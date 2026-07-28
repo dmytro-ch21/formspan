@@ -3,7 +3,7 @@
   "private": true,
   "packageManager": "pnpm@11.17.0",
   "scripts": {
-    "dev:api": "cd backend && go run ./cmd/api",
+    "dev:api": "cd backend && set -a && . ./.env && set +a && go run ./cmd/api",
     "dev:web": "pnpm --filter web dev",
     "lint:web": "pnpm --filter web lint",
     "typecheck:web": "pnpm --filter web exec tsc --noEmit",
