@@ -1,14 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { SignInButton, UserButton, useAuth } from "@clerk/nextjs";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
 type Healthz = { status: string; service: string };
+type Me = { user_id: string };
 
 export default function Home() {
   const [health, setHealth] = useState<Healthz | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { isLoaded, isSignedIn } = useAuth();
 
   useEffect(() => {
     fetch(`${API_URL}/healthz`)
@@ -30,6 +33,48 @@ export default function Home() {
           API says: <strong>{health.service}</strong> is <strong>{health.status}</strong>
         </p>
       )}
+
+      {!isLoaded && <p>Loading auth…</p>}
+      {isLoaded && !isSignedIn && <SignInButton mode="modal" />}
+      {isLoaded && isSignedIn && (
+        <>
+          <UserButton />
+          <MePanel />
+        </>
+      )}
     </main>
+  );
+}
+
+function MePanel() {
+  const { getToken } = useAuth();
+  const [me, setMe] = useState<Me | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      const token = await getToken();
+      try {
+        const res = await fetch(`${API_URL}/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) throw new Error(`API responded ${res.status}`);
+        setMe(await res.json());
+      } catch (err) {
+        setError(String(err));
+      }
+    })();
+  }, [getToken]);
+
+  return (
+    <div>
+      {error && <p style={{ color: "crimson" }}>Failed to reach /me: {error}</p>}
+      {!error && !me && <p>Loading /me…</p>}
+      {me && (
+        <p>
+          API verified you as user <strong>{me.user_id}</strong>
+        </p>
+      )}
+    </div>
   );
 }
