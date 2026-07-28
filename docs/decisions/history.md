@@ -125,6 +125,20 @@ Bug found via that web-preview verification, not assumed away: the web preview i
 
 Added a `mobile` CI job (typecheck only for now, matching the low-ceremony bar of this first increment) — every other app in this repo got CI coverage on its first PR, no reason mobile shouldn't too.
 
+### Next.js customer web shell
+
+The web counterpart to the mobile shell above. `apps/web` had no real structure until now — just the original hello-world `page.tsx` (inline healthz fetch + Clerk sign-in demo) with `proxy.ts` explicitly not gating anything. Built the actual customer-facing shell per the navigation IA (web = sidebar, planning/analysis surface): a protected `/dashboard` route with a sidebar layout (`app/dashboard/layout.tsx` — wordmark, nav, `UserButton`) and one real destination, `Dashboard` (`app/dashboard/page.tsx`), which is where the old healthz + `/me` demo content moved to — same role as the mobile shell's Today tab. Root `/` is now a minimal public entry point: server-redirects signed-in users straight to `/dashboard`, shows branding + a sign-in button otherwise.
+
+Same "smallest verified slice" discipline as the mobile shell: only `Dashboard` gets a sidebar entry — no stub pages for Calendar/Strength/BJJ/Nutrition/Insights/Account yet, mirroring mobile shipping with only its `Today` tab wired.
+
+Decisions: **Tailwind CSS v4** added for styling (asked the user directly since, unlike Expo Router/Expo Go, this is a longer-lived choice that shapes every future web page — confirmed over plain CSS/CSS Modules). **Auth gating moved server-side**: `proxy.ts` now uses `createRouteMatcher(["/dashboard(.*)"])` + `auth.protect()`, closing the "not gating anything yet" gap called out when Clerk was first wired in — the old client-side `isLoaded`/`isSignedIn` check on the root page is gone, replaced by a server-side `auth()` check + `redirect()`, which also removes the previous flash-of-wrong-state on load.
+
+Verified end-to-end in a real browser (not just typecheck/build): visiting `/dashboard` signed out redirects to Clerk's hosted sign-in with a `redirect_url` back to `/dashboard`; after signing in (done by the user directly — credentials are never entered on their behalf), the dashboard renders the sidebar, a live healthz check, and the authenticated `/me` call; visiting `/` while signed in redirects straight to `/dashboard`. Confirmed via `window.location.pathname` that the redirect is a real navigation, not just content substitution.
+
+Work happened in an isolated git worktree (`feature/web-app-shell`, branched from `origin/main`) because the primary working directory had unrelated uncommitted changes (the user's own in-progress test-ID additions to the mobile Today screen) that weren't safe to disturb — same pattern used for the REST/OpenAPI conventions increment.
+
+No backend, CI, or root `package.json` changes needed — reused the existing `/v1/healthz` and `/v1/me` endpoints as-is, and the existing `lint:web`/`typecheck:web`/`build:web` scripts plus the CI `web` job already cover the new routes without modification.
+
 ---
 
 ## Open items / known gaps as of this entry
@@ -135,5 +149,6 @@ Added a `mobile` CI job (typecheck only for now, matching the low-ceremony bar o
 - No production Postgres — `staging` is currently doing double duty for dev/staging/testing.
 - JWT verification doesn't check the `azp` claim (fine for one frontend origin; revisit if that changes).
 - Mobile app shell exists (`apps/mobile`) but not yet Simulator-verified — pending the user's Xcode install finishing. Also still has no auth, no other tabs (Plan/Log/Progress/Profile), and no dev client (Expo Go only) — all deliberately deferred to future increments.
+- Web app shell exists (`apps/web`, `/dashboard`) with only one destination (`Dashboard`) wired — Calendar/Strength/BJJ/Nutrition/Insights/Account are all still just IA on paper, no routes or stub pages yet.
 - No admin console, structured logging/trace IDs, or feature flags yet — all still-untouched Phase 2 checklist items.
 - The new `backend-module-scaffolder` agent and `/new-module` skill are unverified in practice — no module has been scaffolded through them yet (the `profile` module they're modeled on predates them). Worth checking they actually produce correct output the first time they're used for real (e.g. a future `goals` module).
