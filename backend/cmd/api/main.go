@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
 	"os"
+
+	"github.com/dmytro-ch21/formspan/backend/internal/platform/auth"
 )
 
 func main() {
@@ -13,8 +16,18 @@ func main() {
 		port = "8080"
 	}
 
+	clerkIssuer := os.Getenv("CLERK_ISSUER")
+	if clerkIssuer == "" {
+		log.Fatal("CLERK_ISSUER must be set (see backend/.env.example)")
+	}
+	verifier, err := auth.NewVerifier(context.Background(), clerkIssuer)
+	if err != nil {
+		log.Fatalf("auth: %v", err)
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", handleHealthz)
+	mux.Handle("GET /me", verifier.RequireAuth(http.HandlerFunc(handleMe)))
 
 	log.Printf("api listening on :%s", port)
 	if err := http.ListenAndServe(":"+port, withCORS(mux)); err != nil {
@@ -47,5 +60,13 @@ func handleHealthz(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{
 		"status":  "ok",
 		"service": "api",
+	})
+}
+
+func handleMe(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.ClaimsFromContext(r.Context())
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"user_id": claims.UserID,
 	})
 }
