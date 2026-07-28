@@ -12,7 +12,9 @@
     "vet:api": "cd backend && go vet ./...",
     "build:api": "cd backend && go build -o bin/ ./cmd/api",
     "test:api": "cd backend && go test ./...",
-    "lint:openapi": "redocly lint contracts/public.openapi.yaml --config .redocly.yaml"
+    "lint:openapi": "redocly lint contracts/public.openapi.yaml --config .redocly.yaml",
+    "dev:mobile": "pnpm --filter mobile start",
+    "typecheck:mobile": "pnpm --filter mobile exec tsc --noEmit"
   },
   "devDependencies": {
     "@redocly/cli": "^2.41.0"

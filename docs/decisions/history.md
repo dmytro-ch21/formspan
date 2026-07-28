@@ -113,6 +113,18 @@ Follow-up gap the user caught immediately: the log was written as a one-time sna
 
 Also built: root `CLAUDE.md` (auto-loaded for any Claude Code session in this repo — repo map, the backend module pattern, REST/OpenAPI conventions pointer, the git/PR workflow hard rules, local dev setup, and the known-gotchas list below, condensed from everything learned so far) plus two custom subagents/skills for the two workflows that have actually repeated: `.claude/agents/backend-module-scaffolder.md` + `/new-module` (scaffold a new `internal/modules/<name>` following the `profile` module's exact shape) and `.claude/agents/pre-merge-checker.md` + `/pre-merge` (run the full CI-equivalent check suite and report before a push). Deliberately did not build a Railway-provisioning or functional-test-writing agent yet — those workflows haven't repeated enough times, or (functional tests) the pattern is still actively evolving in the user's own hands.
 
+### React Native + Expo application shell
+
+First mobile app in the project. Scaffolded `apps/mobile` via `create-expo-app` with the `tabs` template (Expo Router + a tab navigator out of the box — matches the already-decided mobile nav IA more directly than a manual `blank-typescript` setup would have). Stripped the template's demo content (a second placeholder tab, a modal screen, `EditScreenInfo`/`ExternalLink` components) down to the planned scope: one `Today` tab, one screen, fetching `/v1/healthz` and rendering the result — the mobile equivalent of the very first web/API hello-world increment.
+
+Decisions made (flagged as recommended defaults during planning, not separately re-confirmed): **Expo Router** over React Navigation, **Expo Go** (not a custom dev client) for now — no EAS account needed, defer a dev client until a native module Expo Go doesn't support is actually needed (HealthKit, BLE, per the original brief). No auth yet; Clerk's Expo SDK is its own follow-up increment, same pattern as web auth being separate from the web hello-world.
+
+Environment constraint hit immediately: Xcode wasn't fully installed (only Command Line Tools — `simctl` needs the full Xcode.app). The user chose to install Xcode themselves for real Simulator verification rather than settle for a lesser proxy. Scaffolding and most verification don't depend on Xcode being ready, so that work proceeded in parallel: `tsc --noEmit` clean, Metro bundler starts clean, and the Expo **web preview** (`npx expo start --web`, port `:8081`) verified in a real browser — confirmed the tab renders correctly and the healthz fetch/render logic works.
+
+Bug found via that web-preview verification, not assumed away: the web preview is a real browser page and hit the same CORS wall the very first web hello-world did, since it runs on a different origin (`:8081`) than `apps/web` (`:3000`). Fixed by making the backend's `withCORS` support multiple comma-separated origins via `WEB_ORIGIN` (echoing back the request's `Origin` header only if it's in the allowlist, never a wildcard) instead of a single static one — this only matters for browser-based clients; native iOS/Android requests aren't subject to CORS at all, so the real Simulator/device experience was never going to hit this regardless.
+
+Added a `mobile` CI job (typecheck only for now, matching the low-ceremony bar of this first increment) — every other app in this repo got CI coverage on its first PR, no reason mobile shouldn't too.
+
 ---
 
 ## Open items / known gaps as of this entry
@@ -122,5 +134,6 @@ Also built: root `CLAUDE.md` (auto-loaded for any Claude Code session in this re
 - No Railway `api` or `web` services exist yet, only Postgres — `railway/*.toml` configs are ready but unconnected.
 - No production Postgres — `staging` is currently doing double duty for dev/staging/testing.
 - JWT verification doesn't check the `azp` claim (fine for one frontend origin; revisit if that changes).
-- No React Native app, admin console, structured logging/trace IDs, or feature flags yet — all still-untouched Phase 2 checklist items.
+- Mobile app shell exists (`apps/mobile`) but not yet Simulator-verified — pending the user's Xcode install finishing. Also still has no auth, no other tabs (Plan/Log/Progress/Profile), and no dev client (Expo Go only) — all deliberately deferred to future increments.
+- No admin console, structured logging/trace IDs, or feature flags yet — all still-untouched Phase 2 checklist items.
 - The new `backend-module-scaffolder` agent and `/new-module` skill are unverified in practice — no module has been scaffolded through them yet (the `profile` module they're modeled on predates them). Worth checking they actually produce correct output the first time they're used for real (e.g. a future `goals` module).
