@@ -169,6 +169,18 @@ Verified end-to-end in a real browser, all three auth states: signed-out `/users
 
 Wired into the workspace the same way every prior app was: root `package.json` scripts, a CI job (lint + typecheck + build, no backend needed), `railway/admin.toml`. Added this feature's scenarios to `docs/testing/functional-scenarios.md`, explicitly noting everything is against mock data for now.
 
+### Structured logging, request IDs, and trace context
+
+Next Phase 2 foundation item. Before this, the API had zero structured logging and no correlation IDs at all — every log call was stdlib `log.Printf`/`log.Fatal` plain text, and there was no way to trace a single request through the logs or for a client to reference "what happened on my request" when reporting a bug.
+
+Built `backend/internal/platform/httplog`, matching the shape of the existing `apihttp`/`auth`/`database` platform packages: `log/slog` (Go 1.26 stdlib — no new dependency) with JSON output always, plus an HTTP middleware that generates/extracts a request ID and a W3C `traceparent` trace context per request, injects a request-scoped logger into context, echoes both back as response headers (`X-Request-ID`, `traceparent`), and emits one structured access-log line per request.
+
+Decisions: **request ID** is honored from an incoming `X-Request-ID` header if present (harmless to trust — it's a correlation value, not a security control), generated fresh otherwise. **Trace ID uses the W3C `traceparent` standard** rather than a project-specific header — the one place the architecture doc explicitly names a preferred standard (OpenTelemetry) over something proprietary; parsed defensively so a malformed incoming header never fails the request, just starts a fresh trace. No frontend app generates or forwards one yet, so today every request effectively starts its own trace — the payoff is that the mechanism already speaks the real standard, so whenever a client starts threading one trace ID across several related calls, they'll correlate with zero backend changes. **No API contract change**: `apihttp.WriteError`'s signature and the `{"error":{"code","message"}}` shape stay untouched — the `X-Request-ID` response header already gives support/debugging the same correlation capability without rippling a signature change through 8+ call sites across `profile/handler.go`, `auth.go`, and `main.go`.
+
+Also added, since structured logging made it nearly free: `auth.go`'s `RequireAuth` now logs a `WARN` line on every rejected auth attempt (missing/invalid bearer token) — a security-relevant signal that plainly didn't exist before. Scope deliberately excludes `cmd/migrate` (a one-shot CLI, not a request-serving server — request/trace IDs don't apply, its plain `log.Printf` output is fine as-is).
+
+Verified for real, not just typecheck/build: ran the API locally and confirmed via `curl -i` that `X-Request-ID` and `traceparent` response headers are present on every response, that a custom incoming `X-Request-ID` is echoed back rather than overwritten, and that both the access-log line and the `auth: rejected` warning line for a bad-token request share the same `request_id`/`trace_id`/`span_id` — proving the context-scoped logger correlation actually works, not just compiles.
+
 ---
 
 ## Open items / known gaps as of this entry
@@ -182,5 +194,5 @@ Wired into the workspace the same way every prior app was: root `package.json` s
 - Web app shell exists (`apps/web`, `/dashboard`) with only one destination (`Dashboard`) wired — Calendar/Strength/BJJ/Nutrition/Insights/Account are all still just IA on paper, no routes or stub pages yet.
 - Admin console exists (`apps/admin`) with only `User Lookup`/`User Detail` wired, entirely against mock data (`lib/mock-users.ts`) — no admin backend, no subscriptions/device-platform/integrations/support-ticket data model, no `Jobs & Webhooks`/`Audit Log` screens (not designed yet). All explicitly future work, not silently skipped.
 - `apps/web`'s current visual style predates the shared hi-fi design system (Barlow/Barlow Condensed, the light palette used in `apps/admin`) and doesn't yet follow it — reconciling that is unstarted.
-- No structured logging/trace IDs or feature flags yet — still-untouched Phase 2 checklist items.
+- Structured logging + request/trace IDs exist in the API (`backend/internal/platform/httplog`), but no frontend app propagates a `traceparent` yet — every request today starts a fresh trace. No feature flags yet either — still an untouched Phase 2 checklist item.
 - The new `backend-module-scaffolder` agent and `/new-module` skill are unverified in practice — no module has been scaffolded through them yet (the `profile` module they're modeled on predates them). Worth checking they actually produce correct output the first time they're used for real (e.g. a future `goals` module).
