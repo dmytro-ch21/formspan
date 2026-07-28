@@ -4,6 +4,13 @@
   "packageManager": "pnpm@11.17.0",
   "scripts": {
     "dev:api": "cd backend && go run ./cmd/api",
-    "dev:web": "pnpm --filter web dev"
+    "dev:web": "pnpm --filter web dev",
+    "lint:web": "pnpm --filter web lint",
+    "typecheck:web": "pnpm --filter web exec tsc --noEmit",
+    "build:web": "pnpm --filter web build",
+    "fmt:api": "cd backend && gofmt -l .",
+    "vet:api": "cd backend && go vet ./...",
+    "build:api": "cd backend && go build -o bin/ ./cmd/api",
+    "test:api": "cd backend && go test ./..."
   }
 }
