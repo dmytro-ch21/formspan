@@ -131,6 +131,14 @@ Hit a second, genuinely non-obvious bug this surfaced: Expo Go could not connect
 
 With that fixed, the Simulator run succeeded end-to-end and was screenshot-confirmed: "Today" tab active, "Formspan" heading, and a live "API says: api is ok" rendered from the real backend — the same rigor (real tool-verified testing, not a proxy) used for every other piece of this project. Mobile app shell verification is now fully complete; Simulator testing is no longer a pending item.
 
+### Functional test scenarios doc + standing workflow rule
+
+Added `docs/testing/functional-scenarios.md`: a living, per-feature list of recommended functional test scenarios (happy path, edge cases & errors, auth/security), meant to be translated into the user's own in-progress Playwright suite (`tests/functional/`) or mobile's equivalent — not test code itself, so it's safe to write even while that suite's own shape is still evolving. Backfilled scenarios for everything shipped so far: the healthz check, Clerk/JWKS auth, the profile module, and both the web and mobile app shells.
+
+Decision: kept this under `docs/testing/` rather than inside `tests/functional/` specifically so it never risks colliding with or presuming the shape of the user's own in-progress test files — same caution `CLAUDE.md` already calls out for that directory.
+
+Wired into the standing workflow, same pattern as the `docs/decisions/history.md` rule: a new `CLAUDE.md` hard rule says to add a feature's scenarios here as part of finishing any new module/route/screen, and the `/new-module` skill now has an explicit step for it (after the history-log entry) so it isn't only a manually-remembered convention.
+
 ---
 
 ## Open items / known gaps as of this entry
