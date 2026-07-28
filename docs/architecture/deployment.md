@@ -4,14 +4,16 @@ Status as of this doc: the pieces below marked **built** exist in this repo and 
 
 ## Development — built
 
-Runs directly on a developer's machine, no containers, no Railway environment:
+Runs directly on a developer's machine, no Railway environment:
 
 ```bash
-pnpm run dev:api   # Go API on :8080
-pnpm run dev:web   # Next.js on :3000
+docker compose up -d   # local Postgres on :5432
+cd backend && go run ./cmd/migrate up
+pnpm run dev:api        # Go API on :8080
+pnpm run dev:web        # Next.js on :3000
 ```
 
-Config comes from real env vars / `.env.local` (see `backend/.env.example` and `apps/web/.env.example`), not a container. `apps/web/.env.local` is gitignored and points `NEXT_PUBLIC_API_URL` at `http://localhost:8080`.
+Config comes from real env vars / `.env.local` (see `backend/.env.example` and `apps/web/.env.example`), not baked into images. `apps/web/.env.local` is gitignored and points `NEXT_PUBLIC_API_URL` at `http://localhost:8080`. Local Docker runs via Colima (CLI-only, no Docker Desktop) — see `docker-compose.yml` at the repo root for the Postgres service definition.
 
 ## Staging & production — planned, not yet provisioned
 
@@ -25,7 +27,7 @@ One Railway project with `staging` and `production` environments (no permanent R
 | `admin-api` | No | not built — no admin-api binary exists yet |
 | `worker` | No | not built — no worker binary exists yet |
 | `scheduler` | No, cron | not built — no scheduler binary exists yet |
-| `postgres` | No | not built — no database yet |
+| `postgres` | No | not built on Railway yet — but `backend/migrations/` + `cmd/migrate` are real now, run against local Postgres via docker-compose |
 | `redis` | No | not built — not needed yet |
 | `files` | No | not built — no object storage usage yet |
 
@@ -41,9 +43,9 @@ Both are services on the same repo, but with different root directories:
 
 Public: `web.yourdomain.com`, `api.yourdomain.com`, `admin.yourdomain.com` (none registered yet — placeholders in `.env.example` files). Everything else (`admin-api`, `worker`, `scheduler`, `postgres`, `redis`) stays on Railway's private internal networking, never public.
 
-### Migrations (planned, not applicable yet)
+### Migrations — tooling built, Railway wiring still planned
 
-No database exists yet, so no migration binary or run-once rule applies today. Once Postgres is added: migrations run exactly once, as the `api` service's pre-deploy command (`/app/bin/migrate up`) — never independently from `worker`/`admin-api`, to avoid concurrent-migration conflicts. This becomes real when the Postgres increment lands.
+`cmd/migrate` (golang-migrate, plain versioned SQL in `backend/migrations/`) is real and used today: locally via docker-compose Postgres, and in CI via a Postgres service container before tests run. Still planned: once `postgres` is an actual Railway service, migrations should run exactly once, as the `api` service's pre-deploy command (`/app/bin/migrate up`) — never independently from `worker`/`admin-api`, to avoid concurrent-migration conflicts. `railway/api.toml` already has this wired in (`preDeployCommand`), ready for when the service exists for real.
 
 ### PR / preview environments (planned, deferred)
 
