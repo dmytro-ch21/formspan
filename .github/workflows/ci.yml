@@ -19,6 +19,9 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: backend/go.mod
+          # No go.sum yet (stdlib only, no external deps) — nothing to
+          # cache. Re-enable once dependencies exist: cache-dependency-path: backend/go.sum
+          cache: false
 
       - name: Check formatting (gofmt)
         run: |
