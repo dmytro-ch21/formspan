@@ -1,22 +1,26 @@
 # Formspan
 
-Formspan is a unified training and nutrition platform for BJJ athletes who also strength train and track nutrition — one athlete profile and calendar connecting BJJ, strength training, and nutrition, with deterministic, explainable cross-sport recommendations. See [docs/architecture/deployment.md](docs/architecture/deployment.md) for how dev/staging/production are set up; more architecture docs land here as they're built.
+Formspan is a unified training and nutrition platform for BJJ athletes who also strength train and track nutrition — one athlete profile and calendar connecting BJJ, strength training, and nutrition, with deterministic, explainable cross-sport recommendations.
 
-This repo is a pnpm + Go monorepo. It's being built incrementally, starting from a minimal "hello world" and adding one piece at a time.
+- [docs/decisions/history.md](docs/decisions/history.md) — chronological project history: what's been built, why, and what's still open. Start here if you're new to this repo.
+- [docs/architecture/deployment.md](docs/architecture/deployment.md) — dev/staging/production environment setup.
 
-## Current state: Increment 1 — hello world
+This repo is a pnpm + Go monorepo, built incrementally, one verified piece at a time.
 
-- `backend/` — Go API (`cmd/api`), currently just a `GET /healthz` endpoint
-- `apps/web/` — Next.js customer web app, currently just a page that fetches `/healthz` from the API and displays it
+## Current state
 
-### Run it
+- `backend/` — Go API (`cmd/api`): `/healthz`, `/me`, `/profile` (CRUD), behind Clerk-verified auth. Real Postgres via `golang-migrate` migrations (`backend/migrations/`), both locally (`docker-compose.yml`) and on a real Railway `staging` Postgres. (A `/v1` route prefix and structured error responses are landing separately — see the history log.)
+- `apps/web/` — Next.js customer web app: Clerk sign-in/sign-up, calls the API's health and identity endpoints.
+- `tests/functional/` — a Playwright-based functional test suite (in progress).
+
+### Run it locally
 
 ```bash
-# terminal 1 — backend API on :8080
-pnpm run dev:api
+docker compose up -d              # local Postgres on :5432
+cd backend && go run ./cmd/migrate up
 
-# terminal 2 — web app on :3000
-pnpm run dev:web
+pnpm run dev:api                  # backend API on :8080
+pnpm run dev:web                  # web app on :3000
 ```
 
-Then open http://localhost:3000 — it should show the API's health response.
+Then open http://localhost:3000.
