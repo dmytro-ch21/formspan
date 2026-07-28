@@ -16,6 +16,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/dmytro-ch21/formspan/backend/internal/platform/apihttp"
+	"github.com/dmytro-ch21/formspan/backend/internal/platform/httplog"
 )
 
 type Claims struct {
@@ -85,12 +86,14 @@ func (v *Verifier) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if !ok || token == "" {
+			httplog.FromContext(r.Context()).Warn("auth: rejected", "reason", "missing bearer token", "path", r.URL.Path)
 			apihttp.WriteError(w, http.StatusUnauthorized, apihttp.CodeUnauthorized, "missing bearer token")
 			return
 		}
 
 		claims, err := v.Verify(token)
 		if err != nil {
+			httplog.FromContext(r.Context()).Warn("auth: rejected", "reason", "invalid token", "path", r.URL.Path, "err", err)
 			apihttp.WriteError(w, http.StatusUnauthorized, apihttp.CodeUnauthorized, "invalid token")
 			return
 		}

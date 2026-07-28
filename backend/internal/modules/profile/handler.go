@@ -3,11 +3,11 @@ package profile
 import (
 	"encoding/json"
 	"errors"
-	"log"
 	"net/http"
 
 	"github.com/dmytro-ch21/formspan/backend/internal/platform/apihttp"
 	"github.com/dmytro-ch21/formspan/backend/internal/platform/auth"
+	"github.com/dmytro-ch21/formspan/backend/internal/platform/httplog"
 )
 
 type Handler struct {
@@ -22,7 +22,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
 	p, err := h.repo.Get(r.Context(), claims.UserID)
 	if err != nil {
-		writeError(w, err)
+		writeError(w, r, err)
 		return
 	}
 	apihttp.WriteJSON(w, http.StatusOK, p)
@@ -49,7 +49,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		Sex:         req.Sex,
 	})
 	if err != nil {
-		writeError(w, err)
+		writeError(w, r, err)
 		return
 	}
 	apihttp.WriteJSON(w, http.StatusCreated, p)
@@ -84,7 +84,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		RunningEnabled:   req.RunningEnabled,
 	})
 	if err != nil {
-		writeError(w, err)
+		writeError(w, r, err)
 		return
 	}
 	apihttp.WriteJSON(w, http.StatusOK, p)
@@ -94,7 +94,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 // unmapped is treated as internal: the real error is logged server-side but
 // never sent to the client, to avoid leaking implementation details (e.g.
 // raw database errors) over the wire.
-func writeError(w http.ResponseWriter, err error) {
+func writeError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, ErrNotFound):
 		apihttp.WriteError(w, http.StatusNotFound, apihttp.CodeNotFound, err.Error())
@@ -103,7 +103,7 @@ func writeError(w http.ResponseWriter, err error) {
 	case errors.Is(err, ErrInvalidInput):
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, err.Error())
 	default:
-		log.Printf("profile: internal error: %v", err)
+		httplog.FromContext(r.Context()).Error("profile: internal error", "err", err)
 		apihttp.WriteError(w, http.StatusInternalServerError, apihttp.CodeInternal, "internal error")
 	}
 }
