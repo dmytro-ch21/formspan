@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/dmytro-ch21/formspan/backend/internal/modules/featureflag"
 	"github.com/dmytro-ch21/formspan/backend/internal/modules/profile"
 	"github.com/dmytro-ch21/formspan/backend/internal/platform/apihttp"
 	"github.com/dmytro-ch21/formspan/backend/internal/platform/auth"
@@ -45,6 +46,7 @@ func main() {
 	defer pool.Close()
 
 	profileHandler := profile.NewHandler(profile.NewPostgresRepository(pool))
+	featureFlagHandler := featureflag.NewHandler(featureflag.NewPostgresRepository(pool))
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/healthz", handleHealthz)
@@ -52,6 +54,7 @@ func main() {
 	mux.Handle("GET /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Get)))
 	mux.Handle("POST /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Create)))
 	mux.Handle("PATCH /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Update)))
+	mux.Handle("GET /v1/flags", verifier.RequireAuth(http.HandlerFunc(featureFlagHandler.List)))
 
 	logger.Info("api listening", "port", port)
 	if err := http.ListenAndServe(":"+port, httplog.Middleware(logger)(withCORS(mux))); err != nil {
