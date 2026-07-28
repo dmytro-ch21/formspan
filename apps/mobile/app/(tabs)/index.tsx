@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { StyleSheet } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
+import { newTraceId, traceparent } from '@/lib/trace';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
 const API_BASE = `${API_URL}/v1`;
@@ -9,18 +10,20 @@ const API_BASE = `${API_URL}/v1`;
 type Healthz = { status: string; service: string };
 
 export default function TodayScreen() {
+  // One trace ID for this screen view — reused across every request it makes.
+  const [traceId] = useState(newTraceId);
   const [health, setHealth] = useState<Healthz | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(`${API_BASE}/healthz`)
+    fetch(`${API_BASE}/healthz`, { headers: { traceparent: traceparent(traceId) } })
       .then((res) => {
         if (!res.ok) throw new Error(`API responded ${res.status}`);
         return res.json();
       })
       .then(setHealth)
       .catch((err) => setError(String(err)));
-  }, []);
+  }, [traceId]);
 
   return (
     <View style={styles.container}>
