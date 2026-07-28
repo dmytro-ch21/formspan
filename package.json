@@ -14,7 +14,11 @@
     "test:api": "cd backend && go test ./...",
     "lint:openapi": "redocly lint contracts/public.openapi.yaml --config .redocly.yaml",
     "dev:mobile": "pnpm --filter mobile start",
-    "typecheck:mobile": "pnpm --filter mobile exec tsc --noEmit"
+    "typecheck:mobile": "pnpm --filter mobile exec tsc --noEmit",
+    "dev:admin": "pnpm --filter admin dev",
+    "lint:admin": "pnpm --filter admin lint",
+    "typecheck:admin": "pnpm --filter admin exec tsc --noEmit",
+    "build:admin": "pnpm --filter admin build"
   },
   "devDependencies": {
     "@redocly/cli": "^2.41.0"

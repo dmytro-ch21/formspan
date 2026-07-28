@@ -1,0 +1,13 @@
+# Railway service config for `admin`. Root directory should be the repo root
+# (this is a pnpm workspace; `admin` can't build standalone without the root
+# lockfile), with Railway auto-detecting Node via Nixpacks.
+[build]
+builder = "NIXPACKS"
+buildCommand = "pnpm install --frozen-lockfile && pnpm run build:admin"
+
+[deploy]
+startCommand = "pnpm --filter admin start"
+healthcheckPath = "/"
+healthcheckTimeout = 100
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3

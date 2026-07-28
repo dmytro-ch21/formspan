@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+/*
+  Design tokens extracted from the shared hi-fi design (2t/2u admin mocks).
+  The design system is light-only for web/admin (dark is mobile-only) —
+  no dark-mode variant here, that's an intentional match to the source.
+*/
+@theme inline {
+  --font-barlow: var(--font-barlow);
+  --font-barlow-condensed: var(--font-barlow-condensed);
+
+  --color-page: #f5f5f2;
+  --color-card: #ffffff;
+  --color-border: #e4e4df;
+  --color-border-strong: #d6d6d0;
+  --color-dash-border: #cfcfc9;
+  --color-row-alt: #fafaf8;
+
+  --color-text: #111312;
+  --color-text-muted: #8d918d;
+  --color-text-secondary: #6f736f;
+  --color-button-text: #4a4f4c;
+
+  --color-accent-dark: #111312;
+  --color-accent-lime: #e9ffa3;
+
+  --color-success-bg: #f4ffd6;
+  --color-success-text: #5c6b00;
+  --color-danger-bg: #fff7f2;
+  --color-danger-text: #d1591a;
+  --color-danger-border: #e6b3a0;
+  --color-neutral-bg: #eeeeea;
+}
+
+body {
+  background: var(--color-page);
+  color: var(--color-text);
+  font-family: var(--font-barlow), system-ui;
+}
