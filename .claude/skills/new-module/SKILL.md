@@ -16,3 +16,5 @@ argument-hint: <module-name> [brief description of what it stores/does]
    - **Do not merge without the user's explicit go-ahead**, even if CI is green.
 
 4. Append a dated entry to `docs/decisions/history.md` describing what module was added and why, per the standing rule in `CLAUDE.md`.
+
+5. Add the new module's recommended functional test scenarios (happy path, edge cases & errors, auth/security) to `docs/testing/functional-scenarios.md`, per the standing rule in `CLAUDE.md`.
