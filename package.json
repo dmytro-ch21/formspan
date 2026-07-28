@@ -11,6 +11,10 @@
     "fmt:api": "cd backend && gofmt -l .",
     "vet:api": "cd backend && go vet ./...",
     "build:api": "cd backend && go build -o bin/ ./cmd/api",
-    "test:api": "cd backend && go test ./..."
+    "test:api": "cd backend && go test ./...",
+    "lint:openapi": "redocly lint contracts/public.openapi.yaml --config .redocly.yaml"
+  },
+  "devDependencies": {
+    "@redocly/cli": "^2.41.0"
   }
 }

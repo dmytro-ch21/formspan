@@ -14,6 +14,8 @@ import (
 
 	"github.com/MicahParks/keyfunc/v3"
 	"github.com/golang-jwt/jwt/v5"
+
+	"github.com/dmytro-ch21/formspan/backend/internal/platform/apihttp"
 )
 
 type Claims struct {
@@ -83,13 +85,13 @@ func (v *Verifier) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if !ok || token == "" {
-			http.Error(w, "missing bearer token", http.StatusUnauthorized)
+			apihttp.WriteError(w, http.StatusUnauthorized, apihttp.CodeUnauthorized, "missing bearer token")
 			return
 		}
 
 		claims, err := v.Verify(token)
 		if err != nil {
-			http.Error(w, "invalid token", http.StatusUnauthorized)
+			apihttp.WriteError(w, http.StatusUnauthorized, apihttp.CodeUnauthorized, "invalid token")
 			return
 		}
 

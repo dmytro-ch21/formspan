@@ -1,0 +1,253 @@
+openapi: 3.0.3
+info:
+  title: Formspan Public API
+  version: "1.0.0"
+  description: >
+    Public API for the Formspan mobile and web clients. See
+    docs/architecture/api-conventions.md for the conventions this spec
+    follows (versioning, error shape, auth, status codes).
+servers:
+  - url: http://localhost:8080/v1
+    description: Local development
+
+security:
+  - ClerkBearerAuth: []
+
+components:
+  securitySchemes:
+    ClerkBearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Clerk-issued session token, verified server-side via Clerk's JWKS.
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum:
+                - invalid_input
+                - unauthorized
+                - not_found
+                - already_exists
+                - internal
+            message:
+              type: string
+
+    Healthz:
+      type: object
+      required: [status, service]
+      properties:
+        status:
+          type: string
+          example: ok
+        service:
+          type: string
+          example: api
+
+    Me:
+      type: object
+      required: [user_id]
+      properties:
+        user_id:
+          type: string
+          example: user_3H8rAWz7wri5uEKGajnj4pLqWXz
+
+    Sex:
+      type: string
+      nullable: true
+      enum: [male, female]
+
+    Profile:
+      type: object
+      required:
+        - user_id
+        - display_name
+        - date_of_birth
+        - sex
+        - bjj_enabled
+        - strength_enabled
+        - nutrition_enabled
+        - running_enabled
+        - created_at
+        - updated_at
+      properties:
+        user_id:
+          type: string
+        display_name:
+          type: string
+          nullable: true
+        date_of_birth:
+          type: string
+          format: date
+          nullable: true
+        sex:
+          $ref: "#/components/schemas/Sex"
+        bjj_enabled:
+          type: boolean
+        strength_enabled:
+          type: boolean
+        nutrition_enabled:
+          type: boolean
+        running_enabled:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ProfileCreate:
+      type: object
+      properties:
+        display_name:
+          type: string
+          nullable: true
+        date_of_birth:
+          type: string
+          format: date
+          nullable: true
+        sex:
+          $ref: "#/components/schemas/Sex"
+
+    ProfileUpdate:
+      type: object
+      description: Partial update — omitted fields are left unchanged.
+      properties:
+        display_name:
+          type: string
+          nullable: true
+        date_of_birth:
+          type: string
+          format: date
+          nullable: true
+        sex:
+          $ref: "#/components/schemas/Sex"
+        bjj_enabled:
+          type: boolean
+        strength_enabled:
+          type: boolean
+        nutrition_enabled:
+          type: boolean
+        running_enabled:
+          type: boolean
+
+  responses:
+    BadRequest:
+      description: Malformed request body or a value that failed validation.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: Missing, malformed, or expired bearer token.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: The resource doesn't exist for this caller.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Conflict:
+      description: The resource already exists.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+paths:
+  /healthz:
+    get:
+      summary: Liveness check
+      operationId: getHealthz
+      security: []
+      responses:
+        "200":
+          description: The API is up.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Healthz"
+
+  /me:
+    get:
+      summary: Return the authenticated caller's verified identity
+      operationId: getMe
+      responses:
+        "200":
+          description: The verified caller.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Me"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /profile:
+    get:
+      summary: Get the authenticated caller's profile
+      operationId: getProfile
+      responses:
+        "200":
+          description: The caller's profile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Profile"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      summary: Create the authenticated caller's profile (onboarding)
+      operationId: createProfile
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProfileCreate"
+      responses:
+        "201":
+          description: The newly created profile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Profile"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+    patch:
+      summary: Partially update the authenticated caller's profile
+      operationId: updateProfile
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProfileUpdate"
+      responses:
+        "200":
+          description: The updated profile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Profile"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"

@@ -6,7 +6,11 @@ settings:
 
 importers:
 
-  .: {}
+  .:
+    devDependencies:
+      '@redocly/cli':
+        specifier: ^2.41.0
+        version: 2.41.0
 
   apps/web:
     dependencies:
@@ -460,6 +464,11 @@ packages:
   '@nolyfill/is-core-module@1.0.39':
     resolution: {integrity: sha512-nn5ozdjYQpUCZlWGuxcJY/KpxkWQs4DcbMCmKojjyrYDEAGy4Ce19NN4v5MduafTwJlbKc99UA8YhSVqq9yPZA==}
     engines: {node: '>=12.4.0'}
+
+  '@redocly/cli@2.41.0':
+    resolution: {integrity: sha512-7MjbLQ7u7zPT5sWN6PaBBOCflue//fgmmoGYui8pKmi1dw6um2pYwjElXjC0qycNEGXo3pCJc599GqEgFdKbxQ==}
+    engines: {node: '>=22.12.0 || >=20.19.0 <21.0.0', npm: '>=10'}
+    hasBin: true
 
   '@rtsao/scc@1.1.0':
     resolution: {integrity: sha512-zt6OdqaDoOnJ1ZYsCYGt9YmWzDXl4vQdKTyJev62gFhRGKdx7mcT54V9KIjg+d2wi9EXsPvAPKe7i7WjfVWB8g==}
@@ -2235,6 +2244,8 @@ snapshots:
       fastq: 1.20.1
 
   '@nolyfill/is-core-module@1.0.39': {}
+
+  '@redocly/cli@2.41.0': {}
 
   '@rtsao/scc@1.1.0': {}
 

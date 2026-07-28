@@ -24,12 +24,19 @@ func TestPostgresRepository_CreateGetUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
-	defer pool.Close()
+	// Registered before the delete-row cleanup below so it runs *after* it:
+	// t.Cleanup runs LIFO, and a plain `defer pool.Close()` here would run
+	// before any t.Cleanup callback (defers run when the test function
+	// returns; t.Cleanup runs afterward), closing the pool before the
+	// delete could use it and silently leaking the row every run.
+	t.Cleanup(func() { pool.Close() })
 
 	repo := NewPostgresRepository(pool)
 	userID := "test_user_create_get_update"
 	t.Cleanup(func() {
-		pool.Exec(ctx, `DELETE FROM profiles WHERE user_id = $1`, userID)
+		if _, err := pool.Exec(ctx, `DELETE FROM profiles WHERE user_id = $1`, userID); err != nil {
+			t.Logf("cleanup: delete profile: %v", err)
+		}
 	})
 
 	name := "Test User"

@@ -1,0 +1,12 @@
+apis:
+  public:
+    root: contracts/public.openapi.yaml
+
+rules:
+  # Internal API, not published under an open license.
+  info-license: off
+  # localhost is genuinely the only server documented right now (dev) —
+  # revisit once staging/production domains exist.
+  no-server-example.com: off
+  # /healthz is a pure liveness check with no documented failure response.
+  operation-4xx-response: off
