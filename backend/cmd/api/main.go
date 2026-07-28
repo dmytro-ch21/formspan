@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -11,9 +10,12 @@ import (
 	"github.com/dmytro-ch21/formspan/backend/internal/platform/apihttp"
 	"github.com/dmytro-ch21/formspan/backend/internal/platform/auth"
 	"github.com/dmytro-ch21/formspan/backend/internal/platform/database"
+	"github.com/dmytro-ch21/formspan/backend/internal/platform/httplog"
 )
 
 func main() {
+	logger := httplog.New()
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -21,20 +23,24 @@ func main() {
 
 	clerkIssuer := os.Getenv("CLERK_ISSUER")
 	if clerkIssuer == "" {
-		log.Fatal("CLERK_ISSUER must be set (see backend/.env.example)")
+		logger.Error("CLERK_ISSUER must be set (see backend/.env.example)")
+		os.Exit(1)
 	}
 	verifier, err := auth.NewVerifier(context.Background(), clerkIssuer)
 	if err != nil {
-		log.Fatalf("auth: %v", err)
+		logger.Error("auth: init verifier", "err", err)
+		os.Exit(1)
 	}
 
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
-		log.Fatal("DATABASE_URL must be set (see backend/.env.example)")
+		logger.Error("DATABASE_URL must be set (see backend/.env.example)")
+		os.Exit(1)
 	}
 	pool, err := database.NewPool(context.Background(), databaseURL)
 	if err != nil {
-		log.Fatalf("database: %v", err)
+		logger.Error("database: connect", "err", err)
+		os.Exit(1)
 	}
 	defer pool.Close()
 
@@ -47,9 +53,10 @@ func main() {
 	mux.Handle("POST /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Create)))
 	mux.Handle("PATCH /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Update)))
 
-	log.Printf("api listening on :%s", port)
-	if err := http.ListenAndServe(":"+port, withCORS(mux)); err != nil {
-		log.Fatal(err)
+	logger.Info("api listening", "port", port)
+	if err := http.ListenAndServe(":"+port, httplog.Middleware(logger)(withCORS(mux))); err != nil {
+		logger.Error("server exited", "err", err)
+		os.Exit(1)
 	}
 }
 
