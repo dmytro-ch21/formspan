@@ -80,7 +80,29 @@ Domain: one profile per Clerk user — display name, date of birth, sex, and fou
 
 ---
 
+## Admin app shell (`apps/admin`)
+
+Domain: fully separate from `apps/web`, not athlete-facing. Reuses the same Clerk instance; gated by both middleware (must be signed in) and an `ADMIN_EMAILS` allowlist check. **No backend wiring yet** — everything below is against `lib/mock-users.ts`, explicit static data, not a real API.
+
+**Happy path**
+- Signed in with an allowlisted email, `/users` (User Lookup) renders the table matching the design: search field, filter pills, EMAIL/PLAN/PLATFORM/STATUS columns, footer count + pagination controls.
+- Typing in the search field filters rows client-side by email substring match.
+- Clicking a filter pill (e.g. "Sync errors") narrows the table to matching rows client-side.
+- Clicking a lookup row navigates to `/users/[id]` — for the one seeded id (`48192`), renders the full detail view (account/subscription/modules grid, integrations + support-events grid) matching the design.
+
+**Edge cases & errors**
+- Signed out, visiting `/users` or `/users/[id]` → redirected to Clerk's hosted sign-in, returns to the original URL after completing sign-in.
+- Signed in with a **non-allowlisted** email → `/users` renders a plain "Not authorized" message instead of the shell — verified by temporarily pointing `ADMIN_EMAILS` at a different address and confirming the denial state, then restoring it.
+- Clicking a lookup row whose id has no seeded detail record (5 of the 6 mock rows) → an honest "No mock detail record for this user yet" state, not fabricated data reused under the wrong identity.
+- Visiting `/users/<unknown-id>` directly → same "no mock detail record" state.
+
+**Auth & security**
+- The allowlist check happens server-side (`app/users/layout.tsx`, via `currentUser()`), not just hidden client-side UI — a non-allowlisted signed-in user genuinely cannot reach the shell's data, not just its visible nav.
+
+---
+
 ## Not yet covered (tracked here so it isn't lost, not because it's blocking)
 
 - Mobile has no auth yet (Clerk Expo SDK is a separate future increment) — no sign-in/sign-out scenarios apply to mobile today.
 - Web/mobile nav destinations beyond Dashboard/Today (Calendar, Strength, BJJ, Nutrition, Insights, Account / Plan, Log, Progress, Profile) don't exist yet — add their scenarios here when each one is actually built, not preemptively.
+- Admin has no real backend data (subscriptions, device/platform tracking, integration sync, support tickets) and no `Jobs & Webhooks`/`Audit Log` screens — none of these are designed yet; add scenarios once each lands for real.
