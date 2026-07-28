@@ -17,6 +17,7 @@ RUN apk add --no-cache ca-certificates && \
     addgroup -S app && adduser -S app -G app
 
 COPY --from=build /app/bin/ /app/bin/
+COPY migrations/ /app/migrations/
 
 USER app
 WORKDIR /app

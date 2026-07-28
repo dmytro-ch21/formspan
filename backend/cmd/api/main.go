@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/dmytro-ch21/formspan/backend/internal/modules/profile"
 	"github.com/dmytro-ch21/formspan/backend/internal/platform/auth"
+	"github.com/dmytro-ch21/formspan/backend/internal/platform/database"
 )
 
 func main() {
@@ -25,9 +27,24 @@ func main() {
 		log.Fatalf("auth: %v", err)
 	}
 
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		log.Fatal("DATABASE_URL must be set (see backend/.env.example)")
+	}
+	pool, err := database.NewPool(context.Background(), databaseURL)
+	if err != nil {
+		log.Fatalf("database: %v", err)
+	}
+	defer pool.Close()
+
+	profileHandler := profile.NewHandler(profile.NewPostgresRepository(pool))
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", handleHealthz)
 	mux.Handle("GET /me", verifier.RequireAuth(http.HandlerFunc(handleMe)))
+	mux.Handle("GET /profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Get)))
+	mux.Handle("POST /profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Create)))
+	mux.Handle("PATCH /profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Update)))
 
 	log.Printf("api listening on :%s", port)
 	if err := http.ListenAndServe(":"+port, withCORS(mux)); err != nil {

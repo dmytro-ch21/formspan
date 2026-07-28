@@ -13,6 +13,23 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: formspan
+          POSTGRES_PASSWORD: formspan_test
+          POSTGRES_DB: formspan_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U formspan"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://formspan:formspan_test@localhost:5432/formspan_test?sslmode=disable
+      TEST_DATABASE_URL: postgres://formspan:formspan_test@localhost:5432/formspan_test?sslmode=disable
     steps:
       - uses: actions/checkout@v7
 
@@ -35,6 +52,9 @@ jobs:
 
       - name: Build
         run: go build ./...
+
+      - name: Run migrations
+        run: go run ./cmd/migrate up
 
       - name: Test
         run: go test ./...

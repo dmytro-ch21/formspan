@@ -9,6 +9,10 @@ dockerfilePath = "Dockerfile"
 
 [deploy]
 startCommand = "/app/bin/api"
+# Runs once per deploy, before the new container starts. Only this service
+# runs migrations — never worker/admin-api — to avoid concurrent-migration
+# conflicts (see docs/architecture/deployment.md).
+preDeployCommand = "/app/bin/migrate up"
 healthcheckPath = "/healthz"
 healthcheckTimeout = 100
 restartPolicyType = "ON_FAILURE"
