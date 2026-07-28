@@ -1,0 +1,21 @@
+# Node
+node_modules/
+.next/
+dist/
+build/
+
+# Go
+backend/bin/
+*.exe
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
