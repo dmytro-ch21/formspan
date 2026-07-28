@@ -13,7 +13,7 @@ startCommand = "/app/bin/api"
 # runs migrations — never worker/admin-api — to avoid concurrent-migration
 # conflicts (see docs/architecture/deployment.md).
 preDeployCommand = "/app/bin/migrate up"
-healthcheckPath = "/healthz"
+healthcheckPath = "/v1/healthz"
 healthcheckTimeout = 100
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 3

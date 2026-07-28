@@ -15,21 +15,23 @@ pnpm run dev:web        # Next.js on :3000
 
 Config comes from real env vars / `.env.local` (see `backend/.env.example` and `apps/web/.env.example`), not baked into images. `apps/web/.env.local` is gitignored and points `NEXT_PUBLIC_API_URL` at `http://localhost:8080`. Local Docker runs via Colima (CLI-only, no Docker Desktop) — see `docker-compose.yml` at the repo root for the Postgres service definition.
 
-## Staging & production — planned, not yet provisioned
+## Staging & production — Postgres is real now, application services still not provisioned
 
-One Railway project with `staging` and `production` environments (no permanent Railway environment for local dev — that's the section above). Planned service topology:
+Railway project `formspan` exists (`staging` and `production` environments — no permanent Railway environment for local dev, that's the section above). Current service topology:
 
 | Service | Public? | Config |
 |---|---:|---|
-| `api` | Yes | `railway/api.toml` — built |
-| `web` | Yes | `railway/web.toml` — built |
+| `api` | Yes | `railway/api.toml` — config built, **service not yet created on Railway** |
+| `web` | Yes | `railway/web.toml` — config built, **service not yet created on Railway** |
 | `admin-web` | Yes, authenticated | not built — no admin app exists yet |
 | `admin-api` | No | not built — no admin-api binary exists yet |
 | `worker` | No | not built — no worker binary exists yet |
 | `scheduler` | No, cron | not built — no scheduler binary exists yet |
-| `postgres` | No | not built on Railway yet — but `backend/migrations/` + `cmd/migrate` are real now, run against local Postgres via docker-compose |
+| `postgres` | No | **real**, in the `staging` environment — migrations applied (`profiles` table exists there too, not just locally). Shared for dev/staging testing purposes for now; no separate `production` Postgres yet. |
 | `redis` | No | not built — not needed yet |
 | `files` | No | not built — no object storage usage yet |
+
+The `staging` environment's Postgres credentials live in `backend/.env.staging.local` (gitignored, never commit). `DATABASE_URL_PUBLIC` works from anywhere (Railway's TCP proxy) — useful for manually running `migrate` against staging from local dev. `DATABASE_URL_INTERNAL` only resolves from inside Railway's network, for when the `api` service itself is deployed there.
 
 Add each service's `railway/*.toml` and wire it into the Railway dashboard only once the corresponding code exists (`admin-api`, `worker`, `scheduler` binaries, the admin Next.js app) — no point configuring a deploy target for a binary that doesn't exist.
 
@@ -43,9 +45,9 @@ Both are services on the same repo, but with different root directories:
 
 Public: `web.yourdomain.com`, `api.yourdomain.com`, `admin.yourdomain.com` (none registered yet — placeholders in `.env.example` files). Everything else (`admin-api`, `worker`, `scheduler`, `postgres`, `redis`) stays on Railway's private internal networking, never public.
 
-### Migrations — tooling built, Railway wiring still planned
+### Migrations — tooling built, applied everywhere that currently has a database
 
-`cmd/migrate` (golang-migrate, plain versioned SQL in `backend/migrations/`) is real and used today: locally via docker-compose Postgres, and in CI via a Postgres service container before tests run. Still planned: once `postgres` is an actual Railway service, migrations should run exactly once, as the `api` service's pre-deploy command (`/app/bin/migrate up`) — never independently from `worker`/`admin-api`, to avoid concurrent-migration conflicts. `railway/api.toml` already has this wired in (`preDeployCommand`), ready for when the service exists for real.
+`cmd/migrate` (golang-migrate, plain versioned SQL in `backend/migrations/`) runs today against: local docker-compose Postgres, CI's ephemeral Postgres service container, and the real Railway `staging` Postgres (applied manually via `DATABASE_URL_PUBLIC`, once). Still planned: once the `api` service itself exists on Railway, migrations should run exactly once, as its pre-deploy command (`/app/bin/migrate up`) — never independently from `worker`/`admin-api`, to avoid concurrent-migration conflicts. `railway/api.toml` already has this wired in (`preDeployCommand`), ready for when the service exists for real.
 
 ### PR / preview environments (planned, deferred)
 

@@ -3,8 +3,10 @@ package profile
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 
+	"github.com/dmytro-ch21/formspan/backend/internal/platform/apihttp"
 	"github.com/dmytro-ch21/formspan/backend/internal/platform/auth"
 )
 
@@ -23,7 +25,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, p)
+	apihttp.WriteJSON(w, http.StatusOK, p)
 }
 
 type createRequest struct {
@@ -37,7 +39,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 
 	var req createRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
 		return
 	}
 
@@ -50,7 +52,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, p)
+	apihttp.WriteJSON(w, http.StatusCreated, p)
 }
 
 type updateRequest struct {
@@ -68,7 +70,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 
 	var req updateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
 		return
 	}
 
@@ -85,24 +87,23 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, p)
+	apihttp.WriteJSON(w, http.StatusOK, p)
 }
 
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
-}
-
+// writeError maps domain errors to the shared error response shape. Anything
+// unmapped is treated as internal: the real error is logged server-side but
+// never sent to the client, to avoid leaking implementation details (e.g.
+// raw database errors) over the wire.
 func writeError(w http.ResponseWriter, err error) {
-	status := http.StatusInternalServerError
 	switch {
 	case errors.Is(err, ErrNotFound):
-		status = http.StatusNotFound
+		apihttp.WriteError(w, http.StatusNotFound, apihttp.CodeNotFound, err.Error())
 	case errors.Is(err, ErrAlreadyExists):
-		status = http.StatusConflict
+		apihttp.WriteError(w, http.StatusConflict, apihttp.CodeAlreadyExists, err.Error())
 	case errors.Is(err, ErrInvalidInput):
-		status = http.StatusBadRequest
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, err.Error())
+	default:
+		log.Printf("profile: internal error: %v", err)
+		apihttp.WriteError(w, http.StatusInternalServerError, apihttp.CodeInternal, "internal error")
 	}
-	writeJSON(w, status, map[string]string{"error": err.Error()})
 }

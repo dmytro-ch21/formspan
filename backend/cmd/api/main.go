@@ -2,12 +2,12 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"log"
 	"net/http"
 	"os"
 
 	"github.com/dmytro-ch21/formspan/backend/internal/modules/profile"
+	"github.com/dmytro-ch21/formspan/backend/internal/platform/apihttp"
 	"github.com/dmytro-ch21/formspan/backend/internal/platform/auth"
 	"github.com/dmytro-ch21/formspan/backend/internal/platform/database"
 )
@@ -40,11 +40,11 @@ func main() {
 	profileHandler := profile.NewHandler(profile.NewPostgresRepository(pool))
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", handleHealthz)
-	mux.Handle("GET /me", verifier.RequireAuth(http.HandlerFunc(handleMe)))
-	mux.Handle("GET /profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Get)))
-	mux.Handle("POST /profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Create)))
-	mux.Handle("PATCH /profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Update)))
+	mux.HandleFunc("GET /v1/healthz", handleHealthz)
+	mux.Handle("GET /v1/me", verifier.RequireAuth(http.HandlerFunc(handleMe)))
+	mux.Handle("GET /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Get)))
+	mux.Handle("POST /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Create)))
+	mux.Handle("PATCH /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Update)))
 
 	log.Printf("api listening on :%s", port)
 	if err := http.ListenAndServe(":"+port, withCORS(mux)); err != nil {
@@ -73,8 +73,7 @@ func withCORS(next http.Handler) http.Handler {
 }
 
 func handleHealthz(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	apihttp.WriteJSON(w, http.StatusOK, map[string]string{
 		"status":  "ok",
 		"service": "api",
 	})
@@ -82,8 +81,7 @@ func handleHealthz(w http.ResponseWriter, r *http.Request) {
 
 func handleMe(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	apihttp.WriteJSON(w, http.StatusOK, map[string]string{
 		"user_id": claims.UserID,
 	})
 }

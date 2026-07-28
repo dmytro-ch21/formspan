@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { SignInButton, UserButton, useAuth } from "@clerk/nextjs";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+const API_BASE = `${API_URL}/v1`;
 
 type Healthz = { status: string; service: string };
 type Me = { user_id: string };
@@ -14,7 +15,7 @@ export default function Home() {
   const { isLoaded, isSignedIn } = useAuth();
 
   useEffect(() => {
-    fetch(`${API_URL}/healthz`)
+    fetch(`${API_BASE}/healthz`)
       .then((res) => {
         if (!res.ok) throw new Error(`API responded ${res.status}`);
         return res.json();
@@ -55,7 +56,7 @@ function MePanel() {
     (async () => {
       const token = await getToken();
       try {
-        const res = await fetch(`${API_URL}/me`, {
+        const res = await fetch(`${API_BASE}/me`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!res.ok) throw new Error(`API responded ${res.status}`);
