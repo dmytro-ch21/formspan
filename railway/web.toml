@@ -1,0 +1,13 @@
+# Railway service config for `web`. Root directory should be the repo root
+# (this is a pnpm workspace; `web` can't build standalone without the root
+# lockfile), with Railway auto-detecting Node via Nixpacks.
+[build]
+builder = "NIXPACKS"
+buildCommand = "pnpm install --frozen-lockfile && pnpm run build:web"
+
+[deploy]
+startCommand = "pnpm --filter web start"
+healthcheckPath = "/"
+healthcheckTimeout = 100
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3

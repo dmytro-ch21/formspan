@@ -1,0 +1,15 @@
+# Railway service config for `api`. In the Railway dashboard, point this
+# service's "Config as code" path at railway/api.toml and set its root
+# directory to backend/ (the Dockerfile's COPY paths are relative to that
+# directory, not the repo root — keeps the build context to just the Go
+# module instead of the whole monorepo).
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "/app/bin/api"
+healthcheckPath = "/healthz"
+healthcheckTimeout = 100
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3

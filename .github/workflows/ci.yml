@@ -38,6 +38,9 @@ jobs:
       - name: Test
         run: go test ./...
 
+      - name: Build Docker image
+        run: docker build -f Dockerfile -t formspan-api:ci .
+
   web:
     name: Web (Next.js)
     runs-on: ubuntu-latest

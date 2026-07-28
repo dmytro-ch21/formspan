@@ -1,6 +1,6 @@
 # Formspan
 
-Formspan is a unified training and nutrition platform for BJJ athletes who also strength train and track nutrition — one athlete profile and calendar connecting BJJ, strength training, and nutrition, with deterministic, explainable cross-sport recommendations. See `docs/` (coming later) for the full product and architecture decisions.
+Formspan is a unified training and nutrition platform for BJJ athletes who also strength train and track nutrition — one athlete profile and calendar connecting BJJ, strength training, and nutrition, with deterministic, explainable cross-sport recommendations. See [docs/architecture/deployment.md](docs/architecture/deployment.md) for how dev/staging/production are set up; more architecture docs land here as they're built.
 
 This repo is a pnpm + Go monorepo. It's being built incrementally, starting from a minimal "hello world" and adding one piece at a time.
 
