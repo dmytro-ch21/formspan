@@ -140,6 +140,34 @@ components:
         running_enabled:
           type: boolean
 
+    Flag:
+      type: object
+      description: >
+        A server-controlled, global on/off switch — distinct from
+        profile's per-user module toggles. Read-only for now; toggled
+        via direct SQL until there's a write endpoint.
+      required: [key, enabled, description, updated_at]
+      properties:
+        key:
+          type: string
+          example: new_recommendation_engine
+        enabled:
+          type: boolean
+        description:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+
+    FlagList:
+      type: object
+      required: [flags]
+      properties:
+        flags:
+          type: array
+          items:
+            $ref: "#/components/schemas/Flag"
+
   responses:
     BadRequest:
       description: Malformed request body or a value that failed validation.
@@ -251,3 +279,17 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /flags:
+    get:
+      summary: List all server-controlled feature flags
+      operationId: listFeatureFlags
+      responses:
+        "200":
+          description: All feature flags.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlagList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
