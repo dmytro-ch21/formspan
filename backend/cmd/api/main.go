@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/dmytro-ch21/formspan/backend/internal/modules/profile"
 	"github.com/dmytro-ch21/formspan/backend/internal/platform/apihttp"
@@ -52,16 +53,30 @@ func main() {
 	}
 }
 
-// withCORS allows the local web dev server to call the API from a different
-// origin (localhost:3000 -> localhost:8080). Revisit this allowlist once
-// staging/production domains exist.
+// withCORS allows local web dev servers to call the API from different
+// origins (localhost:3000 for apps/web, localhost:8081 for the Expo web
+// preview). WEB_ORIGIN is comma-separated; only origins actually in the
+// list get echoed back, never a wildcard. Revisit this allowlist once
+// staging/production domains exist. Note: CORS is a browser-only concern —
+// it doesn't apply to native iOS/Android requests at all, only web previews.
 func withCORS(next http.Handler) http.Handler {
-	allowedOrigin := os.Getenv("WEB_ORIGIN")
-	if allowedOrigin == "" {
-		allowedOrigin = "http://localhost:3000"
+	raw := os.Getenv("WEB_ORIGIN")
+	if raw == "" {
+		raw = "http://localhost:3000,http://localhost:8081"
 	}
+	allowed := make(map[string]bool)
+	for _, origin := range strings.Split(raw, ",") {
+		if origin = strings.TrimSpace(origin); origin != "" {
+			allowed[origin] = true
+		}
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
+		origin := r.Header.Get("Origin")
+		if allowed[origin] {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Vary", "Origin")
+		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		if r.Method == http.MethodOptions {
