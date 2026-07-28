@@ -153,6 +153,22 @@ Decision: kept this under `docs/testing/` rather than inside `tests/functional/`
 
 Wired into the standing workflow, same pattern as the `docs/decisions/history.md` rule: a new `CLAUDE.md` hard rule says to add a feature's scenarios here as part of finishing any new module/route/screen, and the `/new-module` skill now has an explicit step for it (after the history-log entry) so it isn't only a manually-remembered convention.
 
+### Next.js admin shell
+
+The admin console, per the nav IA (fully separate app, not athlete-facing) — nothing admin existed until now: no `apps/admin`, no admin backend, no staff/role concept anywhere. This time the user provided a real hi-fi design (a bundled Claude-design export, shared as a local HTML file after the in-app Browser turned out to be policy-blocked from `claude.ai` and Claude in Chrome wasn't connected in this session) covering the whole product's visual system — dark mobile, light web. Only two admin screens exist in it so far, **User Detail** and **User Lookup**, matching the nav IA's first two items exactly (Jobs & Webhooks and Audit Log aren't designed yet, so out of scope here, same "build what's designed" discipline as every prior shell).
+
+Exact design tokens were extracted directly from the rendered DOM's inline styles (the export has no semantic CSS classes) rather than approximated by eye: Barlow + Barlow Condensed (real Google Fonts), a light palette (`#F5F5F2` page / `#FFFFFF` cards / `#E4E4DF` borders / `#111312` text), a dark lime accent pill (`#111312` bg, `#E9FFA3` text) for tags and active filters, and success/danger/neutral status-badge colors. These now live as Tailwind `@theme` tokens in `apps/admin/src/app/globals.css`.
+
+Two decisions the user made directly this session:
+- **Auth**: reuse the *same* Clerk instance as `apps/web` rather than a separate app or Clerk Organizations/roles — gated by a plain `ADMIN_EMAILS` allowlist env var, checked server-side in `app/users/layout.tsx` (in addition to `proxy.ts` requiring sign-in at all). Matches "no admin team exists yet"; upgradeable to real roles later without a rewrite.
+- **Data**: no backend admin API or data model exists for any of what the design shows (subscriptions, device/platform tracking, integration sync, support tickets — none of these tables/systems exist, and the real user directory lives in Clerk, not Postgres). Per the user, **"we'll work on each of those later, just remember the design decisions for now"** — this pass is the visual/interaction shell only. `lib/mock-users.ts` holds the design's own sample content as explicit, temporary static data — not fabricated filler, and clearly labeled as such in code and in `CLAUDE.md`. Only one full detail record exists (Ivan Koval, the only one designed); the other five lookup rows are genuinely clickable but land on an honest "no mock detail record for this user yet" state rather than showing his data under a different identity.
+
+Mid-build feedback from the user: the first pass centered everything in a `max-w-5xl` column, which read as a small floating card on a wide screen rather than a real app surface. Fixed by rebuilding both screens with a full-width header bar (matching the design's own white top-bar-with-border-bottom) and full-bleed content — confirmed via direct DOM measurement (not just eyeballing a screenshot) that the rendered width matches the viewport.
+
+Verified end-to-end in a real browser, all three auth states: signed-out `/users` redirects to Clerk's hosted sign-in; signed-in with a non-allowlisted email (temporarily pointed `ADMIN_EMAILS` at a different address, then restored it) shows a plain "Not authorized" message instead of the shell; signed-in and allowlisted renders the lookup table and, for the seeded id, the full detail view — both matching the design's layout, colors, and typography. Search and filter pills are genuinely functional client-side over the mock array, not decorative.
+
+Wired into the workspace the same way every prior app was: root `package.json` scripts, a CI job (lint + typecheck + build, no backend needed), `railway/admin.toml`. Added this feature's scenarios to `docs/testing/functional-scenarios.md`, explicitly noting everything is against mock data for now.
+
 ---
 
 ## Open items / known gaps as of this entry
@@ -164,5 +180,7 @@ Wired into the standing workflow, same pattern as the `docs/decisions/history.md
 - JWT verification doesn't check the `azp` claim (fine for one frontend origin; revisit if that changes).
 - Mobile app shell exists (`apps/mobile`) and is now fully Simulator-verified (screenshot-confirmed on a real iPhone 15 Pro Simulator). Still has no auth, no other tabs (Plan/Log/Progress/Profile), and no dev client (Expo Go only) — all deliberately deferred to future increments.
 - Web app shell exists (`apps/web`, `/dashboard`) with only one destination (`Dashboard`) wired — Calendar/Strength/BJJ/Nutrition/Insights/Account are all still just IA on paper, no routes or stub pages yet.
-- No admin console, structured logging/trace IDs, or feature flags yet — all still-untouched Phase 2 checklist items.
+- Admin console exists (`apps/admin`) with only `User Lookup`/`User Detail` wired, entirely against mock data (`lib/mock-users.ts`) — no admin backend, no subscriptions/device-platform/integrations/support-ticket data model, no `Jobs & Webhooks`/`Audit Log` screens (not designed yet). All explicitly future work, not silently skipped.
+- `apps/web`'s current visual style predates the shared hi-fi design system (Barlow/Barlow Condensed, the light palette used in `apps/admin`) and doesn't yet follow it — reconciling that is unstarted.
+- No structured logging/trace IDs or feature flags yet — still-untouched Phase 2 checklist items.
 - The new `backend-module-scaffolder` agent and `/new-module` skill are unverified in practice — no module has been scaffolded through them yet (the `profile` module they're modeled on predates them). Worth checking they actually produce correct output the first time they're used for real (e.g. a future `goals` module).
