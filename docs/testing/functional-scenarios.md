@@ -118,6 +118,25 @@ Domain: fully separate from `apps/web`, not athlete-facing. Reuses the same Cler
 
 ---
 
+## Server-controlled feature flags (`GET /v1/flags`)
+
+Domain: operator-controlled, global on/off switches — distinct from the profile module's per-user `bjj_enabled`/`strength_enabled`/etc. toggles. Global booleans only, no percentage rollout or per-user targeting. **Read-only** — there's no write endpoint or admin UI yet; flags are toggled via direct SQL.
+
+**Happy path**
+- `GET /v1/flags` with a valid bearer token returns `200` with `{"flags": [...]}`, one entry per row in `feature_flags` (`key`, `enabled`, `description`, `updated_at`), sorted by key.
+- The two flags seeded by the migration (`new_recommendation_engine`, `bjj_technique_video_upload`) come back with `enabled: false` by default.
+
+**Edge cases & errors**
+- No `Authorization` header → `401 unauthorized`, same as every other non-`healthz` endpoint.
+- Zero flags in the table → `{"flags": []}`, never `{"flags": null}`.
+
+**Not yet covered / deferred**
+- No write endpoint (`PATCH`/`POST`) and no admin-console screen to toggle flags — needs a backend-side admin-authorization concept that doesn't exist yet. Toggling today is direct SQL only.
+- No frontend app (web/mobile/admin) fetches or gates on any flag yet — this pass is backend-only, same scoping call as structured logging.
+- No per-user/cohort targeting or percentage rollout — add if a real use case shows up.
+
+---
+
 ## Not yet covered (tracked here so it isn't lost, not because it's blocking)
 
 - Mobile has no auth yet (Clerk Expo SDK is a separate future increment) — no sign-in/sign-out scenarios apply to mobile today.
