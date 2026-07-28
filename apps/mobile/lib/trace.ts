@@ -1,0 +1,28 @@
+// W3C trace-context propagation to the backend (see
+// backend/internal/platform/httplog for the server side). Plain
+// Math.random()-based hex, not crypto — these are correlation IDs for
+// logs, not secrets, so there's no need for a CSPRNG or a polyfill (React
+// Native's JS engine doesn't ship crypto.getRandomValues by default).
+//
+// Duplicated in apps/web rather than shared — a ~15-line utility isn't
+// worth a shared package yet.
+
+function randomHex(bytes: number): string {
+  let s = '';
+  for (let i = 0; i < bytes; i++) {
+    s += Math.floor(Math.random() * 256)
+      .toString(16)
+      .padStart(2, '0');
+  }
+  return s;
+}
+
+/** A fresh 32-hex-char trace ID — generate once per screen view and reuse across every request it makes. */
+export function newTraceId(): string {
+  return randomHex(16);
+}
+
+/** A `traceparent` header value for one request within `traceId`'s trace — a fresh span ID every call. */
+export function traceparent(traceId: string): string {
+  return `00-${traceId}-${randomHex(8)}-01`;
+}
