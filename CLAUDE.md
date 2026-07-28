@@ -11,6 +11,7 @@ Formspan is a unified training and nutrition platform for BJJ athletes who also 
 - `apps/mobile/` — Expo (managed workflow, Expo Go — not a custom dev client yet) + Expo Router (file-based, `app/(tabs)/` for the tab navigator). No auth yet. `EXPO_PUBLIC_*` env var convention (RN equivalent of Next's `NEXT_PUBLIC_*`).
 - `apps/admin/` — Next.js admin console, fully separate from `apps/web` (not athlete-facing). Reuses the **same Clerk instance** as `apps/web`; `/users(.*)` is gated two ways — `proxy.ts` requires sign-in, `app/users/layout.tsx` additionally checks the signed-in email against the `ADMIN_EMAILS` allowlist env var (no roles/orgs yet). Only `User Lookup` (`/users`) and `User Detail` (`/users/[id]`) exist so far, matching what's actually been designed. **No backend wiring yet** — `lib/mock-users.ts` is explicit, temporary static data (subscriptions/device-platform/integrations/support-tickets have no real system behind them at all yet); real data is future work, tracked in `docs/decisions/history.md`. Visual design (colors, Barlow/Barlow Condensed fonts, component styles) comes from a shared hi-fi design file — tokens live in `app/globals.css`'s `@theme` block. **Note:** `apps/web`'s current visual style predates this design system and does not yet follow it — reconciling that is a separate, not-yet-started piece of work.
 - `tests/functional/` — Playwright functional test suite (user-authored, in progress — evolving, don't assume its current shape without checking).
+- `docs/testing/functional-scenarios.md` — recommended functional test scenarios per feature, meant to be translated into `tests/functional/` (or mobile's equivalent). A living doc, not `tests/functional/` itself — safe to update even when the test suite's own shape is uncertain.
 - `contracts/public.openapi.yaml` — hand-maintained OpenAPI spec (not generated).
 - `railway/*.toml` — per-service Railway config. **Only exists for services with real code behind them** — don't create a config for a service that has no binary/app yet.
 - `docs/architecture/` — current-state docs (deployment, API conventions). `docs/decisions/history.md` — the project narrative.
@@ -56,6 +57,10 @@ Then: `git push -u origin <branch>`, `gh pr create`, watch CI with `gh run watch
 
 [docs/decisions/history.md](docs/decisions/history.md) is a living document, not a one-time snapshot. Whenever a PR lands (or right before merging one) that represents a material decision or a notable chunk of work — a new module, a new convention, an infrastructure change, a bug found and fixed, a provider/tooling choice — **append a dated entry** to it in the same style as the existing entries: what was decided/built, why, and any open questions or gaps it leaves behind. Do this as part of finishing the work, not as an afterthought someone has to remember to ask for. Skip it only for truly trivial changes (typo fixes, formatting) that don't represent a decision anyone would need to know about later.
 
+## Keep functional test scenarios current (hard rule)
+
+[docs/testing/functional-scenarios.md](docs/testing/functional-scenarios.md) is a living document, same discipline as `docs/decisions/history.md`. Whenever a new module or user-facing feature lands — a new backend endpoint, a new web route/page, a new mobile screen — **add its recommended scenarios** (happy path, edge cases & errors, and auth/security where relevant) as part of finishing that work. Don't write the actual Playwright/test code yourself unless asked — `tests/functional/` is the user's own in-progress suite; this doc is the reference list they (or a future session) translate into real tests. Skip it only for changes with no user-facing or API-surface behavior (refactors, docs, CI tweaks).
+
 ## Local dev setup
 
 ```bash
@@ -85,3 +90,4 @@ The backend's CORS (`withCORS` in `cmd/api/main.go`) allows multiple comma-separ
 - [docs/architecture/deployment.md](docs/architecture/deployment.md) — environments, Railway topology, migrations
 - [docs/architecture/api-conventions.md](docs/architecture/api-conventions.md) — full REST/OpenAPI conventions
 - [contracts/public.openapi.yaml](contracts/public.openapi.yaml) — the wire contract
+- [docs/testing/functional-scenarios.md](docs/testing/functional-scenarios.md) — recommended functional test scenarios per feature
