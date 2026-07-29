@@ -567,6 +567,14 @@ The modelling decision worth keeping: **a missing row means "use the profile def
 
 **Still open:** distances convert but no screen currently takes a distance input in anger, so that path is typed but unexercised. And the override is available on the session screen only — the workout editor uses the account default, which is arguably wrong for a template built around one specific machine.
 
+## 2026-07-29 — Modal sheets went white (a fix's own regression)
+
+The exercise picker and the new-workout sheet were rendering on iOS's default white, with the near-white body text invisible against it.
+
+Cause: the earlier fix that stopped `components/Themed`'s `View` painting the theme's *page* background unconditionally. That was right — it was stamping a page-coloured rectangle over every card it sat inside — but it assumed something else always paints behind. On a normal screen the navigator does. **A `Modal` renders outside the navigator, so nothing does**, and the two sheets that relied on `Themed.View` for their background got the system default instead.
+
+Both sheets now set `backgroundColor` explicitly, with a comment saying why a screen-level container needs one here and nowhere else. Worth recording because the shape recurs: a fix that removes an implicit default is only safe where the explicit replacement actually exists, and a modal is exactly the place it doesn't.
+
 
 ## Open items / known gaps as of this entry
 

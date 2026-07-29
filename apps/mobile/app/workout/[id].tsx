@@ -662,7 +662,11 @@ const styles = StyleSheet.create({
   emptyTitle: { fontSize: 16, fontWeight: '600' },
   muted: { color: vola.textMuted, fontSize: 13 },
   error: { color: vola.danger, fontSize: 14 },
-  sheet: { flex: 1, padding: 20, gap: 12 },
+  // A Modal renders outside the navigator, so nothing paints behind it —
+  // this is the one place a screen-level container has to set its own
+  // background. Without it the sheet falls through to iOS's default
+  // white and the near-white body text disappears into it.
+  sheet: { flex: 1, padding: 20, gap: 12, backgroundColor: vola.bg },
   sheetHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   sheetTitle: { fontSize: 17, fontWeight: '700' },
   input: {
