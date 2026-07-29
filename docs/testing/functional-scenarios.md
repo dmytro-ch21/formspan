@@ -134,9 +134,34 @@ Domain: operator-controlled, global on/off switches — distinct from the profil
 - Zero flags in the table → `{"flags": []}`, never `{"flags": null}`.
 
 **Not yet covered / deferred**
-- No write endpoint (`PATCH`/`POST`) and no admin-console screen to toggle flags — needs a backend-side admin-authorization concept that doesn't exist yet. Toggling today is direct SQL only.
+- No write endpoint (`PATCH`/`POST`) and no admin-console screen to toggle flags — real backend admin authorization exists now (`RequireAdmin`, see below), so this is no longer blocked on that; just not built yet. Toggling today is direct SQL only.
 - No frontend app (web/mobile/admin) fetches or gates on any flag yet — this pass is backend-only, same scoping call as structured logging.
 - No per-user/cohort targeting or percentage rollout — add if a real use case shows up.
+
+---
+
+## Activity module + real backend admin authorization (`/v1/activities`, `/v1/admin/*`)
+
+Domain: the unified "activity envelope" (one table, `kind` + flexible `details` JSONB, not per-sport tables) — Phase 1 of the first end-to-end vertical slice (log on mobile → sync → display on web → find + trace in admin). Also the first real backend-side admin authorization: `RequireAdmin` (Clerk user ID allowlist via `ADMIN_USER_IDS`), closing a gap flagged when the admin console shipped mock-only.
+
+**Happy path**
+- `POST /v1/activities` with a valid bearer token and `{id, kind, occurred_at, notes?, details?}` creates the activity, stamped server-side with the caller's `user_id` and the current request's own `request_id`/`trace_id` — `200` with the full row.
+- `GET /v1/activities` returns the caller's own activities, newest `occurred_at` first.
+- `GET /v1/admin/users` with an `ADMIN_USER_IDS`-listed token returns every user with a `profiles` row (LEFT JOIN `activities`) — `user_id`, `display_name`, `activity_count`, `last_activity_at` — including users with zero activities yet.
+- `GET /v1/admin/users/{userID}/activities` with an admin token returns that specific user's activities, each with its `request_id`/`trace_id` — the "trace the request" mechanism: grep the backend's own log output for that ID to see the full request that created it.
+
+**Edge cases & errors**
+- **Idempotent create**: `POST`ing the same `id` twice (a real offline-sync retry scenario) returns the *original* row both times — same `request_id`, same `created_at` — never a duplicate, never an error. Verified directly: two live `curl` calls with the same `id` returned byte-identical `request_id`/`created_at`.
+- Missing `id`/`kind`/`occurred_at` → `400 invalid_input`.
+- No `Authorization` header on any of these routes → `401 unauthorized`.
+- A valid, authenticated token that **isn't** in `ADMIN_USER_IDS` → `403 forbidden` on both admin routes — verified live: a real signed-in token, temporarily excluded from the allowlist, got `403`, then succeeded once restored.
+
+**Auth & security**
+- Admin authorization is enforced server-side (`auth.Verifier.RequireAdmin`), not just `apps/admin`'s frontend `ADMIN_EMAILS`/allowlist gate — a non-admin authenticated user genuinely cannot reach `/v1/admin/*` by calling the backend directly, closing the exact gap `apps/admin`'s own history entry flagged as unresolved.
+
+**Not yet covered / deferred**
+- Nothing calls these endpoints yet outside manual `curl` verification — mobile (offline logging + sync), web (display), and admin (real-data wiring, replacing `lib/mock-users.ts`) are Phases 2–5 of this same arc, not yet built.
+- `apps/admin`'s frontend gate still checks `ADMIN_EMAILS`, not the new `ADMIN_USER_IDS` convention — reconciling that is Phase 5.
 
 ---
 

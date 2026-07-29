@@ -23,7 +23,11 @@ func New() *slog.Logger {
 
 type ctxKey string
 
-const loggerCtxKey ctxKey = "httplog.logger"
+const (
+	loggerCtxKey    ctxKey = "httplog.logger"
+	requestIDCtxKey ctxKey = "httplog.request_id"
+	traceIDCtxKey   ctxKey = "httplog.trace_id"
+)
 
 // FromContext returns the request-scoped logger stashed by Middleware,
 // already tagged with request_id/trace_id/span_id. Falls back to the
@@ -33,6 +37,21 @@ func FromContext(ctx context.Context) *slog.Logger {
 		return l
 	}
 	return slog.Default()
+}
+
+// RequestIDFromContext returns the current request's ID — e.g. for
+// handlers that need to persist it alongside the record they're creating
+// (see internal/modules/activity), not just log it. Empty outside a
+// request.
+func RequestIDFromContext(ctx context.Context) string {
+	id, _ := ctx.Value(requestIDCtxKey).(string)
+	return id
+}
+
+// TraceIDFromContext is RequestIDFromContext's trace-ID counterpart.
+func TraceIDFromContext(ctx context.Context) string {
+	id, _ := ctx.Value(traceIDCtxKey).(string)
+	return id
 }
 
 // Middleware generates/extracts a request ID and W3C trace context for
@@ -55,6 +74,8 @@ func Middleware(base *slog.Logger) func(http.Handler) http.Handler {
 
 			logger := base.With("request_id", requestID, "trace_id", traceID, "span_id", spanID)
 			ctx := context.WithValue(r.Context(), loggerCtxKey, logger)
+			ctx = context.WithValue(ctx, requestIDCtxKey, requestID)
+			ctx = context.WithValue(ctx, traceIDCtxKey, traceID)
 
 			w.Header().Set("X-Request-ID", requestID)
 			w.Header().Set("traceparent", fmt.Sprintf("00-%s-%s-01", traceID, spanID))

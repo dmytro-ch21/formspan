@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/dmytro-ch21/formspan/backend/internal/modules/activity"
 	"github.com/dmytro-ch21/formspan/backend/internal/modules/featureflag"
 	"github.com/dmytro-ch21/formspan/backend/internal/modules/profile"
 	"github.com/dmytro-ch21/formspan/backend/internal/platform/apihttp"
@@ -27,7 +28,8 @@ func main() {
 		logger.Error("CLERK_ISSUER must be set (see backend/.env.example)")
 		os.Exit(1)
 	}
-	verifier, err := auth.NewVerifier(context.Background(), clerkIssuer)
+	adminUserIDs := strings.Split(os.Getenv("ADMIN_USER_IDS"), ",")
+	verifier, err := auth.NewVerifier(context.Background(), clerkIssuer, adminUserIDs)
 	if err != nil {
 		logger.Error("auth: init verifier", "err", err)
 		os.Exit(1)
@@ -47,6 +49,7 @@ func main() {
 
 	profileHandler := profile.NewHandler(profile.NewPostgresRepository(pool))
 	featureFlagHandler := featureflag.NewHandler(featureflag.NewPostgresRepository(pool))
+	activityHandler := activity.NewHandler(activity.NewPostgresRepository(pool))
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/healthz", handleHealthz)
@@ -55,6 +58,10 @@ func main() {
 	mux.Handle("POST /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Create)))
 	mux.Handle("PATCH /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Update)))
 	mux.Handle("GET /v1/flags", verifier.RequireAuth(http.HandlerFunc(featureFlagHandler.List)))
+	mux.Handle("POST /v1/activities", verifier.RequireAuth(http.HandlerFunc(activityHandler.Create)))
+	mux.Handle("GET /v1/activities", verifier.RequireAuth(http.HandlerFunc(activityHandler.List)))
+	mux.Handle("GET /v1/admin/users", verifier.RequireAdmin(http.HandlerFunc(activityHandler.AdminListUsers)))
+	mux.Handle("GET /v1/admin/users/{userID}/activities", verifier.RequireAdmin(http.HandlerFunc(activityHandler.AdminListUserActivities)))
 
 	logger.Info("api listening", "port", port)
 	if err := http.ListenAndServe(":"+port, httplog.Middleware(logger)(withCORS(mux))); err != nil {
