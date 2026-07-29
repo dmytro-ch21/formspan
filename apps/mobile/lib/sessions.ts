@@ -348,15 +348,24 @@ export async function getSession(
 
 export async function startSession(
   getToken: () => Promise<string | null>,
-  input: { sport: string; name: string; workout_id?: string | null; sets?: LoggedSet[] },
+  input: {
+    sport: string;
+    name: string;
+    workout_id?: string | null;
+    sets?: LoggedSet[];
+    /** Supplied when pushing a session that was started offline. */
+    id?: string;
+    started_at?: string;
+  },
 ): Promise<{ session: Session; volume: Volume }> {
   // Client-generated ID, so starting a session is idempotent on retry — the
-  // same contract offline activity logging relies on.
+  // same contract offline activity logging relies on, and what lets the
+  // offline store push a session it created hours earlier.
   return request(getToken, '/sessions', {
     method: 'POST',
     body: JSON.stringify({
-      id: randomUUID(),
-      started_at: new Date().toISOString(),
+      id: input.id ?? randomUUID(),
+      started_at: input.started_at ?? new Date().toISOString(),
       ...input,
     }),
   });
@@ -376,10 +385,13 @@ export async function replaceSets(
 export async function finishSession(
   getToken: () => Promise<string | null>,
   id: string,
+  /** Supplied when pushing a session finished offline — the real end time,
+   *  not the time the sync happened to run. */
+  endedAt?: string,
 ): Promise<{ session: Session; volume: Volume }> {
   return request(getToken, `/sessions/${encodeURIComponent(id)}/finish`, {
     method: 'POST',
-    body: JSON.stringify({ ended_at: new Date().toISOString() }),
+    body: JSON.stringify({ ended_at: endedAt ?? new Date().toISOString() }),
   });
 }
 

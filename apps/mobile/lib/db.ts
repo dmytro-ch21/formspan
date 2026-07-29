@@ -28,6 +28,49 @@ const CREATE_TABLE = `
   );
 `;
 
+const CREATE_SESSIONS = `
+  CREATE TABLE IF NOT EXISTS local_sessions (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL,
+    workout_id TEXT,
+    sport TEXT NOT NULL,
+    name TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    ended_at TEXT,
+    notes TEXT NOT NULL DEFAULT '',
+    sets_json TEXT NOT NULL DEFAULT '[]',
+    -- 0 = the server holds exactly this; 1 = we owe it a push. Same outbox
+    -- flag as activities, named for what it means rather than for sync
+    -- state, because a row can be dirty for reasons other than "never sent".
+    dirty INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL
+  );
+`;
+
+const CREATE_WORKOUT_CACHE = `
+  CREATE TABLE IF NOT EXISTS workout_cache (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL,
+    sport TEXT NOT NULL,
+    name TEXT NOT NULL,
+    items_json TEXT NOT NULL DEFAULT '[]',
+    cached_at TEXT NOT NULL
+  );
+`;
+
+const CREATE_EXERCISE_CACHE = `
+  CREATE TABLE IF NOT EXISTS exercise_cache (
+    id TEXT PRIMARY KEY NOT NULL,
+    sport TEXT NOT NULL,
+    name TEXT NOT NULL,
+    movement_pattern TEXT NOT NULL,
+    load_type TEXT NOT NULL,
+    is_unilateral INTEGER NOT NULL DEFAULT 0,
+    thumbnail_url TEXT,
+    cached_at TEXT NOT NULL
+  );
+`;
+
 /**
  * Current local schema version. Bump this and add a matching `if` in
  * `migrate()` whenever the local table shape changes.
@@ -39,7 +82,7 @@ const CREATE_TABLE = `
  * "no such column" crash the guard was supposed to prevent. A version number
  * can't develop that blind spot.
  */
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 3;
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
@@ -55,6 +98,41 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
   await db.execAsync(
     `CREATE INDEX IF NOT EXISTS activities_user_id_idx ON activities (user_id);`,
   );
+
+  if (current < 2) {
+    // v1 -> v2: sessions become offline-first too.
+    //
+    // Sets live as a JSON blob rather than their own table, deliberately.
+    // The API replaces a session's whole ordered list in one call, and the
+    // UI edits it as one array, so there is no operation anywhere that
+    // touches a single set in isolation. Rows would buy a join and a
+    // reconciliation step and nothing else.
+    await db.execAsync(CREATE_SESSIONS);
+    await db.execAsync(
+      `CREATE INDEX IF NOT EXISTS local_sessions_user_idx
+         ON local_sessions (user_id, started_at DESC);`,
+    );
+    // The catalog cache is what makes a session *readable* offline. Without
+    // it the screen has set rows and no idea what exercise they belong to,
+    // which measures to render, or what to call them — a log you can write
+    // but not read is not offline support.
+    await db.execAsync(CREATE_EXERCISE_CACHE);
+    await db.execAsync(
+      `CREATE INDEX IF NOT EXISTS exercise_cache_sport_idx ON exercise_cache (sport);`,
+    );
+  }
+
+  if (current < 3) {
+    // v2 -> v3. Caching sessions and the exercise catalog but not the
+    // *plans* left the worst possible offline state: the start screen said
+    // "no workouts yet" and offered to create one, which is a lie told at
+    // precisely the moment someone is standing in a gym about to train.
+    await db.execAsync(CREATE_WORKOUT_CACHE);
+    await db.execAsync(
+      `CREATE INDEX IF NOT EXISTS workout_cache_user_sport_idx
+         ON workout_cache (user_id, sport);`,
+    );
+  }
 
   await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION};`);
 }

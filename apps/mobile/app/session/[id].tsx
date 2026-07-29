@@ -1,3 +1,4 @@
+import { useAuth } from '@clerk/clerk-expo';
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
@@ -9,15 +10,22 @@ import { vola } from '@/constants/Colors';
 import { restSecondsFor } from '@/lib/rest';
 import { fetchExercises, type Exercise } from '@/lib/exercises';
 import {
-  deleteSession,
+  cacheExercises,
+  cachedExercises,
+  countPendingSessions,
+  deleteLocalSession,
+  finishLocalSession,
+  hydrateSession,
+  readLocalSession,
+  saveLocalSets,
+  syncSessions,
+} from '@/lib/sessionStore';
+import { deleteSession } from '@/lib/sessions';
+import {
   describeSet,
   emptySet,
   fetchSuggestions,
-  finishSession,
-  getSession,
-  isValidationError,
   measuresFor,
-  replaceSets,
   SET_TYPES,
   type LoggedSet,
   type Measure,
@@ -42,6 +50,7 @@ import {
 export default function SessionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const getToken = useAuthToken();
+  const { userId } = useAuth();
   const router = useRouter();
 
   const [session, setSession] = useState<Session | null>(null);
@@ -57,24 +66,47 @@ export default function SessionScreen() {
   const [everLoaded, setEverLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // How many sessions the server still owes — the honest replacement for a
+  // "saving…" spinner once saving no longer depends on the network.
+  const [pending, setPending] = useState(0);
 
-  // Declared above persist, which clears it when a save fails for a reason
-  // that means the screen is out of date rather than the input was bad.
-  const pending = useRef<LoggedSet[] | null>(null);
+  const queued = useRef<LoggedSet[] | null>(null);
 
+  // Local first, always. The network can only ever *add* to what's on
+  // screen — it is never the thing the screen waits for.
   const load = useCallback(async () => {
-    if (!id) return;
+    if (!id || !userId) return;
     try {
-      const { session: s, volume: v } = await getSession(getToken, id);
-      const list = await fetchExercises(getToken, { sport: s.sport });
+      let s = await readLocalSession(userId, id);
+      if (!s) {
+        // Never seen on this device — started on the web, say. Needs the
+        // network, and offline there is genuinely nothing to show.
+        s = await hydrateSession(userId, id, getToken);
+      }
+      if (!s) {
+        setError('This session isn\'t on this device, and it can\'t be reached right now.');
+        setEverLoaded(true);
+        return;
+      }
       setSession(s);
       setSets(s.sets);
-      setVolume(v);
-      setCatalog(new Map(list.map((e) => [e.id, e])));
-      setEverLoaded(true);
+      setVolume(localVolume(s.sets));
       setError(null);
-      // Separate and non-blocking: the session must render even if the
-      // history lookup fails, since it's advice rather than content.
+      setEverLoaded(true);
+      setPending(await countPendingSessions(userId));
+
+      // The cache renders the screen; the fetch refreshes the cache for
+      // next time. Offline, the first half still works.
+      const cached = await cachedExercises(s.sport);
+      if (cached.length > 0) setCatalog(new Map(cached.map((e) => [e.id, e])));
+      fetchExercises(getToken, { sport: s.sport })
+        .then((list) => {
+          setCatalog(new Map(list.map((e) => [e.id, e])));
+          return cacheExercises(list);
+        })
+        .catch(() => {});
+
+      // Advice, not content — it simply doesn't appear offline.
       fetchSuggestions(
         getToken,
         s.sets.map((x) => x.exercise_id),
@@ -87,7 +119,7 @@ export default function SessionScreen() {
     } finally {
       setLoading(false);
     }
-  }, [getToken, id]);
+  }, [getToken, id, userId]);
 
   // Runs on mount and again on every return from the exercise picker, which
   // appends its set server-side — without this the new set wouldn't appear.
@@ -109,24 +141,24 @@ export default function SessionScreen() {
   // shows the newer one — a lost update with nothing left to reconcile it.
   const inFlight = useRef<Promise<unknown>>(Promise.resolve());
 
+  // The local write is the save. The push is an attempt, and failing it is
+  // an ordinary state — not an error worth interrupting a workout for.
   const persist = useCallback(
     (next: LoggedSet[]) => {
-      if (!id) return Promise.resolve();
+      if (!id || !userId) return Promise.resolve();
       const run = inFlight.current.then(async () => {
         setSaving(true);
         try {
-          const { volume: v } = await replaceSets(getToken, id, next);
-          setVolume(v);
+          await saveLocalSets(userId, id, next);
+          setVolume(localVolume(next));
           setError(null);
+          const result = await syncSessions(userId, getToken);
+          setPending(await countPendingSessions(userId));
+          // Only a rejection says the *data* is wrong; anything else is the
+          // network, which the outbox already handles.
+          if (result.error && /invalid|400/i.test(result.error)) setError(result.error);
         } catch (err) {
           setError(err instanceof Error ? err.message : String(err));
-          // Bad input is the caller's to correct — reloading would throw away
-          // every other edit made since the last good save. Only re-read when
-          // the server and the screen genuinely disagree about what exists.
-          if (!isValidationError(err)) {
-            pending.current = null;
-            load();
-          }
         } finally {
           setSaving(false);
         }
@@ -134,7 +166,7 @@ export default function SessionScreen() {
       inFlight.current = run.catch(() => {});
       return run;
     },
-    [getToken, id, load],
+    [getToken, id, userId],
   );
 
   // Typing a weight is several keystrokes; one PUT each would be a request
@@ -147,9 +179,9 @@ export default function SessionScreen() {
       clearTimeout(timer.current);
       timer.current = null;
     }
-    const queued = pending.current;
-    pending.current = null;
-    if (queued) await persist(queued);
+    const next = queued.current;
+    queued.current = null;
+    if (next) await persist(next);
     // Awaited even with nothing queued: a save may already be flying, and
     // callers flush precisely because they're about to read the session back.
     await inFlight.current;
@@ -157,7 +189,7 @@ export default function SessionScreen() {
 
   const persistSoon = useCallback(
     (next: LoggedSet[]) => {
-      pending.current = next;
+      queued.current = next;
       if (timer.current) clearTimeout(timer.current);
       timer.current = setTimeout(() => void flush(), 700);
     },
@@ -182,7 +214,7 @@ export default function SessionScreen() {
   // goes now, not on the debounce.
   function commit(updated: LoggedSet[]) {
     setSets(updated);
-    pending.current = updated;
+    queued.current = updated;
     void flush();
   }
 
@@ -390,10 +422,17 @@ export default function SessionScreen() {
             onPress={async () => {
               try {
                 await flush(); // the last set typed must land before the session closes
-                const { session: s, volume: v } = await finishSession(getToken, id!);
-                setSession(s);
-                setSets(s.sets);
-                setVolume(v);
+                await finishLocalSession(userId!, id!);
+                const s = await readLocalSession(userId!, id!);
+                if (s) {
+                  setSession(s);
+                  setSets(s.sets);
+                  setVolume(localVolume(s.sets));
+                }
+                syncSessions(userId!, getToken)
+                  .then(() => countPendingSessions(userId!))
+                  .then(setPending)
+                  .catch(() => {});
               } catch (err) {
                 setError(err instanceof Error ? err.message : String(err));
               }
@@ -416,7 +455,10 @@ export default function SessionScreen() {
                 style: 'destructive',
                 onPress: async () => {
                   try {
-                    await deleteSession(getToken, id!);
+                    await deleteLocalSession(userId!, id!);
+                    // Best-effort: gone locally either way, and a delete
+                    // that only lands when signal returns is still a delete.
+                    deleteSession(getToken, id!).catch(() => {});
                     router.back();
                   } catch (err) {
                     setError(err instanceof Error ? err.message : String(err));
@@ -443,6 +485,37 @@ export default function SessionScreen() {
       )}
     </View>
   );
+}
+
+/**
+ * The same working-volume arithmetic the API performs, run locally.
+ *
+ * Duplicating it is a deliberate, narrow exception to "compute it once, on
+ * the server": a summary that blanks out the moment you lose signal is worse
+ * than a summary computed twice, and this is the one screen guaranteed to be
+ * used without a network. The rule it implements — warm-ups count toward
+ * nothing — is pinned on the server by TestSummarise_ExcludesWarmups; if the
+ * two ever disagree, that test is the authority.
+ */
+function localVolume(sets: LoggedSet[]): Volume {
+  const v: Volume = {
+    working_sets: 0,
+    total_reps: 0,
+    tonnage_kg: 0,
+    hardest_rpe: 0,
+    exercise_ids: [],
+  };
+  for (const s of sets) {
+    if (!v.exercise_ids.includes(s.exercise_id)) v.exercise_ids.push(s.exercise_id);
+    if (s.set_type === 'warmup') continue;
+    v.working_sets++;
+    if (s.rpe != null && s.rpe > v.hardest_rpe) v.hardest_rpe = s.rpe;
+    if (s.reps != null) {
+      v.total_reps += s.reps;
+      if (s.weight_kg != null) v.tonnage_kg += s.reps * s.weight_kg;
+    }
+  }
+  return v;
 }
 
 function Stat({ label, value }: { label: string; value: string }) {

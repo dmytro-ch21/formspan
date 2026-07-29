@@ -27,7 +27,8 @@ import {
   type Workout,
   type WorkoutItem,
 } from '@/lib/workouts';
-import { applySuggestions, fetchSuggestions, setsFromWorkout, startSession } from '@/lib/sessions';
+import { applySuggestions, fetchSuggestions, setsFromWorkout } from '@/lib/sessions';
+import { startLocalSession, syncSessions } from '@/lib/sessionStore';
 import { vola } from '@/constants/Colors';
 
 export default function WorkoutDetailScreen() {
@@ -115,7 +116,7 @@ export default function WorkoutDetailScreen() {
   // you start from and then change — which is what makes the gap between
   // prescribed and actual measurable at all.
   async function start() {
-    if (starting || !workout) return;
+    if (starting || !workout || !userId) return;
     setStarting(true);
     setError(null);
     try {
@@ -130,12 +131,15 @@ export default function WorkoutDetailScreen() {
       } catch {
         /* start anyway */
       }
-      const { session } = await startSession(getToken, {
+      // Local first — the plan is on the phone, so starting it shouldn't
+      // need the network either.
+      const session = await startLocalSession(userId, {
         sport: workout.sport,
         name: workout.name,
         workout_id: workout.id,
         sets,
       });
+      syncSessions(userId, getToken).catch(() => {});
       router.push(`/session/${session.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

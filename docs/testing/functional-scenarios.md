@@ -540,6 +540,38 @@ Domain: the countdown between sets. **Mobile only, permanently** — an in-progr
 
 ---
 
+## Offline workout execution (`apps/mobile`)
+
+Domain: logging a session with no connectivity. **Test this by actually stopping the API**, not by mocking a failure — both gaps found during development were things a mocked failure would have hidden.
+
+**Happy path, with the API stopped**
+- Starting a session (empty or from a cached workout) succeeds and opens immediately.
+- The session screen renders: exercise names, the right measures per `load_type`, and a working volume summary — all from local data.
+- Editing sets, adding, removing and swapping all persist locally.
+- The exercise picker falls back to the cached catalog and filters it by substring.
+- The start screen lists **cached workouts**. It must never say "no workouts yet" when the account has some — that's a lie at the worst possible moment.
+- Finishing a session works offline.
+
+**On reconnect**
+- The session pushes and the dirty flag clears; Today's "N not synced" count goes to zero.
+- **`started_at` is the real start time, not the sync time.** Verified: a session created at 22:42:30 with the API down arrived in Postgres with that timestamp.
+- A retried push cannot duplicate — the ID is client-generated and create is idempotent.
+- Push happens **before** pull, or the server's older copy overwrites unsynced local work.
+- A session the device holds dirty is never overwritten by the pull.
+
+**Edge cases**
+- A corrupt `sets_json` blob must leave the session openable (empty set list), not throw.
+- Local rows are scoped by `user_id` — a shared device must not show or push one account's sessions under another's token.
+- Deleting offline removes it locally and best-effort remotely.
+- A session started on another device cannot be opened offline; it must say so rather than appear empty.
+
+**Known gaps to write scenarios for once built**
+- **Sync is trigger-based** (screen focus, next edit, session start) — there is no connectivity listener, so regaining signal doesn't itself push. A `NetInfo`-driven retry is the next step.
+- Suggestions are server-computed and don't appear offline.
+- The workout cache covers `scope=mine` only.
+
+---
+
 ## Not yet covered (tracked here so it isn't lost, not because it's blocking)
 
 - Mobile has no auth yet (Clerk Expo SDK is a separate future increment) — no sign-in/sign-out scenarios apply to mobile today.

@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
+import { cacheExercises } from '@/lib/sessionStore';
 import { useAuthToken } from '@/lib/useAuthToken';
 
 // Abort reasons, so a superseded request (silent) and a timeout (a real
@@ -87,6 +88,10 @@ export default function LibraryScreen() {
         );
         if (!controller.signal.aborted) {
           setExercises(list);
+          // Warms the offline cache from the screen that already has the
+          // whole catalog — the first offline session shouldn't be the first
+          // time anything gets cached.
+          cacheExercises(list).catch(() => {});
           setEverLoaded(true);
         }
       } catch (err) {

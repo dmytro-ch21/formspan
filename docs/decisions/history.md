@@ -505,6 +505,33 @@ Defaults come from the same movement-pattern table (180s for squat/hinge/olympic
 **Still open:** nothing yet *reads* the history back as trends — the suggestion is the first consumer of RIR/RPE, and the analysis surface the web app is now explicitly for hasn't been built. Sessions remain online-only. Everything is still kilograms and metres.
 
 
+## 2026-07-29 — Offline workout execution
+
+Session logging was online-only, which meant it failed in a basement gym — the place it is most likely to be used. It is now local-first: every read and write on the session screen goes to SQLite, and the network is a background reconciliation concern the UI never waits on.
+
+**The design rests entirely on two properties the API already had**, which is why it stayed small enough to trust:
+
+1. The session ID is **client-generated**, so a session created offline and pushed hours later cannot duplicate — the server's create is idempotent on that ID.
+2. Sets are replaced as a **whole ordered list**, so the outbox stores desired *state*, not a log of operations. Replaying is just "send what the row says now", which means a failed push followed by three more edits still costs one request. An operation log would have needed ordering, compaction and conflict resolution; last-write-wins on a whole list needs none of it, and is correct because a live session is edited on exactly one device.
+
+Sets live in the local row as a JSON blob rather than their own table — nothing anywhere touches a single set in isolation, so rows would buy a join and a reconciliation step and nothing else.
+
+**Push before pull, and that order is not incidental.** Pulling first would overwrite unsynced local work with the server's older copy — precisely the data loss the store exists to prevent. On the pull side, any session the device holds dirty is skipped.
+
+**Caching the sessions turned out to be the easy half.** Testing against a genuinely stopped API surfaced two gaps that no amount of reading the code would have:
+
+- **The exercise catalog wasn't cached**, so an offline session had set rows and no idea what exercise they belonged to, which measures to render, or what to call them. A log you can write but not read is not offline support.
+- **Workouts weren't cached either**, so the start screen said *"No Strength workouts yet"* and offered to create one — a lie told at the exact moment someone is standing in a gym about to train. Worse than an error, because it looks like data.
+
+Both are now cached, and the catalog is warmed from the Library tab rather than lazily on first offline use — the first offline session shouldn't be the first time anything gets cached.
+
+**The volume summary is now computed locally too**, a deliberate and narrow exception to "compute it once, on the server". A summary that blanks out the moment you lose signal is worse than one computed twice. The server's `Summarise` remains the authority, pinned by its own test; if the two ever disagree, that test wins.
+
+**Verified against a stopped API, not a mocked one.** With `dev:api` killed: a session started, the screen rendered with no error, the picker fell back to the cache, and the row was written locally. On restart, returning to Today triggered the sync and the session landed in Postgres — keeping its **real** `started_at` of 22:42:30, the moment it was created offline, not the moment it synced. That timestamp is the whole point of the exercise.
+
+**Honest remaining gaps.** Sync is **trigger-based, not event-driven**: it runs on screen focus, on the next edit, and when a session starts — there is no connectivity listener, so a phone that regains signal while sitting on a bench won't push until something touches it. A `NetInfo` subscription is the obvious next step and was deliberately not added here rather than bolted on untested. Also: a session started on *another* device still can't be opened offline (it has to be fetched once), suggestions are server-computed and so simply don't appear offline, and the workout cache covers `scope=mine` only. The web app is unchanged and stays online-only, which is correct under the platform rule — it is the planning and analysis surface, not the one used in a gym.
+
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.
