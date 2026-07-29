@@ -106,14 +106,17 @@ Domain: fully separate from `apps/web`, not athlete-facing. Reuses the same Cler
 **Happy path**
 - Any request to the API gets an `X-Request-ID` response header and a `traceparent` response header (W3C format), and one structured JSON access-log line (`method`, `path`, `status`, `duration_ms`, plus `request_id`/`trace_id`/`span_id`).
 - Sending a request with an `X-Request-ID` header already set → the same value is echoed back, not overwritten with a freshly generated one.
+- `apps/web`'s dashboard generates one trace ID per page view (`src/lib/trace.ts`) and sends it as `traceparent` on both its `healthz` and `/me` fetches — the backend's access-log lines for both requests share the same `trace_id` with distinct `span_id`s, proving client-side trace correlation actually works.
+- `apps/mobile`'s Today screen does the same (`lib/trace.ts`) for its one `healthz` fetch.
 
 **Edge cases & errors**
 - Sending a malformed or garbage `traceparent` header → ignored, a fresh trace ID is generated, the request still succeeds (never fails a request over a bad trace header).
 - A rejected auth attempt (missing or invalid bearer token on `GET /v1/me`) → a `WARN`-level structured log line (`auth: rejected`, with `reason`) is emitted, correlated (same `request_id`/`trace_id`) with that request's access-log line.
 - An unmapped internal error in the profile module → logged server-side via the request-scoped logger (`profile: internal error`), while the client still only sees the generic `{"error":{"code":"internal",...}}` body — the raw error never leaks over the wire.
+- The backend's CORS middleware must allow `traceparent` as a request header (`Access-Control-Allow-Headers`) — a real bug caught during verification: without it, the preflight `OPTIONS` succeeds but the actual browser request fails with a CORS error, silently breaking every web-based request the moment a custom header is added.
 
 **Not yet covered / deferred**
-- No frontend app (web/mobile/admin) generates or forwards a `traceparent` header yet — every request today starts a fresh trace at the API. Multi-request/client-correlated tracing is future work, not blocking.
+- `apps/admin` doesn't call the backend at all yet (mock data only — see the admin shell entry above), so there's nothing to wire there.
 - `cmd/migrate` (the one-shot CLI) intentionally keeps its plain `log.Printf` output — request/trace IDs don't apply to it.
 
 ---
