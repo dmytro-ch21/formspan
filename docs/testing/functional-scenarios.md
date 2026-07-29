@@ -57,7 +57,7 @@ Domain: one profile per Clerk user — display name, date of birth, sex, and fou
 ## Web app shell (`apps/web`)
 
 **Happy path**
-- Signed-out visit to `/` shows the "Formspan" landing with a sign-in button (no sidebar).
+- Signed-out visit to `/` shows the "VOLA" landing with a sign-in button (no sidebar).
 - After signing in, landing on `/dashboard` shows the sidebar (wordmark, nav, account menu) plus a live healthz check and the authenticated `/me` result.
 - Signed-in visit to `/` redirects straight to `/dashboard` (no dead-end landing page for authenticated users).
 
@@ -82,7 +82,7 @@ Domain: Clerk auth (same instance as web/admin) with the session token in the OS
 
 **Offline & sync (verified end-to-end on a real Simulator)**
 - With the API unreachable, logging an activity still succeeds locally and shows **pending**, with an explicit error (`Synced 0, 1 still pending — …Could not connect to the server.`) — never a false success.
-- The pending row is genuinely in the device's SQLite with `synced = 0` (confirmed by querying the Simulator's `formspan.db` directly).
+- The pending row is genuinely in the device's SQLite with `synced = 0` (confirmed by querying the Simulator's `vola.db` directly).
 - When the API returns, "Sync now" pushes it → "Synced 1.", the row flips to `synced = 1`, and the same client-generated ID appears in Postgres.
 - Because the ID is client-generated and the API's create is idempotent, a retried sync of an already-synced row is a no-op, not a duplicate.
 - Not yet covered: no automatic background sync (manual/on-log only), and no conflict resolution — activities are append-only so far.

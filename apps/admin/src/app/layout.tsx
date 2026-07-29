@@ -16,8 +16,8 @@ const barlowCondensed = Barlow_Condensed({
 });
 
 export const metadata: Metadata = {
-  title: "Formspan Admin",
-  description: "Formspan admin console",
+  title: "VOLA Admin",
+  description: "VOLA admin console",
 };
 
 export default function RootLayout({

@@ -124,7 +124,7 @@ export default function SignInScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Sign in to Formspan</Text>
+      <Text style={styles.title}>Sign in to VOLA</Text>
 
       {secondFactor === null ? (
         <>

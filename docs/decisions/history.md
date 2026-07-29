@@ -278,6 +278,25 @@ Also resolved: pnpm required explicit `allowBuilds` decisions for five new trans
 
 ---
 
+## 2026-07-28 — Phase 3: Rebrand to VOLA
+
+The product is renamed **Formspan → VOLA**. Nothing about the strategy, scope, or architecture changed — this is an identity change, and everything above this entry stays as written. Per this document's own rule, earlier entries are *not* rewritten: they say "Formspan" because that is what the project was called when those decisions were made, and silently rewriting them would destroy the record of when the name changed.
+
+**Brand assets are now in the repo** at `assets/brand/` and are the source of truth for identity: 7 logo SVGs, 4 app-icon masters, 2 splash masters, 25 UI icons, and `design-tokens.json`. Palette: lime `#B8FF2C`, green `#42F58D`, navy `#0B1220`, charcoal `#111827`, muted `#94A3B8`. The mark is a green→lime gradient check.
+
+Everything is SVG, deliberately. The rasters Expo needs (`apps/mobile/assets/images/*.png`) are **generated from those SVGs**, not hand-edited — so the vector stays authoritative and the PNGs can be regenerated at any size. Details that mattered while generating them: the iOS 1024 icon is flattened onto navy so it carries **no alpha channel** (the App Store rejects a transparent icon, and iOS applies its own corner mask anyway, so the source SVG's rounded corners must not survive as transparent pixels); Android's monochrome/themed icon collapses the gradient to flat white, because Android re-tints that layer from the user's wallpaper and a gradient renders as mud; and the splash ships the mark alone on transparency with the navy supplied by `app.json`'s `backgroundColor`, so it stays correct at any aspect ratio instead of letterboxing a fixed 1080×1920 bitmap.
+
+**What the rename actually touched, and what it deliberately didn't:**
+- Go module path `github.com/dmytro-ch21/formspan/backend` → `.../vola/backend`, with every import rewritten. Decided together with renaming the GitHub repo, so the Go convention that module path == repo URL still holds.
+- Local Postgres role/database `formspan` → `vola`, in `docker-compose.yml`, `backend/.env.example`, and CI. This one has a trap: Postgres only runs its init env vars against an **empty** data directory, so bringing the container back up with new credentials against the existing named volume would silently keep the old `formspan` role and leave you debugging an auth failure. It needs `docker compose down -v` — an actual data wipe, taken deliberately (the local rows were throwaway dev data).
+- Mobile SQLite `formspan.db` → `vola.db`. The filename change *is* the migration: pre-rename rows aren't migrated, they're abandoned. Fine — throwaway dev data, and no build has shipped to anyone.
+- Design tokens are now available as `brand-`-namespaced Tailwind v4 `@theme` tokens in both `apps/web` and `apps/admin`. **Namespaced on purpose**: they're purely additive, so no existing utility (`rounded-lg`, `p-4`, …) shifts underneath screens that were built before them. Note `apps/admin`'s existing `--color-accent-lime` (`#e9ffa3`) is the *admin mock's* pale lime and is **not** the brand lime — reconciling the two is part of the deferred restyle, not this change.
+- **Not renamed:** the Railway project and the Clerk application are still called `formspan` externally. Docs now say so explicitly rather than describing the desired end state, because a doc that names a resource you can't find is worse than no doc.
+- Restyling the apps to the VOLA palette is deliberately **not** in this change. `apps/web` already doesn't follow the existing design system, so doing brand + rename + restyle at once would have buried a 30-file mechanical rename in visual churn and made both halves harder to review.
+
+**A real problem surfaced while verifying the rename**, unrelated to it: the backend Postgres integration tests skip silently unless `TEST_DATABASE_URL` is set, and that variable was never documented in `backend/.env.example`. So locally they had *always* skipped — `pnpm run test:api` printed `ok` for all three module packages while running no integration test at all. They did genuinely run in CI (which sets the var), so the tests were doing their job on every PR; what was worthless was the local signal, and any local claim of "tests pass" made before this. Now documented in `.env.example`, `README.md`, and `CLAUDE.md`, pointed at a separate `vola_test` database so a test run can never touch dev data, and confirmed: all six integration tests report `PASS`, not `SKIP`.
+
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

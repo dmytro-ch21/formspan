@@ -1,9 +1,9 @@
 openapi: 3.0.3
 info:
-  title: Formspan Public API
+  title: VOLA Public API
   version: "1.0.0"
   description: >
-    Public API for the Formspan mobile and web clients. See
+    Public API for the VOLA mobile and web clients. See
     docs/architecture/api-conventions.md for the conventions this spec
     follows (versioning, error shape, auth, status codes).
 servers:

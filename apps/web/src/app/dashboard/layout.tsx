@@ -12,7 +12,7 @@ export default function DashboardLayout({
     <div className="flex min-h-screen flex-1">
       <aside className="flex w-56 flex-col justify-between border-r border-black/10 p-4 dark:border-white/10">
         <div>
-          <span className="text-lg font-bold">Formspan</span>
+          <span className="text-lg font-bold">VOLA</span>
           <nav className="mt-8 flex flex-col gap-1">
             {navItems.map((item) => (
               <Link

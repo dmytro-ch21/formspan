@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dmytro-ch21/formspan/backend/internal/platform/database"
+	"github.com/dmytro-ch21/vola/backend/internal/platform/database"
 )
 
 // Requires a real Postgres with migrations already applied — set

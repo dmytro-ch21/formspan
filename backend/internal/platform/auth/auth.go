@@ -15,8 +15,8 @@ import (
 	"github.com/MicahParks/keyfunc/v3"
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/dmytro-ch21/formspan/backend/internal/platform/apihttp"
-	"github.com/dmytro-ch21/formspan/backend/internal/platform/httplog"
+	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
+	"github.com/dmytro-ch21/vola/backend/internal/platform/httplog"
 )
 
 type Claims struct {

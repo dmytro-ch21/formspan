@@ -6,13 +6,13 @@ import (
 	"os"
 	"strings"
 
-	"github.com/dmytro-ch21/formspan/backend/internal/modules/activity"
-	"github.com/dmytro-ch21/formspan/backend/internal/modules/featureflag"
-	"github.com/dmytro-ch21/formspan/backend/internal/modules/profile"
-	"github.com/dmytro-ch21/formspan/backend/internal/platform/apihttp"
-	"github.com/dmytro-ch21/formspan/backend/internal/platform/auth"
-	"github.com/dmytro-ch21/formspan/backend/internal/platform/database"
-	"github.com/dmytro-ch21/formspan/backend/internal/platform/httplog"
+	"github.com/dmytro-ch21/vola/backend/internal/modules/activity"
+	"github.com/dmytro-ch21/vola/backend/internal/modules/featureflag"
+	"github.com/dmytro-ch21/vola/backend/internal/modules/profile"
+	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
+	"github.com/dmytro-ch21/vola/backend/internal/platform/auth"
+	"github.com/dmytro-ch21/vola/backend/internal/platform/database"
+	"github.com/dmytro-ch21/vola/backend/internal/platform/httplog"
 )
 
 func main() {

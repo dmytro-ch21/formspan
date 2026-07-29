@@ -1,6 +1,6 @@
-# Formspan
+# VOLA
 
-Formspan is a unified training and nutrition platform for BJJ athletes who also strength train and track nutrition — one athlete profile and calendar connecting BJJ, strength training, and nutrition, with deterministic, explainable cross-sport recommendations.
+VOLA is a unified training and nutrition platform for BJJ athletes who also strength train and track nutrition — one athlete profile and calendar connecting BJJ, strength training, and nutrition, with deterministic, explainable cross-sport recommendations.
 
 - [docs/decisions/history.md](docs/decisions/history.md) — chronological project history: what's been built, why, and what's still open. Start here if you're new to this repo.
 - [docs/testing/functional-scenarios.md](docs/testing/functional-scenarios.md) — recommended functional test scenarios per feature.
@@ -17,6 +17,7 @@ This repo is a pnpm + Go monorepo, built incrementally, one verified piece at a 
 - `apps/mobile/` — Expo/React Native app (Expo Router, Expo Go). Clerk sign-in (incl. two-factor), and a `Today` tab that logs activities **offline-first** into local SQLite and syncs them to the API when connectivity allows — retries are safe because the activity ID is client-generated and the API's create is idempotent.
 - `apps/admin/` — Next.js admin console, fully separate from `apps/web` (not athlete-facing). `User Lookup`/`User Detail` run on **real backend data** via the `/v1/admin/*` endpoints above, gated by an `ADMIN_USER_IDS` allowlist the backend independently enforces. Each activity shows the `request_id` of the sync request that created it, for grepping the API's structured logs.
 - `tests/functional/` — a Playwright-based functional test suite (user-authored, in progress).
+- `assets/brand/` — the VOLA brand kit and source of truth for identity: logos, app-icon/splash masters, 25 `currentColor` UI icons, and `design-tokens.json`. All SVG; the PNGs under `apps/mobile/assets/images/` are generated from these.
 
 ### Run it locally
 
@@ -31,3 +32,14 @@ pnpm --filter admin dev --port 3001   # admin console on :3001 (needs its own po
 ```
 
 Then open http://localhost:3000 (web) or http://localhost:3001 (admin). Each app needs its own `.env.local` (copy from `.env.example`) — the admin console additionally needs `ADMIN_USER_IDS` set to your Clerk user ID, matching the same var in `backend/.env`, before `/users` will let you in (find your ID via `GET /v1/me` or the Clerk dashboard).
+
+### Run the backend tests
+
+The Postgres integration tests **skip silently** unless `TEST_DATABASE_URL` is set, so `go test ./...` can look green while testing almost nothing. Give them their own database:
+
+```bash
+docker compose exec postgres createdb -U vola vola_test
+cd backend && DATABASE_URL='postgres://vola:vola_dev_only@localhost:5432/vola_test?sslmode=disable' go run ./cmd/migrate up
+```
+
+Then set `TEST_DATABASE_URL` in `backend/.env` (see `backend/.env.example`) and run `pnpm run test:api`. Expect `PASS`, not `SKIP`.

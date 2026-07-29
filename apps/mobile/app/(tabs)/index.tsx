@@ -79,7 +79,7 @@ export default function TodayScreen() {
   return (
     <ScrollView contentContainerStyle={styles.container} testID="today-screen">
       <Text accessibilityRole="header" style={styles.title} testID="app-title">
-        Formspan
+        VOLA
       </Text>
 
       <View style={styles.card}>

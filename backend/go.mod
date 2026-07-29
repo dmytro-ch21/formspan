@@ -1,4 +1,4 @@
-module github.com/dmytro-ch21/formspan/backend
+module github.com/dmytro-ch21/vola/backend
 
 go 1.26.1
 

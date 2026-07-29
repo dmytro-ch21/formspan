@@ -29,19 +29,24 @@ let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 export function getDb(): Promise<SQLite.SQLiteDatabase> {
   if (!dbPromise) {
     dbPromise = (async () => {
-      const db = await SQLite.openDatabaseAsync('formspan.db');
+      const db = await SQLite.openDatabaseAsync('vola.db');
       await db.execAsync(`PRAGMA journal_mode = WAL;`);
       await db.execAsync(CREATE_TABLE);
 
-      // Pre-user_id installs (dev builds only) already have an `activities`
-      // table, so CREATE TABLE IF NOT EXISTS above is a no-op for them and
-      // the column is still missing. Check before touching anything that
-      // depends on it — including the index below, which would otherwise
+      // A dev build that ran an older schema already has an `activities`
+      // table, so CREATE TABLE IF NOT EXISTS above is a no-op for it and any
+      // newer column is still missing. Check before touching anything that
+      // depends on one — including the index below, which would otherwise
       // throw "no such column: user_id" on every launch.
       //
-      // Rather than guess who those rows belonged to, drop them: they're one
-      // person's local test data, and mis-attributing them to whoever signs
-      // in next is worse than losing them.
+      // Rather than guess who orphaned rows belonged to, drop them: they're
+      // one person's local test data, and mis-attributing them to whoever
+      // signs in next is worse than losing them.
+      //
+      // Note the pre-VOLA `formspan.db` isn't reachable from here at all —
+      // the rename changed the filename, so those rows are simply abandoned
+      // rather than migrated. Deliberate: it was throwaway dev data, and no
+      // build has shipped to anyone.
       const cols = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(activities)`);
       if (!cols.some((c) => c.name === 'user_id')) {
         await db.execAsync(`DROP TABLE activities;`);

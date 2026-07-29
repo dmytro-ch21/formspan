@@ -17,7 +17,7 @@ Config comes from real env vars / `.env.local` (see `backend/.env.example` and `
 
 ## Staging & production — Postgres is real now, application services still not provisioned
 
-Railway project `formspan` exists (`staging` and `production` environments — no permanent Railway environment for local dev, that's the section above). Current service topology:
+Railway project `formspan` exists — still under its pre-rename name; the VOLA rename covered the repo and code, not the external service accounts (`staging` and `production` environments — no permanent Railway environment for local dev, that's the section above). Current service topology:
 
 | Service | Public? | Config |
 |---|---:|---|

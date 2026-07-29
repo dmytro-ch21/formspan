@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Formspan",
-  description: "Formspan web app",
+  title: "VOLA",
+  description: "VOLA web app",
 };
 
 export default function RootLayout({
