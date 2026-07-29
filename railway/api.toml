@@ -12,7 +12,14 @@ startCommand = "/app/bin/api"
 # Runs once per deploy, before the new container starts. Only this service
 # runs migrations — never worker/admin-api — to avoid concurrent-migration
 # conflicts (see docs/architecture/deployment.md).
-preDeployCommand = "/app/bin/migrate up"
+#
+# `seed` follows `migrate` and applies version-controlled reference content
+# (the exercise catalog). It must be here rather than left as a local-only
+# step: migration 000004 creates an empty `exercises` table, and without a
+# seed step the deployed API would serve `{"exercises": []}` forever — a
+# valid 200 that no healthcheck or error would ever surface. Idempotent, so
+# running it on every deploy is the intended usage, not a workaround.
+preDeployCommand = "/app/bin/migrate up && /app/bin/seed"
 healthcheckPath = "/v1/healthz"
 healthcheckTimeout = 100
 restartPolicyType = "ON_FAILURE"
