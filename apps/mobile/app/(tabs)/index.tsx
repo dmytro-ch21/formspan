@@ -23,13 +23,19 @@ export default function TodayScreen() {
   }, []);
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Formspan</Text>
+    <View style={styles.container} testID="today-screen">
+      <Text accessibilityRole="header" style={styles.title} testID="app-title">
+        Formspan
+      </Text>
       <View style={styles.separator} lightColor="#eee" darkColor="rgba(255,255,255,0.1)" />
-      {error && <Text style={styles.error}>Failed to reach API: {error}</Text>}
-      {!error && !health && <Text>Loading API status…</Text>}
+      {error && (
+        <Text style={styles.error} testID="api-error">
+          Failed to reach API: {error}
+        </Text>
+      )}
+      {!error && !health && <Text testID="api-loading">Loading API status…</Text>}
       {health && (
-        <Text>
+        <Text testID="api-status">
           API says: {health.service} is {health.status}
         </Text>
       )}
