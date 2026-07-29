@@ -82,22 +82,27 @@ Domain: one profile per Clerk user — display name, date of birth, sex, and fou
 
 ## Admin app shell (`apps/admin`)
 
-Domain: fully separate from `apps/web`, not athlete-facing. Reuses the same Clerk instance; gated by both middleware (must be signed in) and an `ADMIN_EMAILS` allowlist check. **No backend wiring yet** — everything below is against `lib/mock-users.ts`, explicit static data, not a real API.
+Domain: fully separate from `apps/web`, not athlete-facing. Reuses the same Clerk instance; gated by both middleware (must be signed in) and an `ADMIN_USER_IDS` allowlist check matching the backend's own. **Runs on real backend data** (`/v1/admin/users`, `/v1/admin/users/{userID}/activities`) — no mock data anywhere in this app.
 
 **Happy path**
-- Signed in with an allowlisted email, `/users` (User Lookup) renders the table matching the design: search field, filter pills, EMAIL/PLAN/PLATFORM/STATUS columns, footer count + pagination controls.
-- Typing in the search field filters rows client-side by email substring match.
-- Clicking a filter pill (e.g. "Sync errors") narrows the table to matching rows client-side.
-- Clicking a lookup row navigates to `/users/[id]` — for the one seeded id (`48192`), renders the full detail view (account/subscription/modules grid, integrations + support-events grid) matching the design.
+- Signed in as an allowlisted admin, `/users` (User Lookup) lists every user with a profile: user ID, display name, activity count, last-activity timestamp — all from Postgres.
+- Typing in the search field filters rows client-side by user ID or display name substring.
+- Clicking a lookup row navigates to `/users/[id]` and renders that user's real activities (kind, occurred-at, notes) with the `request_id`/`trace_id` of the sync request that created each one.
 
 **Edge cases & errors**
 - Signed out, visiting `/users` or `/users/[id]` → redirected to Clerk's hosted sign-in, returns to the original URL after completing sign-in.
-- Signed in with a **non-allowlisted** email → `/users` renders a plain "Not authorized" message instead of the shell — verified by temporarily pointing `ADMIN_EMAILS` at a different address and confirming the denial state, then restoring it.
-- Clicking a lookup row whose id has no seeded detail record (5 of the 6 mock rows) → an honest "No mock detail record for this user yet" state, not fabricated data reused under the wrong identity.
-- Visiting `/users/<unknown-id>` directly → same "no mock detail record" state.
+- Signed in as a **non-allowlisted** user → `/users` renders a plain "Not authorized" message instead of the shell.
+- A user with no activities → honest "This user hasn't logged any activities yet" empty state, not a fabricated row.
+- Zero users overall → "No users yet — a user appears here once they have a profile."
+- Search matching nothing → "No users match this search" (distinct from the zero-users case).
 
 **Auth & security**
-- The allowlist check happens server-side (`app/users/layout.tsx`, via `currentUser()`), not just hidden client-side UI — a non-allowlisted signed-in user genuinely cannot reach the shell's data, not just its visible nav.
+- The allowlist check happens server-side (`app/users/layout.tsx`, via `currentUser()`), not hidden client-side UI. More importantly, the **backend independently enforces `RequireAdmin`** on every `/v1/admin/*` route — a non-admin can't reach this data by calling the API directly, so the UI gate is defence in depth rather than the security boundary.
+- Admin fetches use `cache: "no-store"` — an admin tool showing a stale render of someone's account would be a correctness bug.
+
+**Log tracing (verified end-to-end)**
+- Create a real activity → the admin User Detail row shows its `request_id`; grepping the API's structured log output for that exact ID returns the `POST /v1/activities` line that created it (method, path, status, duration). Confirmed live: `request_id=f7e0fa0c589688d5` appeared in both the admin UI and the backend log.
+- There is deliberately **no in-app log viewer** yet — the correlation ID is durably stored so a human can grep the real log stream (local terminal today, Railway's log viewer once deployed).
 
 ---
 
@@ -116,7 +121,7 @@ Domain: fully separate from `apps/web`, not athlete-facing. Reuses the same Cler
 - The backend's CORS middleware must allow `traceparent` as a request header (`Access-Control-Allow-Headers`) — a real bug caught during verification: without it, the preflight `OPTIONS` succeeds but the actual browser request fails with a CORS error, silently breaking every web-based request the moment a custom header is added.
 
 **Not yet covered / deferred**
-- `apps/admin` doesn't call the backend at all yet (mock data only — see the admin shell entry above), so there's nothing to wire there.
+- `apps/admin` now propagates `traceparent` on its own admin reads too (added when it started calling the backend for real), so all three apps correlate.
 - `cmd/migrate` (the one-shot CLI) intentionally keeps its plain `log.Printf` output — request/trace IDs don't apply to it.
 
 ---
@@ -157,11 +162,11 @@ Domain: the unified "activity envelope" (one table, `kind` + flexible `details` 
 - A valid, authenticated token that **isn't** in `ADMIN_USER_IDS` → `403 forbidden` on both admin routes — verified live: a real signed-in token, temporarily excluded from the allowlist, got `403`, then succeeded once restored.
 
 **Auth & security**
-- Admin authorization is enforced server-side (`auth.Verifier.RequireAdmin`), not just `apps/admin`'s frontend `ADMIN_EMAILS`/allowlist gate — a non-admin authenticated user genuinely cannot reach `/v1/admin/*` by calling the backend directly, closing the exact gap `apps/admin`'s own history entry flagged as unresolved.
+- Admin authorization is enforced server-side (`auth.Verifier.RequireAdmin`), not just `apps/admin`'s frontend allowlist gate — a non-admin authenticated user genuinely cannot reach `/v1/admin/*` by calling the backend directly, closing the exact gap `apps/admin`'s own history entry flagged as unresolved.
 
 **Not yet covered / deferred**
-- Nothing calls these endpoints yet outside manual `curl` verification — mobile (offline logging + sync), web (display), and admin (real-data wiring, replacing `lib/mock-users.ts`) are Phases 2–5 of this same arc, not yet built.
-- `apps/admin`'s frontend gate still checks `ADMIN_EMAILS`, not the new `ADMIN_USER_IDS` convention — reconciling that is Phase 5.
+- `apps/admin` now consumes the admin endpoints for real (Phase 5, done). Still not built: mobile offline logging + sync (Phases 2–3) and web activity display (Phase 4) — so the only way to *create* an activity today is a direct API call.
+- `apps/admin` now uses the same `ADMIN_USER_IDS` allowlist as the backend (done in Phase 5) — one admin-identity convention across the stack.
 
 ---
 
