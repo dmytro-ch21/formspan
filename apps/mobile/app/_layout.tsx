@@ -1,12 +1,24 @@
 import { ClerkProvider, useAuth } from '@clerk/clerk-expo';
 import { useFonts } from 'expo-font';
-import { DarkTheme, DefaultTheme, Stack, ThemeProvider, useRouter, useSegments } from 'expo-router';
+import { DarkTheme, Stack, ThemeProvider, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 import 'react-native-reanimated';
 
-import { useColorScheme } from '@/components/useColorScheme';
 import { tokenCache } from '@/lib/tokenCache';
+import { vola } from '@/constants/Colors';
+
+const volaNavTheme = {
+  ...DarkTheme,
+  colors: {
+    ...DarkTheme.colors,
+    background: vola.bg,
+    card: vola.surface,
+    border: vola.lineSoft,
+    text: vola.text,
+    primary: vola.lime,
+  },
+};
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -58,7 +70,6 @@ export default function RootLayout() {
 }
 
 function RootLayoutNav() {
-  const colorScheme = useColorScheme();
   const { isLoaded, isSignedIn } = useAuth();
   const segments = useSegments();
   const router = useRouter();
@@ -85,8 +96,10 @@ function RootLayoutNav() {
     return null;
   }
 
+  // Always dark, and carrying VOLA's own ground rather than React
+  // Navigation's default near-black — the app has one palette.
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+    <ThemeProvider value={volaNavTheme}>
       <Stack>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="sign-in" options={{ title: 'Sign in' }} />
