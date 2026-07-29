@@ -12,8 +12,14 @@
   Duplicated verbatim in apps/admin/src/app/globals.css. Two small Next
   apps with no shared UI package yet; when a third consumer appears, or
   these drift, promote them to a workspace package instead of copying again.
+
+  `static` matters: a plain `@theme` only emits a variable into :root once
+  some utility actually references it, so `var(--color-brand-navy)` in
+  hand-written CSS or an inline style would silently resolve to nothing
+  until an unrelated `bg-brand-navy` happened to appear somewhere. `static`
+  emits all of them, which is what "the palette is available" has to mean.
 */
-@theme {
+@theme static {
   --color-brand-lime: #b8ff2c;
   --color-brand-green: #42f58d;
   --color-brand-navy: #0b1220;

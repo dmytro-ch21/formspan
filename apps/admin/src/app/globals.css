@@ -7,9 +7,14 @@
   admin mock's pale lime, *not* the brand lime — they're different values
   and reconciling them is part of the deferred restyle, not this change).
 
-  Duplicated verbatim in apps/web/src/app/globals.css. See the note there.
+  Duplicated verbatim in apps/web/src/app/globals.css. See the note there,
+  including why this is `@theme static` rather than plain `@theme`.
+
+  Second name collision worth knowing alongside the lime one: brand-muted
+  (#94a3b8, a cool slate) is not admin's text-muted (#8d918d, a warm grey).
+  Two different "muted"s coexisting — pick deliberately, not by autocomplete.
 */
-@theme {
+@theme static {
   --color-brand-lime: #b8ff2c;
   --color-brand-green: #42f58d;
   --color-brand-navy: #0b1220;
