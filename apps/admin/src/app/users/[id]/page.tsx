@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { listUserActivities } from "@/lib/api";
+import { formatUTC } from "@/lib/format";
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
@@ -38,7 +39,8 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
 
           {activities.length === 0 ? (
             <p className="py-4 text-sm text-text-secondary">
-              This user hasn&apos;t logged any activities yet.
+              No activities for this user ID. Either they haven&apos;t logged any yet, or the ID
+              doesn&apos;t exist — the API returns an empty list for both.
             </p>
           ) : (
             <div className="flex flex-col gap-[1px]">
@@ -56,9 +58,7 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
                   }`}
                 >
                   <span className="font-semibold">{a.kind}</span>
-                  <span className="text-text-secondary">
-                    {new Date(a.occurred_at).toLocaleString()}
-                  </span>
+                  <span className="text-text-secondary">{formatUTC(a.occurred_at)}</span>
                   <span className="text-text-secondary">{a.notes ?? "—"}</span>
                   <span className="flex flex-col font-mono text-[11px] text-text-muted">
                     <span>req {a.request_id}</span>

@@ -1,4 +1,7 @@
+import "server-only";
+
 import { auth } from "@clerk/nextjs/server";
+import { newTraceId, traceparent } from "./trace";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 const API_BASE = `${API_URL}/v1`;
@@ -22,6 +25,17 @@ export type Activity = {
   created_at: string;
 };
 
+/** Carries the HTTP status so the error boundary can tell 403 from 5xx. */
+export class ApiError extends Error {
+  constructor(
+    public readonly status: number,
+    path: string,
+  ) {
+    super(`API responded ${status} for ${path}`);
+    this.name = "ApiError";
+  }
+}
+
 /**
  * Server-side fetch against the admin-only backend endpoints. The backend
  * independently enforces the ADMIN_USER_IDS allowlist (auth.RequireAdmin) —
@@ -34,14 +48,24 @@ export type Activity = {
 async function adminFetch<T>(path: string): Promise<T> {
   const { getToken } = await auth();
   const token = await getToken();
+  if (!token) {
+    // Without this, the header becomes the literal "Bearer null" and the
+    // backend's 401 looks like a server fault rather than a missing session.
+    throw new ApiError(401, path);
+  }
 
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: {
+      Authorization: `Bearer ${token}`,
+      // Correlates this admin read with the API's structured logs, same as
+      // apps/web and apps/mobile already do for their own calls.
+      traceparent: traceparent(newTraceId()),
+    },
     cache: "no-store",
   });
 
   if (!res.ok) {
-    throw new Error(`API responded ${res.status} for ${path}`);
+    throw new ApiError(res.status, path);
   }
   return res.json() as Promise<T>;
 }

@@ -11,8 +11,13 @@ export default async function UserLookupPage() {
           <h1 className="font-barlow-condensed text-[17px] font-bold tracking-[0.1em] uppercase">
             User Lookup
           </h1>
+          {/*
+            Deliberately not "N accounts": this lists users with a `profiles`
+            row, so anyone signed up but not yet onboarded is invisible here.
+            The real account directory lives in Clerk.
+          */}
           <span className="text-[13px] text-text-secondary">
-            {users.length} {users.length === 1 ? "account" : "accounts"}
+            {users.length} with a profile
           </span>
         </div>
       </header>

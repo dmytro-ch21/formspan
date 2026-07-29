@@ -121,7 +121,7 @@ Domain: fully separate from `apps/web`, not athlete-facing. Reuses the same Cler
 - The backend's CORS middleware must allow `traceparent` as a request header (`Access-Control-Allow-Headers`) — a real bug caught during verification: without it, the preflight `OPTIONS` succeeds but the actual browser request fails with a CORS error, silently breaking every web-based request the moment a custom header is added.
 
 **Not yet covered / deferred**
-- `apps/admin` doesn't call the backend at all yet (mock data only — see the admin shell entry above), so there's nothing to wire there.
+- `apps/admin` now propagates `traceparent` on its own admin reads too (added when it started calling the backend for real), so all three apps correlate.
 - `cmd/migrate` (the one-shot CLI) intentionally keeps its plain `log.Printf` output — request/trace IDs don't apply to it.
 
 ---

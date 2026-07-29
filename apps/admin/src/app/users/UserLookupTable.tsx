@@ -3,11 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import type { AdminUserSummary } from "@/lib/api";
-
-function formatDate(iso: string | null): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString();
-}
+import { formatUTC } from "@/lib/format";
 
 export function UserLookupTable({ users }: { users: AdminUserSummary[] }) {
   const [query, setQuery] = useState("");
@@ -24,11 +20,15 @@ export function UserLookupTable({ users }: { users: AdminUserSummary[] }) {
 
   return (
     <>
+      <label htmlFor="user-search" className="sr-only">
+        Search users by ID or display name
+      </label>
       <input
+        id="user-search"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder="Search user id or display name…"
-        className="w-full rounded-[10px] border border-border-strong bg-card px-4 py-3 text-sm text-text placeholder:text-text-muted focus:outline-none"
+        className="w-full rounded-[10px] border border-border-strong bg-card px-4 py-3 text-sm text-text placeholder:text-text-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-dark"
       />
 
       <div className="grid grid-cols-[2fr_1.5fr_1fr_1.5fr] px-3 pt-6 pb-2 font-barlow-condensed text-[9px] font-bold tracking-[0.16em] text-text-muted uppercase">
@@ -51,7 +51,7 @@ export function UserLookupTable({ users }: { users: AdminUserSummary[] }) {
             <span className="text-text-secondary">{u.display_name ?? "—"}</span>
             <span className="text-text-secondary">{u.activity_count}</span>
             <span className="justify-self-end text-text-secondary">
-              {formatDate(u.last_activity_at)}
+              {formatUTC(u.last_activity_at)}
             </span>
           </Link>
         ))}
