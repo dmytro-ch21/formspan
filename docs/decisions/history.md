@@ -349,6 +349,49 @@ Unlike the exercise upsert, the media writer **does delete**: rows absent from t
 **Still open:** the two-bucket split (public immutable catalog media vs. private progress photos behind signed URLs) exists as a decision but only the public half is real, since no user-uploaded media exists yet. No content-hash in keys yet, so `Cache-Control: immutable` isn't safe until keys are versioned — worth doing before the catalog is public. And there's still no `ETag` on `/v1/exercises` itself.
 
 
+## 2026-07-29 — Workout templates
+
+Workouts are **templates** ("Push Day A": bench 5×5, overhead press 3×8), deliberately distinct from a logged session (the `activity` module). Conflating the two is the classic mistake — you lose the ability to say "I did 3 sets, not the 5 the plan called for", and that gap between planned and actual is the adherence signal the system-design doc calls the most valuable row in the database.
+
+**Two decisions came from the user and one correction came out of them:**
+
+- **Shareable.** `owner_user_id` is nullable — NULL means a VOLA-authored official template — and pairs with a `visibility` of private/public. Together those cover both sharing cases (official templates, and a user publishing their own) without an ACL table, which would be premature. A DB constraint stops the two nonsense combinations: an ownerless private row would be unreachable by anyone.
+- **No mixed workouts** — a workout is strength, running, or BJJ, never a blend. Enforced in the repository (every item's exercise must match the workout's sport) rather than trusted from the client, because "no mixing" is a data-model guarantee, not a UI convention.
+- **The correction: goal is not sport.** The brief said "strength/powerlifting/hypertrophy/endurance or running or bjj", but powerlifting, hypertrophy and endurance are all things you do with the *same barbell squat*. Modelling them as sports would have meant duplicating every exercise across four catalogs. They're a property of the **workout** instead — a nullable `goal` column, meaningful only for strength — so `sport` stays the three real disciplines.
+
+**Security carried forward from the activity module rather than rediscovered.** Workout IDs are client-generated (so a workout can be created offline and synced idempotently), which means `Create`'s conflict fallback has to be owner-scoped or replaying someone else's ID hands back their workout — the exact IDOR found in `activity`. Tested by name. Three more properties are tested rather than assumed:
+
+- A private workout returns **`ErrNotFound`, not `ErrForbidden`**, to a stranger — telling them apart would let someone enumerate other people's IDs.
+- **Visible does not mean writable**: a public workout is readable by everyone and editable only by its owner. Official templates (NULL owner) are read-only over the API entirely.
+- The read-authorization rule lives in **one SQL fragment** reused by both `List` and `Get`, so the two can't drift — a `Get` more permissive than its `List` is a classic leak.
+
+`visibility` defaults to private, in the handler as well as the schema: sharing should be a deliberate act, never the consequence of omitting a field. `position` is assigned from array order on write rather than trusted, so a client can't create gaps, duplicates, or a stored order that differs from what it sent.
+
+Items are replaced **wholesale** (`PUT /v1/workouts/{id}/items`) rather than diffed. Reordering is the common edit, and a diff would have to dance around the `(workout_id, position)` unique constraint for no benefit at this size — the reorder case is tested precisely because that constraint is where a naive implementation breaks.
+
+**BJJ is only half-served.** BJJ workouts work today because `bjj-gi-rounds` and `bjj-drilling` live in the exercise catalog, but a real BJJ session is techniques (armbar, triangle, guard passes) — positions and transitions, not muscles and load types. That's its own library and its own module. When it lands, `workout_items` gains a nullable `technique_id` alongside `exercise_id` with a CHECK that exactly one is set: additive, so nothing here needs redoing.
+
+**Not built yet:** no mobile UI (the API is complete but nothing consumes it), no logging a session *against* a template, no official seeded templates, and no duplicate-a-shared-workout-into-your-own action — which is the obvious next thing sharing implies.
+
+
+## 2026-07-29 — Mobile stack: RN now, Swift later, Android probably dropped
+
+**Decision:** stay on Expo/React Native for now, build out the foundation and get the interaction design right, then rebuild iOS in Swift — and probably abandon Android at that point.
+
+An intermediate option was considered and rejected: **RN for Android, Swift for iOS, in parallel.** That gets the costs of both and the benefits of neither — two codebases, which is the thing RN exists to avoid, while still carrying RN's constraints on Android. Worse for this product specifically, the offline sync layer is the highest-risk code in the app (outbox, client-generated idempotency keys, per-user scoping), and two independent implementations of an idempotency contract is how you get divergent bugs that surface on one platform months later in someone's real training history. The only thing genuinely shared between an RN Android app and a Swift iOS app is the OpenAPI contract, which already exists — so it would be two apps, not one app with two shells.
+
+**What this changes about how to build from here**, and it's the important part:
+
+React Native is now explicitly the **design vehicle, not the destination**. That shifts the cost/benefit of every mobile decision:
+
+- **Push logic into the backend wherever there's a choice.** Anything behind the API is stack-agnostic and survives the rewrite; anything in `apps/mobile` gets rewritten in Swift. This retroactively validates decisions already made — `load_type` driving which inputs a client renders, `movement_pattern` as the rule-reasoning level, the server assembling media URLs — all of that is carried by the API rather than by client code, so a Swift client inherits it for free.
+- **The offline sync protocol needs to exist as a written spec, not only as TypeScript.** Today it's implicit in `lib/activities.ts` + the backend's `ON CONFLICT` behaviour. Before the Swift rewrite it has to be documented as a contract (client-generated UUID as idempotency key, per-user scoping, retry semantics, which 4xx are permanent) so the second implementation can be faithful rather than reverse-engineered.
+- **Don't over-invest in RN visual polish.** The WHOOP-like feel — 60fps rings, gradients, heavy animation — is where RN is weakest and where SwiftUI is strongest. Building it twice is waste; building it once in RN to *learn the design* and once properly in Swift is the plan. So RN screens should be functionally complete and visually plain rather than laboriously polished.
+- **Do invest in the data model, API contract, and OpenAPI spec.** Those are permanent.
+
+**Open question deferred, not resolved:** whether to leave Expo Go for a custom dev client. HealthKit is load-bearing given wearables are recommended, and it doesn't work in Expo Go — but if the iOS app is going to be Swift anyway, prebuilding an RN app to reach HealthKit may be work that gets thrown away. The answer probably depends on whether HealthKit integration is needed to *validate the design* or only to ship.
+
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.
