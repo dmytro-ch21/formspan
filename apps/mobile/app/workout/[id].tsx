@@ -27,7 +27,7 @@ import {
   type Workout,
   type WorkoutItem,
 } from '@/lib/workouts';
-import { setsFromWorkout, startSession } from '@/lib/sessions';
+import { applySuggestions, fetchSuggestions, setsFromWorkout, startSession } from '@/lib/sessions';
 import { vola } from '@/constants/Colors';
 
 export default function WorkoutDetailScreen() {
@@ -119,11 +119,22 @@ export default function WorkoutDetailScreen() {
     setStarting(true);
     setError(null);
     try {
+      let sets = setsFromWorkout(items);
+      try {
+        // Where the plan is silent on weight, last time's is the sensible
+        // starting point. A failed lookup mustn't block the session.
+        sets = applySuggestions(
+          sets,
+          await fetchSuggestions(getToken, sets.map((x) => x.exercise_id)),
+        );
+      } catch {
+        /* start anyway */
+      }
       const { session } = await startSession(getToken, {
         sport: workout.sport,
         name: workout.name,
         workout_id: workout.id,
-        sets: setsFromWorkout(items),
+        sets,
       });
       router.push(`/session/${session.id}`);
     } catch (err) {

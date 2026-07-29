@@ -163,6 +163,9 @@ type Filter struct {
 
 type Repository interface {
 	List(ctx context.Context, userID string, f Filter) ([]Session, error)
+	// LastPerformances returns, per requested exercise, the top working set of
+	// the most recent session containing it. Missing keys mean "never logged".
+	LastPerformances(ctx context.Context, userID string, exerciseIDs []string) (map[string]Performance, error)
 	Get(ctx context.Context, userID, id string) (*Session, error)
 	// Create is idempotent on the client-supplied ID for the same user; a
 	// different user's ID collides with ErrAlreadyExists.

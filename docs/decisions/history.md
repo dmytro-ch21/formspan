@@ -474,6 +474,37 @@ Two of the symptoms were reported as user-visible bugs before the cause was know
 **The gap this leaves, and it's a real one: sessions are online-only.** `/v1/activities` goes through the SQLite outbox; sessions do not, so logging in a basement with no signal currently fails outright — on the feature most likely to be used exactly there. The contract is already right (client-generated ID, idempotent create, whole-list replace), so the fix is a local queue rather than a redesign. Also missing: no rest timer, no supersets, no history analytics — nothing yet *reads* sessions back, which is the point of collecting RIR and RPE at all.
 
 
+## 2026-07-29 — Progressive overload, a rest timer, and the platform split made explicit
+
+**The app now tells you what to load, and always says why.** `GET /v1/sessions/suggestions` answers "what should I lift today" for a whole workout in one request, from the caller's own history: the **top working set of the most recent session** containing that exercise, warm-ups excluded (progressing off a warm-up would recommend a weight nobody worked at).
+
+The rule is **effort-driven**, which is the entire reason RIR and RPE are collected. Weight alone cannot say whether a set was easy — someone who grinds out five reps and someone who leaves three in reserve log an identical row. So:
+
+| last top set | outcome |
+|---|---|
+| 2+ RIR, or RPE ≤ 8 | **increase** by the movement's increment |
+| RIR 1, or RPE 8–9.5 | repeat — real work, but not room |
+| RIR 0, or RPE ≥ 9.5 | repeat — at or near failure |
+| no RIR and no RPE | repeat, and say so: nothing recorded means nothing to call easy |
+| over 28 days ago | repeat — staleness outranks effort |
+
+Increments scale with the movement rather than being one number: **5 kg** for squat/hinge/olympic, **2.5 kg** for push/pull/lunge, **1.25 kg** for isolation and anything unmapped. "Add 2.5 kg" is trivial on a squat and a fortnight of progress on a lateral raise. This is the coarse `movement_pattern` earning its keep a second time — the same vocabulary now drives both the increment and the rest default, which is exactly the argument for having split it from `movement_pattern_detail`.
+
+**Two properties were treated as non-negotiable.** First, it *never guesses*: no recorded effort produces "repeat it and log an RIR", not an invented jump. Second, **the evidence travels with the recommendation** — `last_reps`, `last_weight_kg`, `last_rir`, `last_rpe` and the date are returned even when the answer is "repeat", so a number can be checked rather than trusted. A recommendation you can argue with is a different object from an oracle, and only the first belongs in a training log. Clients branch on a `code`; `reason` is prose and explicitly not contract.
+
+Sessions started from a template now open **pre-filled**: the plan's prescribed weight wins where it exists, and history fills the gaps. Reps are left alone — the programme owns those, and inferring them from one prior set would quietly rewrite it.
+
+**A flaw the tests missed and real data caught immediately.** The first version took the most recent session containing the exercise, full stop. But a session where an exercise was *added and never performed* — every measure null — is not evidence, and it was winning over a real set behind it, reporting "not measured in weight" and erasing a genuine 102.5 kg history. Sets with nothing recorded are now excluded from the lookup. This is the second time in two days that running the thing against real rows found something twelve unit tests didn't.
+
+**A rest timer, driven by a deadline rather than by ticks.** That distinction is the whole implementation: a timer that decrements a counter each second drifts, and it stops when iOS throttles the JS thread — which happens the moment the phone goes into a pocket, i.e. during every real rest period. So the only state is the epoch millisecond the rest *ends*, and each tick re-reads the clock. Put the phone away for two minutes and the timer is right when you look again, because it was never counting.
+
+Defaults come from the same movement-pattern table (180s for squat/hinge/olympic, 120s for push/pull/lunge, 60s otherwise), and they are defaults rather than prescriptions — ±15s is one tap and the number is always on screen. Rest starts on an explicit per-set "Rest" tap and on "+ Set", both of which mean "I just finished one". It uses haptics (`expo-haptics`, the one new dependency) because you should not have to be looking at a phone to know rest is over.
+
+**The platform split is now a rule, not a habit.** The previous entry landed on "logging is mobile-first, authoring is desktop-first" and then hedged by building both everywhere. The user drew the line properly: **an in-progress session is a phone thing; the web app is for planning and analysis.** So the rest timer is mobile-only and always will be — a countdown on a desktop you are not standing next to is decoration. Web keeps starting, reviewing and correcting sessions, which are desk activities, and gains the planning and analytical surface. Recorded in `CLAUDE.md` so it stops being re-litigated per feature.
+
+**Still open:** nothing yet *reads* the history back as trends — the suggestion is the first consumer of RIR/RPE, and the analysis surface the web app is now explicitly for hasn't been built. Sessions remain online-only. Everything is still kilograms and metres.
+
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

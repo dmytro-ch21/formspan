@@ -480,6 +480,66 @@ Domain: a training session that **actually happened**, and the sets in it — re
 
 ---
 
+## Progressive-overload suggestions (`GET /v1/sessions/suggestions`, both clients)
+
+Domain: what to load today for a given exercise, computed from the caller's own history. The first thing in the product that advises rather than records, so it follows the standing rule — deterministic, and it always states its evidence.
+
+**The rule, branch by branch** (all covered by pure-function tests, no database needed)
+- 2+ RIR, or RPE ≤ 8 → `increase` by the movement's increment.
+- RIR 1, or RPE strictly between 8 and 9.5 → `repeat_consolidate`.
+- RIR 0, or RPE ≥ 9.5 → `repeat_hard`.
+- No RIR **and** no RPE → `repeat_unknown_effort`. **It must never guess** — the absence of effort data is not evidence that a set was easy.
+- Last performed over 28 days ago → `repeat_stale`, **and this outranks effort**: a four-month-old easy set describes someone who has since detrained. Boundary tested at 27 and 29 days.
+- Not `weight_reps`, or no weight recorded → `not_applicable`, with no suggested weight.
+- Never logged → `no_history`, with no suggested weight.
+
+**Increments scale with the movement**: 5 kg for squat/hinge/olympic, 2.5 kg for push/pull/lunge, 1.25 kg for isolation, core, rotation and anything unmapped.
+
+**Which set the advice comes from**
+- The **top working set of the most recent session** containing the exercise — heaviest, then most reps.
+- **Warm-ups are excluded**, even when heavier than the working sets. Tested with a deliberately heavier warm-up.
+- **Sets with nothing recorded are excluded.** Found against real data: an exercise added to a session and never performed was winning over a real set behind it, erasing genuine history and reporting "not measured in weight".
+
+**Auth & security**
+- Scoped to the caller — this reads training history, and `TestLastPerformances_IsUserScoped` is the test that would catch it leaking.
+- Missing `exercise_ids` → `400`. More than 100 → `400`.
+- The route must not shadow `GET /v1/sessions/{sessionID}`; both are live (verify with two unauthenticated calls, each `401` rather than one `404`).
+
+**Clients**
+- Starting a session from a template pre-fills weights: **the plan's prescription wins**, history fills the gaps, reps are never inferred.
+- A failed suggestions lookup must not block the session starting — an empty weight is an inconvenience, a blocked workout is a lost one.
+- The session screen shows the evidence and the reason verbatim, with a one-tap control to apply the suggested weight to every set of that exercise.
+- The apply control is hidden once the sets already carry the suggested weight, and on a finished session.
+
+**Not yet covered / deferred**
+- One data point only — no trend, no volume landmarks, no deload logic, and no awareness of a programme's own progression scheme.
+- Rep progression isn't suggested, only load. Double progression (add reps to a ceiling, then add weight) is the obvious next rule.
+
+---
+
+## Rest timer (`apps/mobile` only)
+
+Domain: the countdown between sets. **Mobile only, permanently** — an in-progress session is a phone thing, and a rest countdown on a desktop you aren't standing next to is decoration. Do not add scenarios for it under web.
+
+**Happy path**
+- Tapping "Rest" on a set, or "+ Set", starts the countdown; both mean "I just finished one".
+- The default comes from the exercise's movement pattern: 180s squat/hinge/olympic, 120s push/pull/lunge, 60s otherwise, and 60s for time/distance work regardless of pattern.
+- The bar shows remaining time, the exercise it belongs to, and a progress track that drains.
+- ±15s adjusts; tapping the clock pauses and resumes; Skip dismisses.
+- At zero it turns green, says "Rest done", and fires a success haptic.
+
+**The property that matters most**
+- **The countdown is derived from a stored end timestamp, never from an accumulated tick count.** Background the app for two minutes and the remaining time must be correct on return — a tick-based timer stops when iOS throttles the JS thread, which is exactly what happens when the phone goes in a pocket mid-rest. Test by backgrounding and restoring, not just by watching it run.
+- Adjusting while paused must change the frozen remainder, not the (absent) deadline.
+- The progress track must never overflow: +15s grows the total as well as the remainder.
+
+**Edge cases**
+- Starting a new rest while one is running replaces it and re-arms the completion haptic.
+- Leaving the session screen ends the rest — it belongs to the session on screen, not to the app.
+- The bar sits outside the scroll view, so scrolling the set list never hides it.
+
+---
+
 ## Not yet covered (tracked here so it isn't lost, not because it's blocking)
 
 - Mobile has no auth yet (Clerk Expo SDK is a separate future increment) — no sign-in/sign-out scenarios apply to mobile today.

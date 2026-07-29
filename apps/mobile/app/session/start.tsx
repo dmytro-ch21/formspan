@@ -5,7 +5,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet } from 'react-nati
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAuthToken } from '@/lib/useAuthToken';
-import { setsFromWorkout, startSession } from '@/lib/sessions';
+import { applySuggestions, fetchSuggestions, setsFromWorkout, startSession } from '@/lib/sessions';
 import { listWorkouts, SPORTS, summariseTargets, type Sport, type Workout } from '@/lib/workouts';
 
 /**
@@ -53,11 +53,24 @@ export default function StartSessionScreen() {
     setStarting(true);
     setError(null);
     try {
+      let sets = workout ? setsFromWorkout(workout.items) : [];
+      if (sets.length > 0) {
+        // Opening a planned session at an empty weight makes you remember
+        // last week's numbers yourself, which is the job the app exists to
+        // do. Where the plan doesn't prescribe a weight, history fills it.
+        try {
+          const suggestions = await fetchSuggestions(getToken, sets.map((x) => x.exercise_id));
+          sets = applySuggestions(sets, suggestions);
+        } catch {
+          // A failed lookup must not stop the session starting — an empty
+          // weight is an inconvenience, a blocked workout is a lost one.
+        }
+      }
       const { session } = await startSession(getToken, {
         sport,
         name: workout ? workout.name : `${label} session`,
         workout_id: workout ? workout.id : null,
-        sets: workout ? setsFromWorkout(workout.items) : [],
+        sets,
       });
       // replace, not push: finishing a session and pressing back should not
       // land on the chooser that created it.

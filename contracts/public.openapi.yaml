@@ -368,6 +368,74 @@ components:
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
 
+    Suggestion:
+      type: object
+      description: >
+        What to load today for one exercise, derived from what the caller
+        actually did last time.
+
+        Deterministic and explainable by construction — no model, no hidden
+        weighting. The rule is effort-driven, which is why RIR and RPE are
+        collected at all: weight alone can't say whether a set was easy, since
+        a lifter who grinds out five reps and one who leaves three in reserve
+        log the identical row. When no effort was recorded the honest answer
+        is "repeat it", not a guess.
+
+        The evidence (`last_*`) travels with every suggestion, including when
+        the answer is to repeat — a number the athlete can check beats one
+        they have to trust.
+
+        Branch on `code`; `reason` is prose and is not part of the contract.
+      required: [exercise_id, last_performed_at, last_reps, last_weight_kg,
+                 last_rir, last_rpe, suggested_weight_kg, code, reason]
+      properties:
+        exercise_id: { type: string, example: back-squat }
+        last_performed_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the most recent session containing it started.
+        last_reps: { type: integer, nullable: true }
+        last_weight_kg: { type: number, nullable: true }
+        last_rir: { type: integer, nullable: true }
+        last_rpe: { type: number, nullable: true }
+        suggested_weight_kg:
+          type: number
+          nullable: true
+          description: >
+            What to load. Equal to `last_weight_kg` whenever the answer is to
+            repeat; null when there's nothing to say (no history, or not
+            measured in weight).
+        code:
+          type: string
+          enum: [no_history, not_applicable, increase, repeat_hard,
+                 repeat_unknown_effort, repeat_stale, repeat_consolidate]
+          description: >
+            `increase` — 2+ reps in reserve (or RPE ≤ 8), so add the
+            movement's increment: 5 kg for squat/hinge/olympic, 2.5 kg for
+            push/pull/lunge, 1.25 kg for isolation and everything else.
+            Scaled to muscle mass, because "add 2.5 kg" is trivial on a squat
+            and a fortnight of progress on a lateral raise.
+
+            `repeat_hard` — RIR 0 or RPE ≥ 9.5. `repeat_consolidate` — RIR 1,
+            or RPE between 8 and 9.5: real work, but not room.
+            `repeat_unknown_effort` — no RIR or RPE recorded.
+            `repeat_stale` — last performed over 28 days ago, which outranks
+            effort: an old easy set is evidence about someone who has since
+            detrained. `not_applicable` — not measured in weight.
+        reason:
+          type: string
+          description: Human-readable, cites the evidence. Never pattern-match on it.
+          example: You had 3 reps left last time — add 5 kg.
+
+    SuggestionList:
+      type: object
+      required: [suggestions]
+      properties:
+        suggestions:
+          type: array
+          items: { $ref: "#/components/schemas/Suggestion" }
+
     Volume:
       type: object
       description: >
@@ -1128,6 +1196,39 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+
+  /sessions/suggestions:
+    get:
+      summary: What to load today, per exercise, from the caller's own history
+      operationId: listSessionSuggestions
+      description: >
+        One request for a whole workout rather than one per exercise. Each
+        answer is computed from the **top working set of the most recent
+        session** containing that exercise — warm-ups excluded, since
+        progressing off a warm-up would recommend a weight nobody worked at.
+
+        Scoped to the caller: this endpoint reads training history and returns
+        only their own.
+      parameters:
+        - name: exercise_ids
+          in: query
+          required: true
+          schema: { type: string }
+          description: Comma-separated, max 100.
+      responses:
+        "200":
+          description: >
+            One entry per requested id, in the order requested. An exercise
+            with no history still gets an entry, with `code: no_history`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SuggestionList" }
+        "400":
+          description: Missing `exercise_ids`, or more than 100 of them.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
 
   /sessions/{sessionID}:
     get:

@@ -8,6 +8,7 @@ import { useAuth } from "@clerk/nextjs";
 import {
   deleteSession,
   emptySet,
+  fetchSuggestions,
   finishSession,
   getSession,
   isValidationError,
@@ -25,6 +26,7 @@ import {
   type Measure,
   type Session,
   type SetType,
+  type Suggestion,
   type Volume,
 } from "@/lib/api";
 
@@ -51,6 +53,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const [sets, setSets] = useState<LoggedSet[]>([]);
   const [volume, setVolume] = useState<Volume | null>(null);
   const [catalog, setCatalog] = useState<Map<string, Exercise>>(new Map());
+  const [suggestions, setSuggestions] = useState<Map<string, Suggestion>>(new Map());
   const [loading, setLoading] = useState(true);
   const [everLoaded, setEverLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -75,6 +78,15 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       setCatalog(new Map(list.map((e) => [e.id, e])));
       setEverLoaded(true);
       setError(null);
+      // Non-blocking: the session must render even if the history lookup
+      // fails, since it's advice rather than content.
+      fetchSuggestions(
+        getToken,
+        s.sets.map((x) => x.exercise_id),
+        controller.signal,
+      )
+        .then(setSuggestions)
+        .catch(() => {});
     } catch (err) {
       if (controller.signal.aborted) return;
       setError(err instanceof Error ? err.message : String(err));
@@ -166,41 +178,66 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     persistSoon(updated);
   }
 
-  function commit(updated: LoggedSet[]) {
-    setSets(updated);
-    pending.current = updated;
-    void flush();
-  }
+  // Adding, removing, swapping or applying a suggestion is a structural
+  // change: it goes now, not on the debounce. Kept in a useCallback rather
+  // than a plain function so the ref writes stay out of the render path.
+  const commit = useCallback(
+    (updated: LoggedSet[]) => {
+      pending.current = null;
+      if (timer.current) {
+        clearTimeout(timer.current);
+        timer.current = null;
+      }
+      void persist(updated);
+    },
+    [persist],
+  );
 
   // Inserted after the group it belongs to, not appended to the end of the
   // session. Groups form by adjacency, so appending created a second block of
   // the same exercise at the bottom of the page — the volume counted it while
   // the exercise you were looking at appeared unchanged.
-  function addSet(exerciseID: string, afterIndex: number) {
-    const previous = sets[afterIndex];
-    commit(
-      [
+  // Computed outside the state updater, deliberately: an updater must be pure,
+  // and StrictMode invokes it twice — which would fire two PUTs.
+  const addSet = useCallback(
+    (exerciseID: string, afterIndex: number) => {
+      const next = [
         ...sets.slice(0, afterIndex + 1),
-        emptySet(exerciseID, afterIndex + 1, previous),
+        emptySet(exerciseID, afterIndex + 1, sets[afterIndex]),
         ...sets.slice(afterIndex + 1),
-      ].map((s, i) => ({ ...s, position: i })),
-    );
-  }
+      ].map((s, i) => ({ ...s, position: i }));
+      setSets(next);
+      commit(next);
+    },
+    [commit, sets],
+  );
+
+  /** Applies a recommended weight to every set of one exercise at once. */
+  const applySuggestion = useCallback(
+    (indices: number[], weight: number) => {
+      const next = sets.map((s, i) => (indices.includes(i) ? { ...s, weight_kg: weight } : s));
+      setSets(next);
+      commit(next);
+    },
+    [commit, sets],
+  );
 
   function addExercise(e: Exercise) {
     setCatalog((c) => (c.has(e.id) ? c : new Map(c).set(e.id, e)));
-    if (swapping) {
-      // Rewrites the sets already logged rather than deleting and re-adding,
-      // which would throw them away.
-      commit(swapExercise(sets, swapping, e, catalog.get(swapping)?.load_type));
-      setSwapping(null);
-      return;
-    }
-    commit([...sets, emptySet(e.id, sets.length)]);
+    const next = swapping
+      ? // Rewrites the sets already logged rather than deleting and re-adding,
+        // which would throw them away.
+        swapExercise(sets, swapping, e, catalog.get(swapping)?.load_type)
+      : [...sets, emptySet(e.id, sets.length)];
+    setSets(next);
+    commit(next);
+    setSwapping(null);
   }
 
   function removeSet(index: number) {
-    commit(sets.filter((_, i) => i !== index).map((s, i) => ({ ...s, position: i })));
+    const next = sets.filter((_, i) => i !== index).map((s, i) => ({ ...s, position: i }));
+    setSets(next);
+    commit(next);
   }
 
   // Grouped by exercise so "Add set" sits under the movement it belongs to.
@@ -321,9 +358,11 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                 editable={!finished}
                 onChange={update}
                 onRemove={removeSet}
-                onAddSet={() => addSet(g.exerciseID, g.indices[g.indices.length - 1])}
-                onSwap={() => setSwapping(g.exerciseID)}
+                onAddSet={addSet}
+                onSwap={setSwapping}
                 swapping={swapping === g.exerciseID}
+                suggestion={suggestions.get(g.exerciseID)}
+                onApplySuggestion={applySuggestion}
               />
             ))
           )}
@@ -380,6 +419,8 @@ function ExerciseBlock({
   onAddSet,
   onSwap,
   swapping,
+  suggestion,
+  onApplySuggestion,
 }: {
   exercise: Exercise | undefined;
   exerciseID: string;
@@ -388,9 +429,11 @@ function ExerciseBlock({
   editable: boolean;
   onChange: (index: number, next: LoggedSet) => void;
   onRemove: (index: number) => void;
-  onAddSet: () => void;
-  onSwap: () => void;
+  onAddSet: (exerciseID: string, afterIndex: number) => void;
+  onSwap: (exerciseID: string) => void;
   swapping: boolean;
+  suggestion: Suggestion | undefined;
+  onApplySuggestion: (indices: number[], weight: number) => void;
 }) {
   const image = exercise ? pickImage(exercise, "thumbnail") : null;
   // Data-driven from the catalog's load_type, so a plank asks for seconds
@@ -417,7 +460,7 @@ function ExerciseBlock({
         {editable && (
           <button
             type="button"
-            onClick={onSwap}
+            onClick={() => onSwap(exerciseID)}
             aria-pressed={swapping}
             className={`shrink-0 rounded-pill border px-3 py-1 text-xs font-bold transition ${
               swapping
@@ -429,6 +472,36 @@ function ExerciseBlock({
           </button>
         )}
       </div>
+
+      {suggestion && suggestion.last_weight_kg != null && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-card border border-line bg-surface-raised px-4 py-2.5">
+          <p className="min-w-0 flex-1 text-sm">
+            <span className="font-medium">
+              Last time: {suggestion.last_reps != null ? `${suggestion.last_reps} × ` : ""}
+              {suggestion.last_weight_kg} kg
+              {suggestion.last_rir != null
+                ? ` · ${suggestion.last_rir} RIR`
+                : suggestion.last_rpe != null
+                  ? ` · RPE ${suggestion.last_rpe}`
+                  : ""}
+            </span>{" "}
+            {/* The reason verbatim from the API — the point is a number you
+                can argue with, not one you have to trust. */}
+            <span className="text-text-muted">{suggestion.reason}</span>
+          </p>
+          {editable &&
+            suggestion.suggested_weight_kg != null &&
+            sets[indices[0]]?.weight_kg !== suggestion.suggested_weight_kg && (
+              <button
+                type="button"
+                onClick={() => onApplySuggestion(indices, suggestion.suggested_weight_kg!)}
+                className="shrink-0 rounded-pill bg-accent-fill px-4 py-1.5 text-sm font-bold text-accent-on-fill transition hover:brightness-110"
+              >
+                Use {suggestion.suggested_weight_kg} kg
+              </button>
+            )}
+        </div>
+      )}
 
       <div className="overflow-x-auto rounded-card border border-line bg-surface">
         <table className="w-full min-w-max text-sm">
@@ -476,7 +549,7 @@ function ExerciseBlock({
       {editable && (
         <button
           type="button"
-          onClick={onAddSet}
+          onClick={() => onAddSet(exerciseID, indices[indices.length - 1])}
           className="self-start rounded-pill border border-dashed border-line px-4 py-1.5 text-sm font-medium text-text-muted transition hover:border-lime hover:text-text"
         >
           + Add set

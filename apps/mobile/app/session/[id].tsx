@@ -2,14 +2,17 @@ import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-rou
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
 
+import { RestTimerBar, useRestTimer } from '@/components/RestTimer';
 import { Text, View } from '@/components/Themed';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { vola } from '@/constants/Colors';
+import { restSecondsFor } from '@/lib/rest';
 import { fetchExercises, type Exercise } from '@/lib/exercises';
 import {
   deleteSession,
   describeSet,
   emptySet,
+  fetchSuggestions,
   finishSession,
   getSession,
   isValidationError,
@@ -20,6 +23,7 @@ import {
   type Measure,
   type Session,
   type SetType,
+  type Suggestion,
   type Volume,
 } from '@/lib/sessions';
 
@@ -47,6 +51,8 @@ export default function SessionScreen() {
   const [sets, setSets] = useState<LoggedSet[]>([]);
   const [volume, setVolume] = useState<Volume | null>(null);
   const [catalog, setCatalog] = useState<Map<string, Exercise>>(new Map());
+  const [suggestions, setSuggestions] = useState<Map<string, Suggestion>>(new Map());
+  const timerState = useRestTimer();
   const [loading, setLoading] = useState(true);
   const [everLoaded, setEverLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -67,6 +73,14 @@ export default function SessionScreen() {
       setCatalog(new Map(list.map((e) => [e.id, e])));
       setEverLoaded(true);
       setError(null);
+      // Separate and non-blocking: the session must render even if the
+      // history lookup fails, since it's advice rather than content.
+      fetchSuggestions(
+        getToken,
+        s.sets.map((x) => x.exercise_id),
+      )
+        .then(setSuggestions)
+        .catch(() => {});
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setEverLoaded(true);
@@ -164,23 +178,34 @@ export default function SessionScreen() {
   // set in a second group of the same exercise at the very bottom of the
   // screen — from the top it looked like the tap had done nothing at all,
   // even as the volume summary counted it.
-  function addSet(exerciseID: string, afterIndex: number) {
-    const previous = sets[afterIndex];
-    const updated = [
-      ...sets.slice(0, afterIndex + 1),
-      emptySet(exerciseID, afterIndex + 1, previous),
-      ...sets.slice(afterIndex + 1),
-    ].map((s, i) => ({ ...s, position: i }));
+  // Adding, removing, or applying a recommendation is a structural change: it
+  // goes now, not on the debounce.
+  function commit(updated: LoggedSet[]) {
     setSets(updated);
     pending.current = updated;
     void flush();
   }
 
+  function addSet(exerciseID: string, afterIndex: number) {
+    // Adding the next set is the gesture that means "I just finished one",
+    // so rest starts here rather than behind a second, separate tap.
+    startRest(exerciseID);
+    commit(
+      [
+        ...sets.slice(0, afterIndex + 1),
+        emptySet(exerciseID, afterIndex + 1, sets[afterIndex]),
+        ...sets.slice(afterIndex + 1),
+      ].map((s, i) => ({ ...s, position: i })),
+    );
+  }
+
+  function startRest(exerciseID: string) {
+    const ex = catalog.get(exerciseID);
+    timerState.start(restSecondsFor(ex), ex?.name ?? 'Rest');
+  }
+
   function removeSet(index: number) {
-    const updated = sets.filter((_, i) => i !== index).map((s, i) => ({ ...s, position: i }));
-    setSets(updated);
-    pending.current = updated;
-    void flush();
+    commit(sets.filter((_, i) => i !== index).map((s, i) => ({ ...s, position: i })));
   }
 
   if (loading && !everLoaded) {
@@ -276,8 +301,51 @@ export default function SessionScreen() {
                   editable={!finished}
                   onChange={(next) => update(i, next)}
                   onRemove={() => removeSet(i)}
+                  onRest={() => startRest(g.exerciseID)}
                 />
               ))}
+              {(() => {
+                const hint = suggestions.get(g.exerciseID);
+                if (!hint || hint.last_weight_kg == null) return null;
+                const target = hint.suggested_weight_kg;
+                const canApply =
+                  !finished && target != null && sets[g.indices[0]]?.weight_kg !== target;
+                return (
+                  <View style={styles.hintRow}>
+                    <View style={styles.hintBody}>
+                      <Text style={styles.hintLast}>
+                        Last time: {hint.last_reps != null ? `${hint.last_reps} × ` : ''}
+                        {hint.last_weight_kg}kg
+                        {hint.last_rir != null ? ` · ${hint.last_rir} RIR` : ''}
+                        {hint.last_rir == null && hint.last_rpe != null ? ` · RPE ${hint.last_rpe}` : ''}
+                      </Text>
+                      {/* The reason, verbatim from the API. It's the whole
+                          point: a number you can argue with. */}
+                      <Text style={styles.hintReason}>{hint.reason}</Text>
+                    </View>
+                    {canApply && (
+                      <Pressable
+                        onPress={() => {
+                          commit(
+                            sets.map((st, i) =>
+                              g.indices.includes(i) ? { ...st, weight_kg: target } : st,
+                            ),
+                          );
+                        }}
+                        style={styles.hintApply}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Use ${target} kilograms for every set of ${
+                          exercise?.name ?? 'this exercise'
+                        }`}
+                        testID={`apply-suggestion-${g.exerciseID}`}
+                      >
+                        <Text style={styles.hintApplyText}>{target}kg</Text>
+                      </Pressable>
+                    )}
+                  </View>
+                );
+              })()}
+
               {!finished && (
                 <Pressable
                   style={styles.addSet}
@@ -363,6 +431,16 @@ export default function SessionScreen() {
           <Text style={styles.deleteText}>Delete session</Text>
         </Pressable>
       </ScrollView>
+
+      {timerState.rest && (
+        <RestTimerBar
+          rest={timerState.rest}
+          remaining={timerState.remaining}
+          onAdjust={timerState.adjust}
+          onTogglePause={timerState.togglePause}
+          onStop={timerState.stop}
+        />
+      )}
     </View>
   );
 }
@@ -388,6 +466,7 @@ function SetRow({
   editable,
   onChange,
   onRemove,
+  onRest,
 }: {
   index: number;
   ordinal: number;
@@ -396,6 +475,7 @@ function SetRow({
   editable: boolean;
   onChange: (next: LoggedSet) => void;
   onRemove: () => void;
+  onRest: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const measures: Measure[] = exercise ? measuresFor(exercise.load_type) : ['reps'];
@@ -431,6 +511,20 @@ function SetRow({
           {typeShort ? <Text style={styles.setBadge}> {typeShort}</Text> : null}
         </Text>
         <Text style={styles.setSummary}>{describeSet(set)}</Text>
+        {editable && (
+          // Sits on the collapsed row, because that's where your thumb
+          // already is when you rack the bar — not behind a disclosure.
+          <Pressable
+            onPress={onRest}
+            hitSlop={10}
+            style={styles.restChip}
+            accessibilityRole="button"
+            accessibilityLabel={`Done — start resting after set ${ordinal}`}
+            testID={`rest-${index}`}
+          >
+            <Text style={styles.restChipText}>Rest</Text>
+          </Pressable>
+        )}
         {editable && <Text style={styles.disclosure}>{open ? '⌃' : '⌄'}</Text>}
       </Pressable>
 
@@ -606,6 +700,15 @@ const styles = StyleSheet.create({
   setOrdinal: { width: 34, fontWeight: '700', color: vola.textDim },
   setBadge: { color: vola.lime, fontSize: 11, fontWeight: '700' },
   setSummary: { flex: 1, fontSize: 15 },
+  restChip: {
+    borderWidth: 1,
+    borderColor: vola.line,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    minHeight: 34,
+    justifyContent: 'center',
+  },
+  restChipText: { fontSize: 12, fontWeight: '700', color: vola.lime },
   disclosure: { color: vola.textDim, width: 16, textAlign: 'center' },
   setEditor: { padding: 12, paddingTop: 0, gap: 12 },
   fieldRow: { flexDirection: 'row', gap: 10 },
@@ -636,6 +739,27 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: vola.lime, borderColor: vola.lime },
   chipText: { fontSize: 13, fontWeight: '600', color: vola.textMuted },
   chipTextActive: { color: vola.navy },
+  hintRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: vola.surfaceRaised,
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  hintBody: { flex: 1, gap: 2 },
+  hintLast: { fontSize: 13, fontWeight: '600' },
+  hintReason: { fontSize: 12, color: vola.textMuted },
+  hintApply: {
+    backgroundColor: vola.lime,
+    borderRadius: 999,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  hintApplyText: { color: vola.navy, fontWeight: '700', fontSize: 14 },
   addSet: {
     borderWidth: 1,
     borderStyle: 'dashed',
