@@ -1,23 +1,42 @@
 import { useAuth } from '@clerk/clerk-expo';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
+import { useAuthToken } from '@/lib/useAuthToken';
 import {
   listLocalActivities,
   logActivityOffline,
   syncPendingActivities,
   type LocalActivity,
 } from '@/lib/activities';
+import { listSessions, type Session } from '@/lib/sessions';
 import { vola } from '@/constants/Colors';
 
+const SPORTS: { key: string; label: string }[] = [
+  { key: 'strength', label: 'Strength' },
+  { key: 'bjj', label: 'BJJ' },
+  { key: 'running', label: 'Running' },
+];
+
+/** Warm-ups excluded, matching the backend's own working-volume rule — the
+ *  same session must not report two different numbers on two screens. */
+function workingSets(s: Session): number {
+  return s.sets.filter((set) => set.set_type !== 'warmup').length;
+}
+
 export default function TodayScreen() {
-  const { userId, getToken, signOut } = useAuth();
+  const { userId, signOut } = useAuth();
+  const getToken = useAuthToken();
+  const router = useRouter();
 
   const [notes, setNotes] = useState('');
   const [activities, setActivities] = useState<LocalActivity[]>([]);
   const [status, setStatus] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [sessionError, setSessionError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!userId) return;
@@ -34,6 +53,24 @@ export default function TodayScreen() {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  const refreshSessions = useCallback(async () => {
+    try {
+      setSessions(await listSessions(getToken, { limit: 5 }));
+      setSessionError(null);
+    } catch (err) {
+      setSessionError(err instanceof Error ? err.message : String(err));
+    }
+  }, [getToken]);
+
+  // On focus rather than on mount: coming back from a session should show
+  // its new numbers, not the list as it was when the tab first rendered.
+  useFocusEffect(
+    useCallback(() => {
+      refreshSessions();
+    }, [refreshSessions]),
+  );
+
 
   const pending = activities.filter((a) => a.synced === 0).length;
 
@@ -82,6 +119,60 @@ export default function TodayScreen() {
       <Text accessibilityRole="header" style={styles.title} testID="app-title">
         VOLA
       </Text>
+
+      <View style={styles.card}>
+        <Text style={styles.label}>Start a session</Text>
+        <View style={styles.sportRow}>
+          {SPORTS.map((s) => (
+            <Pressable
+              key={s.key}
+              style={styles.sportButton}
+              onPress={() => router.push(`/session/start?sport=${s.key}`)}
+              accessibilityRole="button"
+              accessibilityLabel={`Start a ${s.label} session`}
+              testID={`start-session-${s.key}`}
+            >
+              <Text style={styles.sportText}>{s.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+        <Text style={styles.hint}>Pick one of your workouts, or start empty.</Text>
+      </View>
+
+      {sessionError && (
+        <Text style={styles.errorText} accessibilityLiveRegion="polite" testID="session-list-error">
+          {sessionError}
+        </Text>
+      )}
+
+      {sessions.length > 0 && (
+        <View style={styles.card}>
+          <Text style={styles.label}>Recent sessions</Text>
+          {sessions.map((s) => (
+            <Pressable
+              key={s.id}
+              style={styles.sessionRow}
+              onPress={() => router.push(`/session/${s.id}`)}
+              accessibilityRole="button"
+              accessibilityLabel={`Open ${s.name || s.sport} session`}
+              testID={`session-${s.id}`}
+            >
+              <View style={styles.activityMain}>
+                <Text style={styles.activityKind}>{s.name || s.sport}</Text>
+                <Text style={styles.muted}>
+                  {new Date(s.started_at).toLocaleDateString()} · {workingSets(s)}{' '}
+                  {workingSets(s) === 1 ? 'working set' : 'working sets'}
+                </Text>
+              </View>
+              <Text style={s.ended_at ? styles.synced : styles.pending}>
+                {s.ended_at ? 'done' : 'in progress'}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
+
+      <View style={styles.separator} lightColor="#eee" darkColor="rgba(255,255,255,0.1)" />
 
       <View style={styles.card}>
         <Text style={styles.label}>Log a BJJ session</Text>
@@ -175,6 +266,24 @@ const styles = StyleSheet.create({
   button: { backgroundColor: vola.lime, borderRadius: 8, paddingVertical: 14, alignItems: 'center' },
   buttonText: { color: vola.navy, fontWeight: '600', fontSize: 16 },
   buttonDisabled: { opacity: 0.6 },
+  sportRow: { flexDirection: 'row', gap: 8 },
+  sportButton: {
+    flex: 1,
+    backgroundColor: vola.lime,
+    borderRadius: 8,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  sportText: { color: vola.navy, fontWeight: '700', fontSize: 15 },
+  hint: { color: vola.textMuted, fontSize: 12 },
+  sessionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    gap: 12,
+  },
+  errorText: { color: vola.danger, fontSize: 13 },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   secondaryButton: {
     borderWidth: 1,

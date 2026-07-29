@@ -1,4 +1,3 @@
-import { useAuth } from '@clerk/clerk-expo';
 import { Link, useFocusEffect } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 import {
@@ -12,6 +11,7 @@ import {
 } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
+import { useAuthToken } from '@/lib/useAuthToken';
 import {
   createWorkout,
   listWorkouts,
@@ -29,7 +29,7 @@ const SCOPES = [
 ] as const;
 
 export default function WorkoutsScreen() {
-  const { getToken } = useAuth();
+  const getToken = useAuthToken();
 
   const [scope, setScope] = useState<'mine' | 'shared'>('mine');
   const [workouts, setWorkouts] = useState<Workout[]>([]);
@@ -198,7 +198,7 @@ function NewWorkoutSheet({
   onClose: () => void;
   onCreated: (w: Workout) => void;
 }) {
-  const { getToken } = useAuth();
+  const getToken = useAuthToken();
   const [name, setName] = useState('');
   const [sport, setSport] = useState<Sport>('strength');
   const [goal, setGoal] = useState<Goal>('general');

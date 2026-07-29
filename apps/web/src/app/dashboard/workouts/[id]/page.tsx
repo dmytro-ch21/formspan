@@ -14,6 +14,8 @@ import {
   listExercises,
   pickImage,
   replaceItems,
+  setsFromWorkout,
+  startSession,
   targetFieldsFor,
   type Exercise,
   type TargetField,
@@ -49,6 +51,7 @@ export default function WorkoutEditorPage({ params }: { params: Promise<{ id: st
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [savedOnce, setSavedOnce] = useState(false);
+  const [starting, setStarting] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
   const canEdit =
@@ -129,6 +132,27 @@ export default function WorkoutEditorPage({ params }: { params: Promise<{ id: st
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
 
+  // A template is only worth writing if performing it is one click away.
+  // The session opens pre-filled with the prescribed sets, so the plan is
+  // what you start from and then change — which is what makes the gap
+  // between prescribed and actual measurable at all.
+  async function start() {
+    if (starting || !workout) return;
+    setStarting(true);
+    try {
+      const { session } = await startSession(getToken, {
+        sport: workout.sport,
+        name: workout.name,
+        workout_id: workout.id,
+        sets: setsFromWorkout(items),
+      });
+      router.push(`/dashboard/sessions/${session.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setStarting(false);
+    }
+  }
+
   function addExercise(e: Exercise) {
     setCatalog((c) => (c.has(e.id) ? c : new Map(c).set(e.id, e)));
     setItems((prev) => [...prev, emptyItem(e.id, prev.length)]);
@@ -175,23 +199,36 @@ export default function WorkoutEditorPage({ params }: { params: Promise<{ id: st
           </p>
         </div>
 
-        {canEdit && (
-          <div className="flex items-center gap-3">
-            {/* A status line rather than a toast: it stays put, so it can be
-                read at a glance without having caught it appearing. */}
-            <span aria-live="polite" className="text-sm text-text-muted">
-              {saving ? "Saving…" : dirty ? "Unsaved changes" : savedOnce ? "Saved" : ""}
-            </span>
-            <button
-              type="button"
-              onClick={save}
-              disabled={!dirty || saving}
-              className="rounded-pill bg-accent-fill px-5 py-2 text-sm font-bold text-accent-on-fill transition disabled:cursor-not-allowed disabled:opacity-30"
-            >
-              Save
-            </button>
-          </div>
-        )}
+        <div className="flex items-center gap-3">
+          {canEdit && (
+            <>
+              {/* A status line rather than a toast: it stays put, so it can be
+                  read at a glance without having caught it appearing. */}
+              <span aria-live="polite" className="text-sm text-text-muted">
+                {saving ? "Saving…" : dirty ? "Unsaved changes" : savedOnce ? "Saved" : ""}
+              </span>
+              <button
+                type="button"
+                onClick={save}
+                disabled={!dirty || saving}
+                className="rounded-pill border border-line px-5 py-2 text-sm font-bold transition hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-30"
+              >
+                Save
+              </button>
+            </>
+          )}
+          <button
+            type="button"
+            onClick={start}
+            // Starting with unsaved edits would log the plan as the server
+            // holds it, not as it reads on screen.
+            disabled={starting || dirty || items.length === 0}
+            title={dirty ? "Save your changes first" : undefined}
+            className="rounded-pill bg-accent-fill px-5 py-2 text-sm font-bold text-accent-on-fill transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-30"
+          >
+            {starting ? "Starting…" : "Start session"}
+          </button>
+        </div>
       </header>
 
       {!canEdit && (

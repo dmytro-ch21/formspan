@@ -1,4 +1,3 @@
-import { useAuth } from '@clerk/clerk-expo';
 import { Image } from 'expo-image';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -11,6 +10,7 @@ import {
 } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
+import { useAuthToken } from '@/lib/useAuthToken';
 
 // Abort reasons, so a superseded request (silent) and a timeout (a real
 // error the user must see) don't both collapse into `signal.aborted`.
@@ -45,7 +45,7 @@ const LOAD_LABEL: Record<Exercise['load_type'], string> = {
 };
 
 export default function LibraryScreen() {
-  const { getToken } = useAuth();
+  const getToken = useAuthToken();
 
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [sport, setSport] = useState<string>('');
