@@ -30,6 +30,19 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="workouts"
+        options={{
+          title: 'Workouts',
+          tabBarIcon: ({ color }) => (
+            <SymbolView
+              name={{ ios: 'square.stack', android: 'view_agenda', web: 'view_agenda' }}
+              tintColor={color}
+              size={28}
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="library"
         options={{
           title: 'Library',

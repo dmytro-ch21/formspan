@@ -6,7 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "vola",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "dark",
     "ios": {
       "supportsTablet": true
     },
@@ -39,6 +39,7 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "backgroundColor": "#080B12"
   }
 }

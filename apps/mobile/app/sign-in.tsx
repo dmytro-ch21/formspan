@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, TextInput } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
+import { vola } from '@/constants/Colors';
 
 type SecondFactorStrategy = 'totp' | 'phone_code' | 'backup_code' | 'email_code';
 
@@ -183,7 +184,7 @@ export default function SignInScreen() {
         testID="sign-in-submit"
       >
         {busy ? (
-          <ActivityIndicator color="#fff" />
+          <ActivityIndicator color={vola.navy} />
         ) : (
           <Text style={styles.buttonText}>{secondFactor === null ? 'Sign in' : 'Verify'}</Text>
         )}
@@ -211,16 +212,16 @@ const styles = StyleSheet.create({
   },
   input: {
     borderWidth: 1,
-    borderColor: '#ccc',
+    borderColor: vola.line,
     borderRadius: 8,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 16,
-    color: '#111',
-    backgroundColor: '#fff',
+    color: vola.text,
+    backgroundColor: vola.surface,
   },
   button: {
-    backgroundColor: '#111',
+    backgroundColor: vola.lime,
     borderRadius: 8,
     paddingVertical: 14,
     alignItems: 'center',
@@ -230,12 +231,12 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   buttonText: {
-    color: '#fff',
+    color: vola.navy,
     fontWeight: '600',
     fontSize: 16,
   },
   error: {
-    color: 'crimson',
+    color: vola.danger,
     fontSize: 14,
   },
 });

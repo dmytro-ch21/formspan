@@ -1,12 +1,24 @@
 import { ClerkProvider, useAuth } from '@clerk/clerk-expo';
 import { useFonts } from 'expo-font';
-import { DarkTheme, DefaultTheme, Stack, ThemeProvider, useRouter, useSegments } from 'expo-router';
+import { DarkTheme, Stack, ThemeProvider, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 import 'react-native-reanimated';
 
-import { useColorScheme } from '@/components/useColorScheme';
 import { tokenCache } from '@/lib/tokenCache';
+import { vola } from '@/constants/Colors';
+
+const volaNavTheme = {
+  ...DarkTheme,
+  colors: {
+    ...DarkTheme.colors,
+    background: vola.bg,
+    card: vola.surface,
+    border: vola.lineSoft,
+    text: vola.text,
+    primary: vola.lime,
+  },
+};
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -58,7 +70,6 @@ export default function RootLayout() {
 }
 
 function RootLayoutNav() {
-  const colorScheme = useColorScheme();
   const { isLoaded, isSignedIn } = useAuth();
   const segments = useSegments();
   const router = useRouter();
@@ -66,10 +77,15 @@ function RootLayoutNav() {
   useEffect(() => {
     if (!isLoaded) return;
 
-    const inTabs = segments[0] === '(tabs)';
-    if (!isSignedIn && inTabs) {
+    // Keyed on the sign-in screen specifically, not on "is this the tabs".
+    // The earlier version bounced any signed-in user off any route outside
+    // (tabs) — harmless while sign-in was the only such route, but it made
+    // every pushed screen unreachable the moment one existed: tapping a
+    // workout navigated and was instantly replaced back to the tab root.
+    const onSignIn = segments[0] === 'sign-in';
+    if (!isSignedIn && !onSignIn) {
       router.replace('/sign-in');
-    } else if (isSignedIn && !inTabs) {
+    } else if (isSignedIn && onSignIn) {
       router.replace('/');
     }
   }, [isLoaded, isSignedIn, segments, router]);
@@ -80,11 +96,16 @@ function RootLayoutNav() {
     return null;
   }
 
+  // Always dark, and carrying VOLA's own ground rather than React
+  // Navigation's default near-black — the app has one palette.
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+    <ThemeProvider value={volaNavTheme}>
       <Stack>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="sign-in" options={{ title: 'Sign in' }} />
+        {/* Pushed over the tabs so the workout keeps a back button to the
+            list it came from, rather than becoming a tab of its own. */}
+        <Stack.Screen name="workout/[id]" options={{ title: 'Workout' }} />
       </Stack>
     </ThemeProvider>
   );

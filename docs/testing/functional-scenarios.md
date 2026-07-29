@@ -202,6 +202,81 @@ Domain: operator-controlled, global on/off switches — distinct from the profil
 
 ---
 
+## Theming (`apps/web` light + dark, `apps/mobile` dark-only)
+
+**Web**
+- Loads **light** by default on a browser with no stored preference.
+- The rail toggle switches to dark and back; the choice survives a reload and applies to every route.
+- **No flash of the wrong theme on navigation.** A dark-mode user must never see a white frame — the theme is applied by a blocking inline script before first paint, not after hydration.
+- Storage being unavailable (private mode) must not break the toggle; it just stops persisting.
+- Solid buttons stay legible in both: lime fill only works against dark, so light uses navy with a lime label.
+
+**Mobile**
+- Dark in every case, regardless of the OS appearance setting — the palette exists in one direction only, so following the OS would render a half-styled app on a light phone.
+- **No layout container may paint the page background.** Text inside a card sits directly on the card; a nested `View` stamping the page colour over its parent shows as a darker box behind every row, which is what happened before `Themed.View` stopped painting by default.
+- The navigator supplies the screen, header and back-chevron colours from the VOLA palette rather than React Navigation's defaults.
+
+---
+
+## Workout authoring on web (`/dashboard/workouts`)
+
+**Happy path**
+- Create a workout from the list; it goes straight into the editor, since creating a template is never the goal and filling it is.
+- The catalog pane is **always visible** beside the template — adding eight exercises is eight clicks with no modal cycle.
+- Targets are edited inline in each row, with the fields decided by the exercise's `load_type`.
+- Reorder by dragging, or with the per-row arrow buttons.
+- ⌘/Ctrl-S saves; `/` focuses catalog search; Escape closes the create dialog.
+
+**Edge cases & errors**
+- Save is disabled unless something actually changed — an always-live Save trains people to ignore it.
+- Leaving the page with unsaved edits warns before unload.
+- A workout you don't own (shared, or a VOLA template) renders read-only with an explicit banner; the backend remains the boundary.
+- The catalog pane scrolls independently, so the template beside it never moves.
+
+**Not yet covered**
+- No rename or visibility change after creation. No logging a session against a template.
+
+---
+
+## Workout templates UI (`apps/mobile` Workouts tab, `apps/web` /dashboard/workouts)
+
+Domain: building and browsing workout templates. Mobile is the build surface; web is the read/planning surface, per the mobile-first split in `docs/decisions/system-design.md`.
+
+**Happy path — mobile**
+- The Workouts tab lists your templates with discipline, goal, and exercise count; a "Shared" scope shows public ones.
+- "New workout" takes a name, a discipline, and — **only for strength** — a goal, since powerlifting/hypertrophy/endurance are things you do with the same barbell squat.
+- Opening a workout shows its ordered exercises; "Add exercise" opens a picker.
+- Reordering with up/down and removing an item both work; **Save appears only when something actually changed.**
+- Verified live on a Simulator: created "Push Day A" (Strength · Hypertrophy), opened it, and the picker listed 498 strength exercises with movement pattern and equipment.
+
+**The picker is filtered to the workout's own discipline**
+- A strength workout's picker shows only strength exercises. This isn't cosmetic: workouts are single-discipline and the API rejects a mismatch, so an unfiltered picker would let someone choose an exercise only to be refused on save. Filtering makes the invalid choice **unreachable rather than merely rejected**.
+
+**Target fields are driven by the exercise's `load_type`**
+- A barbell squat asks for sets/reps/weight; a plank asks for sets/seconds; a run asks for distance/time. The editor branches on `load_type` alone, so adding an exercise to the catalog never means touching the UI. This is the payoff of carrying `load_type` as data.
+- A unilateral exercise says so explicitly — "8 reps here means 8 each side".
+
+**Permissions in the UI**
+- A shared workout you don't own, and a VOLA template, both render read-only with an explicit banner rather than edit controls that would fail on save.
+- The backend is still the boundary; this only avoids offering an action that would be refused.
+
+**Edge cases & errors**
+- **No screen may render an empty state before its first successful load.** The picker, the workouts list, and the library all gate their "nothing here" message on having loaded at least once — otherwise "No matching strength exercises" appears during the first fetch and reads as "this discipline has none". Caught live in the picker during testing.
+- A failed load shows the API's own error message where it's actionable (a sport mismatch names the offending exercise), not a bare status code.
+- Errors clear on the next *successful* load, not at request start, so a retry doesn't briefly look fine.
+
+**Routing**
+- **Pushing a screen over the tabs must not bounce back to the tab root.** The root auth effect redirected any signed-in user off any route outside `(tabs)` — harmless while sign-in was the only such route, and it made the workout detail screen unreachable the moment one existed. Now keyed on the sign-in screen specifically.
+
+**Web**
+- `/dashboard/workouts` lists templates in a scannable table; `/dashboard/workouts/[id]` shows every exercise with targets **and coaching notes** — the thing a large screen is genuinely better at and a phone mid-set is worse at.
+- The table scrolls inside its own container so the page body never scrolls sideways.
+
+**Not yet covered / deferred**
+- No drag-to-reorder (up/down only), no rename or visibility change after creation, and no way to log a session *against* a template — which is the point of templates and the natural next increment.
+
+---
+
 ## Workout templates (`/v1/workouts`)
 
 Domain: user-owned workout *templates* — an ordered list of exercises with target sets/reps/loads. Distinct from a logged session (`/v1/activities`); keeping them separate is what preserves the planned-vs-actual gap. Shareable via `visibility`, with a nullable owner for VOLA-authored official templates. One discipline per workout.

@@ -37,9 +37,23 @@ export function Text(props: TextProps) {
   return <DefaultText style={[{ color }, style]} {...otherProps} />;
 }
 
+/**
+ * A layout View. Deliberately does NOT paint a background.
+ *
+ * It used to apply the theme's page background unconditionally, which meant
+ * every nested layout container stamped a page-coloured rectangle over
+ * whatever card it sat inside — visible as a darker box behind text on the
+ * dark theme. Backgrounds now belong to the thing that actually is a
+ * surface: the screen (via the navigator's theme) or a card (via its own
+ * style).
+ *
+ * Pass lightColor/darkColor to opt back in where a themed background is
+ * genuinely wanted.
+ */
 export function View(props: ViewProps) {
   const { style, lightColor, darkColor, ...otherProps } = props;
-  const backgroundColor = useThemeColor({ light: lightColor, dark: darkColor }, 'background');
+  const themed = useThemeColor({ light: lightColor, dark: darkColor }, 'background');
+  const backgroundColor = lightColor || darkColor ? themed : 'transparent';
 
   return <DefaultView style={[{ backgroundColor }, style]} {...otherProps} />;
 }

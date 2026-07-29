@@ -1,153 +1,139 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useAuth } from "@clerk/nextjs";
+
+import { listWorkouts, type Workout } from "@/lib/api";
 import { newTraceId, traceparent } from "@/lib/trace";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 const API_BASE = `${API_URL}/v1`;
 
-type Healthz = { status: string; service: string };
-type Me = { user_id: string };
-type Activity = {
-  id: string;
-  kind: string;
-  occurred_at: string;
-  notes: string | null;
-};
+type Activity = { id: string; kind: string; occurred_at: string; notes: string | null };
 
-// Fixed locale + zone: the default `toLocaleString()` resolves differently
-// during SSR than in the browser, which mismatches on hydration.
-const UTC_FORMAT = new Intl.DateTimeFormat("en-GB", {
-  dateStyle: "medium",
-  timeStyle: "short",
-  timeZone: "UTC",
-});
+// Fixed locale and zone: the default resolves differently during SSR than in
+// the browser, which mismatches on hydration.
+const DAY = new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeZone: "UTC" });
 
-export default function DashboardPage() {
-  // One trace ID for the whole page view — shared with MePanel below so
-  // both requests this page makes correlate in the backend's logs.
+export default function TodayPage() {
+  const { getToken } = useAuth();
   const [traceId] = useState(newTraceId);
-  const [health, setHealth] = useState<Healthz | null>(null);
+  // Captured once rather than read during render: Date.now() in the render
+  // body is impure, and it also resolves differently on the server than in
+  // the browser, which is a hydration mismatch waiting to happen.
+  const [mountedAt] = useState(() => Date.now());
+
+  const [activities, setActivities] = useState<Activity[]>([]);
+  const [workouts, setWorkouts] = useState<Workout[]>([]);
+  const [everLoaded, setEverLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const load = useCallback(async () => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    try {
+      const token = await getToken();
+      if (!token) throw new Error("Not signed in.");
+      const res = await fetch(`${API_BASE}/activities`, {
+        headers: { Authorization: `Bearer ${token}`, traceparent: traceparent(traceId) },
+        signal: controller.signal,
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(body?.error?.message ?? `API responded ${res.status}`);
+      const mine = await listWorkouts(getToken, "mine", controller.signal);
+      if (controller.signal.aborted) return;
+      setActivities(body.activities ?? []);
+      setWorkouts(mine);
+      setEverLoaded(true);
+      setError(null);
+    } catch (err) {
+      if (controller.signal.aborted) return;
+      setError(err instanceof Error ? err.message : String(err));
+      setEverLoaded(true);
+    }
+  }, [getToken, traceId]);
 
   useEffect(() => {
-    fetch(`${API_BASE}/healthz`, { headers: { traceparent: traceparent(traceId) } })
-      .then((res) => {
-        if (!res.ok) throw new Error(`API responded ${res.status}`);
-        return res.json();
-      })
-      .then(setHealth)
-      .catch((err) => setError(String(err)));
-  }, [traceId]);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    load();
+    return () => abortRef.current?.abort();
+  }, [load]);
+
+  const thisWeek = activities.filter(
+    (a) => mountedAt - new Date(a.occurred_at).getTime() < 7 * 864e5,
+  ).length;
 
   return (
-    <div className="flex flex-col gap-4">
-      <h1 className="text-2xl font-bold">Dashboard</h1>
-      {error && <p className="text-red-600">Failed to reach API: {error}</p>}
-      {!error && !health && <p className="text-black/60 dark:text-white/60">Loading API status…</p>}
-      {health && (
-        <p>
-          API says: <strong>{health.service}</strong> is <strong>{health.status}</strong>
+    <div className="flex flex-col gap-10">
+      <header>
+        <p className="eyebrow">Today</p>
+        <h1 className="font-display text-4xl font-bold">Overview</h1>
+      </header>
+
+      {error && (
+        <p role="alert" className="rounded-card border border-danger/40 bg-danger/10 px-4 py-3 text-sm">
+          {error}
         </p>
       )}
-      <MePanel traceId={traceId} />
-      <ActivitiesPanel traceId={traceId} />
+
+      {/* Real counts only. The Readiness/Load/Fuel dials from the design doc
+          need data we don't collect yet, and a placeholder dial would be a
+          fabricated number on the one screen that must never lie. */}
+      <section className="grid gap-4 sm:grid-cols-3">
+        <Stat label="Sessions this week" value={everLoaded ? String(thisWeek) : "—"} />
+        <Stat label="Logged all time" value={everLoaded ? String(activities.length) : "—"} />
+        <Stat label="Your templates" value={everLoaded ? String(workouts.length) : "—"} />
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <div className="flex items-baseline justify-between">
+          <h2 className="eyebrow">Recent activity</h2>
+          <Link href="/dashboard/workouts" className="text-sm text-text-muted hover:text-text">
+            Workouts →
+          </Link>
+        </div>
+
+        {!everLoaded ? (
+          <p className="text-sm text-text-muted">Loading…</p>
+        ) : activities.length === 0 ? (
+          <div className="rounded-card border border-dashed border-line px-6 py-12 text-center">
+            <p className="font-medium">Nothing logged yet</p>
+            <p className="mt-1 text-sm text-text-muted">
+              Log a session in the mobile app — it syncs here automatically.
+            </p>
+          </div>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {activities.slice(0, 8).map((a) => (
+              <li
+                key={a.id}
+                className="flex items-center justify-between gap-4 rounded-card border border-line bg-surface px-4 py-3"
+              >
+                <div className="min-w-0">
+                  <p className="truncate font-medium capitalize">{a.kind.replace(/_/g, " ")}</p>
+                  <p className="truncate text-sm text-text-dim">{a.notes ?? "No notes"}</p>
+                </div>
+                <span className="stat shrink-0 text-sm text-text-muted">
+                  {DAY.format(new Date(a.occurred_at))}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </div>
   );
 }
 
-/**
- * The receiving end of the mobile app's offline sync — activities logged on
- * a phone (possibly while offline) and pushed to /v1/activities show up here
- * once synced.
- */
-function ActivitiesPanel({ traceId }: { traceId: string }) {
-  const { getToken } = useAuth();
-  const [activities, setActivities] = useState<Activity[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const token = await getToken();
-        const res = await fetch(`${API_BASE}/activities`, {
-          headers: { Authorization: `Bearer ${token}`, traceparent: traceparent(traceId) },
-        });
-        if (!res.ok) throw new Error(`API responded ${res.status}`);
-        const data = await res.json();
-        setActivities(data.activities ?? []);
-      } catch (err) {
-        setError(String(err));
-      }
-    })();
-  }, [getToken, traceId]);
-
+function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <section className="flex flex-col gap-2 pt-4">
-      <h2 className="text-lg font-semibold">Your activities</h2>
-
-      {error && <p className="text-red-600">Failed to load activities: {error}</p>}
-      {!error && activities === null && (
-        <p className="text-black/60 dark:text-white/60">Loading activities…</p>
-      )}
-      {activities?.length === 0 && (
-        <p className="text-black/60 dark:text-white/60">
-          Nothing yet — log an activity in the mobile app and sync it.
-        </p>
-      )}
-
-      {activities && activities.length > 0 && (
-        <ul className="flex flex-col gap-2">
-          {activities.map((a) => (
-            <li
-              key={a.id}
-              className="flex items-baseline justify-between gap-4 border-b border-black/10 pb-2 dark:border-white/10"
-            >
-              <span className="font-medium">{a.kind}</span>
-              <span className="flex-1 text-sm text-black/60 dark:text-white/60">
-                {a.notes ?? "No notes"}
-              </span>
-              <span className="text-sm text-black/60 dark:text-white/60">
-                {UTC_FORMAT.format(new Date(a.occurred_at))} UTC
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
-  );
-}
-
-function MePanel({ traceId }: { traceId: string }) {
-  const { getToken } = useAuth();
-  const [me, setMe] = useState<Me | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    (async () => {
-      const token = await getToken();
-      try {
-        const res = await fetch(`${API_BASE}/me`, {
-          headers: { Authorization: `Bearer ${token}`, traceparent: traceparent(traceId) },
-        });
-        if (!res.ok) throw new Error(`API responded ${res.status}`);
-        setMe(await res.json());
-      } catch (err) {
-        setError(String(err));
-      }
-    })();
-  }, [getToken, traceId]);
-
-  return (
-    <div>
-      {error && <p className="text-red-600">Failed to reach /me: {error}</p>}
-      {!error && !me && <p className="text-black/60 dark:text-white/60">Loading /me…</p>}
-      {me && (
-        <p>
-          API verified you as user <strong>{me.user_id}</strong>
-        </p>
-      )}
+    <div className="relative overflow-hidden rounded-card border border-line bg-surface p-5">
+      <span aria-hidden="true" className="accent-rule absolute inset-x-0 top-0 h-[2px]" />
+      <p className="eyebrow">{label}</p>
+      <p className="stat mt-1 text-5xl">{value}</p>
     </div>
   );
 }
