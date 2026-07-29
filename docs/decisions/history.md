@@ -213,6 +213,12 @@ New routes: `POST`/`GET /v1/activities` (self-scoped, `RequireAuth`), `GET /v1/a
 
 Verified for real, not just typecheck/build: the integration test's idempotent-create assertion passed twice in a row (`-count=1`); then, against the live API with a real Clerk bearer token, two identical `POST /v1/activities` calls returned byte-identical `request_id`/`created_at` (proof the idempotency actually works over HTTP, not just in the repository layer); `GET /v1/admin/users`/`.../activities` returned real Postgres data with that same admin token; and — the actual security property this whole phase exists for — the same valid, signed-in token got `403 forbidden` on both admin routes when temporarily excluded from `ADMIN_USER_IDS`, then succeeded once restored.
 
+### README drift — a real gap, plus a standing rule to stop it recurring
+
+The user asked how to start the admin app; the honest answer required pulling it from a chat reply rather than the README, because the README still described a two-app, four-endpoint repo — `apps/mobile` and `apps/admin` weren't mentioned at all, and the backend endpoint list predated `/v1/flags`, `/v1/activities`, and `/v1/admin/*`. Root cause, not just the symptom: `docs/decisions/history.md` and `docs/testing/functional-scenarios.md` both have explicit "keep current" hard rules in `CLAUDE.md`; `README.md` never did, so nothing forced it to track reality.
+
+Fixed the content (current app list with what each one actually does today, the real backend route list, a complete "run it locally" section covering all four services including the admin console's non-default port and its `ADMIN_EMAILS` requirement) and the root cause: added a matching "Keep the README current" hard rule to `CLAUDE.md`, same shape as the other two.
+
 ---
 
 ## Open items / known gaps as of this entry
