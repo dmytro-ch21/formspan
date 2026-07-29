@@ -3,8 +3,11 @@ name: CI
 on:
   push:
     branches: [main]
+  # Deliberately unfiltered by base branch. It used to be `branches: [main]`,
+  # which silently gave **stacked PRs no CI at all** — a PR based on another
+  # feature branch matched nothing and ran zero checks, while still showing a
+  # clean "no checks failed" state that reads exactly like passing.
   pull_request:
-    branches: [main]
 
 jobs:
   backend:
@@ -17,19 +20,19 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_USER: formspan
-          POSTGRES_PASSWORD: formspan_test
-          POSTGRES_DB: formspan_test
+          POSTGRES_USER: vola
+          POSTGRES_PASSWORD: vola_test
+          POSTGRES_DB: vola_test
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U formspan"
+          --health-cmd "pg_isready -U vola"
           --health-interval 2s
           --health-timeout 5s
           --health-retries 10
     env:
-      DATABASE_URL: postgres://formspan:formspan_test@localhost:5432/formspan_test?sslmode=disable
-      TEST_DATABASE_URL: postgres://formspan:formspan_test@localhost:5432/formspan_test?sslmode=disable
+      DATABASE_URL: postgres://vola:vola_test@localhost:5432/vola_test?sslmode=disable
+      TEST_DATABASE_URL: postgres://vola:vola_test@localhost:5432/vola_test?sslmode=disable
     steps:
       - uses: actions/checkout@v7
 
@@ -60,7 +63,7 @@ jobs:
         run: go test ./...
 
       - name: Build Docker image
-        run: docker build -f Dockerfile -t formspan-api:ci .
+        run: docker build -f Dockerfile -t vola-api:ci .
 
   web:
     name: Web (Next.js)

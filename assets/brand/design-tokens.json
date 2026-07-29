@@ -1,0 +1,32 @@
+{
+  "brand": {
+    "lime": "#B8FF2C",
+    "green": "#42F58D",
+    "navy": "#0B1220",
+    "charcoal": "#111827",
+    "white": "#FFFFFF",
+    "muted": "#94A3B8"
+  },
+  "icon": {
+    "size": 24,
+    "strokeWidth": 1.8,
+    "linecap": "round",
+    "linejoin": "round"
+  },
+  "spacing": [
+    4,
+    8,
+    12,
+    16,
+    24,
+    32,
+    48,
+    64
+  ],
+  "radius": [
+    8,
+    12,
+    16,
+    24
+  ]
+}

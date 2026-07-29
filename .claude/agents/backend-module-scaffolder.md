@@ -5,7 +5,7 @@ tools: Read, Write, Edit, Bash, Grep, Glob
 model: inherit
 ---
 
-You are scaffolding a new backend domain module for Formspan (a Go modular monolith, stdlib `net/http`, no web framework). Follow the established pattern exactly — do not invent a new shape.
+You are scaffolding a new backend domain module for VOLA (a Go modular monolith, stdlib `net/http`, no web framework). Follow the established pattern exactly — do not invent a new shape.
 
 ## Before writing anything
 

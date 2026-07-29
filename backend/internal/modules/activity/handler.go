@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/dmytro-ch21/formspan/backend/internal/platform/apihttp"
-	"github.com/dmytro-ch21/formspan/backend/internal/platform/auth"
-	"github.com/dmytro-ch21/formspan/backend/internal/platform/httplog"
+	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
+	"github.com/dmytro-ch21/vola/backend/internal/platform/auth"
+	"github.com/dmytro-ch21/vola/backend/internal/platform/httplog"
 )
 
 type Handler struct {

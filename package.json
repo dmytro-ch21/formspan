@@ -1,5 +1,5 @@
 {
-  "name": "formspan",
+  "name": "vola",
   "private": true,
   "packageManager": "pnpm@11.17.0",
   "scripts": {
@@ -10,7 +10,7 @@
     "build:web": "pnpm --filter web build",
     "fmt:api": "cd backend && gofmt -l .",
     "vet:api": "cd backend && go vet ./...",
-    "build:api": "cd backend && go build -o bin/ ./cmd/api",
+    "build:api": "cd backend && go build -o bin/ ./cmd/...",
     "test:api": "cd backend && go test ./...",
     "lint:openapi": "redocly lint contracts/public.openapi.yaml --config .redocly.yaml",
     "dev:mobile": "pnpm --filter mobile start",

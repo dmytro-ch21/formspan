@@ -57,7 +57,7 @@ Domain: one profile per Clerk user — display name, date of birth, sex, and fou
 ## Web app shell (`apps/web`)
 
 **Happy path**
-- Signed-out visit to `/` shows the "Formspan" landing with a sign-in button (no sidebar).
+- Signed-out visit to `/` shows the "VOLA" landing with a sign-in button (no sidebar).
 - After signing in, landing on `/dashboard` shows the sidebar (wordmark, nav, account menu) plus a live healthz check and the authenticated `/me` result.
 - Signed-in visit to `/` redirects straight to `/dashboard` (no dead-end landing page for authenticated users).
 
@@ -82,7 +82,7 @@ Domain: Clerk auth (same instance as web/admin) with the session token in the OS
 
 **Offline & sync (verified end-to-end on a real Simulator)**
 - With the API unreachable, logging an activity still succeeds locally and shows **pending**, with an explicit error (`Synced 0, 1 still pending — …Could not connect to the server.`) — never a false success.
-- The pending row is genuinely in the device's SQLite with `synced = 0` (confirmed by querying the Simulator's `formspan.db` directly).
+- The pending row is genuinely in the device's SQLite with `synced = 0` (confirmed by querying the Simulator's `vola.db` directly).
 - When the API returns, "Sync now" pushes it → "Synced 1.", the row flips to `synced = 1`, and the same client-generated ID appears in Postgres.
 - Because the ID is client-generated and the API's create is idempotent, a retried sync of an already-synced row is a no-op, not a duplicate.
 - Not yet covered: no automatic background sync (manual/on-log only), and no conflict resolution — activities are append-only so far.
@@ -175,6 +175,43 @@ Domain: operator-controlled, global on/off switches — distinct from the profil
 - No write endpoint (`PATCH`/`POST`) and no admin-console screen to toggle flags — real backend admin authorization exists now (`RequireAdmin`, see below), so this is no longer blocked on that; just not built yet. Toggling today is direct SQL only.
 - No frontend app (web/mobile/admin) fetches or gates on any flag yet — this pass is backend-only, same scoping call as structured logging.
 - No per-user/cohort targeting or percentage rollout — add if a real use case shows up.
+
+---
+
+## Exercise catalog (`/v1/exercises`)
+
+Domain: the global, operator-authored exercise catalog — reference content shared by every user, with no owner. Read-only over HTTP; seeded from version-controlled JSON via `cmd/seed`.
+
+**Happy path**
+- `GET /v1/exercises` with a valid token returns the whole catalog, ordered by sport then name.
+- `GET /v1/exercises?sport=bjj` returns only BJJ entries; `?q=squat` matches on name.
+- `GET /v1/exercises/barbell-back-squat` returns that single entry with its full field set.
+- Every entry carries a `load_type` from the fixed set — a client can decide which inputs to render from the catalog alone, with no hardcoded per-exercise knowledge.
+
+**Edge cases & errors**
+- Name search is **case-insensitive** (`?q=SQUAT` matches "Barbell Back Squat") — a search that only matched exact case would be useless on a phone keyboard.
+- A filter matching nothing returns `{"exercises": []}` with `200`, not `404` — an empty result is a valid answer to a valid question.
+- **LIKE metacharacters are literal, not wildcards**: `?q=%` and `?q=_` match nothing rather than the whole table. Binding the parameter prevents SQL injection but not *pattern* injection — different problem, same untrusted input.
+- `?q=` longer than 100 characters → `400 invalid_input`; no exercise name comes close, so anything longer is a mistake or an attempt to make the database work for nothing.
+- `GET /v1/exercises/{unknown-id}` → `404 not_found`.
+- `is_unilateral` is set on per-side exercises (the lunge) — 8 reps per side is not 8 reps, so any volume maths downstream must read it.
+
+**Seeding**
+- `cmd/seed` is idempotent: running it twice upserts the same rows, doesn't duplicate them, and preserves `created_at`. It's meant to run on every deploy, so a non-idempotent seed would be a live defect rather than a nuisance.
+- Editing the JSON and re-running is how a catalog entry is corrected — there's no write API.
+- Malformed seed content fails **before** touching the database: a duplicate slug (which would silently overwrite a different exercise), a missing required field, an unknown `load_type` (which no client could render), or a misspelled `sport`/`movement_pattern` each abort the run with a named error. The typo cases matter because the JSON is the authoring interface — `"strenght"` would otherwise seed a row that no `?sport=strength` filter can ever return, and a bad `movement_pattern` would silently break a future cross-sport rule.
+- Seeding is **value-idempotent, not just row-count idempotent**: a re-seed with unchanged content must leave `updated_at` alone. Otherwise it degrades into "time of last deploy" and a client asking "what changed since X" gets the whole catalog back after every deploy — which defeats delta sync on an offline-first app.
+- The whole catalog is written in **one transaction**, so a failure partway leaves the previous content intact rather than a half-updated catalog visible to readers.
+- **The deployed environment must actually run the seed.** Migration `000004` creates an empty table; without a seed step the API serves `{"exercises": []}` forever, and because that's a valid `200` no healthcheck or error surfaces it. Covered by `railway/api.toml`'s `preDeployCommand`.
+- The starter set covers all five `load_type` values, asserted by a test rather than left to drift as content is added.
+
+**Auth & security**
+- No `Authorization` header → `401 unauthorized` on both routes. The catalog isn't secret, but it's app content rather than public marketing, so it sits behind auth like everything else under `/v1`.
+- Nothing here is user-scoped, so there's no IDOR surface: every authenticated caller is entitled to the identical response.
+
+**Not yet covered / deferred**
+- No media (images/video) — planned for object storage with Postgres holding only a key; no bytes exist yet.
+- No user-authored custom exercises, no admin write path, and no pagination (12 rows). Filters are applied in SQL rather than in Go, so pagination can be added without rewriting the query.
 
 ---
 

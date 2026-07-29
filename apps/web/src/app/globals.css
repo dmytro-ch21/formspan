@@ -1,5 +1,37 @@
 @import "tailwindcss";
 
+/*
+  VOLA brand tokens — canonical source is assets/brand/design-tokens.json.
+  Namespaced under `brand-` so they're purely additive: none of Tailwind's
+  built-in scales (rounded-lg, p-4, …) shift underneath existing screens.
+
+  These make the palette *available*; they don't restyle anything yet.
+  apps/web's current look predates the design system and reconciling it is
+  its own piece of work — see the note in CLAUDE.md.
+
+  Duplicated verbatim in apps/admin/src/app/globals.css. Two small Next
+  apps with no shared UI package yet; when a third consumer appears, or
+  these drift, promote them to a workspace package instead of copying again.
+
+  `static` matters: a plain `@theme` only emits a variable into :root once
+  some utility actually references it, so `var(--color-brand-navy)` in
+  hand-written CSS or an inline style would silently resolve to nothing
+  until an unrelated `bg-brand-navy` happened to appear somewhere. `static`
+  emits all of them, which is what "the palette is available" has to mean.
+*/
+@theme static {
+  --color-brand-lime: #b8ff2c;
+  --color-brand-green: #42f58d;
+  --color-brand-navy: #0b1220;
+  --color-brand-charcoal: #111827;
+  --color-brand-muted: #94a3b8;
+
+  --radius-brand-sm: 8px;
+  --radius-brand-md: 12px;
+  --radius-brand-lg: 16px;
+  --radius-brand-xl: 24px;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);

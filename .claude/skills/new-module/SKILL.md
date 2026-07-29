@@ -1,6 +1,6 @@
 ---
 name: new-module
-description: Scaffold a new backend domain module (internal/modules/<name>) following Formspan's established pattern — domain types, Postgres repository, HTTP handlers, migration, integration test, OpenAPI entry, wired under /v1. Use when the user asks to add a new backend domain/module (e.g. "add a goals module").
+description: Scaffold a new backend domain module (internal/modules/<name>) following VOLA's established pattern — domain types, Postgres repository, HTTP handlers, migration, integration test, OpenAPI entry, wired under /v1. Use when the user asks to add a new backend domain/module (e.g. "add a goals module").
 argument-hint: <module-name> [brief description of what it stores/does]
 ---
 

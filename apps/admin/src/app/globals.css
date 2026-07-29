@@ -1,6 +1,33 @@
 @import "tailwindcss";
 
 /*
+  VOLA brand tokens — canonical source is assets/brand/design-tokens.json.
+  Namespaced under `brand-` so they're purely additive and don't disturb the
+  admin design-system tokens below (note `--color-accent-lime` there is the
+  admin mock's pale lime, *not* the brand lime — they're different values
+  and reconciling them is part of the deferred restyle, not this change).
+
+  Duplicated verbatim in apps/web/src/app/globals.css. See the note there,
+  including why this is `@theme static` rather than plain `@theme`.
+
+  Second name collision worth knowing alongside the lime one: brand-muted
+  (#94a3b8, a cool slate) is not admin's text-muted (#8d918d, a warm grey).
+  Two different "muted"s coexisting — pick deliberately, not by autocomplete.
+*/
+@theme static {
+  --color-brand-lime: #b8ff2c;
+  --color-brand-green: #42f58d;
+  --color-brand-navy: #0b1220;
+  --color-brand-charcoal: #111827;
+  --color-brand-muted: #94a3b8;
+
+  --radius-brand-sm: 8px;
+  --radius-brand-md: 12px;
+  --radius-brand-lg: 16px;
+  --radius-brand-xl: 24px;
+}
+
+/*
   Design tokens extracted from the shared hi-fi design (2t/2u admin mocks).
   The design system is light-only for web/admin (dark is mobile-only) —
   no dark-mode variant here, that's an intentional match to the source.

@@ -1,12 +1,12 @@
-# Formspan — instructions for Claude Code
+# VOLA — instructions for Claude Code
 
-Formspan is a unified training and nutrition platform for BJJ athletes who also strength train and track nutrition — one athlete profile and calendar connecting BJJ, strength training, and nutrition, with deterministic, explainable cross-sport recommendations.
+VOLA is a unified training and nutrition platform for BJJ athletes who also strength train and track nutrition — one athlete profile and calendar connecting BJJ, strength training, and nutrition, with deterministic, explainable cross-sport recommendations.
 
 **Start here for full context:** [docs/decisions/history.md](docs/decisions/history.md) — chronological narrative of what's been built and why. `docs/architecture/*.md` hold the current-state detail this file only summarizes.
 
 ## Repo map
 
-- `backend/` — Go modular monolith, stdlib `net/http` (no web framework, deliberately). `cmd/api`, `cmd/migrate`. `internal/modules/*` per domain, `internal/platform/*` for cross-cutting concerns (`auth`, `database`, `apihttp`).
+- `backend/` — Go modular monolith, stdlib `net/http` (no web framework, deliberately). `cmd/api`, `cmd/migrate`, `cmd/seed`. `internal/modules/*` per domain, `internal/platform/*` for cross-cutting concerns (`auth`, `database`, `apihttp`).
 - `apps/web/` — Next.js customer app, Clerk auth. `/dashboard(.*)` is server-side gated by `proxy.ts` (Clerk middleware `auth.protect()`); `app/dashboard/` holds the sidebar shell (`layout.tsx`) + destinations (only `Dashboard` wired so far, matching the mobile shell's single-tab scope). Root `/` is the public entry — redirects signed-in users to `/dashboard`, shows sign-in otherwise. Tailwind CSS v4 for styling.
 - `apps/mobile/` — Expo (managed workflow, Expo Go — not a custom dev client yet) + Expo Router (file-based, `app/(tabs)/` for the tab navigator). **Clerk auth** (same instance as web/admin) via `@clerk/clerk-expo`, session token cached in the OS keychain (`lib/tokenCache.ts` → `expo-secure-store`, not AsyncStorage). `app/_layout.tsx` routes signed-out users to `app/sign-in.tsx`, which handles email+password plus a second factor (TOTP / SMS / **email code** / backup code — this Clerk instance uses email codes). **Offline-first activity logging**: `lib/db.ts` (expo-sqlite) writes locally first with a `synced` outbox flag; `lib/activities.ts` pushes pending rows to `POST /v1/activities`. The activity ID is generated *client-side*, which is what makes sync retries idempotent — see the backend's `ON CONFLICT DO NOTHING`. `EXPO_PUBLIC_*` env var convention (RN equivalent of Next's `NEXT_PUBLIC_*`).
 - `apps/admin/` — Next.js admin console, fully separate from `apps/web` (not athlete-facing). Reuses the **same Clerk instance** as `apps/web`; `/users(.*)` is gated two ways — `proxy.ts` requires sign-in, `app/users/layout.tsx` additionally checks the signed-in Clerk user ID against the `ADMIN_USER_IDS` allowlist env var (**same var name and value the backend uses** — one admin-identity convention across the stack; the backend's own `RequireAdmin` is the real security boundary, this gate is defence in depth for the UI). Only `User Lookup` (`/users`) and `User Detail` (`/users/[id]`) exist so far, matching what's actually been designed. **Runs on real backend data** — `lib/api.ts` server-fetches `/v1/admin/users` and `/v1/admin/users/{userID}/activities`; there is no mock data anywhere in this app. Fields the design mocked up but that have no real system behind them yet (subscriptions, device/platform, integration sync, support tickets) are simply **not shown** rather than faked. Visual design (colors, Barlow/Barlow Condensed fonts, component styles) comes from a shared hi-fi design file — tokens live in `app/globals.css`'s `@theme` block. **Note:** `apps/web`'s current visual style predates this design system and does not yet follow it — reconciling that is a separate, not-yet-started piece of work.
@@ -15,6 +15,7 @@ Formspan is a unified training and nutrition platform for BJJ athletes who also 
 - `contracts/public.openapi.yaml` — hand-maintained OpenAPI spec (not generated).
 - `railway/*.toml` — per-service Railway config. **Only exists for services with real code behind them** — don't create a config for a service that has no binary/app yet.
 - `docs/architecture/` — current-state docs (deployment, API conventions). `docs/decisions/history.md` — the project narrative.
+- `assets/brand/` — the VOLA brand kit, and the **source of truth** for brand identity: logos, app-icon and splash masters, 25 UI icons, and `design-tokens.json`. All SVG — the rasters in `apps/mobile/assets/images/` are *generated* from these, so edit the SVG and regenerate, never the PNG. UI icons use `currentColor`, so recolour via CSS/props rather than by forking the file.
 
 ## Backend module pattern
 
@@ -79,10 +80,18 @@ Both are **read-only diagnostics** — they report findings, they don't apply fi
 ```bash
 docker compose up -d                       # local Postgres on :5432 (Colima-backed Docker, not Docker Desktop)
 cd backend && go run ./cmd/migrate up
+cd backend && go run ./cmd/seed             # reference content (exercise catalog) — idempotent, safe to re-run
 pnpm run dev:api                            # :8080
 pnpm run dev:web                            # :3000
 pnpm run dev:mobile                          # Expo — Metro on :8081, press i/a/w for iOS Sim/Android/web
 pnpm run dev:admin                          # :3001 (or next available port — runs alongside apps/web)
+```
+
+The backend integration tests need `TEST_DATABASE_URL` and **skip silently without it** — for a long stretch that meant a green local `go test ./...` proved nothing and they only genuinely ran in CI. Point it at a separate database from `DATABASE_URL`:
+
+```bash
+docker compose exec postgres createdb -U vola vola_test
+cd backend && DATABASE_URL='postgres://vola:vola_dev_only@localhost:5432/vola_test?sslmode=disable' go run ./cmd/migrate up
 ```
 
 Env vars come from real files, never baked into images: `backend/.env` / `backend/.env.example`, `apps/web/.env.local` / `apps/web/.env.example`, `apps/mobile/.env.local` / `apps/mobile/.env.example`, `apps/admin/.env.local` / `apps/admin/.env.example` — all gitignored except the `.example` templates. `backend/.env.staging.local` holds real Railway `staging` Postgres credentials (gitignored, never commit).
@@ -94,7 +103,7 @@ The backend's CORS (`withCORS` in `cmd/api/main.go`) allows multiple comma-separ
 - **`secrets.txt`** may show up untracked in the repo root containing what looks like a live API key. Never stage or commit it — flag it to the user instead.
 - This Next.js version renamed the `middleware.ts` file convention to `proxy.ts` (same `clerkMiddleware()` export, just a renamed file). Separately: `next dev --hostname 127.0.0.1` breaks when a `proxy.ts`/`clerkMiddleware()` is present — Next's Proxy runtime tries to self-fetch via `localhost` internally and fails (`ECONNRESET`, surfaces as a 500). Use `--port` alone when running concurrent dev instances; never pass `--hostname`.
 - pnpm blocks native build scripts (`sharp`, `unrs-resolver`, etc.) by default — they need explicit `allowBuilds: true` entries in `pnpm-workspace.yaml` or installs fail.
-- Railway: real project `formspan` exists, with a `staging` environment holding a real Postgres (migrations already applied there). No `production` Postgres yet, and no `api`/`web` services deployed to Railway yet — only Postgres. An **unrelated pre-existing project, `dynamic-trust`** (service `medical-portal-api`), sits in the same Railway account — it is not ours; never touch it.
+- Railway: the real project is **still named `formspan`** — the VOLA rename covered the repo and code, not the external service accounts (Railway, Clerk). Don't "correct" it in docs until it's actually renamed in the Railway dashboard. It has a `staging` environment holding a real Postgres (migrations already applied there). No `production` Postgres yet, and no `api`/`web` services deployed to Railway yet — only Postgres. An **unrelated pre-existing project, `dynamic-trust`** (service `medical-portal-api`), sits in the same Railway account — it is not ours; never touch it.
 - **Metro/Expo Go IPv6 vs IPv4 loopback mismatch**: Node resolves the hostname `localhost` to IPv6 first by default, so a plain `expo start` binds Metro only to `::1:8081`. But Expo's `--localhost` flag generates the Expo Go deep link using the literal IPv4 address `127.0.0.1`, so Expo Go can never connect — a total, silent mismatch, not a firewall/network issue. Fixed by prefixing `NODE_OPTIONS=--dns-result-order=ipv4first` on every `apps/mobile/package.json` script (`start`/`android`/`ios`/`web`), forcing Metro to bind IPv4 first. Diagnose with `lsof -i :8081 -P -n` — look for `127.0.0.1:8081` vs `[::1]:8081`.
 
 ## Where to look for more

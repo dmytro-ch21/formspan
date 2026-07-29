@@ -1,9 +1,9 @@
 openapi: 3.0.3
 info:
-  title: Formspan Public API
+  title: VOLA Public API
   version: "1.0.0"
   description: >
-    Public API for the Formspan mobile and web clients. See
+    Public API for the VOLA mobile and web clients. See
     docs/architecture/api-conventions.md for the conventions this spec
     follows (versioning, error shape, auth, status codes).
 servers:
@@ -168,6 +168,77 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Flag"
+
+    Exercise:
+      type: object
+      description: >
+        One entry in the global exercise catalog. Operator-authored
+        reference content shared by every user — there is no owner, so
+        nothing here is user-scoped. Seeded from version-controlled JSON
+        rather than written through the API.
+      required:
+        [id, name, sport, movement_pattern, primary_muscles,
+         secondary_muscles, equipment, load_type, is_unilateral,
+         instructions, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          description: Stable slug, safe to store as a reference.
+          example: barbell-back-squat
+        name:
+          type: string
+          example: Barbell Back Squat
+        sport:
+          type: string
+          example: strength
+        movement_pattern:
+          type: string
+          description: >
+            What the movement is structurally. This is the level the
+            cross-sport rules reason at — "heavy hinge and squat work
+            yesterday" is what makes hard sparring today worth flagging.
+            Muscle lists alone are too granular to write rules against.
+          example: squat
+        primary_muscles:
+          type: array
+          items: { type: string }
+          example: [quadriceps, glutes]
+        secondary_muscles:
+          type: array
+          items: { type: string }
+        equipment:
+          type: array
+          items: { type: string }
+          example: [barbell, squat_rack]
+        load_type:
+          type: string
+          enum: [weight_reps, reps, time, distance, distance_time]
+          description: >
+            Which measurements a session of this exercise records, and
+            therefore which inputs a client should render. Carried as data
+            so logging stays one screen instead of a form per exercise
+            type, and so adding an exercise never needs an app release.
+        is_unilateral:
+          type: boolean
+          description: >
+            Affects volume maths — 8 reps per side is not 8 reps.
+        instructions:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ExerciseList:
+      type: object
+      required: [exercises]
+      properties:
+        exercises:
+          type: array
+          items:
+            $ref: "#/components/schemas/Exercise"
 
     Activity:
       type: object
@@ -433,6 +504,53 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+
+  /exercises:
+    get:
+      summary: List the global exercise catalog
+      operationId: listExercises
+      parameters:
+        - name: sport
+          in: query
+          required: false
+          schema: { type: string }
+          description: Exact-match filter, e.g. `strength` or `bjj`.
+        - name: q
+          in: query
+          required: false
+          schema: { type: string }
+          description: Case-insensitive substring match on the name.
+      responses:
+        "200":
+          description: Matching catalog entries, ordered by sport then name.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExerciseList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /exercises/{exerciseID}:
+    get:
+      summary: Get one catalog entry by its slug
+      operationId: getExercise
+      parameters:
+        - name: exerciseID
+          in: path
+          required: true
+          schema: { type: string }
+          example: barbell-back-squat
+      responses:
+        "200":
+          description: The exercise.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Exercise"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /admin/users:
     get:
