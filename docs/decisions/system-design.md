@@ -120,12 +120,28 @@ What actually produces that feel:
 
 So: **show the confidence, degrade gracefully, never invent a number.** With a wearable, Readiness is a percentage. Without one, it's a three-state band (ready / moderate / back off) and says what it's missing. This is a feature, not an apology — it's the difference between an honest tool and an app that guesses convincingly.
 
+## 8. Wearables: recommended, not required — and what that costs
+
+**Decided 2026-07-28: wearables are recommended.** Not assumed, not ignored.
+
+This is the commercially right answer — requiring one shrinks the addressable market sharply, while ignoring them makes VOLA weaker than WHOOP for exactly the athletes most likely to pay — but it is also the **most demanding of the three options to build**, because it means shipping two paths and letting neither feel like a broken version of the other. Four things follow directly:
+
+**1. Integrate with HealthKit / Health Connect, not with wearable vendors.** Apple Watch, Oura, Garmin, Polar, and Fitbit all write into the platform health store. One integration covers most of the market; per-vendor APIs (Oura, Garmin, WHOOP) are a later gap-filler for specific data those devices don't publish, not the starting point. Notably WHOOP's own device is the least cooperative here — worth knowing before promising WHOOP users a seamless import.
+
+**2. HRV is not one number, and this will silently corrupt the data if we ignore it.** Apple Health stores **SDNN**; most HRV research and most other devices use **rMSSD**. They are not interchangeable and must never be compared or averaged across sources. Every biometric sample needs a **`source` and a `metric_type`**, and trend lines must be computed within a single source. A user who switches from an Oura ring to an Apple Watch should see a discontinuity, correctly labelled — not a smooth line that quietly means nothing.
+
+**3. HRV is only meaningful against the individual's own rolling baseline**, which needs roughly 2–4 weeks to establish. Onboarding must say so plainly — "this number starts meaning something around week three" — rather than showing a confident score on day two. Same honest-confidence principle as everywhere else.
+
+**4. "Recommended" must never become a permanent upsell.** The obvious degeneration is a nag banner on every screen for wearable-less users, which is precisely the shame-based messaging the project ruled out. The rule: **mention a wearable at onboarding and once in the Readiness explainer, and nowhere else.** The no-wearable path shows a band instead of a score, uses subjective inputs plus sleep, and is otherwise a complete product.
+
+**Data-model consequence:** biometric samples are their own domain (not activities) and carry `source`, `metric_type`, `measured_at`, and a quality/confidence marker. The recommendation engine already stores its inputs, rule version, and explanation with every output — that extends naturally to recording *which inputs were available*, so a low-confidence recommendation is auditable as such after the fact.
+
 ---
 
 ## Open questions for discussion
 
-1. **Is a wearable assumed, recommended, or irrelevant?** This is the biggest fork in the whole design. It determines whether Readiness is a real physiological score or an inference, and it changes the onboarding, the marketing, and how much of §5 is achievable at all.
+1. ~~Is a wearable assumed, recommended, or irrelevant?~~ **Resolved 2026-07-28: recommended.** See §8.
 2. **What's the sRPE prompt's timing?** Immediately post-session is most accurate but least likely to happen; next-morning is reliable but recall-biased. Probably: prompt at session end via notification, fall back to the morning.
-3. **When do we leave Expo Go?** Suggested: before the first real logging increment, since HealthKit and widgets are the core of §4.
+3. **When do we leave Expo Go?** Suggested: before the first real logging increment, since HealthKit and widgets are the core of §4 — and §8 makes HealthKit load-bearing, which strengthens the case for doing it early.
 4. **Does the exercise/technique library ship with the strength module or before it?** It's a content and licensing project as much as a code one — see the media-storage decision needed alongside it.
 5. **How much planning is automatic?** The MVP scope deliberately excludes auto-generated programs. Does "Plan" then mean the user places sessions manually and VOLA only flags conflicts? (Recommended for MVP — it's honest, and conflict-flagging is the differentiator anyway.)
