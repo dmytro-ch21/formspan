@@ -101,6 +101,30 @@ Domain: Clerk auth (same instance as web/admin) with the session token in the OS
 
 ---
 
+## Exercise library screen (`apps/mobile`, Library tab)
+
+Domain: the mobile-facing view of the global catalog — browse, filter by sport, search by name, with images served from R2 via the API's assembled URLs.
+
+**Happy path**
+- The Library tab lists every catalog entry with its thumbnail, movement pattern, load type, and primary muscles.
+- Tapping a sport chip filters server-side; "All" clears it.
+- Typing in search filters by name, debounced so it doesn't fire per keystroke. Verified live on a Simulator: "press" narrowed to Bench Press and Overhead Press.
+- Images come from Cloudflare R2 and are disk-cached by `expo-image`, so a second visit doesn't re-download.
+
+**Edge cases & errors**
+- An exercise with no media shows an explicit placeholder, not a broken image or an empty gap.
+- `pickImage` falls back (thumbnail → demo → start) rather than showing nothing when the preferred kind is missing — an upscaled thumbnail beats an empty box.
+- A failed fetch shows an explicit error; it must never render as an empty catalog, which would read as "no exercises exist".
+- A filter matching nothing says "No exercises match this search", distinct from the never-loaded empty state.
+- Rapid typing must not show stale results: each request aborts the previous one, so a slow early response can't overwrite a newer one.
+- An aborted request is not an error — superseding our own request must not surface a failure message.
+
+**Not yet covered / deferred**
+- The catalog is fetched, not cached locally, so the Library needs a connection. Given the offline-first design this is a real gap — the catalog is exactly the kind of rarely-changing global content worth persisting on device.
+- No exercise detail screen yet: rows are pressable but don't navigate.
+
+---
+
 ## Web activities display (`apps/web`)
 
 **Happy path**
