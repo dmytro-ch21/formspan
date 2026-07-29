@@ -9,8 +9,13 @@ package activity
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 )
+
+// ErrAlreadyExists means the client-generated activity ID is already in use
+// by a *different* user. A same-user repeat is an idempotent retry, not this.
+var ErrAlreadyExists = errors.New("activity: id already exists for another user")
 
 type Activity struct {
 	ID         string          `json:"id"`

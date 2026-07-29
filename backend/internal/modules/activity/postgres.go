@@ -29,20 +29,35 @@ func (r *PostgresRepository) Create(ctx context.Context, in NewActivity) (*Activ
 	a, err := scanActivity(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			// id already existed (ON CONFLICT DO NOTHING) — an idempotent
-			// sync retry, not an error. Return the original row.
-			return r.getByID(ctx, in.ID)
+			// id already existed (ON CONFLICT DO NOTHING) — normally an
+			// idempotent sync retry, so return the original row.
+			//
+			// Scoped to the caller: IDs are client-generated, so without the
+			// user_id predicate this path would hand any authenticated caller
+			// another user's activity simply by guessing/replaying its ID
+			// (an IDOR), and would also silently swallow a colliding activity
+			// from a second user while telling their client it synced fine.
+			// A hit on someone else's ID is reported as a conflict instead.
+			return r.getOwnedByID(ctx, in.ID, in.UserID)
 		}
 		return nil, err
 	}
 	return a, nil
 }
 
-func (r *PostgresRepository) getByID(ctx context.Context, id string) (*Activity, error) {
+func (r *PostgresRepository) getOwnedByID(ctx context.Context, id, userID string) (*Activity, error) {
 	row := r.pool.QueryRow(ctx, `
 		SELECT id, user_id, kind, occurred_at, notes, details, request_id, trace_id, created_at
-		FROM activities WHERE id = $1`, id)
-	return scanActivity(row)
+		FROM activities WHERE id = $1 AND user_id = $2`, id, userID)
+	a, err := scanActivity(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// The ID exists but belongs to someone else.
+			return nil, ErrAlreadyExists
+		}
+		return nil, err
+	}
+	return a, nil
 }
 
 func (r *PostgresRepository) ListByUser(ctx context.Context, userID string) ([]Activity, error) {
@@ -68,13 +83,23 @@ func (r *PostgresRepository) ListByUser(ctx context.Context, userID string) ([]A
 	return activities, nil
 }
 
+// ListUsers returns every user the system knows about — anyone with a
+// profile *or* any activity. Starting from `profiles` alone would hide a
+// user who logged activities before completing onboarding, which is exactly
+// the person an admin is most likely to be looking for during support.
 func (r *PostgresRepository) ListUsers(ctx context.Context) ([]UserSummary, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT p.user_id, p.display_name, count(a.id), max(a.occurred_at)
-		FROM profiles p
-		LEFT JOIN activities a ON a.user_id = p.user_id
-		GROUP BY p.user_id, p.display_name
-		ORDER BY p.user_id`)
+		WITH known_users AS (
+			SELECT user_id FROM profiles
+			UNION
+			SELECT DISTINCT user_id FROM activities
+		)
+		SELECT k.user_id, p.display_name, count(a.id), max(a.occurred_at)
+		FROM known_users k
+		LEFT JOIN profiles p ON p.user_id = k.user_id
+		LEFT JOIN activities a ON a.user_id = k.user_id
+		GROUP BY k.user_id, p.display_name
+		ORDER BY k.user_id`)
 	if err != nil {
 		return nil, fmt.Errorf("activity: list users: %w", err)
 	}

@@ -239,6 +239,43 @@ Bug found while setting this up: `apps/admin/.env.local` had only `ADMIN_EMAILS`
 
 Both are read-only diagnostics that report `[blocking]` vs `[suggestion]` findings and never apply fixes. A new `CLAUDE.md` hard rule requires running whichever matches the diff before opening a PR. The `frontend-reviewer` was run against this very change as its first real test.
 
+### Vertical slice Phases 2–4: mobile auth, offline logging + sync, web display
+
+Completes the arc. With Phase 1 (backend) and Phase 5 (admin) already done, this closes the middle: an activity logged on a phone — possibly offline — reaching Postgres, the web dashboard, and the admin console.
+
+**Phase 2 — mobile Clerk auth.** `@clerk/clerk-expo` with the session token cached in the OS keychain via `expo-secure-store` rather than AsyncStorage (a token in plaintext app storage isn't worth the convenience), so sessions survive restarts. `app/_layout.tsx` gates the tabs behind sign-in.
+
+The sign-in flow needed two rounds of real fixes, both surfaced only by actually signing in — a good argument for the project's insistence on live verification over "it compiles":
+1. The first pass handled only email+password. The account has 2FA, so Clerk returned `needs_second_factor` and the screen stopped there. It reported the status honestly rather than failing silently, which made the gap obvious.
+2. The second pass added TOTP / SMS / backup codes — but this Clerk instance uses **email codes**, which Clerk's own TypeScript definitions don't list among second-factor params even though instances can be configured for it. The fallback error was changed to *name the strategy Clerk actually asked for* instead of a generic "unsupported", which is what identified `email_code` immediately. Implemented with a narrow, commented cast at the two call sites.
+
+**Phase 3 — offline logging + sync.** `lib/db.ts` (expo-sqlite) holds a local `activities` table with a `synced` outbox flag; `lib/activities.ts` writes locally first and pushes pending rows to `POST /v1/activities`. **The activity ID is generated client-side** — that's the load-bearing decision, since it's what makes a retried sync idempotent against the backend's `ON CONFLICT (id) DO NOTHING`. Rows are kept after syncing rather than deleted, so the device keeps its own history independent of the network. Sync is manual + opportunistic-on-log; no background sync yet.
+
+**Phase 4 — web display.** An activities panel on the dashboard consuming `GET /v1/activities`, with fixed-locale UTC timestamps (the same SSR-vs-browser hydration trap the admin console hit).
+
+**Bug found by real end-to-end testing, not by any check suite:** the mobile test account had logged three activities but never completed onboarding, so it had no `profiles` row — and `ListUsers` started `FROM profiles`, making it **completely invisible in admin user lookup**. A user with data but no profile is precisely who an admin is most likely hunting for during support. Fixed to `UNION` user IDs from both tables (`LEFT JOIN` for the display name, which is now legitimately null for such users), with a named regression test. This only showed up because the verification used a genuinely different account than the seeded one.
+
+**Verified end-to-end on a real iOS Simulator, not by proxy** — the whole point of the exercise:
+- Signed in through the real 2FA flow.
+- Took the API down, logged "Logged while offline" → saved locally as **pending** with an explicit "Could not connect to the server" message, no false success.
+- Confirmed the row in the Simulator's actual `formspan.db` with `synced = 0`.
+- Brought the API back, hit Sync now → "Synced 1.", row flipped to `synced = 1`.
+- The same client-generated ID (`1b15201f…`) is in Postgres, stamped `request_id=36a2b0cabecfcadf`.
+- The web dashboard lists it; admin user lookup shows the user (3 activities) and the detail view shows that same `request_id`.
+- Grepping the live API log for `36a2b0cabecfcadf` returns the exact `POST /v1/activities` line — `200`, `46ms`. Full chain: phone SQLite → API → Postgres → web → admin → log line.
+- The authorization deny path also proved itself incidentally: signing into admin as the non-allowlisted mobile account produced the "Not authorized" screen naming the ID, before that ID was added to `ADMIN_USER_IDS`.
+
+**Three blocking issues found by `frontend-reviewer` on this change, all fixed before the PR** — and all things the check suite passed straight through:
+1. **IDOR in the backend's idempotency path.** Activity IDs are client-generated, and `Create`'s conflict fallback looked the row up by ID *unscoped* — so any authenticated caller could POST a guessed/replayed ID and receive another user's activity (`user_id`, `notes`, timestamps) with a `200`. A collision also silently discarded the second user's activity while telling their client it synced. Fixed by scoping the fallback to the caller and returning `409 already_exists` on someone else's ID, with a named regression test seeding a victim row and asserting an attacker gets neither the row nor a success.
+2. **Unscoped local outbox.** The device's SQLite `activities` table had no `user_id`, and sign-out didn't clear it — so on a shared device, user A's pending rows would sync **under user B's token** (permanent, since idempotency prevents correction), and B would see A's history. Fixed by adding `user_id`, stamping it from Clerk at insert, and filtering every read/sync by the active user. Pre-existing dev rows are dropped rather than mis-attributed.
+3. **Silent local-database failures.** `onLog`/`onSync`/`refresh` had no error handling; a failed local read rendered as **"No activities yet."** — a failure disguised as a legitimate empty state, on an app whose entire promise is that the local write survived. Now surfaced. This fix immediately proved itself: re-testing showed a real `no such column: user_id` migration-ordering bug (the `user_id` index was created before the column check) that would otherwise have been invisible.
+
+Also hardened from the same review: activity IDs moved from `Math.random()` hex to `expo-crypto`'s `randomUUID()` (the reasoning in `lib/trace.ts` — "correlation IDs, not secrets" — doesn't transfer to a value the server treats as an idempotency key); the session token is now fetched per row rather than once per sync run, since Clerk tokens are short-lived and a long backlog would start failing `401` partway; permanent 4xx rejections are distinguished from transient failures so a poison row can't retry forever; and accessibility fixes (accessible names on busy buttons, labelled inputs, larger sign-out target, contrast-corrected placeholders).
+
+Deferred with reasons rather than silently: no `FlatList` virtualisation yet (the list is small), no fetch cancellation on the web panel (matches the existing `MePanel` pattern — fix both or neither), and Expo web target unverified for SecureStore/SQLite.
+
+Also resolved: pnpm required explicit `allowBuilds` decisions for five new transitive postinstalls (`@clerk/shared`, `browser-tabs-lock`, `bufferutil`, `core-js`, `utf-8-validate`) — all set to `false` with a comment on why none are needed under React Native.
+
 ---
 
 ## Open items / known gaps as of this entry
@@ -254,5 +291,6 @@ Both are read-only diagnostics that report `[blocking]` vs `[suggestion]` findin
 - `apps/web`'s current visual style predates the shared hi-fi design system (Barlow/Barlow Condensed, the light palette used in `apps/admin`) and doesn't yet follow it — reconciling that is unstarted.
 - Structured logging + request/trace IDs exist in the API (`backend/internal/platform/httplog`), and `apps/web`/`apps/mobile` now propagate a `traceparent` on their real backend calls. `apps/admin` still doesn't — it has no backend calls of any kind yet, not a tracing gap specifically.
 - Feature flags exist (`GET /v1/flags`, `internal/modules/featureflag`) but are read-only — no write endpoint or admin-console screen yet (real backend admin authorization now exists, see below, so this is no longer the blocker it was). No frontend app fetches or gates on one yet.
-- First end-to-end vertical slice: **Phase 1 (backend) and Phase 5 (admin real data) are done** — `internal/modules/activity`, `RequireAdmin`, and an admin console running entirely on real data with verified log tracing. **Phases 2–4 remain**: mobile has no auth at all yet (`apps/mobile`), so nothing can be logged offline or synced from a phone; `apps/web`'s dashboard doesn't display activities yet. Until those land, the only way to create an activity is a direct API call.
+- First end-to-end vertical slice: **complete** — all five phases done and verified together on a real Simulator (offline log → sync → Postgres → web → admin → log grep). Remaining gaps within it, all deliberate: mobile sync is manual/on-log with **no background sync**; there's **no conflict resolution** (activities are append-only); only one activity `kind` is loggable from the UI; and there's still no in-app log viewer (tracing is by grepping the real log stream for a `request_id`).
+- Mobile sign-in covers email+password plus TOTP/SMS/email-code/backup second factors, but has **no sign-up, OAuth, or password reset** — a user must already exist. Email-code 2FA needed a cast around Clerk's own typings, which don't list it among second-factor params; worth revisiting when `@clerk/clerk-expo` updates.
 - The new `backend-module-scaffolder` agent and `/new-module` skill are still unverified in practice — the feature-flags module was scaffolded by hand instead, since its shape (global, ownerless, read-only) didn't fit the agent's per-user-CRUD template. No module has gone through the agent for real yet (the `profile` module it's modeled on predates it) — worth checking it actually produces correct output the first time it's used for a module that *does* fit the template (e.g. a future `goals` module).
