@@ -202,6 +202,42 @@ Domain: operator-controlled, global on/off switches — distinct from the profil
 
 ---
 
+## Theming (`apps/web` light + dark, `apps/mobile` dark-only)
+
+**Web**
+- Loads **light** by default on a browser with no stored preference.
+- The rail toggle switches to dark and back; the choice survives a reload and applies to every route.
+- **No flash of the wrong theme on navigation.** A dark-mode user must never see a white frame — the theme is applied by a blocking inline script before first paint, not after hydration.
+- Storage being unavailable (private mode) must not break the toggle; it just stops persisting.
+- Solid buttons stay legible in both: lime fill only works against dark, so light uses navy with a lime label.
+
+**Mobile**
+- Dark in every case, regardless of the OS appearance setting — the palette exists in one direction only, so following the OS would render a half-styled app on a light phone.
+- **No layout container may paint the page background.** Text inside a card sits directly on the card; a nested `View` stamping the page colour over its parent shows as a darker box behind every row, which is what happened before `Themed.View` stopped painting by default.
+- The navigator supplies the screen, header and back-chevron colours from the VOLA palette rather than React Navigation's defaults.
+
+---
+
+## Workout authoring on web (`/dashboard/workouts`)
+
+**Happy path**
+- Create a workout from the list; it goes straight into the editor, since creating a template is never the goal and filling it is.
+- The catalog pane is **always visible** beside the template — adding eight exercises is eight clicks with no modal cycle.
+- Targets are edited inline in each row, with the fields decided by the exercise's `load_type`.
+- Reorder by dragging, or with the per-row arrow buttons.
+- ⌘/Ctrl-S saves; `/` focuses catalog search; Escape closes the create dialog.
+
+**Edge cases & errors**
+- Save is disabled unless something actually changed — an always-live Save trains people to ignore it.
+- Leaving the page with unsaved edits warns before unload.
+- A workout you don't own (shared, or a VOLA template) renders read-only with an explicit banner; the backend remains the boundary.
+- The catalog pane scrolls independently, so the template beside it never moves.
+
+**Not yet covered**
+- No rename or visibility change after creation. No logging a session against a template.
+
+---
+
 ## Workout templates UI (`apps/mobile` Workouts tab, `apps/web` /dashboard/workouts)
 
 Domain: building and browsing workout templates. Mobile is the build surface; web is the read/planning surface, per the mobile-first split in `docs/decisions/system-design.md`.
