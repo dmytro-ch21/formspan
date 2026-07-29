@@ -15,6 +15,7 @@ import (
 const (
 	CodeInvalidInput  = "invalid_input"
 	CodeUnauthorized  = "unauthorized"
+	CodeForbidden     = "forbidden"
 	CodeNotFound      = "not_found"
 	CodeAlreadyExists = "already_exists"
 	CodeInternal      = "internal"
