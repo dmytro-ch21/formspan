@@ -350,3 +350,49 @@ func TestHandler_MediaURLAssembly(t *testing.T) {
 		}
 	}
 }
+
+// Every catalog entry should end up with something renderable: its own
+// photos where they exist, the sport placeholder otherwise. The placeholder
+// must stay *distinguishable* though — if it read as real content, the fact
+// that most of the library has no photo of its own would be invisible, and
+// an invisible gap is a permanent one.
+func TestHandler_DefaultMediaFillsGapsButStaysLabelled(t *testing.T) {
+	h := NewHandler(nil, "https://media.example")
+
+	real := Media{Kind: MediaKindDemo, StorageKey: "exercises/back-squat/demo.webp"}
+	got := []Exercise{
+		{ID: "has-own", Sport: "strength", Media: []Media{real}},
+		{ID: "no-media-strength", Sport: "strength", Media: []Media{}},
+		{ID: "no-media-bjj", Sport: "bjj", Media: []Media{}},
+		{ID: "no-media-unknown-sport", Sport: "swimming", Media: []Media{}},
+	}
+	h.withMediaURLs(got)
+
+	if len(got[0].Media) != 1 || got[0].Media[0].IsDefault {
+		t.Errorf("an exercise with its own media had it replaced: %+v", got[0].Media)
+	}
+	for _, i := range []int{1, 2} {
+		if len(got[i].Media) == 0 {
+			t.Fatalf("%s got no placeholder", got[i].ID)
+		}
+		for _, m := range got[i].Media {
+			if !m.IsDefault {
+				t.Errorf("%s: placeholder not marked is_default", got[i].ID)
+			}
+			if m.URL == "" {
+				t.Errorf("%s: placeholder has no URL", got[i].ID)
+			}
+		}
+	}
+	// A sport with no placeholder must yield nothing, not a broken image.
+	if len(got[3].Media) != 0 {
+		t.Errorf("unknown sport got media from nowhere: %+v", got[3].Media)
+	}
+
+	// The shared map must not be mutated by URL assembly — otherwise the
+	// second request would see keys already prefixed with the base URL.
+	if defaultMedia["strength"][0].URL != "" {
+		t.Errorf("URL assembly wrote through into the shared defaults: %q",
+			defaultMedia["strength"][0].URL)
+	}
+}

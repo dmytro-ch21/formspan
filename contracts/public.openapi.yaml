@@ -296,7 +296,7 @@ components:
         per row. `url` is empty when no media origin is configured (local dev
         and CI) — clients should treat an empty url as "no image available"
         rather than attempting to load it.
-      required: [kind, storage_key, url, content_type, width, height, position]
+      required: [kind, storage_key, url, content_type, width, height, position, is_default]
       properties:
         kind:
           type: string
@@ -319,6 +319,14 @@ components:
           nullable: true
         position:
           type: integer
+        is_default:
+          type: boolean
+          description: >
+            True when this is a sport-level placeholder standing in for an
+            exercise with no photo of its own. Exposed rather than hidden so
+            clients can present it differently and so catalog media coverage
+            stays measurable — a placeholder indistinguishable from real
+            content makes the gap invisible and therefore permanent.
 
     Exercise:
       type: object
@@ -387,7 +395,8 @@ components:
           description: >
             Ordered semantically (thumbnail, demo, start, end, demo_video) rather
             than alphabetically, so a start/end pair reads in movement order.
-            Always an array, never null.
+            Always an array, never null. An exercise with no media of its own
+            gets its sport's placeholder, flagged `is_default`.
           items:
             $ref: "#/components/schemas/Media"
         created_at:

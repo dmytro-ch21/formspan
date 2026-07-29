@@ -296,6 +296,13 @@ Domain: the global, operator-authored exercise catalog — 524 entries imported 
 - **The deployed environment must actually run the seed.** Migration `000004` creates an empty table; without a seed step the API serves `{"exercises": []}` forever, and because that's a valid `200` no healthcheck or error surfaces it. Covered by `railway/api.toml`'s `preDeployCommand`.
 - The starter set covers all five `load_type` values, asserted by a test rather than left to drift as content is added.
 
+**Default media**
+- An exercise with no photo of its own returns its **sport's placeholder**, flagged `is_default: true` — so the grid never has holes.
+- The flag must survive to the client. A placeholder indistinguishable from a real photo makes the coverage gap invisible, and an invisible gap never gets filled — with 463 of 523 exercises lacking their own image, that distinction is most of the catalog.
+- An exercise that *does* have its own media never has it replaced.
+- A sport with no configured placeholder returns an empty array, not a broken image.
+- Placeholders are resolved at read time, not seeded — seeding would be ~1000 rows pointing at six files and would make "which exercises actually have a photo" unanswerable.
+
 **Auth & security**
 - No `Authorization` header → `401 unauthorized` on both routes. The catalog isn't secret, but it's app content rather than public marketing, so it sits behind auth like everything else under `/v1`.
 - Nothing here is user-scoped, so there's no IDOR surface: every authenticated caller is entitled to the identical response.
