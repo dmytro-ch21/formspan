@@ -12,7 +12,7 @@ This repo is a pnpm + Go monorepo, built incrementally, one verified piece at a 
 
 ## Current state
 
-- `backend/` — Go API (`cmd/api`), stdlib `net/http`. `/v1/healthz` (public), `/v1/me`, `/v1/profile` (CRUD), `/v1/flags` (read-only, server-controlled feature flags), `/v1/activities` (create/list — the unified activity envelope, idempotent create for offline sync), `/v1/admin/users` + `/v1/admin/users/{userID}/activities` (admin-only, gated by a Clerk-user-ID allowlist). Structured JSON logging with request-ID/W3C-trace-context correlation on every request. Real Postgres via `golang-migrate` migrations (`backend/migrations/`), both locally (`docker-compose.yml`) and on a real Railway `staging` Postgres.
+- `backend/` — Go API (`cmd/api`), stdlib `net/http`. `/v1/healthz` (public), `/v1/me`, `/v1/profile` (CRUD), `/v1/flags` (read-only, server-controlled feature flags), `/v1/activities` (create/list — the unified activity envelope, idempotent create for offline sync), `/v1/exercises` + `/v1/exercises/{id}` (the global exercise catalog — read-only reference content, seeded from version-controlled JSON via `cmd/seed`), `/v1/admin/users` + `/v1/admin/users/{userID}/activities` (admin-only, gated by a Clerk-user-ID allowlist). Structured JSON logging with request-ID/W3C-trace-context correlation on every request. Real Postgres via `golang-migrate` migrations (`backend/migrations/`), both locally (`docker-compose.yml`) and on a real Railway `staging` Postgres.
 - `apps/web/` — Next.js customer app: Clerk sign-in, `/dashboard` (sidebar shell, one destination so far) showing a live API health check and the caller's synced activities.
 - `apps/mobile/` — Expo/React Native app (Expo Router, Expo Go). Clerk sign-in (incl. two-factor), and a `Today` tab that logs activities **offline-first** into local SQLite and syncs them to the API when connectivity allows — retries are safe because the activity ID is client-generated and the API's create is idempotent.
 - `apps/admin/` — Next.js admin console, fully separate from `apps/web` (not athlete-facing). `User Lookup`/`User Detail` run on **real backend data** via the `/v1/admin/*` endpoints above, gated by an `ADMIN_USER_IDS` allowlist the backend independently enforces. Each activity shows the `request_id` of the sync request that created it, for grepping the API's structured logs.
@@ -24,6 +24,7 @@ This repo is a pnpm + Go monorepo, built incrementally, one verified piece at a 
 ```bash
 docker compose up -d              # local Postgres on :5432
 cd backend && go run ./cmd/migrate up
+cd backend && go run ./cmd/seed   # reference content (exercise catalog); idempotent
 
 pnpm run dev:api                  # backend API on :8080
 pnpm run dev:web                  # web app on :3000

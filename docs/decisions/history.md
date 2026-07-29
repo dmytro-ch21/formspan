@@ -297,6 +297,26 @@ Everything is SVG, deliberately. The rasters Expo needs (`apps/mobile/assets/ima
 **A real problem surfaced while verifying the rename**, unrelated to it: the backend Postgres integration tests skip silently unless `TEST_DATABASE_URL` is set, and that variable was never documented in `backend/.env.example`. So locally they had *always* skipped — `pnpm run test:api` printed `ok` for all three module packages while running no integration test at all. They did genuinely run in CI (which sets the var), so the tests were doing their job on every PR; what was worthless was the local signal, and any local claim of "tests pass" made before this. Now documented in `.env.example`, `README.md`, and `CLAUDE.md`, pointed at a separate `vola_test` database so a test run can never touch dev data, and confirmed: all six integration tests report `PASS`, not `SKIP`.
 
 
+## 2026-07-28 — Exercise catalog (first content module)
+
+The first module that is **content rather than user data**: operator-authored reference material shared by every user, with no owner. That difference drives most of the design — nothing in it is user-scoped, and it's read-only over HTTP.
+
+**Two fields carry the product intent, and they're the reason this isn't just a list of names:**
+
+- **`load_type`** (`weight_reps` | `reps` | `time` | `distance` | `distance_time`) tells a client *which inputs to render*. A back squat wants weight × reps, a plank wants a duration, a run wants distance and time. Carrying that as data instead of branching in client code is what keeps logging one screen rather than a form per exercise type — and it means adding an exercise never requires an app-store release. This is the "experience, not a logger" principle made concrete in a database column.
+- **`movement_pattern`** (squat / hinge / horizontal_push / vertical_pull / carry / core / lunge / locomotion / grappling) is the level the cross-sport rules can actually reason at. "Heavy hinge and squat work yesterday" is what makes hard sparring today worth flagging; muscle lists alone are too granular to write a readable rule against. `primary_muscles` is kept as well, but for display and filtering rather than as the rule input.
+
+**Content lives in version-controlled JSON**, embedded into the binary with `go:embed` and applied by a new `cmd/seed`. This is the CMS decision, made concretely: content stays diffable and code-reviewed, deploys are reproducible across environments, and no authoring UI has to exist for the catalog to grow. Reach for a real headless CMS when people who don't use git need to author — not before. `go:embed` rather than reading from disk so the binary is self-contained and seeding can't fail on a container that didn't copy a data directory.
+
+`seed` is a **separate binary from `migrate`**, deliberately. Migrations change schema and must run exactly once in strict order; seeding writes content and is meant to run repeatedly. Folding content into migrations would mean a new migration file every time a typo in an exercise description gets fixed. Every write is an upsert, so re-running is safe and `created_at` survives.
+
+Seeded with 12 starter exercises spanning all three sports and — deliberately — **every one of the five load types**, so no load type ships without a client having rendered it at least once. A test asserts that property directly, rather than trusting the content to stay balanced as it grows.
+
+**Media is deliberately absent.** Exercise images/video will live in object storage (Cloudflare R2 — S3-compatible so the Go SDK is unchanged, and its zero egress fee matches the access pattern: one file, every user, repeatedly, over mobile networks), with Postgres holding only a key and a CDN serving the bytes. But there are no bytes yet, so no bucket was provisioned to serve nothing. When it lands, the split that matters is **two buckets**: public immutable catalog media with content-hashed keys served straight from the CDN, and private user progress photos behind short-lived signed URLs — different policies, so a public-read rule can never widen to cover the private one.
+
+**Known gaps, all deliberate:** no user-authored custom exercises (when they arrive they get a nullable owner column on this table, not a parallel one, so the logger keeps reading from one place); no admin write path (edit the JSON and re-seed); no media; and no pagination — 12 rows today, and the filters are applied in SQL rather than in Go specifically so that adding pagination later doesn't require rewriting the query.
+
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.
