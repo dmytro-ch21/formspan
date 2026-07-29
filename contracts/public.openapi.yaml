@@ -182,7 +182,7 @@ components:
       properties:
         kind:
           type: string
-          enum: [start, end, demo_video, thumbnail]
+          enum: [thumbnail, demo, start, end, demo_video]
         storage_key:
           type: string
           example: exercises/barbell-back-squat/start.webp
@@ -260,7 +260,7 @@ components:
         media:
           type: array
           description: >
-            Ordered semantically (thumbnail, start, end, demo_video) rather
+            Ordered semantically (thumbnail, demo, start, end, demo_video) rather
             than alphabetically, so a start/end pair reads in movement order.
             Always an array, never null.
           items:

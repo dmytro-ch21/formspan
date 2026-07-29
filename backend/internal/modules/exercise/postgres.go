@@ -122,10 +122,11 @@ func (r *PostgresRepository) attachMedia(ctx context.Context, exercises []Exerci
 		ORDER BY exercise_id, position,
 			CASE kind
 				WHEN 'thumbnail'  THEN 0
-				WHEN 'start'      THEN 1
-				WHEN 'end'        THEN 2
-				WHEN 'demo_video' THEN 3
-				ELSE 4
+				WHEN 'demo'       THEN 1
+				WHEN 'start'      THEN 2
+				WHEN 'end'        THEN 3
+				WHEN 'demo_video' THEN 4
+				ELSE 5
 			END`, ids)
 	if err != nil {
 		return fmt.Errorf("exercise: list media: %w", err)

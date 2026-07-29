@@ -14,6 +14,11 @@ CREATE TABLE exercise_media (
 
     -- What this asset depicts, which is what lets a client pick the right
     -- one for a context (a list thumbnail vs. a full demo).
+    --
+    -- 'demo' is the single representative still, and is the common case —
+    -- start/end pairs are the exception, not the default. Modelling only
+    -- pairs would have forced every one-image exercise to pretend its photo
+    -- was a "start position".
     kind         TEXT        NOT NULL,
 
     -- Path within the bucket, e.g. exercises/barbell-back-squat/start.webp.
@@ -31,7 +36,7 @@ CREATE TABLE exercise_media (
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
 
     CONSTRAINT exercise_media_kind_valid CHECK (
-        kind IN ('start', 'end', 'demo_video', 'thumbnail')
+        kind IN ('thumbnail', 'demo', 'start', 'end', 'demo_video')
     ),
     -- One asset per (exercise, kind, position). Also the conflict target
     -- that makes seeding idempotent without needing a synthetic key.

@@ -249,6 +249,9 @@ func TestPostgresRepository_Media(t *testing.T) {
 	withMedia := make([]Exercise, len(seeded))
 	copy(withMedia, seeded)
 	for i := range withMedia {
+		withMedia[i].Media = nil
+	}
+	for i := range withMedia {
 		if withMedia[i].ID != "barbell-back-squat" {
 			continue
 		}
@@ -295,8 +298,15 @@ func TestPostgresRepository_Media(t *testing.T) {
 
 	// The JSON is authoritative for which assets exist, so removing media
 	// from the source must remove the rows — otherwise a deleted image keeps
-	// being served forever.
-	if err := repo.UpsertAll(ctx, seeded); err != nil {
+	// being served forever. Build the media-free variant explicitly rather
+	// than assuming the seed has none: it does now, and an assumption like
+	// that silently stops testing anything the moment content changes.
+	stripped := make([]Exercise, len(seeded))
+	copy(stripped, seeded)
+	for i := range stripped {
+		stripped[i].Media = nil
+	}
+	if err := repo.UpsertAll(ctx, stripped); err != nil {
 		t.Fatalf("re-upsert without media: %v", err)
 	}
 	pruned, err := repo.Get(ctx, "barbell-back-squat")

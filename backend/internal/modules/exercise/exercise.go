@@ -46,6 +46,7 @@ const (
 type MediaKind string
 
 const (
+	MediaKindDemo      MediaKind = "demo"       // single representative still (the common case)
 	MediaKindStart     MediaKind = "start"      // starting position
 	MediaKindEnd       MediaKind = "end"        // end position
 	MediaKindDemoVideo MediaKind = "demo_video" // short looping clip
