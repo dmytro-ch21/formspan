@@ -1,7 +1,10 @@
 import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
 
-const navItems = [{ href: "/dashboard", label: "Dashboard" }];
+const navItems = [
+  { href: "/dashboard", label: "Dashboard" },
+  { href: "/dashboard/workouts", label: "Workouts" },
+];
 
 export default function DashboardLayout({
   children,
