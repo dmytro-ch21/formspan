@@ -169,6 +169,74 @@ components:
           items:
             $ref: "#/components/schemas/Flag"
 
+    WorkoutItem:
+      type: object
+      description: >
+        One entry in a workout's ordered contents. Every target is optional
+        because which ones apply is decided by the exercise's own load_type —
+        a plank has no reps, a run has no weight. `position` is assigned from
+        array order on write, never trusted from the client.
+      required: [exercise_id, position, notes]
+      properties:
+        exercise_id: { type: string, example: barbell-bench-press }
+        position: { type: integer }
+        target_sets: { type: integer, nullable: true }
+        target_reps: { type: integer, nullable: true }
+        target_weight_kg: { type: number, nullable: true }
+        target_seconds: { type: integer, nullable: true }
+        target_distance_m: { type: integer, nullable: true }
+        notes: { type: string }
+
+    Workout:
+      type: object
+      description: >
+        A workout *template* — deliberately distinct from a logged session
+        (see Activity). Keeping them separate is what preserves the gap
+        between planned and actual, which is the adherence signal.
+        One discipline per workout; mixing is not supported.
+      required:
+        [id, owner_user_id, name, sport, goal, notes, visibility, items,
+         created_at, updated_at]
+      properties:
+        id:
+          type: string
+          description: Client-generated, so a workout can be created offline and synced idempotently.
+        owner_user_id:
+          type: string
+          nullable: true
+          description: Null for a VOLA-authored official template.
+        name: { type: string, example: Push Day A }
+        sport:
+          type: string
+          enum: [strength, running, bjj]
+        goal:
+          type: string
+          nullable: true
+          enum: [general, powerlifting, hypertrophy, endurance]
+          description: >
+            The training style, which is *not* a sport — powerlifting,
+            hypertrophy and endurance are all done with the same barbell
+            squat, so this belongs to the workout, not the exercise. Only
+            meaningful for strength.
+        notes: { type: string }
+        visibility:
+          type: string
+          enum: [private, public]
+          description: Defaults to private — sharing is always a deliberate act.
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/WorkoutItem" }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    WorkoutList:
+      type: object
+      required: [workouts]
+      properties:
+        workouts:
+          type: array
+          items: { $ref: "#/components/schemas/Workout" }
+
     Media:
       type: object
       description: >
@@ -592,6 +660,148 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /workouts:
+    get:
+      summary: List workouts visible to the caller
+      operationId: listWorkouts
+      parameters:
+        - name: scope
+          in: query
+          schema: { type: string, enum: [mine, shared] }
+          description: Omit for both. `shared` excludes the caller's own.
+        - name: sport
+          in: query
+          schema: { type: string, enum: [strength, running, bjj] }
+        - name: goal
+          in: query
+          schema: { type: string, enum: [general, powerlifting, hypertrophy, endurance] }
+      responses:
+        "200":
+          description: Workouts the caller owns and/or public ones, each with items.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WorkoutList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      summary: Create a workout
+      operationId: createWorkout
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, name, sport]
+              properties:
+                id: { type: string }
+                name: { type: string }
+                sport: { type: string, enum: [strength, running, bjj] }
+                goal: { type: string, enum: [general, powerlifting, hypertrophy, endurance] }
+                notes: { type: string }
+                visibility: { type: string, enum: [private, public] }
+                items:
+                  type: array
+                  items: { $ref: "#/components/schemas/WorkoutItem" }
+      responses:
+        "200":
+          description: >
+            The created workout. Idempotent on `id` for the same owner — a
+            retry returns the original rather than erroring.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Workout" }
+        "400":
+          description: >
+            Invalid input — including an item whose exercise belongs to a
+            different sport than the workout, since mixing is not supported.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409":
+          description: The id already belongs to a different user.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /workouts/{workoutID}:
+    get:
+      summary: Get one workout
+      operationId: getWorkout
+      parameters:
+        - name: workoutID
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The workout.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Workout" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      summary: Delete a workout (owner only)
+      operationId: deleteWorkout
+      parameters:
+        - name: workoutID
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: Deleted. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: Visible to you, but not yours to change.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /workouts/{workoutID}/items:
+    put:
+      summary: Replace a workout's ordered contents (owner only)
+      operationId: replaceWorkoutItems
+      description: >
+        Sends the whole list — the natural shape for both "add an exercise"
+        and "reorder". Positions are reassigned from array order.
+      parameters:
+        - name: workoutID
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  items: { $ref: "#/components/schemas/WorkoutItem" }
+      responses:
+        "200":
+          description: The updated workout.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Workout" }
+        "400":
+          description: Invalid input, including a sport mismatch.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: Visible to you, but not yours to change.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /admin/users:
     get:
