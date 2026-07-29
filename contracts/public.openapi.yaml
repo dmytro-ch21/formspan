@@ -169,6 +169,39 @@ components:
           items:
             $ref: "#/components/schemas/Flag"
 
+    Media:
+      type: object
+      description: >
+        One asset belonging to a catalog entry. `storage_key` is the path
+        within the bucket; `url` is assembled from it at read time using the
+        API's MEDIA_BASE_URL, so the bucket and CDN hostname are never stored
+        per row. `url` is empty when no media origin is configured (local dev
+        and CI) — clients should treat an empty url as "no image available"
+        rather than attempting to load it.
+      required: [kind, storage_key, url, content_type, width, height, position]
+      properties:
+        kind:
+          type: string
+          enum: [start, end, demo_video, thumbnail]
+        storage_key:
+          type: string
+          example: exercises/barbell-back-squat/start.webp
+        url:
+          type: string
+          example: https://media.vola.app/exercises/barbell-back-squat/start.webp
+        content_type:
+          type: string
+          example: image/webp
+        width:
+          type: integer
+          nullable: true
+          description: Intrinsic width, so a client can reserve layout space before load.
+        height:
+          type: integer
+          nullable: true
+        position:
+          type: integer
+
     Exercise:
       type: object
       description: >
@@ -179,7 +212,7 @@ components:
       required:
         [id, name, sport, movement_pattern, primary_muscles,
          secondary_muscles, equipment, load_type, is_unilateral,
-         instructions, created_at, updated_at]
+         instructions, media, created_at, updated_at]
       properties:
         id:
           type: string
@@ -224,6 +257,14 @@ components:
             Affects volume maths — 8 reps per side is not 8 reps.
         instructions:
           type: string
+        media:
+          type: array
+          description: >
+            Ordered semantically (thumbnail, start, end, demo_video) rather
+            than alphabetically, so a start/end pair reads in movement order.
+            Always an array, never null.
+          items:
+            $ref: "#/components/schemas/Media"
         created_at:
           type: string
           format: date-time

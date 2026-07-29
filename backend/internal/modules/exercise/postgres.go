@@ -82,17 +82,82 @@ func (r *PostgresRepository) List(ctx context.Context, f Filter) ([]Exercise, er
 	defer rows.Close()
 
 	exercises := []Exercise{}
+	ids := []string{}
 	for rows.Next() {
 		e, err := scanExercise(rows)
 		if err != nil {
 			return nil, fmt.Errorf("exercise: scan: %w", err)
 		}
 		exercises = append(exercises, *e)
+		ids = append(ids, e.ID)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("exercise: rows: %w", err)
 	}
+
+	if err := r.attachMedia(ctx, exercises, ids); err != nil {
+		return nil, err
+	}
 	return exercises, nil
+}
+
+// attachMedia fetches every listed exercise's media in a single query and
+// stitches it in memory. One query for the whole page rather than one per
+// exercise — the N+1 here would be invisible with 12 rows and painful with
+// 500.
+func (r *PostgresRepository) attachMedia(ctx context.Context, exercises []Exercise, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	// Ordered semantically, not alphabetically. `ORDER BY kind` would put
+	// "end" before "start", which is backwards for a movement and exactly
+	// the sort of thing that ships as "why is the finish position first?".
+	// `position` leads so an author can override; the CASE breaks ties
+	// deterministically when every row leaves position at its default.
+	rows, err := r.pool.Query(ctx, `
+		SELECT exercise_id, kind, storage_key, content_type, width, height, position
+		FROM exercise_media
+		WHERE exercise_id = ANY($1)
+		ORDER BY exercise_id, position,
+			CASE kind
+				WHEN 'thumbnail'  THEN 0
+				WHEN 'start'      THEN 1
+				WHEN 'end'        THEN 2
+				WHEN 'demo_video' THEN 3
+				ELSE 4
+			END`, ids)
+	if err != nil {
+		return fmt.Errorf("exercise: list media: %w", err)
+	}
+	defer rows.Close()
+
+	byExercise := make(map[string][]Media, len(ids))
+	for rows.Next() {
+		var (
+			exerciseID string
+			m          Media
+		)
+		if err := rows.Scan(&exerciseID, &m.Kind, &m.StorageKey, &m.ContentType,
+			&m.Width, &m.Height, &m.Position); err != nil {
+			return fmt.Errorf("exercise: scan media: %w", err)
+		}
+		byExercise[exerciseID] = append(byExercise[exerciseID], m)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("exercise: media rows: %w", err)
+	}
+
+	for i := range exercises {
+		// Always a non-nil slice so the JSON is `[]`, never `null` — a
+		// client shouldn't need to handle both for "no media".
+		if m := byExercise[exercises[i].ID]; m != nil {
+			exercises[i].Media = m
+		} else {
+			exercises[i].Media = []Media{}
+		}
+	}
+	return nil
 }
 
 func (r *PostgresRepository) Get(ctx context.Context, id string) (*Exercise, error) {
@@ -104,7 +169,12 @@ func (r *PostgresRepository) Get(ctx context.Context, id string) (*Exercise, err
 		}
 		return nil, fmt.Errorf("exercise: get: %w", err)
 	}
-	return e, nil
+
+	one := []Exercise{*e}
+	if err := r.attachMedia(ctx, one, []string{e.ID}); err != nil {
+		return nil, err
+	}
+	return &one[0], nil
 }
 
 // The trailing WHERE makes an unchanged row a genuine no-op rather than a
@@ -178,8 +248,95 @@ func (r *PostgresRepository) UpsertAll(ctx context.Context, exercises []Exercise
 		return fmt.Errorf("exercise: batch: %w", err)
 	}
 
+	if err := upsertMedia(ctx, tx, exercises); err != nil {
+		return err
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("exercise: commit: %w", err)
+	}
+	return nil
+}
+
+const mediaUpsertSQL = `
+	INSERT INTO exercise_media (
+		exercise_id, kind, storage_key, content_type, width, height, position
+	) VALUES ($1, $2, $3, $4, $5, $6, $7)
+	ON CONFLICT (exercise_id, kind, position) DO UPDATE SET
+		storage_key  = EXCLUDED.storage_key,
+		content_type = EXCLUDED.content_type,
+		width        = EXCLUDED.width,
+		height       = EXCLUDED.height,
+		updated_at   = now()
+	WHERE (
+		exercise_media.storage_key, exercise_media.content_type,
+		exercise_media.width, exercise_media.height
+	) IS DISTINCT FROM (
+		EXCLUDED.storage_key, EXCLUDED.content_type,
+		EXCLUDED.width, EXCLUDED.height
+	)`
+
+// upsertMedia syncs each seeded exercise's media, then touches the parent
+// exercise's updated_at for any that actually changed.
+//
+// That last step matters more than it looks: a client delta-syncing on
+// exercises.updated_at would otherwise never learn that an image was
+// swapped, because the exercise row itself didn't change. Media is part of
+// what the client caches, so it has to be part of what marks the row stale.
+//
+// Unlike the exercise upsert, this one *does* delete: media rows absent from
+// the JSON are removed, so the file is authoritative for which assets exist.
+// Safe here in a way it isn't for exercises themselves, since nothing
+// references a media row by ID.
+func upsertMedia(ctx context.Context, tx pgx.Tx, exercises []Exercise) error {
+	var (
+		exerciseIDs = make([]string, 0, len(exercises))
+		keepIDs     []string
+		keepKinds   []string
+		keepPos     []int
+	)
+	for _, e := range exercises {
+		exerciseIDs = append(exerciseIDs, e.ID)
+		for _, m := range e.Media {
+			keepIDs = append(keepIDs, e.ID)
+			keepKinds = append(keepKinds, string(m.Kind))
+			keepPos = append(keepPos, m.Position)
+		}
+	}
+
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM exercise_media
+		WHERE exercise_id = ANY($1)
+		  AND (exercise_id, kind, position) NOT IN (
+			SELECT * FROM unnest($2::text[], $3::text[], $4::int[])
+		  )`, exerciseIDs, keepIDs, keepKinds, keepPos); err != nil {
+		return fmt.Errorf("exercise: prune media: %w", err)
+	}
+
+	changed := map[string]bool{}
+	for _, e := range exercises {
+		for _, m := range e.Media {
+			tag, err := tx.Exec(ctx, mediaUpsertSQL,
+				e.ID, m.Kind, m.StorageKey, m.ContentType, m.Width, m.Height, m.Position)
+			if err != nil {
+				return fmt.Errorf("exercise: upsert media %q/%s: %w", e.ID, m.Kind, err)
+			}
+			if tag.RowsAffected() > 0 {
+				changed[e.ID] = true
+			}
+		}
+	}
+
+	if len(changed) == 0 {
+		return nil
+	}
+	touched := make([]string, 0, len(changed))
+	for id := range changed {
+		touched = append(touched, id)
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE exercises SET updated_at = now() WHERE id = ANY($1)`, touched); err != nil {
+		return fmt.Errorf("exercise: touch after media change: %w", err)
 	}
 	return nil
 }

@@ -51,7 +51,7 @@ func main() {
 	profileHandler := profile.NewHandler(profile.NewPostgresRepository(pool))
 	featureFlagHandler := featureflag.NewHandler(featureflag.NewPostgresRepository(pool))
 	activityHandler := activity.NewHandler(activity.NewPostgresRepository(pool))
-	exerciseHandler := exercise.NewHandler(exercise.NewPostgresRepository(pool))
+	exerciseHandler := exercise.NewHandler(exercise.NewPostgresRepository(pool), os.Getenv("MEDIA_BASE_URL"))
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/healthz", handleHealthz)

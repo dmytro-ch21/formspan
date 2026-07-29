@@ -327,6 +327,28 @@ Also from the review: seeding is now a single transaction (a half-applied catalo
 **Known gaps, all deliberate:** seeding never deletes — removing an entry from the JSON leaves its row, and renaming a slug creates a second row, so the JSON is authoritative for *content* but not yet for *membership* (hard deletion gets risky once activities reference exercise IDs, so an `archived_at` column is the likely answer); no `ETag`/`Cache-Control` on a payload that's byte-identical for every user and changes only on deploy, which is probably the highest-value next change for an offline-first client; no user-authored custom exercises (when they arrive they get a nullable owner column on this table, not a parallel one, so the logger keeps reading from one place); no admin write path (edit the JSON and re-seed); no media; and no pagination — 12 rows today, and the filters are applied in SQL rather than in Go specifically so that adding pagination later doesn't require rewriting the query.
 
 
+## 2026-07-28 — Exercise media on Cloudflare R2
+
+R2 bucket created and first images uploaded, so the media half of the catalog is now wired.
+
+**Postgres stores a key, never a URL and never bytes.** Bytes in Postgres would bloat every backup and WAL segment and couldn't be CDN-cached. A baked-in absolute URL is subtler but just as bad: it pins the bucket and CDN hostname into the data, so moving either becomes a data migration. Instead each row holds a `storage_key` (`exercises/{id}/{kind}.webp`) and the API joins it onto `MEDIA_BASE_URL` at read time — moving buckets or putting a different CDN in front is then an env-var change.
+
+`MEDIA_BASE_URL` being **unset is a supported state, not a misconfiguration**: local dev and CI have no bucket. Media then reports an empty URL rather than a broken one, and clients treat empty as "no image" instead of trying to load it.
+
+**A separate `exercise_media` table**, not columns on `exercises` — one exercise has several assets (start position, end position, later a demo clip) and that set should grow without a schema change. `width`/`height` are stored so a client can reserve layout space before the image loads instead of reflowing the list as each one arrives.
+
+**Two non-obvious things this surfaced:**
+
+- **A media change has to mark the parent exercise stale.** A client delta-syncing on `exercises.updated_at` would otherwise never learn that an image was swapped, because the exercise row itself didn't change — media is part of what the client caches, so it has to be part of what marks the row stale. The seed now touches the parent's `updated_at` for any exercise whose media actually changed (and only those, preserving the value-idempotency established in the previous entry).
+- **`ORDER BY kind` is alphabetical, which puts `end` before `start`** — backwards for a movement, and exactly the sort of thing that ships as "why is the finish position showing first?". Caught by a test. Media is now ordered by `position` first, with an explicit semantic `CASE` (thumbnail → start → end → demo_video) breaking ties deterministically when position is left at its default.
+
+Unlike the exercise upsert, the media writer **does delete**: rows absent from the seed JSON are pruned, so the file is authoritative for which assets exist. Safe here in a way it isn't for exercises themselves, since nothing references a media row by ID — a deleted image that kept being served would be a worse failure than a stale row.
+
+`List` and `Get` both fetch media in **one query for the whole page** rather than one per exercise. The N+1 would be invisible at 12 rows and painful at 500.
+
+**Still open:** the two-bucket split (public immutable catalog media vs. private progress photos behind signed URLs) exists as a decision but only the public half is real, since no user-uploaded media exists yet. No content-hash in keys yet, so `Cache-Control: immutable` isn't safe until keys are versioned — worth doing before the catalog is public. And there's still no `ETag` on `/v1/exercises` itself.
+
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.
