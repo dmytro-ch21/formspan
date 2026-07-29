@@ -3,8 +3,11 @@ name: CI
 on:
   push:
     branches: [main]
+  # Deliberately unfiltered by base branch. It used to be `branches: [main]`,
+  # which silently gave **stacked PRs no CI at all** — a PR based on another
+  # feature branch matched nothing and ran zero checks, while still showing a
+  # clean "no checks failed" state that reads exactly like passing.
   pull_request:
-    branches: [main]
 
 jobs:
   backend:
