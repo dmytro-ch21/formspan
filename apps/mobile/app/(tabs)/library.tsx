@@ -11,6 +11,20 @@ import {
 } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
+
+// Abort reasons, so a superseded request (silent) and a timeout (a real
+// error the user must see) don't both collapse into `signal.aborted`.
+const SUPERSEDED = 'superseded';
+const TIMED_OUT = 'timed-out';
+
+function describeError(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  // React Native's fetch says "Network request failed", which tells a user
+  // nothing actionable.
+  if (/network request failed/i.test(msg)) return "You're offline.";
+  if (/\(401\)/.test(msg)) return 'Your session expired. Sign in again.';
+  return msg;
+}
 import { fetchExercises, pickImage, type Exercise } from '@/lib/exercises';
 
 const SPORTS = [
@@ -36,6 +50,13 @@ export default function LibraryScreen() {
   const [sport, setSport] = useState<string>('');
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
+  // "Have we ever successfully loaded?" — distinct from "are we loading now".
+  // Without it, a retry after a failure renders "No exercises yet" while the
+  // replacement request is in flight: error cleared, loading false (all
+  // automatic loads are silent), list still empty. That's a failure
+  // disguised as a legitimate empty state, which the functional-scenarios
+  // doc names as forbidden.
+  const [everLoaded, setEverLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,9 +67,14 @@ export default function LibraryScreen() {
 
   const load = useCallback(
     async (opts: { silent?: boolean } = {}) => {
-      abortRef.current?.abort();
+      abortRef.current?.abort(SUPERSEDED);
       const controller = new AbortController();
       abortRef.current = controller;
+
+      // Without a deadline the initial spinner can spin forever on a captive
+      // or dead network — and the RefreshControl isn't mounted in the
+      // spinner branch, so there'd be no way to recover.
+      const timeout = setTimeout(() => controller.abort(TIMED_OUT), 10_000);
 
       if (!opts.silent) setLoading(true);
       setError(null);
@@ -58,14 +84,25 @@ export default function LibraryScreen() {
           { sport: sport || undefined, q: query.trim() || undefined },
           controller.signal,
         );
-        if (!controller.signal.aborted) setExercises(list);
-      } catch (err) {
-        // An abort is us superseding our own request, not a failure — showing
-        // an error for it would make fast typing look broken.
-        if (controller.signal.aborted) return;
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
         if (!controller.signal.aborted) {
+          setExercises(list);
+          setEverLoaded(true);
+        }
+      } catch (err) {
+        // Superseding our own request is not a failure — showing an error
+        // for it would make fast typing look broken. A timeout is, though,
+        // so the two aborts have to be distinguishable rather than lumped
+        // together under `signal.aborted`.
+        if (controller.signal.reason === SUPERSEDED) return;
+        setError(
+          controller.signal.reason === TIMED_OUT
+            ? "Couldn't reach the server. Pull down to try again."
+            : describeError(err),
+        );
+        setEverLoaded(true); // so the empty state stops claiming to be authoritative
+      } finally {
+        clearTimeout(timeout);
+        if (controller.signal.reason !== SUPERSEDED) {
           setLoading(false);
           setRefreshing(false);
         }
@@ -80,7 +117,7 @@ export default function LibraryScreen() {
     return () => clearTimeout(t);
   }, [load]);
 
-  useEffect(() => () => abortRef.current?.abort(), []);
+  useEffect(() => () => abortRef.current?.abort(SUPERSEDED), []);
 
   const isFiltered = query.trim() !== '' || sport !== '';
 
@@ -97,6 +134,9 @@ export default function LibraryScreen() {
           autoCapitalize="none"
           autoCorrect={false}
           returnKeyType="search"
+          // The API rejects q over 100 chars; stop it here rather than
+          // spending a round trip to be told off.
+          maxLength={100}
           testID="library-search"
         />
         <View style={styles.chips}>
@@ -120,12 +160,12 @@ export default function LibraryScreen() {
       </View>
 
       {error && (
-        <Text style={styles.error} testID="library-error">
+        <Text style={styles.error} accessibilityLiveRegion="polite" testID="library-error">
           {error}
         </Text>
       )}
 
-      {loading && exercises.length === 0 ? (
+      {loading && !everLoaded && exercises.length === 0 ? (
         <ActivityIndicator style={styles.loader} testID="library-loading" />
       ) : (
         <FlatList
@@ -144,11 +184,11 @@ export default function LibraryScreen() {
             />
           }
           ListEmptyComponent={
-            error ? null : (
+            // Only claim the catalog is empty once we've actually seen a
+            // successful response. Before that, silence beats a wrong answer.
+            error || !everLoaded ? null : (
               <Text style={styles.muted} testID="library-empty">
-                {isFiltered
-                  ? 'No exercises match this search.'
-                  : 'No exercises yet.'}
+                {isFiltered ? 'No exercises match this filter.' : 'No exercises yet.'}
               </Text>
             )
           }
@@ -169,6 +209,11 @@ export default function LibraryScreen() {
                     // Immutable keys, so caching hard is free and correct.
                     cachePolicy="memory-disk"
                     transition={150}
+                    // Decorative on web too: expo-image's web renderer maps
+                    // accessibilityLabel to alt and ignores `accessible`, so
+                    // without this the <img> ships with no alt at all and
+                    // screen readers read out the URL filename.
+                    alt=""
                     // Decorative here — the name beside it already conveys
                     // the exercise, so announcing it twice adds noise.
                     accessible={false}
@@ -233,6 +278,7 @@ const styles = StyleSheet.create({
   rowBody: { flex: 1, gap: 3 },
   name: { fontSize: 16, fontWeight: '600' },
   meta: { fontSize: 13, color: '#6b7280', textTransform: 'capitalize' },
-  muted: { color: '#8a9099', fontSize: 13 },
+  // #8a9099 was ~3.2:1 on white — below WCAG AA's 4.5:1 for 13pt text.
+  muted: { color: '#6b7280', fontSize: 13 },
   error: { color: 'crimson', fontSize: 14, paddingHorizontal: 16, paddingTop: 10 },
 });

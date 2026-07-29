@@ -7,8 +7,35 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// translatePgError converts constraint violations into domain errors, so a
+// bad request reaches the client as 400 rather than 500. Without it a
+// target_sets of 0 trips the CHECK and surfaces as an internal error, which
+// is both a lie and a contract violation.
+//
+// Deliberately does NOT include pgErr.Message in the returned error: the
+// handler surfaces ErrInvalidInput text to the client, and Postgres messages
+// name constraints, columns, and sometimes values.
+func translatePgError(err error) error {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return err
+	}
+	switch pgErr.Code {
+	case "23514": // check_violation
+		return fmt.Errorf("%w: a target value is out of range", ErrInvalidInput)
+	case "22003": // numeric_value_out_of_range
+		return fmt.Errorf("%w: a target value is too large", ErrInvalidInput)
+	case "23503": // foreign_key_violation
+		return fmt.Errorf("%w: unknown exercise", ErrInvalidInput)
+	case "23505": // unique_violation
+		return ErrAlreadyExists
+	}
+	return err
+}
 
 type PostgresRepository struct {
 	pool *pgxpool.Pool
@@ -62,7 +89,7 @@ func (r *PostgresRepository) List(ctx context.Context, userID string, f Filter) 
 	}
 
 	rows, err := r.pool.Query(ctx, `SELECT `+workoutColumns+` FROM workouts WHERE `+
-		strings.Join(where, " AND ")+` ORDER BY name`, args...)
+		strings.Join(where, " AND ")+` ORDER BY name, id`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("workout: list: %w", err)
 	}
@@ -210,6 +237,9 @@ func insertItems(ctx context.Context, tx pgx.Tx, workoutID string, items []Item)
 	for range items {
 		if _, err := results.Exec(); err != nil {
 			results.Close() //nolint:errcheck // returning the more useful error
+			if t := translatePgError(err); !errors.Is(t, err) {
+				return t
+			}
 			return fmt.Errorf("workout: insert item: %w", err)
 		}
 	}
@@ -270,30 +300,48 @@ func (r *PostgresRepository) Create(ctx context.Context, in NewWorkout) (*Workou
 	return r.Get(ctx, in.OwnerUserID, in.ID)
 }
 
-// requireOwner resolves a workout for writing. Distinguishes "not visible"
-// (ErrNotFound) from "visible but not yours" (ErrForbidden) — safe here
-// because reaching the second case already means the caller can read it.
+// requireOwner resolves a workout for writing.
+//
+// ErrForbidden is reserved for rows the caller can actually *see*; anything
+// else is ErrNotFound. That distinction is the whole point: an earlier
+// version selected only owner and sport, so writing to a stranger's PRIVATE
+// workout returned 403 while a nonexistent ID returned 404 — and that pair
+// of answers confirms the ID exists. Since IDs are client-generated and
+// therefore often guessable ("push-day-a") rather than random, that made the
+// write paths a practical enumeration oracle for private workouts, undoing
+// the guarantee Get already upheld.
+//
+// FOR UPDATE locks the row for the transaction, so two concurrent
+// ReplaceItems calls on one workout serialise instead of racing into a
+// (workout_id, position) unique violation — a real case here, given the
+// offline sync model retries.
 func requireOwner(ctx context.Context, tx pgx.Tx, userID, workoutID string) (Sport, error) {
 	var (
-		owner *string
-		sport Sport
+		owner      *string
+		sport      Sport
+		visibility Visibility
 	)
 	err := tx.QueryRow(ctx,
-		`SELECT owner_user_id, sport FROM workouts WHERE id = $1`, workoutID).Scan(&owner, &sport)
+		`SELECT owner_user_id, sport, visibility FROM workouts WHERE id = $1 FOR UPDATE`,
+		workoutID).Scan(&owner, &sport, &visibility)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", ErrNotFound
 		}
 		return "", fmt.Errorf("workout: load for write: %w", err)
 	}
-	if owner == nil {
-		// Official templates are read-only over the API — they're seeded.
-		return "", ErrForbidden
+
+	isOwner := owner != nil && *owner == userID
+	if isOwner {
+		return sport, nil
 	}
-	if *owner != userID {
-		return "", ErrForbidden
+	if visibility != VisibilityPublic {
+		// Not visible to this caller — indistinguishable from missing.
+		return "", ErrNotFound
 	}
-	return sport, nil
+	// Visible but not theirs. Official templates (nil owner) are always
+	// public per the schema CHECK, so they land here: read-only, as intended.
+	return "", ErrForbidden
 }
 
 func (r *PostgresRepository) ReplaceItems(ctx context.Context, userID, workoutID string, items []Item) (*Workout, error) {

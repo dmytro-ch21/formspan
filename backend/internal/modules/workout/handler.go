@@ -14,6 +14,11 @@ type Handler struct{ repo Repository }
 
 func NewHandler(repo Repository) *Handler { return &Handler{repo: repo} }
 
+// maxItems bounds a workout's length. No real session comes close, so
+// anything longer is a mistake or an attempt to make the database work for
+// nothing — each item is a statement in a batch.
+const maxItems = 200
+
 // writeErr maps domain errors to the API's error contract in one place, so
 // every handler below reports the same situation the same way.
 func writeErr(w http.ResponseWriter, r *http.Request, err error) {
@@ -42,7 +47,26 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
 	q := r.URL.Query()
 
+	// Reject unknown enum values rather than silently returning []. An
+	// unrecognised ?scope= used to fall through to "everything visible",
+	// so a typo looked like it worked.
 	scope := q.Get("scope")
+	if scope != "" && scope != "mine" && scope != "shared" {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"scope must be mine or shared")
+		return
+	}
+	if s := q.Get("sport"); s != "" && !ValidSport(Sport(s)) {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"sport must be one of: strength, running, bjj")
+		return
+	}
+	if g := q.Get("goal"); g != "" && !ValidGoal(Goal(g)) {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"goal must be one of: general, powerlifting, hypertrophy, endurance")
+		return
+	}
+
 	f := Filter{
 		Sport:  Sport(q.Get("sport")),
 		Goal:   Goal(q.Get("goal")),
@@ -84,6 +108,10 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	var req createRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
+		return
+	}
+	if len(req.Items) > maxItems {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "too many items")
 		return
 	}
 	if req.ID == "" || req.Name == "" {
@@ -140,6 +168,10 @@ func (h *Handler) ReplaceItems(w http.ResponseWriter, r *http.Request) {
 	var req replaceItemsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
+		return
+	}
+	if len(req.Items) > maxItems {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "too many items")
 		return
 	}
 	for _, it := range req.Items {

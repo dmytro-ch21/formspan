@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/database"
@@ -246,5 +247,82 @@ func TestReplaceItems_Reorders(t *testing.T) {
 	}
 	if got.Items[0].ExerciseID != "barbell-overhead-press" {
 		t.Errorf("order not applied: %+v", got.Items)
+	}
+}
+
+// A stranger must not be able to tell a private workout apart from a
+// nonexistent one on ANY path — reads and writes alike.
+//
+// The original requireOwner selected only owner and sport, so writing to a
+// stranger's private workout returned ErrForbidden while a missing ID
+// returned ErrNotFound. That pair of answers confirms the ID exists, and
+// since IDs are client-generated they're often guessable ("push-day-a")
+// rather than random — a practical enumeration oracle, not a theoretical
+// one. It undid on the write paths exactly the guarantee Get already upheld.
+//
+// The original tests missed it because their fixture was public — the one
+// case where ErrForbidden is the correct answer.
+func TestPrivateWorkout_IsNotAnExistenceOracle(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	cleanupWorkout(t, pool, "wk-oracle-1")
+
+	if _, err := repo.Create(ctx, strengthWorkout("wk-oracle-1", "user_victim", VisibilityPrivate)); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	if _, err := repo.ReplaceItems(ctx, "user_attacker", "wk-oracle-1", nil); !errors.Is(err, ErrNotFound) {
+		t.Errorf("ReplaceItems on a stranger's private workout: got %v, want ErrNotFound", err)
+	}
+	if err := repo.Delete(ctx, "user_attacker", "wk-oracle-1"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("Delete on a stranger's private workout: got %v, want ErrNotFound", err)
+	}
+
+	// Refusing must also mean not mutating.
+	victim, err := repo.Get(ctx, "user_victim", "wk-oracle-1")
+	if err != nil {
+		t.Fatalf("victim's workout gone: %v", err)
+	}
+	if len(victim.Items) != 2 {
+		t.Errorf("attacker mutated the victim's workout: %d items left", len(victim.Items))
+	}
+}
+
+// A *public* workout still returns ErrForbidden rather than ErrNotFound: the
+// caller can already read it, so there's nothing left to hide, and a 404
+// would be a lie that disguises a real permission problem as a missing row.
+func TestPublicWorkout_WriteIsForbiddenNotHidden(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	cleanupWorkout(t, pool, "wk-public-write-1")
+
+	if _, err := repo.Create(ctx, strengthWorkout("wk-public-write-1", "user_owner", VisibilityPublic)); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := repo.ReplaceItems(ctx, "user_stranger", "wk-public-write-1", nil); !errors.Is(err, ErrForbidden) {
+		t.Errorf("got %v, want ErrForbidden", err)
+	}
+}
+
+// A CHECK violation is bad client input, not an internal failure: it must
+// surface as invalid_input, and the message must not carry raw Postgres
+// text, which names constraints and sometimes values.
+func TestInvalidTarget_IsInvalidInputNotInternal(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	cleanupWorkout(t, pool, "wk-badtarget-1")
+
+	zero := 0
+	in := strengthWorkout("wk-badtarget-1", "user_a", VisibilityPrivate)
+	in.Items = []Item{{ExerciseID: "barbell-bench-press", TargetSets: &zero}}
+
+	_, err := repo.Create(ctx, in)
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("got %v, want ErrInvalidInput", err)
+	}
+	for _, leak := range []string{"workout_items_targets_positive", "SQLSTATE", "violates"} {
+		if strings.Contains(err.Error(), leak) {
+			t.Errorf("error leaks internal detail %q: %v", leak, err)
+		}
 	}
 }
