@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/dmytro-ch21/vola/backend/internal/modules/exercise"
+	"github.com/dmytro-ch21/vola/backend/internal/modules/technique"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/database"
 )
 
@@ -46,4 +47,10 @@ func main() {
 		log.Fatalf("seed: exercises: %v", err)
 	}
 	log.Printf("seed: exercises: %d upserted", n)
+
+	tn, err := technique.Seed(ctx, technique.NewPostgresRepository(pool))
+	if err != nil {
+		log.Fatalf("seed: techniques: %v", err)
+	}
+	log.Printf("seed: techniques: %d upserted", tn)
 }

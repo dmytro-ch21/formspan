@@ -13,6 +13,14 @@ import (
 // (see docker-compose.yml for local dev, or backend/.env.example) and skip
 // gracefully without it.
 
+// Named fixtures rather than inline IDs: the catalog is generated from a
+// spreadsheet now, so an exercise can be renamed by a content edit. One
+// place to update beats hunting string literals through the file.
+const (
+	seedFixtureID  = "back-squat"
+	mediaFixtureID = "bench-press"
+)
+
 func newTestRepo(t *testing.T) *PostgresRepository {
 	t.Helper()
 
@@ -105,7 +113,7 @@ func TestPostgresRepository_SeedIsIdempotent(t *testing.T) {
 		t.Fatalf("first seed: %v", err)
 	}
 
-	before, err := repo.Get(ctx, "barbell-back-squat")
+	before, err := repo.Get(ctx, seedFixtureID)
 	if err != nil {
 		t.Fatalf("get after first seed: %v", err)
 	}
@@ -120,7 +128,7 @@ func TestPostgresRepository_SeedIsIdempotent(t *testing.T) {
 		t.Errorf("seed count changed between runs: %d then %d", n1, n2)
 	}
 
-	after, err := repo.Get(ctx, "barbell-back-squat")
+	after, err := repo.Get(ctx, seedFixtureID)
 	if err != nil {
 		t.Fatalf("get after second seed: %v", err)
 	}
@@ -252,7 +260,7 @@ func TestPostgresRepository_Media(t *testing.T) {
 		withMedia[i].Media = nil
 	}
 	for i := range withMedia {
-		if withMedia[i].ID != "barbell-back-squat" {
+		if withMedia[i].ID != mediaFixtureID {
 			continue
 		}
 		withMedia[i].Media = []Media{
@@ -266,7 +274,7 @@ func TestPostgresRepository_Media(t *testing.T) {
 		t.Fatalf("upsert with media: %v", err)
 	}
 
-	got, err := repo.Get(ctx, "barbell-back-squat")
+	got, err := repo.Get(ctx, mediaFixtureID)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -288,7 +296,7 @@ func TestPostgresRepository_Media(t *testing.T) {
 	// A media change must mark the parent exercise stale. Without this a
 	// client delta-syncing on exercises.updated_at would never learn that an
 	// image was swapped, because the exercise row itself didn't change.
-	afterMedia, err := repo.Get(ctx, "barbell-back-squat")
+	afterMedia, err := repo.Get(ctx, mediaFixtureID)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -309,7 +317,7 @@ func TestPostgresRepository_Media(t *testing.T) {
 	if err := repo.UpsertAll(ctx, stripped); err != nil {
 		t.Fatalf("re-upsert without media: %v", err)
 	}
-	pruned, err := repo.Get(ctx, "barbell-back-squat")
+	pruned, err := repo.Get(ctx, mediaFixtureID)
 	if err != nil {
 		t.Fatalf("get after prune: %v", err)
 	}

@@ -238,9 +238,40 @@ Domain: user-owned workout *templates* — an ordered list of exercises with tar
 
 ---
 
+## BJJ technique library (`/v1/techniques`)
+
+Domain: the BJJ technique library — 450 entries with position, category, gi/no-gi, and the graph edges (`setup_from`, `common_counters`). Reference content, read-only, seeded from version-controlled JSON generated from the authored spreadsheet.
+
+**Happy path**
+- `GET /v1/techniques` returns the library ordered by position, then category, then name.
+- `?position=Guard - Bottom`, `?category=Submission`, `?q=armbar` each narrow it; all filter server-side.
+- `GET /v1/techniques/{id}` returns one entry with its full edge lists.
+
+**Edge cases & errors**
+- **`?gi=Gi Only` must also return techniques marked `Both`** — 304 of 450 are `Both`, so a filter that excluded them would hide most of the library rather than narrow it. Tested explicitly in both directions: `Both` entries appear, `No-Gi Only` ones don't.
+- An invalid `?gi=` value → `400`, rather than silently returning nothing.
+- LIKE metacharacters are literal: `?q=%` matches nothing.
+- `?q=` over 100 characters → `400`.
+- `GET /v1/techniques/{unknown}` → `404 not_found`.
+
+**Seeding**
+- Idempotent and value-idempotent: a re-seed with unchanged content leaves `updated_at` alone, so delta sync isn't defeated by a deploy.
+- Malformed content fails before any write: duplicate ID, missing name/category/position, or an unknown `gi_no_gi` (the one field with a DB CHECK behind it).
+- **A test asserts the library still carries graph edges** — if fewer than 90% of entries have `setup_from` or `common_counters`, the library has gone flat and the whole reason for a separate module from `exercises` has evaporated. That's the invariant worth guarding, not the row count.
+
+**Auth & security**
+- No `Authorization` header → `401`. Nothing here is user-scoped, so there's no IDOR surface — every authenticated caller gets an identical response.
+
+**Not yet covered / deferred**
+- Edges are name strings, not resolved references, so nothing validates that a named counter exists.
+- `workout_items` can't reference a technique yet, so BJJ workouts remain exercise-only.
+- No UI in any client.
+
+---
+
 ## Exercise catalog (`/v1/exercises`)
 
-Domain: the global, operator-authored exercise catalog — reference content shared by every user, with no owner. Read-only over HTTP; seeded from version-controlled JSON via `cmd/seed`.
+Domain: the global, operator-authored exercise catalog — 524 entries imported from the authored spreadsheet — reference content shared by every user, with no owner. Read-only over HTTP; seeded from version-controlled JSON via `cmd/seed`.
 
 **Happy path**
 - `GET /v1/exercises` with a valid token returns the whole catalog, ordered by sport then name.

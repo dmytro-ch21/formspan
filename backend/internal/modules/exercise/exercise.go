@@ -73,19 +73,22 @@ type Media struct {
 var ErrNotFound = errors.New("exercise: not found")
 
 type Exercise struct {
-	ID               string    `json:"id"` // stable slug, e.g. "barbell-back-squat"
-	Name             string    `json:"name"`
-	Sport            string    `json:"sport"`
-	MovementPattern  string    `json:"movement_pattern"`
-	PrimaryMuscles   []string  `json:"primary_muscles"`
-	SecondaryMuscles []string  `json:"secondary_muscles"`
-	Equipment        []string  `json:"equipment"`
-	LoadType         LoadType  `json:"load_type"`
-	IsUnilateral     bool      `json:"is_unilateral"`
-	Instructions     string    `json:"instructions"`
-	Media            []Media   `json:"media"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	ID              string `json:"id"` // stable slug, e.g. "barbell-back-squat"
+	Name            string `json:"name"`
+	Sport           string `json:"sport"`
+	MovementPattern string `json:"movement_pattern"`
+	// The source catalog's own, far more granular pattern (75 distinct
+	// values). Kept for display and filtering; rules read MovementPattern.
+	MovementPatternDetail string    `json:"movement_pattern_detail"`
+	PrimaryMuscles        []string  `json:"primary_muscles"`
+	SecondaryMuscles      []string  `json:"secondary_muscles"`
+	Equipment             []string  `json:"equipment"`
+	LoadType              LoadType  `json:"load_type"`
+	IsUnilateral          bool      `json:"is_unilateral"`
+	Instructions          string    `json:"instructions"`
+	Media                 []Media   `json:"media"`
+	CreatedAt             time.Time `json:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at"`
 }
 
 // Filter narrows a catalog listing. A zero Filter lists everything.

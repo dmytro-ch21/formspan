@@ -169,6 +169,56 @@ components:
           items:
             $ref: "#/components/schemas/Flag"
 
+    Technique:
+      type: object
+      description: >
+        One entry in the BJJ technique library. Deliberately not an Exercise:
+        a technique isn't measured (you never log "3 sets of armbar"), and it
+        lives in a graph — it comes from a position and is answered by
+        counters. Reference content, identical for every user.
+      required:
+        [id, name, aliases, category, position, position_detail, gi_no_gi,
+         typical_belt, description, setup_from, common_counters,
+         created_at, updated_at]
+      properties:
+        id: { type: string, example: armbar-from-closed-guard }
+        name: { type: string }
+        aliases:
+          type: array
+          items: { type: string }
+        category:
+          type: string
+          description: Submission, Sweep, Pass, Escape, Takedown, Control/Pin, Transition, Guard Retention, Other.
+          example: Submission
+        position:
+          type: string
+          description: Where it happens.
+          example: Guard - Bottom
+        position_detail: { type: string }
+        gi_no_gi:
+          type: string
+          enum: [Both, "Gi Only", "No-Gi Only"]
+        typical_belt: { type: string, example: White }
+        description: { type: string }
+        setup_from:
+          type: array
+          description: Graph edge — positions or techniques this is set up from.
+          items: { type: string }
+        common_counters:
+          type: array
+          description: Graph edge — what answers this technique.
+          items: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    TechniqueList:
+      type: object
+      required: [techniques]
+      properties:
+        techniques:
+          type: array
+          items: { $ref: "#/components/schemas/Technique" }
+
     WorkoutItem:
       type: object
       description: >
@@ -280,7 +330,7 @@ components:
       required:
         [id, name, sport, movement_pattern, primary_muscles,
          secondary_muscles, equipment, load_type, is_unilateral,
-         instructions, media, created_at, updated_at]
+         instructions, media, movement_pattern_detail, created_at, updated_at]
       properties:
         id:
           type: string
@@ -300,6 +350,13 @@ components:
             yesterday" is what makes hard sparring today worth flagging.
             Muscle lists alone are too granular to write rules against.
           example: squat
+        movement_pattern_detail:
+          type: string
+          description: >
+            The source catalog's own, far more granular pattern (75 distinct
+            values, e.g. "Scapular Elevation"). For display and filtering;
+            rules read `movement_pattern`.
+          example: Hip Adduction
         primary_muscles:
           type: array
           items: { type: string }
@@ -660,6 +717,60 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /techniques:
+    get:
+      summary: List the BJJ technique library
+      operationId: listTechniques
+      parameters:
+        - name: position
+          in: query
+          schema: { type: string }
+          example: Guard - Bottom
+        - name: category
+          in: query
+          schema: { type: string }
+          example: Submission
+        - name: gi
+          in: query
+          schema: { type: string, enum: [Both, "Gi Only", "No-Gi Only"] }
+          description: >
+            Asking for gi or no-gi also returns techniques marked `Both` —
+            a filter that excluded them would hide most of the library.
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 100 }
+          description: Case-insensitive substring of the name.
+      responses:
+        "200":
+          description: Matching techniques, ordered by position then category then name.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TechniqueList" }
+        "400":
+          description: Invalid filter value.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /techniques/{techniqueID}:
+    get:
+      summary: Get one technique
+      operationId: getTechnique
+      parameters:
+        - name: techniqueID
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The technique.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Technique" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /workouts:
     get:

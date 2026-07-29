@@ -47,6 +47,16 @@ func cleanupWorkout(t *testing.T, pool *pgxpool.Pool, id string) {
 	})
 }
 
+// Catalog IDs used as fixtures. Named rather than inlined because the
+// exercise catalog is generated from a spreadsheet now, so a content edit
+// can rename one — and the failure then shows up in five tests at once.
+const (
+	exBench    = "bench-press"
+	exOverhead = "overhead-press"
+	exSquat    = "back-squat"
+	exBJJ      = "bear-crawl-forward" // a bjj-sport entry, for the mismatch test
+)
+
 func strengthWorkout(id, owner string, vis Visibility) NewWorkout {
 	goal := GoalHypertrophy
 	sets, reps := 5, 5
@@ -54,8 +64,8 @@ func strengthWorkout(id, owner string, vis Visibility) NewWorkout {
 		ID: id, OwnerUserID: owner, Name: "Push Day A",
 		Sport: SportStrength, Goal: &goal, Visibility: vis,
 		Items: []Item{
-			{ExerciseID: "barbell-bench-press", TargetSets: &sets, TargetReps: &reps},
-			{ExerciseID: "barbell-overhead-press", TargetSets: &sets, TargetReps: &reps},
+			{ExerciseID: exBench, TargetSets: &sets, TargetReps: &reps},
+			{ExerciseID: exOverhead, TargetSets: &sets, TargetReps: &reps},
 		},
 	}
 }
@@ -74,7 +84,7 @@ func TestCreateAndGet(t *testing.T) {
 	}
 	// Position comes from array order, not the client — so the stored order
 	// always matches what was sent.
-	if wk.Items[0].ExerciseID != "barbell-bench-press" || wk.Items[0].Position != 0 {
+	if wk.Items[0].ExerciseID != exBench || wk.Items[0].Position != 0 {
 		t.Errorf("unexpected first item: %+v", wk.Items[0])
 	}
 	if wk.Items[1].Position != 1 {
@@ -134,7 +144,7 @@ func TestCreate_RejectsSportMismatch(t *testing.T) {
 	cleanupWorkout(t, pool, "wk-mixed-1")
 
 	in := strengthWorkout("wk-mixed-1", "user_a", VisibilityPrivate)
-	in.Items = append(in.Items, Item{ExerciseID: "bjj-gi-rounds"})
+	in.Items = append(in.Items, Item{ExerciseID: exBJJ})
 
 	if _, err := repo.Create(ctx, in); !errors.Is(err, ErrSportMismatch) {
 		t.Errorf("expected ErrSportMismatch, got %v", err)
@@ -205,7 +215,7 @@ func TestWrites_AreOwnerOnly(t *testing.T) {
 	}
 
 	_, err := repo.ReplaceItems(ctx, "user_stranger", "wk-owner-1",
-		[]Item{{ExerciseID: "barbell-back-squat"}})
+		[]Item{{ExerciseID: exSquat}})
 	if !errors.Is(err, ErrForbidden) {
 		t.Errorf("a stranger edited a public workout: %v", err)
 	}
@@ -215,11 +225,11 @@ func TestWrites_AreOwnerOnly(t *testing.T) {
 
 	// The owner can still do both.
 	updated, err := repo.ReplaceItems(ctx, "user_owner", "wk-owner-1",
-		[]Item{{ExerciseID: "barbell-back-squat"}})
+		[]Item{{ExerciseID: exSquat}})
 	if err != nil {
 		t.Fatalf("owner replace: %v", err)
 	}
-	if len(updated.Items) != 1 || updated.Items[0].ExerciseID != "barbell-back-squat" {
+	if len(updated.Items) != 1 || updated.Items[0].ExerciseID != exSquat {
 		t.Errorf("replace did not swap the list: %+v", updated.Items)
 	}
 	if err := repo.Delete(ctx, "user_owner", "wk-owner-1"); err != nil {
@@ -239,13 +249,13 @@ func TestReplaceItems_Reorders(t *testing.T) {
 	// Reordering must not trip the (workout_id, position) unique constraint —
 	// the reason items are replaced wholesale rather than diffed.
 	got, err := repo.ReplaceItems(ctx, "user_a", "wk-reorder-1", []Item{
-		{ExerciseID: "barbell-overhead-press"},
-		{ExerciseID: "barbell-bench-press"},
+		{ExerciseID: exOverhead},
+		{ExerciseID: exBench},
 	})
 	if err != nil {
 		t.Fatalf("reorder: %v", err)
 	}
-	if got.Items[0].ExerciseID != "barbell-overhead-press" {
+	if got.Items[0].ExerciseID != exOverhead {
 		t.Errorf("order not applied: %+v", got.Items)
 	}
 }
@@ -314,7 +324,7 @@ func TestInvalidTarget_IsInvalidInputNotInternal(t *testing.T) {
 
 	zero := 0
 	in := strengthWorkout("wk-badtarget-1", "user_a", VisibilityPrivate)
-	in.Items = []Item{{ExerciseID: "barbell-bench-press", TargetSets: &zero}}
+	in.Items = []Item{{ExerciseID: exBench, TargetSets: &zero}}
 
 	_, err := repo.Create(ctx, in)
 	if !errors.Is(err, ErrInvalidInput) {
