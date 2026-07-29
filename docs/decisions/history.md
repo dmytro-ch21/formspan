@@ -374,6 +374,24 @@ Items are replaced **wholesale** (`PUT /v1/workouts/{id}/items`) rather than dif
 **Not built yet:** no mobile UI (the API is complete but nothing consumes it), no logging a session *against* a template, no official seeded templates, and no duplicate-a-shared-workout-into-your-own action — which is the obvious next thing sharing implies.
 
 
+## 2026-07-29 — Mobile stack: RN now, Swift later, Android probably dropped
+
+**Decision:** stay on Expo/React Native for now, build out the foundation and get the interaction design right, then rebuild iOS in Swift — and probably abandon Android at that point.
+
+An intermediate option was considered and rejected: **RN for Android, Swift for iOS, in parallel.** That gets the costs of both and the benefits of neither — two codebases, which is the thing RN exists to avoid, while still carrying RN's constraints on Android. Worse for this product specifically, the offline sync layer is the highest-risk code in the app (outbox, client-generated idempotency keys, per-user scoping), and two independent implementations of an idempotency contract is how you get divergent bugs that surface on one platform months later in someone's real training history. The only thing genuinely shared between an RN Android app and a Swift iOS app is the OpenAPI contract, which already exists — so it would be two apps, not one app with two shells.
+
+**What this changes about how to build from here**, and it's the important part:
+
+React Native is now explicitly the **design vehicle, not the destination**. That shifts the cost/benefit of every mobile decision:
+
+- **Push logic into the backend wherever there's a choice.** Anything behind the API is stack-agnostic and survives the rewrite; anything in `apps/mobile` gets rewritten in Swift. This retroactively validates decisions already made — `load_type` driving which inputs a client renders, `movement_pattern` as the rule-reasoning level, the server assembling media URLs — all of that is carried by the API rather than by client code, so a Swift client inherits it for free.
+- **The offline sync protocol needs to exist as a written spec, not only as TypeScript.** Today it's implicit in `lib/activities.ts` + the backend's `ON CONFLICT` behaviour. Before the Swift rewrite it has to be documented as a contract (client-generated UUID as idempotency key, per-user scoping, retry semantics, which 4xx are permanent) so the second implementation can be faithful rather than reverse-engineered.
+- **Don't over-invest in RN visual polish.** The WHOOP-like feel — 60fps rings, gradients, heavy animation — is where RN is weakest and where SwiftUI is strongest. Building it twice is waste; building it once in RN to *learn the design* and once properly in Swift is the plan. So RN screens should be functionally complete and visually plain rather than laboriously polished.
+- **Do invest in the data model, API contract, and OpenAPI spec.** Those are permanent.
+
+**Open question deferred, not resolved:** whether to leave Expo Go for a custom dev client. HealthKit is load-bearing given wearables are recommended, and it doesn't work in Expo Go — but if the iOS app is going to be Swift anyway, prebuilding an RN app to reach HealthKit may be work that gets thrown away. The answer probably depends on whether HealthKit integration is needed to *validate the design* or only to ship.
+
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.
