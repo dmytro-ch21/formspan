@@ -101,6 +101,30 @@ Domain: Clerk auth (same instance as web/admin) with the session token in the OS
 
 ---
 
+## Exercise library screen (`apps/mobile`, Library tab)
+
+Domain: the mobile-facing view of the global catalog — browse, filter by sport, search by name, with images served from R2 via the API's assembled URLs.
+
+**Happy path**
+- The Library tab lists every catalog entry with its thumbnail, movement pattern, load type, and primary muscles.
+- Tapping a sport chip filters server-side; "All" clears it.
+- Typing in search filters by name, debounced so it doesn't fire per keystroke. Verified live on a Simulator: "press" narrowed to Bench Press and Overhead Press.
+- Images come from Cloudflare R2 and are disk-cached by `expo-image`, so a second visit doesn't re-download.
+
+**Edge cases & errors**
+- An exercise with no media shows an explicit placeholder, not a broken image or an empty gap.
+- `pickImage` falls back (thumbnail → demo → start) rather than showing nothing when the preferred kind is missing — an upscaled thumbnail beats an empty box.
+- A failed fetch shows an explicit error; it must never render as an empty catalog, which would read as "no exercises exist".
+- A filter matching nothing says "No exercises match this search", distinct from the never-loaded empty state.
+- Rapid typing must not show stale results: each request aborts the previous one, so a slow early response can't overwrite a newer one.
+- An aborted request is not an error — superseding our own request must not surface a failure message.
+
+**Not yet covered / deferred**
+- The catalog is fetched, not cached locally, so the Library needs a connection. Given the offline-first design this is a real gap — the catalog is exactly the kind of rarely-changing global content worth persisting on device.
+- No exercise detail screen yet: rows are pressable but don't navigate.
+
+---
+
 ## Web activities display (`apps/web`)
 
 **Happy path**
@@ -175,6 +199,42 @@ Domain: operator-controlled, global on/off switches — distinct from the profil
 - No write endpoint (`PATCH`/`POST`) and no admin-console screen to toggle flags — real backend admin authorization exists now (`RequireAdmin`, see below), so this is no longer blocked on that; just not built yet. Toggling today is direct SQL only.
 - No frontend app (web/mobile/admin) fetches or gates on any flag yet — this pass is backend-only, same scoping call as structured logging.
 - No per-user/cohort targeting or percentage rollout — add if a real use case shows up.
+
+---
+
+## Workout templates (`/v1/workouts`)
+
+Domain: user-owned workout *templates* — an ordered list of exercises with target sets/reps/loads. Distinct from a logged session (`/v1/activities`); keeping them separate is what preserves the planned-vs-actual gap. Shareable via `visibility`, with a nullable owner for VOLA-authored official templates. One discipline per workout.
+
+**Happy path**
+- `POST /v1/workouts` with `{id, name, sport, goal?, items[]}` creates it and returns it with items in the order sent.
+- `GET /v1/workouts` returns the caller's own plus every public one; `?scope=mine` / `?scope=shared` narrow.
+- `PUT /v1/workouts/{id}/items` replaces the whole ordered list — the shape both "add an exercise" and "reorder" take.
+- `DELETE /v1/workouts/{id}` removes it; items cascade.
+- Retrying `POST` with the same `id` as the same owner returns the original rather than erroring — offline creation must be safe to retry.
+
+**Auth & security — the properties that matter most here**
+- **A private workout is indistinguishable from a nonexistent one, on every path.** A stranger calling `GET`, `PUT .../items`, or `DELETE` gets `404 not_found`, never `403`. A 403-vs-404 split would confirm the ID exists, and since IDs are client-generated they're often guessable rather than random — that makes enumeration practical. Regression-tested (`TestPrivateWorkout_IsNotAnExistenceOracle`) because the original implementation had exactly this bug on the write paths while `GET` was correct.
+- **A *public* workout returns `403`, not `404`, on write** — the caller can already read it, so there's nothing to hide, and a 404 would disguise a permission problem as a missing row.
+- **Visible ≠ writable.** A public workout is readable by anyone, editable only by its owner. Official (null-owner) templates are read-only over the API entirely.
+- `POST` with an `id` already owned by someone else → `409 already_exists`, and the response contains none of their data.
+- A refused write must also not mutate: the victim's workout is unchanged afterwards.
+- `owner_user_id` always comes from the token, never the request body.
+
+**Edge cases & errors**
+- **No mixed workouts**: an item whose exercise belongs to a different sport → `400`, and the whole create rolls back rather than leaving a partial row.
+- An unknown `exercise_id` → `400 invalid_input`, not a raw foreign-key error.
+- An out-of-range target (`target_sets: 0`, an oversized weight) → `400 invalid_input`, **not `500`** — a CHECK violation is bad input, not an internal failure. The message must not carry raw Postgres text, which names constraints and values.
+- An unrecognised `?scope=`, `?sport=`, or `?goal=` → `400`, rather than silently returning everything or nothing.
+- More than 200 items → `400`; each item is a statement in a batch.
+- `visibility` defaults to **private** when omitted — sharing must never be the consequence of a missing field.
+- `PUT` with `{"items": []}` clears the list rather than erroring.
+
+**Not yet covered / deferred**
+- No mobile or web UI consumes this yet.
+- No way to rename a workout or change its visibility after creation — "I published this by accident" is currently a dead end.
+- `GET /v1/workouts` is unbounded and `scope=shared` grows with the whole user base; needs a limit/cursor before real traffic.
+- BJJ workouts only work because two BJJ entries live in the exercise catalog; a real technique library is its own module.
 
 ---
 

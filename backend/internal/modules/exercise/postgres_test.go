@@ -229,3 +229,116 @@ func TestPostgresRepository_GetNotFound(t *testing.T) {
 		t.Errorf("expected nil exercise alongside error, got %+v", e)
 	}
 }
+
+func TestPostgresRepository_Media(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	if _, err := Seed(ctx, repo); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	seeded, err := SeedData()
+	if err != nil {
+		t.Fatalf("SeedData: %v", err)
+	}
+
+	// Attach media to one exercise by re-running the writer with media on it,
+	// rather than reaching past the repository into raw SQL — this exercises
+	// the same path a real seed edit would take.
+	width, height := 1200, 800
+	withMedia := make([]Exercise, len(seeded))
+	copy(withMedia, seeded)
+	for i := range withMedia {
+		withMedia[i].Media = nil
+	}
+	for i := range withMedia {
+		if withMedia[i].ID != "barbell-back-squat" {
+			continue
+		}
+		withMedia[i].Media = []Media{
+			{Kind: MediaKindStart, StorageKey: "exercises/barbell-back-squat/start.webp",
+				ContentType: "image/webp", Width: &width, Height: &height},
+			{Kind: MediaKindEnd, StorageKey: "exercises/barbell-back-squat/end.webp",
+				ContentType: "image/webp", Width: &width, Height: &height},
+		}
+	}
+	if err := repo.UpsertAll(ctx, withMedia); err != nil {
+		t.Fatalf("upsert with media: %v", err)
+	}
+
+	got, err := repo.Get(ctx, "barbell-back-squat")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if len(got.Media) != 2 {
+		t.Fatalf("expected 2 media rows, got %d", len(got.Media))
+	}
+	// Semantic order, not alphabetical: "start" must precede "end", even
+	// though 'e' < 's'.
+	if got.Media[0].Kind != MediaKindStart || got.Media[1].Kind != MediaKindEnd {
+		t.Errorf("media out of semantic order: got %q then %q", got.Media[0].Kind, got.Media[1].Kind)
+	}
+	if got.Media[0].StorageKey != "exercises/barbell-back-squat/start.webp" {
+		t.Errorf("unexpected storage key %q", got.Media[0].StorageKey)
+	}
+	if got.Media[0].Width == nil || *got.Media[0].Width != 1200 {
+		t.Error("intrinsic width did not round-trip; a client can't reserve layout space without it")
+	}
+
+	// A media change must mark the parent exercise stale. Without this a
+	// client delta-syncing on exercises.updated_at would never learn that an
+	// image was swapped, because the exercise row itself didn't change.
+	afterMedia, err := repo.Get(ctx, "barbell-back-squat")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if !afterMedia.UpdatedAt.After(afterMedia.CreatedAt) {
+		t.Error("attaching media did not touch the parent exercise's updated_at")
+	}
+
+	// The JSON is authoritative for which assets exist, so removing media
+	// from the source must remove the rows — otherwise a deleted image keeps
+	// being served forever. Build the media-free variant explicitly rather
+	// than assuming the seed has none: it does now, and an assumption like
+	// that silently stops testing anything the moment content changes.
+	stripped := make([]Exercise, len(seeded))
+	copy(stripped, seeded)
+	for i := range stripped {
+		stripped[i].Media = nil
+	}
+	if err := repo.UpsertAll(ctx, stripped); err != nil {
+		t.Fatalf("re-upsert without media: %v", err)
+	}
+	pruned, err := repo.Get(ctx, "barbell-back-squat")
+	if err != nil {
+		t.Fatalf("get after prune: %v", err)
+	}
+	if len(pruned.Media) != 0 {
+		t.Errorf("expected media pruned, still have %d", len(pruned.Media))
+	}
+
+	// Never null in JSON — a client shouldn't have to handle both [] and null
+	// for "no media".
+	if pruned.Media == nil {
+		t.Error("Media should be an empty slice, not nil")
+	}
+}
+
+func TestHandler_MediaURLAssembly(t *testing.T) {
+	// Base URL joins cleanly regardless of trailing/leading slashes, and an
+	// unset base leaves the URL empty rather than emitting a broken one.
+	cases := []struct{ base, key, want string }{
+		{"https://media.vola.app", "exercises/a/start.webp", "https://media.vola.app/exercises/a/start.webp"},
+		{"https://media.vola.app/", "exercises/a/start.webp", "https://media.vola.app/exercises/a/start.webp"},
+		{"https://media.vola.app", "/exercises/a/start.webp", "https://media.vola.app/exercises/a/start.webp"},
+		{"", "exercises/a/start.webp", ""},
+	}
+	for _, tc := range cases {
+		h := NewHandler(nil, tc.base)
+		got := []Exercise{{Media: []Media{{StorageKey: tc.key}}}}
+		h.withMediaURLs(got)
+		if got[0].Media[0].URL != tc.want {
+			t.Errorf("base %q + key %q = %q, want %q", tc.base, tc.key, got[0].Media[0].URL, tc.want)
+		}
+	}
+}

@@ -3,6 +3,7 @@ package exercise
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/httplog"
@@ -10,10 +11,32 @@ import (
 
 type Handler struct {
 	repo Repository
+	// mediaBaseURL is the public origin media is served from — an R2 custom
+	// domain in production, or the r2.dev development URL. Kept out of the
+	// database on purpose: storing absolute URLs on each row would pin the
+	// bucket and CDN hostname into the data, so moving either would become a
+	// migration instead of an env-var change.
+	//
+	// Empty is a supported state, not a misconfiguration: local dev and CI
+	// have no bucket. Media then reports no URL rather than a broken one.
+	mediaBaseURL string
 }
 
-func NewHandler(repo Repository) *Handler {
-	return &Handler{repo: repo}
+func NewHandler(repo Repository, mediaBaseURL string) *Handler {
+	return &Handler{repo: repo, mediaBaseURL: strings.TrimRight(mediaBaseURL, "/")}
+}
+
+// withMediaURLs fills in each asset's public URL from its storage key.
+func (h *Handler) withMediaURLs(exercises []Exercise) {
+	if h.mediaBaseURL == "" {
+		return
+	}
+	for i := range exercises {
+		for j := range exercises[i].Media {
+			m := &exercises[i].Media[j]
+			m.URL = h.mediaBaseURL + "/" + strings.TrimLeft(m.StorageKey, "/")
+		}
+	}
 }
 
 // maxQueryLen bounds the ?q= search term. No exercise name comes close, so
@@ -39,6 +62,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		apihttp.WriteError(w, http.StatusInternalServerError, apihttp.CodeInternal, "internal error")
 		return
 	}
+	h.withMediaURLs(exercises)
 	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"exercises": exercises})
 }
 
@@ -53,5 +77,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		apihttp.WriteError(w, http.StatusInternalServerError, apihttp.CodeInternal, "internal error")
 		return
 	}
-	apihttp.WriteJSON(w, http.StatusOK, e)
+	one := []Exercise{*e}
+	h.withMediaURLs(one)
+	apihttp.WriteJSON(w, http.StatusOK, one[0])
 }

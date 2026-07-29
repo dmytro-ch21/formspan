@@ -41,6 +41,34 @@ const (
 	LoadTypeDistanceTime LoadType = "distance_time" // run: 5km in 24:30
 )
 
+// MediaKind is what an asset depicts, which is how a client picks the right
+// one for a context — a list thumbnail versus a full demo.
+type MediaKind string
+
+const (
+	MediaKindDemo      MediaKind = "demo"       // single representative still (the common case)
+	MediaKindStart     MediaKind = "start"      // starting position
+	MediaKindEnd       MediaKind = "end"        // end position
+	MediaKindDemoVideo MediaKind = "demo_video" // short looping clip
+	MediaKindThumbnail MediaKind = "thumbnail"  // list/browse thumbnail
+)
+
+// Media is one asset belonging to an exercise.
+//
+// StorageKey is the path within the bucket; URL is assembled from it at read
+// time using MEDIA_BASE_URL. Deliberately not stored as an absolute URL —
+// that would pin the bucket and CDN hostname into the database, so moving
+// either would become a data migration instead of an env-var change.
+type Media struct {
+	Kind        MediaKind `json:"kind"`
+	StorageKey  string    `json:"storage_key"`
+	URL         string    `json:"url"`
+	ContentType string    `json:"content_type"`
+	Width       *int      `json:"width"`
+	Height      *int      `json:"height"`
+	Position    int       `json:"position"`
+}
+
 // ErrNotFound means no exercise exists with the requested ID.
 var ErrNotFound = errors.New("exercise: not found")
 
@@ -55,6 +83,7 @@ type Exercise struct {
 	LoadType         LoadType  `json:"load_type"`
 	IsUnilateral     bool      `json:"is_unilateral"`
 	Instructions     string    `json:"instructions"`
+	Media            []Media   `json:"media"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
 }

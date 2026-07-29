@@ -29,6 +29,19 @@ export default function TabLayout() {
           ),
         }}
       />
+      <Tabs.Screen
+        name="library"
+        options={{
+          title: 'Library',
+          tabBarIcon: ({ color }) => (
+            <SymbolView
+              name={{ ios: 'books.vertical', android: 'list', web: 'list' }}
+              tintColor={color}
+              size={28}
+            />
+          ),
+        }}
+      />
     </Tabs>
   );
 }
