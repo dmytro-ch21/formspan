@@ -26,8 +26,20 @@ func NewHandler(repo Repository, mediaBaseURL string) *Handler {
 	return &Handler{repo: repo, mediaBaseURL: strings.TrimRight(mediaBaseURL, "/")}
 }
 
-// withMediaURLs fills in each asset's public URL from its storage key.
+// withMediaURLs substitutes the sport placeholder for any exercise with no
+// media of its own, then fills in each asset's public URL from its key.
+//
+// The default substitution happens even when no media origin is configured,
+// so the shape of the response doesn't change between environments — only
+// the URLs go empty, which clients already treat as "no image".
 func (h *Handler) withMediaURLs(exercises []Exercise) {
+	for i := range exercises {
+		if len(exercises[i].Media) == 0 {
+			if d := DefaultMediaFor(exercises[i].Sport); d != nil {
+				exercises[i].Media = d
+			}
+		}
+	}
 	if h.mediaBaseURL == "" {
 		return
 	}

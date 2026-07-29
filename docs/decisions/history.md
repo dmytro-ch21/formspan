@@ -392,6 +392,30 @@ React Native is now explicitly the **design vehicle, not the destination**. That
 **Open question deferred, not resolved:** whether to leave Expo Go for a custom dev client. HealthKit is load-bearing given wearables are recommended, and it doesn't work in Expo Go — but if the iOS app is going to be Swift anyway, prebuilding an RN app to reach HealthKit may be work that gets thrown away. The answer probably depends on whether HealthKit integration is needed to *validate the design* or only to ship.
 
 
+## 2026-07-29 — The real catalog: 523 exercises, 450 BJJ techniques
+
+The twelve hand-written starter exercises are replaced by the authored catalogs, imported from the source spreadsheets by `scripts/import-exercise-catalog.py` — kept as a script, not a one-off, because the spreadsheets are the authoring surface and the seed is the build artifact.
+
+**The "one catalog or separate?" question, settled by the data rather than by argument.** Exercises stay in one table — splitting by *sport* would triplicate search, filtering and media handling, force a UNION for anything cross-sport, and undercut the unified load model. But BJJ techniques got their own module, because the split that matters is by **shape**, not sport:
+
+- An exercise is a **loggable unit measured by a load type**. You never log "3 sets of armbar at 60kg" — techniques aren't measured at all.
+- A technique lives in a **graph**: it comes from a position and is answered by counters. In the imported library **444 of 450 carry `setup_from` edges and all 450 carry counters**. That graph is the substance of the thing, and it is simply inexpressible as a row in a flat catalog.
+
+**Two mappings were needed, and one of them is a design decision worth knowing.** The source has **75 movement patterns** (Elbow Flexion, Scapular Elevation, Plantar Flexion…). That granularity is right for browsing and useless for rules — "heavy hinge work yesterday" would have to enumerate a dozen. So there are now two levels: `movement_pattern` stays a small closed vocabulary the cross-sport rules reason over, and `movement_pattern_detail` preserves the source's own value for display. Same split as keeping `primary_muscles` for display while rules read the pattern. `isolation` is the honest bucket for the single-joint long tail (147 entries) rather than inventing precision the rules can't use.
+
+The other mapping is a quiet vindication: **all 19 of the source's tracking types collapsed onto the existing five load types.** No new one was needed, which is some evidence the original cut was right.
+
+**A real content-integrity problem surfaced, and a test caught it.** Most of the twelve placeholders were *renamed* on the way in (`barbell-back-squat` → `back-squat`), so replacing the seed left ten superseded rows sitting alongside their replacements — the API would have served both — and orphaned three of the four R2 image sets, since their exercise IDs no longer existed. This is the "seeding never deletes" gap, previously noted as theoretical, biting for real: the JSON is authoritative for *content* but not for *membership*. Fixed by re-pointing the media at the surviving IDs and a one-off migration removing the ten. The general problem still wants an `archived_at` column rather than a migration each time.
+
+Storage keys still read `exercises/barbell-back-squat/...` while pointing at `back-squat`. A key is an opaque path, so re-pointing costs nothing and re-uploading eight files would buy only tidiness — worth doing when the media pipeline grows, not now.
+
+**Test fixtures moved to named constants** in both the exercise and workout suites. With the catalog generated from a spreadsheet, a content edit can rename an exercise, and inline string IDs meant that broke five tests at once with no indication that the cause was content rather than code.
+
+**Also added deliberately:** a curated outdoor `Run`. The source is a commercial-gym catalog whose only running options are five treadmill variants — no outdoor run, which is the one a BJJ athlete who runs outside actually logs. It lives in an `EXTRAS` list in the importer rather than in the spreadsheet, so the spreadsheet stays a faithful record of the gym's equipment.
+
+**Known gaps:** 463 of 523 imported exercises have **no coaching notes** — the catalog is structurally complete but nearly devoid of instructional content, which is far cheaper to fill in the spreadsheet than later. Technique `setup_from`/`common_counters` are name arrays rather than resolved foreign keys, because the source authors them as free text and not every referenced technique exists yet; a hard FK would reject the whole seed over one forward reference. And `workout_items` still can't reference a technique, so BJJ workouts remain exercise-only — that's the additive `technique_id` column already planned.
+
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

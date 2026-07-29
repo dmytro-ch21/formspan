@@ -13,6 +13,14 @@ import (
 // (see docker-compose.yml for local dev, or backend/.env.example) and skip
 // gracefully without it.
 
+// Named fixtures rather than inline IDs: the catalog is generated from a
+// spreadsheet now, so an exercise can be renamed by a content edit. One
+// place to update beats hunting string literals through the file.
+const (
+	seedFixtureID  = "back-squat"
+	mediaFixtureID = "bench-press"
+)
+
 func newTestRepo(t *testing.T) *PostgresRepository {
 	t.Helper()
 
@@ -105,7 +113,7 @@ func TestPostgresRepository_SeedIsIdempotent(t *testing.T) {
 		t.Fatalf("first seed: %v", err)
 	}
 
-	before, err := repo.Get(ctx, "barbell-back-squat")
+	before, err := repo.Get(ctx, seedFixtureID)
 	if err != nil {
 		t.Fatalf("get after first seed: %v", err)
 	}
@@ -120,7 +128,7 @@ func TestPostgresRepository_SeedIsIdempotent(t *testing.T) {
 		t.Errorf("seed count changed between runs: %d then %d", n1, n2)
 	}
 
-	after, err := repo.Get(ctx, "barbell-back-squat")
+	after, err := repo.Get(ctx, seedFixtureID)
 	if err != nil {
 		t.Fatalf("get after second seed: %v", err)
 	}
@@ -252,7 +260,7 @@ func TestPostgresRepository_Media(t *testing.T) {
 		withMedia[i].Media = nil
 	}
 	for i := range withMedia {
-		if withMedia[i].ID != "barbell-back-squat" {
+		if withMedia[i].ID != mediaFixtureID {
 			continue
 		}
 		withMedia[i].Media = []Media{
@@ -266,7 +274,7 @@ func TestPostgresRepository_Media(t *testing.T) {
 		t.Fatalf("upsert with media: %v", err)
 	}
 
-	got, err := repo.Get(ctx, "barbell-back-squat")
+	got, err := repo.Get(ctx, mediaFixtureID)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -288,7 +296,7 @@ func TestPostgresRepository_Media(t *testing.T) {
 	// A media change must mark the parent exercise stale. Without this a
 	// client delta-syncing on exercises.updated_at would never learn that an
 	// image was swapped, because the exercise row itself didn't change.
-	afterMedia, err := repo.Get(ctx, "barbell-back-squat")
+	afterMedia, err := repo.Get(ctx, mediaFixtureID)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -309,7 +317,7 @@ func TestPostgresRepository_Media(t *testing.T) {
 	if err := repo.UpsertAll(ctx, stripped); err != nil {
 		t.Fatalf("re-upsert without media: %v", err)
 	}
-	pruned, err := repo.Get(ctx, "barbell-back-squat")
+	pruned, err := repo.Get(ctx, mediaFixtureID)
 	if err != nil {
 		t.Fatalf("get after prune: %v", err)
 	}
@@ -340,5 +348,51 @@ func TestHandler_MediaURLAssembly(t *testing.T) {
 		if got[0].Media[0].URL != tc.want {
 			t.Errorf("base %q + key %q = %q, want %q", tc.base, tc.key, got[0].Media[0].URL, tc.want)
 		}
+	}
+}
+
+// Every catalog entry should end up with something renderable: its own
+// photos where they exist, the sport placeholder otherwise. The placeholder
+// must stay *distinguishable* though — if it read as real content, the fact
+// that most of the library has no photo of its own would be invisible, and
+// an invisible gap is a permanent one.
+func TestHandler_DefaultMediaFillsGapsButStaysLabelled(t *testing.T) {
+	h := NewHandler(nil, "https://media.example")
+
+	real := Media{Kind: MediaKindDemo, StorageKey: "exercises/back-squat/demo.webp"}
+	got := []Exercise{
+		{ID: "has-own", Sport: "strength", Media: []Media{real}},
+		{ID: "no-media-strength", Sport: "strength", Media: []Media{}},
+		{ID: "no-media-bjj", Sport: "bjj", Media: []Media{}},
+		{ID: "no-media-unknown-sport", Sport: "swimming", Media: []Media{}},
+	}
+	h.withMediaURLs(got)
+
+	if len(got[0].Media) != 1 || got[0].Media[0].IsDefault {
+		t.Errorf("an exercise with its own media had it replaced: %+v", got[0].Media)
+	}
+	for _, i := range []int{1, 2} {
+		if len(got[i].Media) == 0 {
+			t.Fatalf("%s got no placeholder", got[i].ID)
+		}
+		for _, m := range got[i].Media {
+			if !m.IsDefault {
+				t.Errorf("%s: placeholder not marked is_default", got[i].ID)
+			}
+			if m.URL == "" {
+				t.Errorf("%s: placeholder has no URL", got[i].ID)
+			}
+		}
+	}
+	// A sport with no placeholder must yield nothing, not a broken image.
+	if len(got[3].Media) != 0 {
+		t.Errorf("unknown sport got media from nowhere: %+v", got[3].Media)
+	}
+
+	// The shared map must not be mutated by URL assembly — otherwise the
+	// second request would see keys already prefixed with the base URL.
+	if defaultMedia["strength"][0].URL != "" {
+		t.Errorf("URL assembly wrote through into the shared defaults: %q",
+			defaultMedia["strength"][0].URL)
 	}
 }

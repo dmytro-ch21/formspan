@@ -238,9 +238,40 @@ Domain: user-owned workout *templates* — an ordered list of exercises with tar
 
 ---
 
+## BJJ technique library (`/v1/techniques`)
+
+Domain: the BJJ technique library — 450 entries with position, category, gi/no-gi, and the graph edges (`setup_from`, `common_counters`). Reference content, read-only, seeded from version-controlled JSON generated from the authored spreadsheet.
+
+**Happy path**
+- `GET /v1/techniques` returns the library ordered by position, then category, then name.
+- `?position=Guard - Bottom`, `?category=Submission`, `?q=armbar` each narrow it; all filter server-side.
+- `GET /v1/techniques/{id}` returns one entry with its full edge lists.
+
+**Edge cases & errors**
+- **`?gi=Gi Only` must also return techniques marked `Both`** — 304 of 450 are `Both`, so a filter that excluded them would hide most of the library rather than narrow it. Tested explicitly in both directions: `Both` entries appear, `No-Gi Only` ones don't.
+- An invalid `?gi=` value → `400`, rather than silently returning nothing.
+- LIKE metacharacters are literal: `?q=%` matches nothing.
+- `?q=` over 100 characters → `400`.
+- `GET /v1/techniques/{unknown}` → `404 not_found`.
+
+**Seeding**
+- Idempotent and value-idempotent: a re-seed with unchanged content leaves `updated_at` alone, so delta sync isn't defeated by a deploy.
+- Malformed content fails before any write: duplicate ID, missing name/category/position, or an unknown `gi_no_gi` (the one field with a DB CHECK behind it).
+- **A test asserts the library still carries graph edges** — if fewer than 90% of entries have `setup_from` or `common_counters`, the library has gone flat and the whole reason for a separate module from `exercises` has evaporated. That's the invariant worth guarding, not the row count.
+
+**Auth & security**
+- No `Authorization` header → `401`. Nothing here is user-scoped, so there's no IDOR surface — every authenticated caller gets an identical response.
+
+**Not yet covered / deferred**
+- Edges are name strings, not resolved references, so nothing validates that a named counter exists.
+- `workout_items` can't reference a technique yet, so BJJ workouts remain exercise-only.
+- No UI in any client.
+
+---
+
 ## Exercise catalog (`/v1/exercises`)
 
-Domain: the global, operator-authored exercise catalog — reference content shared by every user, with no owner. Read-only over HTTP; seeded from version-controlled JSON via `cmd/seed`.
+Domain: the global, operator-authored exercise catalog — 524 entries imported from the authored spreadsheet — reference content shared by every user, with no owner. Read-only over HTTP; seeded from version-controlled JSON via `cmd/seed`.
 
 **Happy path**
 - `GET /v1/exercises` with a valid token returns the whole catalog, ordered by sport then name.
@@ -264,6 +295,13 @@ Domain: the global, operator-authored exercise catalog — reference content sha
 - The whole catalog is written in **one transaction**, so a failure partway leaves the previous content intact rather than a half-updated catalog visible to readers.
 - **The deployed environment must actually run the seed.** Migration `000004` creates an empty table; without a seed step the API serves `{"exercises": []}` forever, and because that's a valid `200` no healthcheck or error surfaces it. Covered by `railway/api.toml`'s `preDeployCommand`.
 - The starter set covers all five `load_type` values, asserted by a test rather than left to drift as content is added.
+
+**Default media**
+- An exercise with no photo of its own returns its **sport's placeholder**, flagged `is_default: true` — so the grid never has holes.
+- The flag must survive to the client. A placeholder indistinguishable from a real photo makes the coverage gap invisible, and an invisible gap never gets filled — with 463 of 523 exercises lacking their own image, that distinction is most of the catalog.
+- An exercise that *does* have its own media never has it replaced.
+- A sport with no configured placeholder returns an empty array, not a broken image.
+- Placeholders are resolved at read time, not seeded — seeding would be ~1000 rows pointing at six files and would make "which exercises actually have a photo" unanswerable.
 
 **Auth & security**
 - No `Authorization` header → `401 unauthorized` on both routes. The catalog isn't secret, but it's app content rather than public marketing, so it sits behind auth like everything else under `/v1`.

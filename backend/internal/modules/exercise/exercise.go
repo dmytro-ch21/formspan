@@ -67,25 +67,80 @@ type Media struct {
 	Width       *int      `json:"width"`
 	Height      *int      `json:"height"`
 	Position    int       `json:"position"`
+	// IsDefault marks a sport-level placeholder standing in for an exercise
+	// that has no photo of its own. Exposed rather than hidden so a client
+	// can present it differently, and so "how much of the catalog actually
+	// has media" stays answerable — a placeholder that's indistinguishable
+	// from real content makes the gap invisible and therefore permanent.
+	IsDefault bool `json:"is_default"`
+}
+
+// defaultMedia are the per-sport placeholders in the bucket, used for any
+// exercise with no media of its own.
+//
+// Resolved at read time rather than seeded as rows. Seeding would mean ~1000
+// rows across 519 exercises all pointing at six files, and — worse — it would
+// destroy the ability to ask which exercises actually have their own photo,
+// which is exactly the coverage metric worth tracking while the library is
+// being filled in.
+var defaultMedia = map[string][]Media{
+	"strength": {
+		{Kind: MediaKindDemo, StorageKey: "exercises/_defaults/strength.webp",
+			ContentType: "image/webp", Width: intp(683), Height: intp(1024), IsDefault: true},
+		{Kind: MediaKindThumbnail, StorageKey: "exercises/_defaults/strength-thumbnail.webp",
+			ContentType: "image/webp", Width: intp(213), Height: intp(320), IsDefault: true},
+	},
+	"bjj": {
+		{Kind: MediaKindDemo, StorageKey: "exercises/_defaults/bjj-default.webp",
+			ContentType: "image/webp", Width: intp(1024), Height: intp(1024), IsDefault: true},
+		{Kind: MediaKindThumbnail, StorageKey: "exercises/_defaults/bjj-default-thumbnail.webp",
+			ContentType: "image/webp", Width: intp(320), Height: intp(320), IsDefault: true},
+	},
+	"running": {
+		{Kind: MediaKindDemo, StorageKey: "exercises/_defaults/running-default.webp",
+			ContentType: "image/webp", Width: intp(683), Height: intp(1024), IsDefault: true},
+		{Kind: MediaKindThumbnail, StorageKey: "exercises/_defaults/running-default-thumbnail.webp",
+			ContentType: "image/webp", Width: intp(213), Height: intp(320), IsDefault: true},
+	},
+}
+
+func intp(v int) *int { return &v }
+
+// DefaultMediaFor returns the placeholder set for a sport, or nil if that
+// sport has none — in which case a client renders its own empty state rather
+// than a broken image.
+func DefaultMediaFor(sport string) []Media {
+	src := defaultMedia[sport]
+	if src == nil {
+		return nil
+	}
+	// Copied so a caller mutating URLs (which the handler does) can't write
+	// through into the shared package-level map.
+	out := make([]Media, len(src))
+	copy(out, src)
+	return out
 }
 
 // ErrNotFound means no exercise exists with the requested ID.
 var ErrNotFound = errors.New("exercise: not found")
 
 type Exercise struct {
-	ID               string    `json:"id"` // stable slug, e.g. "barbell-back-squat"
-	Name             string    `json:"name"`
-	Sport            string    `json:"sport"`
-	MovementPattern  string    `json:"movement_pattern"`
-	PrimaryMuscles   []string  `json:"primary_muscles"`
-	SecondaryMuscles []string  `json:"secondary_muscles"`
-	Equipment        []string  `json:"equipment"`
-	LoadType         LoadType  `json:"load_type"`
-	IsUnilateral     bool      `json:"is_unilateral"`
-	Instructions     string    `json:"instructions"`
-	Media            []Media   `json:"media"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	ID              string `json:"id"` // stable slug, e.g. "barbell-back-squat"
+	Name            string `json:"name"`
+	Sport           string `json:"sport"`
+	MovementPattern string `json:"movement_pattern"`
+	// The source catalog's own, far more granular pattern (75 distinct
+	// values). Kept for display and filtering; rules read MovementPattern.
+	MovementPatternDetail string    `json:"movement_pattern_detail"`
+	PrimaryMuscles        []string  `json:"primary_muscles"`
+	SecondaryMuscles      []string  `json:"secondary_muscles"`
+	Equipment             []string  `json:"equipment"`
+	LoadType              LoadType  `json:"load_type"`
+	IsUnilateral          bool      `json:"is_unilateral"`
+	Instructions          string    `json:"instructions"`
+	Media                 []Media   `json:"media"`
+	CreatedAt             time.Time `json:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at"`
 }
 
 // Filter narrows a catalog listing. A zero Filter lists everything.

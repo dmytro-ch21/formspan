@@ -42,11 +42,19 @@ var (
 	validSports = map[string]bool{
 		"strength": true, "bjj": true, "running": true,
 	}
+	// The COARSE vocabulary — the level cross-sport rules are written
+	// against. The source catalog's own 75 patterns are preserved per row in
+	// MovementPatternDetail; this list stays deliberately small, because a
+	// rule that has to enumerate "Scapular Elevation" is a rule nobody will
+	// maintain. "isolation" is the honest bucket for the single-joint long
+	// tail rather than inventing precision the rules can't use.
 	validMovementPatterns = map[string]bool{
 		"squat": true, "hinge": true, "lunge": true,
 		"horizontal_push": true, "vertical_push": true,
 		"horizontal_pull": true, "vertical_pull": true,
-		"carry": true, "core": true, "locomotion": true, "grappling": true,
+		"carry": true, "core": true, "rotation": true,
+		"locomotion": true, "grappling": true, "olympic": true,
+		"jump": true, "mobility": true, "isolation": true,
 	}
 	validLoadTypes = map[LoadType]bool{
 		LoadTypeWeightReps: true, LoadTypeReps: true, LoadTypeTime: true,
