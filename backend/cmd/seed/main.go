@@ -17,6 +17,7 @@ import (
 	"context"
 	"log"
 	"os"
+	"time"
 
 	"github.com/dmytro-ch21/vola/backend/internal/modules/exercise"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/database"
@@ -28,7 +29,12 @@ func main() {
 		log.Fatal("DATABASE_URL must be set")
 	}
 
-	ctx := context.Background()
+	// Bounded rather than context.Background(): this runs as Railway's
+	// preDeployCommand, where an unreachable database would otherwise hang
+	// the deploy indefinitely instead of failing it.
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
 	pool, err := database.NewPool(ctx, databaseURL)
 	if err != nil {
 		log.Fatalf("seed: database: %v", err)

@@ -68,7 +68,9 @@ type Filter struct {
 type Repository interface {
 	List(ctx context.Context, f Filter) ([]Exercise, error)
 	Get(ctx context.Context, id string) (*Exercise, error)
-	// Upsert writes catalog content. Not exposed over HTTP — it exists for
-	// seeding from version-controlled JSON, which is how the catalog grows.
-	Upsert(ctx context.Context, e Exercise) error
+	// UpsertAll writes catalog content, all-or-nothing. Not exposed over
+	// HTTP — it exists for seeding from version-controlled JSON, which is
+	// how the catalog grows. Takes the whole set rather than one row so the
+	// write can be a single transaction.
+	UpsertAll(ctx context.Context, exercises []Exercise) error
 }

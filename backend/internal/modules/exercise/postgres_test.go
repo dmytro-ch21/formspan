@@ -75,6 +75,17 @@ func TestValidate_RejectsBadContent(t *testing.T) {
 		{"missing movement pattern", []Exercise{
 			{ID: "a", Name: "A", Sport: "strength", LoadType: LoadTypeReps},
 		}},
+		// The JSON is the authoring interface, so a typo has to fail loudly
+		// here or it fails silently forever: "strenght" would seed a row no
+		// ?sport=strength filter can ever return.
+		{"misspelled sport", []Exercise{
+			{ID: "a", Name: "A", Sport: "strenght", MovementPattern: "squat", LoadType: LoadTypeReps},
+		}},
+		// Worse than a bad sport: movement_pattern is what the cross-sport
+		// rules reason over, so a typo breaks a future rule invisibly.
+		{"unknown movement pattern", []Exercise{
+			{ID: "a", Name: "A", Sport: "strength", MovementPattern: "squatting", LoadType: LoadTypeReps},
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -100,7 +111,7 @@ func TestPostgresRepository_SeedIsIdempotent(t *testing.T) {
 	}
 
 	// Re-running the seed is a normal deploy step, so it must not duplicate
-	// rows or reset creation timestamps.
+	// rows or reset timestamps.
 	n2, err := Seed(ctx, repo)
 	if err != nil {
 		t.Fatalf("second seed: %v", err)
@@ -116,13 +127,43 @@ func TestPostgresRepository_SeedIsIdempotent(t *testing.T) {
 	if !after.CreatedAt.Equal(before.CreatedAt) {
 		t.Errorf("created_at changed on re-seed: %v then %v", before.CreatedAt, after.CreatedAt)
 	}
+	// Value-idempotent, not merely row-count idempotent: an unchanged row
+	// must not be rewritten. Otherwise updated_at degrades into "time of
+	// last deploy", and a client asking "what changed since X" gets the
+	// whole catalog back every time the API is redeployed.
+	if !after.UpdatedAt.Equal(before.UpdatedAt) {
+		t.Errorf("updated_at moved on a no-op re-seed: %v then %v", before.UpdatedAt, after.UpdatedAt)
+	}
+
+	// Count only the seeded IDs rather than the whole table, so this doesn't
+	// break the first time another test inserts a non-catalog fixture — that
+	// failure would read as a seeding bug rather than a test-isolation one.
+	seeded, err := SeedData()
+	if err != nil {
+		t.Fatalf("SeedData: %v", err)
+	}
+	wanted := make(map[string]bool, len(seeded))
+	for _, e := range seeded {
+		wanted[e.ID] = true
+	}
 
 	all, err := repo.List(ctx, Filter{})
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if len(all) != n1 {
-		t.Errorf("re-seeding duplicated rows: seeded %d, listed %d", n1, len(all))
+	found := map[string]int{}
+	for _, e := range all {
+		if wanted[e.ID] {
+			found[e.ID]++
+		}
+	}
+	if len(found) != n1 {
+		t.Errorf("expected %d seeded exercises present, found %d", n1, len(found))
+	}
+	for id, count := range found {
+		if count != 1 {
+			t.Errorf("re-seeding duplicated %q: %d rows", id, count)
+		}
 	}
 }
 
@@ -154,6 +195,18 @@ func TestPostgresRepository_ListFilters(t *testing.T) {
 	}
 	if len(found) == 0 {
 		t.Fatal(`expected "SQUAT" to match Barbell Back Squat case-insensitively`)
+	}
+
+	// LIKE metacharacters must be literal, not wildcards — an unescaped "%"
+	// would turn a search box into a full-table scan.
+	for _, meta := range []string{"%", "_", "\\"} {
+		got, err := repo.List(ctx, Filter{Query: meta})
+		if err != nil {
+			t.Fatalf("list %q: %v", meta, err)
+		}
+		if len(got) != 0 {
+			t.Errorf("%q was treated as a wildcard: matched %d rows, want 0", meta, len(got))
+		}
 	}
 
 	none, err := repo.List(ctx, Filter{Query: "definitely-not-an-exercise"})
