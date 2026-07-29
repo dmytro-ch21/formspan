@@ -68,15 +68,48 @@ Domain: one profile per Clerk user — display name, date of birth, sex, and fou
 
 ---
 
-## Mobile app shell (`apps/mobile`)
+## Mobile auth + offline activity logging (`apps/mobile`)
+
+Domain: Clerk auth (same instance as web/admin) with the session token in the OS keychain, plus offline-first activity logging — local SQLite write, then sync to `POST /v1/activities`.
 
 **Happy path**
-- App launches in Expo Go to the "Today" tab, showing the "Formspan" heading.
-- Today screen fetches `${EXPO_PUBLIC_API_URL}/v1/healthz` and renders "API says: api is ok" once it resolves.
+- Signed out, the app shows the sign-in screen; the tabs are unreachable.
+- Email + password sign-in reaches the tabs. If the account has 2FA, a second-factor step appears with the right prompt for the strategy Clerk offers (TOTP / SMS / **email code** / backup code).
+- Session survives an app restart (token cached in `expo-secure-store`, not lost on relaunch).
+- Logging an activity while online writes it locally and syncs immediately → shows "synced".
+- "Sync now" with nothing pending reports "Nothing to sync."
+- Sign out returns to the sign-in screen.
+
+**Offline & sync (verified end-to-end on a real Simulator)**
+- With the API unreachable, logging an activity still succeeds locally and shows **pending**, with an explicit error (`Synced 0, 1 still pending — …Could not connect to the server.`) — never a false success.
+- The pending row is genuinely in the device's SQLite with `synced = 0` (confirmed by querying the Simulator's `formspan.db` directly).
+- When the API returns, "Sync now" pushes it → "Synced 1.", the row flips to `synced = 1`, and the same client-generated ID appears in Postgres.
+- Because the ID is client-generated and the API's create is idempotent, a retried sync of an already-synced row is a no-op, not a duplicate.
+- Not yet covered: no automatic background sync (manual/on-log only), and no conflict resolution — activities are append-only so far.
+
+**Multi-user on one device**
+- The local outbox is scoped by `user_id`: signing out and signing in as someone else shows **their** activities, never the previous account's. A shared or handed-over phone is the realistic case here, not a contrived one.
+- A row logged offline by user A and still pending when user B signs in must never sync under B's token — idempotency would make that mis-attribution permanent server-side.
 
 **Edge cases & errors**
-- Backend unreachable → screen shows "Failed to reach API: ..." instead of hanging on "Loading API status…" forever or crashing.
-- Verified on both the Simulator (loopback) and, once relevant, a physical device on the same LAN (`EXPO_PUBLIC_API_URL` pointed at the dev machine's LAN IP rather than `localhost`).
+- Missing `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` → the app throws a named error at startup rather than rendering an app that silently can't authenticate.
+- A second factor the app doesn't implement → the error names the strategy Clerk asked for, so the gap is diagnosable rather than a dead end.
+- A **local database failure** (failed read, failed insert, bad migration) surfaces as an explicit message — never as "No activities yet.", which would disguise a failure as a legitimate empty state on an app whose whole promise is that the local write survived. This caught a real migration-ordering bug the moment it was added.
+- Activity IDs come from a CSPRNG (`expo-crypto` `randomUUID()`), not `Math.random()` — the server treats this ID as an idempotency key, so a guessable one is security-relevant, not just a collision risk.
+- A permanent rejection (4xx other than `401`/`408`/`429`) is reported as un-syncable rather than retried forever, so a poison row can't quietly inflate the pending count.
+- Verified on the Simulator (loopback); a physical device needs `EXPO_PUBLIC_API_URL` pointed at the dev machine's LAN IP rather than `localhost`.
+
+---
+
+## Web activities display (`apps/web`)
+
+**Happy path**
+- The dashboard lists the signed-in user's synced activities (kind, notes, occurred-at) from `GET /v1/activities` — the receiving end of mobile's sync.
+- Timestamps render in explicit UTC (fixed locale/zone), avoiding an SSR-vs-browser hydration mismatch.
+
+**Edge cases & errors**
+- No activities → "Nothing yet — log an activity in the mobile app and sync it," not a blank panel.
+- API unreachable or non-2xx → an explicit "Failed to load activities: …" message.
 
 ---
 
@@ -85,7 +118,7 @@ Domain: one profile per Clerk user — display name, date of birth, sex, and fou
 Domain: fully separate from `apps/web`, not athlete-facing. Reuses the same Clerk instance; gated by both middleware (must be signed in) and an `ADMIN_USER_IDS` allowlist check matching the backend's own. **Runs on real backend data** (`/v1/admin/users`, `/v1/admin/users/{userID}/activities`) — no mock data anywhere in this app.
 
 **Happy path**
-- Signed in as an allowlisted admin, `/users` (User Lookup) lists every user with a profile: user ID, display name, activity count, last-activity timestamp — all from Postgres.
+- Signed in as an allowlisted admin, `/users` (User Lookup) lists every known user — with a profile or with activities: user ID, display name, activity count, last-activity timestamp — all from Postgres.
 - Typing in the search field filters rows client-side by user ID or display name substring.
 - Clicking a lookup row navigates to `/users/[id]` and renders that user's real activities (kind, occurred-at, notes) with the `request_id`/`trace_id` of the sync request that created each one.
 
@@ -152,11 +185,13 @@ Domain: the unified "activity envelope" (one table, `kind` + flexible `details` 
 **Happy path**
 - `POST /v1/activities` with a valid bearer token and `{id, kind, occurred_at, notes?, details?}` creates the activity, stamped server-side with the caller's `user_id` and the current request's own `request_id`/`trace_id` — `200` with the full row.
 - `GET /v1/activities` returns the caller's own activities, newest `occurred_at` first.
-- `GET /v1/admin/users` with an `ADMIN_USER_IDS`-listed token returns every user with a `profiles` row (LEFT JOIN `activities`) — `user_id`, `display_name`, `activity_count`, `last_activity_at` — including users with zero activities yet.
+- `GET /v1/admin/users` with an `ADMIN_USER_IDS`-listed token returns every user the system knows about — anyone with a profile **or** any activity — as `user_id`, `display_name`, `activity_count`, `last_activity_at`.
+- That includes a user with a profile but zero activities, **and** a user with activities but no profile yet (someone who logged before finishing onboarding — exactly the person an admin is most likely searching for). Their `display_name` is null rather than the row being missing. Regression-tested (`TestPostgresRepository_ListUsers_IncludesProfilelessUsers`) because the first implementation started `FROM profiles` and hid them entirely.
 - `GET /v1/admin/users/{userID}/activities` with an admin token returns that specific user's activities, each with its `request_id`/`trace_id` — the "trace the request" mechanism: grep the backend's own log output for that ID to see the full request that created it.
 
 **Edge cases & errors**
 - **Idempotent create**: `POST`ing the same `id` twice (a real offline-sync retry scenario) returns the *original* row both times — same `request_id`, same `created_at` — never a duplicate, never an error. Verified directly: two live `curl` calls with the same `id` returned byte-identical `request_id`/`created_at`.
+- **Idempotency is per-user, not global**: `POST`ing an `id` that already belongs to a **different** user → `409 already_exists`, and the response contains none of that user's data. The caller must never receive someone else's activity, and their own activity must never be silently discarded as a "duplicate". Regression-tested (`TestPostgresRepository_Create_RejectsAnotherUsersID`) — the first implementation looked the conflicting row up by ID alone, which made a guessed or replayed ID an IDOR.
 - Missing `id`/`kind`/`occurred_at` → `400 invalid_input`.
 - No `Authorization` header on any of these routes → `401 unauthorized`.
 - A valid, authenticated token that **isn't** in `ADMIN_USER_IDS` → `403 forbidden` on both admin routes — verified live: a real signed-in token, temporarily excluded from the allowlist, got `403`, then succeeded once restored.

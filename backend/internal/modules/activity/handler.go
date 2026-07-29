@@ -2,6 +2,7 @@ package activity
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -52,6 +53,14 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		TraceID:    httplog.TraceIDFromContext(r.Context()),
 	})
 	if err != nil {
+		if errors.Is(err, ErrAlreadyExists) {
+			// The client-generated ID collides with another user's activity.
+			// Report it rather than returning their row (which would be an
+			// IDOR) or silently dropping this one.
+			httplog.FromContext(r.Context()).Warn("activity: id belongs to another user", "activity_id", req.ID)
+			apihttp.WriteError(w, http.StatusConflict, apihttp.CodeAlreadyExists, "activity id already in use")
+			return
+		}
 		httplog.FromContext(r.Context()).Error("activity: internal error", "err", err)
 		apihttp.WriteError(w, http.StatusInternalServerError, apihttp.CodeInternal, "internal error")
 		return

@@ -2,5 +2,16 @@ packages:
   - "apps/*"
   - "packages/*"
 allowBuilds:
+  # pnpm blocks native/postinstall build scripts by default and requires an
+  # explicit decision per package. Everything set to `false` below is a
+  # postinstall we genuinely don't need at runtime:
+  #   @clerk/shared, browser-tabs-lock — browser-oriented; unused under RN.
+  #   bufferutil, utf-8-validate      — optional native speedups for `ws`.
+  #   core-js                         — postinstall is just a funding notice.
+  '@clerk/shared': false
+  browser-tabs-lock: false
+  bufferutil: false
+  core-js: false
+  utf-8-validate: false
   sharp: true
   unrs-resolver: true
