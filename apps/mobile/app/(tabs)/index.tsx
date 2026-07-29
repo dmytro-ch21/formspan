@@ -9,6 +9,7 @@ import {
   syncPendingActivities,
   type LocalActivity,
 } from '@/lib/activities';
+import { vola } from '@/constants/Colors';
 
 export default function TodayScreen() {
   const { userId, getToken, signOut } = useAuth();
@@ -163,21 +164,21 @@ const styles = StyleSheet.create({
   label: { fontSize: 15, fontWeight: '600' },
   input: {
     borderWidth: 1,
-    borderColor: '#ccc',
+    borderColor: vola.line,
     borderRadius: 8,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 16,
-    color: '#111',
-    backgroundColor: '#fff',
+    color: vola.text,
+    backgroundColor: vola.surface,
   },
-  button: { backgroundColor: '#111', borderRadius: 8, paddingVertical: 14, alignItems: 'center' },
-  buttonText: { color: '#fff', fontWeight: '600', fontSize: 16 },
+  button: { backgroundColor: vola.lime, borderRadius: 8, paddingVertical: 14, alignItems: 'center' },
+  buttonText: { color: vola.navy, fontWeight: '600', fontSize: 16 },
   buttonDisabled: { opacity: 0.6 },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   secondaryButton: {
     borderWidth: 1,
-    borderColor: '#ccc',
+    borderColor: vola.line,
     borderRadius: 8,
     paddingVertical: 10,
     paddingHorizontal: 16,
@@ -195,7 +196,7 @@ const styles = StyleSheet.create({
   },
   activityMain: { flex: 1, gap: 2 },
   activityKind: { fontWeight: '600' },
-  synced: { color: 'seagreen', fontSize: 12 },
-  pending: { color: 'darkorange', fontSize: 12 },
+  synced: { color: vola.green, fontSize: 12 },
+  pending: { color: vola.warn, fontSize: 12 },
   signOut: { marginTop: 24, alignItems: 'center', paddingVertical: 14 },
 });

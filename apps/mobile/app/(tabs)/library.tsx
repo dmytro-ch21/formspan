@@ -26,6 +26,7 @@ function describeError(err: unknown): string {
   return msg;
 }
 import { fetchExercises, pickImage, type Exercise } from '@/lib/exercises';
+import { vola } from '@/constants/Colors';
 
 const SPORTS = [
   { key: '', label: 'All' },
@@ -250,35 +251,35 @@ const styles = StyleSheet.create({
   controls: { paddingHorizontal: 16, paddingTop: 12, gap: 10 },
   search: {
     borderWidth: 1,
-    borderColor: '#ccc',
+    borderColor: vola.line,
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 11,
     fontSize: 16,
-    color: '#111',
-    backgroundColor: '#fff',
+    color: vola.text,
+    backgroundColor: vola.surface,
   },
   chips: { flexDirection: 'row', gap: 8 },
   chip: {
     borderWidth: 1,
-    borderColor: '#ccc',
+    borderColor: vola.line,
     borderRadius: 999,
     paddingVertical: 7,
     paddingHorizontal: 14,
   },
-  chipActive: { backgroundColor: '#0B1220', borderColor: '#0B1220' },
+  chipActive: { backgroundColor: vola.lime, borderColor: vola.lime },
   chipText: { fontSize: 14, fontWeight: '600' },
-  chipTextActive: { color: '#B8FF2C' },
+  chipTextActive: { color: vola.navy },
   loader: { marginTop: 32 },
   list: { padding: 16, gap: 14 },
   row: { flexDirection: 'row', gap: 14, alignItems: 'center' },
-  thumb: { width: 72, height: 72, borderRadius: 12, backgroundColor: '#eceff3' },
+  thumb: { width: 72, height: 72, borderRadius: 12, backgroundColor: vola.surfaceRaised },
   thumbEmpty: { alignItems: 'center', justifyContent: 'center' },
-  thumbEmptyText: { color: '#8a9099', fontSize: 20 },
+  thumbEmptyText: { color: vola.textDim, fontSize: 20 },
   rowBody: { flex: 1, gap: 3 },
   name: { fontSize: 16, fontWeight: '600' },
-  meta: { fontSize: 13, color: '#6b7280', textTransform: 'capitalize' },
+  meta: { fontSize: 13, color: vola.textMuted, textTransform: 'capitalize' },
   // #8a9099 was ~3.2:1 on white — below WCAG AA's 4.5:1 for 13pt text.
-  muted: { color: '#6b7280', fontSize: 13 },
-  error: { color: 'crimson', fontSize: 14, paddingHorizontal: 16, paddingTop: 10 },
+  muted: { color: vola.textMuted, fontSize: 13 },
+  error: { color: vola.danger, fontSize: 14, paddingHorizontal: 16, paddingTop: 10 },
 });

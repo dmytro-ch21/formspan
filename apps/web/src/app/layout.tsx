@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 import { Barlow, Barlow_Condensed } from "next/font/google";
 import "./globals.css";
+import { ThemeScript } from "./ThemeToggle";
 
 // Barlow for text, Barlow Condensed for numerals and micro-labels — the
 // same pair the admin console uses, so the two surfaces read as one product.
@@ -30,6 +31,9 @@ export default function RootLayout({
   return (
     <ClerkProvider>
       <html lang="en" className={`${barlow.variable} ${barlowCondensed.variable}`}>
+        <head>
+          <ThemeScript />
+        </head>
         <body>{children}</body>
       </html>
     </ClerkProvider>

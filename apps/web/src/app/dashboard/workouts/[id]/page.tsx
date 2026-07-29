@@ -186,7 +186,7 @@ export default function WorkoutEditorPage({ params }: { params: Promise<{ id: st
               type="button"
               onClick={save}
               disabled={!dirty || saving}
-              className="rounded-pill bg-lime px-5 py-2 text-sm font-bold text-navy transition disabled:cursor-not-allowed disabled:opacity-30"
+              className="rounded-pill bg-accent-fill px-5 py-2 text-sm font-bold text-accent-on-fill transition disabled:cursor-not-allowed disabled:opacity-30"
             >
               Save
             </button>

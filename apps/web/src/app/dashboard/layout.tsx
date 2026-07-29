@@ -2,6 +2,7 @@ import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
 
 import { NavLink } from "./NavLink";
+import { ThemeToggle } from "../ThemeToggle";
 
 const navItems = [
   { href: "/dashboard", label: "Today" },
@@ -33,7 +34,11 @@ export default function DashboardLayout({
           ))}
         </nav>
 
-        <div className="mt-auto flex items-center gap-3 border-t border-line-soft px-5 py-4">
+        <div className="mt-auto flex flex-col gap-1 border-t border-line-soft p-3">
+          <ThemeToggle />
+        </div>
+
+        <div className="flex items-center gap-3 border-t border-line-soft px-5 py-4">
           {/* Clerk's widget renders its own surface, so it needs telling
               about the dark ground or it drops a white popover onto it. */}
           <UserButton appearance={{ variables: { colorBackground: "#10151f" } }} />

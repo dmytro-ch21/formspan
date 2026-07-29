@@ -1,45 +1,108 @@
 @import "tailwindcss";
 
 /*
-  VOLA dark design system.
+  VOLA web theming.
 
-  The reference is WHOOP's feel rather than its look: a near-black ground with
-  content floating on it, one dominant element per view, separation by space
-  rather than by borders, and a single accent that *encodes state* instead of
-  decorating. The brand's lime/green gradient does that job here — it means
-  "this is live / this is yours / act here", never "this is pretty".
+  Web is **light by default with an opt-in dark mode**; the mobile app is the
+  one that's dark-first. That split is deliberate rather than an oversight:
+  the phone is used in a gym and at night, while the web app is the desk
+  surface — planning, reviewing, authoring — where a light ground is easier
+  to read for long stretches and matches the tools it sits beside.
 
-  Two deliberate departures, so the app reads as VOLA and not as a clone:
-    - Barlow Condensed for numerals and micro-labels. Numbers are the content
-      in a training app, and the condensed cut lets a big number sit next to
-      its label without either shrinking.
-    - The lime is used sparingly and almost never as a fill. It's a 2px rule,
-      a single active chip, one number. Used everywhere it stops meaning
-      anything, which is the usual way a bold accent gets wasted.
+  Every colour below is declared twice, once per theme, and the Tailwind
+  utilities reference the semantic variable rather than a literal. So a
+  component written once works in both, and adding a third theme later means
+  adding a block here rather than touching a single component.
 
-  Committed to dark only. A theme that has to work in both directions doubles
-  the design surface, and this product is used in a gym and at night.
+  The accent is the constant across both. The brand lime/green means "this is
+  live / this is yours / act here" and is used sparingly — a rule, one chip,
+  one number — never as a page-filling wash. An accent used everywhere stops
+  meaning anything.
 */
-@theme static {
-  /* Ground up: each surface is a step nearer the viewer. */
-  --color-bg: #080b12;
-  --color-surface: #10151f;
-  --color-surface-raised: #171e2b;
-  --color-surface-hover: #1d2534;
 
-  --color-line: #222b3a;
-  --color-line-soft: #1a2230;
+:root {
+  /* LIGHT — the default. Not pure white: a faint warm grey ground lets
+     cards read as raised without needing heavy borders. */
+  --c-bg: #f5f6f8;
+  --c-surface: #ffffff;
+  --c-surface-raised: #ffffff;
+  --c-surface-hover: #f0f2f5;
 
-  --color-text: #f3f6fa;
-  --color-text-muted: #949fb3;
-  --color-text-dim: #667085;
+  --c-line: #e2e5ea;
+  --c-line-soft: #eceef2;
 
-  --color-lime: #b8ff2c;
-  --color-green: #42f58d;
-  --color-navy: #0b1220;
+  --c-text: #10151f;
+  --c-text-muted: #5a6478;
+  --c-text-dim: #838d9e;
 
-  --color-warn: #ffb020;
-  --color-danger: #ff6b6b;
+  /* The brand lime is only legible as a *fill* against dark. On light it
+     becomes an outline/tint, and solid buttons use the navy instead. */
+  --c-accent-fill: #0b1220;
+  --c-accent-on-fill: #b8ff2c;
+
+  --c-lime: #6f9c00;
+  --c-lime-rule: #b8ff2c;
+  --c-green: #42f58d;
+  --c-navy: #0b1220;
+
+  --c-warn: #b06a00;
+  --c-danger: #c0392b;
+
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  /* DARK — the WHOOP-adjacent ground the mobile app also uses. Each surface
+     is a step nearer the viewer rather than a border away from it. */
+  --c-bg: #080b12;
+  --c-surface: #10151f;
+  --c-surface-raised: #171e2b;
+  --c-surface-hover: #1d2534;
+
+  --c-line: #222b3a;
+  --c-line-soft: #1a2230;
+
+  --c-text: #f3f6fa;
+  --c-text-muted: #949fb3;
+  --c-text-dim: #667085;
+
+  --c-accent-fill: #b8ff2c;
+  --c-accent-on-fill: #0b1220;
+
+  --c-lime: #b8ff2c;
+  --c-lime-rule: #b8ff2c;
+  --c-green: #42f58d;
+  --c-navy: #0b1220;
+
+  --c-warn: #ffb020;
+  --c-danger: #ff6b6b;
+
+  color-scheme: dark;
+}
+
+/* `inline` so each utility compiles to the var() rather than the value it
+   happens to have at build time — which is what makes the theme swap work. */
+@theme inline {
+  --color-bg: var(--c-bg);
+  --color-surface: var(--c-surface);
+  --color-surface-raised: var(--c-surface-raised);
+  --color-surface-hover: var(--c-surface-hover);
+
+  --color-line: var(--c-line);
+  --color-line-soft: var(--c-line-soft);
+
+  --color-text: var(--c-text);
+  --color-text-muted: var(--c-text-muted);
+  --color-text-dim: var(--c-text-dim);
+
+  --color-accent-fill: var(--c-accent-fill);
+  --color-accent-on-fill: var(--c-accent-on-fill);
+
+  --color-lime: var(--c-lime);
+  --color-green: var(--c-green);
+  --color-navy: var(--c-navy);
+  --color-warn: var(--c-warn);
+  --color-danger: var(--c-danger);
 
   --font-display: var(--font-barlow-condensed), var(--font-barlow), system-ui;
   --font-body: var(--font-barlow), system-ui;
@@ -50,23 +113,21 @@
 
 html {
   height: 100%;
-  color-scheme: dark;
 }
 
 body {
   min-height: 100%;
-  background: var(--color-bg);
-  color: var(--color-text);
+  background: var(--c-bg);
+  color: var(--c-text);
   font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
 /*
-  Numerals and micro-labels. `.stat` is for the one big number a view is
-  about; `.eyebrow` is the small uppercase label above it. Kept as classes
-  rather than repeated utility strings because they're a typographic rule,
-  not a one-off.
+  Numerals and micro-labels. `.stat` is for the number a view is about;
+  `.eyebrow` is the small uppercase label above it. Classes rather than
+  repeated utility strings because they're a typographic rule, not a one-off.
 */
 .stat {
   font-family: var(--font-display);
@@ -81,12 +142,13 @@ body {
   letter-spacing: 0.14em;
   font-size: 0.6875rem;
   font-weight: 600;
-  color: var(--color-text-dim);
+  color: var(--c-text-dim);
 }
 
-/* The accent as a rule rather than a fill — see the note above. */
+/* The accent as a rule rather than a fill. Keeps its saturation in both
+   themes because it sits on its own, not behind text. */
 .accent-rule {
-  background: linear-gradient(90deg, var(--color-green), var(--color-lime));
+  background: linear-gradient(90deg, var(--c-green), var(--c-lime-rule));
 }
 
 a {
@@ -94,20 +156,17 @@ a {
   text-decoration: none;
 }
 
-/* Visible focus, because a dark UI hides the browser default. */
 :focus-visible {
-  outline: 2px solid var(--color-lime);
+  outline: 2px solid var(--c-accent-fill);
   outline-offset: 2px;
   border-radius: 4px;
 }
 
-/* Dark scrollbars — a bright one against near-black is jarring. */
 * {
-  scrollbar-color: var(--color-line) transparent;
+  scrollbar-color: var(--c-line) transparent;
   scrollbar-width: thin;
 }
 
-/* Inputs inherit almost nothing by default; set it once here. */
 input,
 textarea,
 select,

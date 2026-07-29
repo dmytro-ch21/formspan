@@ -68,7 +68,7 @@ export default function WorkoutsPage() {
         <button
           type="button"
           onClick={() => setComposing(true)}
-          className="rounded-pill bg-lime px-5 py-2.5 text-sm font-bold text-navy transition hover:brightness-110"
+          className="rounded-pill bg-accent-fill px-5 py-2.5 text-sm font-bold text-accent-on-fill transition hover:brightness-110"
         >
           New workout
         </button>
@@ -306,7 +306,7 @@ function NewWorkoutDialog({
           <button
             type="submit"
             disabled={busy || !name.trim()}
-            className="rounded-pill bg-lime px-5 py-2 text-sm font-bold text-navy transition disabled:cursor-not-allowed disabled:opacity-30"
+            className="rounded-pill bg-accent-fill px-5 py-2 text-sm font-bold text-accent-on-fill transition disabled:cursor-not-allowed disabled:opacity-30"
           >
             {busy ? "Creating…" : "Create"}
           </button>
