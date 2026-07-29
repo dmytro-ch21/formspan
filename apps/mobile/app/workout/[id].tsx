@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
+import { useAuthToken } from '@/lib/useAuthToken';
 import { fetchExercises, pickImage, type Exercise } from '@/lib/exercises';
 import {
   deleteWorkout,
@@ -26,11 +27,13 @@ import {
   type Workout,
   type WorkoutItem,
 } from '@/lib/workouts';
+import { setsFromWorkout, startSession } from '@/lib/sessions';
 import { vola } from '@/constants/Colors';
 
 export default function WorkoutDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { getToken, userId } = useAuth();
+  const { userId } = useAuth();
+  const getToken = useAuthToken();
   const router = useRouter();
 
   const [workout, setWorkout] = useState<Workout | null>(null);
@@ -40,6 +43,7 @@ export default function WorkoutDetailScreen() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [picking, setPicking] = useState(false);
+  const [starting, setStarting] = useState(false);
 
   // Compared against the loaded state so Save only appears when something
   // actually changed — a Save button that's always live trains people to
@@ -106,6 +110,29 @@ export default function WorkoutDetailScreen() {
     ]);
   }
 
+  // A template is only worth writing if performing it is one tap away. The
+  // session opens pre-filled with the prescribed sets, so the plan is what
+  // you start from and then change — which is what makes the gap between
+  // prescribed and actual measurable at all.
+  async function start() {
+    if (starting || !workout) return;
+    setStarting(true);
+    setError(null);
+    try {
+      const { session } = await startSession(getToken, {
+        sport: workout.sport,
+        name: workout.name,
+        workout_id: workout.id,
+        sets: setsFromWorkout(items),
+      });
+      router.push(`/session/${session.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setStarting(false);
+    }
+  }
+
   function move(index: number, by: -1 | 1) {
     const next = [...items];
     const target = index + by;
@@ -150,6 +177,26 @@ export default function WorkoutDetailScreen() {
           {workout.goal ? ` · ${workout.goal}` : ''}
           {workout.visibility === 'public' ? ' · shared' : ''}
         </Text>
+
+        <Pressable
+          style={[styles.startButton, (starting || dirty) && styles.disabled]}
+          onPress={start}
+          disabled={starting || dirty}
+          accessibilityRole="button"
+          accessibilityLabel={`Start a session from ${workout.name}`}
+          accessibilityState={{ busy: starting, disabled: starting || dirty }}
+          testID="workout-start-session"
+        >
+          {starting ? (
+            <ActivityIndicator color={vola.navy} />
+          ) : (
+            <Text style={styles.startText}>
+              {/* Starting with unsaved edits would log the plan as it is on
+                  the server, not as it is on screen — so save first. */}
+              {dirty ? 'Save to start a session' : 'Start session'}
+            </Text>
+          )}
+        </Pressable>
 
         {!canEdit && (
           <Text style={styles.readonly} testID="workout-readonly">
@@ -388,7 +435,7 @@ function ExercisePicker({
   onClose: () => void;
   onPick: (e: Exercise) => void;
 }) {
-  const { getToken } = useAuth();
+  const getToken = useAuthToken();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Exercise[]>([]);
   const [loading, setLoading] = useState(false);
@@ -550,6 +597,15 @@ const styles = StyleSheet.create({
   smallButtonText: { fontWeight: '600', fontSize: 14 },
   removeText: { color: vola.danger },
   disabled: { opacity: 0.35 },
+  startButton: {
+    backgroundColor: vola.lime,
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 54,
+  },
+  startText: { color: vola.navy, fontWeight: '700', fontSize: 16 },
   addButton: {
     borderWidth: 1,
     borderStyle: 'dashed',

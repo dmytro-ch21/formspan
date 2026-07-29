@@ -101,11 +101,21 @@ function RootLayoutNav() {
   return (
     <ThemeProvider value={volaNavTheme}>
       <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        {/* `title` is never shown (the header is hidden) but it is what the
+            next screen's back button says — without it that reads "(tabs)". */}
+        <Stack.Screen name="(tabs)" options={{ headerShown: false, title: 'Today' }} />
         <Stack.Screen name="sign-in" options={{ title: 'Sign in' }} />
         {/* Pushed over the tabs so the workout keeps a back button to the
             list it came from, rather than becoming a tab of its own. */}
         <Stack.Screen name="workout/[id]" options={{ title: 'Workout' }} />
+        <Stack.Screen name="session/start" options={{ title: 'Start' }} />
+        <Stack.Screen name="session/[id]" options={{ title: 'Session' }} />
+        {/* Presented as a sheet: picking an exercise is an interruption of
+            logging, not a place you navigate to and stay. */}
+        <Stack.Screen
+          name="session/[id]/add"
+          options={{ title: 'Add exercise', presentation: 'modal' }}
+        />
       </Stack>
     </ThemeProvider>
   );

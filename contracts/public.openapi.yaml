@@ -287,6 +287,123 @@ components:
           type: array
           items: { $ref: "#/components/schemas/Workout" }
 
+    LoggedSet:
+      type: object
+      description: >
+        One set actually performed. Every measure is optional because which
+        ones apply is decided by the exercise's own load_type — a plank has
+        no reps, a run has no weight.
+
+        `rir` and `rpe` are two views of the same quantity (RPE 8 is roughly
+        2 RIR). Both are stored because lifters are fluent in one or the
+        other and rarely both, and asking for a conversion just after a hard
+        set is the wrong moment for arithmetic.
+      required: [exercise_id, position, set_type, notes]
+      properties:
+        exercise_id: { type: string, example: barbell-back-squat }
+        position:
+          type: integer
+          description: Assigned from array order on write, never trusted from the client.
+        set_type:
+          type: string
+          enum: [warmup, working, backoff, drop, amrap, failure]
+          description: >
+            Warm-ups count toward neither working sets nor tonnage — counting
+            them would make a light day look like a hard one.
+        reps: { type: integer, nullable: true }
+        weight_kg: { type: number, nullable: true }
+        seconds: { type: integer, nullable: true }
+        distance_m: { type: integer, nullable: true }
+        rir:
+          type: integer
+          nullable: true
+          minimum: 0
+          maximum: 20
+          description: Reps in reserve. 0 is meaningful — nothing left in the tank.
+        rpe:
+          type: number
+          nullable: true
+          minimum: 1
+          maximum: 10
+          description: Rate of perceived exertion, half steps allowed.
+        notes: { type: string }
+
+    Session:
+      type: object
+      description: >
+        A training session that actually happened, and the sets in it —
+        deliberately distinct from a Workout, which is the *plan*. Keeping
+        them apart is what preserves the gap between prescribed and actual.
+        A session may follow a template or be entirely freeform.
+      required:
+        [id, user_id, workout_id, sport, name, started_at, ended_at, notes,
+         sets, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          description: Client-generated, so a session survives an offline start and syncs idempotently.
+        user_id: { type: string }
+        workout_id:
+          type: string
+          nullable: true
+          description: >
+            The template followed, if any. Null for a freeform session, and
+            also null once a followed template is deleted — history outlives
+            the plan it came from.
+        sport: { type: string, enum: [strength, running, bjj] }
+        name: { type: string, example: Push Day A }
+        started_at:
+          type: string
+          format: date-time
+          description: Client-supplied — logging can happen well after the fact.
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Null while the session is still in progress.
+        notes: { type: string }
+        sets:
+          type: array
+          items: { $ref: "#/components/schemas/LoggedSet" }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    Volume:
+      type: object
+      description: >
+        The derived working-volume summary, computed server-side so both
+        clients report identical numbers rather than each rolling their own
+        arithmetic. Warm-up sets are excluded.
+      required: [working_sets, total_reps, tonnage_kg, hardest_rpe, exercise_ids]
+      properties:
+        working_sets: { type: integer }
+        total_reps: { type: integer }
+        tonnage_kg: { type: number, description: Sum of reps × weight over non-warm-up sets. }
+        hardest_rpe:
+          type: number
+          description: >
+            Highest RPE over the *working* sets; 0 when none carried one. A
+            hard warm-up single shouldn't set the session's headline
+            difficulty.
+        exercise_ids:
+          type: array
+          items: { type: string }
+
+    SessionWithVolume:
+      type: object
+      required: [session, volume]
+      properties:
+        session: { $ref: "#/components/schemas/Session" }
+        volume: { $ref: "#/components/schemas/Volume" }
+
+    SessionList:
+      type: object
+      required: [sessions]
+      properties:
+        sessions:
+          type: array
+          items: { $ref: "#/components/schemas/Session" }
+
     Media:
       type: object
       description: >
@@ -921,6 +1038,201 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /sessions:
+    get:
+      summary: List the caller's sessions, newest first
+      operationId: listSessions
+      parameters:
+        - name: sport
+          in: query
+          schema: { type: string, enum: [strength, running, bjj] }
+        - name: exercise_id
+          in: query
+          schema: { type: string }
+          description: Only sessions containing this exercise.
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        "200":
+          description: The caller's own sessions, each with its sets. Never anyone else's.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionList" }
+        "400":
+          description: Invalid sport or limit.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      summary: Start (or record) a session
+      operationId: createSession
+      description: >
+        Sets may be supplied up front — starting from a template pre-fills
+        them with the prescribed numbers — or left empty and added later via
+        the sets endpoint.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, sport]
+              properties:
+                id: { type: string }
+                workout_id:
+                  type: string
+                  nullable: true
+                  description: >
+                    Must be a workout the caller can see (their own, public,
+                    or a VOLA template) and of the same sport.
+                sport: { type: string, enum: [strength, running, bjj] }
+                name: { type: string }
+                started_at:
+                  type: string
+                  format: date-time
+                  description: Defaults to now when omitted.
+                ended_at: { type: string, format: date-time, nullable: true }
+                notes: { type: string }
+                sets:
+                  type: array
+                  maxItems: 500
+                  items: { $ref: "#/components/schemas/LoggedSet" }
+      responses:
+        "200":
+          description: >
+            The created session and its volume summary. Idempotent on `id`
+            for the same user — a retry returns the original rather than
+            erroring, which is what makes an offline start safe to resend.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionWithVolume" }
+        "400":
+          description: >
+            Invalid input — including a set whose exercise belongs to a
+            different sport than the session, an out-of-range RIR/RPE, more
+            than 500 sets, or a `workout_id` that doesn't exist or isn't
+            visible to the caller. Those last two are deliberately the same
+            error: workout IDs are client-generated and often guessable, so
+            distinguishing them would let a caller enumerate other people's
+            private templates.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409":
+          description: The id already belongs to a different user.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /sessions/{sessionID}:
+    get:
+      summary: Get one session with its volume summary
+      operationId: getSession
+      parameters:
+        - name: sessionID
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The session and its derived volume.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionWithVolume" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404":
+          description: >
+            No such session, or it belongs to someone else — deliberately
+            indistinguishable, since sessions are never shared and a 403
+            would confirm that an id exists.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    delete:
+      summary: Delete a session
+      operationId: deleteSession
+      parameters:
+        - name: sessionID
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: Deleted. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /sessions/{sessionID}/sets:
+    put:
+      summary: Replace a session's ordered sets
+      operationId: replaceSessionSets
+      description: >
+        Sends the whole list — the natural shape for "log another set" and
+        "fix a typo in set 2" alike. Positions are reassigned from array
+        order. Clients write through on every edit rather than offering a
+        save button, so a session survives the app being killed mid-workout.
+      parameters:
+        - name: sessionID
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sets]
+              properties:
+                sets:
+                  type: array
+                  maxItems: 500
+                  items: { $ref: "#/components/schemas/LoggedSet" }
+      responses:
+        "200":
+          description: The updated session and its recomputed volume.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionWithVolume" }
+        "400":
+          description: Invalid input, including a sport mismatch or an out-of-range RIR/RPE.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /sessions/{sessionID}/finish:
+    post:
+      summary: Mark a session finished
+      operationId: finishSession
+      parameters:
+        - name: sessionID
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ended_at:
+                  type: string
+                  format: date-time
+                  description: Defaults to now. An empty body is fine.
+      responses:
+        "200":
+          description: The finished session and its final volume.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionWithVolume" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /admin/users:

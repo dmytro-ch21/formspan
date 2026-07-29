@@ -7,6 +7,7 @@ import { ThemeToggle } from "../ThemeToggle";
 const navItems = [
   { href: "/dashboard", label: "Today" },
   { href: "/dashboard/workouts", label: "Workouts" },
+  { href: "/dashboard/sessions", label: "Sessions" },
   { href: "/dashboard/library", label: "Library" },
 ];
 

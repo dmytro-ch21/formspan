@@ -155,7 +155,228 @@ export function pickImage(e: Exercise, prefer: "thumbnail" | "demo"): string | n
   return null;
 }
 
+export type SetType = "warmup" | "working" | "backoff" | "drop" | "amrap" | "failure";
+
+export const SET_TYPES: { key: SetType; label: string; short: string }[] = [
+  { key: "warmup", label: "Warm-up", short: "W" },
+  { key: "working", label: "Working", short: "" },
+  { key: "backoff", label: "Back-off", short: "B" },
+  { key: "drop", label: "Drop", short: "D" },
+  { key: "amrap", label: "AMRAP", short: "A" },
+  { key: "failure", label: "To failure", short: "F" },
+];
+
+export type LoggedSet = {
+  exercise_id: string;
+  position: number;
+  set_type: SetType;
+  reps: number | null;
+  weight_kg: number | null;
+  seconds: number | null;
+  distance_m: number | null;
+  /** Reps in reserve. 0 is meaningful — nothing left in the tank. */
+  rir: number | null;
+  /** 1–10, half steps. RPE 8 is roughly 2 RIR; record whichever you think in. */
+  rpe: number | null;
+  notes: string;
+};
+
+export type Session = {
+  id: string;
+  user_id: string;
+  workout_id: string | null;
+  sport: Sport;
+  name: string;
+  started_at: string;
+  ended_at: string | null;
+  notes: string;
+  sets: LoggedSet[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type Volume = {
+  working_sets: number;
+  total_reps: number;
+  tonnage_kg: number;
+  hardest_rpe: number;
+  exercise_ids: string[];
+};
+
+/**
+ * Which measures a performed set records, decided by the exercise's own
+ * `load_type` — the same data-driven rule the templates use, and identical
+ * to the mobile client's `measuresFor`.
+ */
+export type Measure = "reps" | "weight" | "seconds" | "distance";
+
+export function measuresFor(loadType: LoadType): Measure[] {
+  switch (loadType) {
+    case "weight_reps":
+      return ["reps", "weight"];
+    case "reps":
+      return ["reps"];
+    case "time":
+      return ["seconds"];
+    case "distance":
+      return ["distance"];
+    case "distance_time":
+      return ["distance", "seconds"];
+  }
+}
+
+export const MEASURE_LABEL: Record<Measure, string> = {
+  reps: "Reps",
+  weight: "kg",
+  seconds: "Secs",
+  distance: "Metres",
+};
+
+export const MEASURE_KEY: Record<Measure, keyof LoggedSet> = {
+  reps: "reps",
+  weight: "weight_kg",
+  seconds: "seconds",
+  distance: "distance_m",
+};
+
+export function emptySet(exerciseID: string, position: number, from?: LoggedSet): LoggedSet {
+  return {
+    exercise_id: exerciseID,
+    position,
+    // Carrying the previous set's numbers forward is what makes logging a
+    // straight-sets block a click per set rather than a retype.
+    set_type: from?.set_type ?? "working",
+    reps: from?.reps ?? null,
+    weight_kg: from?.weight_kg ?? null,
+    seconds: from?.seconds ?? null,
+    distance_m: from?.distance_m ?? null,
+    // Effort is never carried: the third set at the same weight is not the
+    // same effort as the first, and prefilling it would invite recording a
+    // number nobody actually judged.
+    rir: null,
+    rpe: null,
+    notes: "",
+  };
+}
+
+/**
+ * Turns a template into the sets to start from: one row per prescribed set,
+ * pre-filled with the prescribed numbers. Mirrors the mobile client exactly,
+ * so a session started on either platform begins from the same rows.
+ */
+export function setsFromWorkout(items: WorkoutItem[]): LoggedSet[] {
+  const out: LoggedSet[] = [];
+  for (const item of items) {
+    const count = Math.min(Math.max(item.target_sets ?? 1, 1), 20);
+    for (let i = 0; i < count; i++) {
+      out.push({
+        exercise_id: item.exercise_id,
+        position: out.length,
+        set_type: "working",
+        reps: item.target_reps,
+        weight_kg: item.target_weight_kg,
+        seconds: item.target_seconds,
+        distance_m: item.target_distance_m,
+        rir: null,
+        rpe: null,
+        notes: "",
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Swaps every set of one exercise for another, in place — the rack is taken,
+ * the bar is in use, a shoulder complains on the third set.
+ *
+ * Measures carry over only when the two are measured the same way: a barbell
+ * squat for a goblet squat keeps your reps, a plank for a run cannot keep
+ * anything, and inventing a number there would be worse than a blank. Effort
+ * is always cleared — it was a judgement about a different movement.
+ */
+export function swapExercise(
+  sets: LoggedSet[],
+  fromID: string,
+  to: Exercise,
+  fromLoadType: LoadType | undefined,
+): LoggedSet[] {
+  const sameShape = fromLoadType === to.load_type;
+  return sets.map((s) =>
+    s.exercise_id !== fromID
+      ? s
+      : {
+          ...s,
+          exercise_id: to.id,
+          reps: sameShape ? s.reps : null,
+          weight_kg: sameShape ? s.weight_kg : null,
+          seconds: sameShape ? s.seconds : null,
+          distance_m: sameShape ? s.distance_m : null,
+          rir: null,
+          rpe: null,
+        },
+  );
+}
+
+/**
+ * Ranks stand-ins for `base`. Deterministic and explainable by design — the
+ * same movement pattern *and* load type is a true substitute (it slots into
+ * the same set and the numbers still mean something); one of the two is a
+ * weaker suggestion; neither isn't a recommendation at all.
+ */
+export function similarTo(base: Exercise, all: Exercise[]): Exercise[] {
+  const score = (e: Exercise): number => {
+    if (e.id === base.id) return -1;
+    const pattern = e.movement_pattern === base.movement_pattern;
+    const shape = e.load_type === base.load_type;
+    if (pattern && shape) return 3;
+    if (pattern) return 2;
+    // A shared load type alone says nothing — every barbell lift is
+    // weight_reps — so it only counts alongside shared equipment.
+    if (shape && e.equipment.some((q) => base.equipment.includes(q))) return 1;
+    return 0;
+  };
+  return all
+    .map((e) => ({ e, s: score(e) }))
+    .filter((x) => x.s > 0)
+    .sort((a, b) => b.s - a.s || a.e.name.localeCompare(b.e.name))
+    .slice(0, 8)
+    .map((x) => x.e);
+}
+
+export function describeSet(s: LoggedSet): string {
+  const parts: string[] = [];
+  if (s.reps != null && s.weight_kg != null) parts.push(`${s.reps} × ${s.weight_kg}kg`);
+  else if (s.reps != null) parts.push(`${s.reps} reps`);
+  else if (s.weight_kg != null) parts.push(`${s.weight_kg}kg`);
+  if (s.seconds != null) parts.push(`${s.seconds}s`);
+  if (s.distance_m != null) parts.push(`${s.distance_m}m`);
+  if (s.rpe != null) parts.push(`RPE ${s.rpe}`);
+  else if (s.rir != null) parts.push(`${s.rir} RIR`);
+  return parts.join(" · ") || "Not recorded";
+}
+
 export type Token = () => Promise<string | null>;
+
+/**
+ * An API failure that kept the error *code* from the response envelope.
+ * Codes are part of the contract; messages explicitly are not.
+ */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly code: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+/** True when the server rejected the input rather than the request. */
+export function isValidationError(err: unknown): boolean {
+  return err instanceof ApiError && err.code === "invalid_input";
+}
 
 async function request<T>(
   getToken: Token,
@@ -182,7 +403,11 @@ async function request<T>(
   if (!res.ok) {
     // The API's message is human-usable where it matters (a sport mismatch
     // names the offending exercise), so surface it over a bare status.
-    throw new Error(body?.error?.message ?? `Request failed (${res.status}).`);
+    throw new ApiError(
+      body?.error?.message ?? `Request failed (${res.status}).`,
+      body?.error?.code ?? "unknown",
+      res.status,
+    );
   }
   return body as T;
 }
@@ -225,6 +450,65 @@ export async function replaceItems(
 
 export async function deleteWorkout(getToken: Token, id: string): Promise<void> {
   await request<void>(getToken, `/workouts/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export async function listSessions(
+  getToken: Token,
+  opts: { limit?: number } = {},
+  signal?: AbortSignal,
+): Promise<Session[]> {
+  const qs = opts.limit ? `?limit=${opts.limit}` : "";
+  const b = await request<{ sessions: Session[] }>(getToken, `/sessions${qs}`, {}, signal);
+  return b.sessions ?? [];
+}
+
+export async function getSession(
+  getToken: Token,
+  id: string,
+  signal?: AbortSignal,
+): Promise<{ session: Session; volume: Volume }> {
+  return request(getToken, `/sessions/${encodeURIComponent(id)}`, {}, signal);
+}
+
+export async function startSession(
+  getToken: Token,
+  input: { sport: Sport; name: string; workout_id?: string | null; sets?: LoggedSet[] },
+): Promise<{ session: Session; volume: Volume }> {
+  // Client-generated ID, so starting a session is idempotent on retry —
+  // the same contract the offline mobile client relies on.
+  return request(getToken, "/sessions", {
+    method: "POST",
+    body: JSON.stringify({
+      id: crypto.randomUUID(),
+      started_at: new Date().toISOString(),
+      ...input,
+    }),
+  });
+}
+
+export async function replaceSets(
+  getToken: Token,
+  id: string,
+  sets: LoggedSet[],
+): Promise<{ session: Session; volume: Volume }> {
+  return request(getToken, `/sessions/${encodeURIComponent(id)}/sets`, {
+    method: "PUT",
+    body: JSON.stringify({ sets }),
+  });
+}
+
+export async function finishSession(
+  getToken: Token,
+  id: string,
+): Promise<{ session: Session; volume: Volume }> {
+  return request(getToken, `/sessions/${encodeURIComponent(id)}/finish`, {
+    method: "POST",
+    body: JSON.stringify({ ended_at: new Date().toISOString() }),
+  });
+}
+
+export async function deleteSession(getToken: Token, id: string): Promise<void> {
+  await request<void>(getToken, `/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
 export async function listExercises(
