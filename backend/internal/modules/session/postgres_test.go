@@ -940,3 +940,35 @@ func TestBestOneRMs_IsUserScopedAndIgnoresUnqualifyingSets(t *testing.T) {
 		t.Errorf("expected no estimates, got %v", empty)
 	}
 }
+
+// The negative wildcard assertion in TestList can't catch the other
+// direction: dropping LikeTerm while keeping LikeClause passes it and fails
+// this. Its own user, so the fixture doesn't perturb TestList's paging counts.
+func TestSearch_FindsALiteralWildcardInAName(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	cleanup(t, pool, "ses-pct")
+
+	in := strengthSession("ses-pct", "user_pct",
+		[]Set{{ExerciseID: exSquat, Reps: ptrInt(5), Completed: true}})
+	in.Name = "Deload 60% week"
+	if _, err := repo.Create(ctx, in); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	found, err := repo.List(ctx, "user_pct", Filter{Query: "60%"})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(found.Sessions) != 1 || found.Sessions[0].ID != "ses-pct" {
+		t.Errorf(`searching "60%%" should find the session named "Deload 60%% week", got %d`, len(found.Sessions))
+	}
+	// And an underscore is a literal too, not "any single character".
+	none, err := repo.List(ctx, "user_pct", Filter{Query: "6_%"})
+	if err != nil {
+		t.Fatalf("underscore search: %v", err)
+	}
+	if len(none.Sessions) != 0 {
+		t.Errorf(`"6_%%" should match nothing — _ is being treated as a wildcard`)
+	}
+}

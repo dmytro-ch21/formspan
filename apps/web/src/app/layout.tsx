@@ -30,7 +30,24 @@ export default function RootLayout({
 }>) {
   return (
     <ClerkProvider>
-      <html lang="en" className={`${barlow.variable} ${barlowCondensed.variable}`}>
+      {/*
+        suppressHydrationWarning is load-bearing, not a silencer.
+
+        ThemeScript runs in <head> and sets `data-theme` on this element
+        before React hydrates — that's the whole point of it, and it's what
+        stops a dark-mode user seeing a white flash on every navigation. So
+        the server HTML legitimately lacks an attribute the live DOM has, and
+        React reports it as a mismatch on every page load.
+
+        This is the case the prop exists for. It applies to *this element's
+        own attributes only*, one level deep, so a real mismatch anywhere in
+        the tree below is still reported.
+      */}
+      <html
+        lang="en"
+        suppressHydrationWarning
+        className={`${barlow.variable} ${barlowCondensed.variable}`}
+      >
         <head>
           <ThemeScript />
         </head>

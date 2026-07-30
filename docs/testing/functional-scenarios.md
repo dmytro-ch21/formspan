@@ -775,6 +775,13 @@ Domain: logging a session with no connectivity. **Test this by actually stopping
 - Estimates render at whole-unit precision (`144kg`, not `143.88kg`) — they're modelled, not measured.
 - Exercises with no weight (BJJ, timed work) show no estimate rather than a dash-filled row.
 
+## Search escaping, set ownership, and theme hydration
+
+- A search for `%` or `_` in **any** search box (exercises, techniques, sessions) matches those characters, not everything. All three go through `database.LikeTerm` + `LikeClause`; the `ESCAPE` half is the one that gets dropped, and dropping it makes `50%` silently find nothing.
+- `session_sets.user_id` must always equal its session's. It's derived inside the INSERT, so a mismatch means someone added a second write path: `SELECT count(*) FROM session_sets ss JOIN sessions s ON s.id=ss.session_id WHERE ss.user_id <> s.user_id` must be 0.
+- The personal-best lookup must use `session_sets_user_exercise_idx` once a table has many users — `EXPLAIN` it with several athletes sharing one popular exercise, not with a single-user fixture, where a seq scan is correctly cheaper.
+- Loading any page must produce **no hydration error** while `data-theme` is still applied before first paint. The two are in tension: removing the script kills the error and reintroduces the dark-mode flash.
+
 ## Not yet covered (tracked here so it isn't lost, not because it's blocking)
 
 - Mobile has no auth yet (Clerk Expo SDK is a separate future increment) — no sign-in/sign-out scenarios apply to mobile today.

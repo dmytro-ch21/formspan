@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/dmytro-ch21/vola/backend/internal/platform/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -40,12 +41,6 @@ func scanExercise(row scannable) (*Exercise, error) {
 	return &e, nil
 }
 
-// LIKE/ILIKE treat %, _ and \ as pattern metacharacters. Binding a parameter
-// stops SQL injection but not *pattern* injection — a bare "%" typed into a
-// search box would otherwise match the entire table. Different problem, same
-// untrusted input.
-var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
-
 // List builds its WHERE clause from compile-time-constant fragments, adding
 // only bound values — never user input — to the SQL text.
 //
@@ -66,8 +61,8 @@ func (r *PostgresRepository) List(ctx context.Context, f Filter) ([]Exercise, er
 		where = append(where, fmt.Sprintf("sport = $%d", len(args)))
 	}
 	if f.Query != "" {
-		args = append(args, likeEscaper.Replace(f.Query))
-		where = append(where, fmt.Sprintf(`name ILIKE '%%' || $%d || '%%' ESCAPE '\'`, len(args)))
+		args = append(args, database.LikeTerm(f.Query))
+		where = append(where, database.LikeClause("name", len(args)))
 	}
 
 	q := `SELECT ` + selectColumns + ` FROM exercises`

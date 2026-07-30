@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/dmytro-ch21/vola/backend/internal/platform/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -36,11 +37,6 @@ func scanTechnique(row scannable) (*Technique, error) {
 	return &t, nil
 }
 
-// Same pattern-injection guard as the exercise catalog: binding the
-// parameter stops SQL injection but not LIKE metacharacters, so a bare "%"
-// would otherwise turn a search into a full-table match.
-var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
-
 // List composes its WHERE from compile-time-constant fragments plus bound
 // values, so each filter shape gets its own cached plan that can use its
 // index — rather than one static query with disabled predicates, which
@@ -65,8 +61,8 @@ func (r *PostgresRepository) List(ctx context.Context, f Filter) ([]Technique, e
 		where = append(where, fmt.Sprintf("(gi_no_gi = $%d OR gi_no_gi = 'Both')", len(args)))
 	}
 	if f.Query != "" {
-		args = append(args, likeEscaper.Replace(f.Query))
-		where = append(where, fmt.Sprintf(`name ILIKE '%%' || $%d || '%%' ESCAPE '\'`, len(args)))
+		args = append(args, database.LikeTerm(f.Query))
+		where = append(where, database.LikeClause("name", len(args)))
 	}
 
 	q := `SELECT ` + selectColumns + ` FROM techniques`
