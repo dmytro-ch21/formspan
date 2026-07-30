@@ -12,6 +12,7 @@ import (
 	// a second binary, or these tests in a slim image, would break silently.
 	_ "time/tzdata"
 
+	"github.com/dmytro-ch21/vola/backend/internal/platform/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -27,12 +28,6 @@ const maxLimit = 200
 // the 12-effective-rep ceiling is 36/25. It's what lets the candidate search
 // be bounded *exactly* rather than by a guessed row cap — see BestOneRMs.
 const maxOneRMMultiplier = 36.0 / (37.0 - float64(maxEstimableReps))
-
-// likeEscaper neutralises LIKE's own wildcards so a search for "50%" means
-// the characters, not "anything". Mirrors the exercise catalog's, which is
-// the other search box in the product — duplicated rather than shared because
-// a two-line var doesn't justify a package, and both carry this comment.
-var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 
 type PostgresRepository struct {
 	pool *pgxpool.Pool
@@ -120,8 +115,8 @@ func (r *PostgresRepository) List(ctx context.Context, userID string, f Filter) 
 		// Same shape as the exercise catalog's search, escape and all, so the
 		// two search boxes behave identically. Without the ESCAPE a name
 		// containing % or _ would silently match far more than it should.
-		args = append(args, likeEscaper.Replace(f.Query))
-		where = append(where, fmt.Sprintf(`s.name ILIKE '%%' || $%d || '%%' ESCAPE '\'`, len(args)))
+		args = append(args, database.LikeTerm(f.Query))
+		where = append(where, database.LikeClause("s.name", len(args)))
 	}
 
 	whereSQL := strings.Join(where, " AND ")
@@ -578,11 +573,17 @@ func insertSets(ctx context.Context, tx pgx.Tx, sessionID string, sets []Set) er
 		}
 		// Position from array order, never trusted from the client — so a
 		// caller can't create gaps or an order differing from what it sent.
+		// user_id is derived from the session rather than passed in, so the
+		// denormalised copy cannot disagree with the row it came from — there
+		// is no code path that could supply a different one by mistake.
 		batch.Queue(`
 			INSERT INTO session_sets (
-				session_id, exercise_id, position, set_type, reps, weight_kg,
+				session_id, user_id, exercise_id, position, set_type, reps, weight_kg,
 				seconds, distance_m, rir, rpe, notes, completed
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+			) VALUES (
+				$1, (SELECT user_id FROM sessions WHERE id = $1),
+				$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12
+			)`,
 			sessionID, s.ExerciseID, i, st, s.Reps, s.WeightKg,
 			s.Seconds, s.DistanceM, s.RIR, s.RPE, s.Notes, s.Completed)
 	}
@@ -786,9 +787,11 @@ func (r *PostgresRepository) BestOneRMs(
 		WITH candidate AS (
 			SELECT ss.exercise_id, ss.reps, ss.weight_kg, ss.rir, ss.rpe,
 			       MAX(ss.weight_kg) OVER (PARTITION BY ss.exercise_id) AS heaviest
+			-- No join: the owner is on the row, so this seeks straight into
+			-- session_sets_user_exercise_idx instead of scanning either every
+			-- user's sets of this exercise or this user's whole history.
 			FROM session_sets ss
-			JOIN sessions s ON s.id = ss.session_id
-			WHERE s.user_id = $1
+			WHERE ss.user_id = $1
 			  AND ss.exercise_id = ANY($2)
 			  AND `+workingSet+`
 			  AND ss.reps IS NOT NULL AND ss.weight_kg IS NOT NULL

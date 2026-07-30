@@ -1059,6 +1059,39 @@ paging is stable across writes, because it isn't — a session synced mid-page
 shifts every later row down one.
 
 
+## 2026-07-30 — Three loose ends: hydration, a shared escaper, an index
+
+**The theme script and React were fighting on every page load.** `ThemeScript`
+sets `data-theme` in `<head>` before hydration — deliberately, because without
+it a dark-mode user gets a white flash on every navigation. So the server HTML
+legitimately lacks an attribute the live DOM has, and React reported a
+mismatch every time. `suppressHydrationWarning` on `<html>` is the case that
+prop exists for; it covers that element's own attributes one level deep, so a
+genuine mismatch anywhere below is still reported. Verified: no console error
+on a fresh load, `data-theme` still applied.
+
+**`likeEscaper` had reached three copies** — exercise, technique, session. The
+escaping is only correct *in combination with* `ESCAPE '\'`, and the ESCAPE
+is the half that gets forgotten: omit it and the backslashes the escaper
+inserted become literal characters to match, so a search for "50%" silently
+finds nothing while "%" still matches everything. Both halves now live in
+`platform/database` as `LikeTerm` + `LikeClause`, because they are one
+decision rather than two.
+
+**`BestOneRMs` had no index it could use, and it runs whenever a workout
+starts.** The query filtered on `sessions.user_id` and
+`session_sets.exercise_id` — two tables, so nothing could index it. Postgres
+had to either scan every user's sets of that exercise or walk the caller's
+whole history, and both get worse with every session logged.
+
+The owner is now denormalised onto `session_sets`, which makes
+`(user_id, exercise_id, weight_kg DESC)` possible and drops the join
+entirely. Measured on 60,000 squat sets across 300 athletes: the planner picks
+the new index and reads exactly the 200 rows belonging to one of them, four
+heap blocks. `user_id` is derived from the session inside the INSERT rather
+than passed in, so no code path can supply a different one; a check across the
+dev database found zero rows disagreeing with their session.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.
