@@ -78,6 +78,7 @@ components:
         - nutrition_enabled
         - running_enabled
         - unit_system
+        - track_effort
         - created_at
         - updated_at
       properties:
@@ -109,6 +110,12 @@ components:
             number — only how it's shown and entered. Storing converted
             values would make every historical row ambiguous, and would break
             the progression rule, which compares weights across sessions.
+        track_effort:
+          type: boolean
+          description: >
+            Whether the clients collect RIR and RPE. On by default — the
+            progression rule is built on them, and silently withholding its
+            only input would make the app look broken rather than simple.
         created_at:
           type: string
           format: date-time
@@ -159,6 +166,12 @@ components:
             number — only how it's shown and entered. Storing converted
             values would make every historical row ambiguous, and would break
             the progression rule, which compares weights across sessions.
+        track_effort:
+          type: boolean
+          description: >
+            Whether the clients collect RIR and RPE. On by default — the
+            progression rule is built on them, and silently withholding its
+            only input would make the app look broken rather than simple.
 
     Flag:
       type: object
@@ -346,6 +359,13 @@ components:
           maximum: 10
           description: Rate of perceived exertion, half steps allowed.
         notes: { type: string }
+        completed:
+          type: boolean
+          description: >
+            Whether this set was actually performed. The volume summary
+            counts only completed sets, so a session's numbers climb as it
+            is performed rather than starting at the plan's total. A set
+            built from a template starts false.
 
     Session:
       type: object

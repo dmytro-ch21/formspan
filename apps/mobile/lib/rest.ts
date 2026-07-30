@@ -1,4 +1,5 @@
 import type { Exercise } from './exercises';
+import { PREF_AUTO_REST, readPref, writePref } from './prefs';
 
 /**
  * Rest defaults, in seconds, by movement pattern.
@@ -37,7 +38,49 @@ export function restSecondsFor(exercise: Exercise | undefined): number {
   return REST_BY_PATTERN[exercise.movement_pattern] ?? DEFAULT_REST;
 }
 
+/**
+ * Per-exercise rest overrides.
+ *
+ * Local rather than on the profile, and that's the right shape rather than a
+ * shortcut: the rest timer is mobile-only by the platform rule, so there is
+ * no second client to keep in step. A server round-trip would buy nothing
+ * and would stop it working in a basement gym.
+ */
+const restKey = (exerciseID: string) => `rest:${exerciseID}`;
+
+export async function readAutoRest(userID: string): Promise<boolean> {
+  return (await readPref(userID, PREF_AUTO_REST)) === 'on';
+}
+
+export function writeAutoRest(userID: string, on: boolean) {
+  return writePref(userID, PREF_AUTO_REST, on ? 'on' : 'off');
+}
+
+export async function readRestSeconds(
+  userID: string,
+  exercise: Exercise | undefined,
+  exerciseID: string,
+): Promise<number> {
+  const stored = await readPref(userID, restKey(exerciseID));
+  const n = stored ? Number(stored) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : restSecondsFor(exercise);
+}
+
+export function writeRestSeconds(userID: string, exerciseID: string, seconds: number) {
+  return writePref(userID, restKey(exerciseID), String(Math.max(15, Math.round(seconds))));
+}
+
 /** m:ss, and never a negative sign — an overrun reads as 0:00. */
+/** h:mm:ss once past an hour, m:ss below — a session runs long, a rest doesn't. */
+export function formatElapsed(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) return `${h}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
+  return `${m}:${sec.toString().padStart(2, '0')}`;
+}
+
 export function formatRest(seconds: number): string {
   const s = Math.max(0, Math.round(seconds));
   const mins = Math.floor(s / 60);

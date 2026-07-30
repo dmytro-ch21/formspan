@@ -576,6 +576,101 @@ Cause: the earlier fix that stopped `components/Themed`'s `View` painting the th
 Both sheets now set `backgroundColor` explicitly, with a comment saying why a screen-level container needs one here and nowhere else. Worth recording because the shape recurs: a fix that removes an implicit default is only safe where the explicit replacement actually exists, and a modal is exactly the place it doesn't.
 
 
+## 2026-07-29 — One ground, a flat tab bar, and the Λ
+
+The mobile shell was three stacked slabs of slightly different dark — navigation header, content, tab bar — each separated by a hairline rule. On a dark theme those seams are the most visible thing on screen, and they were dividing a layout with no actual sections in it. Everything now sits on one continuous ground: the stack header paints `vola.bg` with `headerShadowVisible: false`, the tab navigator's scene does too, and the tab screens' own header is a plain component rather than navigation furniture.
+
+**The tab bar is flat, flush, and type-only** — labels in uppercase on the same ground, a small dot above the active one, and a hairline as the only separator. No icons, no pill, no fill.
+
+This took two wrong turns worth recording, because both were plausible. The first was a solid floating pill; the second made it glass, on the reasoning that a solid bar floating over content is just a smaller opaque bar. Both were the wrong instinct: **a floating control is a *thing on top of* the app**, and the design treats navigation as part of the page — quiet enough to ignore until you look for it. The active tab is marked by a dot rather than a container because that's the least furniture that still answers "where am I". Checking the hi-fi mockup earlier would have skipped both attempts.
+
+The hairline is the one seam kept deliberately: without it the labels read as content when a list scrolls behind them.
+
+**A React Navigation trap worth recording anyway**, since it'll bite the next person who tries to float something: insetting the tab bar with `left`/`right`/`bottom` silently does nothing — the navigator positions the bar's own container and overwrites those offsets, so it stays edge-to-edge and looks completely unchanged. Margins apply to the bar itself and survive.
+
+**Screen names are small and top-left**, with the wordmark centred beside them. They're orientation, not headlines — you already know where you are and just want confirming.
+
+**The wordmark's A is a bare chevron**, drawn from two rotated rules rather than set as a glyph. The Greek lambda renders at a different weight and width to the rest of the wordmark in most faces, so "VOLΛ" came out visibly mismatched; two strokes match the text exactly because that weight is a number we pick. The box width is derived rather than eyeballed — a 12pt leg rotated 22° carries its top end ≈2.25pt inward, so the apexes meet at 8.5pt and 9 gives a hair of overlap so the join reads solid. The first attempt had the rotations swapped and rendered a V.
+
+**On the Dynamic Island:** the wordmark sits below it, not in it. Drawing *into* the island means a Live Activity via ActivityKit — native code and a custom dev client, neither of which this app has. The first attempt placed it level with the island and the island simply covered it; the island is opaque hardware, not a layer an app can draw into.
+
+**Also removed:** the Expo web target's `body` still followed `prefers-color-scheme` and went white on a light machine, behind a dark app. Mobile is dark-only by decision, so it's the VOLA ground unconditionally now.
+
+
+## 2026-07-29 — A You tab, profile editing, and Settings as grouped rows
+
+The mockup's fifth tab exists now. **You** shows who the athlete is — name, which sports they train, the units in use — with **Edit** and **Settings** in the top-right.
+
+**Those two are deliberately separate, not one list.** Edit changes *facts about you* that the app reasons over: which sports you do decides what it offers, and date of birth feeds the calorie and heart-rate maths later. Settings changes *how the app behaves*. Getting a fact wrong changes answers; getting a preference wrong only changes labels. One combined list would make "change my units" and "change my birthday" look like the same kind of action.
+
+**Settings is grouped rows that drill down**, following the reference the user pointed at. The shape matters more than it looks: this list is going to grow — notifications, integrations, privacy, per-sport defaults — and a screen that gains a switch per feature becomes unnavigable long before it becomes complete. Sections and drill-downs mean adding a preference is adding a row, not redesigning the page. Units moved into its own sub-screen on that basis.
+
+**Sign out lives in Settings under Account**, which is where people look for it, and it confirms first — anything not yet synced is still only on the device, and signing out is the one action that can put it out of reach. It was removed from Today (where it never belonged) and from You (where it would have been a second copy).
+
+`PATCH /v1/profile` still 404s for an account with no profile row, so the edit screen creates one and retries, same as the units preference already did.
+
+**Not visually verified:** the grouped Settings screen and the Edit form. Both typecheck and the navigation into Settings from the You header was confirmed working, but repeated Fast Refreshes had drifted the Simulator's navigation state badly enough that further taps were landing on stale frames, and screenshotting through that would have proved nothing. Worth a real pass before merging.
+
+
+## 2026-07-29 — Volume that climbs, and effort you can switch off
+
+**The session summary now counts what you've done, not what's been planned.** Opening a template used to show its full tonnage before a single rep — the opposite of what a training log is for. `session_sets.completed` is the trigger, and `Summarise` skips anything not ticked, so working sets, reps, tonnage and top RPE all climb as the session is performed.
+
+The migration backfills existing rows to `true` and *then* flips the default to `false`. Anything already logged was by definition done; resetting history to "not completed" would have zeroed every past session's volume — and the fact that the tests caught exactly that when the insert path silently kept writing the new default is the reason the backfill is worth spelling out.
+
+**Completing a set is a tick.** The old "Rest" chip became a checkbox. Un-ticking is allowed: mis-taps happen mid-set, and an un-undoable checkbox is worse than none.
+
+*(Superseded below: the tick briefly also started the rest timer.)*
+
+Two consequences worth stating because they're easy to miss: an uncompleted set contributes **no effort** to `hardest_rpe`, and the progression lookup now requires `completed` — a weight you planned but didn't lift must not become the evidence the next session's recommendation is built on.
+
+**Effort tracking is a preference.** `profiles.track_effort`, on by default, with a switch under Settings → Preferences. Off hides the RIR and RPE fields entirely rather than greying them: a disabled field still costs the space and still reads as something you're failing to fill in.
+
+Default-on is deliberate and not just conservatism — the progression rule has no other input, so shipping it off would make the app look broken rather than simple. Worth remembering if the setting ever moves into onboarding.
+
+**Not visually verified.** The whole change typechecks, the full suite passes, and the new `Summarise` behaviour has tests covering nothing-done, partly-done and fully-done. But the tick and the effort switch haven't been driven on the Simulator — the session state there had drifted badly from a long stretch of Fast Refreshes, and screenshotting through it would have proved nothing. Both want a real pass.
+
+
+## 2026-07-29 — What the session header is actually for
+
+Trimmed to three numbers while training — **time, sets, reps** — with tonnage joining them only once the session is finished.
+
+**Top RPE is gone entirely.** Mid-session it repeated the effort typed thirty seconds earlier, which is the definition of a stat that doesn't earn its place. **Tonnage is a result, not a readout**: nobody changes the next set because a running total crossed 1,500 kg, so it appears when the figure means something.
+
+Both are still computed by the API. They're real data for the trends screen the web app is meant to become — the change is about what deserves a permanent slot in a header read between sets with one hand, not about what's worth recording.
+
+## 2026-07-29 — Session duration, rest per exercise, and stats in the library
+
+**A session records how long it took.** A live clock in the summary header, derived from `started_at` on every tick rather than accumulated — same reasoning as the rest timer, since a session spends most of its life with the phone in a pocket and a counter would stop when the JS thread is throttled. Finished sessions show their duration in the recent list and on the web history page.
+
+**Rest is per exercise, and you start it when you want.** Each exercise header gained a Rest control, so the timer no longer only fires by ticking a set — you can start it after a warm-up, or a set you didn't tick, or just because.
+
+**Then: auto-start became a setting, because it's genuinely a preference.** Ticking a set had also kicked off the countdown, on the theory that finishing a set and beginning to rest are the same moment. For some people it is; for others it isn't — you tick late, or tick a set you finished five minutes ago, or you're already walking to the next rack. Having guessed wrong in both directions (first auto-on, then auto-off), the honest answer was that neither is universally right: it's **"Auto rest timer"** under Settings → Preferences.
+
+It defaults **off**, because a countdown that starts itself is one you spend attention cancelling when it guesses wrong, and the Rest button is always there regardless. The setting is local, like the per-exercise durations, for the same reason: the rest timer is mobile-only, so there's no second client to keep in step.
+
+Worth noting as a process point rather than a design one — two rounds of me picking a default were two rounds of churn that a setting resolved immediately. Behaviour that splits on how someone trains is a preference, not a decision to make on their behalf. The duration is per exercise and **learned**: ±15s while a rest is running saves that adjustment against the exercise, so a heavy squat and a lateral raise stop sharing a wait after the first time you correct it.
+
+Those durations live in the local `prefs` table rather than on the profile, and that's the right shape rather than a shortcut: the rest timer is mobile-only by the platform rule, so there is no second client to keep in step, and a server round-trip would buy nothing while breaking it in a basement gym.
+
+**The library opens an exercise.** A detail screen showing the catalog entry and, underneath, what you last did on it — weight, reps, effort, when. The catalog alone is reference material anyone could look up; the last line is what turns "what is a Bulgarian split squat" into "what did *I* do last time", which is the only version of the question anyone asks standing in a gym. It reads from the same endpoint that drives progressive overload, so the number shown here and the number recommended in a session cannot drift.
+
+**A bug caught by looking rather than by testing.** The mobile client's `localVolume` is a deliberate duplicate of the server's `Summarise`, kept so the header still works offline — and the completion change went into the Go version only. The result was a live session showing the plan's full tonnage (18 sets, 19,171 lb) against a column of unticked sets. Exactly the drift the duplication risks, found on the first screenshot after wiring it up. Both rules are now pinned server-side by tests named in the client's comment, so the next person to touch either knows which is authoritative.
+
+Verified live: ticking the first set dropped the header from 18 sets to 1 set / 12 reps / 1620.1 lb, started the rest countdown labelled with that exercise, and left the session clock running.
+
+
+## 2026-07-29 — A preference that needed a server was a preference that broke
+
+The "Track effort" switch wouldn't move. The immediate cause was mundane — the local API had stopped, so the profile read and write both failed. But the reason that was *invisible* is the part worth keeping: the switch applied optimistically and then reverted in a `.catch`, so a dead network looked exactly like a dead control. No error, no explanation, just a toggle that snapped back.
+
+The fix is the same shape the units preference already had and this one didn't: a **local cache is what the UI reads and writes**, and the account-level write is opportunistic. `useTrackEffort` now mirrors `useUnits`, and both the Settings switch and the session screen read the same hook, so they can't disagree about whether effort is being collected.
+
+The preference still lives on the profile rather than being purely local, because it changes what the web app collects too — but in an offline-first app, *nothing about expressing a preference* should require a server to be reachable. The rest-timer settings were already local for a related reason; this brings the account-level ones in line behaviourally without moving where they're stored.
+
+Verified by flipping it and reading `profiles.track_effort` go `t` → `f`.
+
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

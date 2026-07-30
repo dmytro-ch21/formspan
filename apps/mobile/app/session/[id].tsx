@@ -7,7 +7,7 @@ import { RestTimerBar, useRestTimer } from '@/components/RestTimer';
 import { Text, View } from '@/components/Themed';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { vola } from '@/constants/Colors';
-import { restSecondsFor } from '@/lib/rest';
+import { formatElapsed, readAutoRest, readRestSeconds, writeRestSeconds } from '@/lib/rest';
 import {
   distanceInputUnit,
   formatWeight,
@@ -20,6 +20,7 @@ import {
 } from '@/lib/units';
 import { useUnits } from '@/lib/useUnits';
 import { getExerciseUnits, setExerciseUnit } from '@/lib/profile';
+import { useTrackEffort } from '@/lib/useTrackEffort';
 import { fetchExercises, type Exercise } from '@/lib/exercises';
 import {
   cacheExercises,
@@ -74,11 +75,38 @@ export default function SessionScreen() {
   const [catalog, setCatalog] = useState<Map<string, Exercise>>(new Map());
   const [suggestions, setSuggestions] = useState<Map<string, Suggestion>>(new Map());
   const timerState = useRestTimer();
+
+  /**
+   * How long you've been training. Derived from started_at on every tick
+   * rather than accumulated, for the same reason the rest timer is: a
+   * counter stops when the JS thread is throttled, and a session spends most
+   * of its life with the phone in a pocket.
+   */
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!session) return;
+    const from = new Date(session.started_at).getTime();
+    const to = session.ended_at ? new Date(session.ended_at).getTime() : null;
+    const tick = () => setElapsed(((to ?? Date.now()) - from) / 1000);
+    tick();
+    // A finished session's duration is fixed, so there's nothing to tick.
+    if (to !== null) return;
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [session]);
   const { units } = useUnits();
   // Per-exercise overrides: a lifter who thinks in kilograms still faces a
   // leg press marked in pounds, and converting in your head at the moment
   // you're trying to record a number is exactly what this avoids.
   const [exerciseUnits, setExerciseUnits] = useState<Record<string, UnitSystem>>({});
+  // Defaults to showing effort: the progression rule is built on it, and a
+  // failed profile fetch shouldn't quietly disable the app's only input.
+  const [showEffort, setShowEffort] = useState(true);
+  // Off unless asked for — see PREF_AUTO_REST for why that's the default.
+  const [autoRest, setAutoRest] = useState(false);
+  useEffect(() => {
+    if (userId) readAutoRest(userId).then(setAutoRest).catch(() => {});
+  }, [userId]);
   useEffect(() => {
     getExerciseUnits(getToken).then(setExerciseUnits).catch(() => {});
   }, [getToken]);
@@ -259,9 +287,6 @@ export default function SessionScreen() {
   }
 
   function addSet(exerciseID: string, afterIndex: number) {
-    // Adding the next set is the gesture that means "I just finished one",
-    // so rest starts here rather than behind a second, separate tap.
-    startRest(exerciseID);
     commit(
       [
         ...sets.slice(0, afterIndex + 1),
@@ -271,9 +296,36 @@ export default function SessionScreen() {
     );
   }
 
-  function startRest(exerciseID: string) {
+  /**
+   * Ticking a set records that it happened — and nothing else.
+   *
+   * Whether it also starts the rest countdown is the athlete's call, not
+   * ours: for some people ticking *is* the moment they rack the bar, and for
+   * others it happens late or for a set they finished five minutes ago. We
+   * guessed wrong in both directions before making it a setting, so now it's
+   * "Auto rest timer" — off by default, because a countdown that starts
+   * itself is one you spend attention cancelling.
+   *
+   * Un-ticking never starts rest, and stays possible: mis-taps happen
+   * mid-set, and an un-undoable checkbox is worse than none.
+   */
+  function toggleDone(index: number, exerciseID: string) {
+    const now = !sets[index].completed;
+    commit(sets.map((s, i) => (i === index ? { ...s, completed: now } : s)));
+    if (now && autoRest) startRest(exerciseID);
+  }
+
+  /**
+   * Starts rest for one exercise, at that exercise's own duration.
+   *
+   * The duration is per exercise and editable — a triple on a heavy squat
+   * and a set of lateral raises are not the same wait, and the movement
+   * pattern's default is a starting point rather than an answer.
+   */
+  async function startRest(exerciseID: string) {
     const ex = catalog.get(exerciseID);
-    timerState.start(restSecondsFor(ex), ex?.name ?? 'Rest');
+    const seconds = userId ? await readRestSeconds(userId, ex, exerciseID) : 90;
+    timerState.start(seconds, ex?.name ?? 'Rest', exerciseID);
   }
 
   function removeSet(index: number) {
@@ -322,15 +374,27 @@ export default function SessionScreen() {
         keyboardShouldPersistTaps="handled"
         automaticallyAdjustKeyboardInsets
       >
+        {/* Three numbers while you train — time, sets, reps — and tonnage
+            on top once you finish.
+            "Top RPE" is gone entirely: mid-session it only repeated the
+            effort typed thirty seconds earlier. Both are still computed by
+            the API; they're real data for the trends screen, just not worth
+            a permanent slot in a header read between sets. */}
         {volume && (
           <View style={styles.summary}>
-            <Stat label="Working sets" value={String(volume.working_sets)} />
+            <Stat label="Time" value={formatElapsed(elapsed)} />
+            <Stat label="Sets" value={String(volume.working_sets)} />
             <Stat label="Reps" value={String(volume.total_reps)} />
-            <Stat
-              label="Tonnage"
-              value={volume.tonnage_kg > 0 ? formatWeight(volume.tonnage_kg, units) : '—'}
-            />
-            <Stat label="Top RPE" value={volume.hardest_rpe > 0 ? String(volume.hardest_rpe) : '—'} />
+            {/* Tonnage is a result, not a readout. Mid-session it's a
+                number nobody acts on — you don't change the next set
+                because the running total crossed 1,500kg — so it appears
+                once the session is done and the figure means something. */}
+            {finished && (
+              <Stat
+                label="Tonnage"
+                value={volume.tonnage_kg > 0 ? formatWeight(volume.tonnage_kg, units) : '—'}
+              />
+            )}
           </View>
         )}
 
@@ -346,6 +410,18 @@ export default function SessionScreen() {
             <View key={g.exerciseID + g.indices[0]} style={styles.group}>
               <View style={styles.groupHead}>
                 <Text style={styles.groupName}>{exercise?.name ?? g.exerciseID}</Text>
+                {!finished && (
+                  <Pressable
+                    onPress={() => startRest(g.exerciseID)}
+                    hitSlop={10}
+                    style={styles.restChip}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Start rest for ${exercise?.name ?? 'this exercise'}`}
+                    testID={`rest-${g.exerciseID}`}
+                  >
+                    <Text style={styles.restChipText}>Rest</Text>
+                  </Pressable>
+                )}
                 {!finished && (
                   <Pressable
                     onPress={() => toggleUnitFor(g.exerciseID)}
@@ -387,7 +463,8 @@ export default function SessionScreen() {
                   editable={!finished}
                   onChange={(next) => update(i, next)}
                   onRemove={() => removeSet(i)}
-                  onRest={() => startRest(g.exerciseID)}
+                  onToggleDone={() => toggleDone(i, g.exerciseID)}
+                  showEffort={showEffort}
                   units={unitFor(g.exerciseID)}
                 />
               ))}
@@ -535,7 +612,16 @@ export default function SessionScreen() {
         <RestTimerBar
           rest={timerState.rest}
           remaining={timerState.remaining}
-          onAdjust={timerState.adjust}
+          onAdjust={(delta) => {
+            timerState.adjust(delta);
+            // Adjusting is how you tell the app this exercise needs a
+            // different wait — so it sticks, rather than being redone
+            // every set.
+            const ex = timerState.rest?.exerciseID;
+            if (userId && ex) {
+              writeRestSeconds(userId, ex, (timerState.rest?.total ?? 90) + delta).catch(() => {});
+            }
+          }}
           onTogglePause={timerState.togglePause}
           onStop={timerState.stop}
         />
@@ -550,9 +636,10 @@ export default function SessionScreen() {
  * Duplicating it is a deliberate, narrow exception to "compute it once, on
  * the server": a summary that blanks out the moment you lose signal is worse
  * than a summary computed twice, and this is the one screen guaranteed to be
- * used without a network. The rule it implements — warm-ups count toward
- * nothing — is pinned on the server by TestSummarise_ExcludesWarmups; if the
- * two ever disagree, that test is the authority.
+ * used without a network. The rules it implements — only completed sets
+ * count, and warm-ups count toward nothing — are pinned on the server by
+ * TestSummarise_CountsOnlyCompletedSets and TestSummarise_ExcludesWarmups.
+ * If the two ever disagree, those tests are the authority.
  */
 function localVolume(sets: LoggedSet[]): Volume {
   const v: Volume = {
@@ -564,6 +651,10 @@ function localVolume(sets: LoggedSet[]): Volume {
   };
   for (const s of sets) {
     if (!v.exercise_ids.includes(s.exercise_id)) v.exercise_ids.push(s.exercise_id);
+    // Must match the server's rule exactly. Missing this on the first pass
+    // showed the plan's full tonnage against a column of unticked sets —
+    // precisely the drift this duplicated arithmetic risks.
+    if (!s.completed) continue;
     if (s.set_type === 'warmup') continue;
     v.working_sets++;
     if (s.rpe != null && s.rpe > v.hardest_rpe) v.hardest_rpe = s.rpe;
@@ -596,8 +687,9 @@ function SetRow({
   editable,
   onChange,
   onRemove,
-  onRest,
+  onToggleDone,
   units,
+  showEffort,
 }: {
   index: number;
   ordinal: number;
@@ -606,8 +698,9 @@ function SetRow({
   editable: boolean;
   onChange: (next: LoggedSet) => void;
   onRemove: () => void;
-  onRest: () => void;
+  onToggleDone: () => void;
   units: UnitSystem;
+  showEffort: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const measures: Measure[] = exercise ? measuresFor(exercise.load_type) : ['reps'];
@@ -644,17 +737,17 @@ function SetRow({
         </Text>
         <Text style={styles.setSummary}>{describeSet(set, units)}</Text>
         {editable && (
-          // Sits on the collapsed row, because that's where your thumb
-          // already is when you rack the bar — not behind a disclosure.
+          // Records the set; starts rest only if "Auto rest timer" is on.
           <Pressable
-            onPress={onRest}
+            onPress={onToggleDone}
             hitSlop={10}
-            style={styles.restChip}
-            accessibilityRole="button"
-            accessibilityLabel={`Done — start resting after set ${ordinal}`}
-            testID={`rest-${index}`}
+            style={[styles.tick, set.completed && styles.tickDone]}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: set.completed }}
+            accessibilityLabel={`Set ${ordinal} done`}
+            testID={`done-${index}`}
           >
-            <Text style={styles.restChipText}>Rest</Text>
+            <Text style={[styles.tickMark, set.completed && styles.tickMarkDone]}>✓</Text>
           </Pressable>
         )}
         {editable && <Text style={styles.disclosure}>{open ? '⌃' : '⌄'}</Text>}
@@ -709,7 +802,11 @@ function SetRow({
           </View>
 
           {/* Effort, side by side. Two views of the same thing — record
-              whichever you think in rather than converting mid-session. */}
+              whichever you think in rather than converting mid-session.
+              Hidden entirely when effort tracking is off: greying the
+              fields out would still cost the space and still read as
+              something you're failing to fill in. */}
+          {showEffort && (
           <View style={styles.fieldRow}>
             <Field
               label="RIR"
@@ -729,6 +826,7 @@ function SetRow({
               testID={`set-${index}-rpe`}
             />
           </View>
+          )}
 
           <View style={styles.chips}>
             {SET_TYPES.map((t) => (
@@ -859,6 +957,15 @@ const styles = StyleSheet.create({
   groupHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   groupName: { flex: 1, fontSize: 16, fontWeight: '700' },
   swapText: { color: vola.lime, fontWeight: '600', fontSize: 14 },
+  restChip: {
+    borderWidth: 1,
+    borderColor: vola.line,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    minHeight: 32,
+    justifyContent: 'center',
+  },
+  restChipText: { fontSize: 12, fontWeight: '700', color: vola.textMuted },
   unitChip: {
     borderWidth: 1,
     borderColor: vola.line,
@@ -873,15 +980,18 @@ const styles = StyleSheet.create({
   setOrdinal: { width: 34, fontWeight: '700', color: vola.textDim },
   setBadge: { color: vola.lime, fontSize: 11, fontWeight: '700' },
   setSummary: { flex: 1, fontSize: 15 },
-  restChip: {
-    borderWidth: 1,
-    borderColor: vola.line,
+  tick: {
+    width: 34,
+    height: 34,
     borderRadius: 999,
-    paddingHorizontal: 12,
-    minHeight: 34,
+    borderWidth: 1.5,
+    borderColor: vola.line,
+    alignItems: 'center',
     justifyContent: 'center',
   },
-  restChipText: { fontSize: 12, fontWeight: '700', color: vola.lime },
+  tickDone: { backgroundColor: vola.lime, borderColor: vola.lime },
+  tickMark: { color: vola.textDim, fontWeight: '800', fontSize: 15 },
+  tickMarkDone: { color: vola.navy },
   disclosure: { color: vola.textDim, width: 16, textAlign: 'center' },
   setEditor: { padding: 12, paddingTop: 0, gap: 12 },
   fieldRow: { flexDirection: 'row', gap: 10 },

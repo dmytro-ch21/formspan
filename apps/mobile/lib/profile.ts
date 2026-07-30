@@ -7,12 +7,49 @@ const API_BASE = `${API_URL}/v1`;
 export type Profile = {
   user_id: string;
   display_name: string | null;
+  date_of_birth: string | null;
+  sex: string | null;
   unit_system: UnitSystem;
+  track_effort: boolean;
   bjj_enabled: boolean;
   strength_enabled: boolean;
   nutrition_enabled: boolean;
   running_enabled: boolean;
 };
+
+/** The fields the edit screen can change. Omitted keys are left alone. */
+export type ProfilePatch = Partial<{
+  track_effort: boolean;
+  display_name: string | null;
+  date_of_birth: string | null;
+  sex: string | null;
+  bjj_enabled: boolean;
+  strength_enabled: boolean;
+  nutrition_enabled: boolean;
+  running_enabled: boolean;
+}>;
+
+/**
+ * Saves profile edits, creating the row first if there isn't one.
+ *
+ * Same reasoning as the unit preference: PATCH on a missing profile is a
+ * 404, which is right for the API and a dead end for someone who reached
+ * this screen without ever going through onboarding.
+ */
+export async function updateProfile(
+  getToken: () => Promise<string | null>,
+  patch: ProfilePatch,
+): Promise<Profile> {
+  const send = () =>
+    request<Profile>(getToken, '/profile', { method: 'PATCH', body: JSON.stringify(patch) });
+  try {
+    return await send();
+  } catch (err) {
+    if (!/not found/i.test(err instanceof Error ? err.message : '')) throw err;
+    await request<Profile>(getToken, '/profile', { method: 'POST', body: JSON.stringify({}) });
+    return send();
+  }
+}
 
 async function request<T>(
   getToken: () => Promise<string | null>,
@@ -63,6 +100,13 @@ export async function setExerciseUnit(
     method: 'PUT',
     body: JSON.stringify({ unit_system: unit }),
   });
+}
+
+export function setTrackEffort(
+  getToken: () => Promise<string | null>,
+  on: boolean,
+): Promise<Profile> {
+  return updateProfile(getToken, { track_effort: on } as never);
 }
 
 export function getProfile(getToken: () => Promise<string | null>): Promise<Profile> {

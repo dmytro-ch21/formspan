@@ -1,5 +1,5 @@
 import { Image } from 'expo-image';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -12,6 +12,7 @@ import {
 
 import { useAuth } from '@clerk/clerk-expo';
 
+import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
 import { Text, View } from '@/components/Themed';
 import { PREF_LIBRARY_SPORT, readPref, writePref } from '@/lib/prefs';
 import { cacheExercises } from '@/lib/sessionStore';
@@ -54,6 +55,7 @@ export default function LibraryScreen() {
 
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const { userId } = useAuth();
+  const router = useRouter();
   const [sport, setSportState] = useState<string>('');
   const [query, setQuery] = useState('');
 
@@ -165,6 +167,7 @@ export default function LibraryScreen() {
 
   return (
     <View style={styles.container} testID="library-screen">
+      <ScreenHeader title="Library" />
       <View style={styles.controls}>
         <TextInput
           style={styles.search}
@@ -239,8 +242,9 @@ export default function LibraryScreen() {
             return (
               <Pressable
                 style={styles.row}
+                onPress={() => router.push(`/exercise/${item.id}`)}
                 accessibilityRole="button"
-                accessibilityLabel={`${item.name}, ${item.sport}`}
+                accessibilityLabel={`${item.name}, ${item.sport}. See your last session.`}
                 testID={`exercise-${item.id}`}
               >
                 {uri ? (
@@ -312,7 +316,7 @@ const styles = StyleSheet.create({
   chipText: { fontSize: 14, fontWeight: '600' },
   chipTextActive: { color: vola.navy },
   loader: { marginTop: 32 },
-  list: { padding: 16, gap: 14 },
+  list: { padding: 16, gap: 14, paddingBottom: TAB_BAR_CLEARANCE },
   row: { flexDirection: 'row', gap: 14, alignItems: 'center' },
   thumb: { width: 72, height: 72, borderRadius: 12, backgroundColor: vola.surfaceRaised },
   thumbEmpty: { alignItems: 'center', justifyContent: 'center' },

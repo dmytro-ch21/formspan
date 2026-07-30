@@ -429,6 +429,42 @@ Domain: a training session that **actually happened**, and the sets in it — re
 - Retrying `POST` with the same `id` as the same user returns the original — an offline start must be safe to resend.
 - **Every measure round-trips**: reps, weight, seconds, distance, RIR *and* RPE on one set, read back unchanged (`TestPostgresRepository_RecordsEveryMeasure`).
 
+**Progressive volume — the property that matters most**
+- A session opened from a template shows **zero** working sets, reps and tonnage until sets are ticked off. It must never open at the plan's total (`TestSummarise_CountsOnlyCompletedSets`).
+- Each tick moves the numbers by exactly that set's contribution.
+- An **uncompleted set contributes no effort** either — it must not set `hardest_rpe` (`TestSummarise_IgnoresEffortOnUncompletedSets`).
+- The progression lookup ignores uncompleted sets: a weight planned but not lifted must never become evidence for the next recommendation.
+- **Ticking a set starts the rest timer only when "Auto rest timer" is on.** It defaults **off**, so out of the box the Rest button is the only trigger. Un-ticking never starts rest, on or off. Un-ticking is allowed.
+- **Migration check:** existing sets backfill to completed, so historical sessions keep their volume. Only new sets default to not-done.
+- **The client's `localVolume` must match the server's `Summarise` exactly.** It's a deliberate duplicate so the header works offline, and it has already drifted once — the completion rule went into Go only, and a live session showed the plan's full tonnage against unticked sets.
+
+**What the header shows**
+- While training: time, sets, reps. **No tonnage, no top RPE.**
+- Once finished: tonnage appears. Top RPE never does.
+- Both remain in the `Volume` API response — dropping them from the UI must not drop them from the contract, since the trends screen will want them.
+
+**Session duration**
+- The header clock runs from `started_at` and keeps time across backgrounding — derived per tick, never accumulated.
+- A finished session's duration is fixed and stops ticking; it appears in the mobile recent list and the web history page.
+
+**Rest, per exercise**
+- Each exercise header starts its own rest, always available regardless of the auto setting.
+- "Auto rest timer" is a **local** preference — the rest timer is mobile-only, so there's no second client to sync with.
+- ±15s during a rest **persists to that exercise**, so the correction isn't repeated every set.
+- Durations are local to the device by design — the rest timer is mobile-only, so there's no second client to sync with.
+
+**Exercise detail (`apps/mobile` library → exercise)**
+- Shows last weight, reps, effort and date, from the same endpoint as the progression suggestion — the two must never disagree.
+- An exercise never logged shows an explicit "not logged yet" state, not zeros.
+- The catalog entry renders even when the history lookup fails.
+
+**Effort tracking preference (`profiles.track_effort`)**
+- Default **on** — the progression rule has no other input, so off-by-default would make the app look broken rather than simple.
+- Off hides the RIR and RPE fields entirely, not greyed out.
+- Toggling it never alters recorded values; effort already logged stays in the database.
+- **It must work with the API unreachable.** The switch reads and writes a local cache and pushes to the profile opportunistically — an earlier version reverted in a `.catch`, so a stopped API was indistinguishable from a broken control.
+- Settings and the session screen read the same hook, so the switch and the visibility of the fields can never disagree.
+
 **Volume arithmetic**
 - **Warm-ups count toward neither working sets nor tonnage** (`TestSummarise_ExcludesWarmups`). Counting them inflates every number and makes a light day look like a hard one, which would poison anything built on top.
 - `hardest_rpe` covers **working sets only** — a hard warm-up single mustn't set the session's headline difficulty. (It originally counted warm-ups, contradicting the schema's own wording; caught in review.)
@@ -522,7 +558,7 @@ Domain: what to load today for a given exercise, computed from the caller's own 
 Domain: the countdown between sets. **Mobile only, permanently** — an in-progress session is a phone thing, and a rest countdown on a desktop you aren't standing next to is decoration. Do not add scenarios for it under web.
 
 **Happy path**
-- Tapping "Rest" on a set, or "+ Set", starts the countdown; both mean "I just finished one".
+- The Rest button on an exercise header always starts the countdown. Adding a set never does. Ticking a set does only with "Auto rest timer" on.
 - The default comes from the exercise's movement pattern: 180s squat/hinge/olympic, 120s push/pull/lunge, 60s otherwise, and 60s for time/distance work regardless of pattern.
 - The bar shows remaining time, the exercise it belongs to, and a progress track that drains.
 - ±15s adjusts; tapping the clock pauses and resumes; Skip dismisses.
@@ -603,6 +639,27 @@ Domain: logging a session with no connectivity. **Test this by actually stopping
 - The **sport filter persists** across visits and app launches; it's a standing fact about the athlete.
 - The **search box clears** on leaving the tab; it's a question already answered, and finding it still there makes the list look short for no visible reason.
 - Both are stored per user — a shared device must not hand one account's filters to the next person.
+
+## Mobile shell (`apps/mobile` tab navigator)
+
+- **No seams.** Header, content and tab bar share one background; there must be no hairline rule or colour step between them, on tab screens *and* pushed stack screens.
+- **The tab bar is flat and type-only**: uppercase labels on the app's own ground, a dot above the active tab, one hairline separator. No icons, no pill, no fill. It sits in normal flow, so nothing scrolls underneath it.
+- Absolutely-positioned controls (the "New workout" button) sit above the bar, not behind it.
+- **The wordmark must not collide with the Dynamic Island** — it sits below it. Check on a device with an island, not just a notch.
+- The wordmark's chevron apex must be closed, and must point up.
+- Screen names are small, uppercase, top-left; the wordmark is centred and stays centred regardless of the title's width.
+
+## You, profile editing, and Settings (`apps/mobile`)
+
+- **You** shows the display name, enabled sports and current units, and refreshes on focus so a save in Edit is visible on return.
+- No profile row yet is an ordinary first-run state, not an error — You shows "Add your name" and Edit starts empty.
+- **Edit** saves name, date of birth, sex and sport toggles. It must create the profile first when there isn't one: `PATCH /v1/profile` 404s otherwise, and Settings is reachable without onboarding.
+- Tapping the selected sex again clears it — this feeds calorie maths and "unset" has to stay reachable.
+- An empty name box saves as null, not an empty string.
+- **Settings** is grouped rows with drill-downs, not a flat screen of controls. Units is its own sub-screen.
+- **Sign out is in Settings under Account**, confirms first, and appears exactly once in the app.
+
+---
 
 ## Modal sheets (`apps/mobile`)
 

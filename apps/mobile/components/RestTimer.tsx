@@ -7,6 +7,8 @@ import { vola } from '@/constants/Colors';
 import { formatRest } from '@/lib/rest';
 
 export type RestState = {
+  /** Which exercise this rest belongs to, so an adjustment can be saved to it. */
+  exerciseID?: string;
   /** Epoch ms the rest ends at. Null while paused. */
   endsAt: number | null;
   /** Seconds left, frozen, while paused. */
@@ -69,9 +71,9 @@ export function useRestTimer() {
     };
   }, [rest, recompute]);
 
-  const start = useCallback((seconds: number, label: string) => {
+  const start = useCallback((seconds: number, label: string, exerciseID?: string) => {
     firedRef.current = false;
-    setRest({ endsAt: Date.now() + seconds * 1000, pausedWith: null, total: seconds, label });
+    setRest({ endsAt: Date.now() + seconds * 1000, pausedWith: null, total: seconds, label, exerciseID });
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
   }, []);
 

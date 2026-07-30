@@ -235,12 +235,33 @@ function SessionRow({ session }: { session: Session }) {
           </p>
         </div>
 
+        <Metric
+          label="Duration"
+          value={
+            session.ended_at
+              ? formatDuration(
+                  (new Date(session.ended_at).getTime() -
+                    new Date(session.started_at).getTime()) /
+                    1000,
+                )
+              : "—"
+          }
+        />
         <Metric label="Exercises" value={String(exercises)} />
         <Metric label="Working sets" value={String(working.length)} />
         <Metric label="Tonnage" value={tonnage > 0 ? formatWeight(tonnage, units) : "—"} />
       </Link>
     </li>
   );
+}
+
+/** h:mm once past an hour, else m:ss — the same shape the phone shows. */
+function formatDuration(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
 }
 
 function Metric({ label, value }: { label: string; value: string }) {

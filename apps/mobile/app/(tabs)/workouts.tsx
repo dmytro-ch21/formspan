@@ -10,6 +10,7 @@ import {
   TextInput,
 } from 'react-native';
 
+import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
 import { Text, View } from '@/components/Themed';
 import { useAuthToken } from '@/lib/useAuthToken';
 import {
@@ -78,6 +79,7 @@ export default function WorkoutsScreen() {
 
   return (
     <View style={styles.container} testID="workouts-screen">
+      <ScreenHeader title="Workouts" />
       <View style={styles.scopeRow}>
         {SCOPES.map((s) => {
           const active = scope === s.key;
@@ -366,7 +368,7 @@ const styles = StyleSheet.create({
   scopeText: { fontWeight: '600' },
   scopeTextActive: { color: vola.navy },
   loader: { marginTop: 32 },
-  list: { padding: 16, gap: 12, paddingBottom: 96 },
+  list: { padding: 16, gap: 12, paddingBottom: TAB_BAR_CLEARANCE },
   card: {
     borderWidth: 1,
     borderColor: vola.line,
@@ -396,7 +398,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 16,
     right: 16,
-    bottom: 20,
+    bottom: 16,
     backgroundColor: vola.lime,
     borderRadius: 14,
     paddingVertical: 16,

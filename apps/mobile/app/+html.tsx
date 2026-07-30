@@ -28,12 +28,10 @@ export default function Root({ children }: { children: ReactNode }) {
   );
 }
 
+// The mobile app is dark-only by decision — light is the web app's job, not
+// this one's. Following prefers-color-scheme here meant the Expo web preview
+// flashed a white body behind a dark app on any machine set to light.
 const responsiveBackground = `
 body {
-  background-color: #fff;
-}
-@media (prefers-color-scheme: dark) {
-  body {
-    background-color: #000;
-  }
+  background-color: #080B12;
 }`;

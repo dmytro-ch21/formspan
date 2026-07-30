@@ -100,7 +100,19 @@ function RootLayoutNav() {
   // Navigation's default near-black — the app has one palette.
   return (
     <ThemeProvider value={volaNavTheme}>
-      <Stack>
+      <Stack
+        screenOptions={{
+          // One continuous ground on pushed screens too. The default header
+          // paints its own surface colour and a hairline rule under it,
+          // which on a dark theme reads as a seam splitting the screen into
+          // two slabs — the same separation the tab shell just lost.
+          headerStyle: { backgroundColor: vola.bg },
+          headerShadowVisible: false,
+          headerTintColor: vola.lime,
+          headerTitleStyle: { color: vola.text },
+          contentStyle: { backgroundColor: vola.bg },
+        }}
+      >
         {/* `title` is never shown (the header is hidden) but it is what the
             next screen's back button says — without it that reads "(tabs)". */}
         <Stack.Screen name="(tabs)" options={{ headerShown: false, title: 'Today' }} />
@@ -109,6 +121,9 @@ function RootLayoutNav() {
             list it came from, rather than becoming a tab of its own. */}
         <Stack.Screen name="workout/[id]" options={{ title: 'Workout' }} />
         <Stack.Screen name="settings" options={{ title: 'Settings' }} />
+        <Stack.Screen name="settings/units" options={{ title: 'Units' }} />
+        <Stack.Screen name="profile/edit" options={{ title: 'Edit profile' }} />
+        <Stack.Screen name="exercise/[id]" options={{ title: 'Exercise' }} />
         <Stack.Screen name="session/start" options={{ title: 'Start' }} />
         <Stack.Screen name="session/[id]" options={{ title: 'Session' }} />
         {/* Presented as a sheet: picking an exercise is an interruption of

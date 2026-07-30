@@ -72,6 +72,11 @@ type Set struct {
 	RIR *int     `json:"rir"`
 	RPE *float64 `json:"rpe"`
 
+	// Completed is the trigger for progressive volume: the summary counts
+	// what's been done, not what's been planned. A template opens with every
+	// set false, and each one ticks over as it's performed.
+	Completed bool `json:"completed"`
+
 	Notes string `json:"notes"`
 }
 
@@ -118,6 +123,11 @@ func Summarise(sets []Set) Volume {
 		if !seen[s.ExerciseID] {
 			seen[s.ExerciseID] = true
 			v.ExerciseIDs = append(v.ExerciseIDs, s.ExerciseID)
+		}
+		// Planned but not yet performed contributes nothing. This is what
+		// makes the header climb as you work rather than start at the total.
+		if !s.Completed {
+			continue
 		}
 		// Warm-ups count toward no working-volume measure — not sets, not
 		// tonnage, and not the hardest RPE. They stay in ExerciseIDs above,

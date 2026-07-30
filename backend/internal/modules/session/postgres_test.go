@@ -60,9 +60,9 @@ func TestCreateAndGet_RecordsEveryMeasure(t *testing.T) {
 	cleanup(t, pool, "ses-1")
 
 	in := strengthSession("ses-1", "user_a", []Set{
-		{ExerciseID: exBench, SetType: SetTypeWarmup, Reps: ptrInt(10), WeightKg: ptrF(40)},
-		{ExerciseID: exBench, SetType: SetTypeWorking, Reps: ptrInt(5), WeightKg: ptrF(100), RIR: ptrInt(2)},
-		{ExerciseID: exBench, SetType: SetTypeWorking, Reps: ptrInt(5), WeightKg: ptrF(100), RPE: ptrF(8.5)},
+		{ExerciseID: exBench, SetType: SetTypeWarmup, Reps: ptrInt(10), WeightKg: ptrF(40), Completed: true},
+		{ExerciseID: exBench, SetType: SetTypeWorking, Reps: ptrInt(5), WeightKg: ptrF(100), RIR: ptrInt(2), Completed: true},
+		{ExerciseID: exBench, SetType: SetTypeWorking, Reps: ptrInt(5), WeightKg: ptrF(100), RPE: ptrF(8.5), Completed: true},
 	})
 	s, err := repo.Create(ctx, in)
 	if err != nil {
@@ -96,9 +96,9 @@ func TestCreateAndGet_RecordsEveryMeasure(t *testing.T) {
 // day look like a hard one and poison anything built on top.
 func TestSummarise_ExcludesWarmups(t *testing.T) {
 	v := Summarise([]Set{
-		{ExerciseID: exBench, SetType: SetTypeWarmup, Reps: ptrInt(10), WeightKg: ptrF(40)},
-		{ExerciseID: exBench, SetType: SetTypeWorking, Reps: ptrInt(5), WeightKg: ptrF(100), RPE: ptrF(8)},
-		{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(3), WeightKg: ptrF(140), RPE: ptrF(9.5)},
+		{ExerciseID: exBench, SetType: SetTypeWarmup, Reps: ptrInt(10), WeightKg: ptrF(40), Completed: true},
+		{ExerciseID: exBench, SetType: SetTypeWorking, Reps: ptrInt(5), WeightKg: ptrF(100), RPE: ptrF(8), Completed: true},
+		{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(3), WeightKg: ptrF(140), RPE: ptrF(9.5), Completed: true},
 	})
 	if v.WorkingSets != 2 {
 		t.Errorf("working sets counted warm-ups: got %d, want 2", v.WorkingSets)
@@ -172,7 +172,7 @@ func TestCreate_RejectsSportMismatch(t *testing.T) {
 	cleanup(t, pool, "ses-mixed")
 
 	_, err := repo.Create(ctx, strengthSession("ses-mixed", "user_a", []Set{
-		{ExerciseID: exBJJ, Reps: ptrInt(5)},
+		{ExerciseID: exBJJ, Reps: ptrInt(5), Completed: true},
 	}))
 	if !errors.Is(err, ErrSportMismatch) {
 		t.Errorf("expected ErrSportMismatch, got %v", err)
@@ -191,7 +191,7 @@ func TestCreate_RejectsImpossibleEffortValues(t *testing.T) {
 	cleanup(t, pool, "ses-badrpe")
 
 	_, err := repo.Create(ctx, strengthSession("ses-badrpe", "user_a", []Set{
-		{ExerciseID: exBench, Reps: ptrInt(5), RPE: ptrF(15)},
+		{ExerciseID: exBench, Reps: ptrInt(5), RPE: ptrF(15), Completed: true},
 	}))
 	if !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("expected ErrInvalidInput, got %v", err)
@@ -220,7 +220,7 @@ func TestReplaceSets_AndFinish(t *testing.T) {
 	cleanup(t, pool, "ses-edit")
 
 	if _, err := repo.Create(ctx, strengthSession("ses-edit", "user_a", []Set{
-		{ExerciseID: exBench, Reps: ptrInt(5), WeightKg: ptrF(100)},
+		{ExerciseID: exBench, Reps: ptrInt(5), WeightKg: ptrF(100), Completed: true},
 	})); err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -228,8 +228,8 @@ func TestReplaceSets_AndFinish(t *testing.T) {
 	// Logging another set is a whole-list replace — and reordering must not
 	// trip the (session_id, position) unique constraint.
 	updated, err := repo.ReplaceSets(ctx, "user_a", "ses-edit", []Set{
-		{ExerciseID: exSquat, Reps: ptrInt(3), WeightKg: ptrF(140), RIR: ptrInt(1)},
-		{ExerciseID: exBench, Reps: ptrInt(5), WeightKg: ptrF(100)},
+		{ExerciseID: exSquat, Reps: ptrInt(3), WeightKg: ptrF(140), RIR: ptrInt(1), Completed: true},
+		{ExerciseID: exBench, Reps: ptrInt(5), WeightKg: ptrF(100), Completed: true},
 	})
 	if err != nil {
 		t.Fatalf("replace: %v", err)
@@ -268,7 +268,7 @@ func TestDeletingWorkout_KeepsSessionHistory(t *testing.T) {
 		t.Fatalf("seed workout: %v", err)
 	}
 
-	in := strengthSession("ses-orphan", "user_a", []Set{{ExerciseID: exBench, Reps: ptrInt(5)}})
+	in := strengthSession("ses-orphan", "user_a", []Set{{ExerciseID: exBench, Reps: ptrInt(5), Completed: true}})
 	in.WorkoutID = &wid
 	if _, err := repo.Create(ctx, in); err != nil {
 		t.Fatalf("create: %v", err)
@@ -316,7 +316,7 @@ func TestCreate_PrivateWorkoutIsNotAnExistenceOracle(t *testing.T) {
 
 	attempt := func(t *testing.T, workoutID string) error {
 		t.Helper()
-		in := strengthSession("ses-oracle", "user_attacker", []Set{{ExerciseID: exBench, Reps: ptrInt(5)}})
+		in := strengthSession("ses-oracle", "user_attacker", []Set{{ExerciseID: exBench, Reps: ptrInt(5), Completed: true}})
 		in.WorkoutID = &workoutID
 		_, err := repo.Create(ctx, in)
 		return err
@@ -364,7 +364,7 @@ func TestCreate_AcceptsAPublicWorkoutFromAnotherOwner(t *testing.T) {
 		t.Fatalf("seed workout: %v", err)
 	}
 
-	in := strengthSession("ses-public-wk", "user_b", []Set{{ExerciseID: exBench, Reps: ptrInt(5)}})
+	in := strengthSession("ses-public-wk", "user_b", []Set{{ExerciseID: exBench, Reps: ptrInt(5), Completed: true}})
 	in.WorkoutID = &sharedWorkout
 	s, err := repo.Create(ctx, in)
 	if err != nil {
@@ -409,18 +409,18 @@ func TestList_IsUserScopedAndFiltered(t *testing.T) {
 	cleanup(t, pool, "ses-list-theirs")
 	cleanup(t, pool, "ses-list-bjj")
 
-	mine := strengthSession("ses-list-mine", "user_list_a", []Set{{ExerciseID: exSquat, Reps: ptrInt(5)}})
+	mine := strengthSession("ses-list-mine", "user_list_a", []Set{{ExerciseID: exSquat, Reps: ptrInt(5), Completed: true}})
 	if _, err := repo.Create(ctx, mine); err != nil {
 		t.Fatalf("create mine: %v", err)
 	}
-	theirs := strengthSession("ses-list-theirs", "user_list_b", []Set{{ExerciseID: exBench, Reps: ptrInt(5)}})
+	theirs := strengthSession("ses-list-theirs", "user_list_b", []Set{{ExerciseID: exBench, Reps: ptrInt(5), Completed: true}})
 	if _, err := repo.Create(ctx, theirs); err != nil {
 		t.Fatalf("create theirs: %v", err)
 	}
 	bjj := NewSession{
 		ID: "ses-list-bjj", UserID: "user_list_a", Sport: "bjj", Name: "Rolling",
 		StartedAt: time.Now().UTC().Add(-2 * time.Hour),
-		Sets:      []Set{{ExerciseID: exBJJ, Seconds: ptrInt(300)}},
+		Sets:      []Set{{ExerciseID: exBJJ, Seconds: ptrInt(300), Completed: true}},
 	}
 	if _, err := repo.Create(ctx, bjj); err != nil {
 		t.Fatalf("create bjj: %v", err)
