@@ -604,6 +604,11 @@ Domain: logging a session with no connectivity. **Test this by actually stopping
 - The **search box clears** on leaving the tab; it's a question already answered, and finding it still there makes the list look short for no visible reason.
 - Both are stored per user — a shared device must not hand one account's filters to the next person.
 
+## Modal sheets (`apps/mobile`)
+
+- **Every `Modal` must paint its own background.** A modal renders outside the navigator, so the usual dark ground isn't behind it and `Themed.View` deliberately paints nothing — the sheet falls through to iOS white and near-white text vanishes. Regression-checked on the exercise picker and the new-workout sheet; check any future modal the same way.
+- Body text must be legible against the sheet in both the picker and the composer — a screenshot check, since a typecheck can't see it.
+
 ---
 
 ## Not yet covered (tracked here so it isn't lost, not because it's blocking)
