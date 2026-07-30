@@ -368,16 +368,27 @@ export default function SessionScreen() {
         keyboardShouldPersistTaps="handled"
         automaticallyAdjustKeyboardInsets
       >
+        {/* Three numbers while you train — time, sets, reps — and tonnage
+            on top once you finish.
+            "Top RPE" is gone entirely: mid-session it only repeated the
+            effort typed thirty seconds earlier. Both are still computed by
+            the API; they're real data for the trends screen, just not worth
+            a permanent slot in a header read between sets. */}
         {volume && (
           <View style={styles.summary}>
             <Stat label="Time" value={formatElapsed(elapsed)} />
             <Stat label="Sets" value={String(volume.working_sets)} />
             <Stat label="Reps" value={String(volume.total_reps)} />
-            <Stat
-              label="Tonnage"
-              value={volume.tonnage_kg > 0 ? formatWeight(volume.tonnage_kg, units) : '—'}
-            />
-            <Stat label="Top RPE" value={volume.hardest_rpe > 0 ? String(volume.hardest_rpe) : '—'} />
+            {/* Tonnage is a result, not a readout. Mid-session it's a
+                number nobody acts on — you don't change the next set
+                because the running total crossed 1,500kg — so it appears
+                once the session is done and the figure means something. */}
+            {finished && (
+              <Stat
+                label="Tonnage"
+                value={volume.tonnage_kg > 0 ? formatWeight(volume.tonnage_kg, units) : '—'}
+              />
+            )}
           </View>
         )}
 

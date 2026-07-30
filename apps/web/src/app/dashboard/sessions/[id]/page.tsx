@@ -363,14 +363,19 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       </header>
 
       {volume && (
-        <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        // Time, sets and reps while training; tonnage joins them on finish.
+        // "Top RPE" is gone — it only repeated the effort just entered. Both
+        // are still computed by the API for the trends screen.
+        <dl className={`grid gap-3 ${finished ? "grid-cols-4" : "grid-cols-3"}`}>
           <Stat label="Working sets" value={String(volume.working_sets)} />
           <Stat label="Reps" value={String(volume.total_reps)} />
-          <Stat
-            label="Tonnage"
-            value={volume.tonnage_kg > 0 ? formatWeight(volume.tonnage_kg, units) : "—"}
-          />
-          <Stat label="Top RPE" value={volume.hardest_rpe > 0 ? String(volume.hardest_rpe) : "—"} />
+          {/* A result, not a readout — shown once the session is done. */}
+          {finished && (
+            <Stat
+              label="Tonnage"
+              value={volume.tonnage_kg > 0 ? formatWeight(volume.tonnage_kg, units) : "—"}
+            />
+          )}
         </dl>
       )}
 

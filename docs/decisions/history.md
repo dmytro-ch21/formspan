@@ -629,6 +629,14 @@ Default-on is deliberate and not just conservatism — the progression rule has 
 **Not visually verified.** The whole change typechecks, the full suite passes, and the new `Summarise` behaviour has tests covering nothing-done, partly-done and fully-done. But the tick and the effort switch haven't been driven on the Simulator — the session state there had drifted badly from a long stretch of Fast Refreshes, and screenshotting through it would have proved nothing. Both want a real pass.
 
 
+## 2026-07-29 — What the session header is actually for
+
+Trimmed to three numbers while training — **time, sets, reps** — with tonnage joining them only once the session is finished.
+
+**Top RPE is gone entirely.** Mid-session it repeated the effort typed thirty seconds earlier, which is the definition of a stat that doesn't earn its place. **Tonnage is a result, not a readout**: nobody changes the next set because a running total crossed 1,500 kg, so it appears when the figure means something.
+
+Both are still computed by the API. They're real data for the trends screen the web app is meant to become — the change is about what deserves a permanent slot in a header read between sets with one hand, not about what's worth recording.
+
 ## 2026-07-29 — Session duration, rest per exercise, and stats in the library
 
 **A session records how long it took.** A live clock in the summary header, derived from `started_at` on every tick rather than accumulated — same reasoning as the rest timer, since a session spends most of its life with the phone in a pocket and a counter would stop when the JS thread is throttled. Finished sessions show their duration in the recent list and on the web history page.

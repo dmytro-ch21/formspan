@@ -438,6 +438,11 @@ Domain: a training session that **actually happened**, and the sets in it — re
 - **Migration check:** existing sets backfill to completed, so historical sessions keep their volume. Only new sets default to not-done.
 - **The client's `localVolume` must match the server's `Summarise` exactly.** It's a deliberate duplicate so the header works offline, and it has already drifted once — the completion rule went into Go only, and a live session showed the plan's full tonnage against unticked sets.
 
+**What the header shows**
+- While training: time, sets, reps. **No tonnage, no top RPE.**
+- Once finished: tonnage appears. Top RPE never does.
+- Both remain in the `Volume` API response — dropping them from the UI must not drop them from the contract, since the trends screen will want them.
+
 **Session duration**
 - The header clock runs from `started_at` and keeps time across backgrounding — derived per tick, never accumulated.
 - A finished session's duration is fixed and stops ticking; it appears in the mobile recent list and the web history page.
