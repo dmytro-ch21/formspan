@@ -49,10 +49,11 @@ export function formatWeight(kg: number | null | undefined, u: UnitSystem): stri
 }
 
 /**
- * Cumulative load, which lives at a different order of magnitude than a set.
+ * Cumulative load — "volume" in the UI — which lives at a different order of
+ * magnitude than a single set.
  *
  * `formatWeight` is right for "100kg" on a bar and wrong for a quarter of a
- * million: a training block's tonnage rendered by it reads `251147kg`, which
+ * million: a training block's volume rendered by it reads `251147kg`, which
  * is a number nobody can take in at a glance. Tonnes above 1000kg, and
  * thousands separators throughout — `251.1t` and `553,905lb` are both read
  * instantly, which is the entire job of a headline stat.
@@ -60,7 +61,20 @@ export function formatWeight(kg: number | null | undefined, u: UnitSystem): stri
  * Deliberately not folded into `formatWeight`: abbreviating there would turn
  * every heavy single on the session screen into `0.2t`.
  */
-export function formatTonnage(kg: number | null | undefined, u: UnitSystem): string {
+/**
+ * An estimate, rendered at the precision an estimate actually has.
+ *
+ * `formatWeight` keeps two decimals because a logged set is a measurement —
+ * 62.55kg is what was on the bar. A one-rep max derived from a rep-max curve
+ * is not, and "143.88kg" invites reading a modelled number as a measured one.
+ * Rounded to whole display units: 144kg, 317lb.
+ */
+export function formatEstimate(kg: number | null | undefined, u: UnitSystem): string {
+  if (kg == null) return "—";
+  return `${Math.round(toDisplayWeight(kg, u))}${weightUnit(u)}`;
+}
+
+export function formatVolume(kg: number | null | undefined, u: UnitSystem): string {
   if (kg == null) return "—";
   if (u === "metric") {
     // Rounded before the comparison, or 999.6 renders as "1,000kg" — a

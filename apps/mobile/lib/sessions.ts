@@ -84,6 +84,10 @@ export type Suggestion = {
   suggested_weight_kg: number | null;
   code: SuggestionCode;
   reason: string;
+  /** What the last set implies you could lift once, effort included. */
+  estimated_1rm_kg: number | null;
+  /** The highest estimate anywhere in your history for this exercise. */
+  best_1rm_kg: number | null;
 };
 
 export type Volume = {

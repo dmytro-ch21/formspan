@@ -10,7 +10,6 @@ import (
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/auth"
-	"github.com/dmytro-ch21/vola/backend/internal/platform/httplog"
 )
 
 type Handler struct{ repo Repository }
@@ -35,8 +34,7 @@ func writeErr(w http.ResponseWriter, r *http.Request, err error) {
 		// never anything internal.
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, err.Error())
 	default:
-		httplog.FromContext(r.Context()).Error("session: internal error", "err", err)
-		apihttp.WriteError(w, http.StatusInternalServerError, apihttp.CodeInternal, "internal error")
+		apihttp.WriteInternal(w, r, "session", err)
 	}
 }
 
@@ -97,6 +95,24 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = n
 	}
+	offset := 0
+	if o := q.Get("offset"); o != "" {
+		n, err := strconv.Atoi(o)
+		if err != nil || n < 0 {
+			apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+				"offset must be zero or a positive integer")
+			return
+		}
+		offset = n
+	}
+	// Bounded like every other free-text input here. A search box is the
+	// easiest place to hand the database a megabyte.
+	query := strings.TrimSpace(q.Get("q"))
+	if len(query) > 100 {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"q must be 100 characters or fewer")
+		return
+	}
 
 	// Optional date bounds, so the history page can list exactly the period
 	// its calendar and totals describe. Resolved in the caller's zone for the
@@ -138,18 +154,22 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessions, err := h.repo.List(r.Context(), claims.UserID, Filter{
+	page, err := h.repo.List(r.Context(), claims.UserID, Filter{
 		Sport:      q.Get("sport"),
 		ExerciseID: q.Get("exercise_id"),
 		From:       from,
 		To:         to,
+		Query:      query,
 		Limit:      limit,
+		Offset:     offset,
 	})
 	if err != nil {
 		writeErr(w, r, err)
 		return
 	}
-	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"sessions": sessions})
+	// `sessions` stays the top-level key it has always been, so existing
+	// callers that ignore the paging fields keep working unchanged.
+	apihttp.WriteJSON(w, http.StatusOK, page)
 }
 
 // maxHistoryDays bounds a history range. Five years is longer than anyone has
@@ -295,6 +315,12 @@ func (h *Handler) Suggestions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	best, err := h.repo.BestOneRMs(r.Context(), claims.UserID, ids)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+
 	now := time.Now().UTC()
 	suggestions := make([]Suggestion, 0, len(ids))
 	for _, id := range ids {
@@ -305,6 +331,17 @@ func (h *Handler) Suggestions(w http.ResponseWriter, r *http.Request) {
 		s := Suggest(p, now)
 		// Suggest can't know the id when there's no history to carry it.
 		s.ExerciseID = id
+		// Estimated off the last *working* set, effort included — the same
+		// set the suggestion itself reasons from, so the two agree.
+		if p != nil && p.Reps != nil && p.WeightKg != nil {
+			if est, ok := EstimateOneRM(*p.Reps, *p.WeightKg, p.RIR, p.RPE); ok {
+				s.EstimatedOneRMKg = &est
+			}
+		}
+		if b, ok := best[id]; ok {
+			v := b
+			s.BestOneRMKg = &v
+		}
 		suggestions = append(suggestions, s)
 	}
 	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"suggestions": suggestions})

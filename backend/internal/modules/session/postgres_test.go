@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/database"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -437,9 +438,13 @@ func TestList_IsUserScopedAndFiltered(t *testing.T) {
 		t.Fatalf("create bjj: %v", err)
 	}
 
-	all, err := repo.List(ctx, "user_list_a", Filter{})
+	page, err := repo.List(ctx, "user_list_a", Filter{})
 	if err != nil {
 		t.Fatalf("list: %v", err)
+	}
+	all := page.Sessions
+	if page.Total != 2 {
+		t.Errorf("total: %d, want 2", page.Total)
 	}
 	for _, s := range all {
 		if s.UserID != "user_list_a" {
@@ -462,14 +467,19 @@ func TestList_IsUserScopedAndFiltered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list by sport: %v", err)
 	}
-	if len(bySport) != 1 || bySport[0].ID != "ses-list-bjj" {
-		t.Fatalf("sport filter wrong: %+v", bySport)
+	if len(bySport.Sessions) != 1 || bySport.Sessions[0].ID != "ses-list-bjj" {
+		t.Fatalf("sport filter wrong: %+v", bySport.Sessions)
+	}
+	// The count has to describe the *filtered* set, not everything.
+	if bySport.Total != 1 {
+		t.Errorf("filtered total: %d, want 1", bySport.Total)
 	}
 
-	byExercise, err := repo.List(ctx, "user_list_a", Filter{ExerciseID: exSquat})
+	byExerciseP, err := repo.List(ctx, "user_list_a", Filter{ExerciseID: exSquat})
 	if err != nil {
 		t.Fatalf("list by exercise: %v", err)
 	}
+	byExercise := byExerciseP.Sessions
 	if len(byExercise) != 1 || byExercise[0].ID != "ses-list-mine" {
 		t.Fatalf("exercise filter wrong: %+v", byExercise)
 	}
@@ -477,6 +487,51 @@ func TestList_IsUserScopedAndFiltered(t *testing.T) {
 	// A limit over the cap must clamp rather than be honoured or rejected.
 	if _, err := repo.List(ctx, "user_list_a", Filter{Limit: maxLimit + 1000}); err != nil {
 		t.Fatalf("oversized limit: %v", err)
+	}
+
+	// Name search, which is how anyone actually finds an old session.
+	byName, err := repo.List(ctx, "user_list_a", Filter{Query: "roll"})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(byName.Sessions) != 1 || byName.Sessions[0].ID != "ses-list-bjj" {
+		t.Fatalf("search wrong: %+v", byName.Sessions)
+	}
+	// Case-insensitive, and a wildcard is a literal rather than "match all".
+	upper, _ := repo.List(ctx, "user_list_a", Filter{Query: "ROLL"})
+	if len(upper.Sessions) != 1 {
+		t.Errorf("search should be case-insensitive: %d", len(upper.Sessions))
+	}
+	wild, err := repo.List(ctx, "user_list_a", Filter{Query: "%"})
+	if err != nil {
+		t.Fatalf("wildcard search: %v", err)
+	}
+	if len(wild.Sessions) != 0 {
+		t.Errorf("a literal %% matched %d sessions — LIKE escaping is off", len(wild.Sessions))
+	}
+
+	// Paging: every session appears exactly once across the pages, and the
+	// total describes the whole filter rather than the page.
+	seen := map[string]int{}
+	for off := 0; off < 4; off += 1 {
+		p, err := repo.List(ctx, "user_list_a", Filter{Limit: 1, Offset: off})
+		if err != nil {
+			t.Fatalf("page %d: %v", off, err)
+		}
+		if p.Total != 2 {
+			t.Errorf("page %d total: %d, want 2", off, p.Total)
+		}
+		for _, s := range p.Sessions {
+			seen[s.ID]++
+		}
+	}
+	if len(seen) != 2 {
+		t.Errorf("paging saw %d distinct sessions, want 2: %v", len(seen), seen)
+	}
+	for id, n := range seen {
+		if n != 1 {
+			t.Errorf("%s appeared on %d pages — unstable ordering", id, n)
+		}
 	}
 }
 
@@ -542,10 +597,11 @@ func TestHistoryAgreesWithSummarise(t *testing.T) {
 
 	// The other half of the comparison: list the same window and fold
 	// Summarise over it, exactly as a client would.
-	listed, err := repo.List(ctx, user, Filter{From: from, To: to})
+	listedPage, err := repo.List(ctx, user, Filter{From: from, To: to})
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
+	listed := listedPage.Sessions
 	if len(listed) != len(fixtures) {
 		t.Fatalf("expected %d sessions in range, got %d", len(fixtures), len(listed))
 	}
@@ -797,5 +853,90 @@ func TestHistory_EmptyRangeIsZeroNotAnError(t *testing.T) {
 	}
 	if got.Sports == nil || len(got.Sports) != 0 {
 		t.Errorf("sports should be empty, not nil: %+v", got.Sports)
+	}
+}
+
+// TestCancelledQueryIsRecognisedAsClientGone is the assumption the whole
+// abort fix rests on: that a cancelled pgx query produces an error whose
+// chain `errors.Is` can match against context.Canceled, *through* the
+// `fmt.Errorf("%w")` wrapping every repository method applies.
+//
+// If pgx ever returns a bare "context canceled" string instead of the
+// sentinel, this fails — and every aborted browser fetch silently goes back
+// to being logged as a 500.
+func TestCancelledQueryIsRecognisedAsClientGone(t *testing.T) {
+	repo, _ := newTestRepo(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already gone by the time the query runs, as an aborted fetch is
+
+	_, err := repo.List(ctx, "user_cancel_probe", Filter{})
+	if err == nil {
+		t.Fatal("expected a cancelled query to fail")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled query error is not recognisable as context.Canceled: %#v", err)
+	}
+	if !apihttp.ClientGone(err) {
+		t.Fatalf("ClientGone did not classify a real cancelled query: %v", err)
+	}
+
+	// The same has to hold for the history rollup, which issues four queries.
+	_, err = repo.History(ctx, "user_cancel_probe", HistoryFilter{
+		From: time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC),
+		To:   time.Date(2024, 4, 1, 0, 0, 0, 0, time.UTC),
+		TZ:   "UTC",
+	})
+	if err == nil || !apihttp.ClientGone(err) {
+		t.Fatalf("history: cancelled query not classified as client-gone: %v", err)
+	}
+}
+
+func TestBestOneRMs_IsUserScopedAndIgnoresUnqualifyingSets(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const mine, theirs = "user_1rm_mine", "user_1rm_theirs"
+
+	fixtures := []NewSession{
+		strengthSession("ses-1rm-a", mine, []Set{
+			// Heaviest set in the data, and a warm-up — must be ignored.
+			{ExerciseID: exSquat, SetType: SetTypeWarmup, Reps: ptrInt(5), WeightKg: ptrF(300), Completed: true},
+			// 5x100 = 112.5, which beats the 110 single below. The whole
+			// reason this can't be "take the heaviest".
+			{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(5), WeightKg: ptrF(100), Completed: true},
+			{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(1), WeightKg: ptrF(110), Completed: true},
+			// Planned, never performed.
+			{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(3), WeightKg: ptrF(200), Completed: false},
+		}),
+		// Another athlete lifting far more. Must never leak into mine.
+		strengthSession("ses-1rm-theirs", theirs, []Set{
+			{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(5), WeightKg: ptrF(500), Completed: true},
+		}),
+	}
+	for _, f := range fixtures {
+		cleanup(t, pool, f.ID)
+		if _, err := repo.Create(ctx, f); err != nil {
+			t.Fatalf("create %s: %v", f.ID, err)
+		}
+	}
+
+	got, err := repo.BestOneRMs(ctx, mine, []string{exSquat, exBench})
+	if err != nil {
+		t.Fatalf("best 1rms: %v", err)
+	}
+	if !approx(got[exSquat], 112.5) {
+		t.Errorf("squat best = %.2f, want 112.5 (warm-up, incomplete set, or another user leaked in?)", got[exSquat])
+	}
+	// An exercise with no qualifying history is absent, not zero.
+	if _, ok := got[exBench]; ok {
+		t.Errorf("bench should have no estimate, got %v", got[exBench])
+	}
+	// And nothing at all for an athlete with no history.
+	empty, err := repo.BestOneRMs(ctx, "user_1rm_nobody", []string{exSquat})
+	if err != nil {
+		t.Fatalf("empty: %v", err)
+	}
+	if len(empty) != 0 {
+		t.Errorf("expected no estimates, got %v", empty)
 	}
 }

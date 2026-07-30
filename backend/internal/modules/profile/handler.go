@@ -7,7 +7,6 @@ import (
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/auth"
-	"github.com/dmytro-ch21/vola/backend/internal/platform/httplog"
 )
 
 type Handler struct {
@@ -159,7 +158,6 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, ErrInvalidInput):
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, err.Error())
 	default:
-		httplog.FromContext(r.Context()).Error("profile: internal error", "err", err)
-		apihttp.WriteError(w, http.StatusInternalServerError, apihttp.CodeInternal, "internal error")
+		apihttp.WriteInternal(w, r, "profile", err)
 	}
 }

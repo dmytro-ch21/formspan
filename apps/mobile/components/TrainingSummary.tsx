@@ -20,7 +20,7 @@ import {
   type History,
   type SpanKey,
 } from '@/lib/history';
-import { formatTonnage, type UnitSystem } from '@/lib/units';
+import { formatVolume, type UnitSystem } from '@/lib/units';
 
 /**
  * Training history on a phone — the small version, on purpose.
@@ -286,7 +286,7 @@ function Weeks({ history, units }: { history: History; units: UnitSystem }) {
     () => byWeek(history.from, history.to, history.days),
     [history],
   );
-  const value = (w: (typeof weeks)[number]) => (metric === 'tonnage' ? w.tonnageKg : w.minutes);
+  const value = (w: (typeof weeks)[number]) => (metric === 'volume' ? w.tonnageKg : w.minutes);
   const peak = Math.max(1, ...weeks.map(value));
   const total = weeks.reduce((n, w) => n + value(w), 0);
 
@@ -294,15 +294,15 @@ function Weeks({ history, units }: { history: History; units: UnitSystem }) {
     <View style={styles.card}>
       <RNView style={styles.weeksHead}>
         <Text style={styles.weeksTitle}>
-          Weekly {metric === 'tonnage' ? 'tonnage' : 'time'}
+          Weekly {metric}
         </Text>
         <Text style={styles.footText}>
-          {metric === 'tonnage' ? formatTonnage(total, units) : formatDuration(total * 60)} total
+          {metric === 'volume' ? formatVolume(total, units) : formatDuration(total * 60)} total
         </Text>
       </RNView>
 
       <RNView style={styles.bars} accessible accessibilityRole="image"
-        accessibilityLabel={`Weekly ${metric === 'tonnage' ? 'tonnage' : 'time'} over ${weeks.length} weeks. ${
+        accessibilityLabel={`Weekly ${metric} over ${weeks.length} weeks. ${
           weeks.filter((w) => w.sessions > 0).length
         } of ${weeks.length} weeks trained.`}
       >
@@ -318,7 +318,7 @@ function Weeks({ history, units }: { history: History; units: UnitSystem }) {
                   // a measurement and starts reading as a block of colour.
                   {
                     // A trained week never rounds to invisible, and a week the
-                    // axis can't measure — mat time under a tonnage axis — is
+                    // axis can't measure — mat time under a volume axis — is
                     // dimmed rather than drawn as nothing.
                     height: `${v > 0 ? Math.max(4, (v / peak) * 100) : w.sessions > 0 ? 6 : 2}%`,
                     backgroundColor:

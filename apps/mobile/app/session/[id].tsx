@@ -10,6 +10,8 @@ import { vola } from '@/constants/Colors';
 import { formatElapsed, readAutoRest, readRestSeconds, writeRestSeconds } from '@/lib/rest';
 import {
   distanceInputUnit,
+  formatEstimate,
+  formatVolume,
   formatWeight,
   fromDisplayDistance,
   fromDisplayWeight,
@@ -399,7 +401,7 @@ export default function SessionScreen() {
         keyboardShouldPersistTaps="handled"
         automaticallyAdjustKeyboardInsets
       >
-        {/* Three numbers while you train — time, sets, reps — and tonnage
+        {/* Three numbers while you train — time, sets, reps — and volume
             on top once you finish.
             "Top RPE" is gone entirely: mid-session it only repeated the
             effort typed thirty seconds earlier. Both are still computed by
@@ -410,14 +412,14 @@ export default function SessionScreen() {
             <Stat label="Time" value={formatElapsed(elapsed)} />
             <Stat label="Sets" value={String(volume.working_sets)} />
             <Stat label="Reps" value={String(volume.total_reps)} />
-            {/* Tonnage is a result, not a readout. Mid-session it's a
+            {/* Volume is a result, not a readout. Mid-session it's a
                 number nobody acts on — you don't change the next set
                 because the running total crossed 1,500kg — so it appears
                 once the session is done and the figure means something. */}
             {finished && (
               <Stat
-                label="Tonnage"
-                value={volume.tonnage_kg > 0 ? formatWeight(volume.tonnage_kg, units) : '—'}
+                label="Volume"
+                value={volume.tonnage_kg > 0 ? formatVolume(volume.tonnage_kg, units) : '—'}
               />
             )}
           </View>
@@ -511,6 +513,18 @@ export default function SessionScreen() {
                       {/* The reason, verbatim from the API. It's the whole
                           point: a number you can argue with. */}
                       <Text style={styles.hintReason}>{hint.reason}</Text>
+                      {/* Read off the same set the suggestion reasons from,
+                          so the two can't tell different stories. Absent
+                          rather than zero when the set can't support one. */}
+                      {hint.estimated_1rm_kg != null && (
+                        <Text style={styles.hintOneRm}>
+                          Est. 1RM {formatEstimate(hint.estimated_1rm_kg, unitFor(g.exerciseID))}
+                          {hint.best_1rm_kg != null &&
+                            formatEstimate(hint.estimated_1rm_kg, unitFor(g.exerciseID)) ===
+                              formatEstimate(hint.best_1rm_kg, unitFor(g.exerciseID)) &&
+                            ' · your best'}
+                        </Text>
+                      )}
                     </View>
                     {canApply && (
                       <Pressable
@@ -674,7 +688,7 @@ function localVolume(sets: LoggedSet[]): Volume {
   for (const s of sets) {
     if (!v.exercise_ids.includes(s.exercise_id)) v.exercise_ids.push(s.exercise_id);
     // Must match the server's rule exactly. Missing this on the first pass
-    // showed the plan's full tonnage against a column of unticked sets —
+    // showed the plan's full volume against a column of unticked sets —
     // precisely the drift this duplicated arithmetic risks.
     if (!s.completed) continue;
     if (s.set_type === 'warmup') continue;
@@ -691,7 +705,7 @@ function localVolume(sets: LoggedSet[]): Volume {
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.stat}>
-      {/* Four-figure tonnage wrapped onto a second line and shoved its own
+      {/* Four-figure volume wrapped onto a second line and shoved its own
           label out of the row; shrink to fit instead. */}
       <Text style={styles.statValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
         {value}
@@ -1055,6 +1069,7 @@ const styles = StyleSheet.create({
   },
   hintBody: { flex: 1, gap: 2 },
   hintLast: { fontSize: 13, fontWeight: '600' },
+  hintOneRm: { fontSize: 12, color: vola.lime, fontWeight: '600', marginTop: 2 },
   hintReason: { fontSize: 12, color: vola.textMuted },
   hintApply: {
     backgroundColor: vola.lime,

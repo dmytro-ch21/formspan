@@ -5,7 +5,6 @@ import (
 	"net/http"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
-	"github.com/dmytro-ch21/vola/backend/internal/platform/httplog"
 )
 
 type Handler struct{ repo Repository }
@@ -38,8 +37,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		Query:    q.Get("q"),
 	})
 	if err != nil {
-		httplog.FromContext(r.Context()).Error("technique: internal error", "err", err)
-		apihttp.WriteError(w, http.StatusInternalServerError, apihttp.CodeInternal, "internal error")
+		apihttp.WriteInternal(w, r, "technique", err)
 		return
 	}
 	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"techniques": techniques})
@@ -52,8 +50,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 			apihttp.WriteError(w, http.StatusNotFound, apihttp.CodeNotFound, "technique not found")
 			return
 		}
-		httplog.FromContext(r.Context()).Error("technique: internal error", "err", err)
-		apihttp.WriteError(w, http.StatusInternalServerError, apihttp.CodeInternal, "internal error")
+		apihttp.WriteInternal(w, r, "technique", err)
 		return
 	}
 	apihttp.WriteJSON(w, http.StatusOK, t)

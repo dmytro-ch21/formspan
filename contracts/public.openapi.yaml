@@ -430,7 +430,8 @@ components:
 
         Branch on `code`; `reason` is prose and is not part of the contract.
       required: [exercise_id, last_performed_at, last_reps, last_weight_kg,
-                 last_rir, last_rpe, suggested_weight_kg, code, reason]
+                 last_rir, last_rpe, suggested_weight_kg, code, reason,
+                 estimated_1rm_kg, best_1rm_kg]
       properties:
         exercise_id: { type: string, example: back-squat }
         last_performed_at:
@@ -442,6 +443,28 @@ components:
         last_weight_kg: { type: number, nullable: true }
         last_rir: { type: integer, nullable: true }
         last_rpe: { type: number, nullable: true }
+        estimated_1rm_kg:
+          type: number
+          nullable: true
+          description: >
+            One-rep max implied by the last working set, **with effort folded
+            in** — a set of 5 with 3 RIR is evidence of an 8-rep max, not a
+            5-rep one, and ignoring that would read stopping short as a
+            strength loss. Brzycki (`w × 36/(37−r)`), which returns the weight
+            itself at one rep rather than inflating a true single.
+
+
+            Null when the set can't support an estimate: no weight recorded,
+            or more than 12 effective reps, past which every rep-max curve is
+            fiction.
+        best_1rm_kg:
+          type: number
+          nullable: true
+          description: >
+            The highest estimate anywhere in the caller's history for this
+            exercise, so the current one reads as progress rather than as a
+            bare number. Not simply the heaviest set — 5×100 estimates above a
+            110 single.
         suggested_weight_kg:
           type: number
           nullable: true
@@ -502,6 +525,27 @@ components:
         exercise_ids:
           type: array
           items: { type: string }
+
+    SessionPage:
+      type: object
+      description: >
+        One page of sessions plus the size of the whole matching set. `total`
+        is counted with the identical predicate in the same request, so a
+        "21-40 of 137" reading can never disagree with the rows beside it.
+      required: [sessions, total, limit, offset]
+      properties:
+        sessions:
+          type: array
+          items: { $ref: "#/components/schemas/Session" }
+        total:
+          type: integer
+          description: >
+            Sessions matching the filter, ignoring limit/offset. Counted with
+            the same predicate in the same request. Not the same snapshot —
+            a session written between the count and the page can move it by
+            one.
+        limit: { type: integer }
+        offset: { type: integer }
 
     HistoryTotals:
       type: object
@@ -587,14 +631,6 @@ components:
       properties:
         session: { $ref: "#/components/schemas/Session" }
         volume: { $ref: "#/components/schemas/Volume" }
-
-    SessionList:
-      type: object
-      required: [sessions]
-      properties:
-        sessions:
-          type: array
-          items: { $ref: "#/components/schemas/Session" }
 
     Media:
       type: object
@@ -1317,17 +1353,35 @@ paths:
           in: query
           schema: { type: string, default: UTC }
           description: IANA name used to resolve `from`/`to` to instants. Defaults to UTC.
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 100 }
+          description: >
+            Free text matched case-insensitively anywhere in the session's
+            name. LIKE wildcards in the term are escaped, so `50%` searches
+            for those characters rather than matching everything.
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+          description: >
+            Rows to skip. Ordering is a total order (`started_at DESC, id`), so
+            paging is deterministic against an unchanging set. It is not stable
+            across writes: a session added while you page shifts every later
+            row down one, so a row can repeat. Use the date filters to pin a
+            range if that matters.
       responses:
         "200":
-          description: The caller's own sessions, each with its sets. Never anyone else's.
+          description: >
+            One page of the caller's own sessions, each with its sets, plus how
+            many the filter matched in total. Never anyone else's.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/SessionList" }
+              schema: { $ref: "#/components/schemas/SessionPage" }
         "400":
-          description: Invalid sport or limit.
+          description: Invalid sport, limit, offset, date, timezone or search term.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }

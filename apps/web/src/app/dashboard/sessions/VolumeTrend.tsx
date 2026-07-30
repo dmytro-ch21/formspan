@@ -4,7 +4,7 @@ import { useMemo } from "react";
 
 import type { HistoryDay } from "@/lib/api";
 import { byWeek, formatDuration, loadMetric, monthShort } from "@/lib/history";
-import { formatTonnage } from "@/lib/units";
+import { formatVolume } from "@/lib/units";
 import { useUnits } from "@/lib/useUnits";
 
 /**
@@ -32,14 +32,14 @@ export function VolumeTrend({
   const weeks = useMemo(() => byWeek(from, to, days), [from, to, days]);
 
   const value = (w: (typeof weeks)[number]) =>
-    metric === "tonnage" ? w.tonnageKg : w.minutes;
+    metric === "volume" ? w.tonnageKg : w.minutes;
   const peak = Math.max(1, ...weeks.map(value));
   const format = (v: number) =>
-    metric === "tonnage" ? formatTonnage(v, units) : formatDuration(v * 60);
+    metric === "volume" ? formatVolume(v, units) : formatDuration(v * 60);
 
   // Counted off sessions, not off the metric. The axis can only show one
   // measure, and `metric` is chosen for the whole period — so in a block that
-  // mixes lifting with BJJ, every mat-only week scores zero tonnage. Counting
+  // mixes lifting with BJJ, every mat-only week scores zero volume. Counting
   // those as untrained printed "10 of 12 weeks trained" over twelve trained
   // weeks, which is not a rounding error, it's a false statement about
   // someone's training.
@@ -51,7 +51,7 @@ export function VolumeTrend({
     <section className="flex flex-col gap-3" aria-labelledby="trend-heading">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 id="trend-heading" className="eyebrow">
-          Weekly {metric === "tonnage" ? "tonnage" : "time"}
+          Weekly {metric}
         </h2>
         <p className="text-[0.6875rem] text-text-dim">
           {trained} of {weeks.length} weeks trained · peak {format(peak)}
@@ -66,10 +66,10 @@ export function VolumeTrend({
             const v = value(w);
             const sessions = `${w.sessions} ${w.sessions === 1 ? "session" : "sessions"}`;
             // Three states, not two. A week can have training the axis can't
-            // measure — BJJ under a tonnage axis — and calling that "no
+            // measure — BJJ under a volume axis — and calling that "no
             // training" is the one thing this label must never say.
             const detail =
-              v > 0 ? format(v) : w.sessions > 0 ? `${sessions}, no ${metric === "tonnage" ? "tonnage" : "time"} logged` : "no training";
+              v > 0 ? format(v) : w.sessions > 0 ? `${sessions}, no ${metric} logged` : "no training";
             const label = `Week of ${monthShort(w.start)} ${Number(w.start.slice(8))}: ${detail}`;
             return (
               <li

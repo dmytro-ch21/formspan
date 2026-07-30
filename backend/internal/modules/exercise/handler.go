@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
-	"github.com/dmytro-ch21/vola/backend/internal/platform/httplog"
 )
 
 type Handler struct {
@@ -70,8 +69,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		Query: query,
 	})
 	if err != nil {
-		httplog.FromContext(r.Context()).Error("exercise: internal error", "err", err)
-		apihttp.WriteError(w, http.StatusInternalServerError, apihttp.CodeInternal, "internal error")
+		apihttp.WriteInternal(w, r, "exercise", err)
 		return
 	}
 	h.withMediaURLs(exercises)
@@ -85,8 +83,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 			apihttp.WriteError(w, http.StatusNotFound, apihttp.CodeNotFound, "exercise not found")
 			return
 		}
-		httplog.FromContext(r.Context()).Error("exercise: internal error", "err", err)
-		apihttp.WriteError(w, http.StatusInternalServerError, apihttp.CodeInternal, "internal error")
+		apihttp.WriteInternal(w, r, "exercise", err)
 		return
 	}
 	one := []Exercise{*e}

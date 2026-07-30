@@ -727,6 +727,54 @@ Domain: logging a session with no connectivity. **Test this by actually stopping
 - Trained days carry a date + session-count label; empty days are not accessibility stops.
 - Bar heights: a trained week never rounds to invisible, and bars are capped in width so a 4-week span doesn't render as slabs.
 
+## Session list paging, search and filters (`GET /v1/sessions`, `apps/web` History)
+
+**Happy path**
+- The list shows one page at a time with "1–20 of 43"; Newer/Older move between pages and disable at each end.
+- Every session appears on exactly one page. Ordering is `started_at DESC, id` — without the id tiebreak, two sessions logged in the same second can swap places and one is shown twice while another is never shown.
+- Searching by name narrows the list and the count together; clearing it restores them.
+- Search and paging compose with the period, sport and picked-day filters, and any change of scope returns to the first page.
+- `total` is counted with the same predicate in the same request, so the count can never disagree with the rows.
+
+**Edge cases & errors**
+- A search for `%` or `_` matches those characters, not everything — LIKE wildcards are escaped.
+- Search is case-insensitive.
+- `offset` below zero, `limit` below one, or `q` over 100 characters → `400 invalid_input`.
+- A page past the end returns zero rows with the correct total rather than an error.
+- A failed list fetch says so and is distinguishable from "no sessions match".
+
+**Client aborts (`apihttp.WriteInternal`)**
+- Cancelling an in-flight request must produce **499 and no ERROR log**, not 500. The history page aborts on every filter change, so this is the common path, not an edge case.
+- The classification must survive the repository's `fmt.Errorf("%w")` wrapping — assert against a genuinely cancelled query, not a hand-made `context.Canceled`.
+- `context.DeadlineExceeded` must still be a 500: that one is ours.
+- A real failure must still log and must never leak the cause to the client.
+
+**Wording**
+- Cumulative load reads "Volume" everywhere it's visible, on both platforms. The wire field stays `tonnage_kg`.
+
+## Estimated 1RM (`GET /v1/sessions/suggestions`, both clients)
+
+**Happy path**
+- Each exercise with a weighted last set carries `estimated_1rm_kg`, shown on the session logger's "last time" card and on the mobile exercise detail screen.
+- `best_1rm_kg` is the highest estimate in the caller's history; when the current one matches it, the UI says "your best" instead of repeating the number.
+
+**The arithmetic — assert the values, not just presence**
+- A true single must estimate **itself**: 1 × 100kg → 100kg. (Epley would say 103kg; that's the regression this guards.)
+- 5 × 100kg, no effort → 112.5kg.
+- Effort changes the answer: 5 × 100kg at 3 RIR → 124.1kg; at 0 RIR → 112.5kg; at RPE 8 → 120kg.
+- RIR wins when both RIR and RPE are present.
+- Above 12 **effective** reps there is no estimate at all — 13 reps, or 10 reps at 3 RIR, both return null.
+- Monotonic: more reps at the same weight, and more weight at the same reps, must both estimate higher.
+
+**Personal best**
+- The best is **not** the heaviest set: 5×100 (112.5) must beat a 110 single. A pre-filter on weight would fail this.
+- Warm-ups, sets never marked done, and other athletes' sets are all excluded.
+- An exercise with no qualifying history is absent from the map, not zero.
+
+**Display**
+- Estimates render at whole-unit precision (`144kg`, not `143.88kg`) — they're modelled, not measured.
+- Exercises with no weight (BJJ, timed work) show no estimate rather than a dash-filled row.
+
 ## Not yet covered (tracked here so it isn't lost, not because it's blocking)
 
 - Mobile has no auth yet (Clerk Expo SDK is a separate future increment) — no sign-in/sign-out scenarios apply to mobile today.

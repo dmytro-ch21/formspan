@@ -214,8 +214,8 @@ export function weekStreak(days: HistoryDay[], from = today()): number {
 }
 
 /** Whether this period is better described by load or by time on the mat. */
-export function loadMetric(days: HistoryDay[]): 'tonnage' | 'time' {
-  return days.some((d) => d.tonnage_kg > 0) ? 'tonnage' : 'time';
+export function loadMetric(days: HistoryDay[]): 'volume' | 'time' {
+  return days.some((d) => d.tonnage_kg > 0) ? 'volume' : 'time';
 }
 
 export function formatDuration(seconds: number): string {

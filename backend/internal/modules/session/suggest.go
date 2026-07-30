@@ -108,6 +108,15 @@ type Suggestion struct {
 	SuggestedWeightKg *float64       `json:"suggested_weight_kg"`
 	Code              SuggestionCode `json:"code"`
 	Reason            string         `json:"reason"`
+
+	// EstimatedOneRMKg is what the last set implies you could lift once,
+	// effort included. Nil when the set can't support an estimate — no
+	// weight, or more effective reps than any rep-max curve survives.
+	EstimatedOneRMKg *float64 `json:"estimated_1rm_kg"`
+	// BestOneRMKg is the highest estimate anywhere in the caller's history
+	// for this exercise, so the current one reads as progress or as ground
+	// already covered. Nil when there is none.
+	BestOneRMKg *float64 `json:"best_1rm_kg"`
 }
 
 // Suggest turns one previous performance into a recommendation.

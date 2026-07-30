@@ -33,6 +33,8 @@ import {
 } from "@/lib/api";
 import {
   distanceInputUnit,
+  formatEstimate,
+  formatVolume,
   formatWeight,
   fromDisplayDistance,
   fromDisplayWeight,
@@ -363,7 +365,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       </header>
 
       {volume && (
-        // Time, sets and reps while training; tonnage joins them on finish.
+        // Time, sets and reps while training; volume joins them on finish.
         // "Top RPE" is gone — it only repeated the effort just entered. Both
         // are still computed by the API for the trends screen.
         <dl className={`grid gap-3 ${finished ? "grid-cols-4" : "grid-cols-3"}`}>
@@ -372,8 +374,8 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           {/* A result, not a readout — shown once the session is done. */}
           {finished && (
             <Stat
-              label="Tonnage"
-              value={volume.tonnage_kg > 0 ? formatWeight(volume.tonnage_kg, units) : "—"}
+              label="Volume"
+              value={volume.tonnage_kg > 0 ? formatVolume(volume.tonnage_kg, units) : "—"}
             />
           )}
         </dl>
@@ -553,7 +555,18 @@ function ExerciseBlock({
             </span>{" "}
             {/* The reason verbatim from the API — the point is a number you
                 can argue with, not one you have to trust. */}
-            <span className="text-text-muted">{suggestion.reason}</span>
+            <span className="text-text-muted">{suggestion.reason}</span>{" "}
+            {/* Read off the same set the suggestion reasons from, so the two
+                can't tell different stories. */}
+            {suggestion.estimated_1rm_kg != null && (
+              <span className="whitespace-nowrap font-medium text-lime">
+                Est. 1RM {formatEstimate(suggestion.estimated_1rm_kg, units)}
+                {suggestion.best_1rm_kg != null &&
+                  formatEstimate(suggestion.estimated_1rm_kg, units) ===
+                    formatEstimate(suggestion.best_1rm_kg, units) &&
+                  " · your best"}
+              </span>
+            )}
           </p>
           {editable &&
             suggestion.suggested_weight_kg != null &&

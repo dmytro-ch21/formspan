@@ -939,6 +939,126 @@ per-exercise progression gap is the same one web has. And the summary is
 online-only, which sits oddly next to a logging flow that works with no signal
 at all; caching the last response would fit the offline-first story better.
 
+## 2026-07-30 — Aborts, "volume", and a session list that pages
+
+Three fixes, one of which turned out to be structural.
+
+**A cancelled request is not a server error.** Every module's error path
+mapped anything unrecognised to 500 with an ERROR log, and a browser aborting
+a fetch lands there — so the history page, which aborts on every filter
+change, was manufacturing false failures. Anyone with an error-rate alert
+would have been paged by a working feature.
+
+The fix that mattered wasn't the check, it was where it lives. Twelve call
+sites each wrote their own two lines of "log it, 500 it"; a `ClientGone`
+branch pasted into twelve places is a branch someone forgets on the
+thirteenth. They now all go through `apihttp.WriteInternal`, which is also
+the only place that can decide what an unexpected error becomes. Cancelled
+requests get 499 — nginx's convention, understood by every log pipeline —
+and no ERROR line. `DeadlineExceeded` is deliberately *not* included: that's
+usually our own timeout, which is a real problem.
+
+The assumption underneath is that `errors.Is` can see through pgx's error and
+the repository's `fmt.Errorf("%w")` wrapping. That's now pinned by a test that
+cancels a real query and asserts the classification, rather than hoped for.
+
+**"Tonnage" is now "Volume"** everywhere it's visible. The wire field stays
+`tonnage_kg` — renaming it would break the contract for no user-visible gain
+— but the label, the helper (`formatVolume`) and the internal discriminant
+all say volume now, so the code and the UI use one word.
+
+**The session list pages, filters and searches.** It used to fetch a flat 100
+and stop: a year of training simply ended two-thirds down with nothing saying
+so. `GET /v1/sessions` now takes `offset` and `q` and returns a `SessionPage`
+— rows plus the total matched. The total is counted in the same request with
+the identical predicate, because a count fetched separately is a count that
+disagrees with the rows beside it.
+
+Two details worth keeping: the ordering is `started_at DESC, id` so a session
+can't repeat on one page and vanish from another, and the search escapes
+LIKE's wildcards, so `%` searches for the character rather than matching
+everything. Both are tested.
+
+Found while verifying: at anything under ~900px the session name was being
+squeezed to "U…" by four fixed-width metric columns — the one part of the row
+you scan by. Given a basis so it wraps instead.
+
+## 2026-07-30 — Estimated 1RM, and why it reads effort
+
+An estimated one-rep max, on both platforms, embedded where the evidence for
+it already sits rather than in a calculator screen of its own: on the "last
+time" card in the session logger, and on the exercise detail screen.
+
+**Two decisions carry the feature.**
+
+*Brzycki, not Epley.* Epley evaluates a true single at 1.033× the weight, so
+logging a genuine 100kg 1RM would report 103kg — visibly wrong at exactly the
+moment the number is most checkable. Brzycki (`w × 36/(37−r)`) returns the
+weight itself at one rep and is more conservative through the low-rep range
+where heavy sets live.
+
+*Effort is folded in, which is the part most apps skip.* A set of 5 with 3
+reps in reserve is not evidence of a 5-rep max; it's a set of 5 that could
+have been 8. VOLA records RIR and RPE per set, so the estimate runs on reps +
+reserve. Without that, stopping short would read as a strength loss — and the
+whole reason to log effort is that it changes what the numbers mean. RIR wins
+over RPE when both are present: RIR is observed, RPE is converted.
+
+Past twelve effective reps there's no estimate at all. Every rep-max curve is
+fitted near a maximum and diverges badly beyond that; a set of 20 would
+happily "estimate" a single nobody could lift. Returning nothing beats
+returning fiction.
+
+The personal best is a separate number because a current estimate alone is
+inert. It's computed in Go over candidate sets rather than ranked in SQL, for
+a reason worth recording: **the best estimate is not the heaviest set.** 5×100
+estimates to 112.5kg and beats a 110 single. Any "just take the max weight"
+shortcut is wrong, and putting the curve in SQL would have parked a second
+copy of it a migration away from the first.
+
+Displayed through `formatEstimate`, which rounds to whole units. `formatWeight`
+keeps two decimals because a logged set is a *measurement* — 62.55kg is what
+was on the bar — and a modelled number rendered as "143.88kg" invites being
+read as a measured one.
+
+Open: the estimate only appears where a suggestion already loads, so an
+exercise you've never trained shows nothing (correct) and one you trained
+today shows last session's set rather than today's. A per-session estimate,
+and a "new best" moment when a logged set beats the record, are the obvious
+next steps and aren't here.
+
+Two things review changed materially, both worth recording because the first
+instinct was wrong in each case.
+
+**The personal-best search was capped by row count, and that silently loses
+bests.** `ORDER BY weight_kg DESC LIMIT 5000` looks safe and isn't: the order
+is global across every requested exercise, so a squat history eats the budget
+and the lateral raises fall off the end entirely — the failure is biased
+against light lifts and gets worse the longer someone uses the app. Even
+per-exercise a cap can cut the winner, because 12×100 (144) beats 1×140 (140).
+
+Replaced with a bound that's arithmetic rather than arbitrary. The estimate
+lies between 1.00× and 1.44× the weight lifted (Brzycki at the 12-rep
+ceiling), so a set can only win if 1.44 × its weight reaches the heaviest set
+for that exercise. Everything below that line is provably beatable and is
+never fetched. No cap, and no way to lose a best.
+
+**RPE half-steps were being rounded away, in the wrong direction.** The column
+is `NUMERIC(3,1)` precisely because the scale is used in halves, and rounding
+made 8.5 mean 8 — then rounded halves *up*, which raises the estimate, against
+this code's own stated bias toward under-stating. Reserve is fractional now;
+Brzycki takes fractional reps without complaint.
+
+Also from review: offset paging contradicted `api-conventions.md`, which said
+"cursor everywhere, never offsets" — written before any list endpoint existed.
+Rather than change the code, the doc now describes both shapes and when each
+applies: offset+total for a bounded list a *person browses* (the total is the
+point, and a cursor can't give one), cursor for anything a *machine drains*,
+where re-reading a row is a correctness bug. And the contract no longer claims
+paging is stable across writes, because it isn't — a session synced mid-page
+shifts every later row down one.
+
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

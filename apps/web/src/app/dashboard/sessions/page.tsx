@@ -9,13 +9,14 @@ import {
   applySuggestions,
   fetchHistory,
   fetchSuggestions,
-  listSessions,
+  listSessionsPage,
   listWorkouts,
   setsFromWorkout,
   SPORTS,
   startSession,
   type History,
   type Session,
+  type SessionPage,
   type Sport,
   type Workout,
 } from "@/lib/api";
@@ -29,7 +30,7 @@ import {
   sportLabel,
   type PeriodKey,
 } from "@/lib/history";
-import { formatTonnage, type UnitSystem } from "@/lib/units";
+import { formatVolume, type UnitSystem } from "@/lib/units";
 import { useUnits } from "@/lib/useUnits";
 
 import { TrainingCalendar } from "./TrainingCalendar";
@@ -48,9 +49,15 @@ import { VolumeTrend } from "./VolumeTrend";
  * under-reporting the moment someone's history outgrew the page size. The
  * only arithmetic here buckets days the server already rolled up.
  */
-/** What the period list shows before you narrow it. A day picked on the
- *  calendar is fetched on its own, so this cap never hides one. */
-const LIST_LIMIT = 100;
+/**
+ * Sessions per page.
+ *
+ * The list used to fetch a flat 100 and stop, so a year of training simply
+ * ended two-thirds of the way down with nothing saying so. Twenty is about a
+ * month of training — enough to scan, small enough that the request stays
+ * quick even though every session drags its sets along.
+ */
+const PAGE_SIZE = 20;
 
 export default function HistoryPage() {
   const { getToken } = useAuth();
@@ -62,9 +69,14 @@ export default function HistoryPage() {
   const [day, setDay] = useState<string | null>(null);
 
   const [history, setHistory] = useState<History | null>(null);
-  const [sessions, setSessions] = useState<Session[]>([]);
-  // Null while a picked day's own fetch is in flight.
-  const [daySessions, setDaySessions] = useState<Session[] | null>(null);
+  // What's typed, and what's actually been asked for — separated so every
+  // keystroke doesn't become a request.
+  const [search, setSearch] = useState("");
+  const [query, setQuery] = useState("");
+  const [offset, setOffset] = useState(0);
+  const [page, setPage] = useState<SessionPage | null>(null);
+  const [listLoading, setListLoading] = useState(true);
+  const [listFailed, setListFailed] = useState(false);
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [loading, setLoading] = useState(true);
   const [everLoaded, setEverLoaded] = useState(false);
@@ -83,17 +95,13 @@ export default function HistoryPage() {
     try {
       const { from, to } = periodRange(period);
       const tz = localZone();
-      const [h, list] = await Promise.all([
-        fetchHistory(getToken, { from, to, sport: sport ?? undefined, tz }, controller.signal),
-        listSessions(
-          getToken,
-          { from, to, tz, sport: sport ?? undefined, limit: LIST_LIMIT },
-          controller.signal,
-        ),
-      ]);
+      const h = await fetchHistory(
+        getToken,
+        { from, to, sport: sport ?? undefined, tz },
+        controller.signal,
+      );
       if (controller.signal.aborted) return;
       setHistory(h);
-      setSessions(list);
       setError(null);
     } catch (err) {
       if (controller.signal.aborted) return;
@@ -126,27 +134,51 @@ export default function HistoryPage() {
     return () => c.abort();
   }, [getToken]);
 
-  // A picked day is fetched for itself rather than filtered out of the
-  // listing above. The listing is capped, so past that cap a day the calendar
-  // shows as trained would have listed "nothing logged" — the calendar and
-  // the list contradicting each other, which is the exact failure the
-  // server-side totals exist to avoid, re-entering by the back door.
+  // Typing shouldn't be a request per character.
   useEffect(() => {
-    if (!day) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setDaySessions(null);
-      return;
-    }
+    const t = setTimeout(() => setQuery(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  // The list is paged on the server, so it asks for exactly the rows it draws
+  // rather than a capped batch it filters down. A picked day narrows the
+  // range like any other filter — which is also what stops the calendar and
+  // the list disagreeing about a day past the old cap.
+  useEffect(() => {
     const c = new AbortController();
-    listSessions(
+    const { from, to } = day ? { from: day, to: day } : periodRange(period);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setListLoading(true);
+    listSessionsPage(
       getToken,
-      { from: day, to: day, tz: localZone(), sport: sport ?? undefined },
+      { from, to, tz: localZone(), sport: sport ?? undefined, q: query || undefined,
+        limit: PAGE_SIZE, offset },
       c.signal,
     )
-      .then(setDaySessions)
-      .catch(() => {});
+      .then((p) => {
+        if (c.signal.aborted) return;
+        setPage(p);
+        setListFailed(false);
+      })
+      .catch(() => {
+        if (!c.signal.aborted) {
+          setPage(null);
+          setListFailed(true);
+        }
+      })
+      .finally(() => {
+        if (!c.signal.aborted) setListLoading(false);
+      });
     return () => c.abort();
-  }, [getToken, day, sport]);
+  }, [getToken, period, sport, day, query, offset]);
+
+  // Any change of scope starts again at the first page — staying on page 4 of
+  // a result set that now has one page shows an empty list over a non-zero
+  // count, which reads as a bug.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setOffset(0);
+  }, [period, sport, day, query]);
 
   // Changing the scope clears a day picked inside the old one, or the list
   // filters to a date the calendar no longer shows.
@@ -183,15 +215,27 @@ export default function HistoryPage() {
     }
   }
 
-  const live = sessions.filter((s) => s.ended_at === null);
-  const shown = useMemo(() => {
-    const source = day ? (daySessions ?? []) : sessions;
-    return source.filter((s) => s.ended_at !== null);
-  }, [sessions, daySessions, day]);
+  const rows = useMemo(() => page?.sessions ?? [], [page]);
+  // Lifted into their own section only on the unfiltered first page, where
+  // "what's still open" is a useful thing to put at the top.
+  const live = useMemo(
+    () => (offset === 0 && !query ? rows.filter((s) => s.ended_at === null) : []),
+    [rows, offset, query],
+  );
+  // Anywhere else they stay in the list rather than being filtered out of it.
+  // Removing them unconditionally meant a search for an in-progress session
+  // counted it in the total and then rendered "no sessions matching" — the
+  // page contradicting itself about a session that exists. SessionRow already
+  // badges them "in progress", so they read correctly inline.
+  const shown = useMemo(
+    () => (live.length > 0 ? rows.filter((s) => s.ended_at !== null) : rows),
+    [rows, live],
+  );
+  const total = page?.total ?? 0;
 
   const t = history?.totals;
   const p = history?.previous;
-  const nothingHere = !!t && t.sessions === 0 && live.length === 0;
+  const nothingHere = !!t && t.sessions === 0 && live.length === 0 && !query;
 
   return (
     <div className="flex flex-col gap-8">
@@ -261,8 +305,8 @@ export default function HistoryPage() {
                 change={delta(t!.working_sets, p!.working_sets)}
               />
               <Stat
-                label="Tonnage"
-                value={t!.tonnage_kg > 0 ? formatTonnage(t!.tonnage_kg, units) : "—"}
+                label="Volume"
+                value={t!.tonnage_kg > 0 ? formatVolume(t!.tonnage_kg, units) : "—"}
                 change={delta(t!.tonnage_kg, p!.tonnage_kg)}
               />
               <Stat
@@ -298,33 +342,90 @@ export default function HistoryPage() {
           )}
 
           <section className="flex flex-col gap-3">
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              {/* The count lives here, not only in the pager, because the
+                  list is scoped by the period above it — searching "Lower"
+                  inside 3 months finds fewer than searching a year, and
+                  without a number that reads as missing data. */}
               <h2 className="eyebrow">
-                {day
-                  ? formatDayLong(day)
-                  : `${shown.length} ${shown.length === 1 ? "session" : "sessions"}`}
+                {day ? formatDayLong(day) : "Sessions"}
+                {total > 0 && (
+                  <span className="ml-2 text-text-dim">
+                    {total} {total === 1 ? "session" : "sessions"}
+                  </span>
+                )}
               </h2>
-              {day && (
-                <button
-                  type="button"
-                  onClick={() => setDay(null)}
-                  className="rounded-pill border border-line px-3 py-1 text-xs font-medium transition hover:bg-surface-raised"
-                >
-                  Clear day
-                </button>
-              )}
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="relative">
+                  <span className="sr-only">Search sessions by name</span>
+                  <input
+                    type="search"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Search by name…"
+                    maxLength={100}
+                    className="w-56 rounded-pill border border-line bg-surface px-4 py-1.5 text-sm placeholder:text-text-dim focus-visible:border-text"
+                  />
+                </label>
+                {day && (
+                  <button
+                    type="button"
+                    onClick={() => setDay(null)}
+                    className="rounded-pill border border-line px-3 py-1.5 text-xs font-medium transition hover:bg-surface-raised"
+                  >
+                    Clear day
+                  </button>
+                )}
+              </div>
             </div>
-            {shown.length === 0 ? (
+
+            {/* Always mounted, so narrowing a search, changing page and the
+                busy state all announce. The Pager's own region unmounts as
+                soon as there's one page, which is exactly when a search has
+                just succeeded. */}
+            <p role="status" aria-live="polite" className="sr-only">
+              {listLoading
+                ? "Loading sessions"
+                : listFailed
+                  ? "Couldn't load sessions"
+                  : `${total} ${total === 1 ? "session" : "sessions"}${query ? ` matching ${query}` : ""}`}
+            </p>
+
+            {listFailed ? (
+              <p
+                role="alert"
+                className="rounded-card border border-danger/40 bg-danger/10 px-4 py-3 text-sm"
+              >
+                Couldn&apos;t load these sessions.
+              </p>
+            ) : shown.length === 0 && !listLoading ? (
               <p className="rounded-card border border-dashed border-line px-6 py-10 text-center text-sm text-text-muted">
-                {day ? "Nothing logged on this day." : "No completed sessions in this period."}
+                {query
+                  ? `No sessions matching “${query}”.`
+                  : day
+                    ? "Nothing logged on this day."
+                    : "No completed sessions in this period."}
               </p>
             ) : (
-              <ul className="flex flex-col gap-2">
+              <ul
+                aria-busy={listLoading}
+                className={`flex flex-col gap-2 transition-opacity ${listLoading ? "opacity-50" : ""}`}
+              >
                 {shown.map((s) => (
                   <SessionRow key={s.id} session={s} units={units} />
                 ))}
               </ul>
             )}
+
+            {/* Fed from the server's echoed offset, not local state — local
+                state moves on click, so the range briefly read "41–60 of 43"
+                before the page landed, and announced it via aria-live. */}
+            <Pager
+              total={total}
+              offset={page?.offset ?? 0}
+              count={rows.length}
+              onOffset={setOffset}
+            />
           </section>
         </div>
       )}
@@ -431,7 +532,7 @@ function Chip({
  * One headline number and where it's heading.
  *
  * The arrow is deliberately colour-neutral. Up is not automatically good:
- * more tonnage in a build block is progress, more in a deload week means the
+ * more volume in a build block is progress, more in a deload week means the
  * deload didn't happen. Stating the change and leaving the judgement to
  * whoever knows what the block was for is the honest version.
  */
@@ -445,7 +546,7 @@ function Stat({
   change: number | null;
 }) {
   const rounded = change === null ? null : Math.round(change);
-  // A dash means the measure doesn't apply here — tonnage under a month of
+  // A dash means the measure doesn't apply here — volume under a month of
   // BJJ. Captioning that "no prior period" invites the reader to wonder what
   // changed about a number that was never going to exist.
   const absent = value === "—";
@@ -582,10 +683,10 @@ function NewSessionMenu({
 function SessionRow({ session, units }: { session: Session; units: UnitSystem }) {
   // Completed, non-warm-up sets — the backend's own working-volume rule. The
   // `completed` half was missed when progressive volume landed, so this row
-  // showed a session's full tonnage while the detail page showed zero for
+  // showed a session's full volume while the detail page showed zero for
   // the same session.
   const working = session.sets.filter((s) => s.completed && s.set_type !== "warmup");
-  const tonnage = working.reduce((sum, s) => sum + (s.reps ?? 0) * (s.weight_kg ?? 0), 0);
+  const volume = working.reduce((sum, s) => sum + (s.reps ?? 0) * (s.weight_kg ?? 0), 0);
   const exercises = new Set(session.sets.map((s) => s.exercise_id)).size;
 
   return (
@@ -594,7 +695,11 @@ function SessionRow({ session, units }: { session: Session; units: UnitSystem })
         href={`/dashboard/sessions/${session.id}`}
         className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-card border border-line bg-surface px-5 py-4 transition hover:bg-surface-raised"
       >
-        <div className="min-w-0 flex-1">
+        {/* A floor under the name, not just flex-1. Four fixed 6rem metrics
+            take 24rem, so on anything under ~900px the name was being
+            squeezed to "U…" — the one part of the row you actually scan by.
+            With a basis it wraps onto its own line instead. */}
+        <div className="min-w-0 flex-1 basis-48">
           <p className="truncate font-medium">{session.name || "Session"}</p>
           <p className="truncate text-xs capitalize text-text-dim">
             {session.sport} ·{" "}
@@ -623,9 +728,60 @@ function SessionRow({ session, units }: { session: Session; units: UnitSystem })
         />
         <Metric label="Exercises" value={String(exercises)} />
         <Metric label="Working sets" value={String(working.length)} />
-        <Metric label="Tonnage" value={tonnage > 0 ? formatTonnage(tonnage, units) : "—"} />
+        <Metric label="Volume" value={volume > 0 ? formatVolume(volume, units) : "—"} />
       </Link>
     </li>
+  );
+}
+
+/**
+ * Page controls, and the count that makes them meaningful.
+ *
+ * The count comes from the API alongside the rows, computed from the same
+ * predicate — so "21–40 of 137" can never disagree with what's above it, which
+ * is what happens when a total is fetched separately and one of the two moves.
+ *
+ * Prev/next rather than numbered pages: a training log is scanned backwards
+ * from now, and page 7 means nothing to anyone.
+ */
+function Pager({
+  total,
+  offset,
+  count,
+  onOffset,
+}: {
+  total: number;
+  offset: number;
+  count: number;
+  onOffset: (n: number) => void;
+}) {
+  if (total <= PAGE_SIZE) return null;
+  const first = total === 0 ? 0 : offset + 1;
+  const last = Math.min(offset + count, total);
+  return (
+    <div className="flex items-center justify-between gap-3 pt-1">
+      <p className="text-xs text-text-dim" aria-live="polite">
+        {first}–{last} of {total}
+      </p>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => onOffset(Math.max(0, offset - PAGE_SIZE))}
+          disabled={offset === 0}
+          className="rounded-pill border border-line px-4 py-1.5 text-xs font-medium transition hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Newer
+        </button>
+        <button
+          type="button"
+          onClick={() => onOffset(offset + PAGE_SIZE)}
+          disabled={last >= total}
+          className="rounded-pill border border-line px-4 py-1.5 text-xs font-medium transition hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Older
+        </button>
+      </div>
+    </div>
   );
 }
 

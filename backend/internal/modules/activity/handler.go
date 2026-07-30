@@ -61,8 +61,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 			apihttp.WriteError(w, http.StatusConflict, apihttp.CodeAlreadyExists, "activity id already in use")
 			return
 		}
-		httplog.FromContext(r.Context()).Error("activity: internal error", "err", err)
-		apihttp.WriteError(w, http.StatusInternalServerError, apihttp.CodeInternal, "internal error")
+		apihttp.WriteInternal(w, r, "activity", err)
 		return
 	}
 	apihttp.WriteJSON(w, http.StatusOK, a)
@@ -73,8 +72,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
 	activities, err := h.repo.ListByUser(r.Context(), claims.UserID)
 	if err != nil {
-		httplog.FromContext(r.Context()).Error("activity: internal error", "err", err)
-		apihttp.WriteError(w, http.StatusInternalServerError, apihttp.CodeInternal, "internal error")
+		apihttp.WriteInternal(w, r, "activity", err)
 		return
 	}
 	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"activities": activities})
@@ -87,8 +85,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) AdminListUsers(w http.ResponseWriter, r *http.Request) {
 	users, err := h.repo.ListUsers(r.Context())
 	if err != nil {
-		httplog.FromContext(r.Context()).Error("activity: internal error", "err", err)
-		apihttp.WriteError(w, http.StatusInternalServerError, apihttp.CodeInternal, "internal error")
+		apihttp.WriteInternal(w, r, "activity", err)
 		return
 	}
 	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"users": users})
@@ -98,8 +95,7 @@ func (h *Handler) AdminListUserActivities(w http.ResponseWriter, r *http.Request
 	userID := r.PathValue("userID")
 	activities, err := h.repo.ListByUser(r.Context(), userID)
 	if err != nil {
-		httplog.FromContext(r.Context()).Error("activity: internal error", "err", err)
-		apihttp.WriteError(w, http.StatusInternalServerError, apihttp.CodeInternal, "internal error")
+		apihttp.WriteInternal(w, r, "activity", err)
 		return
 	}
 	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"activities": activities})

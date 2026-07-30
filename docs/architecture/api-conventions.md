@@ -31,6 +31,7 @@ Every route is prefixed with a version: `/v1/...`. Added now, while it's cheap (
 | 401 | Missing, malformed, or expired auth |
 | 404 | The resource doesn't exist for this caller |
 | 409 | Conflict — e.g. attempting to create a resource that already exists |
+| 499 | The caller disconnected before the response was written (nginx's convention). **The one response with no body** — nothing is listening, and a JSON error shape would be misleading if it somehow were. Not a failure: it is not logged at ERROR and should not count toward an error-rate alert. |
 | 500 | Unexpected server error |
 
 ## Error response shape
@@ -56,9 +57,32 @@ Current codes: `invalid_input`, `unauthorized`, `not_found`, `already_exists`, `
 
 Single allowed origin via the `WEB_ORIGIN` env var (see `docs/architecture/deployment.md`) — revisit once staging/production domains exist and more than one origin needs to be trusted.
 
-## Pagination (forward-looking — no list endpoints exist yet)
+## Pagination
 
-When a list endpoint is eventually needed, use cursor-based pagination (`?cursor=&limit=`), not page numbers — consistent with the cursor-based incremental sync already planned for mobile offline sync (same underlying concept: a stable position marker rather than an offset that shifts under concurrent writes).
+**Two shapes, chosen by what the list is for.** This section originally said
+"cursor everywhere, never offsets"; that was written before any list endpoint
+existed, and the first one to genuinely need paging wanted the other shape.
+
+**Offset + total** (`?limit=&offset=`, responding with `{items, total, limit,
+offset}`) for a bounded list the caller *browses* — the session history being
+the case in hand. A person reading their own training back wants "137
+sessions" and the ability to jump; a cursor can give neither, because it has
+no idea how much is behind it. The list is bounded by one athlete's own
+history, so the usual objection to `COUNT(*)` doesn't bite.
+
+Two things are required of any offset endpoint:
+
+- **A total order.** `ORDER BY started_at DESC, id`, never the timestamp
+  alone. Without the tiebreak two rows with equal timestamps can swap between
+  requests, so one appears on two pages and another on none.
+- **Honesty about what it doesn't give you.** Offsets shift under concurrent
+  writes: a session synced while someone pages pushes every later row down
+  one. Deterministic within a snapshot is not stable across requests, and the
+  contract must not claim otherwise.
+
+**Cursor** (`?cursor=&limit=`) for anything a machine *drains* — mobile
+incremental sync above all, where re-reading or skipping a row is a
+correctness bug rather than a cosmetic one, and nobody needs a total.
 
 ## OpenAPI
 
