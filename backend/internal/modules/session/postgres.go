@@ -436,6 +436,11 @@ func (r *PostgresRepository) LastPerformances(
 		JOIN sessions s ON s.id = ss.session_id
 		JOIN exercises e ON e.id = ss.exercise_id
 		WHERE s.user_id = $1
+		  -- Redundant against the join, and deliberately so: it lets the
+		  -- planner seek session_sets_user_exercise_idx first instead of
+		  -- walking every session this athlete has. Same result set, by the
+		  -- same invariant BestOneRMs relies on.
+		  AND ss.user_id = $1
 		  AND ss.exercise_id = ANY($2)
 		  AND ss.set_type <> 'warmup'
 		  AND ss.completed
@@ -561,7 +566,7 @@ func assertWorkoutUsable(ctx context.Context, tx pgx.Tx, workoutID *string, user
 	return nil
 }
 
-func insertSets(ctx context.Context, tx pgx.Tx, sessionID string, sets []Set) error {
+func insertSets(ctx context.Context, tx pgx.Tx, sessionID, userID string, sets []Set) error {
 	if len(sets) == 0 {
 		return nil
 	}
@@ -573,18 +578,16 @@ func insertSets(ctx context.Context, tx pgx.Tx, sessionID string, sets []Set) er
 		}
 		// Position from array order, never trusted from the client — so a
 		// caller can't create gaps or an order differing from what it sent.
-		// user_id is derived from the session rather than passed in, so the
-		// denormalised copy cannot disagree with the row it came from — there
-		// is no code path that could supply a different one by mistake.
+		// user_id is passed, not sub-queried: the composite foreign key on
+		// (session_id, user_id) verifies it against `sessions`, so a wrong
+		// value is rejected by the database rather than needing a correlated
+		// lookup on every row of the batch.
 		batch.Queue(`
 			INSERT INTO session_sets (
 				session_id, user_id, exercise_id, position, set_type, reps, weight_kg,
 				seconds, distance_m, rir, rpe, notes, completed
-			) VALUES (
-				$1, (SELECT user_id FROM sessions WHERE id = $1),
-				$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12
-			)`,
-			sessionID, s.ExerciseID, i, st, s.Reps, s.WeightKg,
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+			sessionID, userID, s.ExerciseID, i, st, s.Reps, s.WeightKg,
 			s.Seconds, s.DistanceM, s.RIR, s.RPE, s.Notes, s.Completed)
 	}
 	results := tx.SendBatch(ctx, batch)
@@ -648,7 +651,7 @@ func (r *PostgresRepository) Create(ctx context.Context, in NewSession) (*Sessio
 		return r.Get(ctx, in.UserID, in.ID)
 	}
 
-	if err := insertSets(ctx, tx, in.ID, in.Sets); err != nil {
+	if err := insertSets(ctx, tx, in.ID, in.UserID, in.Sets); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -700,7 +703,10 @@ func (r *PostgresRepository) ReplaceSets(ctx context.Context, userID, sessionID 
 	if _, err := tx.Exec(ctx, `DELETE FROM session_sets WHERE session_id = $1`, sessionID); err != nil {
 		return nil, fmt.Errorf("session: clear sets: %w", err)
 	}
-	if err := insertSets(ctx, tx, sessionID, sets); err != nil {
+	// `userID` here is the caller's, already verified against the session by
+	// requireOwner above — so the composite FK is a second line of defence,
+	// not the only one.
+	if err := insertSets(ctx, tx, sessionID, userID, sets); err != nil {
 		return nil, err
 	}
 	if _, err := tx.Exec(ctx,

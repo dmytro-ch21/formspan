@@ -20,12 +20,18 @@ func LikeTerm(q string) string { return escaper.Replace(q) }
 // LikeClause builds a case-insensitive contains-match against `column`, with
 // the search term bound at `$n`.
 //
-// The term and the clause are one helper because they are one decision. The
-// escaping is only correct in combination with `ESCAPE '\'`, and the ESCAPE is
-// the half that gets forgotten — omit it and the backslashes LikeTerm inserted
-// become literal characters to match, so searching for "50%" silently finds
-// nothing while searching for "%" still matches everything. Three modules had
-// their own copy of both halves; this is the one place to get it right.
+// **`column` is interpolated raw and must be a compile-time constant.** Every
+// caller passes a literal; passing anything derived from a request would be
+// SQL injection. The per-module comments used to carry that warning, and it
+// has to live here now that the SQL fragment does.
+//
+// The term and the clause ship together because the escaping is only
+// meaningful alongside an escape character. In PostgreSQL specifically the
+// `ESCAPE '\'` is redundant — backslash is already the default, and the
+// clause behaves identically without it. It's kept because it's explicit
+// about a dependency that is otherwise invisible, and because it is *not* the
+// default everywhere; but nobody should expect removing it to change a result
+// in this database, and "add ESCAPE" is not the fix for a search bug here.
 //
 //	args = append(args, database.LikeTerm(f.Query))
 //	where = append(where, database.LikeClause("s.name", len(args)))

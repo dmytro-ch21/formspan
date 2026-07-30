@@ -1092,6 +1092,37 @@ heap blocks. `user_id` is derived from the session inside the INSERT rather
 than passed in, so no code path can supply a different one; a check across the
 dev database found zero rows disagreeing with their session.
 
+Review turned two of those into stronger versions, and corrected something I'd
+written that was simply untrue.
+
+**The derived `user_id` guaranteed consistency, not authorization.** Deriving
+it from the session means the value can't disagree with the row it came
+from — but a future caller that skipped the ownership check would write
+perfectly-derived rows into someone else's session, and those rows would then
+show up in that athlete's personal bests. A composite foreign key on
+`(session_id, user_id)` closes it: the pair has to exist on `sessions`, so a
+set can never name a session/owner combination that isn't real. Proven by
+inserting one — the database rejects it. `ON UPDATE CASCADE` also means a
+future Clerk-ID migration carries down instead of silently desyncing every
+set, which nothing else covered. With the FK verifying it, the value is now
+passed rather than sub-queried per row.
+
+**`LastPerformances` is the other half of the same request** — same user, same
+exercises, called one line before `BestOneRMs` — and it still filtered through
+the join, so it couldn't use the new index either. A redundant
+`AND ss.user_id = $1` lets the planner seek the index first.
+
+**And the comment justifying `ESCAPE '\'` was wrong.** It claimed removing the
+clause would make a search for "50%" silently find nothing. In PostgreSQL the
+backslash is *already* the default escape character, so the clause is
+redundant and removing it changes nothing — verified both ways. The clause
+stays, because it's explicit about an otherwise invisible dependency and isn't
+the default in every engine, but a wrong justification in the file whose whole
+billing is "the one place to get this right" is worse than no comment: it
+would send someone chasing a search bug by adding `ESCAPE` where it does
+nothing.
+
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

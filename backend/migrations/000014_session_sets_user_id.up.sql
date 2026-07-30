@@ -1,3 +1,7 @@
+-- A migration that queues behind an in-flight query blocks every reader
+-- behind it too. Fail fast instead of stalling the table.
+SET lock_timeout = '3s';
+
 -- Denormalise the owner onto session_sets.
 --
 -- Every set already belongs to a user, transitively, through its session. The
@@ -25,3 +29,23 @@ ALTER TABLE session_sets ALTER COLUMN user_id SET NOT NULL;
 -- the per-exercise maximum, which this makes cheap to find.
 CREATE INDEX session_sets_user_exercise_idx
     ON session_sets (user_id, exercise_id, weight_kg DESC);
+
+-- Make the denormalisation impossible to break, rather than merely unlikely.
+--
+-- Deriving user_id inside the INSERT guarantees *consistency* — the value can
+-- only come from the session it belongs to. It does not guarantee
+-- *authorization*: a future caller that skipped the ownership check would
+-- write perfectly-derived rows into someone else's session, and those rows
+-- would then pollute that athlete's personal bests.
+--
+-- A composite foreign key closes both. The pair has to exist on `sessions`,
+-- so a set can never name a session/owner combination that isn't real, and
+-- ON UPDATE CASCADE means a user_id rewrite (a Clerk migration, an account
+-- merge) carries down instead of silently desyncing every set.
+ALTER TABLE sessions
+    ADD CONSTRAINT sessions_id_user_unique UNIQUE (id, user_id);
+
+ALTER TABLE session_sets
+    ADD CONSTRAINT session_sets_session_owner_fk
+    FOREIGN KEY (session_id, user_id) REFERENCES sessions (id, user_id)
+    ON DELETE CASCADE ON UPDATE CASCADE;
