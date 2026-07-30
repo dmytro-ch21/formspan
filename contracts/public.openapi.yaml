@@ -77,6 +77,7 @@ components:
         - strength_enabled
         - nutrition_enabled
         - running_enabled
+        - unit_system
         - created_at
         - updated_at
       properties:
@@ -99,6 +100,15 @@ components:
           type: boolean
         running_enabled:
           type: boolean
+        unit_system:
+          type: string
+          enum: [metric, imperial]
+          description: >
+            Display units only. Training data is stored in kilograms and
+            metres regardless, so changing this can never alter a recorded
+            number — only how it's shown and entered. Storing converted
+            values would make every historical row ambiguous, and would break
+            the progression rule, which compares weights across sessions.
         created_at:
           type: string
           format: date-time
@@ -140,6 +150,15 @@ components:
           type: boolean
         running_enabled:
           type: boolean
+        unit_system:
+          type: string
+          enum: [metric, imperial]
+          description: >
+            Display units only. Training data is stored in kilograms and
+            metres regardless, so changing this can never alter a recorded
+            number — only how it's shown and entered. Storing converted
+            values would make every historical row ambiguous, and would break
+            the progression rule, which compares weights across sessions.
 
     Flag:
       type: object

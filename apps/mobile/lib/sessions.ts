@@ -2,6 +2,7 @@ import { randomUUID } from 'expo-crypto';
 
 import type { Exercise } from './exercises';
 import { newTraceId, traceparent } from './trace';
+import { formatDistance, formatWeight, type UnitSystem } from './units';
 import type { WorkoutItem } from './workouts';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
@@ -224,13 +225,14 @@ export function similarTo(base: Exercise, all: Exercise[]): Exercise[] {
     .map((x) => x.e);
 }
 
-export function describeSet(s: LoggedSet): string {
+export function describeSet(s: LoggedSet, units: UnitSystem = 'metric'): string {
   const parts: string[] = [];
-  if (s.reps != null && s.weight_kg != null) parts.push(`${s.reps} × ${s.weight_kg}kg`);
+  const w = formatWeight(s.weight_kg, units);
+  if (s.reps != null && s.weight_kg != null) parts.push(`${s.reps} × ${w}`);
   else if (s.reps != null) parts.push(`${s.reps} reps`);
-  else if (s.weight_kg != null) parts.push(`${s.weight_kg}kg`);
+  else if (s.weight_kg != null) parts.push(w);
   if (s.seconds != null) parts.push(`${s.seconds}s`);
-  if (s.distance_m != null) parts.push(`${s.distance_m}m`);
+  if (s.distance_m != null) parts.push(formatDistance(s.distance_m, units));
   if (s.rpe != null) parts.push(`RPE ${s.rpe}`);
   else if (s.rir != null) parts.push(`${s.rir} RIR`);
   return parts.join(' · ') || 'Not recorded';

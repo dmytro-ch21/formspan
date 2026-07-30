@@ -259,6 +259,15 @@ export default function TodayScreen() {
 
       <Pressable
         style={styles.signOut}
+        onPress={() => router.push('/settings')}
+        accessibilityRole="button"
+        testID="open-settings"
+      >
+        <Text style={styles.settingsLink}>Settings</Text>
+      </Pressable>
+
+      <Pressable
+        style={styles.signOut}
         onPress={() => signOut()}
         accessibilityRole="button"
         testID="sign-out"
@@ -328,5 +337,6 @@ const styles = StyleSheet.create({
   activityKind: { fontWeight: '600' },
   synced: { color: vola.green, fontSize: 12 },
   pending: { color: vola.warn, fontSize: 12 },
-  signOut: { marginTop: 24, alignItems: 'center', paddingVertical: 14 },
+  signOut: { marginTop: 8, alignItems: 'center', paddingVertical: 14 },
+  settingsLink: { color: vola.lime, fontWeight: '600' },
 });

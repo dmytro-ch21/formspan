@@ -46,6 +46,12 @@ func TestSuggest_IncreasesWhenRepsWereLeftInReserve(t *testing.T) {
 	if !contains(s.Reason, "3 reps") {
 		t.Errorf("reason doesn't cite the RIR: %q", s.Reason)
 	}
+	// The reason must stay unit-free — the client renders the target weight
+	// in the athlete's own units, and "kg" here would leak metric into a
+	// pounds interface.
+	if contains(s.Reason, "kg") || contains(s.Reason, "lb") {
+		t.Errorf("reason hardcodes a unit: %q", s.Reason)
+	}
 }
 
 func TestSuggest_IncrementScalesWithTheMovement(t *testing.T) {

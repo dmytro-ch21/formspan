@@ -8,6 +8,17 @@ import { Text, View } from '@/components/Themed';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { vola } from '@/constants/Colors';
 import { restSecondsFor } from '@/lib/rest';
+import {
+  distanceInputUnit,
+  formatWeight,
+  fromDisplayDistance,
+  fromDisplayWeight,
+  toDisplayDistance,
+  toDisplayWeight,
+  weightUnit,
+  type UnitSystem,
+} from '@/lib/units';
+import { useUnits } from '@/lib/useUnits';
 import { fetchExercises, type Exercise } from '@/lib/exercises';
 import {
   cacheExercises,
@@ -62,6 +73,7 @@ export default function SessionScreen() {
   const [catalog, setCatalog] = useState<Map<string, Exercise>>(new Map());
   const [suggestions, setSuggestions] = useState<Map<string, Suggestion>>(new Map());
   const timerState = useRestTimer();
+  const { units } = useUnits();
   const [loading, setLoading] = useState(true);
   const [everLoaded, setEverLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -288,7 +300,7 @@ export default function SessionScreen() {
             <Stat label="Reps" value={String(volume.total_reps)} />
             <Stat
               label="Tonnage"
-              value={volume.tonnage_kg > 0 ? `${Math.round(volume.tonnage_kg)}kg` : '—'}
+              value={volume.tonnage_kg > 0 ? formatWeight(volume.tonnage_kg, units) : '—'}
             />
             <Stat label="Top RPE" value={volume.hardest_rpe > 0 ? String(volume.hardest_rpe) : '—'} />
           </View>
@@ -334,6 +346,7 @@ export default function SessionScreen() {
                   onChange={(next) => update(i, next)}
                   onRemove={() => removeSet(i)}
                   onRest={() => startRest(g.exerciseID)}
+                  units={units}
                 />
               ))}
               {(() => {
@@ -347,7 +360,7 @@ export default function SessionScreen() {
                     <View style={styles.hintBody}>
                       <Text style={styles.hintLast}>
                         Last time: {hint.last_reps != null ? `${hint.last_reps} × ` : ''}
-                        {hint.last_weight_kg}kg
+                        {formatWeight(hint.last_weight_kg, units)}
                         {hint.last_rir != null ? ` · ${hint.last_rir} RIR` : ''}
                         {hint.last_rir == null && hint.last_rpe != null ? ` · RPE ${hint.last_rpe}` : ''}
                       </Text>
@@ -366,12 +379,12 @@ export default function SessionScreen() {
                         }}
                         style={styles.hintApply}
                         accessibilityRole="button"
-                        accessibilityLabel={`Use ${target} kilograms for every set of ${
+                        accessibilityLabel={`Use ${formatWeight(target, units)} for every set of ${
                           exercise?.name ?? 'this exercise'
                         }`}
                         testID={`apply-suggestion-${g.exerciseID}`}
                       >
-                        <Text style={styles.hintApplyText}>{target}kg</Text>
+                        <Text style={styles.hintApplyText}>{formatWeight(target, units)}</Text>
                       </Pressable>
                     )}
                   </View>
@@ -540,6 +553,7 @@ function SetRow({
   onChange,
   onRemove,
   onRest,
+  units,
 }: {
   index: number;
   ordinal: number;
@@ -549,6 +563,7 @@ function SetRow({
   onChange: (next: LoggedSet) => void;
   onRemove: () => void;
   onRest: () => void;
+  units: UnitSystem;
 }) {
   const [open, setOpen] = useState(false);
   const measures: Measure[] = exercise ? measuresFor(exercise.load_type) : ['reps'];
@@ -575,7 +590,7 @@ function SetRow({
         style={styles.setHead}
         onPress={() => editable && setOpen((v) => !v)}
         accessibilityRole={editable ? 'button' : undefined}
-        accessibilityLabel={`Set ${ordinal}. ${describeSet(set)}`}
+        accessibilityLabel={`Set ${ordinal}. ${describeSet(set, units)}`}
         accessibilityState={{ expanded: open }}
         testID={`set-${index}`}
       >
@@ -583,7 +598,7 @@ function SetRow({
           {ordinal}
           {typeShort ? <Text style={styles.setBadge}> {typeShort}</Text> : null}
         </Text>
-        <Text style={styles.setSummary}>{describeSet(set)}</Text>
+        <Text style={styles.setSummary}>{describeSet(set, units)}</Text>
         {editable && (
           // Sits on the collapsed row, because that's where your thumb
           // already is when you rack the bar — not behind a disclosure.
@@ -604,17 +619,49 @@ function SetRow({
       {open && editable && (
         <View style={styles.setEditor}>
           <View style={styles.fieldRow}>
-            {measures.map((m) => (
-              <Field
-                key={m}
-                label={MEASURE_LABEL[m]}
-                value={set[MEASURE_KEY[m]] as number | null}
-                onChangeText={num(MEASURE_KEY[m], m !== 'weight')}
-                integer={m !== 'weight'}
-                accessibilityLabel={`${MEASURE_LABEL[m]} for set ${ordinal} of ${exerciseName}`}
-                testID={`set-${index}-${m}`}
-              />
-            ))}
+            {measures.map((m) => {
+              const stored = set[MEASURE_KEY[m]] as number | null;
+              const label =
+                m === 'weight'
+                  ? `Weight ${weightUnit(units)}`
+                  : m === 'distance'
+                    ? distanceInputUnit(units)
+                    : MEASURE_LABEL[m];
+              // Converted for display, converted back on input — the stored
+              // value is always kilograms or metres, whatever is on screen.
+              const shown =
+                stored == null
+                  ? null
+                  : m === 'weight'
+                    ? toDisplayWeight(stored, units)
+                    : m === 'distance'
+                      ? toDisplayDistance(stored, units)
+                      : stored;
+              return (
+                <Field
+                  key={m}
+                  label={label}
+                  value={shown}
+                  onChangeText={(text) => {
+                    const raw = text.trim() === '' ? null : Number(text.replace(',', '.'));
+                    if (raw === null || !Number.isFinite(raw)) {
+                      onChange({ ...set, [MEASURE_KEY[m]]: null });
+                      return;
+                    }
+                    const canonical =
+                      m === 'weight'
+                        ? fromDisplayWeight(raw, units)
+                        : m === 'distance'
+                          ? Math.round(fromDisplayDistance(raw, units))
+                          : Math.round(raw);
+                    onChange({ ...set, [MEASURE_KEY[m]]: canonical });
+                  }}
+                  integer={m !== 'weight'}
+                  accessibilityLabel={`${label} for set ${ordinal} of ${exerciseName}`}
+                  testID={`set-${index}-${m}`}
+                />
+              );
+            })}
           </View>
 
           {/* Effort, side by side. Two views of the same thing — record

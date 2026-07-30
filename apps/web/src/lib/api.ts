@@ -388,6 +388,18 @@ export function describeSet(s: LoggedSet): string {
   return parts.join(" · ") || "Not recorded";
 }
 
+export type UnitSystemPref = "metric" | "imperial";
+
+export type Profile = {
+  user_id: string;
+  display_name: string | null;
+  unit_system: UnitSystemPref;
+  bjj_enabled: boolean;
+  strength_enabled: boolean;
+  nutrition_enabled: boolean;
+  running_enabled: boolean;
+};
+
 export type Token = () => Promise<string | null>;
 
 /**
@@ -515,6 +527,33 @@ export function applySuggestions(
     const weight = hit?.suggested_weight_kg ?? null;
     return weight == null ? s : { ...s, weight_kg: weight };
   });
+}
+
+export function getProfile(getToken: Token, signal?: AbortSignal): Promise<Profile> {
+  return request<Profile>(getToken, "/profile", {}, signal);
+}
+
+/**
+ * Sets the unit preference, creating the profile if there isn't one yet.
+ * PATCH on a missing profile is a 404 — the right answer for the API, but a
+ * dead end for someone who reaches Settings without having onboarded.
+ */
+export async function updateUnitSystem(
+  getToken: Token,
+  unit: UnitSystemPref,
+): Promise<Profile> {
+  const patch = () =>
+    request<Profile>(getToken, "/profile", {
+      method: "PATCH",
+      body: JSON.stringify({ unit_system: unit }),
+    });
+  try {
+    return await patch();
+  } catch (err) {
+    if (!(err instanceof ApiError) || err.status !== 404) throw err;
+    await request<Profile>(getToken, "/profile", { method: "POST", body: JSON.stringify({}) });
+    return patch();
+  }
 }
 
 export async function listSessions(

@@ -532,6 +532,25 @@ Both are now cached, and the catalog is warmed from the Library tab rather than 
 **Honest remaining gaps.** Sync is **trigger-based, not event-driven**: it runs on screen focus, on the next edit, and when a session starts — there is no connectivity listener, so a phone that regains signal while sitting on a bench won't push until something touches it. A `NetInfo` subscription is the obvious next step and was deliberately not added here rather than bolted on untested. Also: a session started on *another* device still can't be opened offline (it has to be fetched once), suggestions are server-computed and so simply don't appear offline, and the workout cache covers `scope=mine` only. The web app is unchanged and stays online-only, which is correct under the platform rule — it is the planning and analysis surface, not the one used in a gym.
 
 
+## 2026-07-29 — Units, a settings screen, and remembering the right things
+
+**Everything is still stored in kilograms and metres. Units are a display and input transform, nothing more.** That is the whole design, and the reason the change stayed contained.
+
+Storing converted values would have made every historical row ambiguous the moment someone flipped the setting — was that 100 recorded as kg or lb? — and it would have silently broken the progression rule, which compares weights across sessions. So conversion happens at the last possible moment on the way out and the first possible moment on the way in. The settings screen says this in plain language, because a units toggle is exactly the control people expect to rewrite their history.
+
+`profiles.unit_system` holds it, so the preference is an **account** property, not a device one: someone who thinks in pounds thinks in pounds on the web app and on their next phone. Mobile caches it locally so the session screen renders correctly with no signal — showing kilograms to a pounds user purely because the phone is offline would be a worse failure than showing nothing.
+
+**One thing the units work forced a change in.** The progression suggestion's reason read *"add 5 kg"* — hardcoded metric, which would have leaked into a pounds interface. The button beside it already shows the target weight in the athlete's own units, so the delta didn't belong in the prose at all. The reason is now unit-free and there's a test asserting it contains neither "kg" nor "lb".
+
+**A gap found on the way:** `PATCH /v1/profile` 404s when no profile row exists, which is the right answer for the API and a dead end for a real person — you can reach Settings without ever having onboarded, and "choose your units" failing because of a missing row explains nothing. Both clients now create the profile and retry.
+
+**Verified end to end**, which for this feature means the round trip: switched to Imperial on the phone, confirmed `unit_system = 'imperial'` on the profile row, then typed **225** into a field labelled "Weight lb" and read **102.06 kg** back out of Postgres — which converts back to exactly 225.0 lb.
+
+**Separately, the Library now remembers the right half of its state.** The sport filter persists across visits; the search box clears. They're different kinds of thing: "I train strength" is a standing fact that shouldn't need re-stating, while "bench" is a question already answered — finding it still in the box next time is a small confusion every visit, because the list looks short for no visible reason. Filters live in a per-user local `prefs` table, keyed by user because a shared device must not hand one account's settings to the next person.
+
+**Still not done:** the workout editor and exercise library show weights in kilograms regardless — only the session surfaces are unit-aware so far. Distances convert but no screen currently takes a distance input in anger. And there's no per-exercise unit override, which some lifters want for machines marked in pounds.
+
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

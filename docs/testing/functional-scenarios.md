@@ -572,6 +572,29 @@ Domain: logging a session with no connectivity. **Test this by actually stopping
 
 ---
 
+## Units and settings (`profiles.unit_system`, both clients)
+
+**The property everything else depends on: storage is always kilograms and metres.** Units are display and input only.
+
+- Switching units must **never** change a stored value. Verified by round trip: with Imperial selected, typing `225` into "Weight lb" stores `102.06` kg, which renders back as exactly `225.0` lb.
+- Switching to Imperial and back to Metric must leave every logged number identical.
+- `PATCH /v1/profile` with `unit_system` outside `metric|imperial` → `400` naming the field.
+- **`PATCH` on an account with no profile row** must not dead-end: the clients create the profile and retry, because Settings is reachable without onboarding.
+- The preference is per **account**, not per device — set it on the phone, and the web app shows it too.
+- Mobile reads it from a local cache first, so a session opens in the right units with no signal.
+- The progression suggestion's `reason` must contain **neither "kg" nor "lb"** — the client renders the target in the athlete's own units, and a hardcoded unit would leak metric into a pounds interface. Asserted in `TestSuggest_IncreasesWhenRepsWereLeftInReserve`.
+- Distance display switches by magnitude in both systems (m/km, yd/mi) — nobody says "0.02 miles".
+
+**Not yet unit-aware:** the workout editor and the exercise library still show kilograms regardless. No per-exercise override for machines marked in pounds.
+
+## Library filter and search memory (`apps/mobile` Library tab)
+
+- The **sport filter persists** across visits and app launches; it's a standing fact about the athlete.
+- The **search box clears** on leaving the tab; it's a question already answered, and finding it still there makes the list look short for no visible reason.
+- Both are stored per user — a shared device must not hand one account's filters to the next person.
+
+---
+
 ## Not yet covered (tracked here so it isn't lost, not because it's blocking)
 
 - Mobile has no auth yet (Clerk Expo SDK is a separate future increment) — no sign-in/sign-out scenarios apply to mobile today.

@@ -47,6 +47,15 @@ const CREATE_SESSIONS = `
   );
 `;
 
+const CREATE_PREFS = `
+  CREATE TABLE IF NOT EXISTS prefs (
+    user_id TEXT NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    PRIMARY KEY (user_id, key)
+  );
+`;
+
 const CREATE_WORKOUT_CACHE = `
   CREATE TABLE IF NOT EXISTS workout_cache (
     id TEXT PRIMARY KEY NOT NULL,
@@ -82,7 +91,7 @@ const CREATE_EXERCISE_CACHE = `
  * "no such column" crash the guard was supposed to prevent. A version number
  * can't develop that blind spot.
  */
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
@@ -132,6 +141,17 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
       `CREATE INDEX IF NOT EXISTS workout_cache_user_sport_idx
          ON workout_cache (user_id, sport);`,
     );
+  }
+
+  if (current < 4) {
+    // A tiny key/value table for preferences, keyed by user because a shared
+    // device must not hand one account's settings to the next person.
+    //
+    // Two kinds live here for two different reasons. The unit system is a
+    // *cache* of the server's copy, so the session screen can render in the
+    // right units with no signal. The last-used filters are genuinely local
+    // — where you are in the UI is a property of this device, not of you.
+    await db.execAsync(CREATE_PREFS);
   }
 
   await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION};`);

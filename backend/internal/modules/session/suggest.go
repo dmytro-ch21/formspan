@@ -170,7 +170,10 @@ func Suggest(p *Performance, now time.Time) Suggestion {
 		next := *p.WeightKg + add
 		s.SuggestedWeightKg = &next
 		s.Code = SuggestIncrease
-		s.Reason = "You had " + describeRoom(p) + " left last time — add " + trimFloat(add) + " kg."
+		// Deliberately unit-free: the client shows the target weight in the
+		// athlete's own units, and a reason that hardcoded "kg" would leak
+		// metric into a pounds interface.
+		s.Reason = "You had " + describeRoom(p) + " left last time — there's room to add weight."
 		return s
 
 	default:
@@ -212,20 +215,4 @@ func itoa(n int) string {
 		return "-" + string(b)
 	}
 	return string(b)
-}
-
-// trimFloat renders an increment without a trailing ".0" — "5 kg", not
-// "5.0 kg", while keeping "1.25".
-func trimFloat(v float64) string {
-	whole := int(v)
-	if float64(whole) == v {
-		return itoa(whole)
-	}
-	// Two decimals is enough for every increment in the table.
-	cents := int(v*100+0.5) % 100
-	out := itoa(whole) + "." + itoa(cents/10)
-	if cents%10 != 0 {
-		out += itoa(cents % 10)
-	}
-	return out
 }

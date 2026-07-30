@@ -29,6 +29,17 @@ import {
   type Suggestion,
   type Volume,
 } from "@/lib/api";
+import {
+  distanceInputUnit,
+  formatWeight,
+  fromDisplayDistance,
+  fromDisplayWeight,
+  toDisplayDistance,
+  toDisplayWeight,
+  weightUnit,
+  type UnitSystem,
+} from "@/lib/units";
+import { useUnits } from "@/lib/useUnits";
 
 /**
  * Logging a session on a desktop.
@@ -54,6 +65,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const [volume, setVolume] = useState<Volume | null>(null);
   const [catalog, setCatalog] = useState<Map<string, Exercise>>(new Map());
   const [suggestions, setSuggestions] = useState<Map<string, Suggestion>>(new Map());
+  const { units } = useUnits();
   const [loading, setLoading] = useState(true);
   const [everLoaded, setEverLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -326,7 +338,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           <Stat label="Reps" value={String(volume.total_reps)} />
           <Stat
             label="Tonnage"
-            value={volume.tonnage_kg > 0 ? `${Math.round(volume.tonnage_kg)} kg` : "—"}
+            value={volume.tonnage_kg > 0 ? formatWeight(volume.tonnage_kg, units) : "—"}
           />
           <Stat label="Top RPE" value={volume.hardest_rpe > 0 ? String(volume.hardest_rpe) : "—"} />
         </dl>
@@ -362,6 +374,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                 onSwap={setSwapping}
                 swapping={swapping === g.exerciseID}
                 suggestion={suggestions.get(g.exerciseID)}
+                units={units}
                 onApplySuggestion={applySuggestion}
               />
             ))
@@ -421,6 +434,7 @@ function ExerciseBlock({
   swapping,
   suggestion,
   onApplySuggestion,
+  units,
 }: {
   exercise: Exercise | undefined;
   exerciseID: string;
@@ -434,6 +448,7 @@ function ExerciseBlock({
   swapping: boolean;
   suggestion: Suggestion | undefined;
   onApplySuggestion: (indices: number[], weight: number) => void;
+  units: UnitSystem;
 }) {
   const image = exercise ? pickImage(exercise, "thumbnail") : null;
   // Data-driven from the catalog's load_type, so a plank asks for seconds
@@ -478,7 +493,7 @@ function ExerciseBlock({
           <p className="min-w-0 flex-1 text-sm">
             <span className="font-medium">
               Last time: {suggestion.last_reps != null ? `${suggestion.last_reps} × ` : ""}
-              {suggestion.last_weight_kg} kg
+              {formatWeight(suggestion.last_weight_kg, units)}
               {suggestion.last_rir != null
                 ? ` · ${suggestion.last_rir} RIR`
                 : suggestion.last_rpe != null
@@ -497,7 +512,7 @@ function ExerciseBlock({
                 onClick={() => onApplySuggestion(indices, suggestion.suggested_weight_kg!)}
                 className="shrink-0 rounded-pill bg-accent-fill px-4 py-1.5 text-sm font-bold text-accent-on-fill transition hover:brightness-110"
               >
-                Use {suggestion.suggested_weight_kg} kg
+                Use {formatWeight(suggestion.suggested_weight_kg, units)}
               </button>
             )}
         </div>
@@ -512,7 +527,11 @@ function ExerciseBlock({
               </th>
               {measures.map((m) => (
                 <th key={m} scope="col" className="eyebrow px-2 py-2 text-[0.625rem] font-medium">
-                  {MEASURE_LABEL[m]}
+                  {m === "weight"
+                    ? weightUnit(units)
+                    : m === "distance"
+                      ? distanceInputUnit(units)
+                      : MEASURE_LABEL[m]}
                 </th>
               ))}
               <th scope="col" className="eyebrow px-2 py-2 text-[0.625rem] font-medium">
@@ -538,6 +557,7 @@ function ExerciseBlock({
                 measures={measures}
                 editable={editable}
                 exerciseName={exercise?.name ?? exerciseID}
+                units={units}
                 onChange={(next) => onChange(index, next)}
                 onRemove={() => onRemove(index)}
               />
@@ -567,6 +587,7 @@ function SetRow({
   exerciseName,
   onChange,
   onRemove,
+  units,
 }: {
   ordinal: number;
   set: LoggedSet;
@@ -575,6 +596,7 @@ function SetRow({
   exerciseName: string;
   onChange: (next: LoggedSet) => void;
   onRemove: () => void;
+  units: UnitSystem;
 }) {
   const short = SET_TYPES.find((t) => t.key === set.set_type)?.short ?? "";
 
@@ -596,17 +618,49 @@ function SetRow({
         {short && <span className="ml-1 text-xs font-bold text-lime">{short}</span>}
       </td>
 
-      {measures.map((m) => (
-        <td key={m} className="px-2 py-1.5">
-          <NumberCell
-            label={`${MEASURE_LABEL[m]} for set ${ordinal} of ${exerciseName}`}
-            value={set[MEASURE_KEY[m]] as number | null}
-            onChange={num(MEASURE_KEY[m], m !== "weight")}
-            step={m === "weight" ? 0.5 : 1}
-            disabled={!editable}
-          />
-        </td>
-      ))}
+      {measures.map((m) => {
+        const stored = set[MEASURE_KEY[m]] as number | null;
+        const unitLabel =
+          m === "weight"
+            ? weightUnit(units)
+            : m === "distance"
+              ? distanceInputUnit(units)
+              : MEASURE_LABEL[m];
+        const shown =
+          stored == null
+            ? null
+            : m === "weight"
+              ? toDisplayWeight(stored, units)
+              : m === "distance"
+                ? toDisplayDistance(stored, units)
+                : stored;
+        return (
+          <td key={m} className="px-2 py-1.5">
+            <NumberCell
+              label={`${unitLabel} for set ${ordinal} of ${exerciseName}`}
+              value={shown}
+              onChange={(raw) => {
+                const n = raw.trim() === "" ? null : Number(raw.replace(",", "."));
+                if (n === null || !Number.isFinite(n)) {
+                  onChange({ ...set, [MEASURE_KEY[m]]: null });
+                  return;
+                }
+                // Converted back before it's stored — the database only ever
+                // sees kilograms and metres.
+                const canonical =
+                  m === "weight"
+                    ? fromDisplayWeight(n, units)
+                    : m === "distance"
+                      ? Math.round(fromDisplayDistance(n, units))
+                      : Math.round(n);
+                onChange({ ...set, [MEASURE_KEY[m]]: canonical });
+              }}
+              step={m === "weight" ? 0.5 : 1}
+              disabled={!editable}
+            />
+          </td>
+        );
+      })}
 
       <td className="px-2 py-1.5">
         <NumberCell

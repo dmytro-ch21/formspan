@@ -63,6 +63,7 @@ type updateRequest struct {
 	StrengthEnabled  *bool   `json:"strength_enabled"`
 	NutritionEnabled *bool   `json:"nutrition_enabled"`
 	RunningEnabled   *bool   `json:"running_enabled"`
+	UnitSystem       *string `json:"unit_system"`
 }
 
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
@@ -74,6 +75,12 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.UnitSystem != nil && !ValidUnitSystem(*req.UnitSystem) {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"unit_system must be metric or imperial")
+		return
+	}
+
 	p, err := h.repo.Update(r.Context(), claims.UserID, ProfileUpdate{
 		DisplayName:      req.DisplayName,
 		DateOfBirth:      req.DateOfBirth,
@@ -82,6 +89,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		StrengthEnabled:  req.StrengthEnabled,
 		NutritionEnabled: req.NutritionEnabled,
 		RunningEnabled:   req.RunningEnabled,
+		UnitSystem:       req.UnitSystem,
 	})
 	if err != nil {
 		writeError(w, r, err)
