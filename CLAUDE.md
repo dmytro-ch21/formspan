@@ -17,6 +17,15 @@ VOLA is a unified training and nutrition platform for BJJ athletes who also stre
 - `docs/architecture/` — current-state docs (deployment, API conventions). `docs/decisions/history.md` — the project narrative.
 - `assets/brand/` — the VOLA brand kit, and the **source of truth** for brand identity: logos, app-icon and splash masters, 25 UI icons, and `design-tokens.json`. All SVG — the rasters in `apps/mobile/assets/images/` are *generated* from these, so edit the SVG and regenerate, never the PNG. UI icons use `currentColor`, so recolour via CSS/props rather than by forking the file.
 
+## Which platform gets a feature (hard rule)
+
+**An in-progress session is a phone thing. The web app is for planning and analysis.**
+
+- **Mobile** owns live logging: recording sets mid-workout, the rest timer, swapping an exercise because the rack is taken. These are done standing up, one-handed, with 20 seconds between sets.
+- **Web** owns authoring and review: building templates (two-pane, catalog always visible), reading history back, and the analytical surface. It can also start, review and correct a session — those are desk activities — but it does **not** get in-workout affordances. A rest countdown on a desktop you are not standing next to is decoration.
+
+This was re-litigated per feature for a while; it isn't open. When adding something to the session flow, decide which of the two it is before building it, and say so in the history entry.
+
 ## Backend module pattern
 
 Every domain module follows the shape of `internal/modules/profile/` — read it as the reference implementation before adding a new one:

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
@@ -107,6 +108,54 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"sessions": sessions})
+}
+
+// maxSuggestionIDs bounds a suggestions request. A workout is a handful of
+// movements; anything larger is a scrape of the catalog.
+const maxSuggestionIDs = 100
+
+// Suggestions answers "what should I load today" for a list of exercises,
+// from what the caller actually did last time.
+func (h *Handler) Suggestions(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.ClaimsFromContext(r.Context())
+
+	raw := r.URL.Query().Get("exercise_ids")
+	ids := []string{}
+	for _, id := range strings.Split(raw, ",") {
+		if id = strings.TrimSpace(id); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"exercise_ids is required")
+		return
+	}
+	if len(ids) > maxSuggestionIDs {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"too many exercise_ids")
+		return
+	}
+
+	last, err := h.repo.LastPerformances(r.Context(), claims.UserID, ids)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+
+	now := time.Now().UTC()
+	suggestions := make([]Suggestion, 0, len(ids))
+	for _, id := range ids {
+		var p *Performance
+		if v, ok := last[id]; ok {
+			p = &v
+		}
+		s := Suggest(p, now)
+		// Suggest can't know the id when there's no history to carry it.
+		s.ExerciseID = id
+		suggestions = append(suggestions, s)
+	}
+	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"suggestions": suggestions})
 }
 
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {

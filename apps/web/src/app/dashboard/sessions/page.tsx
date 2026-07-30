@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
 
 import {
+  applySuggestions,
+  fetchSuggestions,
   listSessions,
   listWorkouts,
   setsFromWorkout,
@@ -73,11 +75,23 @@ export default function SessionsPage() {
     if (starting) return;
     setStarting(true);
     try {
+      let sets = workout ? setsFromWorkout(workout.items) : [];
+      if (sets.length > 0) {
+        try {
+          // Where the plan doesn't prescribe a weight, history fills it in.
+          sets = applySuggestions(
+            sets,
+            await fetchSuggestions(getToken, sets.map((x) => x.exercise_id)),
+          );
+        } catch {
+          // A failed lookup must not stop the session starting.
+        }
+      }
       const { session } = await startSession(getToken, {
         sport,
         name: workout ? workout.name : `${label} session`,
         workout_id: workout ? workout.id : null,
-        sets: workout ? setsFromWorkout(workout.items) : [],
+        sets,
       });
       router.push(`/dashboard/sessions/${session.id}`);
     } catch (err) {

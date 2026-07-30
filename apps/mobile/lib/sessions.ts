@@ -47,6 +47,38 @@ export type Session = {
   updated_at: string;
 };
 
+
+export type SuggestionCode =
+  | 'no_history'
+  | 'not_applicable'
+  | 'increase'
+  | 'repeat_hard'
+  | 'repeat_unknown_effort'
+  | 'repeat_stale'
+  | 'repeat_consolidate';
+
+/**
+ * What to load today, derived from what you actually did last time.
+ *
+ * The evidence travels with the recommendation on purpose — `last_*` is
+ * always populated when there is history, even when the answer is "repeat
+ * it". A number you can check beats a number you have to trust, and it is
+ * the difference between a recommendation and an oracle.
+ *
+ * Branch on `code`; never pattern-match `reason`, which is prose.
+ */
+export type Suggestion = {
+  exercise_id: string;
+  last_performed_at: string | null;
+  last_reps: number | null;
+  last_weight_kg: number | null;
+  last_rir: number | null;
+  last_rpe: number | null;
+  suggested_weight_kg: number | null;
+  code: SuggestionCode;
+  reason: string;
+};
+
 export type Volume = {
   working_sets: number;
   total_reps: number;
@@ -255,6 +287,43 @@ async function request<T>(
     );
   }
   return body as T;
+}
+
+export async function fetchSuggestions(
+  getToken: () => Promise<string | null>,
+  exerciseIDs: string[],
+  signal?: AbortSignal,
+): Promise<Map<string, Suggestion>> {
+  const unique = [...new Set(exerciseIDs)].filter(Boolean);
+  if (unique.length === 0) return new Map();
+  const b = await request<{ suggestions: Suggestion[] }>(
+    getToken,
+    `/sessions/suggestions?exercise_ids=${encodeURIComponent(unique.join(','))}`,
+    {},
+    signal,
+  );
+  return new Map((b.suggestions ?? []).map((s) => [s.exercise_id, s]));
+}
+
+/**
+ * Fills in the weight for sets that don't already carry one.
+ *
+ * A template's own prescription always wins — it's an instruction, not a
+ * guess. Where it's silent, the recommendation goes in, so a planned session
+ * opens at a weight that means something rather than an empty box. Reps are
+ * left alone: the plan owns those, and inventing them from one prior set
+ * would overwrite the actual programme.
+ */
+export function applySuggestions(
+  sets: LoggedSet[],
+  suggestions: Map<string, Suggestion>,
+): LoggedSet[] {
+  return sets.map((s) => {
+    if (s.weight_kg != null) return s;
+    const hit = suggestions.get(s.exercise_id);
+    const weight = hit?.suggested_weight_kg ?? null;
+    return weight == null ? s : { ...s, weight_kg: weight };
+  });
 }
 
 export async function listSessions(

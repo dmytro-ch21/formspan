@@ -173,6 +173,62 @@ func (r *PostgresRepository) attachSets(ctx context.Context, sessions []Session,
 	return nil
 }
 
+// LastPerformances finds the top working set of the most recent session
+// containing each requested exercise.
+//
+// One query for the whole list, not one per exercise — a session screen asks
+// about every movement in the workout at once, and the N+1 here would be
+// paid on the slowest screen in the app.
+//
+// DISTINCT ON does the work: ordered by exercise, then most recent session,
+// then heaviest and most reps, so the first row per exercise is the top set
+// of the latest session. Warm-ups are excluded — progressing off a warm-up
+// would recommend a weight nobody worked at.
+func (r *PostgresRepository) LastPerformances(
+	ctx context.Context, userID string, exerciseIDs []string,
+) (map[string]Performance, error) {
+	out := map[string]Performance{}
+	if len(exerciseIDs) == 0 {
+		return out, nil
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT DISTINCT ON (ss.exercise_id)
+		       ss.exercise_id, s.started_at, ss.reps, ss.weight_kg, ss.rir, ss.rpe,
+		       e.movement_pattern, e.load_type
+		FROM session_sets ss
+		JOIN sessions s ON s.id = ss.session_id
+		JOIN exercises e ON e.id = ss.exercise_id
+		WHERE s.user_id = $1
+		  AND ss.exercise_id = ANY($2)
+		  AND ss.set_type <> 'warmup'
+		  -- A set with nothing recorded isn't a performance. Without this, an
+		  -- exercise added to a session and then not actually done would be
+		  -- the "most recent" one and would erase real history behind it.
+		  AND (ss.reps IS NOT NULL OR ss.weight_kg IS NOT NULL
+		       OR ss.seconds IS NOT NULL OR ss.distance_m IS NOT NULL)
+		ORDER BY ss.exercise_id,
+		         s.started_at DESC,
+		         ss.weight_kg DESC NULLS LAST,
+		         ss.reps DESC NULLS LAST`, userID, exerciseIDs)
+	if err != nil {
+		return nil, fmt.Errorf("session: last performances: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var p Performance
+		if err := rows.Scan(&p.ExerciseID, &p.PerformedAt, &p.Reps, &p.WeightKg,
+			&p.RIR, &p.RPE, &p.MovementPattern, &p.LoadType); err != nil {
+			return nil, fmt.Errorf("session: scan performance: %w", err)
+		}
+		out[p.ExerciseID] = p
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("session: performance rows: %w", err)
+	}
+	return out, nil
+}
+
 func (r *PostgresRepository) Get(ctx context.Context, userID, id string) (*Session, error) {
 	row := r.pool.QueryRow(ctx,
 		`SELECT `+sessionColumns+` FROM sessions s WHERE s.id = $1 AND s.user_id = $2`, id, userID)
