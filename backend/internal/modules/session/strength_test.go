@@ -20,90 +20,90 @@ import (
 //
 // BestOneRMs can't run Brzycki in Postgres, so it narrows candidates with
 // `weight_kg * 1.44 >= heaviest` and estimates the survivors in Go. The
-// property that has to hold is not really "estimates stay under the bound" —
-// it is the thing that protects records:
+// property that protects a record is:
 //
-//	if a set would BEAT the incumbent, the prefilter must keep it.
+//	if a set would beat the best surviving ESTIMATE, the prefilter keeps it.
 //
-// Tested as that implication directly rather than as a proxy, because the
-// proxy is false by one unit in the last place and the implication is not.
-// EstimateOneRM computes `w * 36 / (37 - r)`, which for w=42.5, r=12 is
-// 1530/25 = 61.2 exactly; the query passes the pre-divided constant, and
-// 42.5 * (36.0/25.0) is 61.199999999999996. So an estimate can land one ulp
-// above `w × multiplier`.
+// **Against the best surviving estimate — not against `heaviest`.** An earlier
+// version of this test asserted the latter, and the two only coincide when the
+// heaviest candidate is itself estimable. When it isn't, `heaviest` is set by a
+// row that scores nothing and every lighter row is pruned in its favour, which
+// is exactly how a real personal best silently stopped existing (fixed in
+// BestOneRMs; see TestBestOneRMs_KeepsTheWinnerWhenTheHeaviestSetIsNotEstimable).
+// The weight-based version passed straight over that bug.
 //
-// That gap can only ever swallow an exact tie, and BestOneRM discards ties
-// anyway (`est <= best` skips), so no record is reachable through it. Asserting
-// the implication states that precisely instead of hiding it behind an epsilon.
+// The remaining ulp question is a non-issue, and the note is here because the
+// earlier comment got it wrong: `$4` is inferred as **numeric**, not float8 —
+// the operand `weight_kg` is NUMERIC(6,2) — and pgx encodes the float as its
+// shortest round-tripping decimal. So Postgres computes `42.5 × 1.44` in exact
+// decimal arithmetic, with a 0.0001 margin, and the float64 `est > bound`
+// hazard modelled below never arises in the query at all. It's still worth
+// asserting in Go, because Go is where the estimate itself is computed.
 func TestOneRMBound_NeverDiscardsASetThatWouldWin(t *testing.T) {
 	weights := []float64{1.25, 20, 42.5, 60, 100, 142.5, 227.5, 500}
 	rirs := []int{0, 1, 2, 3, 5, 8, 11, 20}
 	rpes := []float64{1, 5, 6.5, 8, 8.5, 9, 9.5, 10}
 
-	// Incumbents worth testing against: the heaviest single logged for the
-	// exercise, which is what `heaviest` is in the query. Includes the exact
-	// boundary values where the ulp gap lives.
-	incumbents := []float64{1.25, 20, 42.5, 60, 61.2, 100, 144, 227.5, 327.6, 720}
-
-	check := func(reps int, kg float64, rir *int, rpe *float64) {
-		t.Helper()
-		est, ok := EstimateOneRM(reps, kg, rir, rpe)
-		if !ok {
-			return // Not estimable, so SQL never has to consider it.
-		}
-		for _, heaviest := range incumbents {
-			// Exactly the comparison postgres.go makes.
-			kept := kg*maxOneRMMultiplier >= heaviest
-			if est > heaviest && !kept {
-				t.Errorf("reps=%d kg=%v rir=%s rpe=%s estimates %.6f, which beats "+
-					"an incumbent of %.6f — but the prefilter (%.6f >= %.6f) drops "+
-					"it, so this personal best would vanish",
-					reps, kg, fmtPtrI(rir), fmtPtrF(rpe), est, heaviest,
-					kg*maxOneRMMultiplier, heaviest)
+	// Every set the filter would keep, given an incumbent — and the best
+	// estimate among them. That, not the incumbent weight, is what a
+	// candidate has to beat.
+	bestKeptEstimate := func(heaviest float64) float64 {
+		best := 0.0
+		consider := func(reps int, kg float64, rir *int, rpe *float64) {
+			if kg*maxOneRMMultiplier < heaviest {
+				return // pruned by the prefilter
+			}
+			if est, ok := EstimateOneRM(reps, kg, rir, rpe); ok && est > best {
+				best = est
 			}
 		}
-	}
-
-	for _, kg := range weights {
-		// Deliberately runs past maxEstimableReps: the guarantee has to hold
-		// for everything the function *accepts*, and the ceiling is one of the
-		// things that could be changed out from under it.
-		for reps := 1; reps <= 30; reps++ {
-			check(reps, kg, nil, nil)
-			for _, r := range rirs {
-				v := r
-				check(reps, kg, &v, nil)
-			}
-			for _, p := range rpes {
-				v := p
-				check(reps, kg, nil, &v)
-			}
-		}
-	}
-}
-
-// The bound still has to be an upper bound to within representation error, or
-// the implication above holds only by luck of which incumbents were sampled.
-func TestOneRMBound_IsAnUpperBoundOnEveryEstimate(t *testing.T) {
-	// Relative, and about one ulp at these magnitudes. Not a fudge factor for
-	// a wrong bound — a statement that the two expressions are the same real
-	// number computed two ways. A genuine excess (a different formula, or a
-	// raised ceiling the constant didn't follow) exceeds this by orders of
-	// magnitude.
-	const tolerance = 1e-9
-
-	for _, kg := range []float64{1.25, 20, 42.5, 60, 100, 227.5, 500} {
-		for reps := 1; reps <= 30; reps++ {
-			for _, rir := range []int{0, 1, 2, 3, 5, 8, 11} {
-				v := rir
-				est, ok := EstimateOneRM(reps, kg, &v, nil)
-				if !ok {
-					continue
+		for _, kg := range weights {
+			for reps := 1; reps <= 30; reps++ {
+				consider(reps, kg, nil, nil)
+				for _, r := range rirs {
+					v := r
+					consider(reps, kg, &v, nil)
 				}
-				if over := est - kg*maxOneRMMultiplier; over > tolerance*kg {
-					t.Errorf("reps=%d kg=%v rir=%d estimated %.6f, %.9f above the "+
-						"bound of %.6f — a real excess, not rounding",
-						reps, kg, rir, est, over, kg*maxOneRMMultiplier)
+				for _, p := range rpes {
+					v := p
+					consider(reps, kg, nil, &v)
+				}
+			}
+		}
+		return best
+	}
+
+	for _, heaviest := range []float64{1.25, 20, 42.5, 60, 61.2, 100, 144, 227.5, 327.6, 720} {
+		ceiling := bestKeptEstimate(heaviest)
+
+		check := func(reps int, kg float64, rir *int, rpe *float64) {
+			t.Helper()
+			est, ok := EstimateOneRM(reps, kg, rir, rpe)
+			if !ok {
+				return // Not estimable, so it can never be the answer.
+			}
+			kept := kg*maxOneRMMultiplier >= heaviest
+			if est > ceiling && !kept {
+				t.Errorf("incumbent %.2f: reps=%d kg=%v rir=%s rpe=%s estimates "+
+					"%.6f, above the best estimate the filter keeps (%.6f) — "+
+					"but the filter drops it, so this best would vanish",
+					heaviest, reps, kg, fmtPtrI(rir), fmtPtrF(rpe), est, ceiling)
+			}
+		}
+
+		for _, kg := range weights {
+			// Deliberately runs past maxEstimableReps: the guarantee has to
+			// hold for everything the function *accepts*, and the ceiling is
+			// one of the things that could be changed out from under it.
+			for reps := 1; reps <= 30; reps++ {
+				check(reps, kg, nil, nil)
+				for _, r := range rirs {
+					v := r
+					check(reps, kg, &v, nil)
+				}
+				for _, p := range rpes {
+					v := p
+					check(reps, kg, nil, &v)
 				}
 			}
 		}
@@ -130,8 +130,11 @@ func TestOneRMBound_IsTightEnoughToBeWorthApplying(t *testing.T) {
 	}
 	// Sanity on the absolute value, so a change to either side is visible
 	// here rather than only in a ratio that still agrees with itself.
-	if !approx(maxOneRMMultiplier, 1.44) {
-		t.Errorf("Brzycki at 12 reps is 36/25 = 1.44, got %.4f", maxOneRMMultiplier)
+	// Exact, not approx(): approx is a 0.05 absolute tolerance, which is 3.5%
+	// on a constant whose entire job is to be a specific number. A ceiling of
+	// 11 gives 1.3846 and would slip through at a tenth of that threshold.
+	if math.Abs(maxOneRMMultiplier-1.44) > 1e-12 {
+		t.Errorf("Brzycki at 12 reps is 36/25 = 1.44, got %.6f", maxOneRMMultiplier)
 	}
 }
 
@@ -277,23 +280,31 @@ func TestProgress_EverySuggestedWeightIsLoadable(t *testing.T) {
 // A deload has to actually reduce the load. At light weights 10% can round
 // straight back to where it started, and a "deload" that changes nothing is
 // worse than none — it tells the athlete to back off while prescribing the
-// weight they just failed to progress.
+// weight they just failed to progress from.
 func TestProgress_DeloadNeverSuggestsTheSameOrMoreWeight(t *testing.T) {
 	day := 24 * time.Hour
+	fired := 0
 	for _, kg := range []float64{1.25, 2.5, 5, 10, 20, 60, 200} {
 		stuck := func(ago time.Duration) SessionEffort {
 			return sess(ago, testNow, set(7, kg, ptrInt(1), nil))
 		}
 		p := Progress(progIn("hypertrophy", stuck(day), stuck(3*day), stuck(5*day)), testNow)
 		if p.Code != ProgressDeload {
-			// Below about 12.5kg a 10% cut rounds to nothing, so the rule
-			// declines to deload rather than pretending. That's the correct
-			// behaviour — assert only that it didn't call it a deload.
+			// Below 7.5kg a 10% cut rounds back to the same plate, so the rule
+			// declines to call it a deload rather than pretending. Correct
+			// behaviour — assert only that it didn't claim one.
 			continue
 		}
+		fired++
 		if *p.TargetWeightKg >= kg {
 			t.Errorf("%vkg: deload suggested %v, which is not lighter", kg, *p.TargetWeightKg)
 		}
+	}
+	// Without this the whole loop can quietly become `continue`s — a change to
+	// stallSessions or the deload guard would leave this test green while it
+	// asserted nothing at all.
+	if fired == 0 {
+		t.Fatal("no input reached the deload branch; this test asserted nothing")
 	}
 }
 
@@ -334,8 +345,18 @@ func TestBestOneRM_GoAndSQLAgree(t *testing.T) {
 		{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(12), WeightKg: ptrF(100), RIR: ptrInt(0), Completed: true},
 		// Lighter still, but with reserve left — effort folded in matters.
 		{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(8), WeightKg: ptrF(105), RIR: ptrInt(3), Completed: true},
-		// Beyond the rep ceiling: estimable by neither, and must not win.
+		// Beyond the rep ceiling on reps alone: excluded by both sides, and by
+		// the SQL candidate filter too — which is why it does NOT exercise the
+		// interesting case, and why this fixture used to pass over a real bug.
 		{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(25), WeightKg: ptrF(60), RIR: ptrInt(0), Completed: true},
+		// The case that matters: 12 reps passes a reps-only candidate filter,
+		// but 12 + 3 RIR is 15 effective, so Go refuses to estimate it. It is
+		// therefore a *candidate that cannot score* — and being the heaviest,
+		// it sets the bar and prunes the real winner below.
+		//
+		// Without this row the agreement above holds by construction. With it,
+		// the test fails against a pool chosen on reps alone.
+		{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(12), WeightKg: ptrF(180), RIR: ptrInt(3), Completed: true},
 		// A very heavy warm-up, which counts for nothing on either side.
 		{ExerciseID: exSquat, SetType: SetTypeWarmup, Reps: ptrInt(5), WeightKg: ptrF(200), Completed: true},
 		// Planned and never performed. Also nothing.

@@ -1475,10 +1475,8 @@ argument for running reviewers fresh rather than continuing one that has
 already seen its own conclusions.
 
 The test written specifically to catch this class **passed over it**, twice
-over. Note where that test lives: `strength_test.go` on the branch
-`feature/strength-calc-tests`, which is **not merged**. Nothing described in
-the next two paragraphs is in this tree — go to that branch to find it, and
-the corrections below are still *pending* there rather than applied.
+over — and the corrections described here are **applied in this same branch**,
+in `strength_test.go`.
 
 It asserted "if a set beats the incumbent, the filter keeps it" with the
 incumbent taken as `heaviest` — a *weight*. What a winner actually has to beat
@@ -1488,15 +1486,57 @@ fixture's deliberately-unestimable set used 25 reps, which `reps <= 12`
 excluded from the candidate pool entirely — so no fixture row was ever the
 thing that matters: a candidate that cannot be estimated.
 
-A second correction, **still to be applied on that branch**: the ulp reasoning
-in that test is defending a claim that does not apply. `$4` is inferred as `numeric`, not
+A second correction, applied alongside: the ulp reasoning in that test was
+defending a claim that does not apply. `$4` is inferred as `numeric`, not
 `float8` (the operand `weight_kg` is `NUMERIC(6,2)`), and pgx encodes the
 float as its shortest round-tripping decimal — so Postgres computes
 `42.5 × 1.44` in exact decimal arithmetic. The comment claiming the test
 models "exactly the comparison postgres.go makes" is wrong about the
-arithmetic, even though its conclusion happens to survive. Both that comment
-and the weight-as-incumbent property must be fixed before
-`feature/strength-calc-tests` merges, or they land as written.
+arithmetic, even though its conclusion happened to survive. Both that comment
+and the weight-as-incumbent property are now corrected.
+
+## 2026-07-30 — Correcting the tests that missed the bug
+
+Follow-up to the 1RM prefilter fix, on the branch where those tests live.
+
+**The property was wrong.** `TestOneRMBound_NeverDiscardsASetThatWouldWin`
+asserted "if a set beats the incumbent, the filter keeps it" with the incumbent
+taken as `heaviest` — a *weight*. What a winner actually has to beat is the
+best surviving **estimate**, and the two coincide only when the heaviest
+candidate is itself estimable. That is precisely the case the bug broke, which
+is why the test sailed past it. It now computes the best estimate among the
+rows the filter would keep, and asserts against that.
+
+**The agreement test's fixture was the wrong shape.** Its deliberately
+"estimable by neither" set used 25 reps — which a reps-only candidate filter
+excludes from the pool entirely, so no fixture row was ever the thing that
+matters: *a candidate that cannot be estimated*. Verified by reinstating the
+bug and watching the test still pass. Added a 12 × 180 at 3 RIR row (15
+effective: passes a reps-only filter, scores nothing, and being heaviest sets
+the bar). The test now fails on the old predicate with `SQL says 140.0000, Go
+says 145.3846` and passes on the fix.
+
+**The ulp comment was wrong about the arithmetic.** `$4` is inferred as
+`numeric`, not `float8` — the operand `weight_kg` is `NUMERIC(6,2)` — and pgx
+encodes the float as its shortest round-tripping decimal. Postgres computes
+`42.5 × 1.44` in exact decimal with a 0.0001 margin, so the float64 hazard the
+comment described never arises in the query at all. The Go-side assertion is
+still worth making, because Go is where the estimate is computed; the comment
+now says which is which.
+
+Two smaller ones: `approx()` is a 0.05 *absolute* tolerance, so using it to pin
+a constant whose whole job is to be exactly 36/25 allowed a 3.5% drift (a
+ceiling of 11 gives 1.3846 and would have slipped through at a tenth of the
+threshold) — now an exact comparison. And the deload test `continue`d on any
+non-deload code, so a change to `stallSessions` could have turned all seven
+iterations into skips while the test stayed green — it now counts how many
+reached the branch and fails if none did.
+
+The through-line: every one of these tests asserted something *true*. They were
+weak in what they chose to assert, or in the data they asserted it over, which
+no amount of running them would reveal. Mutation testing caught the ones where
+a line was wrong; only reading the reasoning caught the ones where the premise
+was.
 
 ## Open items / known gaps as of this entry
 
