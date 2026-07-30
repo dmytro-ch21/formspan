@@ -16,7 +16,7 @@ builder = "NIXPACKS"
 # which skips corepack and installs the exact version `packageManager` pins.
 #
 # The Node version is a separate axis and is handled by the root
-# package.json's `engines` field — without it Nixpacks picks Node 18. That
+# package.json's `engines` field — without it Nixpacks picks Node 18, and pnpm 11.17 requires >=22.13. That
 # was the first suspect here and was NOT the cause: the same failure occurs
 # on Node 22. Both pins are needed, for different reasons.
 buildCommand = "pnpm install --frozen-lockfile && pnpm run build:web"

@@ -19,18 +19,21 @@ startCommand = "/app/bin/api"
 # seed step the deployed API would serve `{"exercises": []}` forever — a
 # valid 200 that no healthcheck or error would ever surface. Idempotent, so
 # running it on every deploy is the intended usage, not a workaround.
-# A single token on purpose. Railway executes preDeployCommand as argv and
-# observably splits it on whitespace, so the previous
-# "/app/bin/migrate up && /app/bin/seed" reached migrate as the extra
-# arguments `&&` and `/app/bin/seed` — which it ignored. The chain now lives
-# in /app/bin/predeploy (see backend/Dockerfile), where there is nothing to
-# split and no dependency on how quotes are tokenised.
+# A single token on purpose.
 #
-# That failed silently in staging. Migrations applied, the healthcheck passed,
-# the API served 200s, and `exercises` stayed at 0 rows — exactly the
-# "{"exercises": []} forever" outcome the comment above warns about, with
-# nothing in the logs to say so. Verified by counting rows in the deployed
-# database, which is the only check that would have caught it.
+# The previous value was "/app/bin/migrate up && /app/bin/seed", and seed
+# never ran. What is actually *observed*: migrate printed "migrate: up: done"
+# and exited 0, and seed produced no output at all. That pins the mechanism,
+# because cmd/migrate rejects anything but exactly one argument
+# (`len(os.Args) != 2` -> log.Fatal). Had it been handed `&&` and the seed
+# path as extra argv it would have died on a usage error and failed the
+# deploy loudly. It didn't — so Railway *discarded* everything from `&&`
+# onward while parsing, rather than passing it through.
+#
+# What remains unobserved is the rest of Railway's tokenisation, including
+# how it treats quotes — which is exactly why this is one token. A single
+# token is parsed identically under every model, so the fix depends on none
+# of it. The chain lives in /app/bin/predeploy (see backend/Dockerfile).
 preDeployCommand = "/app/bin/predeploy"
 healthcheckPath = "/v1/healthz"
 healthcheckTimeout = 100

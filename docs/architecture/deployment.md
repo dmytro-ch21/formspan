@@ -21,8 +21,8 @@ Railway project `formspan` exists — still under its pre-rename name; the VOLA 
 
 | Service | Public? | Config |
 |---|---:|---|
-| `api` | Yes | `railway/api.toml` — config built, **service not yet created on Railway** |
-| `web` | Yes | `railway/web.toml` — config built, **service not yet created on Railway** |
+| `api` | Yes | `railway/api.toml` — config built, **service created on Railway `staging` (api live; web/admin in progress)** |
+| `web` | Yes | `railway/web.toml` — config built, **service created on Railway `staging` (api live; web/admin in progress)** |
 | `admin-web` | Yes, authenticated | not built — no admin app exists yet |
 | `admin-api` | No | not built — no admin-api binary exists yet |
 | `worker` | No | not built — no worker binary exists yet |
@@ -47,7 +47,11 @@ Public: `web.yourdomain.com`, `api.yourdomain.com`, `admin.yourdomain.com` (none
 
 ### Migrations — tooling built, applied everywhere that currently has a database
 
-`cmd/migrate` (golang-migrate, plain versioned SQL in `backend/migrations/`) runs today against: local docker-compose Postgres, CI's ephemeral Postgres service container, and the real Railway `staging` Postgres (applied manually via `DATABASE_URL_PUBLIC`, once). Still planned: once the `api` service itself exists on Railway, migrations should run exactly once, as its pre-deploy command (`/app/bin/migrate up`) — never independently from `worker`/`admin-api`, to avoid concurrent-migration conflicts. `railway/api.toml` already has this wired in (`preDeployCommand`), ready for when the service exists for real.
+`cmd/migrate` (golang-migrate, plain versioned SQL in `backend/migrations/`) runs today against: local docker-compose Postgres, CI's ephemeral Postgres service container, and the real Railway `staging` Postgres. On Railway it runs exactly once per deploy, as the `api` service's pre-deploy command — never independently from `worker`/`admin-api`, to avoid concurrent-migration conflicts.
+
+That command is `/app/bin/predeploy`, a script baked into the image that runs `migrate up` and then `seed`. It is a **single token** deliberately. The previous value, `"/app/bin/migrate up && /app/bin/seed"`, ran migrations and silently never ran the seed: Railway executes `preDeployCommand` as argv without a shell, and discarded everything from `&&` onward. Migrations applied, the healthcheck passed, and staging served an empty exercise catalog behind a green deploy. Only counting rows in the deployed database surfaced it.
+
+The seed is part of pre-deploy rather than a one-off because migration 000004 creates an empty `exercises` table; without it the API serves `{"exercises": []}` forever, which no healthcheck or error can distinguish from working. It is idempotent, so running it on every deploy is the intended usage.
 
 ### PR / preview environments (planned, deferred)
 
