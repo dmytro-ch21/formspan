@@ -983,6 +983,50 @@ Found while verifying: at anything under ~900px the session name was being
 squeezed to "U…" by four fixed-width metric columns — the one part of the row
 you scan by. Given a basis so it wraps instead.
 
+## 2026-07-30 — Estimated 1RM, and why it reads effort
+
+An estimated one-rep max, on both platforms, embedded where the evidence for
+it already sits rather than in a calculator screen of its own: on the "last
+time" card in the session logger, and on the exercise detail screen.
+
+**Two decisions carry the feature.**
+
+*Brzycki, not Epley.* Epley evaluates a true single at 1.033× the weight, so
+logging a genuine 100kg 1RM would report 103kg — visibly wrong at exactly the
+moment the number is most checkable. Brzycki (`w × 36/(37−r)`) returns the
+weight itself at one rep and is more conservative through the low-rep range
+where heavy sets live.
+
+*Effort is folded in, which is the part most apps skip.* A set of 5 with 3
+reps in reserve is not evidence of a 5-rep max; it's a set of 5 that could
+have been 8. VOLA records RIR and RPE per set, so the estimate runs on reps +
+reserve. Without that, stopping short would read as a strength loss — and the
+whole reason to log effort is that it changes what the numbers mean. RIR wins
+over RPE when both are present: RIR is observed, RPE is converted.
+
+Past twelve effective reps there's no estimate at all. Every rep-max curve is
+fitted near a maximum and diverges badly beyond that; a set of 20 would
+happily "estimate" a single nobody could lift. Returning nothing beats
+returning fiction.
+
+The personal best is a separate number because a current estimate alone is
+inert. It's computed in Go over candidate sets rather than ranked in SQL, for
+a reason worth recording: **the best estimate is not the heaviest set.** 5×100
+estimates to 112.5kg and beats a 110 single. Any "just take the max weight"
+shortcut is wrong, and putting the curve in SQL would have parked a second
+copy of it a migration away from the first.
+
+Displayed through `formatEstimate`, which rounds to whole units. `formatWeight`
+keeps two decimals because a logged set is a *measurement* — 62.55kg is what
+was on the bar — and a modelled number rendered as "143.88kg" invites being
+read as a measured one.
+
+Open: the estimate only appears where a suggestion already loads, so an
+exercise you've never trained shows nothing (correct) and one you trained
+today shows last session's set rather than today's. A per-session estimate,
+and a "new best" moment when a logged set beats the record, are the obvious
+next steps and aren't here.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

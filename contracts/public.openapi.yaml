@@ -442,6 +442,28 @@ components:
         last_weight_kg: { type: number, nullable: true }
         last_rir: { type: integer, nullable: true }
         last_rpe: { type: number, nullable: true }
+        estimated_1rm_kg:
+          type: number
+          nullable: true
+          description: >
+            One-rep max implied by the last working set, **with effort folded
+            in** — a set of 5 with 3 RIR is evidence of an 8-rep max, not a
+            5-rep one, and ignoring that would read stopping short as a
+            strength loss. Brzycki (`w × 36/(37−r)`), which returns the weight
+            itself at one rep rather than inflating a true single.
+
+
+            Null when the set can't support an estimate: no weight recorded,
+            or more than 12 effective reps, past which every rep-max curve is
+            fiction.
+        best_1rm_kg:
+          type: number
+          nullable: true
+          description: >
+            The highest estimate anywhere in the caller's history for this
+            exercise, so the current one reads as progress rather than as a
+            bare number. Not simply the heaviest set — 5×100 estimates above a
+            110 single.
         suggested_weight_kg:
           type: number
           nullable: true

@@ -23,6 +23,11 @@ import (
 const defaultLimit = 50
 const maxLimit = 200
 
+// maxOneRMScan bounds the candidate sets a personal-best lookup will consider.
+// Ordered heaviest first, so the cap trims the sets least likely to be anyone's
+// best — five thousand covers years of training across a whole workout.
+const maxOneRMScan = 5000
+
 // likeEscaper neutralises LIKE's own wildcards so a search for "50%" means
 // the characters, not "anything". Mirrors the exercise catalog's, which is
 // the other search box in the product — duplicated rather than shared because
@@ -732,4 +737,59 @@ func (r *PostgresRepository) Delete(ctx context.Context, userID, id string) erro
 		return fmt.Errorf("session: delete: %w", err)
 	}
 	return tx.Commit(ctx)
+}
+
+// BestOneRMs finds the best estimated one-rep max per exercise, across
+// everything the caller has logged.
+//
+// The candidate sets are fetched and evaluated in Go rather than ranked in
+// SQL, for two reasons. The estimate folds in RIR and RPE, so it isn't
+// monotonic in weight — 5×100 at 3 RIR beats a 110 single — and there is no
+// "just take the heaviest" shortcut. And expressing the rep-max curve in SQL
+// would put a second copy of it a schema migration away from the first.
+//
+// Bounded by `maxOneRMScan`: only sets that could possibly qualify come back
+// (completed, non-warm-up, weighted, at or under the rep ceiling), which for
+// a real training history is a few hundred rows per exercise.
+func (r *PostgresRepository) BestOneRMs(
+	ctx context.Context, userID string, exerciseIDs []string,
+) (map[string]float64, error) {
+	out := map[string]float64{}
+	if len(exerciseIDs) == 0 {
+		return out, nil
+	}
+
+	rows, err := r.pool.Query(ctx, `
+		SELECT ss.exercise_id, ss.reps, ss.weight_kg, ss.rir, ss.rpe
+		FROM session_sets ss
+		JOIN sessions s ON s.id = ss.session_id
+		WHERE s.user_id = $1
+		  AND ss.exercise_id = ANY($2)
+		  AND `+workingSet+`
+		  AND ss.reps IS NOT NULL AND ss.weight_kg IS NOT NULL
+		  -- Effort only ever *adds* effective reps, so anything already past
+		  -- the ceiling on reps alone can never qualify.
+		  AND ss.reps <= $3
+		ORDER BY ss.weight_kg DESC
+		LIMIT $4`, userID, exerciseIDs, maxEstimableReps, maxOneRMScan)
+	if err != nil {
+		return nil, fmt.Errorf("session: best 1rm: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id string
+		var set Set
+		if err := rows.Scan(&id, &set.Reps, &set.WeightKg, &set.RIR, &set.RPE); err != nil {
+			return nil, fmt.Errorf("session: best 1rm scan: %w", err)
+		}
+		est, ok := EstimateOneRM(*set.Reps, *set.WeightKg, set.RIR, set.RPE)
+		if ok && est > out[id] {
+			out[id] = est
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("session: best 1rm rows: %w", err)
+	}
+	return out, nil
 }

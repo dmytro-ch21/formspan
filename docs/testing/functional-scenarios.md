@@ -752,6 +752,29 @@ Domain: logging a session with no connectivity. **Test this by actually stopping
 **Wording**
 - Cumulative load reads "Volume" everywhere it's visible, on both platforms. The wire field stays `tonnage_kg`.
 
+## Estimated 1RM (`GET /v1/sessions/suggestions`, both clients)
+
+**Happy path**
+- Each exercise with a weighted last set carries `estimated_1rm_kg`, shown on the session logger's "last time" card and on the mobile exercise detail screen.
+- `best_1rm_kg` is the highest estimate in the caller's history; when the current one matches it, the UI says "your best" instead of repeating the number.
+
+**The arithmetic — assert the values, not just presence**
+- A true single must estimate **itself**: 1 × 100kg → 100kg. (Epley would say 103kg; that's the regression this guards.)
+- 5 × 100kg, no effort → 112.5kg.
+- Effort changes the answer: 5 × 100kg at 3 RIR → 124.1kg; at 0 RIR → 112.5kg; at RPE 8 → 120kg.
+- RIR wins when both RIR and RPE are present.
+- Above 12 **effective** reps there is no estimate at all — 13 reps, or 10 reps at 3 RIR, both return null.
+- Monotonic: more reps at the same weight, and more weight at the same reps, must both estimate higher.
+
+**Personal best**
+- The best is **not** the heaviest set: 5×100 (112.5) must beat a 110 single. A pre-filter on weight would fail this.
+- Warm-ups, sets never marked done, and other athletes' sets are all excluded.
+- An exercise with no qualifying history is absent from the map, not zero.
+
+**Display**
+- Estimates render at whole-unit precision (`144kg`, not `143.88kg`) — they're modelled, not measured.
+- Exercises with no weight (BJJ, timed work) show no estimate rather than a dash-filled row.
+
 ## Not yet covered (tracked here so it isn't lost, not because it's blocking)
 
 - Mobile has no auth yet (Clerk Expo SDK is a separate future increment) — no sign-in/sign-out scenarios apply to mobile today.

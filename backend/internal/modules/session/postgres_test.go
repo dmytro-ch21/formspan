@@ -891,3 +891,52 @@ func TestCancelledQueryIsRecognisedAsClientGone(t *testing.T) {
 		t.Fatalf("history: cancelled query not classified as client-gone: %v", err)
 	}
 }
+
+func TestBestOneRMs_IsUserScopedAndIgnoresUnqualifyingSets(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const mine, theirs = "user_1rm_mine", "user_1rm_theirs"
+
+	fixtures := []NewSession{
+		strengthSession("ses-1rm-a", mine, []Set{
+			// Heaviest set in the data, and a warm-up — must be ignored.
+			{ExerciseID: exSquat, SetType: SetTypeWarmup, Reps: ptrInt(5), WeightKg: ptrF(300), Completed: true},
+			// 5x100 = 112.5, which beats the 110 single below. The whole
+			// reason this can't be "take the heaviest".
+			{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(5), WeightKg: ptrF(100), Completed: true},
+			{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(1), WeightKg: ptrF(110), Completed: true},
+			// Planned, never performed.
+			{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(3), WeightKg: ptrF(200), Completed: false},
+		}),
+		// Another athlete lifting far more. Must never leak into mine.
+		strengthSession("ses-1rm-theirs", theirs, []Set{
+			{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(5), WeightKg: ptrF(500), Completed: true},
+		}),
+	}
+	for _, f := range fixtures {
+		cleanup(t, pool, f.ID)
+		if _, err := repo.Create(ctx, f); err != nil {
+			t.Fatalf("create %s: %v", f.ID, err)
+		}
+	}
+
+	got, err := repo.BestOneRMs(ctx, mine, []string{exSquat, exBench})
+	if err != nil {
+		t.Fatalf("best 1rms: %v", err)
+	}
+	if !approx(got[exSquat], 112.5) {
+		t.Errorf("squat best = %.2f, want 112.5 (warm-up, incomplete set, or another user leaked in?)", got[exSquat])
+	}
+	// An exercise with no qualifying history is absent, not zero.
+	if _, ok := got[exBench]; ok {
+		t.Errorf("bench should have no estimate, got %v", got[exBench])
+	}
+	// And nothing at all for an athlete with no history.
+	empty, err := repo.BestOneRMs(ctx, "user_1rm_nobody", []string{exSquat})
+	if err != nil {
+		t.Fatalf("empty: %v", err)
+	}
+	if len(empty) != 0 {
+		t.Errorf("expected no estimates, got %v", empty)
+	}
+}

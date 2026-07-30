@@ -61,6 +61,19 @@ export function formatWeight(kg: number | null | undefined, u: UnitSystem): stri
  * Deliberately not folded into `formatWeight`: abbreviating there would turn
  * every heavy single on the session screen into `0.2t`.
  */
+/**
+ * An estimate, rendered at the precision an estimate actually has.
+ *
+ * `formatWeight` keeps two decimals because a logged set is a measurement —
+ * 62.55kg is what was on the bar. A one-rep max derived from a rep-max curve
+ * is not, and "143.88kg" invites reading a modelled number as a measured one.
+ * Rounded to whole display units: 144kg, 317lb.
+ */
+export function formatEstimate(kg: number | null | undefined, u: UnitSystem): string {
+  if (kg == null) return "—";
+  return `${Math.round(toDisplayWeight(kg, u))}${weightUnit(u)}`;
+}
+
 export function formatVolume(kg: number | null | undefined, u: UnitSystem): string {
   if (kg == null) return "—";
   if (u === "metric") {

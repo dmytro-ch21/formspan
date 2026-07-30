@@ -7,7 +7,7 @@ import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { fetchExercises, pickImage, type Exercise } from '@/lib/exercises';
 import { fetchSuggestions, type Suggestion } from '@/lib/sessions';
-import { formatWeight } from '@/lib/units';
+import { formatEstimate, formatWeight } from '@/lib/units';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
 
@@ -95,6 +95,24 @@ export default function ExerciseDetailScreen() {
               }
             />
           </View>
+          {/* The estimate sits with the set it came from, not in a separate
+              "analysis" section — it's a reading of that set, and splitting
+              them would invite reading it as a measured number. */}
+          {stats?.estimated_1rm_kg != null && (
+            <View style={styles.oneRm}>
+              <Text style={styles.oneRmLabel}>Estimated 1RM</Text>
+              <Text style={styles.oneRmValue}>
+                {formatEstimate(stats.estimated_1rm_kg, units)}
+              </Text>
+              {stats.best_1rm_kg != null && (
+                <Text style={styles.oneRmBest}>
+                  {stats.estimated_1rm_kg >= stats.best_1rm_kg
+                    ? 'your best'
+                    : `best ${formatEstimate(stats.best_1rm_kg, units)}`}
+                </Text>
+              )}
+            </View>
+          )}
           {stats?.last_performed_at && (
             <Text style={styles.when}>
               {new Date(stats.last_performed_at).toLocaleDateString(undefined, {
@@ -161,6 +179,18 @@ const styles = StyleSheet.create({
   stat: { flex: 1, alignItems: 'center', gap: 2 },
   statValue: { fontSize: 20, fontWeight: '800' },
   statLabel: { fontSize: 11, color: vola.textDim },
+  oneRm: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 8,
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: vola.lineSoft,
+  },
+  oneRmLabel: { fontSize: 12, color: vola.textDim, textTransform: 'uppercase', letterSpacing: 0.8 },
+  oneRmValue: { fontSize: 20, fontWeight: '800', color: vola.lime },
+  oneRmBest: { fontSize: 12, color: vola.textMuted },
   when: { color: vola.textMuted, fontSize: 13, textAlign: 'center' },
   reason: { color: vola.textMuted, fontSize: 13, lineHeight: 18 },
   muted: { color: vola.textMuted, fontSize: 14, lineHeight: 20 },

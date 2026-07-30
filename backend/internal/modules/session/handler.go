@@ -315,6 +315,12 @@ func (h *Handler) Suggestions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	best, err := h.repo.BestOneRMs(r.Context(), claims.UserID, ids)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+
 	now := time.Now().UTC()
 	suggestions := make([]Suggestion, 0, len(ids))
 	for _, id := range ids {
@@ -325,6 +331,17 @@ func (h *Handler) Suggestions(w http.ResponseWriter, r *http.Request) {
 		s := Suggest(p, now)
 		// Suggest can't know the id when there's no history to carry it.
 		s.ExerciseID = id
+		// Estimated off the last *working* set, effort included — the same
+		// set the suggestion itself reasons from, so the two agree.
+		if p != nil && p.Reps != nil && p.WeightKg != nil {
+			if est, ok := EstimateOneRM(*p.Reps, *p.WeightKg, p.RIR, p.RPE); ok {
+				s.EstimatedOneRMKg = &est
+			}
+		}
+		if b, ok := best[id]; ok {
+			v := b
+			s.BestOneRMKg = &v
+		}
 		suggestions = append(suggestions, s)
 	}
 	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"suggestions": suggestions})

@@ -10,6 +10,8 @@ import { vola } from '@/constants/Colors';
 import { formatElapsed, readAutoRest, readRestSeconds, writeRestSeconds } from '@/lib/rest';
 import {
   distanceInputUnit,
+  formatEstimate,
+  formatVolume,
   formatWeight,
   fromDisplayDistance,
   fromDisplayWeight,
@@ -417,7 +419,7 @@ export default function SessionScreen() {
             {finished && (
               <Stat
                 label="Volume"
-                value={volume.tonnage_kg > 0 ? formatWeight(volume.tonnage_kg, units) : '—'}
+                value={volume.tonnage_kg > 0 ? formatVolume(volume.tonnage_kg, units) : '—'}
               />
             )}
           </View>
@@ -511,6 +513,17 @@ export default function SessionScreen() {
                       {/* The reason, verbatim from the API. It's the whole
                           point: a number you can argue with. */}
                       <Text style={styles.hintReason}>{hint.reason}</Text>
+                      {/* Read off the same set the suggestion reasons from,
+                          so the two can't tell different stories. Absent
+                          rather than zero when the set can't support one. */}
+                      {hint.estimated_1rm_kg != null && (
+                        <Text style={styles.hintOneRm}>
+                          Est. 1RM {formatEstimate(hint.estimated_1rm_kg, unitFor(g.exerciseID))}
+                          {hint.best_1rm_kg != null &&
+                            hint.estimated_1rm_kg >= hint.best_1rm_kg &&
+                            ' · your best'}
+                        </Text>
+                      )}
                     </View>
                     {canApply && (
                       <Pressable
@@ -1055,6 +1068,7 @@ const styles = StyleSheet.create({
   },
   hintBody: { flex: 1, gap: 2 },
   hintLast: { fontSize: 13, fontWeight: '600' },
+  hintOneRm: { fontSize: 12, color: vola.lime, fontWeight: '600', marginTop: 2 },
   hintReason: { fontSize: 12, color: vola.textMuted },
   hintApply: {
     backgroundColor: vola.lime,

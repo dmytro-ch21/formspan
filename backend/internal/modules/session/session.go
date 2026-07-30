@@ -277,6 +277,9 @@ type Repository interface {
 	// LastPerformances returns, per requested exercise, the top working set of
 	// the most recent session containing it. Missing keys mean "never logged".
 	LastPerformances(ctx context.Context, userID string, exerciseIDs []string) (map[string]Performance, error)
+	// BestOneRMs returns the highest estimated one-rep max in the caller's
+	// history per requested exercise. Missing keys mean "no estimate".
+	BestOneRMs(ctx context.Context, userID string, exerciseIDs []string) (map[string]float64, error)
 	Get(ctx context.Context, userID, id string) (*Session, error)
 	// Create is idempotent on the client-supplied ID for the same user; a
 	// different user's ID collides with ErrAlreadyExists.
