@@ -434,7 +434,7 @@ Domain: a training session that **actually happened**, and the sets in it — re
 - Each tick moves the numbers by exactly that set's contribution.
 - An **uncompleted set contributes no effort** either — it must not set `hardest_rpe` (`TestSummarise_IgnoresEffortOnUncompletedSets`).
 - The progression lookup ignores uncompleted sets: a weight planned but not lifted must never become evidence for the next recommendation.
-- Ticking a set starts the rest timer; un-ticking is allowed and doesn't.
+- **Ticking a set records it and nothing else — it must not start the rest timer.** Rest is started only by the Rest button on the exercise header. Un-ticking is allowed.
 - **Migration check:** existing sets backfill to completed, so historical sessions keep their volume. Only new sets default to not-done.
 - **The client's `localVolume` must match the server's `Summarise` exactly.** It's a deliberate duplicate so the header works offline, and it has already drifted once — the completion rule went into Go only, and a live session showed the plan's full tonnage against unticked sets.
 
@@ -448,7 +448,7 @@ Domain: a training session that **actually happened**, and the sets in it — re
 - A finished session's duration is fixed and stops ticking; it appears in the mobile recent list and the web history page.
 
 **Rest, per exercise**
-- Each exercise header can start its own rest, independently of ticking a set.
+- Each exercise header starts its own rest. It is the only trigger.
 - ±15s during a rest **persists to that exercise**, so the correction isn't repeated every set.
 - Durations are local to the device by design — the rest timer is mobile-only, so there's no second client to sync with.
 
@@ -555,7 +555,7 @@ Domain: what to load today for a given exercise, computed from the caller's own 
 Domain: the countdown between sets. **Mobile only, permanently** — an in-progress session is a phone thing, and a rest countdown on a desktop you aren't standing next to is decoration. Do not add scenarios for it under web.
 
 **Happy path**
-- Tapping "Rest" on a set, or "+ Set", starts the countdown; both mean "I just finished one".
+- The Rest button on an exercise header starts the countdown. **Nothing else does** — not ticking a set, not adding one.
 - The default comes from the exercise's movement pattern: 180s squat/hinge/olympic, 120s push/pull/lunge, 60s otherwise, and 60s for time/distance work regardless of pattern.
 - The bar shows remaining time, the exercise it belongs to, and a progress track that drains.
 - ±15s adjusts; tapping the clock pauses and resumes; Skip dismisses.

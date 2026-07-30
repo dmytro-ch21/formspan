@@ -286,9 +286,6 @@ export default function SessionScreen() {
   }
 
   function addSet(exerciseID: string, afterIndex: number) {
-    // Adding the next set is the gesture that means "I just finished one",
-    // so rest starts here rather than behind a second, separate tap.
-    startRest(exerciseID);
     commit(
       [
         ...sets.slice(0, afterIndex + 1),
@@ -299,14 +296,20 @@ export default function SessionScreen() {
   }
 
   /**
-   * Ticking a set off is the one interaction that both records progress and
-   * starts the clock — so it does both. Un-ticking is possible because
-   * mis-taps happen mid-set and an un-undoable checkbox is worse than none.
+   * Ticking a set records that it happened — and nothing else.
+   *
+   * It used to start the rest timer too, on the theory that finishing a set
+   * and beginning to rest are the same moment. They often aren't: you tick
+   * late, you tick a set you did earlier, you're already walking to the next
+   * rack. A countdown that starts itself is a countdown you spend attention
+   * cancelling, so rest is now only ever started by the Rest button.
+   *
+   * Un-ticking stays possible: mis-taps happen mid-set, and an un-undoable
+   * checkbox is worse than none.
    */
-  function toggleDone(index: number, exerciseID: string) {
+  function toggleDone(index: number) {
     const now = !sets[index].completed;
     commit(sets.map((s, i) => (i === index ? { ...s, completed: now } : s)));
-    if (now) startRest(exerciseID);
   }
 
   /**
@@ -457,7 +460,7 @@ export default function SessionScreen() {
                   editable={!finished}
                   onChange={(next) => update(i, next)}
                   onRemove={() => removeSet(i)}
-                  onToggleDone={() => toggleDone(i, g.exerciseID)}
+                  onToggleDone={() => toggleDone(i)}
                   showEffort={showEffort}
                   units={unitFor(g.exerciseID)}
                 />
@@ -731,9 +734,8 @@ function SetRow({
         </Text>
         <Text style={styles.setSummary}>{describeSet(set, units)}</Text>
         {editable && (
-          // One tap does both: a set is only "done" at the moment rest
-          // begins, so splitting them into two controls would ask for the
-          // same information twice.
+          // Records the set only. Rest is the Rest button's job — see
+          // toggleDone for why the two were separated.
           <Pressable
             onPress={onToggleDone}
             hitSlop={10}

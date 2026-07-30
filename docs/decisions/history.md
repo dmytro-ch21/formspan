@@ -618,7 +618,9 @@ The mockup's fifth tab exists now. **You** shows who the athlete is — name, wh
 
 The migration backfills existing rows to `true` and *then* flips the default to `false`. Anything already logged was by definition done; resetting history to "not completed" would have zeroed every past session's volume — and the fact that the tests caught exactly that when the insert path silently kept writing the new default is the reason the backfill is worth spelling out.
 
-**Completing a set and starting rest are one tap, not two.** The old "Rest" chip became a tick. A set is only *done* at the moment rest begins, so splitting them asked for the same information twice. Un-ticking is allowed: mis-taps happen mid-set, and an un-undoable checkbox is worse than none.
+**Completing a set is a tick.** The old "Rest" chip became a checkbox. Un-ticking is allowed: mis-taps happen mid-set, and an un-undoable checkbox is worse than none.
+
+*(Superseded below: the tick briefly also started the rest timer.)*
 
 Two consequences worth stating because they're easy to miss: an uncompleted set contributes **no effort** to `hardest_rpe`, and the progression lookup now requires `completed` — a weight you planned but didn't lift must not become the evidence the next session's recommendation is built on.
 
@@ -641,7 +643,9 @@ Both are still computed by the API. They're real data for the trends screen the 
 
 **A session records how long it took.** A live clock in the summary header, derived from `started_at` on every tick rather than accumulated — same reasoning as the rest timer, since a session spends most of its life with the phone in a pocket and a counter would stop when the JS thread is throttled. Finished sessions show their duration in the recent list and on the web history page.
 
-**Rest is per exercise, and you start it when you want.** Each exercise header gained a Rest control, so the timer no longer only fires by ticking a set — you can start it after a warm-up, or a set you didn't tick, or just because. The duration is per exercise and **learned**: ±15s while a rest is running saves that adjustment against the exercise, so a heavy squat and a lateral raise stop sharing a wait after the first time you correct it.
+**Rest is per exercise, and you start it when you want.** Each exercise header gained a Rest control, so the timer no longer only fires by ticking a set — you can start it after a warm-up, or a set you didn't tick, or just because.
+
+**And shortly after: nothing starts it automatically at all.** Ticking a set had also kicked off the countdown, on the theory that finishing a set and beginning to rest are the same moment. They frequently aren't — you tick late, you tick a set you did five minutes ago, you're already walking to the next rack. A countdown that starts itself is one you spend attention cancelling, which is the opposite of what a rest timer is for. It's now started only by the Rest button, which is also the version that needs no explanation. The duration is per exercise and **learned**: ±15s while a rest is running saves that adjustment against the exercise, so a heavy squat and a lateral raise stop sharing a wait after the first time you correct it.
 
 Those durations live in the local `prefs` table rather than on the profile, and that's the right shape rather than a shortcut: the rest timer is mobile-only by the platform rule, so there is no second client to keep in step, and a server round-trip would buy nothing while breaking it in a basement gym.
 
