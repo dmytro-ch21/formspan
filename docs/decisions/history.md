@@ -1578,6 +1578,51 @@ pointing nowhere near the cause. I diagnosed that as Clerk rate limiting first
 and was wrong; running one test alone, serially, failed identically, which is
 what disproved it.
 
+## 2026-07-30 — Two staging deploys that failed in opposite ways
+
+Both found by deploying for real. Neither is visible from the repo.
+
+**The seed never ran, and everything said it was fine.** `preDeployCommand`
+was `"/app/bin/migrate up && /app/bin/seed"`. Railway executes it as argv and
+observably splits on whitespace, so migrate received `&&` and the seed path as
+two extra arguments, ignored them, ran `up`, and exited 0. Seed never
+executed.
+
+The failure mode is the interesting part: migrations applied, the healthcheck
+passed, the API served 200s, and `exercises` sat at **0 rows**. Precisely the
+`{"exercises": []}` forever outcome `railway/api.toml`'s own comment warns
+about — a valid 200 no healthcheck, error or log will ever surface. Only
+counting rows in the deployed database catches it, which is why the check
+after a green deploy has to be a query, not a status code.
+
+First fix was `sh -c '/app/bin/migrate up && /app/bin/seed'`. Then the
+evidence was re-read: if Railway split the *original* on whitespace, it will
+split that too, giving `sh` the args `-c`, `'/app/bin/migrate`, `up`, … — the
+same silent bug with more steps. `sh -c` only works if Railway tokenises
+quotes like a shell, and nothing observed says it does.
+
+Replaced with a **single-token command**: the chain moved into
+`/app/bin/predeploy`, a script baked into the image, and `preDeployCommand =
+"/app/bin/predeploy"`. Whatever the splitting rules, there is nothing to
+split. Verified by running the built image's script against a fresh empty
+database: `migrate: up: done`, then 524 exercises and 450 techniques.
+
+The general lesson: when a fix depends on a behaviour you have not observed —
+here, quote handling — prefer the form that does not depend on it at all.
+
+**Nixpacks built the web app with Node 18.** `web` and `admin` build under
+Nixpacks, which takes its Node version from the root `package.json`'s
+`engines` field. There wasn't one, so it chose 18.20.5, while the repo pins
+pnpm 11.17.0, which needs Node 20+. The build died on
+`ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING` from corepack — an error naming
+neither Node nor pnpm, so it reads like a broken lockfile.
+
+CI has used Node 22 since the beginning, which is exactly why this never
+appeared until something outside CI chose for itself. Added
+`engines.node: ">=22"` to the root package.json and noted the dependency in
+both `railway/web.toml` and `railway/admin.toml`, so the next person meets the
+explanation at the point of failure rather than in a stack trace.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

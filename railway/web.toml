@@ -3,6 +3,11 @@
 # lockfile), with Railway auto-detecting Node via Nixpacks.
 [build]
 builder = "NIXPACKS"
+# Nixpacks picks the Node version from the root package.json's `engines`
+# field. Without it, it defaults to Node 18 — and this repo pins pnpm 11,
+# which needs Node 20+. The failure is a corepack stack trace
+# (ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING) that names neither Node nor pnpm,
+# so it reads like a broken lockfile rather than a version mismatch.
 buildCommand = "pnpm install --frozen-lockfile && pnpm run build:web"
 
 [deploy]
