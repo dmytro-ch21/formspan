@@ -599,24 +599,56 @@ export async function updateUnitSystem(
   }
 }
 
+export type SessionQuery = {
+  limit?: number;
+  offset?: number;
+  sport?: Sport;
+  from?: string;
+  to?: string;
+  tz?: string;
+  /** Free text matched against the session name. */
+  q?: string;
+};
+
+/** One page of sessions, plus how many the filter matched in total. */
+export type SessionPage = {
+  sessions: Session[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+function sessionQS(opts: SessionQuery): string {
+  const p = new URLSearchParams();
+  if (opts.limit) p.set("limit", String(opts.limit));
+  if (opts.offset) p.set("offset", String(opts.offset));
+  if (opts.sport) p.set("sport", opts.sport);
+  if (opts.from) p.set("from", opts.from);
+  if (opts.to) p.set("to", opts.to);
+  if (opts.tz) p.set("tz", opts.tz);
+  if (opts.q) p.set("q", opts.q);
+  // Not `p.size`: that's Safari 17+, and on older builds `undefined > 0` is
+  // false, so every filter would be dropped in silence — the listing would
+  // quietly cover all time while the calendar covered the period.
+  const query = p.toString();
+  return query ? `?${query}` : "";
+}
+
+export async function listSessionsPage(
+  getToken: Token,
+  opts: SessionQuery = {},
+  signal?: AbortSignal,
+): Promise<SessionPage> {
+  const b = await request<SessionPage>(getToken, `/sessions${sessionQS(opts)}`, {}, signal);
+  return { sessions: b.sessions ?? [], total: b.total ?? 0, limit: b.limit ?? 0, offset: b.offset ?? 0 };
+}
+
 export async function listSessions(
   getToken: Token,
-  opts: { limit?: number; sport?: Sport; from?: string; to?: string; tz?: string } = {},
+  opts: SessionQuery = {},
   signal?: AbortSignal,
 ): Promise<Session[]> {
-  const q = new URLSearchParams();
-  if (opts.limit) q.set("limit", String(opts.limit));
-  if (opts.sport) q.set("sport", opts.sport);
-  if (opts.from) q.set("from", opts.from);
-  if (opts.to) q.set("to", opts.to);
-  if (opts.tz) q.set("tz", opts.tz);
-  // Not `q.size`: that's Safari 17+, and on older builds `undefined > 0`
-  // is false, so every filter would be dropped in silence — the listing would
-  // quietly cover all time while the calendar covered the period.
-  const query = q.toString();
-  const qs = query ? `?${query}` : "";
-  const b = await request<{ sessions: Session[] }>(getToken, `/sessions${qs}`, {}, signal);
-  return b.sessions ?? [];
+  return (await listSessionsPage(getToken, opts, signal)).sessions;
 }
 
 export type HistoryTotals = {

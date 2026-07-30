@@ -23,6 +23,12 @@ import (
 const defaultLimit = 50
 const maxLimit = 200
 
+// likeEscaper neutralises LIKE's own wildcards so a search for "50%" means
+// the characters, not "anything". Mirrors the exercise catalog's, which is
+// the other search box in the product — duplicated rather than shared because
+// a two-line var doesn't justify a package, and both carry this comment.
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
 type PostgresRepository struct {
 	pool *pgxpool.Pool
 }
@@ -81,7 +87,7 @@ func scanSession(row scannable) (*Session, error) {
 	return &s, nil
 }
 
-func (r *PostgresRepository) List(ctx context.Context, userID string, f Filter) ([]Session, error) {
+func (r *PostgresRepository) List(ctx context.Context, userID string, f Filter) (*SessionPage, error) {
 	where := []string{"s.user_id = $1"}
 	args := []any{userID}
 
@@ -105,6 +111,23 @@ func (r *PostgresRepository) List(ctx context.Context, userID string, f Filter) 
 		args = append(args, f.To)
 		where = append(where, fmt.Sprintf("s.started_at < $%d", len(args)))
 	}
+	if f.Query != "" {
+		// Same shape as the exercise catalog's search, escape and all, so the
+		// two search boxes behave identically. Without the ESCAPE a name
+		// containing % or _ would silently match far more than it should.
+		args = append(args, likeEscaper.Replace(f.Query))
+		where = append(where, fmt.Sprintf(`s.name ILIKE '%%' || $%d || '%%' ESCAPE '\'`, len(args)))
+	}
+
+	whereSQL := strings.Join(where, " AND ")
+
+	// Counted before the page is fetched, with the identical predicate, so
+	// "showing 21-40 of 137" can never disagree with the rows below it.
+	var total int
+	if err := r.pool.QueryRow(ctx,
+		`SELECT COUNT(*)::int FROM sessions s WHERE `+whereSQL, args...).Scan(&total); err != nil {
+		return nil, fmt.Errorf("session: count: %w", err)
+	}
 
 	limit := f.Limit
 	if limit <= 0 {
@@ -113,13 +136,22 @@ func (r *PostgresRepository) List(ctx context.Context, userID string, f Filter) 
 	if limit > maxLimit {
 		limit = maxLimit
 	}
+	offset := f.Offset
+	if offset < 0 {
+		offset = 0
+	}
 	args = append(args, limit)
+	limitPlaceholder := len(args)
+	args = append(args, offset)
 
+	// `s.id` breaks ties on started_at. Without it two sessions logged in the
+	// same second could swap places between pages, so one would appear twice
+	// and another never — the classic unstable-sort paging bug.
 	rows, err := r.pool.Query(ctx, `
 		SELECT `+sessionColumns+` FROM sessions s
-		WHERE `+strings.Join(where, " AND ")+`
+		WHERE `+whereSQL+`
 		ORDER BY s.started_at DESC, s.id
-		LIMIT $`+fmt.Sprint(len(args)), args...)
+		LIMIT $`+fmt.Sprint(limitPlaceholder)+` OFFSET $`+fmt.Sprint(len(args)), args...)
 	if err != nil {
 		return nil, fmt.Errorf("session: list: %w", err)
 	}
@@ -141,7 +173,7 @@ func (r *PostgresRepository) List(ctx context.Context, userID string, f Filter) 
 	if err := r.attachSets(ctx, sessions, ids); err != nil {
 		return nil, err
 	}
-	return sessions, nil
+	return &SessionPage{Sessions: sessions, Total: total, Limit: limit, Offset: offset}, nil
 }
 
 // workingSet is Summarise's rule, expressed once for SQL.

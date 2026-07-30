@@ -503,6 +503,23 @@ components:
           type: array
           items: { type: string }
 
+    SessionPage:
+      type: object
+      description: >
+        One page of sessions plus the size of the whole matching set. `total`
+        is counted with the identical predicate in the same request, so a
+        "21-40 of 137" reading can never disagree with the rows beside it.
+      required: [sessions, total, limit, offset]
+      properties:
+        sessions:
+          type: array
+          items: { $ref: "#/components/schemas/Session" }
+        total:
+          type: integer
+          description: Sessions matching the filter, ignoring limit/offset.
+        limit: { type: integer }
+        offset: { type: integer }
+
     HistoryTotals:
       type: object
       description: A period's training in one line.
@@ -1317,17 +1334,30 @@ paths:
           in: query
           schema: { type: string, default: UTC }
           description: IANA name used to resolve `from`/`to` to instants. Defaults to UTC.
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 100 }
+          description: >
+            Free text matched case-insensitively anywhere in the session's
+            name. LIKE wildcards in the term are escaped, so `50%` searches
+            for those characters rather than matching everything.
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+          description: Rows to skip. Ordering is stable (started_at, then id), so a session can't repeat across pages or be skipped.
       responses:
         "200":
-          description: The caller's own sessions, each with its sets. Never anyone else's.
+          description: >
+            One page of the caller's own sessions, each with its sets, plus how
+            many the filter matched in total. Never anyone else's.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/SessionList" }
+              schema: { $ref: "#/components/schemas/SessionPage" }
         "400":
-          description: Invalid sport or limit.
+          description: Invalid sport, limit, offset, date, timezone or search term.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }

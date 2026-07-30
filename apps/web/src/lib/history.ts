@@ -164,8 +164,8 @@ export function byWeek(from: string, to: string, days: HistoryDay[]): WeekBucket
  * measure every discipline shares, so it's the fallback rather than a
  * special case per sport.
  */
-export function loadMetric(days: HistoryDay[]): "tonnage" | "time" {
-  return days.some((d) => d.tonnage_kg > 0) ? "tonnage" : "time";
+export function loadMetric(days: HistoryDay[]): "volume" | "time" {
+  return days.some((d) => d.tonnage_kg > 0) ? "volume" : "time";
 }
 
 /** h:mm-ish, matching what the phone shows. */

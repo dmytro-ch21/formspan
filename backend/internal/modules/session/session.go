@@ -175,9 +175,28 @@ type Filter struct {
 	// The *handler* is what widens a caller's inclusive `to=2026-03-03` to the
 	// exclusive instant here, so a direct repository caller must pass the
 	// exclusive bound itself. Zero means unbounded.
-	From  time.Time
-	To    time.Time
-	Limit int // 0 means the repository default
+	From time.Time
+	To   time.Time
+	// Query matches the session's name, case-insensitively, anywhere in it.
+	// Names are the only free text a session has, and "leg day" is how people
+	// actually remember one.
+	Query  string
+	Limit  int // 0 means the repository default
+	Offset int // rows to skip, for paging
+}
+
+// SessionPage is one page of a listing plus how many rows the filter matched
+// in total.
+//
+// Total comes back with the page rather than from a second endpoint because
+// the two must describe the same filter — a count that disagrees with the
+// rows is worse than no count, and it's exactly what happens when they're
+// fetched separately and one of them changes.
+type SessionPage struct {
+	Sessions []Session `json:"sessions"`
+	Total    int       `json:"total"`
+	Limit    int       `json:"limit"`
+	Offset   int       `json:"offset"`
 }
 
 // HistoryFilter bounds a history rollup. Unlike Filter the range is required —
@@ -249,7 +268,7 @@ type History struct {
 }
 
 type Repository interface {
-	List(ctx context.Context, userID string, f Filter) ([]Session, error)
+	List(ctx context.Context, userID string, f Filter) (*SessionPage, error)
 	// History rolls a date range up per day plus period totals. Aggregated in
 	// SQL rather than by listing sessions and calling Summarise, because a
 	// year of training is thousands of set rows and the page needs six

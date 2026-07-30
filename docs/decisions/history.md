@@ -939,6 +939,50 @@ per-exercise progression gap is the same one web has. And the summary is
 online-only, which sits oddly next to a logging flow that works with no signal
 at all; caching the last response would fit the offline-first story better.
 
+## 2026-07-30 — Aborts, "volume", and a session list that pages
+
+Three fixes, one of which turned out to be structural.
+
+**A cancelled request is not a server error.** Every module's error path
+mapped anything unrecognised to 500 with an ERROR log, and a browser aborting
+a fetch lands there — so the history page, which aborts on every filter
+change, was manufacturing false failures. Anyone with an error-rate alert
+would have been paged by a working feature.
+
+The fix that mattered wasn't the check, it was where it lives. Twelve call
+sites each wrote their own two lines of "log it, 500 it"; a `ClientGone`
+branch pasted into twelve places is a branch someone forgets on the
+thirteenth. They now all go through `apihttp.WriteInternal`, which is also
+the only place that can decide what an unexpected error becomes. Cancelled
+requests get 499 — nginx's convention, understood by every log pipeline —
+and no ERROR line. `DeadlineExceeded` is deliberately *not* included: that's
+usually our own timeout, which is a real problem.
+
+The assumption underneath is that `errors.Is` can see through pgx's error and
+the repository's `fmt.Errorf("%w")` wrapping. That's now pinned by a test that
+cancels a real query and asserts the classification, rather than hoped for.
+
+**"Tonnage" is now "Volume"** everywhere it's visible. The wire field stays
+`tonnage_kg` — renaming it would break the contract for no user-visible gain
+— but the label, the helper (`formatVolume`) and the internal discriminant
+all say volume now, so the code and the UI use one word.
+
+**The session list pages, filters and searches.** It used to fetch a flat 100
+and stop: a year of training simply ended two-thirds down with nothing saying
+so. `GET /v1/sessions` now takes `offset` and `q` and returns a `SessionPage`
+— rows plus the total matched. The total is counted in the same request with
+the identical predicate, because a count fetched separately is a count that
+disagrees with the rows beside it.
+
+Two details worth keeping: the ordering is `started_at DESC, id` so a session
+can't repeat on one page and vanish from another, and the search escapes
+LIKE's wildcards, so `%` searches for the character rather than matching
+everything. Both are tested.
+
+Found while verifying: at anything under ~900px the session name was being
+squeezed to "U…" by four fixed-width metric columns — the one part of the row
+you scan by. Given a basis so it wraps instead.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

@@ -727,6 +727,31 @@ Domain: logging a session with no connectivity. **Test this by actually stopping
 - Trained days carry a date + session-count label; empty days are not accessibility stops.
 - Bar heights: a trained week never rounds to invisible, and bars are capped in width so a 4-week span doesn't render as slabs.
 
+## Session list paging, search and filters (`GET /v1/sessions`, `apps/web` History)
+
+**Happy path**
+- The list shows one page at a time with "1–20 of 43"; Newer/Older move between pages and disable at each end.
+- Every session appears on exactly one page. Ordering is `started_at DESC, id` — without the id tiebreak, two sessions logged in the same second can swap places and one is shown twice while another is never shown.
+- Searching by name narrows the list and the count together; clearing it restores them.
+- Search and paging compose with the period, sport and picked-day filters, and any change of scope returns to the first page.
+- `total` is counted with the same predicate in the same request, so the count can never disagree with the rows.
+
+**Edge cases & errors**
+- A search for `%` or `_` matches those characters, not everything — LIKE wildcards are escaped.
+- Search is case-insensitive.
+- `offset` below zero, `limit` below one, or `q` over 100 characters → `400 invalid_input`.
+- A page past the end returns zero rows with the correct total rather than an error.
+- A failed list fetch says so and is distinguishable from "no sessions match".
+
+**Client aborts (`apihttp.WriteInternal`)**
+- Cancelling an in-flight request must produce **499 and no ERROR log**, not 500. The history page aborts on every filter change, so this is the common path, not an edge case.
+- The classification must survive the repository's `fmt.Errorf("%w")` wrapping — assert against a genuinely cancelled query, not a hand-made `context.Canceled`.
+- `context.DeadlineExceeded` must still be a 500: that one is ours.
+- A real failure must still log and must never leak the cause to the client.
+
+**Wording**
+- Cumulative load reads "Volume" everywhere it's visible, on both platforms. The wire field stays `tonnage_kg`.
+
 ## Not yet covered (tracked here so it isn't lost, not because it's blocking)
 
 - Mobile has no auth yet (Clerk Expo SDK is a separate future increment) — no sign-in/sign-out scenarios apply to mobile today.

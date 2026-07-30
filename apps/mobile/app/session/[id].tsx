@@ -399,7 +399,7 @@ export default function SessionScreen() {
         keyboardShouldPersistTaps="handled"
         automaticallyAdjustKeyboardInsets
       >
-        {/* Three numbers while you train — time, sets, reps — and tonnage
+        {/* Three numbers while you train — time, sets, reps — and volume
             on top once you finish.
             "Top RPE" is gone entirely: mid-session it only repeated the
             effort typed thirty seconds earlier. Both are still computed by
@@ -416,7 +416,7 @@ export default function SessionScreen() {
                 once the session is done and the figure means something. */}
             {finished && (
               <Stat
-                label="Tonnage"
+                label="Volume"
                 value={volume.tonnage_kg > 0 ? formatWeight(volume.tonnage_kg, units) : '—'}
               />
             )}
@@ -674,7 +674,7 @@ function localVolume(sets: LoggedSet[]): Volume {
   for (const s of sets) {
     if (!v.exercise_ids.includes(s.exercise_id)) v.exercise_ids.push(s.exercise_id);
     // Must match the server's rule exactly. Missing this on the first pass
-    // showed the plan's full tonnage against a column of unticked sets —
+    // showed the plan's full volume against a column of unticked sets —
     // precisely the drift this duplicated arithmetic risks.
     if (!s.completed) continue;
     if (s.set_type === 'warmup') continue;
@@ -691,7 +691,7 @@ function localVolume(sets: LoggedSet[]): Volume {
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.stat}>
-      {/* Four-figure tonnage wrapped onto a second line and shoved its own
+      {/* Four-figure volume wrapped onto a second line and shoved its own
           label out of the row; shrink to fit instead. */}
       <Text style={styles.statValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
         {value}

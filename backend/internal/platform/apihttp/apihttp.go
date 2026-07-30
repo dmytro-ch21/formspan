@@ -4,8 +4,12 @@
 package apihttp
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
+
+	"github.com/dmytro-ch21/vola/backend/internal/platform/httplog"
 )
 
 // Error codes are part of the public API contract (mirrored in
@@ -30,6 +34,27 @@ type errorDetail struct {
 	Message string `json:"message"`
 }
 
+// StatusClientClosed is nginx's 499 — the caller hung up before the response
+// was written. Not an official RFC code, but it's the de-facto one, and every
+// log pipeline and dashboard already understands it as "client gone" rather
+// than "server broke".
+const StatusClientClosed = 499
+
+// ClientGone reports whether an error means the caller disconnected rather
+// than anything failing.
+//
+// A cancelled request context is not a server error. Nothing went wrong, the
+// response has nowhere to go, and the caller already knows — the browser
+// aborted it. Reporting it as 500 with an ERROR line puts false failures in
+// the logs and would page whoever owns the error-rate alert. The web history
+// page aborts a fetch on every filter change, so this fires constantly.
+//
+// DeadlineExceeded is deliberately excluded: that's usually *our* timeout
+// elapsing, which is a real problem worth seeing.
+func ClientGone(err error) bool {
+	return errors.Is(err, context.Canceled)
+}
+
 // WriteJSON writes v as the JSON response body with the given status code.
 func WriteJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -41,4 +66,24 @@ func WriteJSON(w http.ResponseWriter, status int, v any) {
 // error response uses.
 func WriteError(w http.ResponseWriter, status int, code, message string) {
 	WriteJSON(w, status, errorBody{Error: errorDetail{Code: code, Message: message}})
+}
+
+// WriteInternal is the one place an unexpected error becomes a response.
+//
+// It exists so the client-gone check can't be forgotten. That check used to be
+// absent, so every aborted fetch — and the web history page aborts one on
+// every filter change — logged an ERROR and returned 500 to a caller that had
+// already hung up. Nine call sites each had their own copy of the two lines
+// this replaces; nine places to forget it.
+//
+// `module` prefixes the log line, matching what each handler wrote before.
+func WriteInternal(w http.ResponseWriter, r *http.Request, module string, err error) {
+	if ClientGone(err) {
+		// Nothing failed and nobody is listening. Recorded as 499 so it stays
+		// visible in the request log without counting as a server error.
+		w.WriteHeader(StatusClientClosed)
+		return
+	}
+	httplog.FromContext(r.Context()).Error(module+": internal error", "err", err)
+	WriteError(w, http.StatusInternalServerError, CodeInternal, "internal error")
 }
