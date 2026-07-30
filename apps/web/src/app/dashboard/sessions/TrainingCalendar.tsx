@@ -41,7 +41,16 @@ export function TrainingCalendar({
       // thresholds, so a beginner's calendar has the same range of colour as
       // someone deep into a block — the shape is what's being read, not the
       // absolute number.
-      scale: (d: HistoryDay | null) => (d ? Math.ceil((value(d) / peak) * 4) : 0),
+      //
+      // The floor at 1 is the important part. `hasSets` is decided once for
+      // the period but the measure is applied per day, so for the athlete
+      // this product is actually for — lifting Monday, rolling Tuesday — one
+      // strength session puts every BJJ day on the working-sets scale at
+      // zero, and it renders pixel-identical to a rest day. Half a training
+      // week vanishing from the view whose entire job is showing which days
+      // you trained.
+      scale: (d: HistoryDay | null) =>
+        !d ? 0 : Math.max(1, Math.ceil((value(d) / peak) * 4)),
     };
   }, [days]);
 
@@ -92,7 +101,9 @@ export function TrainingCalendar({
                 <span
                   key={`${m.label}-${m.index}`}
                   className="absolute text-[0.6875rem] text-text-dim"
-                  style={{ left: `${m.index * 16}px` }}
+                  // rem, not px: the cells are w-3 + gap-1, both rem-derived, so a
+                  // hardcoded 16 desyncs the strip at a non-default root font size.
+                  style={{ left: `${m.index}rem` }}
                 >
                   {m.label}
                 </span>

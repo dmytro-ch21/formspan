@@ -171,9 +171,10 @@ type NewSession struct {
 type Filter struct {
 	Sport      string // empty means any
 	ExerciseID string // sessions containing this exercise; empty means any
-	// From and To bound started_at. Both are inclusive of the day they name;
-	// the repository widens To to the end of that day so a caller asking for
-	// "the 3rd" gets sessions logged at 19:00 on the 3rd. Zero means unbounded.
+	// From and To bound started_at as a half-open range: From <= t < To.
+	// The *handler* is what widens a caller's inclusive `to=2026-03-03` to the
+	// exclusive instant here, so a direct repository caller must pass the
+	// exclusive bound itself. Zero means unbounded.
 	From  time.Time
 	To    time.Time
 	Limit int // 0 means the repository default

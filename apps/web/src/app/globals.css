@@ -151,15 +151,21 @@ body {
   background: linear-gradient(90deg, var(--c-green), var(--c-lime-rule));
 }
 
-a {
-  color: inherit;
-  text-decoration: none;
-}
+/* Layered for the same reason as the form reset below — see that comment.
+   Unlayered, this `color: inherit` beat every text-* utility on an anchor,
+   which is how a solid-fill CTA rendered as a <Link> came out invisible while
+   the identical <button> next to it was fine. */
+@layer base {
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
 
-:focus-visible {
-  outline: 2px solid var(--c-accent-fill);
-  outline-offset: 2px;
-  border-radius: 4px;
+  :focus-visible {
+    outline: 2px solid var(--c-accent-fill);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
 }
 
 * {

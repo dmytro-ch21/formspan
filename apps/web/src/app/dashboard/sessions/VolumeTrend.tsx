@@ -37,7 +37,13 @@ export function VolumeTrend({
   const format = (v: number) =>
     metric === "tonnage" ? formatTonnage(v, units) : formatDuration(v * 60);
 
-  const trained = weeks.filter((w) => value(w) > 0).length;
+  // Counted off sessions, not off the metric. The axis can only show one
+  // measure, and `metric` is chosen for the whole period — so in a block that
+  // mixes lifting with BJJ, every mat-only week scores zero tonnage. Counting
+  // those as untrained printed "10 of 12 weeks trained" over twelve trained
+  // weeks, which is not a rounding error, it's a false statement about
+  // someone's training.
+  const trained = weeks.filter((w) => w.sessions > 0).length;
 
   if (weeks.length < 2) return null;
 
@@ -58,9 +64,13 @@ export function VolumeTrend({
         <ul className="flex h-32 items-end gap-1" role="list">
           {weeks.map((w) => {
             const v = value(w);
-            const label = `Week of ${monthShort(w.start)} ${Number(w.start.slice(8))}: ${
-              v > 0 ? format(v) : "no training"
-            }`;
+            const sessions = `${w.sessions} ${w.sessions === 1 ? "session" : "sessions"}`;
+            // Three states, not two. A week can have training the axis can't
+            // measure — BJJ under a tonnage axis — and calling that "no
+            // training" is the one thing this label must never say.
+            const detail =
+              v > 0 ? format(v) : w.sessions > 0 ? `${sessions}, no ${metric === "tonnage" ? "tonnage" : "time"} logged` : "no training";
+            const label = `Week of ${monthShort(w.start)} ${Number(w.start.slice(8))}: ${detail}`;
             return (
               <li
                 key={w.start}
@@ -71,11 +81,21 @@ export function VolumeTrend({
                 <span
                   aria-hidden="true"
                   className={`w-full rounded-t-[3px] transition-colors ${
-                    v > 0 ? "bg-lime group-hover:bg-green" : "bg-line-soft"
+                    v > 0
+                      ? "bg-lime group-hover:bg-green"
+                      : w.sessions > 0
+                        ? // Trained, just not in this measure. Dimmed rather
+                          // than absent, so the week still reads as a week
+                          // that happened.
+                          "bg-lime/30 group-hover:bg-lime/50"
+                        : "bg-line-soft"
                   }`}
                   // A trained week must never round to invisible: 2px is the
                   // floor, so a light week reads as light rather than absent.
-                  style={{ height: v > 0 ? `${Math.max(2, (v / peak) * 100)}%` : "2px" }}
+                  style={{
+                    height:
+                      v > 0 ? `${Math.max(2, (v / peak) * 100)}%` : w.sessions > 0 ? "6%" : "2px",
+                  }}
                 />
               </li>
             );

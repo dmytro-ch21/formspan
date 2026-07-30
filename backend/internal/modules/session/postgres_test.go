@@ -18,6 +18,7 @@ const (
 	exBench = "bench-press"
 	exSquat = "back-squat"
 	exBJJ   = "bear-crawl-forward"
+	exOHP   = "overhead-press"
 )
 
 func newTestRepo(t *testing.T) (*PostgresRepository, *pgxpool.Pool) {
@@ -516,6 +517,12 @@ func TestHistoryAgreesWithSummarise(t *testing.T) {
 		histAt("ses-hist-b", user, "strength", base.AddDate(0, 0, 2), 90*time.Minute, []Set{
 			{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(3), WeightKg: ptrF(120), Completed: true},
 			{ExerciseID: exSquat, SetType: SetTypeFailure, Reps: ptrInt(1), WeightKg: ptrF(140), Completed: true},
+			// Third exercise, warm-up only. Summarise counts it in ExerciseIDs
+			// (they're collected before the completed/warm-up guards), so the
+			// SQL's COUNT(DISTINCT exercise_id) must stay unfiltered. Without a
+			// set like this the fixtures can't tell the two apart, and adding a
+			// FILTER here to "match its neighbours" would pass green.
+			{ExerciseID: exOHP, SetType: SetTypeWarmup, Reps: ptrInt(12), WeightKg: ptrF(20), Completed: true},
 		}),
 	}
 	for _, f := range fixtures {
@@ -561,7 +568,7 @@ func TestHistoryAgreesWithSummarise(t *testing.T) {
 	if got.Totals.TotalReps != wantReps {
 		t.Errorf("total reps: SQL %d, Summarise %d", got.Totals.TotalReps, wantReps)
 	}
-	if got.Totals.TonnageKg != wantTonnage {
+	if !closeEnough(got.Totals.TonnageKg, wantTonnage) {
 		t.Errorf("tonnage: SQL %v, Summarise %v", got.Totals.TonnageKg, wantTonnage)
 	}
 	if got.Totals.Exercises != len(distinct) {
@@ -570,11 +577,12 @@ func TestHistoryAgreesWithSummarise(t *testing.T) {
 
 	// And the fixtures' own arithmetic, so a bug that broke both identically
 	// still gets caught: 5×100 + 8 reps unweighted + 3×120 + 1×140 = 1000.
-	if wantSets != 4 || wantReps != 17 || wantTonnage != 1000 {
+	if wantSets != 4 || wantReps != 17 || !closeEnough(wantTonnage, 1000) {
 		t.Fatalf("fixture expectations drifted: sets=%d reps=%d tonnage=%v", wantSets, wantReps, wantTonnage)
 	}
-	// Two sessions, two days, two distinct exercises.
-	if got.Totals.Sessions != 2 || got.Totals.ActiveDays != 2 || got.Totals.Exercises != 2 {
+	// Two sessions, two days, three distinct exercises — the third only
+	// ever warmed up, which still counts as "what did I train".
+	if got.Totals.Sessions != 2 || got.Totals.ActiveDays != 2 || got.Totals.Exercises != 3 {
 		t.Errorf("totals: %+v", got.Totals)
 	}
 	// 60m + 90m.
@@ -597,6 +605,58 @@ func TestHistoryAgreesWithSummarise(t *testing.T) {
 	if got.From != "2024-03-01" || got.To != "2024-03-31" {
 		t.Errorf("echoed range: %s..%s", got.From, got.To)
 	}
+
+	assertDaysSumToTotals(t, got)
+}
+
+// assertDaysSumToTotals pins the two rollups to each other.
+//
+// Summarise can only vouch for `historyTotals`. The harder SQL is in
+// `historyDays` — the per_session CTE, which exists so the LEFT JOIN doesn't
+// repeat a session row once per set and multiply its duration. Summarise has
+// no opinion about join shape, so it cannot catch that at all: flattening the
+// CTE leaves working_sets and the dates untouched and reports four sessions
+// and four hours for one session of one hour. Two independent SQL paths
+// checked against each other is what closes it.
+func assertDaysSumToTotals(t *testing.T, h *History) {
+	t.Helper()
+	var sessions, sets, reps, duration int
+	var tonnage float64
+	for _, d := range h.Days {
+		sessions += d.Sessions
+		sets += d.WorkingSets
+		reps += d.TotalReps
+		duration += d.DurationSeconds
+		tonnage += d.TonnageKg
+	}
+	if sessions != h.Totals.Sessions {
+		t.Errorf("sessions: days sum to %d, totals say %d", sessions, h.Totals.Sessions)
+	}
+	if sets != h.Totals.WorkingSets {
+		t.Errorf("working sets: days sum to %d, totals say %d", sets, h.Totals.WorkingSets)
+	}
+	if reps != h.Totals.TotalReps {
+		t.Errorf("reps: days sum to %d, totals say %d", reps, h.Totals.TotalReps)
+	}
+	if duration != h.Totals.DurationSeconds {
+		t.Errorf("duration: days sum to %d, totals say %d", duration, h.Totals.DurationSeconds)
+	}
+	if !closeEnough(tonnage, h.Totals.TonnageKg) {
+		t.Errorf("tonnage: days sum to %v, totals say %v", tonnage, h.Totals.TonnageKg)
+	}
+	// Active days is the count of days that had anything, by definition.
+	if len(h.Days) != h.Totals.ActiveDays {
+		t.Errorf("active days: %d day buckets, totals say %d", len(h.Days), h.Totals.ActiveDays)
+	}
+}
+
+// closeEnough compares a Postgres NUMERIC sum against one accumulated
+// set-by-set in Go. Exact equality holds for whole-number fixtures and stops
+// holding the moment a realistic NUMERIC(6,2) weight isn't binary-exact — a
+// flaky guard is one that gets loosened instead of trusted.
+func closeEnough(a, b float64) bool {
+	d := a - b
+	return d < 0.001 && d > -0.001
 }
 
 func TestHistory_BucketsDaysInTheCallersTimezone(t *testing.T) {
@@ -713,6 +773,8 @@ func TestHistory_IsUserScopedAndComparesLikeForLike(t *testing.T) {
 	if filtered.Previous.Sessions != 0 {
 		t.Errorf("filtered previous should be BJJ-only: %+v", filtered.Previous)
 	}
+	assertDaysSumToTotals(t, got)
+	assertDaysSumToTotals(t, filtered)
 }
 
 func TestHistory_EmptyRangeIsZeroNotAnError(t *testing.T) {

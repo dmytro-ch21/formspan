@@ -63,7 +63,9 @@ export function formatWeight(kg: number | null | undefined, u: UnitSystem): stri
 export function formatTonnage(kg: number | null | undefined, u: UnitSystem): string {
   if (kg == null) return "—";
   if (u === "metric") {
-    if (kg < 1000) return `${Math.round(kg).toLocaleString()}kg`;
+    // Rounded before the comparison, or 999.6 renders as "1,000kg" — a
+    // thousand kilograms written in the unit the next bracket abbreviates.
+    if (Math.round(kg) < 1000) return `${Math.round(kg).toLocaleString()}kg`;
     // One decimal is the useful precision at this scale — nobody makes a
     // decision on the last 100kg of a training block.
     return `${(Math.round(kg / 100) / 10).toLocaleString(undefined, {

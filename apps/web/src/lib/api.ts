@@ -610,7 +610,11 @@ export async function listSessions(
   if (opts.from) q.set("from", opts.from);
   if (opts.to) q.set("to", opts.to);
   if (opts.tz) q.set("tz", opts.tz);
-  const qs = q.size > 0 ? `?${q}` : "";
+  // Not `q.size`: that's Safari 17+, and on older builds `undefined > 0`
+  // is false, so every filter would be dropped in silence — the listing would
+  // quietly cover all time while the calendar covered the period.
+  const query = q.toString();
+  const qs = query ? `?${query}` : "";
   const b = await request<{ sessions: Session[] }>(getToken, `/sessions${qs}`, {}, signal);
   return b.sessions ?? [];
 }

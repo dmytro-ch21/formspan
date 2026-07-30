@@ -29,7 +29,7 @@ import {
   sportLabel,
   type PeriodKey,
 } from "@/lib/history";
-import { formatTonnage } from "@/lib/units";
+import { formatTonnage, type UnitSystem } from "@/lib/units";
 import { useUnits } from "@/lib/useUnits";
 
 import { TrainingCalendar } from "./TrainingCalendar";
@@ -48,6 +48,10 @@ import { VolumeTrend } from "./VolumeTrend";
  * under-reporting the moment someone's history outgrew the page size. The
  * only arithmetic here buckets days the server already rolled up.
  */
+/** What the period list shows before you narrow it. A day picked on the
+ *  calendar is fetched on its own, so this cap never hides one. */
+const LIST_LIMIT = 100;
+
 export default function HistoryPage() {
   const { getToken } = useAuth();
   const { units } = useUnits();
@@ -59,6 +63,8 @@ export default function HistoryPage() {
 
   const [history, setHistory] = useState<History | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
+  // Null while a picked day's own fetch is in flight.
+  const [daySessions, setDaySessions] = useState<Session[] | null>(null);
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [loading, setLoading] = useState(true);
   const [everLoaded, setEverLoaded] = useState(false);
@@ -77,23 +83,25 @@ export default function HistoryPage() {
     try {
       const { from, to } = periodRange(period);
       const tz = localZone();
-      const [h, list, mine] = await Promise.all([
+      const [h, list] = await Promise.all([
         fetchHistory(getToken, { from, to, sport: sport ?? undefined, tz }, controller.signal),
         listSessions(
           getToken,
-          { from, to, tz, sport: sport ?? undefined, limit: 200 },
+          { from, to, tz, sport: sport ?? undefined, limit: LIST_LIMIT },
           controller.signal,
         ),
-        listWorkouts(getToken, "mine", controller.signal),
       ]);
       if (controller.signal.aborted) return;
       setHistory(h);
       setSessions(list);
-      setWorkouts(mine);
       setError(null);
     } catch (err) {
       if (controller.signal.aborted) return;
       setError(err instanceof Error ? err.message : String(err));
+      // Cleared, not kept. Leaving the previous period's totals on screen
+      // under a new period's pressed button is worse than showing nothing —
+      // the numbers look current and aren't.
+      setHistory(null);
     } finally {
       if (!controller.signal.aborted) {
         setLoading(false);
@@ -107,6 +115,38 @@ export default function HistoryPage() {
     load();
     return () => abortRef.current?.abort();
   }, [load]);
+
+  // Templates don't depend on the period or the sport, so they don't belong
+  // in the reload every chip click triggers.
+  useEffect(() => {
+    const c = new AbortController();
+    listWorkouts(getToken, "mine", c.signal)
+      .then(setWorkouts)
+      .catch(() => {});
+    return () => c.abort();
+  }, [getToken]);
+
+  // A picked day is fetched for itself rather than filtered out of the
+  // listing above. The listing is capped, so past that cap a day the calendar
+  // shows as trained would have listed "nothing logged" — the calendar and
+  // the list contradicting each other, which is the exact failure the
+  // server-side totals exist to avoid, re-entering by the back door.
+  useEffect(() => {
+    if (!day) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setDaySessions(null);
+      return;
+    }
+    const c = new AbortController();
+    listSessions(
+      getToken,
+      { from: day, to: day, tz: localZone(), sport: sport ?? undefined },
+      c.signal,
+    )
+      .then(setDaySessions)
+      .catch(() => {});
+    return () => c.abort();
+  }, [getToken, day, sport]);
 
   // Changing the scope clears a day picked inside the old one, or the list
   // filters to a date the calendar no longer shows.
@@ -145,12 +185,9 @@ export default function HistoryPage() {
 
   const live = sessions.filter((s) => s.ended_at === null);
   const shown = useMemo(() => {
-    const done = sessions.filter((s) => s.ended_at !== null);
-    if (!day) return done;
-    // Compared in the same local calendar the API bucketed by, or an evening
-    // session lands under the wrong heading.
-    return done.filter((s) => toLocalDay(s.started_at) === day);
-  }, [sessions, day]);
+    const source = day ? (daySessions ?? []) : sessions;
+    return source.filter((s) => s.ended_at !== null);
+  }, [sessions, daySessions, day]);
 
   const t = history?.totals;
   const p = history?.previous;
@@ -177,22 +214,35 @@ export default function HistoryPage() {
       </div>
 
       {error && (
-        <p
+        <div
           role="alert"
-          className="rounded-card border border-danger/40 bg-danger/10 px-4 py-3 text-sm"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-danger/40 bg-danger/10 px-4 py-3 text-sm"
         >
-          {error}
-        </p>
+          <span>{error}</span>
+          <button
+            type="button"
+            onClick={() => load()}
+            className="rounded-pill border border-line px-3 py-1 text-xs font-medium transition hover:bg-surface-raised"
+          >
+            Try again
+          </button>
+        </div>
       )}
 
       {!everLoaded ? (
         <Skeleton />
       ) : !history || nothingHere ? (
         error ? null : (
-          <EmptyState hasAnyWorkout={workouts.length > 0} filtered={sport !== null} />
+          <EmptyState
+            hasAnyWorkout={workouts.length > 0}
+            filtered={sport !== null || period !== "1y"}
+          />
         )
       ) : (
-        <div className={`flex flex-col gap-8 transition-opacity ${loading ? "opacity-50" : ""}`}>
+        <div
+          aria-busy={loading}
+          className={`flex flex-col gap-8 transition-opacity ${loading ? "opacity-50" : ""}`}
+        >
           <section aria-label="Totals for the selected period">
             <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
               <Stat
@@ -241,7 +291,7 @@ export default function HistoryPage() {
               <h2 className="eyebrow">In progress</h2>
               <ul className="flex flex-col gap-2">
                 {live.map((s) => (
-                  <SessionRow key={s.id} session={s} />
+                  <SessionRow key={s.id} session={s} units={units} />
                 ))}
               </ul>
             </section>
@@ -271,7 +321,7 @@ export default function HistoryPage() {
             ) : (
               <ul className="flex flex-col gap-2">
                 {shown.map((s) => (
-                  <SessionRow key={s.id} session={s} />
+                  <SessionRow key={s.id} session={s} units={units} />
                 ))}
               </ul>
             )}
@@ -280,13 +330,6 @@ export default function HistoryPage() {
       )}
     </div>
   );
-}
-
-/** The same local calendar day the API bucketed a session into. */
-function toLocalDay(iso: string): string {
-  const d = new Date(iso);
-  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 10);
 }
 
 function periodLength(p: PeriodKey): string {
@@ -435,6 +478,7 @@ function NewSessionMenu({
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   // Click-away and Escape. A menu you can only dismiss by picking something
   // is a trap, and this one covers the page's primary content.
@@ -444,7 +488,11 @@ function NewSessionMenu({
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key !== "Escape") return;
+      setOpen(false);
+      // Back to the trigger. Without this focus lands on <body> and a
+      // keyboard user restarts from the top of the document.
+      triggerRef.current?.focus();
     };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
@@ -457,19 +505,23 @@ function NewSessionMenu({
   return (
     <div ref={ref} className="relative">
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         disabled={disabled}
         aria-expanded={open}
-        aria-haspopup="menu"
+        aria-haspopup="true"
         className="rounded-pill bg-accent-fill px-5 py-2.5 text-sm font-semibold text-accent-on-fill transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
       >
         New session
       </button>
 
+      {/* Deliberately no role="menu": that would promise arrow-key navigation
+          and put screen readers into application mode, where Tab can be
+          swallowed by a widget that doesn't implement the keys it advertised.
+          A plain list of buttons is fully operable today with nothing added. */}
       {open && (
         <div
-          role="menu"
           className="absolute right-0 z-20 mt-2 w-72 overflow-hidden rounded-card border border-line bg-surface shadow-lg"
         >
           {workouts.length > 0 && (
@@ -480,7 +532,6 @@ function NewSessionMenu({
                   <li key={w.id}>
                     <button
                       type="button"
-                      role="menuitem"
                       onClick={() => {
                         setOpen(false);
                         onStart(w.sport, w.name, w);
@@ -506,7 +557,6 @@ function NewSessionMenu({
               <li key={s.key}>
                 <button
                   type="button"
-                  role="menuitem"
                   onClick={() => {
                     setOpen(false);
                     onStart(s.key, s.label);
@@ -524,8 +574,12 @@ function NewSessionMenu({
   );
 }
 
-function SessionRow({ session }: { session: Session }) {
-  const { units } = useUnits();
+// `units` is passed in, not read from useUnits() here. The hook fetches the
+// profile per call site with no shared cache, so a hook call in this row cost
+// one GET /v1/profile *per session rendered* — 200 identical requests for one
+// account-level enum the page already holds. Exactly the amplification this
+// codebase just finished removing from the mobile save path.
+function SessionRow({ session, units }: { session: Session; units: UnitSystem }) {
   // Completed, non-warm-up sets — the backend's own working-volume rule. The
   // `completed` half was missed when progressive volume landed, so this row
   // showed a session's full tonnage while the detail page showed zero for

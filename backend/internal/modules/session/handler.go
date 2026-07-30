@@ -103,8 +103,8 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	// same reason History's are.
 	loc := time.UTC
 	if tz := q.Get("tz"); tz != "" {
-		l, err := time.LoadLocation(tz)
-		if err != nil {
+		l, ok := parseZone(tz)
+		if !ok {
 			apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
 				"tz must be an IANA timezone name, e.g. Europe/Berlin")
 			return
@@ -129,6 +129,13 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		to = t.AddDate(0, 0, 1) // inclusive of the named day
+	}
+	// History rejects this; so should the listing the same page calls
+	// alongside it, rather than silently returning nothing.
+	if !from.IsZero() && !to.IsZero() && to.Before(from) {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"to must not be before from")
+		return
 	}
 
 	sessions, err := h.repo.List(r.Context(), claims.UserID, Filter{
@@ -170,8 +177,8 @@ func (h *Handler) History(w http.ResponseWriter, r *http.Request) {
 	if tz == "" {
 		tz = "UTC"
 	}
-	loc, err := time.LoadLocation(tz)
-	if err != nil {
+	loc, ok := parseZone(tz)
+	if !ok {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
 			"tz must be an IANA timezone name, e.g. Europe/Berlin")
 		return
@@ -217,6 +224,28 @@ func (h *Handler) History(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	apihttp.WriteJSON(w, http.StatusOK, history)
+}
+
+// parseZone resolves an IANA name that *both* Go and Postgres will accept.
+//
+// The two disagree on exactly one name that matters: Go resolves "Local" to
+// the server's own zone, Postgres rejects it outright. Letting it through
+// meant the handler validated it happily and `AT TIME ZONE` then failed
+// downstream, turning a bad parameter into a 500 — and the contract promises
+// a 400. Every other divergence I could find (Zulu, EST5EDT, US/Pacific,
+// Etc/GMT+5) is accepted by both.
+//
+// "Local" is also meaningless over HTTP: whose local? The caller's zone is
+// the one thing the server can't infer, which is why `tz` exists at all.
+func parseZone(tz string) (*time.Location, bool) {
+	if tz == "" || strings.EqualFold(tz, "Local") {
+		return nil, false
+	}
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		return nil, false
+	}
+	return loc, true
 }
 
 // parseDay reads YYYY-MM-DD as midnight in loc. An empty string is rejected:

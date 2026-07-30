@@ -4,8 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
+	// The history rollup resolves the caller's IANA zone. cmd/api imports this
+	// too, but the dependency belongs to the package that calls LoadLocation —
+	// a second binary, or these tests in a slim image, would break silently.
+	_ "time/tzdata"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -167,8 +172,13 @@ func (r *PostgresRepository) History(ctx context.Context, userID string, f Histo
 	// The same length, ending where this one starts. Comparing March against
 	// a fixed "last 30 days" would move the goalposts every time the range
 	// changed, and the delta would mean nothing.
-	span := f.To.Sub(f.From)
-	previous, err := r.historyTotals(ctx, userID, f.Sport, f.TZ, f.From.Add(-span), f.From)
+	//
+	// Counted in days and stepped with AddDate rather than subtracting a
+	// Duration: March in New York is 743 hours, not 744, so `Add(-span)`
+	// starts the comparison window at 01:00 and quietly drops anything logged
+	// in that first hour — of the number the whole "up 12%" framing rests on.
+	spanDays := int(math.Round(f.To.Sub(f.From).Hours() / 24))
+	previous, err := r.historyTotals(ctx, userID, f.Sport, f.TZ, f.From.AddDate(0, 0, -spanDays), f.From)
 	if err != nil {
 		return nil, err
 	}
@@ -272,7 +282,10 @@ func (r *PostgresRepository) historyTotals(
 		)
 		SELECT
 			(SELECT COUNT(*) FROM scoped)::int,
-			(SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (ended_at - started_at))), 0) FROM scoped)::int,
+			-- Rounded per session, matching historyDays, so summing the days
+			-- equals this exactly. Rounding once here instead would leave the
+			-- calendar and the headline a second or two apart.
+			(SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (ended_at - started_at))::bigint), 0) FROM scoped)::int,
 			(SELECT COUNT(DISTINCT (started_at AT TIME ZONE $4)::date) FROM scoped)::int,
 			COUNT(*) FILTER (WHERE `+workingSet+`)::int,
 			COALESCE(SUM(ss.reps) FILTER (WHERE `+workingSet+`), 0)::int,
