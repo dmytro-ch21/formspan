@@ -35,7 +35,10 @@
     "start": "NODE_OPTIONS=--dns-result-order=ipv4first expo start",
     "android": "NODE_OPTIONS=--dns-result-order=ipv4first expo start --android",
     "ios": "NODE_OPTIONS=--dns-result-order=ipv4first expo start --ios --localhost",
-    "web": "NODE_OPTIONS=--dns-result-order=ipv4first expo start --web"
+    "web": "NODE_OPTIONS=--dns-result-order=ipv4first expo start --web",
+    "build:ios": "eas build --platform ios --profile preview",
+    "build:ios:prod": "eas build --platform ios --profile production",
+    "submit:ios": "eas submit --platform ios --latest"
   },
   "private": true
 }
