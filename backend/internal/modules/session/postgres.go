@@ -849,9 +849,14 @@ func (r *PostgresRepository) BestOneRMs(
 	// Bounded by arithmetic rather than by a row cap.
 	//
 	// The estimate is between 1.00x and 1.44x the weight lifted, so a set can
-	// only be the best if 1.44 x its weight reaches the heaviest set recorded
-	// for that same exercise. Everything below that line is provably beatable
-	// and never has to be fetched.
+	// only be the best if 1.44 x its weight reaches the heaviest *estimable*
+	// set recorded for that same exercise. Everything below that line is
+	// provably beatable and never has to be fetched.
+	//
+	// "Estimable" is load-bearing in that sentence — see the filter below.
+	// The bound is only sound when `heaviest` comes from a row that actually
+	// produces an estimate, because it is the estimate that a candidate has
+	// to beat, not the weight.
 	//
 	// A plain `LIMIT n ORDER BY weight DESC` looks equivalent and isn't: the
 	// order is global across every requested exercise, so a squat history
@@ -870,9 +875,29 @@ func (r *PostgresRepository) BestOneRMs(
 			  AND ss.exercise_id = ANY($2)
 			  AND `+workingSet+`
 			  AND ss.reps IS NOT NULL AND ss.weight_kg IS NOT NULL
-			  -- Effort only ever *adds* effective reps, so anything already
-			  -- past the ceiling on reps alone can never qualify.
-			  AND ss.reps <= $3
+			  -- Effective reps, mirroring EstimateOneRM exactly: RIR is the
+			  -- observed quantity and wins where both are present, RPE
+			  -- converts as 10 minus itself, and a set reporting neither is
+			  -- taken at face value.
+			  --
+			  -- This used to test reps alone, which is a correct exclusion
+			  -- and the wrong *pool*. A set of 10 at 3 RIR is 13 effective:
+			  -- Go refuses to estimate it, but it passed that filter and so
+			  -- became a candidate — and heaviest, above, is a MAX over the
+			  -- candidates. It set the bar at its own weight,
+			  -- contributed no estimate, and every lighter set was pruned in
+			  -- favour of a row that could never score. The athlete's record
+			  -- silently stopped existing.
+			  --
+			  -- Found by review, reproduced against Postgres:
+			  -- 100kg x 10 @ 3 RIR alongside 60kg x 12 @ 0 RIR returned no
+			  -- record at all, where the real best is 86.4kg. Ordinary
+			  -- hypertrophy data, not an edge case.
+			  AND ss.reps + COALESCE(
+			        ss.rir::numeric,
+			        GREATEST(0, 10 - LEAST(ss.rpe, 10)),
+			        0
+			      ) <= $3
 		)
 		SELECT exercise_id, reps, weight_kg, rir, rpe
 		FROM candidate

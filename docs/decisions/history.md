@@ -1383,6 +1383,58 @@ fiction. The fields are now named for what they hold, `last_reps` carries the
 top set's own reps, and a test pins that the top-set evidence describes one
 real set.
 
+## 2026-07-30 — A personal best that silently stopped existing
+
+`BestOneRMs` narrows candidates in SQL before estimating them in Go, because
+Postgres can't run Brzycki. The bound is sound: a set can only win if
+`1.44 × its weight` reaches the heaviest recorded. The **pool** was not.
+
+`heaviest` is a MAX over the candidates, and candidates were chosen on `reps`
+alone — while `EstimateOneRM` refuses on *effective* reps, reps plus reserve.
+So a set of 10 at 3 RIR (13 effective) passed the filter, became a candidate,
+set the bar at its own weight, contributed no estimate of its own, and pruned
+every lighter set in favour of a row that could never score.
+
+Reproduced against Postgres: 100 kg × 10 @ 3 RIR alongside 60 kg × 12 @ 0 RIR
+returns **no 1RM record at all**, for an athlete whose log plainly supports
+86.4 kg. It surfaces in `best_1rm_kg` on the suggestions endpoint and in the
+`estimated_1rm` personal record. Ordinary hypertrophy data — 10 at 3 RIR,
+11 at 2, 12 at 2 all exceed the ceiling once effort folds in — so this was not
+an edge case, and the comment above the query asserted the opposite.
+
+Fixed by testing effective reps in the filter, mirroring `EstimateOneRM`
+exactly: RIR wins over RPE, RPE converts as `10 − rpe`, a set reporting
+neither is taken at face value. A non-estimable row can never be the best, so
+excluding it from the pool outright is both the fix and the simpler statement.
+The added predicate sits in the same Filter position the old one did and
+touches no indexed column, so the access path is unchanged.
+
+### How it was found, and why the tests didn't
+
+Two review subagents — different models, separate contexts, neither seeing the
+other — were given the same diff and independently found this, reproducing it
+with different data. That convergence is the strongest signal available that a
+finding is real rather than a plausible-sounding artifact, and it is the
+argument for running reviewers fresh rather than continuing one that has
+already seen its own conclusions.
+
+The test written specifically to catch this class **passed over it**, twice
+over. It asserted "if a set beats the incumbent, the filter keeps it" with the
+incumbent taken as `heaviest` — a *weight*. What a winner actually has to beat
+is the best surviving *estimate*, and the two coincide only when the heaviest
+candidate is itself estimable, which is exactly what fails here. And the
+fixture's deliberately-unestimable set used 25 reps, which `reps <= 12`
+excluded from the candidate pool entirely — so no fixture row was ever the
+thing that matters: a candidate that cannot be estimated.
+
+A second correction from the same review: the ulp reasoning in that test was
+defending a claim that does not apply. `$4` is inferred as `numeric`, not
+`float8` (the operand `weight_kg` is `NUMERIC(6,2)`), and pgx encodes the
+float as its shortest round-tripping decimal — so Postgres computes
+`42.5 × 1.44` in exact decimal arithmetic. The comment claiming the test
+models "exactly the comparison postgres.go makes" was wrong about the
+arithmetic, even though its conclusion happened to survive.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

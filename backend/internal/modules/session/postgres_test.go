@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"errors"
+	"math"
 	"os"
 	"testing"
 	"time"
@@ -1143,5 +1144,58 @@ func TestRecords_PreservesTheCallersOrder(t *testing.T) {
 	// And the caller's own slice must come back untouched.
 	if asked[0] != exBench || asked[1] != exSquat {
 		t.Errorf("Records mutated the caller's slice: %v", asked)
+	}
+}
+
+// A set that survives the SQL candidate filter but cannot be estimated must
+// not set the bar the other candidates are pruned against.
+//
+// The prefilter keeps rows whose weight × 1.44 reaches `heaviest`, and
+// `heaviest` is a MAX over the candidate pool. The pool used to be chosen on
+// reps alone, while EstimateOneRM refuses on *effective* reps — so a set of 10
+// at 3 RIR (13 effective) became a candidate, set `heaviest` to its own
+// weight, contributed no estimate of its own, and pruned every lighter set in
+// favour of a row that could never score.
+//
+// The result was a personal best that silently stopped existing. Found by
+// review; this is the data that reproduced it.
+func TestBestOneRMs_KeepsTheWinnerWhenTheHeaviestSetIsNotEstimable(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	cleanup(t, pool, "ses-unestimable")
+
+	sets := []Set{
+		// 13 effective reps: passes `reps <= 12`, estimates nothing.
+		{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(10), WeightKg: ptrF(100), RIR: ptrInt(3), Completed: true},
+		// The real best: 60 × 12 at 0 RIR estimates 60 × 36/25 = 86.4.
+		// Its weight is below 100/1.44, so the old pool pruned it.
+		{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(12), WeightKg: ptrF(60), RIR: ptrInt(0), Completed: true},
+	}
+	s := strengthSession("ses-unestimable", "user_unestimable", sets)
+	if _, err := repo.Create(ctx, s); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	got, err := repo.BestOneRMs(ctx, "user_unestimable", []string{exSquat})
+	if err != nil {
+		t.Fatalf("best 1rms: %v", err)
+	}
+
+	best, ok := got[exSquat]
+	if !ok {
+		t.Fatal("no 1RM at all for an athlete whose log supports 86.4kg — " +
+			"the unestimable set pruned the winner")
+	}
+	// And it must agree with the Go implementation over the same sets, which
+	// is the invariant the two share.
+	want, _, hasGo := BestOneRM(sets)
+	if !hasGo {
+		t.Fatal("fixture problem: Go found no estimate either")
+	}
+	if math.Abs(best-want) > 0.01 {
+		t.Errorf("SQL says %.4f, Go says %.4f", best, want)
+	}
+	if math.Abs(best-86.4) > 0.01 {
+		t.Errorf("want 86.4 from the 12 × 60, got %.4f", best)
 	}
 }
