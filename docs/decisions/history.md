@@ -1383,6 +1383,62 @@ fiction. The fields are now named for what they hold, `last_reps` carries the
 top set's own reps, and a test pins that the top-set evidence describes one
 real set.
 
+## 2026-07-30 — Tests for the strength arithmetic's seams
+
+The strength maths was well covered *within* each function and not at all
+*between* them. `onerm_test.go` pins what `EstimateOneRM` returns;
+`progression_test.go` pins what `Progress` decides. Neither covered a constant
+in SQL that is only correct because of a bound in Go, or a domain rule written
+out twice in two files — which is the shape that has bitten this codebase
+before, because each side stays internally consistent while drifting from the
+other.
+
+**The one that matters most.** `BestOneRMs` cannot run Brzycki in Postgres, so
+it narrows candidates with `weight_kg * 1.44 >= heaviest` and estimates the
+survivors in Go. That prefilter is sound only if no set can estimate above
+`weight × 1.44` — otherwise a genuine personal best is thrown away before Go
+ever sees it, with no error anywhere. Nothing checked it.
+
+Writing that test surfaced something real. The obvious assertion —
+`est <= weight × multiplier` — **fails**: `EstimateOneRM` computes
+`w * 36 / (37 - r)`, which for w=42.5, r=12 is 1530/25 = 61.2 exactly, while
+the query passes the pre-divided constant and `42.5 * (36.0/25.0)` is
+61.199999999999996. An estimate can land one unit in the last place above its
+own bound.
+
+The temptation was an epsilon. Instead the test asserts the property that
+actually protects records: **if a set would beat the incumbent, the filter
+keeps it.** The ulp gap can only swallow an exact tie, and `BestOneRM`
+discards ties anyway (`est <= best` skips), so no record is reachable through
+it. Stating the implication says that precisely; an epsilon would have hidden
+it.
+
+Also added: `BestOneRM` (Go) against `BestOneRMs` (SQL) over the same history,
+the same pairing `TestHistoryAgreesWithSummarise` established; an agreement
+test between `EstimateOneRM`'s RPE conversion and `reserveOf`'s, recovered
+from outside since the estimator's is unexported; the increment table pinned
+explicitly; every branch that returns a weight asserted to return a loadable
+1.25kg multiple; and a deload asserted to actually reduce the load.
+
+Each was mutation-verified — Brzycki→Epley, the SQL constant derived from the
+wrong ceiling, the RPE scale shifted half a point, RIR/RPE precedence swapped,
+the default increment raised, `roundToPlate` dropped from `add_load`, the
+deload guard loosened, and the SQL prefilter over-narrowed. All caught.
+
+One mutation was **not** caught — loosening the RPE clamp from `min(rpe, 10)`
+to `min(rpe, 11)` — and that is correct rather than a gap: the outer
+`math.Max(0, …)` absorbs it, so the two are the same function. Worth recording
+because "the test didn't catch it" and "the test is weak" are not the same
+finding, and treating the first as the second is how tests get padded with
+assertions that pin nothing.
+
+A fixture bug of my own, for the record: the agreement test's data was built so
+the best estimate would be the 12 × 100 (144), and it came back 145.38. The two
+implementations agreed perfectly — my arithmetic was wrong. 8 × 105 at 3 RIR is
+eleven effective reps, 105 × 36/26 = 145.38, beating both the 140 single and
+the 12 × 100. A better illustration than the one intended: the best evidence of
+a maximum came from neither the heaviest set nor the longest.
+
 ## 2026-07-30 — A personal best that silently stopped existing
 
 `BestOneRMs` narrows candidates in SQL before estimating them in Go, because
@@ -1419,10 +1475,8 @@ argument for running reviewers fresh rather than continuing one that has
 already seen its own conclusions.
 
 The test written specifically to catch this class **passed over it**, twice
-over. Note where that test lives: `strength_test.go` on the branch
-`feature/strength-calc-tests`, which is **not merged**. Nothing described in
-the next two paragraphs is in this tree — go to that branch to find it, and
-the corrections below are still *pending* there rather than applied.
+over — and the corrections described here are **applied in this same branch**,
+in `strength_test.go`.
 
 It asserted "if a set beats the incumbent, the filter keeps it" with the
 incumbent taken as `heaviest` — a *weight*. What a winner actually has to beat
@@ -1432,15 +1486,57 @@ fixture's deliberately-unestimable set used 25 reps, which `reps <= 12`
 excluded from the candidate pool entirely — so no fixture row was ever the
 thing that matters: a candidate that cannot be estimated.
 
-A second correction, **still to be applied on that branch**: the ulp reasoning
-in that test is defending a claim that does not apply. `$4` is inferred as `numeric`, not
+A second correction, applied alongside: the ulp reasoning in that test was
+defending a claim that does not apply. `$4` is inferred as `numeric`, not
 `float8` (the operand `weight_kg` is `NUMERIC(6,2)`), and pgx encodes the
 float as its shortest round-tripping decimal — so Postgres computes
 `42.5 × 1.44` in exact decimal arithmetic. The comment claiming the test
 models "exactly the comparison postgres.go makes" is wrong about the
-arithmetic, even though its conclusion happens to survive. Both that comment
-and the weight-as-incumbent property must be fixed before
-`feature/strength-calc-tests` merges, or they land as written.
+arithmetic, even though its conclusion happened to survive. Both that comment
+and the weight-as-incumbent property are now corrected.
+
+## 2026-07-30 — Correcting the tests that missed the bug
+
+Follow-up to the 1RM prefilter fix, on the branch where those tests live.
+
+**The property was wrong.** `TestOneRMBound_NeverDiscardsASetThatWouldWin`
+asserted "if a set beats the incumbent, the filter keeps it" with the incumbent
+taken as `heaviest` — a *weight*. What a winner actually has to beat is the
+best surviving **estimate**, and the two coincide only when the heaviest
+candidate is itself estimable. That is precisely the case the bug broke, which
+is why the test sailed past it. It now computes the best estimate among the
+rows the filter would keep, and asserts against that.
+
+**The agreement test's fixture was the wrong shape.** Its deliberately
+"estimable by neither" set used 25 reps — which a reps-only candidate filter
+excludes from the pool entirely, so no fixture row was ever the thing that
+matters: *a candidate that cannot be estimated*. Verified by reinstating the
+bug and watching the test still pass. Added a 12 × 180 at 3 RIR row (15
+effective: passes a reps-only filter, scores nothing, and being heaviest sets
+the bar). The test now fails on the old predicate with `SQL says 140.0000, Go
+says 145.3846` and passes on the fix.
+
+**The ulp comment was wrong about the arithmetic.** `$4` is inferred as
+`numeric`, not `float8` — the operand `weight_kg` is `NUMERIC(6,2)` — and pgx
+encodes the float as its shortest round-tripping decimal. Postgres computes
+`42.5 × 1.44` in exact decimal with a 0.0001 margin, so the float64 hazard the
+comment described never arises in the query at all. The Go-side assertion is
+still worth making, because Go is where the estimate is computed; the comment
+now says which is which.
+
+Two smaller ones: `approx()` is a 0.05 *absolute* tolerance, so using it to pin
+a constant whose whole job is to be exactly 36/25 allowed a 3.5% drift (a
+ceiling of 11 gives 1.3846 and would have slipped through at a tenth of the
+threshold) — now an exact comparison. And the deload test `continue`d on any
+non-deload code, so a change to `stallSessions` could have turned all seven
+iterations into skips while the test stayed green — it now counts how many
+reached the branch and fails if none did.
+
+The through-line: every one of these tests asserted something *true*. They were
+weak in what they chose to assert, or in the data they asserted it over, which
+no amount of running them would reveal. Mutation testing caught the ones where
+a line was wrong; only reading the reasoning caught the ones where the premise
+was.
 
 ## Open items / known gaps as of this entry
 
