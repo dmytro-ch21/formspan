@@ -294,7 +294,7 @@ function Weeks({ history, units }: { history: History; units: UnitSystem }) {
     <View style={styles.card}>
       <RNView style={styles.weeksHead}>
         <Text style={styles.weeksTitle}>
-          Weekly {metric === 'volume' ? 'volume' : 'time'}
+          Weekly {metric}
         </Text>
         <Text style={styles.footText}>
           {metric === 'volume' ? formatVolume(total, units) : formatDuration(total * 60)} total
@@ -302,7 +302,7 @@ function Weeks({ history, units }: { history: History; units: UnitSystem }) {
       </RNView>
 
       <RNView style={styles.bars} accessible accessibilityRole="image"
-        accessibilityLabel={`Weekly ${metric === 'volume' ? 'volume' : 'time'} over ${weeks.length} weeks. ${
+        accessibilityLabel={`Weekly ${metric} over ${weeks.length} weeks. ${
           weeks.filter((w) => w.sessions > 0).length
         } of ${weeks.length} weeks trained.`}
       >

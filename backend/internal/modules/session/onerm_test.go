@@ -35,6 +35,12 @@ func TestEstimateOneRM(t *testing.T) {
 		{"10 reps with 3 in reserve exceeds the ceiling", 10, 100, ptrInt(3), nil, 0, false},
 		{"12 effective reps is still in", 9, 100, ptrInt(3), nil, 144, true},
 
+		// Half steps are real: the column is NUMERIC(3,1) because the scale is
+		// used in halves, and rounding them away made 8.5 mean 8.
+		{"RPE 8.5 sits between 8 and 9", 5, 100, nil, ptrF(8.5), 118.03, true},
+		{"RPE 9.5 sits between 9 and 10", 5, 100, nil, ptrF(9.5), 114.29, true},
+		{"RPE 9", 5, 100, nil, ptrF(9), 116.13, true},
+
 		// Nonsense in, nothing out.
 		{"no reps", 0, 100, nil, nil, 0, false},
 		{"no weight", 5, 0, nil, nil, 0, false},
@@ -72,6 +78,30 @@ func TestEstimateOneRM_MonotonicInRepsAndWeight(t *testing.T) {
 	heavy, _ := EstimateOneRM(5, 110, nil, nil)
 	if heavy <= light {
 		t.Errorf("more weight at the same reps must estimate higher: %.2f vs %.2f", heavy, light)
+	}
+}
+
+// Half a point of RPE has to move the answer, or recording it is theatre.
+func TestEstimateOneRM_HalfStepsAreDistinct(t *testing.T) {
+	var prev float64
+	// Descending RPE means more reserve, so the estimate must rise strictly.
+	for _, rpe := range []float64{10, 9.5, 9, 8.5, 8, 7.5, 7} {
+		v := rpe
+		got, ok := EstimateOneRM(5, 100, nil, &v)
+		if !ok {
+			t.Fatalf("RPE %v should be estimable", rpe)
+		}
+		if got <= prev {
+			t.Errorf("RPE %v estimated %.2f, not above the stricter RPE's %.2f", rpe, got, prev)
+		}
+		prev = got
+	}
+	// And a half step must never round up into the next whole point, which is
+	// the direction that over-states strength.
+	half, _ := EstimateOneRM(5, 100, nil, ptrF(8.5))
+	whole, _ := EstimateOneRM(5, 100, nil, ptrF(8))
+	if half >= whole {
+		t.Errorf("RPE 8.5 (%.2f) must estimate below RPE 8 (%.2f)", half, whole)
 	}
 }
 

@@ -159,7 +159,7 @@ export function byWeek(from: string, to: string, days: HistoryDay[]): WeekBucket
 /**
  * Which measure this period is best described by.
  *
- * Tonnage is a strength idea. A month of BJJ has none, and a chart insisting
+ * Volume is a strength idea. A month of BJJ has none, and a chart insisting
  * on it would draw a flat zero line and call it training. Time is the one
  * measure every discipline shares, so it's the fallback rather than a
  * special case per sport.

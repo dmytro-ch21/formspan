@@ -562,7 +562,8 @@ function ExerciseBlock({
               <span className="whitespace-nowrap font-medium text-lime">
                 Est. 1RM {formatEstimate(suggestion.estimated_1rm_kg, units)}
                 {suggestion.best_1rm_kg != null &&
-                  suggestion.estimated_1rm_kg >= suggestion.best_1rm_kg &&
+                  formatEstimate(suggestion.estimated_1rm_kg, units) ===
+                    formatEstimate(suggestion.best_1rm_kg, units) &&
                   " · your best"}
               </span>
             )}

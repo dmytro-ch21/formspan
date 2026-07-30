@@ -216,13 +216,21 @@ export default function HistoryPage() {
   }
 
   const rows = useMemo(() => page?.sessions ?? [], [page]);
-  // In-progress sessions are the newest, so they're on the first page by
-  // definition. Shown only there rather than repeated under every page.
+  // Lifted into their own section only on the unfiltered first page, where
+  // "what's still open" is a useful thing to put at the top.
   const live = useMemo(
     () => (offset === 0 && !query ? rows.filter((s) => s.ended_at === null) : []),
     [rows, offset, query],
   );
-  const shown = useMemo(() => rows.filter((s) => s.ended_at !== null), [rows]);
+  // Anywhere else they stay in the list rather than being filtered out of it.
+  // Removing them unconditionally meant a search for an in-progress session
+  // counted it in the total and then rendered "no sessions matching" — the
+  // page contradicting itself about a session that exists. SessionRow already
+  // badges them "in progress", so they read correctly inline.
+  const shown = useMemo(
+    () => (live.length > 0 ? rows.filter((s) => s.ended_at !== null) : rows),
+    [rows, live],
+  );
   const total = page?.total ?? 0;
 
   const t = history?.totals;
@@ -341,7 +349,11 @@ export default function HistoryPage() {
                   without a number that reads as missing data. */}
               <h2 className="eyebrow">
                 {day ? formatDayLong(day) : "Sessions"}
-                {total > 0 && <span className="ml-2 text-text-dim">{total}</span>}
+                {total > 0 && (
+                  <span className="ml-2 text-text-dim">
+                    {total} {total === 1 ? "session" : "sessions"}
+                  </span>
+                )}
               </h2>
               <div className="flex flex-wrap items-center gap-2">
                 <label className="relative">
@@ -366,6 +378,18 @@ export default function HistoryPage() {
                 )}
               </div>
             </div>
+
+            {/* Always mounted, so narrowing a search, changing page and the
+                busy state all announce. The Pager's own region unmounts as
+                soon as there's one page, which is exactly when a search has
+                just succeeded. */}
+            <p role="status" aria-live="polite" className="sr-only">
+              {listLoading
+                ? "Loading sessions"
+                : listFailed
+                  ? "Couldn't load sessions"
+                  : `${total} ${total === 1 ? "session" : "sessions"}${query ? ` matching ${query}` : ""}`}
+            </p>
 
             {listFailed ? (
               <p
@@ -393,7 +417,15 @@ export default function HistoryPage() {
               </ul>
             )}
 
-            <Pager total={total} offset={offset} count={rows.length} onOffset={setOffset} />
+            {/* Fed from the server's echoed offset, not local state — local
+                state moves on click, so the range briefly read "41–60 of 43"
+                before the page landed, and announced it via aria-live. */}
+            <Pager
+              total={total}
+              offset={page?.offset ?? 0}
+              count={rows.length}
+              onOffset={setOffset}
+            />
           </section>
         </div>
       )}
@@ -725,7 +757,7 @@ function Pager({
 }) {
   if (total <= PAGE_SIZE) return null;
   const first = total === 0 ? 0 : offset + 1;
-  const last = offset + count;
+  const last = Math.min(offset + count, total);
   return (
     <div className="flex items-center justify-between gap-3 pt-1">
       <p className="text-xs text-text-dim" aria-live="polite">

@@ -412,7 +412,7 @@ export default function SessionScreen() {
             <Stat label="Time" value={formatElapsed(elapsed)} />
             <Stat label="Sets" value={String(volume.working_sets)} />
             <Stat label="Reps" value={String(volume.total_reps)} />
-            {/* Tonnage is a result, not a readout. Mid-session it's a
+            {/* Volume is a result, not a readout. Mid-session it's a
                 number nobody acts on — you don't change the next set
                 because the running total crossed 1,500kg — so it appears
                 once the session is done and the figure means something. */}
@@ -520,7 +520,8 @@ export default function SessionScreen() {
                         <Text style={styles.hintOneRm}>
                           Est. 1RM {formatEstimate(hint.estimated_1rm_kg, unitFor(g.exerciseID))}
                           {hint.best_1rm_kg != null &&
-                            hint.estimated_1rm_kg >= hint.best_1rm_kg &&
+                            formatEstimate(hint.estimated_1rm_kg, unitFor(g.exerciseID)) ===
+                              formatEstimate(hint.best_1rm_kg, unitFor(g.exerciseID)) &&
                             ' · your best'}
                         </Text>
                       )}

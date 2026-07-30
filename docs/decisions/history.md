@@ -1027,6 +1027,38 @@ today shows last session's set rather than today's. A per-session estimate,
 and a "new best" moment when a logged set beats the record, are the obvious
 next steps and aren't here.
 
+Two things review changed materially, both worth recording because the first
+instinct was wrong in each case.
+
+**The personal-best search was capped by row count, and that silently loses
+bests.** `ORDER BY weight_kg DESC LIMIT 5000` looks safe and isn't: the order
+is global across every requested exercise, so a squat history eats the budget
+and the lateral raises fall off the end entirely — the failure is biased
+against light lifts and gets worse the longer someone uses the app. Even
+per-exercise a cap can cut the winner, because 12×100 (144) beats 1×140 (140).
+
+Replaced with a bound that's arithmetic rather than arbitrary. The estimate
+lies between 1.00× and 1.44× the weight lifted (Brzycki at the 12-rep
+ceiling), so a set can only win if 1.44 × its weight reaches the heaviest set
+for that exercise. Everything below that line is provably beatable and is
+never fetched. No cap, and no way to lose a best.
+
+**RPE half-steps were being rounded away, in the wrong direction.** The column
+is `NUMERIC(3,1)` precisely because the scale is used in halves, and rounding
+made 8.5 mean 8 — then rounded halves *up*, which raises the estimate, against
+this code's own stated bias toward under-stating. Reserve is fractional now;
+Brzycki takes fractional reps without complaint.
+
+Also from review: offset paging contradicted `api-conventions.md`, which said
+"cursor everywhere, never offsets" — written before any list endpoint existed.
+Rather than change the code, the doc now describes both shapes and when each
+applies: offset+total for a bounded list a *person browses* (the total is the
+point, and a cursor can't give one), cursor for anything a *machine drains*,
+where re-reading a row is a correctness bug. And the contract no longer claims
+paging is stable across writes, because it isn't — a session synced mid-page
+shifts every later row down one.
+
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

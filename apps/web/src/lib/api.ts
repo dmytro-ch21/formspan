@@ -647,13 +647,6 @@ export async function listSessionsPage(
   return { sessions: b.sessions ?? [], total: b.total ?? 0, limit: b.limit ?? 0, offset: b.offset ?? 0 };
 }
 
-export async function listSessions(
-  getToken: Token,
-  opts: SessionQuery = {},
-  signal?: AbortSignal,
-): Promise<Session[]> {
-  return (await listSessionsPage(getToken, opts, signal)).sessions;
-}
 
 export type HistoryTotals = {
   sessions: number;

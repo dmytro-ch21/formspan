@@ -106,7 +106,11 @@ export default function ExerciseDetailScreen() {
               </Text>
               {stats.best_1rm_kg != null && (
                 <Text style={styles.oneRmBest}>
-                  {stats.estimated_1rm_kg >= stats.best_1rm_kg
+                  {/* Compared at display precision, not raw kg: 143.6 and
+                      144.0 both render "144kg", and showing the same number
+                      twice with "best" beside it reads as a regression. */}
+                  {formatEstimate(stats.estimated_1rm_kg, units) ===
+                  formatEstimate(stats.best_1rm_kg, units)
                     ? 'your best'
                     : `best ${formatEstimate(stats.best_1rm_kg, units)}`}
                 </Text>
@@ -182,6 +186,9 @@ const styles = StyleSheet.create({
   oneRm: {
     flexDirection: 'row',
     alignItems: 'baseline',
+    // Text scales with the OS setting; without wrap the three children get
+    // squeezed and break mid-word at large Dynamic Type.
+    flexWrap: 'wrap',
     gap: 8,
     marginTop: 12,
     paddingTop: 12,

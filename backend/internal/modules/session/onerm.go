@@ -35,17 +35,22 @@ func EstimateOneRM(reps int, weightKg float64, rir *int, rpe *float64) (float64,
 		return 0, false
 	}
 
-	effective := reps
+	effective := float64(reps)
 	switch {
 	case rir != nil:
-		effective += *rir
+		effective += float64(*rir)
 	case rpe != nil:
 		// RPE 10 is nothing left; each point below is roughly one more rep.
-		// Values above 10 are impossible and clamped rather than trusted.
-		reserve := int(math.Round(10 - math.Min(*rpe, 10)))
-		if reserve > 0 {
-			effective += reserve
-		}
+		//
+		// Kept fractional rather than rounded. The schema stores RPE as
+		// NUMERIC(3,1) precisely because the scale is used in half steps, and
+		// rounding threw that away — 8.5 and 8 gave identical answers. Worse,
+		// it rounded half *up*, which raises the estimate, against this
+		// function's own bias toward under-stating. Brzycki takes fractional
+		// reps without complaint.
+		//
+		// Above 10 is impossible; clamped rather than trusted.
+		effective += math.Max(0, 10-math.Min(*rpe, 10))
 	}
 
 	if effective > maxEstimableReps {
@@ -57,11 +62,15 @@ func EstimateOneRM(reps int, weightKg float64, rir *int, rpe *float64) (float64,
 		// did.
 		return weightKg, true
 	}
-	return weightKg * 36 / (37 - float64(effective)), true
+	return weightKg * 36 / (37 - effective), true
 }
 
 // BestOneRM returns the highest estimate over a set of performed sets, and
 // which set produced it.
+//
+// Used by the session-level view and by tests; the repository's cross-session
+// lookup applies the same rule in BestOneRMs against rows it fetches, because
+// it never has whole Sets in hand.
 //
 // The best estimate is *not* simply the heaviest set: 5×100 (112.5kg) beats a
 // single at 110. So every qualifying set is evaluated rather than pre-filtered

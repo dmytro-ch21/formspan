@@ -74,11 +74,14 @@ func WriteError(w http.ResponseWriter, status int, code, message string) {
 // absent, so every aborted fetch — and the web history page aborts one on
 // every filter change — logged an ERROR and returned 500 to a caller that had
 // already hung up. Nine call sites each had their own copy of the two lines
-// this replaces; nine places to forget it.
+// this replaces; twelve places to forget it.
 //
 // `module` prefixes the log line, matching what each handler wrote before.
 func WriteInternal(w http.ResponseWriter, r *http.Request, module string, err error) {
-	if ClientGone(err) {
+	// The request's own context has to agree. A context.Canceled arising
+	// internally — a pool shutting down, some future errgroup — would
+	// otherwise vanish from the logs entirely with nothing recording why.
+	if ClientGone(err) && r.Context().Err() != nil {
 		// Nothing failed and nobody is listening. Recorded as 499 so it stays
 		// visible in the request log without counting as a server error.
 		w.WriteHeader(StatusClientClosed)

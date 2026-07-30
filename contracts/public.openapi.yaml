@@ -430,7 +430,8 @@ components:
 
         Branch on `code`; `reason` is prose and is not part of the contract.
       required: [exercise_id, last_performed_at, last_reps, last_weight_kg,
-                 last_rir, last_rpe, suggested_weight_kg, code, reason]
+                 last_rir, last_rpe, suggested_weight_kg, code, reason,
+                 estimated_1rm_kg, best_1rm_kg]
       properties:
         exercise_id: { type: string, example: back-squat }
         last_performed_at:
@@ -538,7 +539,11 @@ components:
           items: { $ref: "#/components/schemas/Session" }
         total:
           type: integer
-          description: Sessions matching the filter, ignoring limit/offset.
+          description: >
+            Sessions matching the filter, ignoring limit/offset. Counted with
+            the same predicate in the same request. Not the same snapshot —
+            a session written between the count and the page can move it by
+            one.
         limit: { type: integer }
         offset: { type: integer }
 
@@ -626,14 +631,6 @@ components:
       properties:
         session: { $ref: "#/components/schemas/Session" }
         volume: { $ref: "#/components/schemas/Volume" }
-
-    SessionList:
-      type: object
-      required: [sessions]
-      properties:
-        sessions:
-          type: array
-          items: { $ref: "#/components/schemas/Session" }
 
     Media:
       type: object
@@ -1369,7 +1366,12 @@ paths:
         - name: offset
           in: query
           schema: { type: integer, minimum: 0, default: 0 }
-          description: Rows to skip. Ordering is stable (started_at, then id), so a session can't repeat across pages or be skipped.
+          description: >
+            Rows to skip. Ordering is a total order (`started_at DESC, id`), so
+            paging is deterministic against an unchanging set. It is not stable
+            across writes: a session added while you page shifts every later
+            row down one, so a row can repeat. Use the date filters to pin a
+            range if that matters.
       responses:
         "200":
           description: >

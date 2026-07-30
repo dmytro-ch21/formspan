@@ -51,7 +51,7 @@ export function VolumeTrend({
     <section className="flex flex-col gap-3" aria-labelledby="trend-heading">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 id="trend-heading" className="eyebrow">
-          Weekly {metric === "volume" ? "volume" : "time"}
+          Weekly {metric}
         </h2>
         <p className="text-[0.6875rem] text-text-dim">
           {trained} of {weeks.length} weeks trained · peak {format(peak)}
@@ -69,7 +69,7 @@ export function VolumeTrend({
             // measure — BJJ under a volume axis — and calling that "no
             // training" is the one thing this label must never say.
             const detail =
-              v > 0 ? format(v) : w.sessions > 0 ? `${sessions}, no ${metric === "volume" ? "volume" : "time"} logged` : "no training";
+              v > 0 ? format(v) : w.sessions > 0 ? `${sessions}, no ${metric} logged` : "no training";
             const label = `Week of ${monthShort(w.start)} ${Number(w.start.slice(8))}: ${detail}`;
             return (
               <li

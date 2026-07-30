@@ -23,10 +23,10 @@ import (
 const defaultLimit = 50
 const maxLimit = 200
 
-// maxOneRMScan bounds the candidate sets a personal-best lookup will consider.
-// Ordered heaviest first, so the cap trims the sets least likely to be anyone's
-// best — five thousand covers years of training across a whole workout.
-const maxOneRMScan = 5000
+// maxOneRMMultiplier is the largest factor EstimateOneRM can apply: Brzycki at
+// the 12-effective-rep ceiling is 36/25. It's what lets the candidate search
+// be bounded *exactly* rather than by a guessed row cap — see BestOneRMs.
+const maxOneRMMultiplier = 36.0 / (37.0 - float64(maxEstimableReps))
 
 // likeEscaper neutralises LIKE's own wildcards so a search for "50%" means
 // the characters, not "anything". Mirrors the exercise catalog's, which is
@@ -126,13 +126,11 @@ func (r *PostgresRepository) List(ctx context.Context, userID string, f Filter) 
 
 	whereSQL := strings.Join(where, " AND ")
 
-	// Counted before the page is fetched, with the identical predicate, so
-	// "showing 21-40 of 137" can never disagree with the rows below it.
-	var total int
-	if err := r.pool.QueryRow(ctx,
-		`SELECT COUNT(*)::int FROM sessions s WHERE `+whereSQL, args...).Scan(&total); err != nil {
-		return nil, fmt.Errorf("session: count: %w", err)
-	}
+	// Counted with the identical predicate in the same request, so the total
+	// and the rows describe the same filter. Not the same *snapshot* — these
+	// are two statements, so a session synced between them can shift the
+	// count by one. That drift is invisible in practice and far cheaper than
+	// holding a repeatable-read transaction open across both.
 
 	limit := f.Limit
 	if limit <= 0 {
@@ -177,6 +175,19 @@ func (r *PostgresRepository) List(ctx context.Context, userID string, f Filter) 
 	}
 	if err := r.attachSets(ctx, sessions, ids); err != nil {
 		return nil, err
+	}
+
+	// A first page that didn't fill *is* the total — no count needed. Worth
+	// the branch because the COUNT is the expensive half under an
+	// `exercise_id` filter: the paged SELECT walks the index and stops at
+	// `limit`, while the count has to evaluate the EXISTS subquery against
+	// every session the athlete has. This covers the common case for free.
+	total := offset + len(sessions)
+	if offset > 0 || len(sessions) == limit {
+		if err := r.pool.QueryRow(ctx,
+			`SELECT COUNT(*)::int FROM sessions s WHERE `+whereSQL, args[:len(args)-2]...).Scan(&total); err != nil {
+			return nil, fmt.Errorf("session: count: %w", err)
+		}
 	}
 	return &SessionPage{Sessions: sessions, Total: total, Limit: limit, Offset: offset}, nil
 }
@@ -759,19 +770,36 @@ func (r *PostgresRepository) BestOneRMs(
 		return out, nil
 	}
 
+	// Bounded by arithmetic rather than by a row cap.
+	//
+	// The estimate is between 1.00x and 1.44x the weight lifted, so a set can
+	// only be the best if 1.44 x its weight reaches the heaviest set recorded
+	// for that same exercise. Everything below that line is provably beatable
+	// and never has to be fetched.
+	//
+	// A plain `LIMIT n ORDER BY weight DESC` looks equivalent and isn't: the
+	// order is global across every requested exercise, so a squat history
+	// eats the budget and the lateral raises fall off the end entirely. And
+	// even per-exercise a cap can cut the winner, because 12x100 (144) beats
+	// 1x140 (140). This filter cannot.
 	rows, err := r.pool.Query(ctx, `
-		SELECT ss.exercise_id, ss.reps, ss.weight_kg, ss.rir, ss.rpe
-		FROM session_sets ss
-		JOIN sessions s ON s.id = ss.session_id
-		WHERE s.user_id = $1
-		  AND ss.exercise_id = ANY($2)
-		  AND `+workingSet+`
-		  AND ss.reps IS NOT NULL AND ss.weight_kg IS NOT NULL
-		  -- Effort only ever *adds* effective reps, so anything already past
-		  -- the ceiling on reps alone can never qualify.
-		  AND ss.reps <= $3
-		ORDER BY ss.weight_kg DESC
-		LIMIT $4`, userID, exerciseIDs, maxEstimableReps, maxOneRMScan)
+		WITH candidate AS (
+			SELECT ss.exercise_id, ss.reps, ss.weight_kg, ss.rir, ss.rpe,
+			       MAX(ss.weight_kg) OVER (PARTITION BY ss.exercise_id) AS heaviest
+			FROM session_sets ss
+			JOIN sessions s ON s.id = ss.session_id
+			WHERE s.user_id = $1
+			  AND ss.exercise_id = ANY($2)
+			  AND `+workingSet+`
+			  AND ss.reps IS NOT NULL AND ss.weight_kg IS NOT NULL
+			  -- Effort only ever *adds* effective reps, so anything already
+			  -- past the ceiling on reps alone can never qualify.
+			  AND ss.reps <= $3
+		)
+		SELECT exercise_id, reps, weight_kg, rir, rpe
+		FROM candidate
+		WHERE weight_kg * $4 >= heaviest`,
+		userID, exerciseIDs, maxEstimableReps, maxOneRMMultiplier)
 	if err != nil {
 		return nil, fmt.Errorf("session: best 1rm: %w", err)
 	}
@@ -782,6 +810,11 @@ func (r *PostgresRepository) BestOneRMs(
 		var set Set
 		if err := rows.Scan(&id, &set.Reps, &set.WeightKg, &set.RIR, &set.RPE); err != nil {
 			return nil, fmt.Errorf("session: best 1rm scan: %w", err)
+		}
+		if set.Reps == nil || set.WeightKg == nil {
+			// The predicate above excludes these, but one edit to it would
+			// turn a filter change into a panic.
+			continue
 		}
 		est, ok := EstimateOneRM(*set.Reps, *set.WeightKg, set.RIR, set.RPE)
 		if ok && est > out[id] {

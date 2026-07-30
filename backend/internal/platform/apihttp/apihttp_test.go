@@ -40,8 +40,14 @@ func TestClientGone(t *testing.T) {
 func TestWriteInternal_AbortIsNotAServerError(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/profile", nil)
 
+	// A genuinely aborted request: the error says cancelled *and* the
+	// request's own context agrees.
+	ctx, cancel := context.WithCancel(req.Context())
+	cancel()
+	aborted := req.WithContext(ctx)
+
 	gone := httptest.NewRecorder()
-	WriteInternal(gone, req, "profile", fmt.Errorf("profile: scan: %w", context.Canceled))
+	WriteInternal(gone, aborted, "profile", fmt.Errorf("profile: scan: %w", context.Canceled))
 	if gone.Code != StatusClientClosed {
 		t.Errorf("aborted request: status %d, want %d", gone.Code, StatusClientClosed)
 	}
@@ -49,6 +55,15 @@ func TestWriteInternal_AbortIsNotAServerError(t *testing.T) {
 	// would be misleading if it were somehow read.
 	if gone.Body.Len() != 0 {
 		t.Errorf("aborted request wrote a body: %q", gone.Body.String())
+	}
+
+	// A cancellation with no corroboration from the request is *not* a client
+	// hanging up — it's something internal cancelling, and swallowing it would
+	// erase the only record of why. Must still be a logged 500.
+	internal := httptest.NewRecorder()
+	WriteInternal(internal, req, "profile", fmt.Errorf("pool closing: %w", context.Canceled))
+	if internal.Code != http.StatusInternalServerError {
+		t.Errorf("internal cancellation: status %d, want 500 — a live request means nobody hung up", internal.Code)
 	}
 
 	real := httptest.NewRecorder()
