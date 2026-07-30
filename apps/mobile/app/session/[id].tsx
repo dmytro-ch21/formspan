@@ -7,7 +7,7 @@ import { RestTimerBar, useRestTimer } from '@/components/RestTimer';
 import { Text, View } from '@/components/Themed';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { vola } from '@/constants/Colors';
-import { restSecondsFor } from '@/lib/rest';
+import { formatElapsed, readRestSeconds, writeRestSeconds } from '@/lib/rest';
 import {
   distanceInputUnit,
   formatWeight,
@@ -74,6 +74,25 @@ export default function SessionScreen() {
   const [catalog, setCatalog] = useState<Map<string, Exercise>>(new Map());
   const [suggestions, setSuggestions] = useState<Map<string, Suggestion>>(new Map());
   const timerState = useRestTimer();
+
+  /**
+   * How long you've been training. Derived from started_at on every tick
+   * rather than accumulated, for the same reason the rest timer is: a
+   * counter stops when the JS thread is throttled, and a session spends most
+   * of its life with the phone in a pocket.
+   */
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!session) return;
+    const from = new Date(session.started_at).getTime();
+    const to = session.ended_at ? new Date(session.ended_at).getTime() : null;
+    const tick = () => setElapsed(((to ?? Date.now()) - from) / 1000);
+    tick();
+    // A finished session's duration is fixed, so there's nothing to tick.
+    if (to !== null) return;
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [session]);
   const { units } = useUnits();
   // Per-exercise overrides: a lifter who thinks in kilograms still faces a
   // leg press marked in pounds, and converting in your head at the moment
@@ -290,9 +309,17 @@ export default function SessionScreen() {
     if (now) startRest(exerciseID);
   }
 
-  function startRest(exerciseID: string) {
+  /**
+   * Starts rest for one exercise, at that exercise's own duration.
+   *
+   * The duration is per exercise and editable — a triple on a heavy squat
+   * and a set of lateral raises are not the same wait, and the movement
+   * pattern's default is a starting point rather than an answer.
+   */
+  async function startRest(exerciseID: string) {
     const ex = catalog.get(exerciseID);
-    timerState.start(restSecondsFor(ex), ex?.name ?? 'Rest');
+    const seconds = userId ? await readRestSeconds(userId, ex, exerciseID) : 90;
+    timerState.start(seconds, ex?.name ?? 'Rest', exerciseID);
   }
 
   function removeSet(index: number) {
@@ -343,7 +370,8 @@ export default function SessionScreen() {
       >
         {volume && (
           <View style={styles.summary}>
-            <Stat label="Working sets" value={String(volume.working_sets)} />
+            <Stat label="Time" value={formatElapsed(elapsed)} />
+            <Stat label="Sets" value={String(volume.working_sets)} />
             <Stat label="Reps" value={String(volume.total_reps)} />
             <Stat
               label="Tonnage"
@@ -365,6 +393,18 @@ export default function SessionScreen() {
             <View key={g.exerciseID + g.indices[0]} style={styles.group}>
               <View style={styles.groupHead}>
                 <Text style={styles.groupName}>{exercise?.name ?? g.exerciseID}</Text>
+                {!finished && (
+                  <Pressable
+                    onPress={() => startRest(g.exerciseID)}
+                    hitSlop={10}
+                    style={styles.restChip}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Start rest for ${exercise?.name ?? 'this exercise'}`}
+                    testID={`rest-${g.exerciseID}`}
+                  >
+                    <Text style={styles.restChipText}>Rest</Text>
+                  </Pressable>
+                )}
                 {!finished && (
                   <Pressable
                     onPress={() => toggleUnitFor(g.exerciseID)}
@@ -555,7 +595,16 @@ export default function SessionScreen() {
         <RestTimerBar
           rest={timerState.rest}
           remaining={timerState.remaining}
-          onAdjust={timerState.adjust}
+          onAdjust={(delta) => {
+            timerState.adjust(delta);
+            // Adjusting is how you tell the app this exercise needs a
+            // different wait — so it sticks, rather than being redone
+            // every set.
+            const ex = timerState.rest?.exerciseID;
+            if (userId && ex) {
+              writeRestSeconds(userId, ex, (timerState.rest?.total ?? 90) + delta).catch(() => {});
+            }
+          }}
           onTogglePause={timerState.togglePause}
           onStop={timerState.stop}
         />
@@ -570,9 +619,10 @@ export default function SessionScreen() {
  * Duplicating it is a deliberate, narrow exception to "compute it once, on
  * the server": a summary that blanks out the moment you lose signal is worse
  * than a summary computed twice, and this is the one screen guaranteed to be
- * used without a network. The rule it implements — warm-ups count toward
- * nothing — is pinned on the server by TestSummarise_ExcludesWarmups; if the
- * two ever disagree, that test is the authority.
+ * used without a network. The rules it implements — only completed sets
+ * count, and warm-ups count toward nothing — are pinned on the server by
+ * TestSummarise_CountsOnlyCompletedSets and TestSummarise_ExcludesWarmups.
+ * If the two ever disagree, those tests are the authority.
  */
 function localVolume(sets: LoggedSet[]): Volume {
   const v: Volume = {
@@ -584,6 +634,10 @@ function localVolume(sets: LoggedSet[]): Volume {
   };
   for (const s of sets) {
     if (!v.exercise_ids.includes(s.exercise_id)) v.exercise_ids.push(s.exercise_id);
+    // Must match the server's rule exactly. Missing this on the first pass
+    // showed the plan's full tonnage against a column of unticked sets —
+    // precisely the drift this duplicated arithmetic risks.
+    if (!s.completed) continue;
     if (s.set_type === 'warmup') continue;
     v.working_sets++;
     if (s.rpe != null && s.rpe > v.hardest_rpe) v.hardest_rpe = s.rpe;
@@ -888,6 +942,15 @@ const styles = StyleSheet.create({
   groupHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   groupName: { flex: 1, fontSize: 16, fontWeight: '700' },
   swapText: { color: vola.lime, fontWeight: '600', fontSize: 14 },
+  restChip: {
+    borderWidth: 1,
+    borderColor: vola.line,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    minHeight: 32,
+    justifyContent: 'center',
+  },
+  restChipText: { fontSize: 12, fontWeight: '700', color: vola.textMuted },
   unitChip: {
     borderWidth: 1,
     borderColor: vola.line,

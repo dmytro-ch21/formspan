@@ -13,6 +13,7 @@ import {
   type LocalActivity,
 } from '@/lib/activities';
 import type { Session } from '@/lib/sessions';
+import { formatElapsed } from '@/lib/rest';
 import { countPendingSessions, listLocalSessions, syncSessions } from '@/lib/sessionStore';
 import { vola } from '@/constants/Colors';
 

@@ -1,5 +1,5 @@
 import { Image } from 'expo-image';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -55,6 +55,7 @@ export default function LibraryScreen() {
 
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const { userId } = useAuth();
+  const router = useRouter();
   const [sport, setSportState] = useState<string>('');
   const [query, setQuery] = useState('');
 
@@ -241,8 +242,9 @@ export default function LibraryScreen() {
             return (
               <Pressable
                 style={styles.row}
+                onPress={() => router.push(`/exercise/${item.id}`)}
                 accessibilityRole="button"
-                accessibilityLabel={`${item.name}, ${item.sport}`}
+                accessibilityLabel={`${item.name}, ${item.sport}. See your last session.`}
                 testID={`exercise-${item.id}`}
               >
                 {uri ? (

@@ -436,6 +436,21 @@ Domain: a training session that **actually happened**, and the sets in it — re
 - The progression lookup ignores uncompleted sets: a weight planned but not lifted must never become evidence for the next recommendation.
 - Ticking a set starts the rest timer; un-ticking is allowed and doesn't.
 - **Migration check:** existing sets backfill to completed, so historical sessions keep their volume. Only new sets default to not-done.
+- **The client's `localVolume` must match the server's `Summarise` exactly.** It's a deliberate duplicate so the header works offline, and it has already drifted once — the completion rule went into Go only, and a live session showed the plan's full tonnage against unticked sets.
+
+**Session duration**
+- The header clock runs from `started_at` and keeps time across backgrounding — derived per tick, never accumulated.
+- A finished session's duration is fixed and stops ticking; it appears in the mobile recent list and the web history page.
+
+**Rest, per exercise**
+- Each exercise header can start its own rest, independently of ticking a set.
+- ±15s during a rest **persists to that exercise**, so the correction isn't repeated every set.
+- Durations are local to the device by design — the rest timer is mobile-only, so there's no second client to sync with.
+
+**Exercise detail (`apps/mobile` library → exercise)**
+- Shows last weight, reps, effort and date, from the same endpoint as the progression suggestion — the two must never disagree.
+- An exercise never logged shows an explicit "not logged yet" state, not zeros.
+- The catalog entry renders even when the history lookup fails.
 
 **Effort tracking preference (`profiles.track_effort`)**
 - Default **on** — the progression rule has no other input, so off-by-default would make the app look broken rather than simple.

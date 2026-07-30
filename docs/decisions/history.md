@@ -629,6 +629,21 @@ Default-on is deliberate and not just conservatism — the progression rule has 
 **Not visually verified.** The whole change typechecks, the full suite passes, and the new `Summarise` behaviour has tests covering nothing-done, partly-done and fully-done. But the tick and the effort switch haven't been driven on the Simulator — the session state there had drifted badly from a long stretch of Fast Refreshes, and screenshotting through it would have proved nothing. Both want a real pass.
 
 
+## 2026-07-29 — Session duration, rest per exercise, and stats in the library
+
+**A session records how long it took.** A live clock in the summary header, derived from `started_at` on every tick rather than accumulated — same reasoning as the rest timer, since a session spends most of its life with the phone in a pocket and a counter would stop when the JS thread is throttled. Finished sessions show their duration in the recent list and on the web history page.
+
+**Rest is per exercise, and you start it when you want.** Each exercise header gained a Rest control, so the timer no longer only fires by ticking a set — you can start it after a warm-up, or a set you didn't tick, or just because. The duration is per exercise and **learned**: ±15s while a rest is running saves that adjustment against the exercise, so a heavy squat and a lateral raise stop sharing a wait after the first time you correct it.
+
+Those durations live in the local `prefs` table rather than on the profile, and that's the right shape rather than a shortcut: the rest timer is mobile-only by the platform rule, so there is no second client to keep in step, and a server round-trip would buy nothing while breaking it in a basement gym.
+
+**The library opens an exercise.** A detail screen showing the catalog entry and, underneath, what you last did on it — weight, reps, effort, when. The catalog alone is reference material anyone could look up; the last line is what turns "what is a Bulgarian split squat" into "what did *I* do last time", which is the only version of the question anyone asks standing in a gym. It reads from the same endpoint that drives progressive overload, so the number shown here and the number recommended in a session cannot drift.
+
+**A bug caught by looking rather than by testing.** The mobile client's `localVolume` is a deliberate duplicate of the server's `Summarise`, kept so the header still works offline — and the completion change went into the Go version only. The result was a live session showing the plan's full tonnage (18 sets, 19,171 lb) against a column of unticked sets. Exactly the drift the duplication risks, found on the first screenshot after wiring it up. Both rules are now pinned server-side by tests named in the client's comment, so the next person to touch either knows which is authoritative.
+
+Verified live: ticking the first set dropped the header from 18 sets to 1 set / 12 reps / 1620.1 lb, started the rest countdown labelled with that exercise, and left the session clock running.
+
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.
