@@ -1583,45 +1583,83 @@ what disproved it.
 Both found by deploying for real. Neither is visible from the repo.
 
 **The seed never ran, and everything said it was fine.** `preDeployCommand`
-was `"/app/bin/migrate up && /app/bin/seed"`. Railway executes it as argv and
-observably splits on whitespace, so migrate received `&&` and the seed path as
-two extra arguments, ignored them, ran `up`, and exited 0. Seed never
-executed.
+was `"/app/bin/migrate up && /app/bin/seed"`. Migrations applied, the
+healthcheck passed, the API served 200s, and `exercises` sat at **0 rows** —
+precisely the `{"exercises": []}` forever outcome `railway/api.toml`'s own
+comment warns about, a valid 200 no healthcheck, error or log will ever
+surface. Only counting rows in the deployed database catches it, which is why
+the check after a green deploy has to be a query and not a status code.
 
-The failure mode is the interesting part: migrations applied, the healthcheck
-passed, the API served 200s, and `exercises` sat at **0 rows**. Precisely the
-`{"exercises": []}` forever outcome `railway/api.toml`'s own comment warns
-about — a valid 200 no healthcheck, error or log will ever surface. Only
-counting rows in the deployed database catches it, which is why the check
-after a green deploy has to be a query, not a status code.
+What is actually **observed**: migrate printed `migrate: up: done` and exited
+0; seed produced no output at all. That is enough to pin the mechanism,
+because `cmd/migrate` rejects anything but exactly one argument
+(`len(os.Args) != 2` → `log.Fatal`). Had it been handed `&&` and the seed path
+as extra argv, it would have died on a usage error and failed the deploy
+loudly. It didn't — so **Railway discarded everything from `&&` onward while
+parsing**, rather than passing it through.
 
-First fix was `sh -c '/app/bin/migrate up && /app/bin/seed'`. Then the
-evidence was re-read: if Railway split the *original* on whitespace, it will
-split that too, giving `sh` the args `-c`, `'/app/bin/migrate`, `up`, … — the
-same silent bug with more steps. `sh -c` only works if Railway tokenises
-quotes like a shell, and nothing observed says it does.
+Two wrong explanations were written down before that one, and both are worth
+recording because the fix survived them and the reasoning didn't. The first
+was `sh -c '...'`. The second was a claim that Railway "splits on
+whitespace", which was then used to reject `sh -c` — and which the repo's own
+`migrate` code disproves, since whitespace splitting would have produced a
+usage error on the very first deploy. The evidence never showed whitespace
+splitting; it showed clean truncation at an operator, which is closer to
+shell-style parsing than to the opposite.
 
-Replaced with a **single-token command**: the chain moved into
-`/app/bin/predeploy`, a script baked into the image, and `preDeployCommand =
-"/app/bin/predeploy"`. Whatever the splitting rules, there is nothing to
-split. Verified by running the built image's script against a fresh empty
-database: `migrate: up: done`, then 524 exercises and 450 techniques.
+The fix is unaffected, and deliberately so: the chain moved into
+`/app/bin/predeploy`, a script baked into the image, so `preDeployCommand` is
+a **single token**. A single token parses identically under every model, which
+is the point — the remaining unknown (how Railway treats quotes) can stay
+unknown. Verified by running the built image's script against a fresh empty
+database: `migrate: up: done`, then 524 exercises and 450 techniques, and a
+deliberate failure exits non-zero so a broken pre-deploy fails loudly.
 
-The general lesson: when a fix depends on a behaviour you have not observed —
-here, quote handling — prefer the form that does not depend on it at all.
+That is the durable lesson, and it is not about Railway. Choosing the form
+that depends on no unobserved behaviour was right; inventing a mechanism to
+justify it was not, and the invented mechanism was checkable against code
+already in the repository. Prefer the robust form *and* leave the mechanism
+marked unknown, rather than manufacturing certainty to support a correct
+decision.
 
-**Nixpacks built the web app with Node 18.** `web` and `admin` build under
-Nixpacks, which takes its Node version from the root `package.json`'s
-`engines` field. There wasn't one, so it chose 18.20.5, while the repo pins
-pnpm 11.17.0, which needs Node 20+. The build died on
-`ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING` from corepack — an error naming
-neither Node nor pnpm, so it reads like a broken lockfile.
+**Nixpacks could not install dependencies at all** — and the first diagnosis
+was wrong, which is the part worth recording.
 
-CI has used Node 22 since the beginning, which is exactly why this never
-appeared until something outside CI chose for itself. Added
-`engines.node: ">=22"` to the root package.json and noted the dependency in
-both `railway/web.toml` and `railway/admin.toml`, so the next person meets the
-explanation at the point of failure rather than in a stack trace.
+`web` builds under Nixpacks, and it died in `pnpm i` on
+`ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING` — an error naming neither Node nor
+pnpm, so it reads like a broken lockfile. The build log showed Node 18.20.5
+against a repo pinning pnpm 11, which needs Node >=22.13, so the Node version
+looked like the answer. Adding `engines.node: ">=22"` to the root
+package.json did move Nixpacks to Node 22.19.0 — **and the identical error
+persisted.**
+
+The real cause was one line further up the same log: Nixpacks force-installs
+`corepack@0.24.1`, which predates pnpm 10/11's bundle format and cannot load
+it. Confirmed by reproducing all three cases in a container rather than
+reasoning about them:
+
+| setup | result |
+|---|---|
+| Node 22 + corepack 0.24.1 | fails, identically |
+| Node 22 + Node's own bundled corepack | works |
+| Node 22 + `npm i -g pnpm@11.17.0`, corepack skipped | works |
+
+Fixed on the service with
+`NIXPACKS_INSTALL_CMD="npm install -g pnpm@11.17.0 && pnpm install --frozen-lockfile"`,
+which skips corepack and installs exactly what `packageManager` pins. Both
+`railway/web.toml` and `railway/admin.toml` now carry the explanation.
+
+The `engines.node` pin is kept: it is correct, matches the Node 22 CI has
+always used, and stops Nixpacks choosing Node 18 — but it is a *separate*
+axis, and the comments now say so rather than implying it was the fix.
+
+The lesson is about the shape of the mistake, not the tooling. A plausible
+cause that matches part of the evidence — Node 18 really is too old for pnpm
+11 — is the easiest kind to stop at, because acting on it produces a visible
+change. Nixpacks did switch to Node 22. Nothing about that confirmed the
+diagnosis, and only the failure surviving the fix did. The check that settled
+it was three one-line container runs isolating each variable, which cost less
+than the guess did.
 
 ## Open items / known gaps as of this entry
 

@@ -3,8 +3,10 @@
 # lockfile), with Railway auto-detecting Node via Nixpacks.
 [build]
 builder = "NIXPACKS"
-# Same Node-version dependency as web — see railway/web.toml. The root
-# package.json's `engines.node` is what keeps Nixpacks off Node 18.
+# Same two Nixpacks pins as web — see railway/web.toml for the detail.
+# `NIXPACKS_INSTALL_CMD` is required on this service too, for the corepack
+# incompatibility; the root package.json's `engines.node` handles the Node
+# version.
 buildCommand = "pnpm install --frozen-lockfile && pnpm run build:admin"
 
 [deploy]
