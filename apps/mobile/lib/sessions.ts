@@ -32,6 +32,12 @@ export type LoggedSet = {
   /** 1–10, half steps. RPE 8 is roughly 2 RIR; record whichever you think in. */
   rpe: number | null;
   notes: string;
+  /**
+   * Done. The trigger for progressive volume — the summary counts what's
+   * been performed, not what's been planned, so the header climbs as you
+   * work rather than starting at the plan's total.
+   */
+  completed: boolean;
 };
 
 export type Session = {
@@ -128,6 +134,7 @@ export function emptySet(exerciseID: string, position: number, from?: LoggedSet)
     rir: null,
     rpe: null,
     notes: '',
+    completed: false,
   };
 }
 
@@ -157,6 +164,7 @@ export function setsFromWorkout(items: WorkoutItem[]): LoggedSet[] {
         rir: null,
         rpe: null,
         notes: '',
+        completed: false,
       });
     }
   }
@@ -192,6 +200,7 @@ export function swapExercise(
           distance_m: sameShape ? s.distance_m : null,
           rir: null,
           rpe: null,
+          completed: false,
         },
   );
 }

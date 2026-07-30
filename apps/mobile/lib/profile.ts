@@ -10,6 +10,7 @@ export type Profile = {
   date_of_birth: string | null;
   sex: string | null;
   unit_system: UnitSystem;
+  track_effort: boolean;
   bjj_enabled: boolean;
   strength_enabled: boolean;
   nutrition_enabled: boolean;
@@ -18,6 +19,7 @@ export type Profile = {
 
 /** The fields the edit screen can change. Omitted keys are left alone. */
 export type ProfilePatch = Partial<{
+  track_effort: boolean;
   display_name: string | null;
   date_of_birth: string | null;
   sex: string | null;
@@ -98,6 +100,13 @@ export async function setExerciseUnit(
     method: 'PUT',
     body: JSON.stringify({ unit_system: unit }),
   });
+}
+
+export function setTrackEffort(
+  getToken: () => Promise<string | null>,
+  on: boolean,
+): Promise<Profile> {
+  return updateProfile(getToken, { track_effort: on } as never);
 }
 
 export function getProfile(getToken: () => Promise<string | null>): Promise<Profile> {

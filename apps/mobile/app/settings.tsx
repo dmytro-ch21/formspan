@@ -1,9 +1,12 @@
 import { useAuth } from '@clerk/clerk-expo';
 import { Stack, useRouter } from 'expo-router';
+import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { getProfile, setTrackEffort } from '@/lib/profile';
+import { useAuthToken } from '@/lib/useAuthToken';
 
 /**
  * Settings as grouped rows that drill down, rather than one flat screen of
@@ -21,7 +24,15 @@ import { vola } from '@/constants/Colors';
  */
 export default function SettingsScreen() {
   const { signOut } = useAuth();
+  const getToken = useAuthToken();
   const router = useRouter();
+
+  const [effort, setEffort] = useState(true);
+  useEffect(() => {
+    getProfile(getToken)
+      .then((p) => setEffort(p.track_effort))
+      .catch(() => {});
+  }, [getToken]);
 
   return (
     <ScrollView contentContainerStyle={styles.scroll} testID="settings-screen">
@@ -47,9 +58,21 @@ export default function SettingsScreen() {
         <Row
           label="Units"
           hint="Kilograms or pounds"
-          last
           onPress={() => router.push('/settings/units')}
           testID="settings-units"
+        />
+        <Toggle
+          label="Track effort"
+          hint="RIR and RPE on every set. Off hides them."
+          value={effort}
+          last
+          onChange={(on) => {
+            // Applied locally first so the switch never lags the tap; the
+            // account-level write follows.
+            setEffort(on);
+            setTrackEffort(getToken, on).catch(() => setEffort(!on));
+          }}
+          testID="settings-effort"
         />
       </Section>
 
@@ -67,6 +90,42 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       <Text style={styles.sectionTitle}>{title}</Text>
       <View style={styles.group}>{children}</View>
     </View>
+  );
+}
+
+/** A row that changes something in place, rather than drilling down. */
+function Toggle({
+  label,
+  hint,
+  value,
+  onChange,
+  last,
+  testID,
+}: {
+  label: string;
+  hint?: string;
+  value: boolean;
+  onChange: (on: boolean) => void;
+  last?: boolean;
+  testID?: string;
+}) {
+  return (
+    <Pressable
+      style={[styles.row, !last && styles.rowDivided]}
+      onPress={() => onChange(!value)}
+      accessibilityRole="switch"
+      accessibilityState={{ checked: value }}
+      accessibilityLabel={hint ? `${label}. ${hint}` : label}
+      testID={testID}
+    >
+      <View style={styles.rowBody}>
+        <Text style={styles.rowLabel}>{label}</Text>
+        {hint && <Text style={styles.muted}>{hint}</Text>}
+      </View>
+      <View style={[styles.switch, value && styles.switchOn]}>
+        <View style={[styles.knob, value && styles.knobOn]} />
+      </View>
+    </Pressable>
   );
 }
 
@@ -133,5 +192,16 @@ const styles = StyleSheet.create({
   danger: { color: vola.danger },
   muted: { color: vola.textMuted, fontSize: 13 },
   chevron: { color: vola.textDim, fontSize: 22 },
+  switch: {
+    width: 50,
+    height: 30,
+    borderRadius: 999,
+    backgroundColor: vola.line,
+    padding: 3,
+    justifyContent: 'center',
+  },
+  switchOn: { backgroundColor: vola.lime },
+  knob: { width: 24, height: 24, borderRadius: 999, backgroundColor: vola.surface },
+  knobOn: { alignSelf: 'flex-end', backgroundColor: vola.navy },
   note: { color: vola.textDim, fontSize: 12, lineHeight: 17, paddingHorizontal: 4 },
 });

@@ -429,6 +429,19 @@ Domain: a training session that **actually happened**, and the sets in it — re
 - Retrying `POST` with the same `id` as the same user returns the original — an offline start must be safe to resend.
 - **Every measure round-trips**: reps, weight, seconds, distance, RIR *and* RPE on one set, read back unchanged (`TestPostgresRepository_RecordsEveryMeasure`).
 
+**Progressive volume — the property that matters most**
+- A session opened from a template shows **zero** working sets, reps and tonnage until sets are ticked off. It must never open at the plan's total (`TestSummarise_CountsOnlyCompletedSets`).
+- Each tick moves the numbers by exactly that set's contribution.
+- An **uncompleted set contributes no effort** either — it must not set `hardest_rpe` (`TestSummarise_IgnoresEffortOnUncompletedSets`).
+- The progression lookup ignores uncompleted sets: a weight planned but not lifted must never become evidence for the next recommendation.
+- Ticking a set starts the rest timer; un-ticking is allowed and doesn't.
+- **Migration check:** existing sets backfill to completed, so historical sessions keep their volume. Only new sets default to not-done.
+
+**Effort tracking preference (`profiles.track_effort`)**
+- Default **on** — the progression rule has no other input, so off-by-default would make the app look broken rather than simple.
+- Off hides the RIR and RPE fields entirely, not greyed out.
+- Toggling it never alters recorded values; effort already logged stays in the database.
+
 **Volume arithmetic**
 - **Warm-ups count toward neither working sets nor tonnage** (`TestSummarise_ExcludesWarmups`). Counting them inflates every number and makes a light day look like a hard one, which would poison anything built on top.
 - `hardest_rpe` covers **working sets only** — a hard warm-up single mustn't set the session's headline difficulty. (It originally counted warm-ups, contradicting the schema's own wording; caught in review.)

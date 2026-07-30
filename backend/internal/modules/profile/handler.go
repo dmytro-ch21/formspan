@@ -110,6 +110,7 @@ type updateRequest struct {
 	NutritionEnabled *bool   `json:"nutrition_enabled"`
 	RunningEnabled   *bool   `json:"running_enabled"`
 	UnitSystem       *string `json:"unit_system"`
+	TrackEffort      *bool   `json:"track_effort"`
 }
 
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
@@ -136,6 +137,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		NutritionEnabled: req.NutritionEnabled,
 		RunningEnabled:   req.RunningEnabled,
 		UnitSystem:       req.UnitSystem,
+		TrackEffort:      req.TrackEffort,
 	})
 	if err != nil {
 		writeError(w, r, err)

@@ -19,7 +19,7 @@ import {
   type UnitSystem,
 } from '@/lib/units';
 import { useUnits } from '@/lib/useUnits';
-import { getExerciseUnits, setExerciseUnit } from '@/lib/profile';
+import { getExerciseUnits, getProfile, setExerciseUnit } from '@/lib/profile';
 import { fetchExercises, type Exercise } from '@/lib/exercises';
 import {
   cacheExercises,
@@ -79,6 +79,14 @@ export default function SessionScreen() {
   // leg press marked in pounds, and converting in your head at the moment
   // you're trying to record a number is exactly what this avoids.
   const [exerciseUnits, setExerciseUnits] = useState<Record<string, UnitSystem>>({});
+  // Defaults to showing effort: the progression rule is built on it, and a
+  // failed profile fetch shouldn't quietly disable the app's only input.
+  const [showEffort, setShowEffort] = useState(true);
+  useEffect(() => {
+    getProfile(getToken)
+      .then((p) => setShowEffort(p.track_effort))
+      .catch(() => {});
+  }, [getToken]);
   useEffect(() => {
     getExerciseUnits(getToken).then(setExerciseUnits).catch(() => {});
   }, [getToken]);
@@ -271,6 +279,17 @@ export default function SessionScreen() {
     );
   }
 
+  /**
+   * Ticking a set off is the one interaction that both records progress and
+   * starts the clock — so it does both. Un-ticking is possible because
+   * mis-taps happen mid-set and an un-undoable checkbox is worse than none.
+   */
+  function toggleDone(index: number, exerciseID: string) {
+    const now = !sets[index].completed;
+    commit(sets.map((s, i) => (i === index ? { ...s, completed: now } : s)));
+    if (now) startRest(exerciseID);
+  }
+
   function startRest(exerciseID: string) {
     const ex = catalog.get(exerciseID);
     timerState.start(restSecondsFor(ex), ex?.name ?? 'Rest');
@@ -387,7 +406,8 @@ export default function SessionScreen() {
                   editable={!finished}
                   onChange={(next) => update(i, next)}
                   onRemove={() => removeSet(i)}
-                  onRest={() => startRest(g.exerciseID)}
+                  onToggleDone={() => toggleDone(i, g.exerciseID)}
+                  showEffort={showEffort}
                   units={unitFor(g.exerciseID)}
                 />
               ))}
@@ -596,8 +616,9 @@ function SetRow({
   editable,
   onChange,
   onRemove,
-  onRest,
+  onToggleDone,
   units,
+  showEffort,
 }: {
   index: number;
   ordinal: number;
@@ -606,8 +627,9 @@ function SetRow({
   editable: boolean;
   onChange: (next: LoggedSet) => void;
   onRemove: () => void;
-  onRest: () => void;
+  onToggleDone: () => void;
   units: UnitSystem;
+  showEffort: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const measures: Measure[] = exercise ? measuresFor(exercise.load_type) : ['reps'];
@@ -644,17 +666,19 @@ function SetRow({
         </Text>
         <Text style={styles.setSummary}>{describeSet(set, units)}</Text>
         {editable && (
-          // Sits on the collapsed row, because that's where your thumb
-          // already is when you rack the bar — not behind a disclosure.
+          // One tap does both: a set is only "done" at the moment rest
+          // begins, so splitting them into two controls would ask for the
+          // same information twice.
           <Pressable
-            onPress={onRest}
+            onPress={onToggleDone}
             hitSlop={10}
-            style={styles.restChip}
-            accessibilityRole="button"
-            accessibilityLabel={`Done — start resting after set ${ordinal}`}
-            testID={`rest-${index}`}
+            style={[styles.tick, set.completed && styles.tickDone]}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: set.completed }}
+            accessibilityLabel={`Set ${ordinal} done`}
+            testID={`done-${index}`}
           >
-            <Text style={styles.restChipText}>Rest</Text>
+            <Text style={[styles.tickMark, set.completed && styles.tickMarkDone]}>✓</Text>
           </Pressable>
         )}
         {editable && <Text style={styles.disclosure}>{open ? '⌃' : '⌄'}</Text>}
@@ -709,7 +733,11 @@ function SetRow({
           </View>
 
           {/* Effort, side by side. Two views of the same thing — record
-              whichever you think in rather than converting mid-session. */}
+              whichever you think in rather than converting mid-session.
+              Hidden entirely when effort tracking is off: greying the
+              fields out would still cost the space and still read as
+              something you're failing to fill in. */}
+          {showEffort && (
           <View style={styles.fieldRow}>
             <Field
               label="RIR"
@@ -729,6 +757,7 @@ function SetRow({
               testID={`set-${index}-rpe`}
             />
           </View>
+          )}
 
           <View style={styles.chips}>
             {SET_TYPES.map((t) => (
@@ -873,15 +902,18 @@ const styles = StyleSheet.create({
   setOrdinal: { width: 34, fontWeight: '700', color: vola.textDim },
   setBadge: { color: vola.lime, fontSize: 11, fontWeight: '700' },
   setSummary: { flex: 1, fontSize: 15 },
-  restChip: {
-    borderWidth: 1,
-    borderColor: vola.line,
+  tick: {
+    width: 34,
+    height: 34,
     borderRadius: 999,
-    paddingHorizontal: 12,
-    minHeight: 34,
+    borderWidth: 1.5,
+    borderColor: vola.line,
+    alignItems: 'center',
     justifyContent: 'center',
   },
-  restChipText: { fontSize: 12, fontWeight: '700', color: vola.lime },
+  tickDone: { backgroundColor: vola.lime, borderColor: vola.lime },
+  tickMark: { color: vola.textDim, fontWeight: '800', fontSize: 15 },
+  tickMarkDone: { color: vola.navy },
   disclosure: { color: vola.textDim, width: 16, textAlign: 'center' },
   setEditor: { padding: 12, paddingTop: 0, gap: 12 },
   fieldRow: { flexDirection: 'row', gap: 10 },

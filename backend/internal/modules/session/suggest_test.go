@@ -192,7 +192,7 @@ func TestLastPerformances_TakesTheTopWorkingSetOfTheLatestSession(t *testing.T) 
 	cleanup(t, pool, "ses-hist-new")
 
 	old := strengthSession("ses-hist-old", "user_hist", []Set{
-		{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(5), WeightKg: ptrF(90), RIR: ptrInt(1)},
+		{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(5), WeightKg: ptrF(90), RIR: ptrInt(1), Completed: true},
 	})
 	old.StartedAt = time.Now().UTC().Add(-10 * 24 * time.Hour)
 	if _, err := repo.Create(ctx, old); err != nil {
@@ -202,10 +202,10 @@ func TestLastPerformances_TakesTheTopWorkingSetOfTheLatestSession(t *testing.T) 
 	recent := strengthSession("ses-hist-new", "user_hist", []Set{
 		// A heavier warm-up than the working sets, to prove warm-ups are
 		// excluded rather than merely deprioritised.
-		{ExerciseID: exSquat, SetType: SetTypeWarmup, Reps: ptrInt(3), WeightKg: ptrF(200)},
-		{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(5), WeightKg: ptrF(100), RIR: ptrInt(2)},
-		{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(3), WeightKg: ptrF(110), RIR: ptrInt(0)},
-		{ExerciseID: exBench, SetType: SetTypeWorking, Reps: ptrInt(8), WeightKg: ptrF(60), RPE: ptrF(7)},
+		{ExerciseID: exSquat, SetType: SetTypeWarmup, Reps: ptrInt(3), WeightKg: ptrF(200), Completed: true},
+		{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(5), WeightKg: ptrF(100), RIR: ptrInt(2), Completed: true},
+		{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(3), WeightKg: ptrF(110), RIR: ptrInt(0), Completed: true},
+		{ExerciseID: exBench, SetType: SetTypeWorking, Reps: ptrInt(8), WeightKg: ptrF(60), RPE: ptrF(7), Completed: true},
 	})
 	recent.StartedAt = time.Now().UTC().Add(-2 * 24 * time.Hour)
 	if _, err := repo.Create(ctx, recent); err != nil {
@@ -258,7 +258,7 @@ func TestLastPerformances_IgnoresSetsWithNothingRecorded(t *testing.T) {
 	cleanup(t, pool, "ses-empty-perf")
 
 	real := strengthSession("ses-real-perf", "user_empty", []Set{
-		{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(5), WeightKg: ptrF(102.5), RIR: ptrInt(2)},
+		{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(5), WeightKg: ptrF(102.5), RIR: ptrInt(2), Completed: true},
 	})
 	real.StartedAt = time.Now().UTC().Add(-5 * 24 * time.Hour)
 	if _, err := repo.Create(ctx, real); err != nil {
@@ -267,7 +267,7 @@ func TestLastPerformances_IgnoresSetsWithNothingRecorded(t *testing.T) {
 
 	// Newer, but the squat row carries no measures at all.
 	empty := strengthSession("ses-empty-perf", "user_empty", []Set{
-		{ExerciseID: exSquat, SetType: SetTypeWorking},
+		{ExerciseID: exSquat, SetType: SetTypeWorking, Completed: true},
 	})
 	empty.StartedAt = time.Now().UTC().Add(-1 * time.Hour)
 	if _, err := repo.Create(ctx, empty); err != nil {
@@ -297,7 +297,7 @@ func TestLastPerformances_IsUserScoped(t *testing.T) {
 	cleanup(t, pool, "ses-hist-theirs")
 
 	theirs := strengthSession("ses-hist-theirs", "user_hist_other", []Set{
-		{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(5), WeightKg: ptrF(300), RIR: ptrInt(5)},
+		{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(5), WeightKg: ptrF(300), RIR: ptrInt(5), Completed: true},
 	})
 	if _, err := repo.Create(ctx, theirs); err != nil {
 		t.Fatalf("create: %v", err)
@@ -309,5 +309,48 @@ func TestLastPerformances_IsUserScoped(t *testing.T) {
 	}
 	if _, ok := got[exSquat]; ok {
 		t.Fatal("returned another user's training history")
+	}
+}
+
+// The header must climb as the session is performed, not start at the
+// plan's total. A template opens with every set present and none completed,
+// so an uncompleted set has to contribute nothing at all.
+func TestSummarise_CountsOnlyCompletedSets(t *testing.T) {
+	planned := []Set{
+		{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(5), WeightKg: ptrF(100)},
+		{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(5), WeightKg: ptrF(100)},
+	}
+
+	// Nothing lifted yet: the exercise is on the card, the volume is zero.
+	v := Summarise(planned)
+	if v.WorkingSets != 0 || v.TotalReps != 0 || v.TonnageKg != 0 {
+		t.Fatalf("a planned-but-unperformed session already has volume: %+v", v)
+	}
+	if len(v.ExerciseIDs) != 1 {
+		t.Errorf("the exercise should still be listed: %+v", v.ExerciseIDs)
+	}
+
+	// One set done: half the plan's numbers.
+	planned[0].Completed = true
+	v = Summarise(planned)
+	if v.WorkingSets != 1 || v.TotalReps != 5 || v.TonnageKg != 500 {
+		t.Fatalf("after one completed set: %+v", v)
+	}
+
+	planned[1].Completed = true
+	v = Summarise(planned)
+	if v.WorkingSets != 2 || v.TotalReps != 10 || v.TonnageKg != 1000 {
+		t.Fatalf("after both: %+v", v)
+	}
+}
+
+// Effort from a set that was never performed must not drive the next
+// session's recommendation either.
+func TestSummarise_IgnoresEffortOnUncompletedSets(t *testing.T) {
+	v := Summarise([]Set{
+		{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(5), RPE: ptrF(10)},
+	})
+	if v.HardestRPE != 0 {
+		t.Fatalf("an unperformed set set the hardest RPE: %v", v.HardestRPE)
 	}
 }

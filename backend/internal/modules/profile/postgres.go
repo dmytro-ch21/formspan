@@ -24,7 +24,7 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 
 func (r *PostgresRepository) Get(ctx context.Context, userID string) (*Profile, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT user_id, display_name, date_of_birth, sex, bjj_enabled, strength_enabled, nutrition_enabled, running_enabled, unit_system, created_at, updated_at
+		SELECT user_id, display_name, date_of_birth, sex, bjj_enabled, strength_enabled, nutrition_enabled, running_enabled, unit_system, track_effort, created_at, updated_at
 		FROM profiles WHERE user_id = $1`, userID)
 	return scanProfile(row)
 }
@@ -37,7 +37,7 @@ func (r *PostgresRepository) Create(ctx context.Context, userID string, in NewPr
 	row := r.pool.QueryRow(ctx, `
 		INSERT INTO profiles (user_id, display_name, date_of_birth, sex)
 		VALUES ($1, $2, $3, $4)
-		RETURNING user_id, display_name, date_of_birth, sex, bjj_enabled, strength_enabled, nutrition_enabled, running_enabled, unit_system, created_at, updated_at
+		RETURNING user_id, display_name, date_of_birth, sex, bjj_enabled, strength_enabled, nutrition_enabled, running_enabled, unit_system, track_effort, created_at, updated_at
 	`, userID, in.DisplayName, dob, in.Sex)
 	p, err := scanProfile(row)
 	if err != nil {
@@ -61,10 +61,11 @@ func (r *PostgresRepository) Update(ctx context.Context, userID string, in Profi
 			nutrition_enabled = COALESCE($7, nutrition_enabled),
 			running_enabled = COALESCE($8, running_enabled),
 			unit_system = COALESCE($9, unit_system),
+			track_effort = COALESCE($10, track_effort),
 			updated_at = now()
 		WHERE user_id = $1
-		RETURNING user_id, display_name, date_of_birth, sex, bjj_enabled, strength_enabled, nutrition_enabled, running_enabled, unit_system, created_at, updated_at
-	`, userID, in.DisplayName, dob, in.Sex, in.BJJEnabled, in.StrengthEnabled, in.NutritionEnabled, in.RunningEnabled, in.UnitSystem)
+		RETURNING user_id, display_name, date_of_birth, sex, bjj_enabled, strength_enabled, nutrition_enabled, running_enabled, unit_system, track_effort, created_at, updated_at
+	`, userID, in.DisplayName, dob, in.Sex, in.BJJEnabled, in.StrengthEnabled, in.NutritionEnabled, in.RunningEnabled, in.UnitSystem, in.TrackEffort)
 	p, err := scanProfile(row)
 	if err != nil {
 		return nil, translatePgError(err)
@@ -128,7 +129,7 @@ func scanProfile(row pgx.Row) (*Profile, error) {
 	var dob *time.Time
 	err := row.Scan(&p.UserID, &p.DisplayName, &dob, &p.Sex,
 		&p.BJJEnabled, &p.StrengthEnabled, &p.NutritionEnabled, &p.RunningEnabled,
-		&p.UnitSystem, &p.CreatedAt, &p.UpdatedAt)
+		&p.UnitSystem, &p.TrackEffort, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound

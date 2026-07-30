@@ -612,6 +612,23 @@ The mockup's fifth tab exists now. **You** shows who the athlete is — name, wh
 **Not visually verified:** the grouped Settings screen and the Edit form. Both typecheck and the navigation into Settings from the You header was confirmed working, but repeated Fast Refreshes had drifted the Simulator's navigation state badly enough that further taps were landing on stale frames, and screenshotting through that would have proved nothing. Worth a real pass before merging.
 
 
+## 2026-07-29 — Volume that climbs, and effort you can switch off
+
+**The session summary now counts what you've done, not what's been planned.** Opening a template used to show its full tonnage before a single rep — the opposite of what a training log is for. `session_sets.completed` is the trigger, and `Summarise` skips anything not ticked, so working sets, reps, tonnage and top RPE all climb as the session is performed.
+
+The migration backfills existing rows to `true` and *then* flips the default to `false`. Anything already logged was by definition done; resetting history to "not completed" would have zeroed every past session's volume — and the fact that the tests caught exactly that when the insert path silently kept writing the new default is the reason the backfill is worth spelling out.
+
+**Completing a set and starting rest are one tap, not two.** The old "Rest" chip became a tick. A set is only *done* at the moment rest begins, so splitting them asked for the same information twice. Un-ticking is allowed: mis-taps happen mid-set, and an un-undoable checkbox is worse than none.
+
+Two consequences worth stating because they're easy to miss: an uncompleted set contributes **no effort** to `hardest_rpe`, and the progression lookup now requires `completed` — a weight you planned but didn't lift must not become the evidence the next session's recommendation is built on.
+
+**Effort tracking is a preference.** `profiles.track_effort`, on by default, with a switch under Settings → Preferences. Off hides the RIR and RPE fields entirely rather than greying them: a disabled field still costs the space and still reads as something you're failing to fill in.
+
+Default-on is deliberate and not just conservatism — the progression rule has no other input, so shipping it off would make the app look broken rather than simple. Worth remembering if the setting ever moves into onboarding.
+
+**Not visually verified.** The whole change typechecks, the full suite passes, and the new `Summarise` behaviour has tests covering nothing-done, partly-done and fully-done. But the tick and the effort switch haven't been driven on the Simulator — the session state there had drifted badly from a long stretch of Fast Refreshes, and screenshotting through it would have proved nothing. Both want a real pass.
+
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

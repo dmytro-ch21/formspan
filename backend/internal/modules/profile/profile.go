@@ -28,9 +28,14 @@ type Profile struct {
 	// UnitSystem is display only — "metric" | "imperial". Training data is
 	// stored in kilograms and metres regardless, so changing it can never
 	// alter a recorded number, only how it's shown and entered.
-	UnitSystem string    `json:"unit_system"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	UnitSystem string `json:"unit_system"`
+	// TrackEffort decides whether the clients collect RIR and RPE at all.
+	// On by default: the progression rule is built on them, and silently
+	// withholding its only input would make the app look broken rather
+	// than simple.
+	TrackEffort bool      `json:"track_effort"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // NewProfile is the input for onboarding. Module toggles aren't set here —
@@ -52,6 +57,7 @@ type ProfileUpdate struct {
 	NutritionEnabled *bool
 	RunningEnabled   *bool
 	UnitSystem       *string
+	TrackEffort      *bool
 }
 
 // ValidUnitSystem guards the only two the clients can render.

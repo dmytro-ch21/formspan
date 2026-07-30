@@ -201,6 +201,7 @@ func (r *PostgresRepository) LastPerformances(
 		WHERE s.user_id = $1
 		  AND ss.exercise_id = ANY($2)
 		  AND ss.set_type <> 'warmup'
+		  AND ss.completed
 		  -- A set with nothing recorded isn't a performance. Without this, an
 		  -- exercise added to a session and then not actually done would be
 		  -- the "most recent" one and would erase real history behind it.
@@ -338,10 +339,10 @@ func insertSets(ctx context.Context, tx pgx.Tx, sessionID string, sets []Set) er
 		batch.Queue(`
 			INSERT INTO session_sets (
 				session_id, exercise_id, position, set_type, reps, weight_kg,
-				seconds, distance_m, rir, rpe, notes
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+				seconds, distance_m, rir, rpe, notes, completed
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
 			sessionID, s.ExerciseID, i, st, s.Reps, s.WeightKg,
-			s.Seconds, s.DistanceM, s.RIR, s.RPE, s.Notes)
+			s.Seconds, s.DistanceM, s.RIR, s.RPE, s.Notes, s.Completed)
 	}
 	results := tx.SendBatch(ctx, batch)
 	for i := range sets {
