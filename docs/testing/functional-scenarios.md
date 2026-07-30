@@ -604,6 +604,15 @@ Domain: logging a session with no connectivity. **Test this by actually stopping
 - The **search box clears** on leaving the tab; it's a question already answered, and finding it still there makes the list look short for no visible reason.
 - Both are stored per user — a shared device must not hand one account's filters to the next person.
 
+## Mobile shell (`apps/mobile` tab navigator)
+
+- **No seams.** Header, content and tab bar share one background; there must be no hairline rule or colour step between them, on tab screens *and* pushed stack screens.
+- **The tab bar floats and blurs.** Content must be visible through it when scrolled underneath. Insetting it requires `marginHorizontal`/`marginBottom` — `left`/`right`/`bottom` are overwritten by the navigator and silently do nothing.
+- Every scrolling screen leaves `TAB_BAR_CLEARANCE` at the bottom, and absolutely-positioned controls (the "New workout" button) clear it too.
+- **The wordmark must not collide with the Dynamic Island** — it sits below it. Check on a device with an island, not just a notch.
+- The wordmark's chevron apex must be closed, and must point up.
+- Screen names are small, uppercase, top-left; the wordmark is centred and stays centred regardless of the title's width.
+
 ## Modal sheets (`apps/mobile`)
 
 - **Every `Modal` must paint its own background.** A modal renders outside the navigator, so the usual dark ground isn't behind it and `Themed.View` deliberately paints nothing — the sheet falls through to iOS white and near-white text vanishes. Regression-checked on the exercise picker and the new-workout sheet; check any future modal the same way.

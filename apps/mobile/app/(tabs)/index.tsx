@@ -3,6 +3,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
 
+import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
 import { Text, View } from '@/components/Themed';
 import { useAuthToken } from '@/lib/useAuthToken';
 import {
@@ -129,158 +130,165 @@ export default function TodayScreen() {
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container} testID="today-screen">
-      <Text accessibilityRole="header" style={styles.title} testID="app-title">
-        VOLA
-      </Text>
+    <ScrollView
+      contentContainerStyle={styles.container}
+      contentInsetAdjustmentBehavior="never"
+      testID="today-screen"
+    >
+      <ScreenHeader title="Today" />
 
-      <View style={styles.card}>
-        <Text style={styles.label}>Start a session</Text>
-        <View style={styles.sportRow}>
-          {SPORTS.map((s) => (
-            <Pressable
-              key={s.key}
-              style={styles.sportButton}
-              onPress={() => router.push(`/session/start?sport=${s.key}`)}
-              accessibilityRole="button"
-              accessibilityLabel={`Start a ${s.label} session`}
-              testID={`start-session-${s.key}`}
-            >
-              <Text style={styles.sportText}>{s.label}</Text>
-            </Pressable>
-          ))}
-        </View>
-        <Text style={styles.hint}>Pick one of your workouts, or start empty.</Text>
-      </View>
+      <View style={styles.body}>
 
-      {sessionError && (
-        <Text style={styles.errorText} accessibilityLiveRegion="polite" testID="session-list-error">
-          {sessionError}
-        </Text>
-      )}
-
-      {sessions.length > 0 && (
         <View style={styles.card}>
-          <View style={styles.row}>
-            <Text style={styles.label}>Recent sessions</Text>
-            {pendingSessions > 0 && (
-              <Text style={styles.pending} testID="sessions-pending">
-                {pendingSessions} not synced
-              </Text>
-            )}
+          <Text style={styles.label}>Start a session</Text>
+          <View style={styles.sportRow}>
+            {SPORTS.map((s) => (
+              <Pressable
+                key={s.key}
+                style={styles.sportButton}
+                onPress={() => router.push(`/session/start?sport=${s.key}`)}
+                accessibilityRole="button"
+                accessibilityLabel={`Start a ${s.label} session`}
+                testID={`start-session-${s.key}`}
+              >
+                <Text style={styles.sportText}>{s.label}</Text>
+              </Pressable>
+            ))}
           </View>
-          {sessions.map((s) => (
-            <Pressable
-              key={s.id}
-              style={styles.sessionRow}
-              onPress={() => router.push(`/session/${s.id}`)}
-              accessibilityRole="button"
-              accessibilityLabel={`Open ${s.name || s.sport} session`}
-              testID={`session-${s.id}`}
-            >
-              <View style={styles.activityMain}>
-                <Text style={styles.activityKind}>{s.name || s.sport}</Text>
-                <Text style={styles.muted}>
-                  {new Date(s.started_at).toLocaleDateString()} · {workingSets(s)}{' '}
-                  {workingSets(s) === 1 ? 'working set' : 'working sets'}
-                </Text>
-              </View>
-              <Text style={s.ended_at ? styles.synced : styles.pending}>
-                {s.ended_at ? 'done' : 'in progress'}
-              </Text>
-            </Pressable>
-          ))}
+          <Text style={styles.hint}>Pick one of your workouts, or start empty.</Text>
         </View>
-      )}
 
-      <View style={styles.separator} lightColor="#eee" darkColor="rgba(255,255,255,0.1)" />
+        {sessionError && (
+          <Text style={styles.errorText} accessibilityLiveRegion="polite" testID="session-list-error">
+            {sessionError}
+          </Text>
+        )}
 
-      <View style={styles.card}>
-        <Text style={styles.label}>Log a BJJ session</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Notes (optional)"
-          placeholderTextColor="#767676"
-          accessibilityLabel="Session notes, optional"
-          value={notes}
-          onChangeText={setNotes}
-          testID="activity-notes"
-        />
-        <Pressable
-          style={styles.button}
-          onPress={onLog}
-          accessibilityRole="button"
-          testID="log-activity"
-        >
-          <Text style={styles.buttonText}>Log activity</Text>
-        </Pressable>
-      </View>
-
-      <View style={styles.row}>
-        <Text testID="pending-count">
-          {pending} pending · {activities.length - pending} synced
-        </Text>
-        <Pressable
-          style={[styles.secondaryButton, syncing && styles.buttonDisabled]}
-          onPress={() => onSync()}
-          disabled={syncing}
-          accessibilityRole="button"
-          accessibilityLabel="Sync now"
-          accessibilityState={{ busy: syncing, disabled: syncing }}
-          testID="sync-now"
-        >
-          {syncing ? <ActivityIndicator /> : <Text style={styles.secondaryText}>Sync now</Text>}
-        </Pressable>
-      </View>
-
-      {status && (
-        <Text style={styles.status} testID="sync-status">
-          {status}
-        </Text>
-      )}
-
-      <View style={styles.separator} lightColor="#eee" darkColor="rgba(255,255,255,0.1)" />
-
-      {activities.length === 0 ? (
-        <Text style={styles.muted}>No activities yet.</Text>
-      ) : (
-        activities.map((a) => (
-          <View key={a.id} style={styles.activityRow} testID={`activity-${a.id}`}>
-            <View style={styles.activityMain}>
-              <Text style={styles.activityKind}>{a.kind}</Text>
-              <Text style={styles.muted}>{a.notes ?? 'No notes'}</Text>
+        {sessions.length > 0 && (
+          <View style={styles.card}>
+            <View style={styles.row}>
+              <Text style={styles.label}>Recent sessions</Text>
+              {pendingSessions > 0 && (
+                <Text style={styles.pending} testID="sessions-pending">
+                  {pendingSessions} not synced
+                </Text>
+              )}
             </View>
-            <Text style={a.synced ? styles.synced : styles.pending}>
-              {a.synced ? 'synced' : 'pending'}
-            </Text>
+            {sessions.map((s) => (
+              <Pressable
+                key={s.id}
+                style={styles.sessionRow}
+                onPress={() => router.push(`/session/${s.id}`)}
+                accessibilityRole="button"
+                accessibilityLabel={`Open ${s.name || s.sport} session`}
+                testID={`session-${s.id}`}
+              >
+                <View style={styles.activityMain}>
+                  <Text style={styles.activityKind}>{s.name || s.sport}</Text>
+                  <Text style={styles.muted}>
+                    {new Date(s.started_at).toLocaleDateString()} · {workingSets(s)}{' '}
+                    {workingSets(s) === 1 ? 'working set' : 'working sets'}
+                  </Text>
+                </View>
+                <Text style={s.ended_at ? styles.synced : styles.pending}>
+                  {s.ended_at ? 'done' : 'in progress'}
+                </Text>
+              </Pressable>
+            ))}
           </View>
-        ))
-      )}
+        )}
 
-      <Pressable
-        style={styles.signOut}
-        onPress={() => router.push('/settings')}
-        accessibilityRole="button"
-        testID="open-settings"
-      >
-        <Text style={styles.settingsLink}>Settings</Text>
-      </Pressable>
+        <View style={styles.separator} lightColor="#eee" darkColor="rgba(255,255,255,0.1)" />
 
-      <Pressable
-        style={styles.signOut}
-        onPress={() => signOut()}
-        accessibilityRole="button"
-        testID="sign-out"
-      >
-        <Text style={styles.muted}>Sign out</Text>
-      </Pressable>
+        <View style={styles.card}>
+          <Text style={styles.label}>Log a BJJ session</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Notes (optional)"
+            placeholderTextColor="#767676"
+            accessibilityLabel="Session notes, optional"
+            value={notes}
+            onChangeText={setNotes}
+            testID="activity-notes"
+          />
+          <Pressable
+            style={styles.button}
+            onPress={onLog}
+            accessibilityRole="button"
+            testID="log-activity"
+          >
+            <Text style={styles.buttonText}>Log activity</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.row}>
+          <Text testID="pending-count">
+            {pending} pending · {activities.length - pending} synced
+          </Text>
+          <Pressable
+            style={[styles.secondaryButton, syncing && styles.buttonDisabled]}
+            onPress={() => onSync()}
+            disabled={syncing}
+            accessibilityRole="button"
+            accessibilityLabel="Sync now"
+            accessibilityState={{ busy: syncing, disabled: syncing }}
+            testID="sync-now"
+          >
+            {syncing ? <ActivityIndicator /> : <Text style={styles.secondaryText}>Sync now</Text>}
+          </Pressable>
+        </View>
+
+        {status && (
+          <Text style={styles.status} testID="sync-status">
+            {status}
+          </Text>
+        )}
+
+        <View style={styles.separator} lightColor="#eee" darkColor="rgba(255,255,255,0.1)" />
+
+        {activities.length === 0 ? (
+          <Text style={styles.muted}>No activities yet.</Text>
+        ) : (
+          activities.map((a) => (
+            <View key={a.id} style={styles.activityRow} testID={`activity-${a.id}`}>
+              <View style={styles.activityMain}>
+                <Text style={styles.activityKind}>{a.kind}</Text>
+                <Text style={styles.muted}>{a.notes ?? 'No notes'}</Text>
+              </View>
+              <Text style={a.synced ? styles.synced : styles.pending}>
+                {a.synced ? 'synced' : 'pending'}
+              </Text>
+            </View>
+          ))
+        )}
+
+        <Pressable
+          style={styles.signOut}
+          onPress={() => router.push('/settings')}
+          accessibilityRole="button"
+          testID="open-settings"
+        >
+          <Text style={styles.settingsLink}>Settings</Text>
+        </Pressable>
+
+        <Pressable
+          style={styles.signOut}
+          onPress={() => signOut()}
+          accessibilityRole="button"
+          testID="sign-out"
+        >
+          <Text style={styles.muted}>Sign out</Text>
+        </Pressable>
+      </View>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 20, gap: 12, paddingBottom: 48 },
-  title: { fontSize: 22, fontWeight: 'bold', textAlign: 'center', marginBottom: 4 },
+  // No horizontal padding here: the header manages its own, so it can sit
+  // flush while the cards below stay inset.
+  container: { gap: 12, paddingBottom: TAB_BAR_CLEARANCE },
+  body: { paddingHorizontal: 20, gap: 12 },
   card: { gap: 10 },
   label: { fontSize: 15, fontWeight: '600' },
   input: {

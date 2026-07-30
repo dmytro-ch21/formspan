@@ -576,6 +576,23 @@ Cause: the earlier fix that stopped `components/Themed`'s `View` painting the th
 Both sheets now set `backgroundColor` explicitly, with a comment saying why a screen-level container needs one here and nowhere else. Worth recording because the shape recurs: a fix that removes an implicit default is only safe where the explicit replacement actually exists, and a modal is exactly the place it doesn't.
 
 
+## 2026-07-29 — One ground, a glass tab bar, and the Λ
+
+The mobile shell was three stacked slabs of slightly different dark — navigation header, content, tab bar — each separated by a hairline rule. On a dark theme those seams are the most visible thing on screen, and they were dividing a layout with no actual sections in it. Everything now sits on one continuous ground: the stack header paints `vola.bg` with `headerShadowVisible: false`, the tab navigator's scene does too, and the tab screens' own header is a plain component rather than navigation furniture.
+
+**The tab bar floats and is glass.** A rounded pill, inset from the edges, with an `expo-blur` `BlurView` as its background rather than a fill. The reasoning is that a *solid* bar floating over content is just a smaller opaque bar — if content is going to scroll underneath it, it should be visible through it. Two details that aren't obvious: the blur has to be the `tabBarBackground` view, because a style can't blur what's behind it; and the bar needs `overflow: 'hidden'`, or the blur renders as a rectangle behind the rounded corners.
+
+**A React Navigation trap worth recording.** Insetting the bar with `left`/`right`/`bottom` silently does nothing — the navigator positions the tab bar's container itself and overwrites those offsets. The bar stayed edge-to-edge and looked unchanged. `marginHorizontal`/`marginBottom` apply to the bar itself and survive.
+
+**Screen names are small and top-left**, with the wordmark centred beside them. They're orientation, not headlines — you already know where you are and just want confirming.
+
+**The wordmark's A is a bare chevron**, drawn from two rotated rules rather than set as a glyph. The Greek lambda renders at a different weight and width to the rest of the wordmark in most faces, so "VOLΛ" came out visibly mismatched; two strokes match the text exactly because that weight is a number we pick. The box width is derived rather than eyeballed — a 12pt leg rotated 22° carries its top end ≈2.25pt inward, so the apexes meet at 8.5pt and 9 gives a hair of overlap so the join reads solid. The first attempt had the rotations swapped and rendered a V.
+
+**On the Dynamic Island:** the wordmark sits below it, not in it. Drawing *into* the island means a Live Activity via ActivityKit — native code and a custom dev client, neither of which this app has. The first attempt placed it level with the island and the island simply covered it; the island is opaque hardware, not a layer an app can draw into.
+
+**Also removed:** the Expo web target's `body` still followed `prefers-color-scheme` and went white on a light machine, behind a dark app. Mobile is dark-only by decision, so it's the VOLA ground unconditionally now.
+
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.
