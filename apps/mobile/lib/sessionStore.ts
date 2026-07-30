@@ -1,9 +1,11 @@
 import { randomUUID } from 'expo-crypto';
+import type * as SQLite from 'expo-sqlite';
 
 import { getDb } from './db';
 import type { Exercise } from './exercises';
 import type { Workout, WorkoutItem } from './workouts';
 import {
+  ApiError,
   finishSession as pushFinish,
   getSession as pullSession,
   listSessions as pullSessions,
@@ -54,18 +56,34 @@ type Row = {
   notes: string;
   sets_json: string;
   dirty: number;
+  remote: number;
   updated_at: string;
 };
 
-function toSession(r: Row): LocalSession {
-  let sets: LoggedSet[] = [];
+/** Parsed sets, or `null` if the blob is unreadable. */
+function parseSets(json: string): LoggedSet[] | null {
   try {
-    sets = JSON.parse(r.sets_json) as LoggedSet[];
+    // `completed` post-dates some cached rows. Defaulting it to true mirrors
+    // the server migration's backfill — without it, a session cached before
+    // the upgrade reads as entirely unperformed, and if it happens to be
+    // dirty the next push writes those false flags straight over the
+    // server's backfilled ones.
+    return (JSON.parse(json) as LoggedSet[]).map((s) => ({
+      ...s,
+      completed: s.completed ?? true,
+    }));
   } catch {
-    // A corrupt blob must not make the session unopenable — an empty list
-    // loses the sets, but a throw here would lose the whole workout.
-    sets = [];
+    return null;
   }
+}
+
+function toSession(r: Row): LocalSession {
+  // A corrupt blob must not make the session unopenable — an empty list
+  // loses the sets on screen, but a throw here would lose the whole workout.
+  // The push paths check `parseSets` themselves rather than trusting this,
+  // because sending that empty list would turn a local read failure into
+  // permanent deletion on the server.
+  const sets = parseSets(r.sets_json) ?? [];
   return {
     id: r.id,
     user_id: r.user_id,
@@ -82,13 +100,24 @@ function toSession(r: Row): LocalSession {
   };
 }
 
-async function upsert(s: LocalSession, userID: string, dirty: boolean): Promise<void> {
+/**
+ * `remote` marks a session the server has acknowledged. It only ever moves
+ * 0 -> 1 here (`max` in the conflict clause): a local edit can't un-create
+ * something the server already holds. The one path that clears it is a 404
+ * on push, in `pushRow`.
+ */
+async function upsert(
+  s: LocalSession,
+  userID: string,
+  dirty: boolean,
+  remote: boolean,
+): Promise<void> {
   const db = await getDb();
   await db.runAsync(
     `INSERT INTO local_sessions
        (id, user_id, workout_id, sport, name, started_at, ended_at, notes,
-        sets_json, dirty, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        sets_json, dirty, remote, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        workout_id = excluded.workout_id,
        sport      = excluded.sport,
@@ -98,6 +127,7 @@ async function upsert(s: LocalSession, userID: string, dirty: boolean): Promise<
        notes      = excluded.notes,
        sets_json  = excluded.sets_json,
        dirty      = excluded.dirty,
+       remote     = max(local_sessions.remote, excluded.remote),
        updated_at = excluded.updated_at`,
     s.id,
     userID,
@@ -109,6 +139,7 @@ async function upsert(s: LocalSession, userID: string, dirty: boolean): Promise<
     s.notes ?? '',
     JSON.stringify(s.sets ?? []),
     dirty ? 1 : 0,
+    remote ? 1 : 0,
     new Date().toISOString(),
   );
 }
@@ -132,7 +163,8 @@ export async function startLocalSession(
     updated_at: new Date().toISOString(),
     dirty: true,
   };
-  await upsert(session, userID, true);
+  // Not remote yet — nothing has been pushed.
+  await upsert(session, userID, true, false);
   return session;
 }
 
@@ -203,6 +235,99 @@ export async function countPendingSessions(userID: string): Promise<number> {
   return row?.n ?? 0;
 }
 
+/**
+ * Pushes one session and clears its dirty flag. Nothing else.
+ *
+ * This exists because the session screen called `syncSessions` on every
+ * save, and `syncSessions` is a *full reconciliation*: it pushes every dirty
+ * session at 2–3 requests each, then pulls the last twenty. One tick of a
+ * set therefore cost `3 × dirty + 1` requests, every debounced keystroke did
+ * the same, and any session that could never push stayed dirty and was
+ * retried on all of them — a request storm that grew with your history
+ * rather than with what you were doing.
+ *
+ * Editing a session should talk about that session. Reconciliation belongs
+ * on screen focus, where it happens once.
+ */
+export async function pushSession(
+  userID: string,
+  id: string,
+  getToken: () => Promise<string | null>,
+): Promise<void> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<Row>(
+    `SELECT * FROM local_sessions WHERE id = ? AND user_id = ? AND dirty = 1`,
+    id,
+    userID,
+  );
+  if (row) await pushRow(db, row, userID, getToken);
+}
+
+/**
+ * Pushes one row's state to the server and clears its dirty flag.
+ *
+ * Shared by `pushSession` and `syncSessions` rather than written twice: the
+ * ordering, the idempotency assumptions and the compare-and-swap below are
+ * all load-bearing, and two copies of that would drift.
+ */
+async function pushRow(
+  db: SQLite.SQLiteDatabase,
+  row: Row,
+  userID: string,
+  getToken: () => Promise<string | null>,
+): Promise<void> {
+  // Not `toSession`, which papers over a corrupt blob with an empty list.
+  // `pushSets` *replaces* the server's list, so pushing that empty array
+  // would turn a local read failure into permanent remote deletion.
+  const sets = parseSets(row.sets_json);
+  if (sets === null) throw new Error('This session is corrupted on this device and was not synced.');
+
+  const s = toSession(row);
+  let remote = row.remote === 1;
+
+  // Only until the server has acknowledged it. The create is idempotent, so
+  // repeating it was harmless — but it doubled the cost of every keystroke
+  // and made the server re-validate the workout template each time.
+  if (!remote) {
+    await pushCreate(getToken, {
+      id: s.id,
+      sport: s.sport,
+      name: s.name,
+      workout_id: s.workout_id,
+      started_at: s.started_at,
+      sets,
+    });
+    remote = true;
+    await db.runAsync(`UPDATE local_sessions SET remote = 1 WHERE id = ? AND user_id = ?`, s.id, userID);
+  }
+
+  try {
+    // Always, even straight after a create: `POST /v1/sessions` ignores the
+    // sets in the body on a replay, so they need their own call regardless.
+    await pushSets(getToken, s.id, sets);
+  } catch (err) {
+    // The session was deleted on another device. Forget that it's remote so
+    // the next attempt recreates it — the device actively logging holds the
+    // live copy, and dropping the sets to honour a delete made elsewhere
+    // would lose work that only exists here.
+    if (err instanceof ApiError && err.status === 404) {
+      await db.runAsync(`UPDATE local_sessions SET remote = 0 WHERE id = ? AND user_id = ?`, s.id, userID);
+    }
+    throw err;
+  }
+  if (s.ended_at) await pushFinish(getToken, s.id, s.ended_at);
+
+  await db.runAsync(
+    `UPDATE local_sessions SET dirty = 0 WHERE id = ? AND user_id = ?
+     -- Only if nothing changed underneath us mid-push, or we'd mark a newer
+     -- edit as already sent and silently drop it.
+     AND updated_at = ?`,
+    s.id,
+    userID,
+    row.updated_at,
+  );
+}
+
 export type SessionSyncResult = { pushed: number; pulled: number; failed: number; error?: string };
 
 /**
@@ -231,30 +356,8 @@ export async function syncSessions(
   );
 
   for (const row of dirty) {
-    const s = toSession(row);
     try {
-      await pushCreate(getToken, {
-        id: s.id,
-        sport: s.sport,
-        name: s.name,
-        workout_id: s.workout_id,
-        started_at: s.started_at,
-        sets: s.sets,
-      });
-      // Always, not just on replay: it's one extra request and it removes
-      // the need to know which branch the create took.
-      await pushSets(getToken, s.id, s.sets);
-      if (s.ended_at) await pushFinish(getToken, s.id, s.ended_at);
-
-      await db.runAsync(
-        `UPDATE local_sessions SET dirty = 0 WHERE id = ? AND user_id = ?
-         -- Only if nothing changed underneath us mid-push, or we'd mark a
-         -- newer edit as already sent and silently drop it.
-         AND updated_at = ?`,
-        s.id,
-        userID,
-        row.updated_at,
-      );
+      await pushRow(db, row, userID, getToken);
       result.pushed++;
     } catch (err) {
       result.failed++;
@@ -273,7 +376,7 @@ export async function syncSessions(
         userID,
       );
       if (local?.dirty === 1) continue;
-      await upsert({ ...r, dirty: false }, userID, false);
+      await upsert({ ...r, dirty: false }, userID, false, true);
       result.pulled++;
     }
   } catch (err) {
@@ -297,7 +400,7 @@ export async function hydrateSession(
 ): Promise<LocalSession | null> {
   try {
     const { session } = await pullSession(getToken, id);
-    await upsert({ ...session, dirty: false }, userID, false);
+    await upsert({ ...session, dirty: false }, userID, false, true);
     return { ...session, dirty: false };
   } catch {
     return null;

@@ -9,7 +9,6 @@ import { useAuth as useClerkAuth } from '@clerk/clerk-expo';
 
 import { readAutoRest, writeAutoRest } from '@/lib/rest';
 import { useTrackEffort } from '@/lib/useTrackEffort';
-import { useAuthToken } from '@/lib/useAuthToken';
 
 /**
  * Settings as grouped rows that drill down, rather than one flat screen of
@@ -27,7 +26,6 @@ import { useAuthToken } from '@/lib/useAuthToken';
  */
 export default function SettingsScreen() {
   const { signOut } = useAuth();
-  const getToken = useAuthToken();
   const router = useRouter();
 
   const { userId } = useClerkAuth();

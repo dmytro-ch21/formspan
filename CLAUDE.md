@@ -55,6 +55,7 @@ Before every push, run the full local check suite (matches CI exactly):
 ```bash
 pnpm run fmt:api && pnpm run vet:api && pnpm run build:api && pnpm run test:api
 pnpm run lint:openapi
+pnpm run typecheck:mobile
 pnpm run lint:web && pnpm run typecheck:web && pnpm run build:web
 docker build -f backend/Dockerfile backend   # if Docker/Colima is available
 ```

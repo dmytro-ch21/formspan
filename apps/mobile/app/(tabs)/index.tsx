@@ -23,10 +23,16 @@ const SPORTS: { key: string; label: string }[] = [
   { key: 'running', label: 'Running' },
 ];
 
-/** Warm-ups excluded, matching the backend's own working-volume rule — the
- *  same session must not report two different numbers on two screens. */
+/**
+ * Completed, non-warm-up sets — the backend's own working-volume rule.
+ *
+ * The `completed` half was missed when progressive volume landed, so this
+ * row said "5 working sets" and the session it linked to said "Sets 0".
+ * Two screens disagreeing about the same session is worse than either
+ * number alone.
+ */
 function workingSets(s: Session): number {
-  return s.sets.filter((set) => set.set_type !== 'warmup').length;
+  return s.sets.filter((set) => set.completed && set.set_type !== 'warmup').length;
 }
 
 export default function TodayScreen() {
@@ -189,6 +195,12 @@ export default function TodayScreen() {
                   <Text style={styles.muted}>
                     {new Date(s.started_at).toLocaleDateString()} · {workingSets(s)}{' '}
                     {workingSets(s) === 1 ? 'working set' : 'working sets'}
+                    {s.ended_at
+                      ? ` · ${formatElapsed(
+                          (new Date(s.ended_at).getTime() - new Date(s.started_at).getTime()) /
+                            1000,
+                        )}`
+                      : ''}
                   </Text>
                 </View>
                 <Text style={s.ended_at ? styles.synced : styles.pending}>

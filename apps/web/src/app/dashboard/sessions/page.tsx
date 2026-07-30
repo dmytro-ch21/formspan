@@ -204,10 +204,11 @@ export default function SessionsPage() {
 
 function SessionRow({ session }: { session: Session }) {
   const { units } = useUnits();
-  // Warm-ups excluded, matching the backend's own working-volume rule — a
-  // number here that disagreed with the one inside the session would be
-  // worse than no number.
-  const working = session.sets.filter((s) => s.set_type !== "warmup");
+  // Completed, non-warm-up sets — the backend's own working-volume rule. The
+  // `completed` half was missed when progressive volume landed, so this row
+  // showed a session's full tonnage while the detail page showed zero for
+  // the same session.
+  const working = session.sets.filter((s) => s.completed && s.set_type !== "warmup");
   const tonnage = working.reduce(
     (sum, s) => sum + (s.reps ?? 0) * (s.weight_kg ?? 0),
     0,

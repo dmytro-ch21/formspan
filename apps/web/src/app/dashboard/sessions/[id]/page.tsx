@@ -573,6 +573,9 @@ function ExerciseBlock({
         <table className="w-full min-w-max text-sm">
           <thead>
             <tr className="border-b border-line-soft text-left">
+              <th scope="col" className="px-4 py-2">
+                <span className="sr-only">Done</span>
+              </th>
               <th scope="col" className="eyebrow px-4 py-2 text-[0.625rem] font-medium">
                 Set
               </th>
@@ -664,6 +667,20 @@ function SetRow({
 
   return (
     <tr className="border-b border-line-soft last:border-b-0">
+      <td className="px-4 py-1.5">
+        {/* Web could create sets but never mark one done, so every
+            web-logged session reported zero volume and dropped out of the
+            progression history entirely — completed sets are the only ones
+            Summarise and LastPerformances count. */}
+        <input
+          type="checkbox"
+          checked={set.completed}
+          disabled={!editable}
+          onChange={(e) => onChange({ ...set, completed: e.target.checked })}
+          aria-label={`Set ${ordinal} of ${exerciseName} done`}
+          className="size-5 accent-lime disabled:opacity-50"
+        />
+      </td>
       <td className="px-4 py-1.5">
         <span className="stat text-text-dim">{ordinal}</span>
         {short && <span className="ml-1 text-xs font-bold text-lime">{short}</span>}

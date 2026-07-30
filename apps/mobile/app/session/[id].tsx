@@ -25,11 +25,11 @@ import { fetchExercises, type Exercise } from '@/lib/exercises';
 import {
   cacheExercises,
   cachedExercises,
-  countPendingSessions,
   deleteLocalSession,
   finishLocalSession,
   hydrateSession,
   readLocalSession,
+  pushSession,
   saveLocalSets,
   syncSessions,
 } from '@/lib/sessionStore';
@@ -38,6 +38,7 @@ import {
   describeSet,
   emptySet,
   fetchSuggestions,
+  isPermanentRejection,
   measuresFor,
   SET_TYPES,
   type LoggedSet,
@@ -75,6 +76,11 @@ export default function SessionScreen() {
   const [catalog, setCatalog] = useState<Map<string, Exercise>>(new Map());
   const [suggestions, setSuggestions] = useState<Map<string, Suggestion>>(new Map());
   const timerState = useRestTimer();
+  // The switch in Settings writes this; reading the same hook is what makes
+  // the two agree. An earlier version imported the hook and never called it,
+  // leaving a useState(true) nothing ever updated — so the setting silently
+  // did nothing while the commit claimed it worked.
+  const { trackEffort: showEffort } = useTrackEffort();
 
   /**
    * How long you've been training. Derived from started_at on every tick
@@ -99,9 +105,6 @@ export default function SessionScreen() {
   // leg press marked in pounds, and converting in your head at the moment
   // you're trying to record a number is exactly what this avoids.
   const [exerciseUnits, setExerciseUnits] = useState<Record<string, UnitSystem>>({});
-  // Defaults to showing effort: the progression rule is built on it, and a
-  // failed profile fetch shouldn't quietly disable the app's only input.
-  const [showEffort, setShowEffort] = useState(true);
   // Off unless asked for — see PREF_AUTO_REST for why that's the default.
   const [autoRest, setAutoRest] = useState(false);
   useEffect(() => {
@@ -134,9 +137,6 @@ export default function SessionScreen() {
   const [everLoaded, setEverLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  // How many sessions the server still owes — the honest replacement for a
-  // "saving…" spinner once saving no longer depends on the network.
-  const [pending, setPending] = useState(0);
 
   const queued = useRef<LoggedSet[] | null>(null);
 
@@ -161,7 +161,6 @@ export default function SessionScreen() {
       setVolume(localVolume(s.sets));
       setError(null);
       setEverLoaded(true);
-      setPending(await countPendingSessions(userId));
 
       // The cache renders the screen; the fetch refreshes the cache for
       // next time. Offline, the first half still works.
@@ -181,6 +180,12 @@ export default function SessionScreen() {
       )
         .then(setSuggestions)
         .catch(() => {});
+
+      // Drain the outbox once, on focus. Saves push only their own session
+      // now, so without this a session logged with no signal would sit dirty
+      // until something happened to open the Today tab — which, on a phone
+      // resumed straight back into a workout, might be a long time.
+      syncSessions(userId, getToken).catch(() => {});
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setEverLoaded(true);
@@ -217,16 +222,36 @@ export default function SessionScreen() {
       const run = inFlight.current.then(async () => {
         setSaving(true);
         try {
-          await saveLocalSets(userId, id, next);
+          // The local write *is* the save, so its failure is never quiet.
+          // The screen is already showing these sets; if SQLite didn't take
+          // them, the athlete is looking at work that doesn't exist
+          // anywhere, and the only honest thing to do is say so.
+          try {
+            await saveLocalSets(userId, id, next);
+          } catch (err) {
+            setError(
+              `Couldn't save on this device: ${err instanceof Error ? err.message : String(err)}`,
+            );
+            return;
+          }
           setVolume(localVolume(next));
           setError(null);
-          const result = await syncSessions(userId, getToken);
-          setPending(await countPendingSessions(userId));
-          // Only a rejection says the *data* is wrong; anything else is the
-          // network, which the outbox already handles.
-          if (result.error && /invalid|400/i.test(result.error)) setError(result.error);
-        } catch (err) {
-          setError(err instanceof Error ? err.message : String(err));
+
+          try {
+            // Only this session, not a full reconciliation. Pushing every
+            // dirty session and pulling twenty more on each keystroke is
+            // what turned one workout into hundreds of requests.
+            await pushSession(userId, id, getToken);
+          } catch (err) {
+            // A push that failed because the network did is an ordinary
+            // state: the row stays dirty and goes out with the next sync.
+            // A push the server actively *refused* will fail the same way
+            // forever, and staying quiet about that means finishing a
+            // workout that was never going to sync.
+            if (isPermanentRejection(err)) {
+              setError(err instanceof Error ? err.message : String(err));
+            }
+          }
         } finally {
           setSaving(false);
         }
@@ -563,10 +588,7 @@ export default function SessionScreen() {
                   setSets(s.sets);
                   setVolume(localVolume(s.sets));
                 }
-                syncSessions(userId!, getToken)
-                  .then(() => countPendingSessions(userId!))
-                  .then(setPending)
-                  .catch(() => {});
+                syncSessions(userId!, getToken).catch(() => {});
               } catch (err) {
                 setError(err instanceof Error ? err.message : String(err));
               }

@@ -324,11 +324,6 @@ function ItemRow({
   // without this component knowing anything about either.
   const fields: TargetField[] = exercise ? targetFieldsFor(exercise.load_type) : [];
 
-  const set = (key: keyof WorkoutItem) => (text: string) => {
-    const n = text.trim() === '' ? null : Number(text.replace(',', '.'));
-    onChange({ ...item, [key]: Number.isFinite(n as number) ? n : null });
-  };
-
   return (
     <View style={styles.item}>
       <Pressable

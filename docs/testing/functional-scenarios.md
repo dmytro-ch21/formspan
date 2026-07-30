@@ -437,12 +437,23 @@ Domain: a training session that **actually happened**, and the sets in it — re
 - **Ticking a set starts the rest timer only when "Auto rest timer" is on.** It defaults **off**, so out of the box the Rest button is the only trigger. Un-ticking never starts rest, on or off. Un-ticking is allowed.
 - **`completed` must survive the Postgres round trip.** It was written by `insertSets` and never selected back by `attachSets`, so every response reported zero volume and the mobile sync cycle would have written `false` over real flags. Assert it in `TestCreateAndGet_RecordsEveryMeasure` — adding it to that test's *fixtures* without an assertion is what let the bug ship green.
 - **Migration check:** existing sets backfill to completed, so historical sessions keep their volume. Only new sets default to not-done.
+- **There are five copies of the working-volume rule.** `Summarise` (Go), `localVolume` (mobile session), `workingSets` (mobile Today), the web history list's `working` filter, and the web session header. Changing the rule means changing all five — four of them drifted the first time, and the symptom is two screens reporting different numbers for the same session.
+- **Every client that can create a set must be able to mark it completed.** The web logger couldn't, so web-logged sessions reported zero volume and vanished from `LastPerformances` entirely.
 - **The client's `localVolume` must match the server's `Summarise` exactly.** It's a deliberate duplicate so the header works offline, and it has already drifted once — the completion rule went into Go only, and a live session showed the plan's full tonnage against unticked sets.
 
 **What the header shows**
 - While training: time, sets, reps. **No tonnage, no top RPE.**
 - Once finished: tonnage appears. Top RPE never does.
 - Both remain in the `Volume` API response — dropping them from the UI must not drop them from the contract, since the trends screen will want them.
+
+**Request cost of logging — worth actually measuring, not just reading**
+- One set edit must cost **one** `PUT /v1/sessions/{id}/sets` and nothing else — no `POST /v1/sessions`, no `GET /v1/sessions`. It used to trigger a full `syncSessions` (every dirty session at 2–3 requests each, plus a pull of twenty) *and* re-send the idempotent create every time. Ninety-one requests for fifteen saves.
+- The create fires **once per session**, not once per save — the `remote` flag records that the server has it. Deleting the session elsewhere and saving again must recreate it rather than fail forever.
+- A push the server *refuses* (404, 409, `invalid_input`) must surface; a push that fails because the network did must not. A failed **local** write must always surface — that one is the save.
+- A session whose local blob is unreadable must be skipped by the push, never sent as an empty set list (which would delete the server's copy).
+- Reconciliation (`syncSessions`) belongs on screen focus, once — never on the save path.
+- A failed push must not raise a banner mid-workout: the local write succeeded and the row stays dirty for the next sync. Only validation errors are worth showing.
+- Capture the API's stdout to a file when checking this; `pnpm run dev:api` doesn't persist it anywhere.
 
 **Session duration**
 - The header clock runs from `started_at` and keeps time across backgrounding — derived per tick, never accumulated.
