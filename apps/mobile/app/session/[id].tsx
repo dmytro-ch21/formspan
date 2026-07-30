@@ -29,6 +29,7 @@ import {
   finishLocalSession,
   hydrateSession,
   readLocalSession,
+  pushSession,
   saveLocalSets,
   syncSessions,
 } from '@/lib/sessionStore';
@@ -37,6 +38,7 @@ import {
   describeSet,
   emptySet,
   fetchSuggestions,
+  isValidationError,
   measuresFor,
   SET_TYPES,
   type LoggedSet,
@@ -217,12 +219,18 @@ export default function SessionScreen() {
           await saveLocalSets(userId, id, next);
           setVolume(localVolume(next));
           setError(null);
-          const result = await syncSessions(userId, getToken);
-              // Only a rejection says the *data* is wrong; anything else is the
-          // network, which the outbox already handles.
-          if (result.error && /invalid|400/i.test(result.error)) setError(result.error);
-        } catch (err) {
-          setError(err instanceof Error ? err.message : String(err));
+          // Only this session, not a full reconciliation. Pushing every
+          // dirty session and pulling twenty more on each keystroke is what
+          // turned one workout into hundreds of requests.
+          await pushSession(userId, id, getToken);
+            } catch (err) {
+          // The local write already succeeded, so a failed push just leaves
+          // the row dirty for the next focus-time sync. Only bad *data* is
+          // worth interrupting a workout for — the network is the outbox's
+          // problem, not the athlete's.
+          if (isValidationError(err)) {
+            setError(err instanceof Error ? err.message : String(err));
+          }
         } finally {
           setSaving(false);
         }

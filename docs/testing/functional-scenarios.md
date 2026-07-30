@@ -446,6 +446,12 @@ Domain: a training session that **actually happened**, and the sets in it — re
 - Once finished: tonnage appears. Top RPE never does.
 - Both remain in the `Volume` API response — dropping them from the UI must not drop them from the contract, since the trends screen will want them.
 
+**Request cost of logging — worth actually measuring, not just reading**
+- One set edit must cost **one** `PUT /v1/sessions/{id}/sets` and nothing else. It used to also trigger a full `syncSessions`: every dirty session pushed at 2–3 requests each, plus a pull of twenty. Ninety-one requests for fifteen saves.
+- Reconciliation (`syncSessions`) belongs on screen focus, once — never on the save path.
+- A failed push must not raise a banner mid-workout: the local write succeeded and the row stays dirty for the next sync. Only validation errors are worth showing.
+- Capture the API's stdout to a file when checking this; `pnpm run dev:api` doesn't persist it anywhere.
+
 **Session duration**
 - The header clock runs from `started_at` and keeps time across backgrounding — derived per tick, never accumulated.
 - A finished session's duration is fixed and stops ticking; it appears in the mobile recent list and the web history page.

@@ -765,6 +765,51 @@ That is two reviews in a row where the *green check suite* was the thing that
 gave false confidence. The checks are necessary and they are not evidence.
 
 
+## 2026-07-30 — One save, seven requests
+
+The backend log was flooding during a workout. Capturing it properly (the
+`pnpm run dev:api` wrapper never wrote stdout anywhere readable, which is why
+this went unseen all session) showed 91 requests in about a second:
+
+| path | count |
+|---|---|
+| `/v1/sessions` | 21 |
+| `/v1/exercises` | 20 |
+| `PUT /v1/sessions/{id}/sets` | 15 |
+| `/v1/profile` | 15 |
+
+Fifteen of those were the actual saves. The rest were amplification.
+
+**The cause: `persist` called `syncSessions`, which is a full
+reconciliation.** It pushes *every* dirty session at 2–3 requests each and
+then pulls the last twenty. So one tick of a set — or one debounced
+keystroke — cost `3 × dirty + 1` requests, and any session that could never
+push stayed dirty and got retried on every single one of them. The cost grew
+with the length of your training history rather than with what you were
+doing, which is exactly backwards.
+
+Editing a session should talk about that session. `pushSession` does one
+session and clears its flag; reconciliation stays on screen focus, where it
+happens once.
+
+Also fixed while there: a failed push no longer surfaces an error banner
+mid-workout. The local write has already succeeded and the row stays dirty
+for the next sync, so the only thing worth interrupting a lift for is bad
+*data* — the network is the outbox's problem.
+
+**Still outstanding from the same trace**, both flagged by `frontend-reviewer`
+and not yet fixed: `/v1/exercises` refetches the entire 524-entry catalog on
+the session screen and the exercise detail screen rather than reading the
+local cache, and `useUnits`/`useTrackEffort` each independently `getProfile()`
+on mount so a screen using both issues two identical requests.
+
+The wider lesson is about instrumentation, not the loop. Nothing in the
+check suite, CI, or the reviewers' static reading would have surfaced a
+request-count problem — it took reading a log, and there was no log to read
+because the dev script's output went nowhere. Worth fixing that before the
+next "why is it slow".
+
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

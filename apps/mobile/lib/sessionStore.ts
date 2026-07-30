@@ -211,6 +211,54 @@ export async function countPendingSessions(userID: string): Promise<number> {
   return row?.n ?? 0;
 }
 
+/**
+ * Pushes one session and clears its dirty flag. Nothing else.
+ *
+ * This exists because the session screen called `syncSessions` on every
+ * save, and `syncSessions` is a *full reconciliation*: it pushes every dirty
+ * session at 2–3 requests each, then pulls the last twenty. One tick of a
+ * set therefore cost `3 × dirty + 1` requests, every debounced keystroke did
+ * the same, and any session that could never push stayed dirty and was
+ * retried on all of them — a request storm that grew with your history
+ * rather than with what you were doing.
+ *
+ * Editing a session should talk about that session. Reconciliation belongs
+ * on screen focus, where it happens once.
+ */
+export async function pushSession(
+  userID: string,
+  id: string,
+  getToken: () => Promise<string | null>,
+): Promise<void> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<Row>(
+    `SELECT * FROM local_sessions WHERE id = ? AND user_id = ? AND dirty = 1`,
+    id,
+    userID,
+  );
+  if (!row) return;
+  const s = toSession(row);
+
+  await pushCreate(getToken, {
+    id: s.id,
+    sport: s.sport,
+    name: s.name,
+    workout_id: s.workout_id,
+    started_at: s.started_at,
+    sets: s.sets,
+  });
+  await pushSets(getToken, s.id, s.sets);
+  if (s.ended_at) await pushFinish(getToken, s.id, s.ended_at);
+
+  await db.runAsync(
+    `UPDATE local_sessions SET dirty = 0
+     WHERE id = ? AND user_id = ? AND updated_at = ?`,
+    s.id,
+    userID,
+    row.updated_at,
+  );
+}
+
 export type SessionSyncResult = { pushed: number; pulled: number; failed: number; error?: string };
 
 /**
