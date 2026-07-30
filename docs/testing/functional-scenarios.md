@@ -708,6 +708,25 @@ Domain: logging a session with no connectivity. **Test this by actually stopping
 - The weekly chart exposes each bar's value as text, so the trend is readable without seeing it.
 - Large tonnage renders as `251.1t`, not `251147kg`.
 
+## Training summary on the phone (`apps/mobile` YOU tab)
+
+**Happy path**
+- The YOU tab shows Sessions / Days / Time for the span, each with its change against the preceding span of the same length, then a day grid and a bar per week.
+- Switching 4 weeks ↔ 12 weeks rescopes tiles, grid and bars together.
+- Returning to the tab refetches, so a session logged since is reflected.
+
+**Edge cases & errors**
+- A day with training must never render in the rest-day colour. Specifically: a BJJ session with **zero working sets** inside a period that also contains lifting — the intensity measure is chosen per period but read per day.
+- A week with sessions but no tonnage is dimmed, not drawn as absent, and the "N weeks in a row" count is taken from sessions rather than from the axis measure.
+- No history → an invitation, not zeroes. A failed fetch says so and is distinguishable from "nothing logged".
+- The streak counts **weeks**, not days: rest days must not break it. An unbroken run must not appear to reset on Monday morning before that week's first session.
+- Large tonnage renders as `251.1t` / `231,196lb`, never `251147kg`.
+
+**Visual / accessibility**
+- The three grid colours must stay ≥3:1 against the card and ≥15 ΔE apart under normal vision — re-validate if the ramp or the surface changes, don't eyeball it.
+- Trained days carry a date + session-count label; empty days are not accessibility stops.
+- Bar heights: a trained week never rounds to invisible, and bars are capped in width so a 4-week span doesn't render as slabs.
+
 ## Not yet covered (tracked here so it isn't lost, not because it's blocking)
 
 - Mobile has no auth yet (Clerk Expo SDK is a separate future increment) — no sign-in/sign-out scenarios apply to mobile today.

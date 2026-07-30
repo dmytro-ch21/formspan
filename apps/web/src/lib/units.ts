@@ -73,7 +73,16 @@ export function formatTonnage(kg: number | null | undefined, u: UnitSystem): str
       maximumFractionDigits: 1,
     })}t`;
   }
-  return `${Math.round(kg * LB_PER_KG).toLocaleString()}lb`;
+  // Pounds run an order of magnitude larger, so the same block that reads
+  // 251.1t reads 553,684lb — the exact mouthful this function exists to
+  // avoid, for the majority of the target market. Abbreviated past six
+  // digits; short tons are avoided because "t" would then mean two things.
+  const lb = Math.round(kg * LB_PER_KG);
+  if (lb < 100_000) return `${lb.toLocaleString()}lb`;
+  return `${(Math.round(lb / 100) / 10).toLocaleString(undefined, {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  })}k lb`;
 }
 
 /**
