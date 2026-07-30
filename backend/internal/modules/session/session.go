@@ -103,9 +103,12 @@ type Session struct {
 //
 // Warm-ups are excluded from working volume deliberately: counting them
 // inflates every number and makes a light day look like a hard one, which
-// would poison any load calculation built on top. ExerciseIDs is the one
-// field that still counts them — it answers "what did I train", not "how
-// hard did I train".
+// would poison any load calculation built on top.
+//
+// ExerciseIDs is the one field that counts *everything* — warm-ups and sets
+// that were planned but never performed. It answers "what is this session
+// about", not "what did I complete", which is why an opened template
+// reports its exercises alongside zero working volume.
 type Volume struct {
 	WorkingSets int      `json:"working_sets"`
 	TotalReps   int      `json:"total_reps"`

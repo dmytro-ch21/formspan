@@ -71,6 +71,16 @@ func TestCreateAndGet_RecordsEveryMeasure(t *testing.T) {
 	if len(s.Sets) != 3 {
 		t.Fatalf("expected 3 sets, got %d", len(s.Sets))
 	}
+	// Completion is a measure like any other and has to survive the round
+	// trip. It didn't: the insert wrote it and attachSets never selected it
+	// back, so every set read from Postgres came back not-completed. That
+	// zeroed the volume on every response, and via the mobile pull-then-push
+	// cycle would have written those false flags back over real ones.
+	for i, set := range s.Sets {
+		if !set.Completed {
+			t.Errorf("set %d came back not completed", i)
+		}
+	}
 	// Every recorded measure must survive the round trip — this is the whole
 	// point of the module.
 	got := s.Sets[1]

@@ -671,6 +671,52 @@ The preference still lives on the profile rather than being purely local, becaus
 Verified by flipping it and reading `profiles.track_effort` go `t` → `f`.
 
 
+## 2026-07-30 — The reviewers earn their place
+
+Two review agents exist for exactly this, and I had been skipping them —
+running the CI check suite instead and treating that as verification. The
+user caught it. Running them on the merged shell work immediately surfaced a
+**blocking data-loss bug that had already reached `main`**.
+
+`insertSets` wrote `session_sets.completed`; `attachSets` never selected it
+back. Every set read from Postgres therefore came back `Completed: false`,
+which meant:
+
+- **Every API response reported zero volume.** `attachSets` backs `Get` and
+  `List`, and `Get` is what `Create`, `ReplaceSets` and `Finish` all return —
+  so all four `Summarise` calls ran over uniformly not-completed sets. The
+  web session page would have shown 0 / 0 / — for a fully logged session.
+- **The mobile sync cycle would have erased real flags.** `sessionStore`
+  pulls sessions from the API and upserts them clean into local SQLite, so a
+  sync overwrote the phone's ticks with `false`; the next whole-list `PUT`
+  wrote those back to Postgres. Flags gone, volume zeroed, and the session
+  silently dropped out of `LastPerformances` — invisible to the progression
+  rule forever.
+
+What let it through is the sharper lesson. `TestCreateAndGet_RecordsEveryMeasure`
+exists precisely to prove "every recorded measure survives the round trip".
+The completion change added `Completed: true` to its fixtures and **no
+assertion on it** — so the test dutifully passed while the measure it was
+named after silently didn't round-trip. A fixture is not a check. Now
+asserted, and confirmed to fail without the fix.
+
+**The process change matters more than the fix.** The rule was already in
+`CLAUDE.md` and I violated it repeatedly anyway, because it lived somewhere
+separate from the thing I actually invoke. `/pre-merge` now runs the
+reviewers *and* the check suite as one gate, with the reasoning written into
+the skill: the checks prove it compiles and have never once caught an
+authorization gap or a data-loss bug, while the reviewers have now caught
+three — the cross-user ID-enumeration oracle twice, and this. Every one of
+them shipped green.
+
+Also from the same review: the `Volume` schema descriptions still claimed
+only warm-ups were excluded, `completed`'s write-side default was implied by
+Go's zero value rather than stated in the contract, `exercise_ids`' doc
+comment disagreed with its own behaviour, and the down migration didn't warn
+that a down-then-up cycle re-backfills every row to `true` — silently
+marking skipped sets as performed.
+
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.
