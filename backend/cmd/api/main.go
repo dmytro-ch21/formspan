@@ -68,6 +68,8 @@ func main() {
 	mux.Handle("GET /v1/flags", verifier.RequireAuth(http.HandlerFunc(featureFlagHandler.List)))
 	mux.Handle("POST /v1/activities", verifier.RequireAuth(http.HandlerFunc(activityHandler.Create)))
 	mux.Handle("GET /v1/activities", verifier.RequireAuth(http.HandlerFunc(activityHandler.List)))
+	mux.Handle("GET /v1/profile/exercise-units", verifier.RequireAuth(http.HandlerFunc(profileHandler.ExerciseUnits)))
+	mux.Handle("PUT /v1/profile/exercise-units/{exerciseID}", verifier.RequireAuth(http.HandlerFunc(profileHandler.SetExerciseUnit)))
 	mux.Handle("GET /v1/exercises", verifier.RequireAuth(http.HandlerFunc(exerciseHandler.List)))
 	mux.Handle("GET /v1/exercises/{exerciseID}", verifier.RequireAuth(http.HandlerFunc(exerciseHandler.Get)))
 	mux.Handle("GET /v1/techniques", verifier.RequireAuth(http.HandlerFunc(techniqueHandler.List)))

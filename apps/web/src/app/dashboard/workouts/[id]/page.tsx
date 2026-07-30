@@ -24,6 +24,14 @@ import {
   type Workout,
   type WorkoutItem,
 } from "@/lib/api";
+import {
+  formatWeight,
+  fromDisplayWeight,
+  toDisplayWeight,
+  weightUnit,
+  type UnitSystem,
+} from "@/lib/units";
+import { useUnits } from "@/lib/useUnits";
 
 /**
  * The workout editor, built for a mouse and a keyboard rather than as a
@@ -54,6 +62,7 @@ export default function WorkoutEditorPage({ params }: { params: Promise<{ id: st
   const [saving, setSaving] = useState(false);
   const [savedOnce, setSavedOnce] = useState(false);
   const [starting, setStarting] = useState(false);
+  const { units } = useUnits();
   const abortRef = useRef<AbortController | null>(null);
 
   const canEdit =
@@ -278,6 +287,7 @@ export default function WorkoutEditorPage({ params }: { params: Promise<{ id: st
                   total={items.length}
                   exercise={catalog.get(item.exercise_id)}
                   editable={canEdit}
+                  units={units}
                   onChange={(next) => setItems(items.map((it, i) => (i === index ? next : it)))}
                   onMoveTo={(to) => move(index, to)}
                   onDropFrom={(from) => move(from, index)}
@@ -320,6 +330,7 @@ function ItemRow({
   total,
   exercise,
   editable,
+  units,
   onChange,
   onMoveTo,
   onDropFrom,
@@ -330,6 +341,7 @@ function ItemRow({
   total: number;
   exercise: Exercise | undefined;
   editable: boolean;
+  units: UnitSystem;
   onChange: (next: WorkoutItem) => void;
   onMoveTo: (to: number) => void;
   onDropFrom: (from: number) => void;
@@ -375,28 +387,45 @@ function ItemRow({
 
       {editable ? (
         <div className="flex shrink-0 items-end gap-2">
-          {fields.map((f) => (
-            <label key={f} className="flex flex-col gap-1">
-              <span className="eyebrow text-[0.625rem]">{FIELD_LABEL[f]}</span>
-              <input
-                type="number"
-                min={1}
-                inputMode="numeric"
-                aria-label={`${FIELD_LABEL[f]} for ${exercise?.name ?? "exercise"}`}
-                value={(item[FIELD_KEY[f]] as number | null) ?? ""}
-                onChange={(e) => {
-                  const raw = e.target.value;
-                  const n = raw === "" ? null : Number(raw);
-                  onChange({ ...item, [FIELD_KEY[f]]: Number.isFinite(n as number) ? n : null });
-                }}
-                placeholder="—"
-                className="stat w-16 rounded-lg border border-line bg-bg px-2 py-1.5 text-center text-base outline-none focus:border-lime"
-              />
-            </label>
-          ))}
+          {fields.map((f) => {
+            const label = f === "weight" ? weightUnit(units) : FIELD_LABEL[f];
+            const stored = item[FIELD_KEY[f]] as number | null;
+            // Shown in the athlete's units, stored in kilograms — the same
+            // rule the session logger follows, so a template written in
+            // pounds and performed in kilograms is still the same plan.
+            const shown =
+              stored == null ? "" : f === "weight" ? toDisplayWeight(stored, units) : stored;
+            return (
+              <label key={f} className="flex flex-col gap-1">
+                <span className="eyebrow text-[0.625rem]">{label}</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={f === "weight" ? 0.5 : 1}
+                  inputMode={f === "weight" ? "decimal" : "numeric"}
+                  aria-label={`${label} for ${exercise?.name ?? "exercise"}`}
+                  value={shown}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    const n = raw === "" ? null : Number(raw);
+                    if (n === null || !Number.isFinite(n)) {
+                      onChange({ ...item, [FIELD_KEY[f]]: null });
+                      return;
+                    }
+                    onChange({
+                      ...item,
+                      [FIELD_KEY[f]]: f === "weight" ? fromDisplayWeight(n, units) : Math.round(n),
+                    });
+                  }}
+                  placeholder="—"
+                  className="stat w-16 rounded-lg border border-line bg-bg px-2 py-1.5 text-center text-base outline-none focus:border-lime"
+                />
+              </label>
+            );
+          })}
         </div>
       ) : (
-        <span className="stat shrink-0 text-sm text-text-muted">{targetSummary(item)}</span>
+        <span className="stat shrink-0 text-sm text-text-muted">{targetSummary(item, units)}</span>
       )}
 
       {editable && (
@@ -418,10 +447,10 @@ function ItemRow({
   );
 }
 
-function targetSummary(i: WorkoutItem): string {
+function targetSummary(i: WorkoutItem, units: UnitSystem): string {
   const p: string[] = [];
   if (i.target_sets && i.target_reps) p.push(`${i.target_sets}×${i.target_reps}`);
-  if (i.target_weight_kg) p.push(`${i.target_weight_kg}kg`);
+  if (i.target_weight_kg) p.push(formatWeight(i.target_weight_kg, units));
   if (i.target_seconds) p.push(`${i.target_seconds}s`);
   if (i.target_distance_m) p.push(`${i.target_distance_m}m`);
   return p.join(" · ") || "—";

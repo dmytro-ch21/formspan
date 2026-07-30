@@ -10,6 +10,7 @@ import {
   emptySet,
   fetchSuggestions,
   finishSession,
+  getExerciseUnits,
   getSession,
   isValidationError,
   listExercises,
@@ -18,6 +19,7 @@ import {
   MEASURE_LABEL,
   pickImage,
   replaceSets,
+  setExerciseUnit,
   SET_TYPES,
   similarTo,
   swapExercise,
@@ -66,6 +68,34 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const [catalog, setCatalog] = useState<Map<string, Exercise>>(new Map());
   const [suggestions, setSuggestions] = useState<Map<string, Suggestion>>(new Map());
   const { units } = useUnits();
+  // Per-exercise overrides: a machine marked in pounds shouldn't force the
+  // whole account into pounds.
+  const [exerciseUnits, setExerciseUnits] = useState<Record<string, UnitSystem>>({});
+  useEffect(() => {
+    getExerciseUnits(getToken)
+      .then(setExerciseUnits)
+      .catch(() => {});
+  }, [getToken]);
+  const unitFor = useCallback(
+    (exerciseID: string): UnitSystem => exerciseUnits[exerciseID] ?? units,
+    [exerciseUnits, units],
+  );
+  const toggleUnitFor = useCallback(
+    (exerciseID: string) => {
+      const next: UnitSystem = (exerciseUnits[exerciseID] ?? units) === "metric" ? "imperial" : "metric";
+      // Cleared rather than stored when it matches the default, so the map
+      // only ever holds genuine exceptions.
+      const override = next === units ? null : next;
+      setExerciseUnits((m) => {
+        const copy = { ...m };
+        if (override) copy[exerciseID] = override;
+        else delete copy[exerciseID];
+        return copy;
+      });
+      setExerciseUnit(getToken, exerciseID, override).catch(() => {});
+    },
+    [exerciseUnits, getToken, units],
+  );
   const [loading, setLoading] = useState(true);
   const [everLoaded, setEverLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -374,7 +404,8 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                 onSwap={setSwapping}
                 swapping={swapping === g.exerciseID}
                 suggestion={suggestions.get(g.exerciseID)}
-                units={units}
+                units={unitFor(g.exerciseID)}
+                onToggleUnit={toggleUnitFor}
                 onApplySuggestion={applySuggestion}
               />
             ))
@@ -435,6 +466,7 @@ function ExerciseBlock({
   suggestion,
   onApplySuggestion,
   units,
+  onToggleUnit,
 }: {
   exercise: Exercise | undefined;
   exerciseID: string;
@@ -449,6 +481,7 @@ function ExerciseBlock({
   suggestion: Suggestion | undefined;
   onApplySuggestion: (indices: number[], weight: number) => void;
   units: UnitSystem;
+  onToggleUnit: (exerciseID: string) => void;
 }) {
   const image = exercise ? pickImage(exercise, "thumbnail") : null;
   // Data-driven from the catalog's load_type, so a plank asks for seconds
@@ -472,6 +505,19 @@ function ExerciseBlock({
             <p className="text-xs text-text-dim">Per side — 8 reps here means 8 each side.</p>
           )}
         </div>
+        {editable && (
+          <button
+            type="button"
+            onClick={() => onToggleUnit(exerciseID)}
+            title={`Showing ${units === "imperial" ? "pounds" : "kilograms"} for this exercise`}
+            aria-label={`${exercise?.name ?? "This exercise"} is in ${
+              units === "imperial" ? "pounds" : "kilograms"
+            }. Switch.`}
+            className="shrink-0 rounded-pill border border-line px-3 py-1 text-xs font-bold text-text-muted transition hover:bg-surface-raised"
+          >
+            {weightUnit(units)}
+          </button>
+        )}
         {editable && (
           <button
             type="button"

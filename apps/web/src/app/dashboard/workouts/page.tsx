@@ -15,6 +15,7 @@ import {
   type Sport,
   type Workout,
 } from "@/lib/api";
+import { useUnits } from "@/lib/useUnits";
 
 const SCOPES = [
   { key: "mine", label: "Mine" },
@@ -23,6 +24,7 @@ const SCOPES = [
 
 export default function WorkoutsPage() {
   const { getToken } = useAuth();
+  const { units } = useUnits();
   const router = useRouter();
 
   const [scope, setScope] = useState<"mine" | "shared">("mine");
@@ -144,7 +146,7 @@ export default function WorkoutsPage() {
                     {w.items.slice(0, 3).map((it, i) => (
                       <li key={i} className="flex justify-between gap-3 text-xs text-text-dim">
                         <span className="truncate">{it.exercise_id.replace(/-/g, " ")}</span>
-                        <span className="stat shrink-0">{summariseTargets(it)}</span>
+                        <span className="stat shrink-0">{summariseTargets(it, units)}</span>
                       </li>
                     ))}
                     {w.items.length > 3 && (

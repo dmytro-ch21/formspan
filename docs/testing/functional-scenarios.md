@@ -585,7 +585,18 @@ Domain: logging a session with no connectivity. **Test this by actually stopping
 - The progression suggestion's `reason` must contain **neither "kg" nor "lb"** — the client renders the target in the athlete's own units, and a hardcoded unit would leak metric into a pounds interface. Asserted in `TestSuggest_IncreasesWhenRepsWereLeftInReserve`.
 - Distance display switches by magnitude in both systems (m/km, yd/mi) — nobody says "0.02 miles".
 
-**Not yet unit-aware:** the workout editor and the exercise library still show kilograms regardless. No per-exercise override for machines marked in pounds.
+**Per-exercise overrides** (`GET`/`PUT /v1/profile/exercise-units`)
+- A **missing key means "use the profile default"** — no third state. Clearing an override deletes the row; the client drops the key rather than storing a sentinel.
+- Flipping an exercise back to the account default must remove the override, not store a duplicate of the default.
+- Overrides are per user: another account's must never appear in yours (`TestExerciseUnits_SetClearAndScope`).
+- Setting the same exercise twice upserts rather than erroring.
+- An unknown `exerciseID` → `400`, **not `500`** — the foreign-key violation is translated (`TestExerciseUnits_RejectsUnknownExercise`).
+- A unit outside `metric|imperial` → `400`.
+- **No raw Postgres text may reach the client.** A check violation is mapped by constraint name; the module used to echo `pgErr.Message`, which includes the offending value and the constraint body.
+
+**Unit-aware surfaces:** session logger, workout template editor, workout cards, start chooser. The exercise library shows no weights, so there is nothing to convert there.
+
+**Not yet:** the override applies on the session screen only — the workout editor uses the account default. Distance conversion is implemented but no screen takes a distance input yet, so that path is untested in anger.
 
 ## Library filter and search memory (`apps/mobile` Library tab)
 

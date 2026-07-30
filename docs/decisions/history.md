@@ -551,6 +551,23 @@ Storing converted values would have made every historical row ambiguous the mome
 **Still not done:** the workout editor and exercise library show weights in kilograms regardless — only the session surfaces are unit-aware so far. Distances convert but no screen currently takes a distance input in anger. And there's no per-exercise unit override, which some lifters want for machines marked in pounds.
 
 
+## 2026-07-29 — Units everywhere, and a per-exercise override
+
+Two follow-ups to the units work, both flagged in the previous entry rather than discovered later.
+
+**The workout surfaces are unit-aware now.** The template editor's weight field, the target summary on every workout card, and the start chooser all render and accept the athlete's own unit, converting back to kilograms before anything is stored — the same rule the session logger already followed, so a template written in pounds and performed in kilograms is still the same plan.
+
+The exercise library turned out to need nothing: it shows no weights at all. The earlier flag was overcautious, and saying so is cheaper than "fixing" something that was never broken.
+
+**Per-exercise overrides, because equipment doesn't care what you think in.** A lifter who works in kilograms still faces a leg press marked in pounds, and forcing the whole account to one system makes them convert in their head at exactly the moment they're trying to record a number. `exercise_unit_prefs (user_id, exercise_id, unit_system)` holds the exceptions, and the session screen gets a small `kg`/`lb` chip on each exercise header.
+
+The modelling decision worth keeping: **a missing row means "use the profile default"**, so there is no third state to reason about, and clearing an override is a `DELETE` rather than a sentinel value. The clients mirror that — flipping an exercise back to the account default removes the key rather than storing it, so the map only ever holds genuine exceptions.
+
+**A pre-existing leak fixed on the way past.** `profile.translatePgError` echoed `pgErr.Message` straight to the client on a check violation. Postgres includes the offending value and the constraint body in that text, and `CLAUDE.md` has forbidden exactly this since the API conventions were written — it had simply never been audited in this module. Now mapped by constraint name, like the session module does. The FK case was missing entirely, so an unknown exercise id would have surfaced as a 500; it's a 400 now, with a test.
+
+**Still open:** distances convert but no screen currently takes a distance input in anger, so that path is typed but unexercised. And the override is available on the session screen only — the workout editor uses the account default, which is arguably wrong for a template built around one specific machine.
+
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

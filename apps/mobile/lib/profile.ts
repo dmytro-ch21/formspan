@@ -30,9 +30,39 @@ async function request<T>(
       traceparent: traceparent(newTraceId()),
     },
   });
+  if (res.status === 204) return undefined as T;
   const body = await res.json().catch(() => null);
   if (!res.ok) throw new Error(body?.error?.message ?? `Request failed (${res.status}).`);
   return body as T;
+}
+
+/**
+ * Per-exercise unit overrides, as a map of exercise id → unit system.
+ *
+ * A missing key means "use the profile default" — there is deliberately no
+ * third state, so clearing an override removes the key rather than storing
+ * a sentinel.
+ */
+export async function getExerciseUnits(
+  getToken: () => Promise<string | null>,
+): Promise<Record<string, UnitSystem>> {
+  const b = await request<{ exercise_units: Record<string, UnitSystem> }>(
+    getToken,
+    '/profile/exercise-units',
+  );
+  return b.exercise_units ?? {};
+}
+
+/** Pass null to clear the override and fall back to the profile default. */
+export async function setExerciseUnit(
+  getToken: () => Promise<string | null>,
+  exerciseID: string,
+  unit: UnitSystem | null,
+): Promise<void> {
+  await request<void>(getToken, `/profile/exercise-units/${encodeURIComponent(exerciseID)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ unit_system: unit }),
+  });
 }
 
 export function getProfile(getToken: () => Promise<string | null>): Promise<Profile> {

@@ -19,6 +19,7 @@ import {
   type UnitSystem,
 } from '@/lib/units';
 import { useUnits } from '@/lib/useUnits';
+import { getExerciseUnits, setExerciseUnit } from '@/lib/profile';
 import { fetchExercises, type Exercise } from '@/lib/exercises';
 import {
   cacheExercises,
@@ -74,6 +75,33 @@ export default function SessionScreen() {
   const [suggestions, setSuggestions] = useState<Map<string, Suggestion>>(new Map());
   const timerState = useRestTimer();
   const { units } = useUnits();
+  // Per-exercise overrides: a lifter who thinks in kilograms still faces a
+  // leg press marked in pounds, and converting in your head at the moment
+  // you're trying to record a number is exactly what this avoids.
+  const [exerciseUnits, setExerciseUnits] = useState<Record<string, UnitSystem>>({});
+  useEffect(() => {
+    getExerciseUnits(getToken).then(setExerciseUnits).catch(() => {});
+  }, [getToken]);
+  const unitFor = useCallback(
+    (exerciseID: string): UnitSystem => exerciseUnits[exerciseID] ?? units,
+    [exerciseUnits, units],
+  );
+  const toggleUnitFor = useCallback(
+    (exerciseID: string) => {
+      const next: UnitSystem = unitFor(exerciseID) === 'metric' ? 'imperial' : 'metric';
+      // Cleared rather than stored when it matches the default, so the map
+      // only ever holds genuine exceptions.
+      const override = next === units ? null : next;
+      setExerciseUnits((m) => {
+        const copy = { ...m };
+        if (override) copy[exerciseID] = override;
+        else delete copy[exerciseID];
+        return copy;
+      });
+      setExerciseUnit(getToken, exerciseID, override).catch(() => {});
+    },
+    [getToken, unitFor, units],
+  );
   const [loading, setLoading] = useState(true);
   const [everLoaded, setEverLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -320,6 +348,20 @@ export default function SessionScreen() {
                 <Text style={styles.groupName}>{exercise?.name ?? g.exerciseID}</Text>
                 {!finished && (
                   <Pressable
+                    onPress={() => toggleUnitFor(g.exerciseID)}
+                    hitSlop={10}
+                    style={styles.unitChip}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${exercise?.name ?? 'This exercise'} is in ${
+                      unitFor(g.exerciseID) === 'imperial' ? 'pounds' : 'kilograms'
+                    }. Switch.`}
+                    testID={`unit-${g.exerciseID}`}
+                  >
+                    <Text style={styles.unitChipText}>{weightUnit(unitFor(g.exerciseID))}</Text>
+                  </Pressable>
+                )}
+                {!finished && (
+                  <Pressable
                     onPress={async () => {
                       // Awaited: the swap screen reads the session back, so an
                       // unsaved edit still in flight would be overwritten.
@@ -346,7 +388,7 @@ export default function SessionScreen() {
                   onChange={(next) => update(i, next)}
                   onRemove={() => removeSet(i)}
                   onRest={() => startRest(g.exerciseID)}
-                  units={units}
+                  units={unitFor(g.exerciseID)}
                 />
               ))}
               {(() => {
@@ -360,7 +402,7 @@ export default function SessionScreen() {
                     <View style={styles.hintBody}>
                       <Text style={styles.hintLast}>
                         Last time: {hint.last_reps != null ? `${hint.last_reps} × ` : ''}
-                        {formatWeight(hint.last_weight_kg, units)}
+                        {formatWeight(hint.last_weight_kg, unitFor(g.exerciseID))}
                         {hint.last_rir != null ? ` · ${hint.last_rir} RIR` : ''}
                         {hint.last_rir == null && hint.last_rpe != null ? ` · RPE ${hint.last_rpe}` : ''}
                       </Text>
@@ -379,12 +421,14 @@ export default function SessionScreen() {
                         }}
                         style={styles.hintApply}
                         accessibilityRole="button"
-                        accessibilityLabel={`Use ${formatWeight(target, units)} for every set of ${
+                        accessibilityLabel={`Use ${formatWeight(target, unitFor(g.exerciseID))} for every set of ${
                           exercise?.name ?? 'this exercise'
                         }`}
                         testID={`apply-suggestion-${g.exerciseID}`}
                       >
-                        <Text style={styles.hintApplyText}>{formatWeight(target, units)}</Text>
+                        <Text style={styles.hintApplyText}>
+                          {formatWeight(target, unitFor(g.exerciseID))}
+                        </Text>
                       </Pressable>
                     )}
                   </View>
@@ -815,6 +859,15 @@ const styles = StyleSheet.create({
   groupHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   groupName: { flex: 1, fontSize: 16, fontWeight: '700' },
   swapText: { color: vola.lime, fontWeight: '600', fontSize: 14 },
+  unitChip: {
+    borderWidth: 1,
+    borderColor: vola.line,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    minHeight: 32,
+    justifyContent: 'center',
+  },
+  unitChipText: { fontSize: 12, fontWeight: '700', color: vola.textMuted },
   setRow: { backgroundColor: vola.surface, borderRadius: 12 },
   setHead: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12 },
   setOrdinal: { width: 34, fontWeight: '700', color: vola.textDim },

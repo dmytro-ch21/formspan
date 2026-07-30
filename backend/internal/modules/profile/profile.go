@@ -59,6 +59,12 @@ func ValidUnitSystem(v string) bool { return v == "metric" || v == "imperial" }
 
 type Repository interface {
 	Get(ctx context.Context, userID string) (*Profile, error)
+	// ListExerciseUnits returns the caller's per-exercise overrides. A missing
+	// key means "use the profile default" — there is deliberately no third
+	// state, so clearing an override is a delete rather than a value.
+	ListExerciseUnits(ctx context.Context, userID string) (map[string]string, error)
+	// SetExerciseUnit stores an override, or removes it when unit is empty.
+	SetExerciseUnit(ctx context.Context, userID, exerciseID, unit string) error
 	Create(ctx context.Context, userID string, in NewProfile) (*Profile, error)
 	Update(ctx context.Context, userID string, in ProfileUpdate) (*Profile, error)
 }

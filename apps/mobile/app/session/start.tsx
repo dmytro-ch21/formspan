@@ -7,6 +7,7 @@ import { vola } from '@/constants/Colors';
 import { useAuth } from '@clerk/clerk-expo';
 
 import { useAuthToken } from '@/lib/useAuthToken';
+import { useUnits } from '@/lib/useUnits';
 import { applySuggestions, fetchSuggestions, setsFromWorkout } from '@/lib/sessions';
 import { cachedWorkouts, cacheWorkouts, startLocalSession, syncSessions } from '@/lib/sessionStore';
 import { listWorkouts, SPORTS, summariseTargets, type Sport, type Workout } from '@/lib/workouts';
@@ -26,6 +27,7 @@ export default function StartSessionScreen() {
   const { sport } = useLocalSearchParams<{ sport: Sport }>();
   const getToken = useAuthToken();
   const { userId } = useAuth();
+  const { units } = useUnits();
   const router = useRouter();
 
   const [workouts, setWorkouts] = useState<Workout[]>([]);
@@ -144,7 +146,7 @@ export default function StartSessionScreen() {
                   <Text style={styles.cardTitle}>{w.name}</Text>
                   <Text style={styles.muted}>
                     {w.items.length} {w.items.length === 1 ? 'exercise' : 'exercises'}
-                    {w.items[0] ? ` · ${summariseTargets(w.items[0])}` : ''}
+                    {w.items[0] ? ` · ${summariseTargets(w.items[0], units)}` : ''}
                   </Text>
                 </View>
                 <Text style={styles.chevron}>›</Text>
