@@ -33,6 +33,20 @@ export async function writePref(userID: string, key: string, value: string): Pro
  * preference that nothing ever reads.
  */
 export const PREF_UNIT_SYSTEM = 'unit_system';
+/**
+ * Whether ticking a set starts the rest countdown.
+ *
+ * Local rather than on the profile, for the same reason the per-exercise
+ * rest durations are: the rest timer is mobile-only by the platform rule,
+ * so there's no second client to keep in step.
+ *
+ * Defaults **off**. A countdown that starts itself is one you spend
+ * attention cancelling when it guesses wrong, and it guesses wrong often —
+ * you tick late, or tick a set you finished five minutes ago. Off is the
+ * behaviour that never surprises; on is there for people whose ticking
+ * really is the moment they rack the bar.
+ */
+export const PREF_AUTO_REST = 'auto_rest';
 /** The Library tab's sport filter. Deliberately remembered; its search box
  *  deliberately isn't — see the Library screen for the reasoning. */
 export const PREF_LIBRARY_SPORT = 'library_sport';

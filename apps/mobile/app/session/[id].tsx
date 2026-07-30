@@ -7,7 +7,7 @@ import { RestTimerBar, useRestTimer } from '@/components/RestTimer';
 import { Text, View } from '@/components/Themed';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { vola } from '@/constants/Colors';
-import { formatElapsed, readRestSeconds, writeRestSeconds } from '@/lib/rest';
+import { formatElapsed, readAutoRest, readRestSeconds, writeRestSeconds } from '@/lib/rest';
 import {
   distanceInputUnit,
   formatWeight,
@@ -101,6 +101,11 @@ export default function SessionScreen() {
   // Defaults to showing effort: the progression rule is built on it, and a
   // failed profile fetch shouldn't quietly disable the app's only input.
   const [showEffort, setShowEffort] = useState(true);
+  // Off unless asked for — see PREF_AUTO_REST for why that's the default.
+  const [autoRest, setAutoRest] = useState(false);
+  useEffect(() => {
+    if (userId) readAutoRest(userId).then(setAutoRest).catch(() => {});
+  }, [userId]);
   useEffect(() => {
     getProfile(getToken)
       .then((p) => setShowEffort(p.track_effort))
@@ -298,18 +303,20 @@ export default function SessionScreen() {
   /**
    * Ticking a set records that it happened — and nothing else.
    *
-   * It used to start the rest timer too, on the theory that finishing a set
-   * and beginning to rest are the same moment. They often aren't: you tick
-   * late, you tick a set you did earlier, you're already walking to the next
-   * rack. A countdown that starts itself is a countdown you spend attention
-   * cancelling, so rest is now only ever started by the Rest button.
+   * Whether it also starts the rest countdown is the athlete's call, not
+   * ours: for some people ticking *is* the moment they rack the bar, and for
+   * others it happens late or for a set they finished five minutes ago. We
+   * guessed wrong in both directions before making it a setting, so now it's
+   * "Auto rest timer" — off by default, because a countdown that starts
+   * itself is one you spend attention cancelling.
    *
-   * Un-ticking stays possible: mis-taps happen mid-set, and an un-undoable
-   * checkbox is worse than none.
+   * Un-ticking never starts rest, and stays possible: mis-taps happen
+   * mid-set, and an un-undoable checkbox is worse than none.
    */
-  function toggleDone(index: number) {
+  function toggleDone(index: number, exerciseID: string) {
     const now = !sets[index].completed;
     commit(sets.map((s, i) => (i === index ? { ...s, completed: now } : s)));
+    if (now && autoRest) startRest(exerciseID);
   }
 
   /**
@@ -460,7 +467,7 @@ export default function SessionScreen() {
                   editable={!finished}
                   onChange={(next) => update(i, next)}
                   onRemove={() => removeSet(i)}
-                  onToggleDone={() => toggleDone(i)}
+                  onToggleDone={() => toggleDone(i, g.exerciseID)}
                   showEffort={showEffort}
                   units={unitFor(g.exerciseID)}
                 />
@@ -734,8 +741,7 @@ function SetRow({
         </Text>
         <Text style={styles.setSummary}>{describeSet(set, units)}</Text>
         {editable && (
-          // Records the set only. Rest is the Rest button's job — see
-          // toggleDone for why the two were separated.
+          // Records the set; starts rest only if "Auto rest timer" is on.
           <Pressable
             onPress={onToggleDone}
             hitSlop={10}

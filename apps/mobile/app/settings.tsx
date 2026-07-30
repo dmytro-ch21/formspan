@@ -5,7 +5,10 @@ import { Alert, Pressable, ScrollView, StyleSheet } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { useAuth as useClerkAuth } from '@clerk/clerk-expo';
+
 import { getProfile, setTrackEffort } from '@/lib/profile';
+import { readAutoRest, writeAutoRest } from '@/lib/rest';
 import { useAuthToken } from '@/lib/useAuthToken';
 
 /**
@@ -26,6 +29,12 @@ export default function SettingsScreen() {
   const { signOut } = useAuth();
   const getToken = useAuthToken();
   const router = useRouter();
+
+  const { userId } = useClerkAuth();
+  const [autoRest, setAutoRest] = useState(false);
+  useEffect(() => {
+    if (userId) readAutoRest(userId).then(setAutoRest).catch(() => {});
+  }, [userId]);
 
   const [effort, setEffort] = useState(true);
   useEffect(() => {
@@ -60,6 +69,16 @@ export default function SettingsScreen() {
           hint="Kilograms or pounds"
           onPress={() => router.push('/settings/units')}
           testID="settings-units"
+        />
+        <Toggle
+          label="Auto rest timer"
+          hint="Start the countdown when you tick a set off."
+          value={autoRest}
+          onChange={(on) => {
+            setAutoRest(on);
+            if (userId) writeAutoRest(userId, on).catch(() => setAutoRest(!on));
+          }}
+          testID="settings-auto-rest"
         />
         <Toggle
           label="Track effort"

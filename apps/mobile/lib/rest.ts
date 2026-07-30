@@ -1,5 +1,5 @@
 import type { Exercise } from './exercises';
-import { readPref, writePref } from './prefs';
+import { PREF_AUTO_REST, readPref, writePref } from './prefs';
 
 /**
  * Rest defaults, in seconds, by movement pattern.
@@ -47,6 +47,14 @@ export function restSecondsFor(exercise: Exercise | undefined): number {
  * and would stop it working in a basement gym.
  */
 const restKey = (exerciseID: string) => `rest:${exerciseID}`;
+
+export async function readAutoRest(userID: string): Promise<boolean> {
+  return (await readPref(userID, PREF_AUTO_REST)) === 'on';
+}
+
+export function writeAutoRest(userID: string, on: boolean) {
+  return writePref(userID, PREF_AUTO_REST, on ? 'on' : 'off');
+}
 
 export async function readRestSeconds(
   userID: string,
