@@ -503,6 +503,12 @@ func splitIDs(raw string) []string {
 // shortlist — enough to look considered, few enough to scan on a phone.
 const defaultRecordExercises = 5
 
+// maxRecordExercises bounds `scope=all`. The wide screen is where you go
+// through everything you've trained rather than a shortlist, and 200 distinct
+// exercises is far more than anyone accumulates in practice — but it still
+// wants a ceiling rather than a promise to return a career.
+const maxRecordExercises = 200
+
 // Records returns the caller's personal records.
 //
 // With no `exercise_ids`, it answers for their pinned shortlist, falling back
@@ -519,6 +525,15 @@ func (h *Handler) Records(w http.ResponseWriter, r *http.Request) {
 				"too many exercise_ids")
 			return
 		}
+	} else if r.URL.Query().Get("scope") == "all" {
+		// Everything the caller has actually trained, most-used first. The
+		// desk view browses the whole log; the phone gets a shortlist.
+		all, err := h.repo.MostTrainedExercises(r.Context(), claims.UserID, maxRecordExercises)
+		if err != nil {
+			writeErr(w, r, err)
+			return
+		}
+		ids = all
 	} else {
 		pinned, err := h.repo.PinnedExercises(r.Context(), claims.UserID)
 		if err != nil {

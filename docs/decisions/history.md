@@ -1159,8 +1159,19 @@ exercise chooses everything downstream. An unset shortlist falls back to what
 you train most, so the view says something useful before anyone configures it
 and there's no empty state to set up.
 
-Still to do: the web half. The API and the shortlist are shared, so it's a
-rendering job rather than a design one.
+**Web is the fuller view, deliberately.** The phone shows a shortlist because
+that's what a glance holds; `/dashboard/records` shows *everything you've
+actually trained* — every exercise, every kind it can hold, the exact set
+behind each, and a link into the session it came from. That's the platform
+split doing its job rather than the same screen at two widths.
+
+Pinning is inline there rather than on its own screen: on a wide layout the
+choice and the numbers being chosen can sit together, so you decide what
+matters *while looking at* it. On a phone they can't, which is why that one
+gets a separate picker.
+
+`scope=all` backs it, capped at 200 distinct exercises — far past what anyone
+accumulates, but a ceiling rather than a promise to return a career.
 
 ## Open items / known gaps as of this entry
 

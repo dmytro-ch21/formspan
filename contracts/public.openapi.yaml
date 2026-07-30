@@ -547,6 +547,62 @@ components:
         limit: { type: integer }
         offset: { type: integer }
 
+    PinnedExercises:
+      type: object
+      required: [exercise_ids]
+      properties:
+        exercise_ids:
+          type: array
+          maxItems: 12
+          items: { type: string }
+          description: Ordered by the athlete's own preference, not alphabetically.
+
+    PersonalRecord:
+      type: object
+      description: >
+        One best, and the set that produced it. The evidence travels with the
+        number for the same reason it does on a suggestion — a record you can
+        open and check beats one you have to trust, and it makes a wrong
+        record self-diagnosing.
+      required:
+        [kind, value, reps, weight_kg, seconds, distance_m, rir, rpe,
+         achieved_at, session_id, is_recent]
+      properties:
+        kind:
+          type: string
+          enum: [heaviest_weight, estimated_1rm, most_reps, longest_time, furthest_distance]
+        value:
+          type: number
+          description: >
+            In storage units — kilograms, reps, seconds or metres, according
+            to `kind` — so a client formats it the way it formats everything
+            else.
+        reps: { type: integer, nullable: true }
+        weight_kg: { type: number, nullable: true }
+        seconds: { type: integer, nullable: true }
+        distance_m: { type: integer, nullable: true }
+        rir: { type: integer, nullable: true }
+        rpe: { type: number, nullable: true }
+        achieved_at: { type: string, format: date-time }
+        session_id: { type: string }
+        is_recent:
+          type: boolean
+          description: Set within the last two weeks — the only reason to treat one record differently from another.
+
+    ExerciseRecords:
+      type: object
+      required: [exercise_id, records]
+      properties:
+        exercise_id: { type: string }
+        records:
+          type: array
+          description: >
+            Only the kinds this exercise can hold and has. An absent kind means
+            no such record yet, not zero. Heaviest weight and estimated 1RM
+            frequently cite *different sets* — 5×100 estimates above a 110
+            single — which is why both are returned.
+          items: { $ref: "#/components/schemas/PersonalRecord" }
+
     HistoryTotals:
       type: object
       description: A period's training in one line.
@@ -1447,6 +1503,89 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+
+  /records:
+    get:
+      summary: Personal records the caller holds
+      operationId: listRecords
+      description: >
+        Derived from the log on every read rather than stored. A kept record
+        has to be *retracted* when the set behind it is corrected or its
+        session deleted — and a stale one means congratulating someone for a
+        lift they never made. Computed, a record is by construction exactly
+        what the log says.
+
+
+        Which kinds an exercise can hold follows from its `load_type`, so a
+        plank never reports a weight and a run never reports reps. Warm-ups
+        and sets never marked done never count.
+      parameters:
+        - name: exercise_ids
+          in: query
+          schema: { type: string }
+          description: Comma-separated. Overrides `scope`. At most 100.
+        - name: scope
+          in: query
+          schema: { type: string, enum: [all] }
+          description: >
+            `all` returns every exercise the caller has actually trained,
+            most-used first, capped at 200 — the desk view. Omitted, the API
+            answers for their pinned shortlist, falling back to the exercises
+            they train most so the view is never empty pending setup.
+      responses:
+        "200":
+          description: The caller's own records only.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [records]
+                properties:
+                  records:
+                    type: array
+                    items: { $ref: "#/components/schemas/ExerciseRecords" }
+        "400":
+          description: Too many exercise_ids.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /records/pinned:
+    get:
+      summary: The exercises whose records show on the caller's profile
+      operationId: getPinnedExercises
+      responses:
+        "200":
+          description: In the caller's chosen order. Empty means "no explicit choice".
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PinnedExercises" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    put:
+      summary: Replace the shortlist
+      operationId: setPinnedExercises
+      description: >
+        Replaces the whole ordered list, like session sets — the client edits
+        it as one thing, and reordering is most of the editing people do here.
+        An empty list clears it and returns to the most-trained default.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PinnedExercises" }
+      responses:
+        "200":
+          description: The stored list.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PinnedExercises" }
+        "400":
+          description: More than 12 entries, a repeat, a blank, or an unknown exercise.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
 
   /sessions/history:
     get:

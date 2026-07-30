@@ -764,3 +764,79 @@ export async function listExercises(
   );
   return b.exercises ?? [];
 }
+
+export type RecordKind =
+  | "heaviest_weight"
+  | "estimated_1rm"
+  | "most_reps"
+  | "longest_time"
+  | "furthest_distance";
+
+export type PersonalRecord = {
+  kind: RecordKind;
+  /** In storage units — kg, reps, seconds or metres. */
+  value: number;
+  reps: number | null;
+  weight_kg: number | null;
+  seconds: number | null;
+  distance_m: number | null;
+  rir: number | null;
+  rpe: number | null;
+  achieved_at: string;
+  session_id: string;
+  is_recent: boolean;
+};
+
+export type ExerciseRecords = { exercise_id: string; records: PersonalRecord[] };
+
+export const RECORD_LABEL: Record<RecordKind, string> = {
+  heaviest_weight: "Heaviest",
+  estimated_1rm: "Est. 1RM",
+  most_reps: "Most reps",
+  longest_time: "Longest",
+  furthest_distance: "Furthest",
+};
+
+/**
+ * The caller's records.
+ *
+ * `scope: "all"` is the desk view — everything they've actually trained,
+ * most-used first. Without it the API answers for their pinned shortlist,
+ * which is what the phone shows.
+ */
+export async function fetchRecords(
+  getToken: Token,
+  opts: { scope?: "all"; exerciseIDs?: string[] } = {},
+  signal?: AbortSignal,
+): Promise<ExerciseRecords[]> {
+  const p = new URLSearchParams();
+  if (opts.scope) p.set("scope", opts.scope);
+  if (opts.exerciseIDs?.length) p.set("exercise_ids", opts.exerciseIDs.join(","));
+  const query = p.toString();
+  const b = await request<{ records: ExerciseRecords[] }>(
+    getToken,
+    `/records${query ? `?${query}` : ""}`,
+    {},
+    signal,
+  );
+  return b.records ?? [];
+}
+
+export async function fetchPinnedExercises(
+  getToken: Token,
+  signal?: AbortSignal,
+): Promise<string[]> {
+  const b = await request<{ exercise_ids: string[] }>(getToken, "/records/pinned", {}, signal);
+  return b.exercise_ids ?? [];
+}
+
+export async function setPinnedExercises(
+  getToken: Token,
+  exerciseIDs: string[],
+): Promise<string[]> {
+  const b = await request<{ exercise_ids: string[] }>(getToken, "/records/pinned", {
+    method: "PUT",
+    body: JSON.stringify({ exercise_ids: exerciseIDs }),
+  });
+  return b.exercise_ids ?? [];
+}

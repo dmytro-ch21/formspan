@@ -798,6 +798,13 @@ Domain: logging a session with no connectivity. **Test this by actually stopping
 - Which kinds appear follows `load_type`: a plank offers longest-time only, a run furthest-distance, bodyweight work most-reps. No exercise should advertise a record for a measure it doesn't take.
 - Evidence travels with every record — reps, weight, effort, date and session.
 
+**Web (`/dashboard/records`) — the fuller view**
+- Lists every exercise trained, not the shortlist, with pinned ones first.
+- Each record shows its value, the set behind it, and a link to that session. Following the link must land on the session the record actually came from.
+- Search and sport filters narrow the list; an empty result is distinguishable from "no records at all".
+- The star toggles the phone shortlist inline and persists — reload and it holds. At the cap it explains rather than silently ignoring the click.
+- A record for a timed or distance exercise shows no reps/weight evidence rather than a row of dashes.
+
 **Shortlist**
 - At most 12; duplicates, blanks and unknown exercise ids each return `400 invalid_input` rather than a 500.
 - Order is the athlete's, preserved on read; clearing is an empty list, not a special case.
