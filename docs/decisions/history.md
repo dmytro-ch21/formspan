@@ -660,6 +660,17 @@ Those durations live in the local `prefs` table rather than on the profile, and 
 Verified live: ticking the first set dropped the header from 18 sets to 1 set / 12 reps / 1620.1 lb, started the rest countdown labelled with that exercise, and left the session clock running.
 
 
+## 2026-07-29 — A preference that needed a server was a preference that broke
+
+The "Track effort" switch wouldn't move. The immediate cause was mundane — the local API had stopped, so the profile read and write both failed. But the reason that was *invisible* is the part worth keeping: the switch applied optimistically and then reverted in a `.catch`, so a dead network looked exactly like a dead control. No error, no explanation, just a toggle that snapped back.
+
+The fix is the same shape the units preference already had and this one didn't: a **local cache is what the UI reads and writes**, and the account-level write is opportunistic. `useTrackEffort` now mirrors `useUnits`, and both the Settings switch and the session screen read the same hook, so they can't disagree about whether effort is being collected.
+
+The preference still lives on the profile rather than being purely local, because it changes what the web app collects too — but in an offline-first app, *nothing about expressing a preference* should require a server to be reachable. The rest-timer settings were already local for a related reason; this brings the account-level ones in line behaviourally without moving where they're stored.
+
+Verified by flipping it and reading `profiles.track_effort` go `t` → `f`.
+
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

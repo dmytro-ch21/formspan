@@ -19,7 +19,8 @@ import {
   type UnitSystem,
 } from '@/lib/units';
 import { useUnits } from '@/lib/useUnits';
-import { getExerciseUnits, getProfile, setExerciseUnit } from '@/lib/profile';
+import { getExerciseUnits, setExerciseUnit } from '@/lib/profile';
+import { useTrackEffort } from '@/lib/useTrackEffort';
 import { fetchExercises, type Exercise } from '@/lib/exercises';
 import {
   cacheExercises,
@@ -106,11 +107,6 @@ export default function SessionScreen() {
   useEffect(() => {
     if (userId) readAutoRest(userId).then(setAutoRest).catch(() => {});
   }, [userId]);
-  useEffect(() => {
-    getProfile(getToken)
-      .then((p) => setShowEffort(p.track_effort))
-      .catch(() => {});
-  }, [getToken]);
   useEffect(() => {
     getExerciseUnits(getToken).then(setExerciseUnits).catch(() => {});
   }, [getToken]);

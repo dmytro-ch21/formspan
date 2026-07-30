@@ -7,8 +7,8 @@ import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAuth as useClerkAuth } from '@clerk/clerk-expo';
 
-import { getProfile, setTrackEffort } from '@/lib/profile';
 import { readAutoRest, writeAutoRest } from '@/lib/rest';
+import { useTrackEffort } from '@/lib/useTrackEffort';
 import { useAuthToken } from '@/lib/useAuthToken';
 
 /**
@@ -36,12 +36,7 @@ export default function SettingsScreen() {
     if (userId) readAutoRest(userId).then(setAutoRest).catch(() => {});
   }, [userId]);
 
-  const [effort, setEffort] = useState(true);
-  useEffect(() => {
-    getProfile(getToken)
-      .then((p) => setEffort(p.track_effort))
-      .catch(() => {});
-  }, [getToken]);
+  const { trackEffort, setTrackEffort } = useTrackEffort();
 
   return (
     <ScrollView contentContainerStyle={styles.scroll} testID="settings-screen">
@@ -83,14 +78,9 @@ export default function SettingsScreen() {
         <Toggle
           label="Track effort"
           hint="RIR and RPE on every set. Off hides them."
-          value={effort}
+          value={trackEffort}
           last
-          onChange={(on) => {
-            // Applied locally first so the switch never lags the tap; the
-            // account-level write follows.
-            setEffort(on);
-            setTrackEffort(getToken, on).catch(() => setEffort(!on));
-          }}
+          onChange={(on) => void setTrackEffort(on)}
           testID="settings-effort"
         />
       </Section>

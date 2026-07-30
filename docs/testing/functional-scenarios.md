@@ -462,6 +462,8 @@ Domain: a training session that **actually happened**, and the sets in it — re
 - Default **on** — the progression rule has no other input, so off-by-default would make the app look broken rather than simple.
 - Off hides the RIR and RPE fields entirely, not greyed out.
 - Toggling it never alters recorded values; effort already logged stays in the database.
+- **It must work with the API unreachable.** The switch reads and writes a local cache and pushes to the profile opportunistically — an earlier version reverted in a `.catch`, so a stopped API was indistinguishable from a broken control.
+- Settings and the session screen read the same hook, so the switch and the visibility of the fields can never disagree.
 
 **Volume arithmetic**
 - **Warm-ups count toward neither working sets nor tonnage** (`TestSummarise_ExcludesWarmups`). Counting them inflates every number and makes a light day look like a hard one, which would poison anything built on top.
