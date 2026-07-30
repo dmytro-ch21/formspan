@@ -29,7 +29,7 @@ function workingSets(s: Session): number {
 }
 
 export default function TodayScreen() {
-  const { userId, signOut } = useAuth();
+  const { userId } = useAuth();
   const getToken = useAuthToken();
   const router = useRouter();
 
@@ -262,23 +262,6 @@ export default function TodayScreen() {
           ))
         )}
 
-        <Pressable
-          style={styles.signOut}
-          onPress={() => router.push('/settings')}
-          accessibilityRole="button"
-          testID="open-settings"
-        >
-          <Text style={styles.settingsLink}>Settings</Text>
-        </Pressable>
-
-        <Pressable
-          style={styles.signOut}
-          onPress={() => signOut()}
-          accessibilityRole="button"
-          testID="sign-out"
-        >
-          <Text style={styles.muted}>Sign out</Text>
-        </Pressable>
       </View>
     </ScrollView>
   );

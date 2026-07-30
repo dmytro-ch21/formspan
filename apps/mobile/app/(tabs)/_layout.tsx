@@ -38,6 +38,7 @@ export default function TabLayout() {
       <Tabs.Screen name="index" options={{ title: 'Today' }} />
       <Tabs.Screen name="workouts" options={{ title: 'Plan' }} />
       <Tabs.Screen name="library" options={{ title: 'Library' }} />
+      <Tabs.Screen name="you" options={{ title: 'You' }} />
     </Tabs>
   );
 }
@@ -55,7 +56,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     textTransform: 'uppercase',
-    letterSpacing: 1.4,
+    letterSpacing: 1.1,
   },
   iconSlot: { height: 10, marginBottom: 2 },
   dot: { width: 5, height: 5, borderRadius: 3, backgroundColor: 'transparent' },

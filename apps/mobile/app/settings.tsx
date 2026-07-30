@@ -1,81 +1,137 @@
-import { Stack } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet } from 'react-native';
+import { useAuth } from '@clerk/clerk-expo';
+import { Stack, useRouter } from 'expo-router';
+import { Alert, Pressable, ScrollView, StyleSheet } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
-import { UNIT_SYSTEMS } from '@/lib/units';
-import { useUnits } from '@/lib/useUnits';
 
 /**
- * Settings.
+ * Settings as grouped rows that drill down, rather than one flat screen of
+ * controls.
  *
- * Units are an account preference rather than a device one — someone who
- * thinks in pounds thinks in pounds on the web app too, and on their next
- * phone. So it's stored on the profile and merely cached locally.
+ * The shape matters more than it looks: this list is going to grow —
+ * notifications, integrations, privacy, language — and a screen that gains a
+ * new switch per feature becomes unnavigable long before it becomes
+ * complete. Sections and drill-downs mean adding a preference is adding a
+ * row, not redesigning the page.
  *
- * Changing it can never alter a recorded number: everything is stored in
- * kilograms and metres, and this only decides how those are shown and typed.
- * The screen says so, because a units toggle is exactly the kind of control
- * people are afraid will rewrite their history.
+ * Sign out lives here, under Account, because that's where people look for
+ * it. It confirms first: anything not yet synced is still on the device, and
+ * signing out is the one action that can put it out of reach.
  */
 export default function SettingsScreen() {
-  const { units, setUnits } = useUnits();
+  const { signOut } = useAuth();
+  const router = useRouter();
 
   return (
-    <View style={styles.container} testID="settings-screen">
+    <ScrollView contentContainerStyle={styles.scroll} testID="settings-screen">
       <Stack.Screen options={{ title: 'Settings' }} />
-      <ScrollView contentContainerStyle={styles.scroll}>
-        <Text style={styles.sectionLabel}>Units</Text>
 
-        {UNIT_SYSTEMS.map((u) => {
-          const selected = units === u.key;
-          return (
-            <Pressable
-              key={u.key}
-              style={[styles.option, selected && styles.optionSelected]}
-              onPress={() => setUnits(u.key)}
-              accessibilityRole="radio"
-              accessibilityState={{ selected }}
-              accessibilityLabel={`${u.label} — ${u.detail}`}
-              testID={`units-${u.key}`}
-            >
-              <View style={styles.optionBody}>
-                <Text style={styles.optionTitle}>{u.label}</Text>
-                <Text style={styles.muted}>{u.detail}</Text>
-              </View>
-              {selected && <Text style={styles.tick}>✓</Text>}
-            </Pressable>
-          );
-        })}
+      <Section title="Account">
+        <Row label="Profile" hint="Name, sports, date of birth" onPress={() => router.push('/profile/edit')} testID="settings-profile" />
+        <Row
+          label="Sign out"
+          danger
+          last
+          onPress={() =>
+            Alert.alert('Sign out?', 'Anything not yet synced stays on this device.', [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Sign out', style: 'destructive', onPress: () => signOut() },
+            ])
+          }
+          testID="settings-sign-out"
+        />
+      </Section>
 
-        <Text style={styles.note}>
-          Your training is always stored in kilograms and metres — this only changes how weights
-          and distances are shown and entered. Switching it never rewrites anything you've logged.
-        </Text>
-      </ScrollView>
+      <Section title="Preferences">
+        <Row
+          label="Units"
+          hint="Kilograms or pounds"
+          last
+          onPress={() => router.push('/settings/units')}
+          testID="settings-units"
+        />
+      </Section>
+
+      <Text style={styles.note}>
+        More preferences will land here as the app grows — notifications, integrations, and
+        per-sport defaults.
+      </Text>
+    </ScrollView>
+  );
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      <View style={styles.group}>{children}</View>
     </View>
   );
 }
 
+function Row({
+  label,
+  hint,
+  onPress,
+  danger,
+  last,
+  testID,
+}: {
+  label: string;
+  hint?: string;
+  onPress: () => void;
+  danger?: boolean;
+  last?: boolean;
+  testID?: string;
+}) {
+  return (
+    <Pressable
+      style={[styles.row, !last && styles.rowDivided]}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={hint ? `${label}. ${hint}` : label}
+      testID={testID}
+    >
+      <View style={styles.rowBody}>
+        <Text style={[styles.rowLabel, danger && styles.danger]}>{label}</Text>
+        {hint && <Text style={styles.muted}>{hint}</Text>}
+      </View>
+      {!danger && <Text style={styles.chevron}>›</Text>}
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  scroll: { padding: 16, gap: 10, paddingBottom: 48 },
-  sectionLabel: { fontSize: 12, color: vola.textDim, textTransform: 'uppercase' },
-  option: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
+  scroll: { padding: 16, gap: 20, paddingBottom: 48 },
+  section: { gap: 8 },
+  sectionTitle: {
+    fontSize: 12,
+    color: vola.textDim,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    paddingHorizontal: 4,
+  },
+  group: {
     borderWidth: 1,
     borderColor: vola.line,
     borderRadius: 14,
     backgroundColor: vola.surface,
-    padding: 16,
-    minHeight: 60,
+    overflow: 'hidden',
   },
-  optionSelected: { borderColor: vola.lime },
-  optionBody: { flex: 1, gap: 2 },
-  optionTitle: { fontSize: 16, fontWeight: '600' },
-  tick: { color: vola.lime, fontSize: 20, fontWeight: '700' },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    minHeight: 58,
+  },
+  rowDivided: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: vola.lineSoft },
+  rowBody: { flex: 1, gap: 2 },
+  rowLabel: { fontSize: 16, fontWeight: '600' },
+  danger: { color: vola.danger },
   muted: { color: vola.textMuted, fontSize: 13 },
-  note: { color: vola.textDim, fontSize: 12, marginTop: 12, lineHeight: 17 },
+  chevron: { color: vola.textDim, fontSize: 22 },
+  note: { color: vola.textDim, fontSize: 12, lineHeight: 17, paddingHorizontal: 4 },
 });

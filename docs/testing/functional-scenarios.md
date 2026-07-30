@@ -613,6 +613,18 @@ Domain: logging a session with no connectivity. **Test this by actually stopping
 - The wordmark's chevron apex must be closed, and must point up.
 - Screen names are small, uppercase, top-left; the wordmark is centred and stays centred regardless of the title's width.
 
+## You, profile editing, and Settings (`apps/mobile`)
+
+- **You** shows the display name, enabled sports and current units, and refreshes on focus so a save in Edit is visible on return.
+- No profile row yet is an ordinary first-run state, not an error — You shows "Add your name" and Edit starts empty.
+- **Edit** saves name, date of birth, sex and sport toggles. It must create the profile first when there isn't one: `PATCH /v1/profile` 404s otherwise, and Settings is reachable without onboarding.
+- Tapping the selected sex again clears it — this feeds calorie maths and "unset" has to stay reachable.
+- An empty name box saves as null, not an empty string.
+- **Settings** is grouped rows with drill-downs, not a flat screen of controls. Units is its own sub-screen.
+- **Sign out is in Settings under Account**, confirms first, and appears exactly once in the app.
+
+---
+
 ## Modal sheets (`apps/mobile`)
 
 - **Every `Modal` must paint its own background.** A modal renders outside the navigator, so the usual dark ground isn't behind it and `Themed.View` deliberately paints nothing — the sheet falls through to iOS white and near-white text vanishes. Regression-checked on the exercise picker and the new-workout sheet; check any future modal the same way.

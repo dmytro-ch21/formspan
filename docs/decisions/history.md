@@ -597,6 +597,21 @@ The hairline is the one seam kept deliberately: without it the labels read as co
 **Also removed:** the Expo web target's `body` still followed `prefers-color-scheme` and went white on a light machine, behind a dark app. Mobile is dark-only by decision, so it's the VOLA ground unconditionally now.
 
 
+## 2026-07-29 — A You tab, profile editing, and Settings as grouped rows
+
+The mockup's fifth tab exists now. **You** shows who the athlete is — name, which sports they train, the units in use — with **Edit** and **Settings** in the top-right.
+
+**Those two are deliberately separate, not one list.** Edit changes *facts about you* that the app reasons over: which sports you do decides what it offers, and date of birth feeds the calorie and heart-rate maths later. Settings changes *how the app behaves*. Getting a fact wrong changes answers; getting a preference wrong only changes labels. One combined list would make "change my units" and "change my birthday" look like the same kind of action.
+
+**Settings is grouped rows that drill down**, following the reference the user pointed at. The shape matters more than it looks: this list is going to grow — notifications, integrations, privacy, per-sport defaults — and a screen that gains a switch per feature becomes unnavigable long before it becomes complete. Sections and drill-downs mean adding a preference is adding a row, not redesigning the page. Units moved into its own sub-screen on that basis.
+
+**Sign out lives in Settings under Account**, which is where people look for it, and it confirms first — anything not yet synced is still only on the device, and signing out is the one action that can put it out of reach. It was removed from Today (where it never belonged) and from You (where it would have been a second copy).
+
+`PATCH /v1/profile` still 404s for an account with no profile row, so the edit screen creates one and retries, same as the units preference already did.
+
+**Not visually verified:** the grouped Settings screen and the Edit form. Both typecheck and the navigation into Settings from the You header was confirmed working, but repeated Fast Refreshes had drifted the Simulator's navigation state badly enough that further taps were landing on stale frames, and screenshotting through that would have proved nothing. Worth a real pass before merging.
+
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.
