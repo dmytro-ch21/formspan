@@ -138,6 +138,16 @@ func withCORS(next http.Handler) http.Handler {
 		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, traceparent")
+		// Response headers a browser is allowed to *read*.
+		//
+		// Without this the trace correlation is one-way: the clients send a
+		// `traceparent` and the API echoes one back along with `x-request-id`,
+		// but JS can only read CORS-safelisted headers, so `response.headers`
+		// simply doesn't contain them. No error, no warning — the ids are
+		// invisible to the very code that would log them, which is most of the
+		// point of stamping them. Native clients are unaffected, so this is
+		// invisible until someone tries to surface a request id in the web app.
+		w.Header().Set("Access-Control-Expose-Headers", "traceparent, x-request-id")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return

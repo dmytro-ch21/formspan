@@ -1661,6 +1661,30 @@ diagnosis, and only the failure surviving the fix did. The check that settled
 it was three one-line container runs isolating each variable, which cost less
 than the guess did.
 
+## 2026-07-30 — The trace ids the browser was never allowed to read
+
+`withCORS` set `Allow-Origin`, `Allow-Methods` and `Allow-Headers`, and never
+`Access-Control-Expose-Headers`. Browsers only let JS read CORS-safelisted
+response headers, so the `traceparent` and `x-request-id` the API stamps on
+every response were simply **absent from `response.headers`** in the web app.
+
+That made the trace correlation one-way. Both clients were taught to *send* a
+`traceparent`; neither could read back the request id the server resolved —
+the very value you would log, display, or paste into a log search. No error,
+no warning, nothing in a test: the headers are on the wire, visible in curl
+and in devtools' network panel, and invisible to `fetch`. Native clients are
+unaffected by CORS entirely, which is why the mobile work never noticed.
+
+Fixed by exposing exactly those two. Verified against a running binary rather
+than by reading the code: an allowed origin now receives
+`Access-Control-Expose-Headers: traceparent, x-request-id`, and a disallowed
+one still receives no `Allow-Origin` at all, so the allowlist is intact.
+
+Found because the staging deployment made the headers inspectable for the
+first time. Nothing about this was visible locally, where every client is
+same-origin or native — CORS only has opinions once a browser talks to a
+different host, which is a thing that first happened today.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.
