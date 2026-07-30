@@ -88,6 +88,11 @@ func main() {
 	mux.Handle("GET /v1/sessions/suggestions", verifier.RequireAuth(http.HandlerFunc(sessionHandler.Suggestions)))
 	// Literal path, so Go 1.22 routing prefers it over /v1/sessions/{sessionID}.
 	mux.Handle("GET /v1/sessions/history", verifier.RequireAuth(http.HandlerFunc(sessionHandler.History)))
+	// Records are derived from sessions, so they're served by that module —
+	// but they're their own noun to a client, so they get their own path.
+	mux.Handle("GET /v1/records", verifier.RequireAuth(http.HandlerFunc(sessionHandler.Records)))
+	mux.Handle("GET /v1/records/pinned", verifier.RequireAuth(http.HandlerFunc(sessionHandler.PinnedExercises)))
+	mux.Handle("PUT /v1/records/pinned", verifier.RequireAuth(http.HandlerFunc(sessionHandler.SetPinnedExercises)))
 	mux.Handle("GET /v1/sessions/{sessionID}", verifier.RequireAuth(http.HandlerFunc(sessionHandler.Get)))
 	mux.Handle("PUT /v1/sessions/{sessionID}/sets", verifier.RequireAuth(http.HandlerFunc(sessionHandler.ReplaceSets)))
 	mux.Handle("POST /v1/sessions/{sessionID}/finish", verifier.RequireAuth(http.HandlerFunc(sessionHandler.Finish)))

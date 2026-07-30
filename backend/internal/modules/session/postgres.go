@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 	// The history rollup resolves the caller's IANA zone. cmd/api imports this
@@ -834,4 +835,319 @@ func (r *PostgresRepository) BestOneRMs(
 		return nil, fmt.Errorf("session: best 1rm rows: %w", err)
 	}
 	return out, nil
+}
+
+// Records finds every personal record the caller holds for the named
+// exercises.
+//
+// Computed from the log on every read rather than kept in a table, and that's
+// the load-bearing decision. A materialised record has to be *retracted* when
+// the set behind it is corrected or its session deleted — and getting that
+// wrong leaves someone staring at a lift they never did, which is the one
+// failure a records feature cannot afford. Derived, a record is by
+// construction exactly what the log says.
+//
+// The simple maxima are exact by construction too: weight, reps, seconds and
+// distance are each monotonic, so the largest row *is* the record and a window
+// function finds it in one pass. Only the estimated 1RM isn't monotonic in
+// weight — effort folds in — which is why it comes from BestOneRMs and its
+// own arithmetic bound instead.
+func (r *PostgresRepository) Records(
+	ctx context.Context, userID string, ids []string,
+) ([]ExerciseRecords, error) {
+	out := []ExerciseRecords{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	sort.Strings(ids) // stable output regardless of caller order
+
+	// Which records an exercise can hold comes from the catalog, not the
+	// caller — same as LastPerformances reads load_type for the progression
+	// rule. A client that guessed would be one catalog change from being
+	// wrong.
+	loadTypes := map[string]string{}
+	ltRows, err := r.pool.Query(ctx,
+		`SELECT id, load_type FROM exercises WHERE id = ANY($1)`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("session: records load types: %w", err)
+	}
+	for ltRows.Next() {
+		var id, lt string
+		if err := ltRows.Scan(&id, &lt); err != nil {
+			ltRows.Close()
+			return nil, fmt.Errorf("session: records load type scan: %w", err)
+		}
+		loadTypes[id] = lt
+	}
+	ltRows.Close()
+	if err := ltRows.Err(); err != nil {
+		return nil, fmt.Errorf("session: records load type rows: %w", err)
+	}
+
+	// One row per (exercise, metric) maximum. `id` breaks ties so the record
+	// is deterministic when two identical bests exist — otherwise the "when"
+	// would flip between requests.
+	rows, err := r.pool.Query(ctx, `
+		WITH scoped AS (
+			SELECT ss.id, ss.exercise_id, ss.reps, ss.weight_kg, ss.seconds,
+			       ss.distance_m, ss.rir, ss.rpe, ss.session_id, s.started_at
+			FROM session_sets ss
+			JOIN sessions s ON s.id = ss.session_id
+			WHERE ss.user_id = $1 AND ss.exercise_id = ANY($2) AND `+workingSet+`
+		),
+		ranked AS (
+			SELECT *,
+			  ROW_NUMBER() OVER (PARTITION BY exercise_id ORDER BY weight_kg  DESC NULLS LAST, id) AS rn_weight,
+			  ROW_NUMBER() OVER (PARTITION BY exercise_id ORDER BY reps       DESC NULLS LAST, id) AS rn_reps,
+			  ROW_NUMBER() OVER (PARTITION BY exercise_id ORDER BY seconds    DESC NULLS LAST, id) AS rn_seconds,
+			  ROW_NUMBER() OVER (PARTITION BY exercise_id ORDER BY distance_m DESC NULLS LAST, id) AS rn_distance
+			FROM scoped
+		)
+		SELECT exercise_id, reps, weight_kg, seconds, distance_m, rir, rpe,
+		       session_id, started_at,
+		       rn_weight = 1, rn_reps = 1, rn_seconds = 1, rn_distance = 1
+		FROM ranked
+		WHERE rn_weight = 1 OR rn_reps = 1 OR rn_seconds = 1 OR rn_distance = 1`,
+		userID, ids)
+	if err != nil {
+		return nil, fmt.Errorf("session: records: %w", err)
+	}
+	defer rows.Close()
+
+	type candidate struct {
+		rec                        Record
+		bestW, bestR, bestS, bestD bool
+	}
+	byExercise := map[string][]candidate{}
+	for rows.Next() {
+		var id string
+		var c candidate
+		if err := rows.Scan(&id, &c.rec.Reps, &c.rec.WeightKg, &c.rec.Seconds,
+			&c.rec.DistanceM, &c.rec.RIR, &c.rec.RPE, &c.rec.SessionID,
+			&c.rec.AchievedAt, &c.bestW, &c.bestR, &c.bestS, &c.bestD); err != nil {
+			return nil, fmt.Errorf("session: records scan: %w", err)
+		}
+		byExercise[id] = append(byExercise[id], c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("session: records rows: %w", err)
+	}
+
+	best1RM, err := r.BestOneRMs(ctx, userID, ids)
+	if err != nil {
+		return nil, err
+	}
+	oneRMSet, err := r.bestOneRMSets(ctx, userID, ids, best1RM)
+	if err != nil {
+		return nil, err
+	}
+
+	cutoff := time.Now().Add(-recentWindow)
+	for _, id := range ids {
+		kinds := RecordKindsFor(loadTypes[id])
+		if len(kinds) == 0 {
+			continue
+		}
+		recs := []Record{}
+		for _, kind := range kinds {
+			var rec *Record
+			switch kind {
+			case RecordOneRM:
+				if v, ok := best1RM[id]; ok {
+					if base, ok := oneRMSet[id]; ok {
+						c := base
+						c.Kind, c.Value = RecordOneRM, v
+						rec = &c
+					}
+				}
+			default:
+				for _, c := range byExercise[id] {
+					if !matchesKind(kind, c.bestW, c.bestR, c.bestS, c.bestD) {
+						continue
+					}
+					v, ok := recordValue(kind, c.rec)
+					if !ok {
+						continue
+					}
+					cp := c.rec
+					cp.Kind, cp.Value = kind, v
+					rec = &cp
+					break
+				}
+			}
+			if rec == nil {
+				continue
+			}
+			rec.IsRecent = rec.AchievedAt.After(cutoff)
+			recs = append(recs, *rec)
+		}
+		if len(recs) > 0 {
+			out = append(out, ExerciseRecords{ExerciseID: id, Records: recs})
+		}
+	}
+	return out, nil
+}
+
+func matchesKind(k RecordKind, w, r, s, d bool) bool {
+	switch k {
+	case RecordHeaviest:
+		return w
+	case RecordMostReps:
+		return r
+	case RecordLongest:
+		return s
+	case RecordFurthest:
+		return d
+	}
+	return false
+}
+
+// recordValue reads the measure a kind is about, reporting false when the
+// winning row didn't record it — a "heaviest" row with no weight is not a
+// weight record, it's just the row that sorted first among nulls.
+func recordValue(k RecordKind, rec Record) (float64, bool) {
+	switch k {
+	case RecordHeaviest:
+		if rec.WeightKg != nil && *rec.WeightKg > 0 {
+			return *rec.WeightKg, true
+		}
+	case RecordMostReps:
+		if rec.Reps != nil && *rec.Reps > 0 {
+			return float64(*rec.Reps), true
+		}
+	case RecordLongest:
+		if rec.Seconds != nil && *rec.Seconds > 0 {
+			return float64(*rec.Seconds), true
+		}
+	case RecordFurthest:
+		if rec.DistanceM != nil && *rec.DistanceM > 0 {
+			return float64(*rec.DistanceM), true
+		}
+	}
+	return 0, false
+}
+
+// bestOneRMSets finds which set produced each exercise's best estimate, so the
+// record can carry its own evidence like every other one.
+func (r *PostgresRepository) bestOneRMSets(
+	ctx context.Context, userID string, ids []string, best map[string]float64,
+) (map[string]Record, error) {
+	out := map[string]Record{}
+	if len(best) == 0 {
+		return out, nil
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT ss.exercise_id, ss.reps, ss.weight_kg, ss.rir, ss.rpe,
+		       ss.session_id, s.started_at
+		FROM session_sets ss
+		JOIN sessions s ON s.id = ss.session_id
+		WHERE ss.user_id = $1 AND ss.exercise_id = ANY($2) AND `+workingSet+`
+		  AND ss.reps IS NOT NULL AND ss.weight_kg IS NOT NULL
+		  AND ss.reps <= $3`, userID, ids, maxEstimableReps)
+	if err != nil {
+		return nil, fmt.Errorf("session: 1rm evidence: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var rec Record
+		if err := rows.Scan(&id, &rec.Reps, &rec.WeightKg, &rec.RIR, &rec.RPE,
+			&rec.SessionID, &rec.AchievedAt); err != nil {
+			return nil, fmt.Errorf("session: 1rm evidence scan: %w", err)
+		}
+		est, ok := EstimateOneRM(*rec.Reps, *rec.WeightKg, rec.RIR, rec.RPE)
+		// Float equality is safe here: both sides come from the identical
+		// function over the identical row, so this is identity rather than
+		// approximation.
+		if !ok || est != best[id] {
+			continue
+		}
+		if prev, seen := out[id]; !seen || rec.AchievedAt.Before(prev.AchievedAt) {
+			// The earliest set to reach the mark is when it was first set.
+			out[id] = rec
+		}
+	}
+	return out, rows.Err()
+}
+
+// maxPinned bounds the profile shortlist. Beyond about a dozen it stops being
+// a shortlist and the screen stops being scannable, which is the whole point.
+const maxPinned = 12
+
+func (r *PostgresRepository) PinnedExercises(ctx context.Context, userID string) ([]string, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT exercise_id FROM pinned_exercises WHERE user_id = $1 ORDER BY position, exercise_id`,
+		userID)
+	if err != nil {
+		return nil, fmt.Errorf("session: pinned: %w", err)
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("session: pinned scan: %w", err)
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// SetPinnedExercises replaces the whole list.
+//
+// Replace rather than add/remove for the same reason sets are replaced
+// wholesale: the client edits an ordered list as one thing, and a diffing API
+// would need to express reordering, which is most of the editing people
+// actually do here.
+func (r *PostgresRepository) SetPinnedExercises(ctx context.Context, userID string, ids []string) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("session: pin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit is a no-op
+
+	if _, err := tx.Exec(ctx, `DELETE FROM pinned_exercises WHERE user_id = $1`, userID); err != nil {
+		return fmt.Errorf("session: clear pins: %w", err)
+	}
+	for i, id := range ids {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO pinned_exercises (user_id, exercise_id, position) VALUES ($1,$2,$3)`,
+			userID, id, i); err != nil {
+			// An unknown exercise is the caller's mistake, not ours.
+			if t := translatePgError(err); !errors.Is(t, err) {
+				return t
+			}
+			return fmt.Errorf("session: pin %s: %w", id, err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("session: pin commit: %w", err)
+	}
+	return nil
+}
+
+// MostTrainedExercises is the fallback shortlist: what you do most, which is
+// a better first guess at what you care about than an empty screen asking you
+// to configure something.
+func (r *PostgresRepository) MostTrainedExercises(ctx context.Context, userID string, limit int) ([]string, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT ss.exercise_id
+		FROM session_sets ss
+		WHERE ss.user_id = $1 AND `+workingSet+`
+		GROUP BY ss.exercise_id
+		ORDER BY COUNT(*) DESC, ss.exercise_id
+		LIMIT $2`, userID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("session: most trained: %w", err)
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("session: most trained scan: %w", err)
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }

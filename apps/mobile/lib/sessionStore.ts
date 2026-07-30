@@ -506,7 +506,13 @@ export async function cacheExercises(list: Exercise[]): Promise<void> {
 }
 
 /** Reads the cache back in the shape the screens already expect. */
-export async function cachedExercises(sport: string): Promise<Exercise[]> {
+/**
+ * The cached catalog, optionally narrowed to one discipline.
+ *
+ * Omitting the sport returns everything cached — what the records view needs,
+ * since a shortlist can span disciplines and it only wants names.
+ */
+export async function cachedExercises(sport?: string): Promise<Exercise[]> {
   const db = await getDb();
   const rows = await db.getAllAsync<{
     id: string;
@@ -516,7 +522,12 @@ export async function cachedExercises(sport: string): Promise<Exercise[]> {
     load_type: string;
     is_unilateral: number;
     thumbnail_url: string | null;
-  }>(`SELECT * FROM exercise_cache WHERE sport = ? ORDER BY name`, sport);
+  }>(
+    sport
+      ? `SELECT * FROM exercise_cache WHERE sport = ? ORDER BY name`
+      : `SELECT * FROM exercise_cache ORDER BY name`,
+    ...(sport ? [sport] : []),
+  );
 
   return rows.map((r) => ({
     id: r.id,

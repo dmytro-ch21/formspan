@@ -280,6 +280,15 @@ type Repository interface {
 	// BestOneRMs returns the highest estimated one-rep max in the caller's
 	// history per requested exercise. Missing keys mean "no estimate".
 	BestOneRMs(ctx context.Context, userID string, exerciseIDs []string) (map[string]float64, error)
+	// Records derives every personal record the caller holds for the named
+	// exercises. Derived rather than stored — see the implementation.
+	Records(ctx context.Context, userID string, exerciseIDs []string) ([]ExerciseRecords, error)
+	// PinnedExercises is the athlete's chosen shortlist for their profile.
+	PinnedExercises(ctx context.Context, userID string) ([]string, error)
+	SetPinnedExercises(ctx context.Context, userID string, exerciseIDs []string) error
+	// MostTrainedExercises backs the default shortlist, so the records view
+	// says something useful before anyone configures it.
+	MostTrainedExercises(ctx context.Context, userID string, limit int) ([]string, error)
 	Get(ctx context.Context, userID, id string) (*Session, error)
 	// Create is idempotent on the client-supplied ID for the same user; a
 	// different user's ID collides with ErrAlreadyExists.

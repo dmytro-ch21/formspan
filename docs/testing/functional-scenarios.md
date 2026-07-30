@@ -782,6 +782,27 @@ Domain: logging a session with no connectivity. **Test this by actually stopping
 - The personal-best lookup must use `session_sets_user_exercise_idx` once a table has many users — `EXPLAIN` it with several athletes sharing one popular exercise, not with a single-user fixture, where a seq scan is correctly cheaper.
 - Loading any page must produce **no hydration error** while `data-theme` is still applied before first paint. The two are in tension: removing the script kills the error and reintroduces the dark-mode flash.
 
+## Personal records (`GET /v1/records`, `PUT /v1/records/pinned`, mobile YOU tab)
+
+**Happy path**
+- The YOU tab shows a card per pinned exercise with each record it holds, the set behind it, and a NEW badge when it was set recently.
+- With nothing pinned, the API answers for the most-trained exercises — the view must never open empty asking to be configured.
+- `Choose` opens the shortlist; tapping saves immediately and reflects on return.
+
+**What must not count as a record**
+- Warm-up sets, sets never marked done, and any other athlete's sets. Seed a heavier warm-up and a heavier unticked set than the real best — both must lose.
+- Deleting the session behind a record, or correcting its weight, must change the record on the next read. Records are derived; there is no cache to invalidate and no stale PR to retract.
+
+**The two kinds**
+- Heaviest weight and estimated 1RM frequently cite **different sets**: 5×100 estimates 112.5 and beats a 110 single. A test that uses data where they coincide proves nothing.
+- Which kinds appear follows `load_type`: a plank offers longest-time only, a run furthest-distance, bodyweight work most-reps. No exercise should advertise a record for a measure it doesn't take.
+- Evidence travels with every record — reps, weight, effort, date and session.
+
+**Shortlist**
+- At most 12; duplicates, blanks and unknown exercise ids each return `400 invalid_input` rather than a 500.
+- Order is the athlete's, preserved on read; clearing is an empty list, not a special case.
+- Another athlete's pins are never visible or writable.
+
 ## Not yet covered (tracked here so it isn't lost, not because it's blocking)
 
 - Mobile has no auth yet (Clerk Expo SDK is a separate future increment) — no sign-in/sign-out scenarios apply to mobile today.

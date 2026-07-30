@@ -1123,6 +1123,45 @@ would send someone chasing a search bug by adding `ESCAPE` where it does
 nothing.
 
 
+## 2026-07-30 — Personal records, derived rather than stored
+
+`GET /v1/records` gives every record the athlete holds for a shortlist of
+exercises, and the YOU tab shows them under the training summary.
+
+**The decision that matters: records are computed on read, not kept in a
+table.** A stored record has to be *retracted* when the set behind it is
+corrected or its session deleted, and getting that wrong leaves someone
+looking at a lift they never made — the one failure a records feature cannot
+afford. Derived, a record is by construction exactly what the log says, and
+correcting a typo fixes the record for free. The index added for the 1RM
+lookup makes it cheap enough that there's no reason to trade that away.
+
+The simple maxima are exact by construction: weight, reps, seconds and
+distance are each monotonic, so the largest row *is* the record and one window
+function finds it. Only the estimated 1RM isn't monotonic in weight — effort
+folds in — which is why it comes from `BestOneRMs` and its own arithmetic
+bound instead.
+
+**Two kinds per lift where both apply**, because they answer different
+questions. The heaviest is what you'd tell someone in a gym; the estimated 1RM
+is what actually moves when you get stronger at any rep range. They frequently
+cite *different sets* — 5×100 estimates 112.5 and beats a 110 single — which
+is the whole reason to show both, and is asserted in the tests.
+
+Which kinds an exercise can hold comes from its `load_type`, mirroring
+`measuresFor`, so a plank never advertises a weight record and a run never
+advertises reps.
+
+**The shortlist is exercises, not record types.** People care about "my big
+three", not about whether to display heaviest-weight separately from
+estimated-1RM — and since load type already decides the kinds, choosing the
+exercise chooses everything downstream. An unset shortlist falls back to what
+you train most, so the view says something useful before anyone configures it
+and there's no empty state to set up.
+
+Still to do: the web half. The API and the shortlist are shared, so it's a
+rendering job rather than a design one.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.
