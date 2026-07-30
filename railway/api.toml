@@ -19,7 +19,19 @@ startCommand = "/app/bin/api"
 # seed step the deployed API would serve `{"exercises": []}` forever — a
 # valid 200 that no healthcheck or error would ever surface. Idempotent, so
 # running it on every deploy is the intended usage, not a workaround.
-preDeployCommand = "/app/bin/migrate up && /app/bin/seed"
+# A single token on purpose. Railway executes preDeployCommand as argv and
+# observably splits it on whitespace, so the previous
+# "/app/bin/migrate up && /app/bin/seed" reached migrate as the extra
+# arguments `&&` and `/app/bin/seed` — which it ignored. The chain now lives
+# in /app/bin/predeploy (see backend/Dockerfile), where there is nothing to
+# split and no dependency on how quotes are tokenised.
+#
+# That failed silently in staging. Migrations applied, the healthcheck passed,
+# the API served 200s, and `exercises` stayed at 0 rows — exactly the
+# "{"exercises": []} forever" outcome the comment above warns about, with
+# nothing in the logs to say so. Verified by counting rows in the deployed
+# database, which is the only check that would have caught it.
+preDeployCommand = "/app/bin/predeploy"
 healthcheckPath = "/v1/healthz"
 healthcheckTimeout = 100
 restartPolicyType = "ON_FAILURE"
