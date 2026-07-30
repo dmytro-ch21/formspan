@@ -167,12 +167,24 @@ a {
   scrollbar-width: thin;
 }
 
-input,
-textarea,
-select,
-button {
-  font-family: inherit;
-  color: inherit;
+/*
+  In `@layer base`, not unlayered, and that's load-bearing.
+
+  Unlayered declarations beat *every* layered one, and Tailwind puts its
+  utilities in `@layer utilities` — so as a bare rule this `color: inherit`
+  silently overrode every `text-*` class on a button. Each solid button in
+  the app was rendering `--c-text` on `--c-accent-fill`: #10151f on #0b1220,
+  about 1.05:1, invisible. The classes were right the whole time; the
+  cascade was eating them.
+*/
+@layer base {
+  input,
+  textarea,
+  select,
+  button {
+    font-family: inherit;
+    color: inherit;
+  }
 }
 
 input[type="number"]::-webkit-outer-spin-button,

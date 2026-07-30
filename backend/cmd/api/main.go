@@ -6,6 +6,13 @@ import (
 	"os"
 	"strings"
 
+	// The history endpoint resolves the caller's IANA timezone to bucket
+	// sessions into calendar days. The runtime image is alpine with only
+	// ca-certificates — no tzdata — so without this every request naming a
+	// real zone would fail to load it and 400. Embedding costs ~450KB and
+	// survives a future base-image change; `apk add tzdata` would not.
+	_ "time/tzdata"
+
 	"github.com/dmytro-ch21/vola/backend/internal/modules/activity"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/exercise"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/featureflag"
@@ -79,6 +86,8 @@ func main() {
 	// Registered before the {sessionID} pattern is irrelevant to net/http's
 	// mux (literal segments beat wildcards), but kept adjacent for reading.
 	mux.Handle("GET /v1/sessions/suggestions", verifier.RequireAuth(http.HandlerFunc(sessionHandler.Suggestions)))
+	// Literal path, so Go 1.22 routing prefers it over /v1/sessions/{sessionID}.
+	mux.Handle("GET /v1/sessions/history", verifier.RequireAuth(http.HandlerFunc(sessionHandler.History)))
 	mux.Handle("GET /v1/sessions/{sessionID}", verifier.RequireAuth(http.HandlerFunc(sessionHandler.Get)))
 	mux.Handle("PUT /v1/sessions/{sessionID}/sets", verifier.RequireAuth(http.HandlerFunc(sessionHandler.ReplaceSets)))
 	mux.Handle("POST /v1/sessions/{sessionID}/finish", verifier.RequireAuth(http.HandlerFunc(sessionHandler.Finish)))

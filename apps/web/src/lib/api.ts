@@ -601,12 +601,68 @@ export async function updateUnitSystem(
 
 export async function listSessions(
   getToken: Token,
-  opts: { limit?: number } = {},
+  opts: { limit?: number; sport?: Sport; from?: string; to?: string; tz?: string } = {},
   signal?: AbortSignal,
 ): Promise<Session[]> {
-  const qs = opts.limit ? `?limit=${opts.limit}` : "";
+  const q = new URLSearchParams();
+  if (opts.limit) q.set("limit", String(opts.limit));
+  if (opts.sport) q.set("sport", opts.sport);
+  if (opts.from) q.set("from", opts.from);
+  if (opts.to) q.set("to", opts.to);
+  if (opts.tz) q.set("tz", opts.tz);
+  const qs = q.size > 0 ? `?${q}` : "";
   const b = await request<{ sessions: Session[] }>(getToken, `/sessions${qs}`, {}, signal);
   return b.sessions ?? [];
+}
+
+export type HistoryTotals = {
+  sessions: number;
+  working_sets: number;
+  total_reps: number;
+  tonnage_kg: number;
+  duration_seconds: number;
+  exercises: number;
+  active_days: number;
+};
+
+export type HistoryDay = {
+  date: string; // YYYY-MM-DD in the requested timezone
+  sessions: number;
+  working_sets: number;
+  total_reps: number;
+  tonnage_kg: number;
+  duration_seconds: number;
+  sports: Sport[];
+};
+
+export type History = {
+  from: string;
+  to: string;
+  totals: HistoryTotals;
+  /** The same-length window immediately before, for reading totals as a direction. */
+  previous: HistoryTotals;
+  /** Only days that had training, ascending. Gaps are absent, not zero-filled. */
+  days: HistoryDay[];
+  /** Every sport in range, ignoring the sport filter. */
+  sports: { sport: Sport; sessions: number }[];
+};
+
+/**
+ * The training-history rollup.
+ *
+ * Aggregated server-side deliberately: the working-set rule lives in one
+ * place, and summing a client-side listing would silently under-report once
+ * history outgrows the 200-row cap.
+ */
+export async function fetchHistory(
+  getToken: Token,
+  opts: { from: string; to: string; sport?: Sport; tz?: string },
+  signal?: AbortSignal,
+): Promise<History> {
+  const q = new URLSearchParams({ from: opts.from, to: opts.to });
+  if (opts.sport) q.set("sport", opts.sport);
+  if (opts.tz) q.set("tz", opts.tz);
+  return request<History>(getToken, `/sessions/history?${q}`, {}, signal);
 }
 
 export async function getSession(
