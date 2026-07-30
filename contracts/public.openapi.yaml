@@ -367,6 +367,10 @@ components:
             is performed rather than starting at the plan's total. A set
             built from a template starts false.
 
+            Defaults to `false` when omitted on write — a set the client
+            didn't explicitly mark done is treated as planned, not
+            performed.
+
     Session:
       type: object
       description: >
@@ -485,13 +489,16 @@ components:
       properties:
         working_sets: { type: integer }
         total_reps: { type: integer }
-        tonnage_kg: { type: number, description: Sum of reps × weight over non-warm-up sets. }
+        tonnage_kg:
+          type: number
+          description: Sum of reps × weight over completed, non-warm-up sets.
         hardest_rpe:
           type: number
           description: >
-            Highest RPE over the *working* sets; 0 when none carried one. A
-            hard warm-up single shouldn't set the session's headline
-            difficulty.
+            Highest RPE over the *completed working* sets; 0 when none
+            carried one. A hard warm-up single shouldn't set the session's
+            headline difficulty, and neither should a set that was planned
+            but never performed.
         exercise_ids:
           type: array
           items: { type: string }

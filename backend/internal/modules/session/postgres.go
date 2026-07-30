@@ -140,7 +140,7 @@ func (r *PostgresRepository) attachSets(ctx context.Context, sessions []Session,
 	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT session_id, exercise_id, position, set_type, reps, weight_kg,
-		       seconds, distance_m, rir, rpe, notes
+		       seconds, distance_m, rir, rpe, notes, completed
 		FROM session_sets
 		WHERE session_id = ANY($1)
 		ORDER BY session_id, position`, ids)
@@ -157,7 +157,7 @@ func (r *PostgresRepository) attachSets(ctx context.Context, sessions []Session,
 		)
 		if err := rows.Scan(&sessionID, &st.ExerciseID, &st.Position, &st.SetType,
 			&st.Reps, &st.WeightKg, &st.Seconds, &st.DistanceM,
-			&st.RIR, &st.RPE, &st.Notes); err != nil {
+			&st.RIR, &st.RPE, &st.Notes, &st.Completed); err != nil {
 			return fmt.Errorf("session: scan set: %w", err)
 		}
 		bySession[sessionID] = append(bySession[sessionID], st)
