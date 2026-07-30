@@ -73,12 +73,30 @@ Then: `git push -u origin <branch>`, `gh pr create`, watch CI with `gh run watch
 
 ## Review before every PR (hard rule)
 
-Two review subagents exist in `.claude/agents/` and should be run on any non-trivial change **before** opening a PR, in addition to (not instead of) the local check suite:
+**Run `/pre-merge` before opening or updating any PR.** It is one gate that
+runs both the CI-equivalent check suite *and* the review subagents in
+`.claude/agents/`:
 
-- **`backend-reviewer`** — for changes touching `backend/**`. Reviews security (authorization gaps/IDOR, information disclosure, secrets/PII in logs), correctness, performance (N+1s, missing indexes, unbounded lists), and adherence to the module pattern above.
-- **`frontend-reviewer`** — for changes touching `apps/**`. Reviews security (server/client boundary leaks, client-only authorization), correctness (Server vs Client Components, `useEffect` deps, error states), performance, accessibility, and design-token/convention adherence.
+- **`backend-reviewer`** — for `backend/**` or `contracts/**`. Security
+  (authorization gaps/IDOR, information disclosure, secrets/PII in logs),
+  correctness, performance (N+1s, missing indexes, unbounded lists), and
+  adherence to the module pattern above.
+- **`frontend-reviewer`** — for `apps/**`. Security (server/client boundary
+  leaks, client-only authorization), correctness (Server vs Client
+  Components, `useEffect` deps, error states), performance, accessibility,
+  and design-token/convention adherence.
 
-Both are **read-only diagnostics** — they report findings, they don't apply fixes. Findings marked `[blocking]` should be resolved or explicitly justified before merging; `[suggestion]` items are judgment calls. Run whichever matches the diff (or both when a change spans backend and frontend).
+Both are **read-only diagnostics** — they report, they don't fix. Resolve or
+explicitly justify every `[blocking]` finding *before* opening the PR;
+`[suggestion]` items are judgment calls.
+
+**Why this is one command and not two rules:** it used to be two, and the
+check suite got run while the reviewers got skipped — repeatedly, over
+several PRs — because running the checks feels like having verified the
+change. It isn't. The checks prove it compiles. The reviewers are what
+caught the cross-user ID-enumeration bug, twice, in two different modules.
+Give them the design intent along with the diff; they find far more when
+they know which properties are load-bearing.
 
 ## Keep the README current (hard rule)
 
