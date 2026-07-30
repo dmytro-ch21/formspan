@@ -29,6 +29,26 @@ const palette = {
   textDim: '#667085',
 
   lime: '#B8FF2C',
+
+  /**
+   * The consistency grid's ramp, and the one place in this palette whose
+   * values are *tuned against* `surface` rather than independent of it.
+   *
+   * They are not lime at an opacity — solving per channel gives inconsistent
+   * alphas — because they were picked by running the ramp through a contrast
+   * and colour-vision validator over this card. Three steps, not four: a
+   * four-step ramp put its top two at ΔE 13.5 (below where full-colour vision
+   * separates them) and its bottom at 2.05:1 (invisible in daylight). These
+   * clear both — ΔE 18.6+, 3.58 / 8.05 / 15.12 against the card.
+   *
+   * `gridRest` is the untrained day. At the old `lineSoft` it was 1.14:1 and
+   * the grid read as scattered dots rather than a calendar, which is a
+   * weaker standard than the one the lit steps were held to.
+   *
+   * **If `surface` changes, re-run the validator.** Nothing else will catch it.
+   */
+  gridRest: '#2A3446',
+  gridLevels: ['#567826', '#87BC28', '#B8FF2C'] as const,
   green: '#42F58D',
   navy: '#0B1220',
 

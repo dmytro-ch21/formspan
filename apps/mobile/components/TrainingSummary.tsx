@@ -15,6 +15,7 @@ import {
   localZone,
   spanRange,
   SPANS,
+  streakRange,
   weekStreak,
   type History,
   type SpanKey,
@@ -41,52 +42,82 @@ export function TrainingSummary({
   units: UnitSystem;
 }) {
   const [span, setSpan] = useState<SpanKey>('12w');
-  const [history, setHistory] = useState<History | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Tagged with the span it was fetched for. Without that, a failed refetch
+  // after switching leaves the previous span's numbers on screen wearing the
+  // new span's label — the same bug that shipped on web, where the empty
+  // state could say "nothing in the last 4 weeks" over 12 weeks of data.
+  const [data, setData] = useState<{ span: SpanKey; history: History } | null>(null);
   const [failed, setFailed] = useState(false);
+  const [streak, setStreak] = useState<number | null>(null);
 
   useFocusEffect(
     useCallback(() => {
       const controller = new AbortController();
       const { from, to } = spanRange(span);
-      setLoading(true);
       fetchHistory(getToken, { from, to, tz: localZone() }, controller.signal)
         .then((h) => {
           if (controller.signal.aborted) return;
-          setHistory(h);
+          setData({ span, history: h });
           setFailed(false);
         })
         .catch(() => {
           if (!controller.signal.aborted) setFailed(true);
-        })
-        .finally(() => {
-          if (!controller.signal.aborted) setLoading(false);
         });
       return () => controller.abort();
     }, [getToken, span]),
   );
 
-  return <SummaryBody span={span} onSpan={setSpan} history={history} loading={loading} failed={failed} units={units} />;
+  // The streak is fetched over its own fixed window, not the selected span,
+  // and this is the whole point: computed from the span's days it is a
+  // function of the segmented control rather than of the training. For anyone
+  // training consistently it reports *exactly* the span length — 4 weeks on
+  // the 4-week view, 12 on the 12-week — which looks entirely plausible and
+  // is a lie about someone's training. Deliberately not keyed on `span`.
+  useFocusEffect(
+    useCallback(() => {
+      const controller = new AbortController();
+      const { from, to } = streakRange();
+      fetchHistory(getToken, { from, to, tz: localZone() }, controller.signal)
+        .then((h) => {
+          if (!controller.signal.aborted) setStreak(weekStreak(h.days));
+        })
+        .catch(() => {
+          // A missing streak is a missing line, not an error worth a banner.
+          if (!controller.signal.aborted) setStreak(null);
+        });
+      return () => controller.abort();
+    }, [getToken]),
+  );
+
+  return (
+    <SummaryBody
+      span={span}
+      onSpan={setSpan}
+      history={data?.span === span ? data.history : null}
+      streak={streak}
+      failed={failed}
+      units={units}
+    />
+  );
 }
 
 function SummaryBody({
   span,
   onSpan,
   history,
-  loading,
+  streak,
   failed,
   units,
 }: {
   span: SpanKey;
   onSpan: (s: SpanKey) => void;
   history: History | null;
-  loading: boolean;
+  streak: number | null;
   failed: boolean;
   units: UnitSystem;
 }) {
   const t = history?.totals;
   const p = history?.previous;
-  const streak = useMemo(() => (history ? weekStreak(history.days) : 0), [history]);
 
   return (
     <>
@@ -97,6 +128,7 @@ function SummaryBody({
             <Pressable
               key={s.key}
               onPress={() => onSpan(s.key)}
+              hitSlop={{ top: 10, bottom: 10, left: 4, right: 4 }}
               accessibilityRole="button"
               accessibilityState={{ selected: span === s.key }}
               accessibilityLabel={`Show ${s.label}`}
@@ -113,14 +145,10 @@ function SummaryBody({
 
       {!history ? (
         <View style={styles.card}>
-          {loading ? (
-            <ActivityIndicator accessibilityLabel="Loading your training" />
+          {failed ? (
+            <Text style={styles.muted}>Couldn&apos;t load your training just now.</Text>
           ) : (
-            <Text style={styles.muted}>
-              {failed
-                ? "Couldn't load your training just now."
-                : 'Log a session and your training shows up here.'}
-            </Text>
+            <ActivityIndicator accessibilityLabel="Loading your training" />
           )}
         </View>
       ) : t!.sessions === 0 ? (
@@ -141,6 +169,11 @@ function SummaryBody({
             />
           </RNView>
 
+          {failed && (
+            <Text style={styles.stale} accessibilityLiveRegion="polite">
+              Showing the last figures loaded — couldn&apos;t refresh just now.
+            </Text>
+          )}
           <Grid history={history} streak={streak} />
           <Weeks history={history} units={units} />
         </>
@@ -174,19 +207,8 @@ function Tile({ label, value, change }: { label: string; value: string; change: 
   );
 }
 
-/**
- * The consistency grid.
- *
- * Three intensity steps, not four, and the exact hex values matter: composited
- * over this card, a four-step lime ramp put its top two steps ΔE 13.5 apart —
- * below the threshold where full-colour vision reliably separates them — and
- * its bottom step at 2.05:1 against the card, which is invisible on a phone in
- * daylight. Three steps clear both (ΔE 18.6+, all ≥3:1). Four levels of
- * precision on a 13pt square was over-reading anyway.
- */
-const LEVELS = ['#567826', '#87BC28', '#B8FF2C'] as const;
-
-function Grid({ history, streak }: { history: History; streak: number }) {
+/** The consistency grid. Ramp and rest colour live in the palette. */
+function Grid({ history, streak }: { history: History; streak: number | null }) {
   const weeks = useMemo(
     () => buildGrid(history.from, history.to, history.days),
     [history],
@@ -207,6 +229,7 @@ function Grid({ history, streak }: { history: History; streak: number }) {
 
   return (
     <View style={styles.card}>
+      <Text style={styles.weeksTitle}>Days trained</Text>
       <RNView style={styles.grid}>
         {weeks.map((week) => (
           <RNView key={week[0].date} style={styles.gridCol}>
@@ -226,7 +249,7 @@ function Grid({ history, streak }: { history: History; streak: number }) {
                   style={[
                     styles.cell,
                     !cell.inRange && styles.cellOut,
-                    lv >= 0 && { backgroundColor: LEVELS[lv] },
+                    lv >= 0 && { backgroundColor: vola.gridLevels[lv] },
                   ]}
                 />
               );
@@ -237,14 +260,16 @@ function Grid({ history, streak }: { history: History; streak: number }) {
 
       <RNView style={styles.gridFoot}>
         <Text style={styles.footText}>
-          {streak > 0
-            ? `${streak} week${streak === 1 ? '' : 's'} in a row`
-            : 'No streak yet — one session starts it'}
+          {streak === null
+            ? ' '
+            : streak > 0
+              ? `${streak} week${streak === 1 ? '' : 's'} in a row`
+              : 'No streak yet — one session starts it'}
         </Text>
         <RNView style={styles.legend}>
           <Text style={styles.footText}>Less</Text>
-          <RNView style={[styles.legendCell, { backgroundColor: vola.lineSoft }]} />
-          {LEVELS.map((c) => (
+          <RNView style={[styles.legendCell, { backgroundColor: vola.gridRest }]} />
+          {vola.gridLevels.map((c) => (
             <RNView key={c} style={[styles.legendCell, { backgroundColor: c }]} />
           ))}
           <Text style={styles.footText}>More</Text>
@@ -264,8 +289,6 @@ function Weeks({ history, units }: { history: History; units: UnitSystem }) {
   const value = (w: (typeof weeks)[number]) => (metric === 'tonnage' ? w.tonnageKg : w.minutes);
   const peak = Math.max(1, ...weeks.map(value));
   const total = weeks.reduce((n, w) => n + value(w), 0);
-
-  if (weeks.length < 2) return null;
 
   return (
     <View style={styles.card}>
@@ -299,7 +322,7 @@ function Weeks({ history, units }: { history: History; units: UnitSystem }) {
                     // dimmed rather than drawn as nothing.
                     height: `${v > 0 ? Math.max(4, (v / peak) * 100) : w.sessions > 0 ? 6 : 2}%`,
                     backgroundColor:
-                      v > 0 ? vola.lime : w.sessions > 0 ? LEVELS[0] : vola.lineSoft,
+                      v > 0 ? vola.lime : w.sessions > 0 ? vola.gridLevels[0] : vola.gridRest,
                   },
                 ]}
               />
@@ -371,7 +394,7 @@ const styles = StyleSheet.create({
 
   grid: { flexDirection: 'row', gap: GAP },
   gridCol: { gap: GAP },
-  cell: { width: CELL, height: CELL, borderRadius: 3, backgroundColor: vola.lineSoft },
+  cell: { width: CELL, height: CELL, borderRadius: 3, backgroundColor: vola.gridRest },
   cellOut: { backgroundColor: 'transparent' },
   gridFoot: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   footText: { fontSize: 11, color: vola.textDim },
@@ -385,4 +408,5 @@ const styles = StyleSheet.create({
   bar: { width: '100%', maxWidth: 26, borderTopLeftRadius: 3, borderTopRightRadius: 3 },
 
   muted: { color: vola.textMuted, fontSize: 13 },
+  stale: { color: vola.warn, fontSize: 12 },
 });

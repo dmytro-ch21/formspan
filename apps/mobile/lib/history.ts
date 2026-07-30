@@ -134,6 +134,19 @@ export function spanRange(span: SpanKey, to = today()): { from: string; to: stri
   return { from: addDays(startOfWeek(to), -(weeks - 1) * 7), to };
 }
 
+/**
+ * How far back the streak looks — deliberately not the selected span.
+ *
+ * A streak computed from the span's own days is a function of the segmented
+ * control rather than of the training: someone training every week reads
+ * "4 weeks in a row" on the 4-week view and "12" on the 12-week one, when the
+ * truth might be 40. A year is long enough that the cap is nearly never the
+ * binding constraint, and it's one extra request of dates.
+ */
+export function streakRange(to = today()): { from: string; to: string } {
+  return { from: addDays(startOfWeek(to), -51 * 7), to };
+}
+
 export type WeekBucket = { start: string; tonnageKg: number; minutes: number; sessions: number };
 
 /** Weekly rollup of days the server already summed. No volume rule here. */
@@ -228,6 +241,3 @@ export function formatDayLong(key: string): string {
   });
 }
 
-export function monthShort(key: string): string {
-  return parse(key).toLocaleDateString(undefined, { month: 'short', timeZone: 'UTC' });
-}
