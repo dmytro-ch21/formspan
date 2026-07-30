@@ -792,10 +792,36 @@ Editing a session should talk about that session. `pushSession` does one
 session and clears its flag; reconciliation stays on screen focus, where it
 happens once.
 
-Also fixed while there: a failed push no longer surfaces an error banner
-mid-workout. The local write has already succeeded and the row stays dirty
-for the next sync, so the only thing worth interrupting a lift for is bad
-*data* — the network is the outbox's problem.
+Review caught that the first cut of this went too far in the other
+direction: the narrowed `catch` wrapped the *local* write too, so a failed
+SQLite write — the one failure offline-first exists to make visible — said
+nothing at all while the screen kept showing sets that existed nowhere. The
+local write is the save and always speaks up; only the push is allowed to
+fail quietly, and only when it failed because the *network* did. A push the
+server actively refused (404 deleted elsewhere, 409, `invalid_input`) will
+fail identically forever, so it surfaces.
+
+Three more things fell out of the same review:
+
+- **The create was still firing on every save.** `POST /v1/sessions` is
+  idempotent, so replaying it was harmless — but it doubled the request cost
+  of typing a weight and made the server re-validate the workout template
+  each time. A `remote` column (schema v5) records that the server has
+  acknowledged the session; a 404 on push clears it so a session deleted on
+  another device is recreated rather than failing forever.
+- **A corrupt local blob would have deleted the server's copy.** `toSession`
+  degrades an unreadable `sets_json` to an empty list so the session stays
+  openable — but `PUT /sets` *replaces*, so pushing that empty list turned a
+  local read failure into permanent remote data loss. The push paths now
+  check the parse themselves instead of trusting the display value.
+- **Nothing drained the outbox except the Today tab.** With saves no longer
+  running a full sync, a session logged offline sat dirty until something
+  happened to open Today. The session screen now reconciles once on focus.
+
+`pushSession` and `syncSessions` share one `pushRow` rather than holding two
+copies of the ordering, idempotency and compare-and-swap logic. This codebase
+has already been bitten by a duplicated implementation drifting (`localVolume`
+against `Summarise`), and this is the same shape of risk.
 
 **Still outstanding from the same trace**, both flagged by `frontend-reviewer`
 and not yet fixed: `/v1/exercises` refetches the entire 524-entry catalog on

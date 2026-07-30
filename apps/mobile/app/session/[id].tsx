@@ -38,7 +38,7 @@ import {
   describeSet,
   emptySet,
   fetchSuggestions,
-  isValidationError,
+  isPermanentRejection,
   measuresFor,
   SET_TYPES,
   type LoggedSet,
@@ -180,6 +180,12 @@ export default function SessionScreen() {
       )
         .then(setSuggestions)
         .catch(() => {});
+
+      // Drain the outbox once, on focus. Saves push only their own session
+      // now, so without this a session logged with no signal would sit dirty
+      // until something happened to open the Today tab — which, on a phone
+      // resumed straight back into a workout, might be a long time.
+      syncSessions(userId, getToken).catch(() => {});
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setEverLoaded(true);
@@ -216,20 +222,35 @@ export default function SessionScreen() {
       const run = inFlight.current.then(async () => {
         setSaving(true);
         try {
-          await saveLocalSets(userId, id, next);
+          // The local write *is* the save, so its failure is never quiet.
+          // The screen is already showing these sets; if SQLite didn't take
+          // them, the athlete is looking at work that doesn't exist
+          // anywhere, and the only honest thing to do is say so.
+          try {
+            await saveLocalSets(userId, id, next);
+          } catch (err) {
+            setError(
+              `Couldn't save on this device: ${err instanceof Error ? err.message : String(err)}`,
+            );
+            return;
+          }
           setVolume(localVolume(next));
           setError(null);
-          // Only this session, not a full reconciliation. Pushing every
-          // dirty session and pulling twenty more on each keystroke is what
-          // turned one workout into hundreds of requests.
-          await pushSession(userId, id, getToken);
-            } catch (err) {
-          // The local write already succeeded, so a failed push just leaves
-          // the row dirty for the next focus-time sync. Only bad *data* is
-          // worth interrupting a workout for — the network is the outbox's
-          // problem, not the athlete's.
-          if (isValidationError(err)) {
-            setError(err instanceof Error ? err.message : String(err));
+
+          try {
+            // Only this session, not a full reconciliation. Pushing every
+            // dirty session and pulling twenty more on each keystroke is
+            // what turned one workout into hundreds of requests.
+            await pushSession(userId, id, getToken);
+          } catch (err) {
+            // A push that failed because the network did is an ordinary
+            // state: the row stays dirty and goes out with the next sync.
+            // A push the server actively *refused* will fail the same way
+            // forever, and staying quiet about that means finishing a
+            // workout that was never going to sync.
+            if (isPermanentRejection(err)) {
+              setError(err instanceof Error ? err.message : String(err));
+            }
           }
         } finally {
           setSaving(false);

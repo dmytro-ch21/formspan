@@ -447,7 +447,10 @@ Domain: a training session that **actually happened**, and the sets in it — re
 - Both remain in the `Volume` API response — dropping them from the UI must not drop them from the contract, since the trends screen will want them.
 
 **Request cost of logging — worth actually measuring, not just reading**
-- One set edit must cost **one** `PUT /v1/sessions/{id}/sets` and nothing else. It used to also trigger a full `syncSessions`: every dirty session pushed at 2–3 requests each, plus a pull of twenty. Ninety-one requests for fifteen saves.
+- One set edit must cost **one** `PUT /v1/sessions/{id}/sets` and nothing else — no `POST /v1/sessions`, no `GET /v1/sessions`. It used to trigger a full `syncSessions` (every dirty session at 2–3 requests each, plus a pull of twenty) *and* re-send the idempotent create every time. Ninety-one requests for fifteen saves.
+- The create fires **once per session**, not once per save — the `remote` flag records that the server has it. Deleting the session elsewhere and saving again must recreate it rather than fail forever.
+- A push the server *refuses* (404, 409, `invalid_input`) must surface; a push that fails because the network did must not. A failed **local** write must always surface — that one is the save.
+- A session whose local blob is unreadable must be skipped by the push, never sent as an empty set list (which would delete the server's copy).
 - Reconciliation (`syncSessions`) belongs on screen focus, once — never on the save path.
 - A failed push must not raise a banner mid-workout: the local write succeeded and the row stays dirty for the next sync. Only validation errors are worth showing.
 - Capture the API's stdout to a file when checking this; `pnpm run dev:api` doesn't persist it anywhere.

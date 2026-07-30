@@ -43,6 +43,11 @@ const CREATE_SESSIONS = `
     -- flag as activities, named for what it means rather than for sync
     -- state, because a row can be dirty for reasons other than "never sent".
     dirty INTEGER NOT NULL DEFAULT 1,
+    -- 1 once the server has acknowledged this session exists. Distinct from
+    -- the dirty flag, which is about the contents being current: a session
+    -- can be dirty forever while still being remote, and that is the common
+    -- case during a workout.
+    remote INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL
   );
 `;
@@ -91,7 +96,7 @@ const CREATE_EXERCISE_CACHE = `
  * "no such column" crash the guard was supposed to prevent. A version number
  * can't develop that blind spot.
  */
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
@@ -152,6 +157,21 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     // right units with no signal. The last-used filters are genuinely local
     // — where you are in the UI is a property of this device, not of you.
     await db.execAsync(CREATE_PREFS);
+  }
+
+  if (current < 5) {
+    // v4 -> v5: remember which sessions the server already knows about.
+    //
+    // Without this the outbox re-sent `POST /v1/sessions` on every single
+    // save, forever. The create is idempotent so it was harmless, but it
+    // doubled the request cost of typing a weight and made the server
+    // re-validate the workout template each time.
+    //
+    // Existing rows default to 0, which costs exactly one redundant create
+    // each and then corrects itself — no backfill needed.
+    await db.execAsync(
+      `ALTER TABLE local_sessions ADD COLUMN remote INTEGER NOT NULL DEFAULT 0;`,
+    );
   }
 
   await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION};`);
