@@ -420,15 +420,16 @@ export async function cacheWorkouts(userID: string, list: Workout[]): Promise<vo
   await db.withTransactionAsync(async () => {
     for (const w of list) {
       await db.runAsync(
-        `INSERT INTO workout_cache (id, user_id, sport, name, items_json, cached_at)
-         VALUES (?, ?, ?, ?, ?, ?)
+        `INSERT INTO workout_cache (id, user_id, sport, name, goal, items_json, cached_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
-           sport = excluded.sport, name = excluded.name,
+           sport = excluded.sport, name = excluded.name, goal = excluded.goal,
            items_json = excluded.items_json, cached_at = excluded.cached_at`,
         w.id,
         userID,
         w.sport,
         w.name,
+        w.goal,
         JSON.stringify(w.items ?? []),
         now,
       );
@@ -442,6 +443,7 @@ export async function cachedWorkouts(userID: string, sport: string): Promise<Wor
     id: string;
     sport: string;
     name: string;
+    goal: string | null;
     items_json: string;
   }>(`SELECT * FROM workout_cache WHERE user_id = ? AND sport = ? ORDER BY name`, userID, sport);
 
@@ -457,7 +459,10 @@ export async function cachedWorkouts(userID: string, sport: string): Promise<Wor
       owner_user_id: userID,
       name: r.name,
       sport: r.sport as Workout['sport'],
-      goal: null,
+      // Cached alongside the plan since schema v6. It decides the rep range
+      // the progression rule works inside, and a null here would start an
+      // offline session on a different range than the session screen uses.
+      goal: r.goal as Workout['goal'],
       notes: '',
       visibility: 'private' as const,
       items,

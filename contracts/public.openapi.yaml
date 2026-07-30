@@ -411,47 +411,126 @@ components:
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
 
+    RepRange:
+      type: object
+      description: The rep window a lift progresses inside before load moves.
+      required: [low, high]
+      properties:
+        low: { type: integer, example: 6 }
+        high: { type: integer, example: 10 }
+
     Suggestion:
       type: object
       description: >
-        What to load today for one exercise, derived from what the caller
-        actually did last time.
+        What to load today for one exercise, and for how many reps, derived
+        from what the caller actually did in their last few sessions.
+
+        The scheme is **double progression, autoregulated by reported effort**:
+        work inside a rep range, adding reps at the same load until every
+        working set reaches the top of the range with reserve to spare, then
+        add load and drop back to the bottom. Effort gates both halves — a set
+        taken to failure is not evidence of room — and three sessions stuck at
+        one load triggers a deload rather than another repeat.
 
         Deterministic and explainable by construction — no model, no hidden
-        weighting. The rule is effort-driven, which is why RIR and RPE are
-        collected at all: weight alone can't say whether a set was easy, since
-        a lifter who grinds out five reps and one who leaves three in reserve
-        log the identical row. When no effort was recorded the honest answer
-        is "repeat it", not a guess.
+        weighting. This is why RIR and RPE are collected at all: weight alone
+        can't say whether a set was easy, since a lifter who grinds out five
+        reps and one who leaves three in reserve log the identical row. When
+        no effort was recorded the honest answer is "repeat it", not a guess.
 
-        The evidence (`last_*`) travels with every suggestion, including when
-        the answer is to repeat — a number the athlete can check beats one
-        they have to trust.
+        The evidence travels with every suggestion, including when the answer
+        is to repeat — a number the athlete can check beats one they have to
+        trust. Note that `last_weight_kg`, `last_reps`, `last_rir` and
+        `last_rpe` all describe the **same single top set** and are only
+        meaningful together; `last_min_reps` / `last_max_reps` are the spread
+        across every working set and belong to the session, not to any one set.
 
         Branch on `code`; `reason` is prose and is not part of the contract.
-      required: [exercise_id, last_performed_at, last_reps, last_weight_kg,
-                 last_rir, last_rpe, suggested_weight_kg, code, reason,
+      required: [exercise_id, code, reason, target_weight_kg, target_reps,
+                 rep_range, last_performed_at, last_weight_kg, last_reps,
+                 last_rir, last_rpe, last_min_reps, last_max_reps,
+                 working_sets, sessions_at_load, hit_target_effort,
                  estimated_1rm_kg, best_1rm_kg]
       properties:
         exercise_id: { type: string, example: back-squat }
+        target_weight_kg:
+          type: number
+          nullable: true
+          description: >
+            What to load. Equal to `last_weight_kg` whenever the answer is to
+            repeat, about 10% below it on a deload; null when there's nothing
+            to say (no history, or not measured in weight).
+
+
+            Always lands on a loadable 1.25 kg step, and an increase is capped
+            at 5% of what's on the bar — a fixed 2.5 kg is 1.8% of a 140 kg
+            bench and 6% of a 40 kg one, and the second is a stall waiting to
+            happen.
+        target_reps:
+          type: integer
+          nullable: true
+          description: >
+            How many reps to aim for, always inside `rep_range` — clamped even
+            on the "repeat what you did" codes, since the range belongs to the
+            *current* workout's goal while the history may come from a block
+            with a different one.
+
+
+            This moves in most sessions and the load doesn't, so a client that
+            fills in the weight but ignores this drops the half of the
+            recommendation that actually changes.
+        rep_range:
+          allOf:
+            - $ref: "#/components/schemas/RepRange"
+          description: >
+            Set by the `goal` query parameter, not by the exercise: the same
+            squat is a 3-rep lift in a powerlifting block and a 10-rep lift in
+            a hypertrophy one.
         last_performed_at:
           type: string
           format: date-time
           nullable: true
           description: When the most recent session containing it started.
-        last_reps: { type: integer, nullable: true }
-        last_weight_kg: { type: number, nullable: true }
-        last_rir: { type: integer, nullable: true }
-        last_rpe: { type: number, nullable: true }
+        last_weight_kg: { type: number, nullable: true, description: The top set's load. }
+        last_reps: { type: integer, nullable: true, description: The top set's own reps. }
+        last_rir: { type: integer, nullable: true, description: The top set's reserve. }
+        last_rpe: { type: number, nullable: true, description: The top set's RPE. }
+        last_min_reps:
+          type: integer
+          nullable: true
+          description: >
+            Fewest reps on any working set last session. **This is what gates
+            progression**, not the best set: a session opening at 10 and ending
+            at 6 is not a 10-rep session, and adding load to it is how a lifter
+            stalls inside a fortnight.
+        last_max_reps: { type: integer, nullable: true }
+        working_sets:
+          type: integer
+          description: How many working sets last session, warm-ups excluded.
+        sessions_at_load:
+          type: integer
+          description: >
+            Consecutive recent sessions at this same weight **without gaining a
+            rep** — the stall signal.
+
+
+            Both halves matter. Climbing 6 → 7 → 8 at a fixed weight *is* the
+            first phase of double progression, so counting those as a stall
+            would deload a lifter who is doing exactly what they were told.
+            And consecutive, because a load returned to after a deload is a
+            fresh attempt rather than a continuing plateau.
+        hit_target_effort:
+          type: boolean
+          description: Every working set finished at or above 2 reps in reserve.
         estimated_1rm_kg:
           type: number
           nullable: true
           description: >
-            One-rep max implied by the last working set, **with effort folded
-            in** — a set of 5 with 3 RIR is evidence of an 8-rep max, not a
-            5-rep one, and ignoring that would read stopping short as a
-            strength loss. Brzycki (`w × 36/(37−r)`), which returns the weight
-            itself at one rep rather than inflating a true single.
+            One-rep max implied by the last top set, **with effort folded in**
+            — a set of 5 with 3 RIR is evidence of an 8-rep max, not a 5-rep
+            one, and ignoring that would read stopping short as a strength
+            loss. Brzycki (`w × 36/(37−r)`), which returns the weight itself at
+            one rep rather than inflating a true single.
 
 
             Null when the set can't support an estimate: no weight recorded,
@@ -465,34 +544,43 @@ components:
             exercise, so the current one reads as progress rather than as a
             bare number. Not simply the heaviest set — 5×100 estimates above a
             110 single.
-        suggested_weight_kg:
-          type: number
-          nullable: true
-          description: >
-            What to load. Equal to `last_weight_kg` whenever the answer is to
-            repeat; null when there's nothing to say (no history, or not
-            measured in weight).
         code:
           type: string
-          enum: [no_history, not_applicable, increase, repeat_hard,
-                 repeat_unknown_effort, repeat_stale, repeat_consolidate]
+          enum: [add_reps, add_load, deload, hold, no_history, not_applicable,
+                 repeat_hard, repeat_unknown_effort, repeat_stale]
           description: >
-            `increase` — 2+ reps in reserve (or RPE ≤ 8), so add the
-            movement's increment: 5 kg for squat/hinge/olympic, 2.5 kg for
-            push/pull/lunge, 1.25 kg for isolation and everything else.
-            Scaled to muscle mass, because "add 2.5 kg" is trivial on a squat
-            and a fortnight of progress on a lateral raise.
+            The four progression outcomes:
 
-            `repeat_hard` — RIR 0 or RPE ≥ 9.5. `repeat_consolidate` — RIR 1,
-            or RPE between 8 and 9.5: real work, but not room.
-            `repeat_unknown_effort` — no RIR or RPE recorded.
+
+            `add_reps` — reserve left but the range isn't finished, so the
+            reps move and the load holds. Where most sessions land.
+            `add_load` — every working set reached the top of the range with
+            reserve to spare, the one condition that earns weight. Adds the
+            movement's increment (5 kg squat/hinge/olympic, 2.5 kg
+            push/pull/lunge, 1.25 kg isolation), capped at 5% of the bar.
+            `deload` — three consecutive sessions at one load with no rep
+            gained. Drops ~10% and rebuilds from the top of the range. Climbing
+            reps at a fixed weight is not a stall; it is the scheme working.
+            `hold` — at least one set was close to the limit; repeat until
+            every set is comfortable.
+
+
+            And the cases where the rule declines to advance:
+
+
+            `repeat_hard` — a set at or near failure, meaning fewer than one
+            rep left in reserve (RIR 0, or RPE above 9). Not evidence of room,
+            whatever the reps said.
+            `repeat_unknown_effort` — no RIR or RPE recorded anywhere in the
+            session, so nothing says it was easy.
             `repeat_stale` — last performed over 28 days ago, which outranks
             effort: an old easy set is evidence about someone who has since
-            detrained. `not_applicable` — not measured in weight.
+            detrained. `no_history` — never logged. `not_applicable` — not
+            measured in weight.
         reason:
           type: string
           description: Human-readable, cites the evidence. Never pattern-match on it.
-          example: You had 3 reps left last time — add 5 kg.
+          example: Every set hit 10 with something left. Add weight and drop back to 6 reps.
 
     SuggestionList:
       type: object
@@ -1643,9 +1731,13 @@ paths:
       operationId: listSessionSuggestions
       description: >
         One request for a whole workout rather than one per exercise. Each
-        answer is computed from the **top working set of the most recent
-        session** containing that exercise — warm-ups excluded, since
-        progressing off a warm-up would recommend a weight nobody worked at.
+        answer reads the **working sets of the last few sessions** containing
+        that exercise — warm-ups excluded, since progressing off a warm-up
+        would recommend a weight nobody worked at.
+
+        Whole sessions rather than a single top set, because the rule gates on
+        the weakest working set and on whether a load has repeated across
+        sessions; neither question can be answered from one row.
 
         Scoped to the caller: this endpoint reads training history and returns
         only their own.
@@ -1655,6 +1747,27 @@ paths:
           required: true
           schema: { type: string }
           description: Comma-separated, max 100.
+        - name: goal
+          in: query
+          required: false
+          schema:
+            type: string
+            example: hypertrophy
+          description: >
+            One of `general`, `powerlifting`, `hypertrophy`, `endurance`.
+            Deliberately typed as a plain string rather than an enum, because
+            an enum would make a request validator or generated client reject
+            exactly the unrecognised values this endpoint promises to accept.
+
+            The goal of the workout being performed, which picks the rep range
+            the recommendation is expressed in: powerlifting 3–5, hypertrophy
+            6–10, endurance 12–20, general (and anything unrecognised) 5–8.
+
+
+            Deliberately not validated — an unknown value falls through to the
+            general range rather than failing the request, since a goal the
+            server doesn't recognise doesn't make the question invalid, it just
+            fails to narrow it.
       responses:
         "200":
           description: >

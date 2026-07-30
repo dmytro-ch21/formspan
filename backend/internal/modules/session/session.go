@@ -274,9 +274,10 @@ type Repository interface {
 	// year of training is thousands of set rows and the page needs six
 	// numbers. TestHistoryAgreesWithSummarise pins the two together.
 	History(ctx context.Context, userID string, f HistoryFilter) (*History, error)
-	// LastPerformances returns, per requested exercise, the top working set of
-	// the most recent session containing it. Missing keys mean "never logged".
-	LastPerformances(ctx context.Context, userID string, exerciseIDs []string) (map[string]Performance, error)
+	// RecentEfforts returns, per requested exercise, the working sets of its
+	// last few sessions — everything the progression rule reads. Missing keys
+	// mean "never logged".
+	RecentEfforts(ctx context.Context, userID string, exerciseIDs []string) (map[string]ProgressionInput, error)
 	// BestOneRMs returns the highest estimated one-rep max in the caller's
 	// history per requested exercise. Missing keys mean "no estimate".
 	BestOneRMs(ctx context.Context, userID string, exerciseIDs []string) (map[string]float64, error)
