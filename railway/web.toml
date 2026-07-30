@@ -3,11 +3,22 @@
 # lockfile), with Railway auto-detecting Node via Nixpacks.
 [build]
 builder = "NIXPACKS"
-# Nixpacks picks the Node version from the root package.json's `engines`
-# field. Without it, it defaults to Node 18 — and this repo pins pnpm 11,
-# which needs Node 20+. The failure is a corepack stack trace
-# (ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING) that names neither Node nor pnpm,
-# so it reads like a broken lockfile rather than a version mismatch.
+# Nixpacks force-installs `corepack@0.24.1`, which predates pnpm 10/11's
+# bundle format and cannot load it: the build dies on
+# ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING from inside corepack.cjs, naming
+# neither corepack nor pnpm. Reproduced in isolation — Node 22 with corepack
+# 0.24.1 fails, Node 22 with its *own* bundled corepack succeeds.
+#
+# Nixpacks' install phase is not settable here, so the service needs:
+#
+#     NIXPACKS_INSTALL_CMD="npm install -g pnpm@11.17.0 && pnpm install --frozen-lockfile"
+#
+# which skips corepack and installs the exact version `packageManager` pins.
+#
+# The Node version is a separate axis and is handled by the root
+# package.json's `engines` field — without it Nixpacks picks Node 18. That
+# was the first suspect here and was NOT the cause: the same failure occurs
+# on Node 22. Both pins are needed, for different reasons.
 buildCommand = "pnpm install --frozen-lockfile && pnpm run build:web"
 
 [deploy]

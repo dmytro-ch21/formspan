@@ -1610,18 +1610,44 @@ database: `migrate: up: done`, then 524 exercises and 450 techniques.
 The general lesson: when a fix depends on a behaviour you have not observed —
 here, quote handling — prefer the form that does not depend on it at all.
 
-**Nixpacks built the web app with Node 18.** `web` and `admin` build under
-Nixpacks, which takes its Node version from the root `package.json`'s
-`engines` field. There wasn't one, so it chose 18.20.5, while the repo pins
-pnpm 11.17.0, which needs Node 20+. The build died on
-`ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING` from corepack — an error naming
-neither Node nor pnpm, so it reads like a broken lockfile.
+**Nixpacks could not install dependencies at all** — and the first diagnosis
+was wrong, which is the part worth recording.
 
-CI has used Node 22 since the beginning, which is exactly why this never
-appeared until something outside CI chose for itself. Added
-`engines.node: ">=22"` to the root package.json and noted the dependency in
-both `railway/web.toml` and `railway/admin.toml`, so the next person meets the
-explanation at the point of failure rather than in a stack trace.
+`web` builds under Nixpacks, and it died in `pnpm i` on
+`ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING` — an error naming neither Node nor
+pnpm, so it reads like a broken lockfile. The build log showed Node 18.20.5
+against a repo pinning pnpm 11, which needs Node 20+, so the Node version
+looked like the answer. Adding `engines.node: ">=22"` to the root
+package.json did move Nixpacks to Node 22.19.0 — **and the identical error
+persisted.**
+
+The real cause was one line further up the same log: Nixpacks force-installs
+`corepack@0.24.1`, which predates pnpm 10/11's bundle format and cannot load
+it. Confirmed by reproducing all three cases in a container rather than
+reasoning about them:
+
+| setup | result |
+|---|---|
+| Node 22 + corepack 0.24.1 | fails, identically |
+| Node 22 + Node's own bundled corepack | works |
+| Node 22 + `npm i -g pnpm@11.17.0`, corepack skipped | works |
+
+Fixed on the service with
+`NIXPACKS_INSTALL_CMD="npm install -g pnpm@11.17.0 && pnpm install --frozen-lockfile"`,
+which skips corepack and installs exactly what `packageManager` pins. Both
+`railway/web.toml` and `railway/admin.toml` now carry the explanation.
+
+The `engines.node` pin is kept: it is correct, matches the Node 22 CI has
+always used, and stops Nixpacks choosing Node 18 — but it is a *separate*
+axis, and the comments now say so rather than implying it was the fix.
+
+The lesson is about the shape of the mistake, not the tooling. A plausible
+cause that matches part of the evidence — Node 18 really is too old for pnpm
+11 — is the easiest kind to stop at, because acting on it produces a visible
+change. Nixpacks did switch to Node 22. Nothing about that confirmed the
+diagnosis, and only the failure surviving the fix did. The check that settled
+it was three one-line container runs isolating each variable, which cost less
+than the guess did.
 
 ## Open items / known gaps as of this entry
 
