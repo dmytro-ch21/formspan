@@ -680,6 +680,34 @@ Domain: logging a session with no connectivity. **Test this by actually stopping
 
 ---
 
+## Training history (`GET /v1/sessions/history`, `apps/web` `/dashboard/sessions`)
+
+**Happy path**
+- A period with training shows five totals, a heatmap cell per trained day, weekly bars and the session list. Every figure comes from the API — none is recomputed in the browser.
+- Switching period (4 weeks / 3 months / year) rescopes totals, calendar, chart and list together. No pane keeps stale numbers.
+- Clicking a calendar day filters the list to that day and retitles the section; `Clear day` restores the full period.
+- Sport chips carry counts from the **unfiltered** breakdown, so each says how much it would find. Selecting one narrows the totals *and* the comparison window — BJJ is measured against BJJ.
+- Deltas compare against the immediately preceding window of the same length, not the previous calendar month.
+
+**Edge cases & errors**
+- Zero history renders the empty state, not zeroes; filtered-to-empty says so differently from never-trained.
+- A sport with no tonnage (BJJ, running) shows `—` for tonnage with no delta caption, and the weekly chart switches to time. It must never draw a flat zero tonnage line and call it training.
+- A day with two sessions counts as one active day and two sessions.
+- Warm-up sets and sets never marked done contribute to no working-set, rep or tonnage total — the same rule as the session screen. `TestHistoryAgreesWithSummarise` pins the SQL to `Summarise`; it must fail if either moves.
+- **Timezone**: a 19:00 session in a UTC-negative zone belongs to that evening's square, not the next day's. Check with `tz=America/New_York` against a session stored at 02:30Z.
+- `from` after `to`, a malformed date, an unknown sport, an unknown timezone, or a range over five years each return `400 invalid_input`.
+- `to` is inclusive — a session logged this evening appears when `to` is today.
+- Distinct exercises and active days are period-wide, so they cannot be reproduced by summing the days.
+
+**Auth / security**
+- Unauthenticated → `401`. Another athlete's sessions never appear in any total, day bucket or sport count, whatever `from`/`to`/`sport`/`tz` are set to.
+
+**Visual / accessibility**
+- Solid buttons must have legible text in both themes. The `text-*` utility on a `<button>` was silently overridden for the whole app while the button reset sat unlayered — worth an explicit contrast assertion rather than trusting the class name.
+- Trained calendar days are focusable and labelled with date, session count and sports; empty days are not focus stops.
+- The weekly chart exposes each bar's value as text, so the trend is readable without seeing it.
+- Large tonnage renders as `251.1t`, not `251147kg`.
+
 ## Not yet covered (tracked here so it isn't lost, not because it's blocking)
 
 - Mobile has no auth yet (Clerk Expo SDK is a separate future increment) — no sign-in/sign-out scenarios apply to mobile today.

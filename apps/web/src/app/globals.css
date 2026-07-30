@@ -151,15 +151,21 @@ body {
   background: linear-gradient(90deg, var(--c-green), var(--c-lime-rule));
 }
 
-a {
-  color: inherit;
-  text-decoration: none;
-}
+/* Layered for the same reason as the form reset below — see that comment.
+   Unlayered, this `color: inherit` beat every text-* utility on an anchor,
+   which is how a solid-fill CTA rendered as a <Link> came out invisible while
+   the identical <button> next to it was fine. */
+@layer base {
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
 
-:focus-visible {
-  outline: 2px solid var(--c-accent-fill);
-  outline-offset: 2px;
-  border-radius: 4px;
+  :focus-visible {
+    outline: 2px solid var(--c-accent-fill);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
 }
 
 * {
@@ -167,12 +173,24 @@ a {
   scrollbar-width: thin;
 }
 
-input,
-textarea,
-select,
-button {
-  font-family: inherit;
-  color: inherit;
+/*
+  In `@layer base`, not unlayered, and that's load-bearing.
+
+  Unlayered declarations beat *every* layered one, and Tailwind puts its
+  utilities in `@layer utilities` — so as a bare rule this `color: inherit`
+  silently overrode every `text-*` class on a button. Each solid button in
+  the app was rendering `--c-text` on `--c-accent-fill`: #10151f on #0b1220,
+  about 1.05:1, invisible. The classes were right the whole time; the
+  cascade was eating them.
+*/
+@layer base {
+  input,
+  textarea,
+  select,
+  button {
+    font-family: inherit;
+    color: inherit;
+  }
 }
 
 input[type="number"]::-webkit-outer-spin-button,

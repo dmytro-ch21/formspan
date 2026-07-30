@@ -18,6 +18,7 @@ const (
 	exBench = "bench-press"
 	exSquat = "back-squat"
 	exBJJ   = "bear-crawl-forward"
+	exOHP   = "overhead-press"
 )
 
 func newTestRepo(t *testing.T) (*PostgresRepository, *pgxpool.Pool) {
@@ -476,5 +477,325 @@ func TestList_IsUserScopedAndFiltered(t *testing.T) {
 	// A limit over the cap must clamp rather than be honoured or rejected.
 	if _, err := repo.List(ctx, "user_list_a", Filter{Limit: maxLimit + 1000}); err != nil {
 		t.Fatalf("oversized limit: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// History
+//
+// The rollup expresses Summarise's working-set rule in SQL, for the reasons in
+// postgres.go. TestHistoryAgreesWithSummarise is what makes that safe: it runs
+// both over the same rows and fails the moment they disagree.
+// ---------------------------------------------------------------------------
+
+// histAt builds a session at a fixed instant, so a range test isn't at the
+// mercy of when it runs.
+func histAt(id, user, sport string, at time.Time, dur time.Duration, sets []Set) NewSession {
+	end := at.Add(dur)
+	return NewSession{
+		ID: id, UserID: user, Sport: sport, Name: "History fixture",
+		StartedAt: at, EndedAt: &end, Sets: sets,
+	}
+}
+
+func TestHistoryAgreesWithSummarise(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const user = "user_hist_agree"
+
+	// Deliberately awkward: warm-ups (excluded), incomplete sets (excluded),
+	// a set with reps but no weight (reps count, tonnage doesn't), and the
+	// same exercise across two days (one distinct exercise, not two).
+	base := time.Date(2024, 3, 4, 12, 0, 0, 0, time.UTC)
+	fixtures := []NewSession{
+		histAt("ses-hist-a", user, "strength", base, time.Hour, []Set{
+			{ExerciseID: exSquat, SetType: SetTypeWarmup, Reps: ptrInt(10), WeightKg: ptrF(20), Completed: true},
+			{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(5), WeightKg: ptrF(100), Completed: true},
+			{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(5), WeightKg: ptrF(100), Completed: false},
+			{ExerciseID: exBench, SetType: SetTypeWorking, Reps: ptrInt(8), Completed: true},
+		}),
+		histAt("ses-hist-b", user, "strength", base.AddDate(0, 0, 2), 90*time.Minute, []Set{
+			{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(3), WeightKg: ptrF(120), Completed: true},
+			{ExerciseID: exSquat, SetType: SetTypeFailure, Reps: ptrInt(1), WeightKg: ptrF(140), Completed: true},
+			// Third exercise, warm-up only. Summarise counts it in ExerciseIDs
+			// (they're collected before the completed/warm-up guards), so the
+			// SQL's COUNT(DISTINCT exercise_id) must stay unfiltered. Without a
+			// set like this the fixtures can't tell the two apart, and adding a
+			// FILTER here to "match its neighbours" would pass green.
+			{ExerciseID: exOHP, SetType: SetTypeWarmup, Reps: ptrInt(12), WeightKg: ptrF(20), Completed: true},
+		}),
+	}
+	for _, f := range fixtures {
+		cleanup(t, pool, f.ID)
+		if _, err := repo.Create(ctx, f); err != nil {
+			t.Fatalf("create %s: %v", f.ID, err)
+		}
+	}
+
+	from := time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2024, 4, 1, 0, 0, 0, 0, time.UTC)
+
+	got, err := repo.History(ctx, user, HistoryFilter{From: from, To: to, TZ: "UTC"})
+	if err != nil {
+		t.Fatalf("history: %v", err)
+	}
+
+	// The other half of the comparison: list the same window and fold
+	// Summarise over it, exactly as a client would.
+	listed, err := repo.List(ctx, user, Filter{From: from, To: to})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(listed) != len(fixtures) {
+		t.Fatalf("expected %d sessions in range, got %d", len(fixtures), len(listed))
+	}
+	var wantSets, wantReps int
+	var wantTonnage float64
+	distinct := map[string]bool{}
+	for _, s := range listed {
+		v := Summarise(s.Sets)
+		wantSets += v.WorkingSets
+		wantReps += v.TotalReps
+		wantTonnage += v.TonnageKg
+		for _, id := range v.ExerciseIDs {
+			distinct[id] = true
+		}
+	}
+
+	if got.Totals.WorkingSets != wantSets {
+		t.Errorf("working sets: SQL %d, Summarise %d", got.Totals.WorkingSets, wantSets)
+	}
+	if got.Totals.TotalReps != wantReps {
+		t.Errorf("total reps: SQL %d, Summarise %d", got.Totals.TotalReps, wantReps)
+	}
+	if !closeEnough(got.Totals.TonnageKg, wantTonnage) {
+		t.Errorf("tonnage: SQL %v, Summarise %v", got.Totals.TonnageKg, wantTonnage)
+	}
+	if got.Totals.Exercises != len(distinct) {
+		t.Errorf("exercises: SQL %d, Summarise %d", got.Totals.Exercises, len(distinct))
+	}
+
+	// And the fixtures' own arithmetic, so a bug that broke both identically
+	// still gets caught: 5×100 + 8 reps unweighted + 3×120 + 1×140 = 1000.
+	if wantSets != 4 || wantReps != 17 || !closeEnough(wantTonnage, 1000) {
+		t.Fatalf("fixture expectations drifted: sets=%d reps=%d tonnage=%v", wantSets, wantReps, wantTonnage)
+	}
+	// Two sessions, two days, three distinct exercises — the third only
+	// ever warmed up, which still counts as "what did I train".
+	if got.Totals.Sessions != 2 || got.Totals.ActiveDays != 2 || got.Totals.Exercises != 3 {
+		t.Errorf("totals: %+v", got.Totals)
+	}
+	// 60m + 90m.
+	if got.Totals.DurationSeconds != 9000 {
+		t.Errorf("duration: %d, want 9000", got.Totals.DurationSeconds)
+	}
+	// Only days with training are returned, not the whole month.
+	if len(got.Days) != 2 {
+		t.Fatalf("expected 2 active days, got %d: %+v", len(got.Days), got.Days)
+	}
+	if got.Days[0].Date != "2024-03-04" || got.Days[1].Date != "2024-03-06" {
+		t.Errorf("day buckets: %s, %s", got.Days[0].Date, got.Days[1].Date)
+	}
+	// The warm-up is excluded from the day's working sets but its exercise
+	// still counted above — the split Summarise makes.
+	if got.Days[0].WorkingSets != 2 {
+		t.Errorf("day 1 working sets: %d, want 2", got.Days[0].WorkingSets)
+	}
+	// Echoed range names the last *included* day, not the exclusive bound.
+	if got.From != "2024-03-01" || got.To != "2024-03-31" {
+		t.Errorf("echoed range: %s..%s", got.From, got.To)
+	}
+
+	assertDaysSumToTotals(t, got)
+}
+
+// assertDaysSumToTotals pins the two rollups to each other.
+//
+// Summarise can only vouch for `historyTotals`. The harder SQL is in
+// `historyDays` — the per_session CTE, which exists so the LEFT JOIN doesn't
+// repeat a session row once per set and multiply its duration. Summarise has
+// no opinion about join shape, so it cannot catch that at all: flattening the
+// CTE leaves working_sets and the dates untouched and reports four sessions
+// and four hours for one session of one hour. Two independent SQL paths
+// checked against each other is what closes it.
+func assertDaysSumToTotals(t *testing.T, h *History) {
+	t.Helper()
+	var sessions, sets, reps, duration int
+	var tonnage float64
+	for _, d := range h.Days {
+		sessions += d.Sessions
+		sets += d.WorkingSets
+		reps += d.TotalReps
+		duration += d.DurationSeconds
+		tonnage += d.TonnageKg
+	}
+	if sessions != h.Totals.Sessions {
+		t.Errorf("sessions: days sum to %d, totals say %d", sessions, h.Totals.Sessions)
+	}
+	if sets != h.Totals.WorkingSets {
+		t.Errorf("working sets: days sum to %d, totals say %d", sets, h.Totals.WorkingSets)
+	}
+	if reps != h.Totals.TotalReps {
+		t.Errorf("reps: days sum to %d, totals say %d", reps, h.Totals.TotalReps)
+	}
+	if duration != h.Totals.DurationSeconds {
+		t.Errorf("duration: days sum to %d, totals say %d", duration, h.Totals.DurationSeconds)
+	}
+	if !closeEnough(tonnage, h.Totals.TonnageKg) {
+		t.Errorf("tonnage: days sum to %v, totals say %v", tonnage, h.Totals.TonnageKg)
+	}
+	// Active days is the count of days that had anything, by definition.
+	if len(h.Days) != h.Totals.ActiveDays {
+		t.Errorf("active days: %d day buckets, totals say %d", len(h.Days), h.Totals.ActiveDays)
+	}
+}
+
+// closeEnough compares a Postgres NUMERIC sum against one accumulated
+// set-by-set in Go. Exact equality holds for whole-number fixtures and stops
+// holding the moment a realistic NUMERIC(6,2) weight isn't binary-exact — a
+// flaky guard is one that gets loosened instead of trusted.
+func closeEnough(a, b float64) bool {
+	d := a - b
+	return d < 0.001 && d > -0.001
+}
+
+func TestHistory_BucketsDaysInTheCallersTimezone(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const user = "user_hist_tz"
+	cleanup(t, pool, "ses-hist-tz")
+
+	// 02:30 UTC on the 6th is 21:30 on the 5th in New York — an evening
+	// session, which is when people train. Bucketing it in UTC would file it
+	// under the wrong day on the one view whose whole job is which days.
+	at := time.Date(2024, 3, 6, 2, 30, 0, 0, time.UTC)
+	if _, err := repo.Create(ctx, histAt("ses-hist-tz", user, "strength", at, time.Hour, []Set{
+		{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(5), WeightKg: ptrF(100), Completed: true},
+	})); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	from := time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2024, 4, 1, 0, 0, 0, 0, time.UTC)
+
+	utc, err := repo.History(ctx, user, HistoryFilter{From: from, To: to, TZ: "UTC"})
+	if err != nil {
+		t.Fatalf("history utc: %v", err)
+	}
+	if len(utc.Days) != 1 || utc.Days[0].Date != "2024-03-06" {
+		t.Fatalf("UTC bucket: %+v", utc.Days)
+	}
+
+	ny, err := repo.History(ctx, user, HistoryFilter{From: from, To: to, TZ: "America/New_York"})
+	if err != nil {
+		t.Fatalf("history ny: %v", err)
+	}
+	if len(ny.Days) != 1 || ny.Days[0].Date != "2024-03-05" {
+		t.Fatalf("New York bucket: %+v, want 2024-03-05", ny.Days)
+	}
+	// Active days must agree with the calendar it sits next to.
+	if ny.Totals.ActiveDays != 1 {
+		t.Errorf("active days: %d", ny.Totals.ActiveDays)
+	}
+}
+
+func TestHistory_IsUserScopedAndComparesLikeForLike(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const mine, theirs = "user_hist_mine", "user_hist_theirs"
+
+	// March is the window under test; February is the previous one. Both get
+	// a session, so a broken previous-window calculation shows up as a wrong
+	// number rather than a zero that could pass by accident.
+	fixtures := []NewSession{
+		histAt("ses-hist-mar", mine, "strength", time.Date(2024, 3, 10, 12, 0, 0, 0, time.UTC), time.Hour, []Set{
+			{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(5), WeightKg: ptrF(100), Completed: true},
+		}),
+		histAt("ses-hist-feb", mine, "strength", time.Date(2024, 2, 10, 12, 0, 0, 0, time.UTC), time.Hour, []Set{
+			{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(5), WeightKg: ptrF(80), Completed: true},
+			{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(5), WeightKg: ptrF(80), Completed: true},
+		}),
+		// Same window, different athlete. Must not appear in either total.
+		histAt("ses-hist-other", theirs, "strength", time.Date(2024, 3, 11, 12, 0, 0, 0, time.UTC), time.Hour, []Set{
+			{ExerciseID: exBench, SetType: SetTypeWorking, Reps: ptrInt(99), WeightKg: ptrF(999), Completed: true},
+		}),
+		// Same window, different sport. Must vanish under a sport filter.
+		histAt("ses-hist-roll", mine, "bjj", time.Date(2024, 3, 12, 12, 0, 0, 0, time.UTC), time.Hour, []Set{
+			{ExerciseID: exBJJ, SetType: SetTypeWorking, Seconds: ptrInt(300), Completed: true},
+		}),
+	}
+	for _, f := range fixtures {
+		cleanup(t, pool, f.ID)
+		if _, err := repo.Create(ctx, f); err != nil {
+			t.Fatalf("create %s: %v", f.ID, err)
+		}
+	}
+
+	march := HistoryFilter{
+		From: time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC),
+		To:   time.Date(2024, 4, 1, 0, 0, 0, 0, time.UTC),
+		TZ:   "UTC",
+	}
+	got, err := repo.History(ctx, mine, march)
+	if err != nil {
+		t.Fatalf("history: %v", err)
+	}
+	// Two of mine in March; the other athlete's 99×999 would be unmissable.
+	if got.Totals.Sessions != 2 {
+		t.Errorf("sessions: %d, want 2 (leaked another user?)", got.Totals.Sessions)
+	}
+	if got.Totals.TonnageKg != 500 {
+		t.Errorf("tonnage: %v, want 500", got.Totals.TonnageKg)
+	}
+	// February is 28 days and March is 31, so the previous window is the 31
+	// days before 1 March — not "last calendar month". February's session is
+	// inside it either way.
+	if got.Previous.Sessions != 1 || got.Previous.TonnageKg != 800 {
+		t.Errorf("previous window: %+v, want 1 session / 800kg", got.Previous)
+	}
+	// Chips count every sport in range, unfiltered — that's what makes them
+	// worth clicking.
+	if len(got.Sports) != 2 {
+		t.Errorf("sports: %+v, want strength and bjj", got.Sports)
+	}
+
+	filtered, err := repo.History(ctx, mine, HistoryFilter{
+		Sport: "bjj", From: march.From, To: march.To, TZ: "UTC",
+	})
+	if err != nil {
+		t.Fatalf("history filtered: %v", err)
+	}
+	if filtered.Totals.Sessions != 1 || filtered.Totals.TonnageKg != 0 {
+		t.Errorf("bjj filter: %+v", filtered.Totals)
+	}
+	// A sport filter must narrow the comparison too, or BJJ gets measured
+	// against last month's squats.
+	if filtered.Previous.Sessions != 0 {
+		t.Errorf("filtered previous should be BJJ-only: %+v", filtered.Previous)
+	}
+	assertDaysSumToTotals(t, got)
+	assertDaysSumToTotals(t, filtered)
+}
+
+func TestHistory_EmptyRangeIsZeroNotAnError(t *testing.T) {
+	repo, _ := newTestRepo(t)
+	got, err := repo.History(context.Background(), "user_hist_nobody", HistoryFilter{
+		From: time.Date(2019, 1, 1, 0, 0, 0, 0, time.UTC),
+		To:   time.Date(2019, 2, 1, 0, 0, 0, 0, time.UTC),
+		TZ:   "UTC",
+	})
+	if err != nil {
+		t.Fatalf("history: %v", err)
+	}
+	// An athlete with no history gets an empty page, not a 500 — and the
+	// slices must be empty rather than nil so they marshal as [] not null.
+	if got.Totals.Sessions != 0 || got.Totals.TonnageKg != 0 {
+		t.Errorf("totals: %+v", got.Totals)
+	}
+	if got.Days == nil || len(got.Days) != 0 {
+		t.Errorf("days should be empty, not nil: %+v", got.Days)
+	}
+	if got.Sports == nil || len(got.Sports) != 0 {
+		t.Errorf("sports should be empty, not nil: %+v", got.Sports)
 	}
 }

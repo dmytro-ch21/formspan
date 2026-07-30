@@ -503,6 +503,84 @@ components:
           type: array
           items: { type: string }
 
+    HistoryTotals:
+      type: object
+      description: A period's training in one line.
+      required:
+        [sessions, working_sets, total_reps, tonnage_kg, duration_seconds,
+         exercises, active_days]
+      properties:
+        sessions: { type: integer }
+        working_sets: { type: integer }
+        total_reps: { type: integer }
+        tonnage_kg:
+          type: number
+          description: Sum of reps × weight over completed, non-warm-up sets.
+        duration_seconds:
+          type: integer
+          description: Total logged duration. Sessions still in progress contribute 0.
+        exercises:
+          type: integer
+          description: >
+            Distinct exercises across the whole period — benching on Monday
+            and Thursday is one. Cannot be derived by summing the days.
+        active_days:
+          type: integer
+          description: >
+            Days on which anything was logged, in the caller's `tz`. Two
+            sessions in one day is one active day.
+
+    HistoryDay:
+      type: object
+      description: One calendar day's training, in the caller's timezone.
+      required:
+        [date, sessions, working_sets, total_reps, tonnage_kg,
+         duration_seconds, sports]
+      properties:
+        date: { type: string, format: date }
+        sessions: { type: integer }
+        working_sets: { type: integer }
+        total_reps: { type: integer }
+        tonnage_kg: { type: number }
+        duration_seconds: { type: integer }
+        sports:
+          type: array
+          items: { type: string, enum: [strength, running, bjj] }
+
+    SportCount:
+      type: object
+      required: [sport, sessions]
+      properties:
+        sport: { type: string, enum: [strength, running, bjj] }
+        sessions: { type: integer }
+
+    History:
+      type: object
+      required: [from, to, totals, previous, days, sports]
+      properties:
+        from: { type: string, format: date }
+        to:
+          type: string
+          format: date
+          description: The last day included, echoing what was asked for.
+        totals: { $ref: "#/components/schemas/HistoryTotals" }
+        previous:
+          allOf:
+            - $ref: "#/components/schemas/HistoryTotals"
+            - description: >
+                The window of the same length immediately before this one, so
+                a total can be read as up or down. Honours the sport filter.
+        days:
+          type: array
+          description: >
+            Only days that had training, ascending. Days with none are absent
+            rather than zero-filled — the range already says they exist.
+          items: { $ref: "#/components/schemas/HistoryDay" }
+        sports:
+          type: array
+          description: Every sport in range, ignoring the sport filter, so the chips show what switching would find.
+          items: { $ref: "#/components/schemas/SportCount" }
+
     SessionWithVolume:
       type: object
       required: [session, volume]
@@ -1224,6 +1302,21 @@ paths:
           in: query
           schema: { type: string }
           description: Only sessions containing this exercise.
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+          description: >
+            Only sessions started on or after this calendar day, resolved in
+            `tz`. Lets the history page list exactly the period its totals
+            describe.
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+          description: Inclusive of the day named — a session at 19:00 on `to` is returned.
+        - name: tz
+          in: query
+          schema: { type: string, default: UTC }
+          description: IANA name used to resolve `from`/`to` to instants. Defaults to UTC.
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
@@ -1301,6 +1394,56 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
 
+  /sessions/history:
+    get:
+      summary: Training history rolled up per day, with period totals
+      operationId: getSessionHistory
+      description: >
+        The analytical surface behind the web history page: one entry per
+        calendar day that had training, totals for the period, and the same
+        totals for the window immediately before it so the numbers read as a
+        direction rather than a quantity.
+
+
+        Aggregated server-side on purpose. The working-set rule (completed,
+        non-warm-up) lives in one place, and a client summing a truncated
+        listing would quietly report the wrong total once history outgrows
+        the page size.
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date }
+          description: Inclusive of the day named. Range must be five years or less.
+        - name: sport
+          in: query
+          schema: { type: string, enum: [strength, running, bjj] }
+          description: >
+            Narrows the totals *and* the comparison window, so BJJ is
+            measured against BJJ. `sports` is always unfiltered.
+        - name: tz
+          in: query
+          schema: { type: string, default: UTC }
+          description: >
+            IANA name deciding which calendar day a session belongs to.
+            Training at 19:00 in New York is 23:00 UTC, so bucketing in UTC
+            would file a Tuesday session under Wednesday.
+      responses:
+        "200":
+          description: The caller's own training only.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/History" }
+        "400":
+          description: Missing or malformed dates, unknown sport or timezone, or a range over five years.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /sessions/suggestions:
     get:
       summary: What to load today, per exercise, from the caller's own history

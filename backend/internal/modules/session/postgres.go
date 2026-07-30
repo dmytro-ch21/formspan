@@ -4,8 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
+	// The history rollup resolves the caller's IANA zone. cmd/api imports this
+	// too, but the dependency belongs to the package that calls LoadLocation —
+	// a second binary, or these tests in a slim image, would break silently.
+	_ "time/tzdata"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -92,6 +97,14 @@ func (r *PostgresRepository) List(ctx context.Context, userID string, f Filter) 
 			"EXISTS (SELECT 1 FROM session_sets ss WHERE ss.session_id = s.id AND ss.exercise_id = $%d)",
 			len(args)))
 	}
+	if !f.From.IsZero() {
+		args = append(args, f.From)
+		where = append(where, fmt.Sprintf("s.started_at >= $%d", len(args)))
+	}
+	if !f.To.IsZero() {
+		args = append(args, f.To)
+		where = append(where, fmt.Sprintf("s.started_at < $%d", len(args)))
+	}
 
 	limit := f.Limit
 	if limit <= 0 {
@@ -129,6 +142,187 @@ func (r *PostgresRepository) List(ctx context.Context, userID string, f Filter) 
 		return nil, err
 	}
 	return sessions, nil
+}
+
+// workingSet is Summarise's rule, expressed once for SQL.
+//
+// Duplicating a domain rule in SQL is normally exactly the drift this
+// codebase has been bitten by. It's done here because the alternative is
+// loading every set row of a training year to produce six numbers, and it's
+// made safe the only way that actually works: TestHistoryAgreesWithSummarise
+// runs both over the same data and fails if they ever disagree.
+const workingSet = `ss.completed AND ss.set_type <> 'warmup'`
+
+// History rolls a date range up per calendar day, plus totals for the period
+// and for the window immediately before it.
+func (r *PostgresRepository) History(ctx context.Context, userID string, f HistoryFilter) (*History, error) {
+	loc, err := time.LoadLocation(f.TZ)
+	if err != nil {
+		return nil, fmt.Errorf("%w: unknown timezone", ErrInvalidInput)
+	}
+
+	days, err := r.historyDays(ctx, userID, f)
+	if err != nil {
+		return nil, err
+	}
+	totals, err := r.historyTotals(ctx, userID, f.Sport, f.TZ, f.From, f.To)
+	if err != nil {
+		return nil, err
+	}
+	// The same length, ending where this one starts. Comparing March against
+	// a fixed "last 30 days" would move the goalposts every time the range
+	// changed, and the delta would mean nothing.
+	//
+	// Counted in days and stepped with AddDate rather than subtracting a
+	// Duration: March in New York is 743 hours, not 744, so `Add(-span)`
+	// starts the comparison window at 01:00 and quietly drops anything logged
+	// in that first hour — of the number the whole "up 12%" framing rests on.
+	spanDays := int(math.Round(f.To.Sub(f.From).Hours() / 24))
+	previous, err := r.historyTotals(ctx, userID, f.Sport, f.TZ, f.From.AddDate(0, 0, -spanDays), f.From)
+	if err != nil {
+		return nil, err
+	}
+	sports, err := r.historySports(ctx, userID, f)
+	if err != nil {
+		return nil, err
+	}
+
+	return &History{
+		From: f.From.In(loc).Format("2006-01-02"),
+		// To is exclusive internally; echo back the last day it includes,
+		// which is the one the caller asked for.
+		To:       f.To.In(loc).AddDate(0, 0, -1).Format("2006-01-02"),
+		Totals:   *totals,
+		Previous: *previous,
+		Days:     days,
+		Sports:   sports,
+	}, nil
+}
+
+func (r *PostgresRepository) historyDays(ctx context.Context, userID string, f HistoryFilter) ([]HistoryDay, error) {
+	args := []any{userID, f.From, f.To, f.TZ}
+	sportClause := ""
+	if f.Sport != "" {
+		args = append(args, f.Sport)
+		sportClause = fmt.Sprintf("AND s.sport = $%d", len(args))
+	}
+
+	// Aggregating sets per session first, then per day. Rolling straight to
+	// the day would multiply the duration by the session's set count, because
+	// the join repeats the session row once per set.
+	rows, err := r.pool.Query(ctx, `
+		WITH scoped AS (
+			SELECT s.id, s.sport, s.started_at, s.ended_at,
+			       (s.started_at AT TIME ZONE $4)::date AS day
+			FROM sessions s
+			WHERE s.user_id = $1 AND s.started_at >= $2 AND s.started_at < $3 `+sportClause+`
+		),
+		per_session AS (
+			SELECT sc.id, sc.day, sc.sport,
+			       COALESCE(EXTRACT(EPOCH FROM (sc.ended_at - sc.started_at)), 0)::bigint AS duration,
+			       COUNT(*) FILTER (WHERE `+workingSet+`) AS working_sets,
+			       COALESCE(SUM(ss.reps) FILTER (WHERE `+workingSet+`), 0) AS total_reps,
+			       COALESCE(SUM(ss.reps * ss.weight_kg) FILTER (WHERE `+workingSet+`), 0) AS tonnage
+			FROM scoped sc
+			LEFT JOIN session_sets ss ON ss.session_id = sc.id
+			GROUP BY sc.id, sc.day, sc.sport, sc.ended_at, sc.started_at
+		)
+		-- Explicit casts throughout: SUM() over bigint yields numeric, which
+		-- won't scan into an int, and SUM() over numeric won't scan into a
+		-- float64. Both are runtime failures, not compile-time ones.
+		SELECT day, COUNT(*)::int, SUM(working_sets)::int, SUM(total_reps)::int,
+		       SUM(tonnage)::float8, SUM(duration)::int,
+		       array_agg(DISTINCT sport ORDER BY sport)
+		FROM per_session
+		GROUP BY day
+		ORDER BY day`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("session: history days: %w", err)
+	}
+	defer rows.Close()
+
+	days := []HistoryDay{}
+	for rows.Next() {
+		var d HistoryDay
+		var day time.Time
+		if err := rows.Scan(&day, &d.Sessions, &d.WorkingSets, &d.TotalReps,
+			&d.TonnageKg, &d.DurationSeconds, &d.Sports); err != nil {
+			return nil, fmt.Errorf("session: history days scan: %w", err)
+		}
+		d.Date = day.Format("2006-01-02")
+		days = append(days, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("session: history days rows: %w", err)
+	}
+	return days, nil
+}
+
+func (r *PostgresRepository) historyTotals(
+	ctx context.Context, userID, sport, tz string, from, to time.Time,
+) (*HistoryTotals, error) {
+	args := []any{userID, from, to, tz}
+	sportClause := ""
+	if sport != "" {
+		args = append(args, sport)
+		sportClause = fmt.Sprintf("AND s.sport = $%d", len(args))
+	}
+
+	var t HistoryTotals
+	// Exercises and active days can't be summed from the per-day rollup —
+	// benching on Monday and Thursday is one exercise, and two sessions in a
+	// day is one day. Both need their own DISTINCT over the whole period.
+	// Active days uses the caller's timezone for the same reason the calendar
+	// does, or the two would disagree about what a day is.
+	err := r.pool.QueryRow(ctx, `
+		WITH scoped AS (
+			SELECT s.id, s.started_at, s.ended_at
+			FROM sessions s
+			WHERE s.user_id = $1 AND s.started_at >= $2 AND s.started_at < $3 `+sportClause+`
+		)
+		SELECT
+			(SELECT COUNT(*) FROM scoped)::int,
+			-- Rounded per session, matching historyDays, so summing the days
+			-- equals this exactly. Rounding once here instead would leave the
+			-- calendar and the headline a second or two apart.
+			(SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (ended_at - started_at))::bigint), 0) FROM scoped)::int,
+			(SELECT COUNT(DISTINCT (started_at AT TIME ZONE $4)::date) FROM scoped)::int,
+			COUNT(*) FILTER (WHERE `+workingSet+`)::int,
+			COALESCE(SUM(ss.reps) FILTER (WHERE `+workingSet+`), 0)::int,
+			COALESCE(SUM(ss.reps * ss.weight_kg) FILTER (WHERE `+workingSet+`), 0)::float8,
+			COUNT(DISTINCT ss.exercise_id)::int
+		FROM session_sets ss
+		WHERE ss.session_id IN (SELECT id FROM scoped)`, args...).
+		Scan(&t.Sessions, &t.DurationSeconds, &t.ActiveDays, &t.WorkingSets,
+			&t.TotalReps, &t.TonnageKg, &t.Exercises)
+	if err != nil {
+		return nil, fmt.Errorf("session: history totals: %w", err)
+	}
+	return &t, nil
+}
+
+func (r *PostgresRepository) historySports(ctx context.Context, userID string, f HistoryFilter) ([]SportCount, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT sport, COUNT(*) FROM sessions
+		WHERE user_id = $1 AND started_at >= $2 AND started_at < $3
+		GROUP BY sport ORDER BY COUNT(*) DESC, sport`, userID, f.From, f.To)
+	if err != nil {
+		return nil, fmt.Errorf("session: history sports: %w", err)
+	}
+	defer rows.Close()
+
+	out := []SportCount{}
+	for rows.Next() {
+		var s SportCount
+		if err := rows.Scan(&s.Sport, &s.Sessions); err != nil {
+			return nil, fmt.Errorf("session: history sports scan: %w", err)
+		}
+		out = append(out, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("session: history sports rows: %w", err)
+	}
+	return out, nil
 }
 
 // attachSets loads every listed session's sets in one query. One round trip

@@ -98,9 +98,51 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		limit = n
 	}
 
+	// Optional date bounds, so the history page can list exactly the period
+	// its calendar and totals describe. Resolved in the caller's zone for the
+	// same reason History's are.
+	loc := time.UTC
+	if tz := q.Get("tz"); tz != "" {
+		l, ok := parseZone(tz)
+		if !ok {
+			apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+				"tz must be an IANA timezone name, e.g. Europe/Berlin")
+			return
+		}
+		loc = l
+	}
+	var from, to time.Time
+	if v := q.Get("from"); v != "" {
+		t, ok := parseDay(v, loc)
+		if !ok {
+			apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+				"from must be a date in YYYY-MM-DD form")
+			return
+		}
+		from = t
+	}
+	if v := q.Get("to"); v != "" {
+		t, ok := parseDay(v, loc)
+		if !ok {
+			apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+				"to must be a date in YYYY-MM-DD form")
+			return
+		}
+		to = t.AddDate(0, 0, 1) // inclusive of the named day
+	}
+	// History rejects this; so should the listing the same page calls
+	// alongside it, rather than silently returning nothing.
+	if !from.IsZero() && !to.IsZero() && to.Before(from) {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"to must not be before from")
+		return
+	}
+
 	sessions, err := h.repo.List(r.Context(), claims.UserID, Filter{
 		Sport:      q.Get("sport"),
 		ExerciseID: q.Get("exercise_id"),
+		From:       from,
+		To:         to,
 		Limit:      limit,
 	})
 	if err != nil {
@@ -108,6 +150,116 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"sessions": sessions})
+}
+
+// maxHistoryDays bounds a history range. Five years is longer than anyone has
+// been using this app and keeps a single request from scanning a career.
+const maxHistoryDays = 366 * 5
+
+// History answers "what has my training looked like" over a date range:
+// per-day totals for the calendar, period totals, and the same totals for the
+// preceding window so the numbers can be read as a direction rather than a
+// quantity.
+func (h *Handler) History(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.ClaimsFromContext(r.Context())
+	q := r.URL.Query()
+
+	if s := q.Get("sport"); s != "" && !validSports[s] {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"sport must be one of: strength, running, bjj")
+		return
+	}
+
+	// The caller's timezone decides which calendar day a session falls on.
+	// Defaulting to UTC rather than guessing keeps the failure mode boring:
+	// a client that doesn't send one gets consistent days, just not local ones.
+	tz := q.Get("tz")
+	if tz == "" {
+		tz = "UTC"
+	}
+	loc, ok := parseZone(tz)
+	if !ok {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"tz must be an IANA timezone name, e.g. Europe/Berlin")
+		return
+	}
+
+	// Dates, not timestamps: the caller is asking about calendar days, and
+	// midnight is resolved in their zone rather than the server's.
+	from, ok := parseDay(q.Get("from"), loc)
+	if !ok {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"from must be a date in YYYY-MM-DD form")
+		return
+	}
+	to, ok := parseDay(q.Get("to"), loc)
+	if !ok {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"to must be a date in YYYY-MM-DD form")
+		return
+	}
+	if to.Before(from) {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"to must not be before from")
+		return
+	}
+	// `to` names a day the caller wants included, so the range runs to the
+	// end of it. An off-by-one here silently drops today's session — the one
+	// most likely to be looked for.
+	to = to.AddDate(0, 0, 1)
+	if to.Sub(from) > maxHistoryDays*24*time.Hour {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"range must be five years or less")
+		return
+	}
+
+	history, err := h.repo.History(r.Context(), claims.UserID, HistoryFilter{
+		Sport: q.Get("sport"),
+		From:  from,
+		To:    to,
+		TZ:    tz,
+	})
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	apihttp.WriteJSON(w, http.StatusOK, history)
+}
+
+// parseZone resolves an IANA name that *both* Go and Postgres will accept.
+//
+// The two disagree on exactly one name that matters: Go resolves "Local" to
+// the server's own zone, Postgres rejects it outright. Letting it through
+// meant the handler validated it happily and `AT TIME ZONE` then failed
+// downstream, turning a bad parameter into a 500 — and the contract promises
+// a 400. Every other divergence I could find (Zulu, EST5EDT, US/Pacific,
+// Etc/GMT+5) is accepted by both.
+//
+// "Local" is also meaningless over HTTP: whose local? The caller's zone is
+// the one thing the server can't infer, which is why `tz` exists at all.
+func parseZone(tz string) (*time.Location, bool) {
+	if tz == "" || strings.EqualFold(tz, "Local") {
+		return nil, false
+	}
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		return nil, false
+	}
+	return loc, true
+}
+
+// parseDay reads YYYY-MM-DD as midnight in loc. An empty string is rejected:
+// the range is required, and defaulting it would make "no dates" mean
+// something different from what any caller intended.
+func parseDay(s string, loc *time.Location) (time.Time, bool) {
+	if s == "" {
+		return time.Time{}, false
+	}
+	t, err := time.ParseInLocation("2006-01-02", s, loc)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
 }
 
 // maxSuggestionIDs bounds a suggestions request. A workout is a handful of

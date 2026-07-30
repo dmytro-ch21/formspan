@@ -836,6 +836,68 @@ because the dev script's output went nowhere. Worth fixing that before the
 next "why is it slow".
 
 
+## 2026-07-30 — Training history, and where the arithmetic lives
+
+`/dashboard/sessions` was a flat list of sessions with a start button on top.
+It's now the history surface the platform split always implied — the web app
+owns review, and review means more than a list — and the nav calls it
+**History** rather than Sessions.
+
+What's on it: a period selector (4 weeks / 3 months / year), sport chips, five
+totals each carrying its change against the preceding window of the same
+length, a consistency heatmap one cell per day, weekly load bars, and the
+session list. Clicking a day filters the list to it.
+
+**The one real decision here was where the numbers get computed.** Doing it in
+the client was the obvious path and would have been wrong twice over:
+
+- The working-set rule has already drifted between a client copy and
+  `Summarise` **twice** in this project. A history page recomputing tonnage in
+  TypeScript would have planted the same bug a third time, in the one view
+  whose entire purpose is being trusted.
+- `GET /v1/sessions` caps at 200 rows. A client summing that listing would
+  have been *correct* for every current user and silently started
+  under-reporting the day someone's history outgrew the cap — the worst
+  possible failure, because nothing looks broken.
+
+So `GET /v1/sessions/history` returns day buckets, period totals, the previous
+window's totals, and a per-sport breakdown. The page's only arithmetic buckets
+days the server already rolled up.
+
+That endpoint aggregates in **SQL**, which does duplicate the working-set rule
+(`completed AND set_type <> 'warmup'`) outside the domain. Loading a year of
+set rows to produce six numbers was the alternative. It's made safe the only
+way that actually works — `TestHistoryAgreesWithSummarise` runs the SQL and
+`Summarise` over the same fixtures and compares. Verified it fails when the
+rule drifts: breaking the warm-up exclusion reports `SQL 5, Summarise 4`.
+
+**Days are bucketed in the caller's timezone**, passed as an IANA name. In UTC
+a 19:00 New York session lands on the next day's square — wrong on the one
+view whose whole job is which days you trained. That needed
+`_ "time/tzdata"` in `cmd/api`: the runtime image is alpine with only
+`ca-certificates`, so `LoadLocation` would have failed on every real zone in
+production while working perfectly on a Mac.
+
+Two things found by building on top of the existing app:
+
+- **Every solid button in the app had invisible text.**
+  `input,textarea,select,button { color: inherit }` sat *unlayered* in
+  `globals.css`, and unlayered CSS beats `@layer utilities` — so it overrode
+  every `text-*` utility on a button. "New workout", "Save", all of them were
+  rendering `#10151f` on `#0b1220`: a contrast ratio of about 1.05:1, already
+  shipped. Moving the reset into `@layer base` fixes all of them.
+- **`formatWeight` has no upper register.** A training block's tonnage came
+  out as `251147kg`. Cumulative load is a different magnitude from a set, so
+  `formatTonnage` renders `251.1t` / `553,905lb` and `formatWeight` stays as
+  it is — abbreviating there would turn a heavy single into `0.2t`.
+
+Gaps this leaves: per-exercise progression ("how has my bench moved") is the
+obvious next analytical surface and isn't here. The listing behind the day
+filter is still capped at 200, which is fine for a year of training and won't
+be forever. And mobile has no equivalent — correctly, per the platform split,
+though "what did I do last time" on a phone is a different question worth
+answering separately.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

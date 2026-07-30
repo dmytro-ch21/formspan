@@ -171,11 +171,90 @@ type NewSession struct {
 type Filter struct {
 	Sport      string // empty means any
 	ExerciseID string // sessions containing this exercise; empty means any
-	Limit      int    // 0 means the repository default
+	// From and To bound started_at as a half-open range: From <= t < To.
+	// The *handler* is what widens a caller's inclusive `to=2026-03-03` to the
+	// exclusive instant here, so a direct repository caller must pass the
+	// exclusive bound itself. Zero means unbounded.
+	From  time.Time
+	To    time.Time
+	Limit int // 0 means the repository default
+}
+
+// HistoryFilter bounds a history rollup. Unlike Filter the range is required —
+// an unbounded aggregate over a training career is not a page, it's a report.
+type HistoryFilter struct {
+	Sport string    // empty means any
+	From  time.Time // inclusive
+	To    time.Time // exclusive
+	// TZ is an IANA name used to bucket sessions into calendar days. It has
+	// to be the caller's, not the server's: training at 19:00 in New York is
+	// 23:00 UTC, and bucketing that in UTC puts a Tuesday session on the
+	// calendar's Wednesday — visibly wrong on the one view whose whole job is
+	// showing which days you trained. Validated by the handler.
+	TZ string
+}
+
+// HistoryDay is one calendar day's training, in the caller's own timezone.
+//
+// Days with no training are absent rather than zero-filled: the range already
+// says which days exist, and sending ~365 empty objects to draw gaps the
+// client can infer is wasted on every request.
+type HistoryDay struct {
+	Date            string   `json:"date"` // YYYY-MM-DD, caller's timezone
+	Sessions        int      `json:"sessions"`
+	WorkingSets     int      `json:"working_sets"`
+	TotalReps       int      `json:"total_reps"`
+	TonnageKg       float64  `json:"tonnage_kg"`
+	DurationSeconds int      `json:"duration_seconds"`
+	Sports          []string `json:"sports"`
+}
+
+// HistoryTotals is a period's training in one line.
+//
+// Exercises counts *distinct* exercises across the period, which is why it
+// can't be derived by summing the days — training bench on Monday and again
+// on Thursday is one exercise, not two.
+type HistoryTotals struct {
+	Sessions        int     `json:"sessions"`
+	WorkingSets     int     `json:"working_sets"`
+	TotalReps       int     `json:"total_reps"`
+	TonnageKg       float64 `json:"tonnage_kg"`
+	DurationSeconds int     `json:"duration_seconds"`
+	Exercises       int     `json:"exercises"`
+	// Days on which anything was logged. The denominator for "how often am I
+	// actually training", which sessions alone doesn't answer — two sessions
+	// in one day is not two days of training.
+	ActiveDays int `json:"active_days"`
+}
+
+// SportCount powers the filter chips: how much of this period was each sport.
+type SportCount struct {
+	Sport    string `json:"sport"`
+	Sessions int    `json:"sessions"`
+}
+
+// History is the analytical surface behind the web history page.
+//
+// Previous holds the immediately preceding window of the same length, which
+// is what makes the totals mean anything — "182 tonnes" is a number, "182
+// tonnes, up 12%" is a fact about your training. It's computed over the same
+// sport filter, so switching to BJJ compares BJJ against BJJ.
+type History struct {
+	From     string        `json:"from"` // YYYY-MM-DD, echoed back
+	To       string        `json:"to"`
+	Totals   HistoryTotals `json:"totals"`
+	Previous HistoryTotals `json:"previous"`
+	Days     []HistoryDay  `json:"days"`
+	Sports   []SportCount  `json:"sports"`
 }
 
 type Repository interface {
 	List(ctx context.Context, userID string, f Filter) ([]Session, error)
+	// History rolls a date range up per day plus period totals. Aggregated in
+	// SQL rather than by listing sessions and calling Summarise, because a
+	// year of training is thousands of set rows and the page needs six
+	// numbers. TestHistoryAgreesWithSummarise pins the two together.
+	History(ctx context.Context, userID string, f HistoryFilter) (*History, error)
 	// LastPerformances returns, per requested exercise, the top working set of
 	// the most recent session containing it. Missing keys mean "never logged".
 	LastPerformances(ctx context.Context, userID string, exerciseIDs []string) (map[string]Performance, error)
