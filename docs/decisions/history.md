@@ -576,13 +576,17 @@ Cause: the earlier fix that stopped `components/Themed`'s `View` painting the th
 Both sheets now set `backgroundColor` explicitly, with a comment saying why a screen-level container needs one here and nowhere else. Worth recording because the shape recurs: a fix that removes an implicit default is only safe where the explicit replacement actually exists, and a modal is exactly the place it doesn't.
 
 
-## 2026-07-29 — One ground, a glass tab bar, and the Λ
+## 2026-07-29 — One ground, a flat tab bar, and the Λ
 
 The mobile shell was three stacked slabs of slightly different dark — navigation header, content, tab bar — each separated by a hairline rule. On a dark theme those seams are the most visible thing on screen, and they were dividing a layout with no actual sections in it. Everything now sits on one continuous ground: the stack header paints `vola.bg` with `headerShadowVisible: false`, the tab navigator's scene does too, and the tab screens' own header is a plain component rather than navigation furniture.
 
-**The tab bar floats and is glass.** A rounded pill, inset from the edges, with an `expo-blur` `BlurView` as its background rather than a fill. The reasoning is that a *solid* bar floating over content is just a smaller opaque bar — if content is going to scroll underneath it, it should be visible through it. Two details that aren't obvious: the blur has to be the `tabBarBackground` view, because a style can't blur what's behind it; and the bar needs `overflow: 'hidden'`, or the blur renders as a rectangle behind the rounded corners.
+**The tab bar is flat, flush, and type-only** — labels in uppercase on the same ground, a small dot above the active one, and a hairline as the only separator. No icons, no pill, no fill.
 
-**A React Navigation trap worth recording.** Insetting the bar with `left`/`right`/`bottom` silently does nothing — the navigator positions the tab bar's container itself and overwrites those offsets. The bar stayed edge-to-edge and looked unchanged. `marginHorizontal`/`marginBottom` apply to the bar itself and survive.
+This took two wrong turns worth recording, because both were plausible. The first was a solid floating pill; the second made it glass, on the reasoning that a solid bar floating over content is just a smaller opaque bar. Both were the wrong instinct: **a floating control is a *thing on top of* the app**, and the design treats navigation as part of the page — quiet enough to ignore until you look for it. The active tab is marked by a dot rather than a container because that's the least furniture that still answers "where am I". Checking the hi-fi mockup earlier would have skipped both attempts.
+
+The hairline is the one seam kept deliberately: without it the labels read as content when a list scrolls behind them.
+
+**A React Navigation trap worth recording anyway**, since it'll bite the next person who tries to float something: insetting the tab bar with `left`/`right`/`bottom` silently does nothing — the navigator positions the bar's own container and overwrites those offsets, so it stays edge-to-edge and looks completely unchanged. Margins apply to the bar itself and survive.
 
 **Screen names are small and top-left**, with the wordmark centred beside them. They're orientation, not headlines — you already know where you are and just want confirming.
 

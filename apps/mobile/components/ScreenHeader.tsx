@@ -109,5 +109,10 @@ const styles = StyleSheet.create({
   },
 });
 
-/** Height to leave clear at the bottom of a scroll view for the floating tab bar. */
-export const TAB_BAR_CLEARANCE = 120;
+/**
+ * Bottom breathing room for a scrolling screen.
+ *
+ * Small now: the tab bar sits in normal flow rather than floating over the
+ * content, so this is margin rather than the clearance it used to be.
+ */
+export const TAB_BAR_CLEARANCE = 28;

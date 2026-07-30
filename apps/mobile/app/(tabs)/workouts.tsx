@@ -398,9 +398,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 16,
     right: 16,
-    // Clears the floating tab bar, which now overlays the bottom of the
-    // screen rather than reserving space below the content.
-    bottom: TAB_BAR_CLEARANCE + 4,
+    bottom: 16,
     backgroundColor: vola.lime,
     borderRadius: 14,
     paddingVertical: 16,

@@ -607,8 +607,8 @@ Domain: logging a session with no connectivity. **Test this by actually stopping
 ## Mobile shell (`apps/mobile` tab navigator)
 
 - **No seams.** Header, content and tab bar share one background; there must be no hairline rule or colour step between them, on tab screens *and* pushed stack screens.
-- **The tab bar floats and blurs.** Content must be visible through it when scrolled underneath. Insetting it requires `marginHorizontal`/`marginBottom` — `left`/`right`/`bottom` are overwritten by the navigator and silently do nothing.
-- Every scrolling screen leaves `TAB_BAR_CLEARANCE` at the bottom, and absolutely-positioned controls (the "New workout" button) clear it too.
+- **The tab bar is flat and type-only**: uppercase labels on the app's own ground, a dot above the active tab, one hairline separator. No icons, no pill, no fill. It sits in normal flow, so nothing scrolls underneath it.
+- Absolutely-positioned controls (the "New workout" button) sit above the bar, not behind it.
 - **The wordmark must not collide with the Dynamic Island** — it sits below it. Check on a device with an island, not just a notch.
 - The wordmark's chevron apex must be closed, and must point up.
 - Screen names are small, uppercase, top-left; the wordmark is centred and stays centred regardless of the title's width.
