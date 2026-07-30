@@ -3,6 +3,7 @@ import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet } from 'react-native';
 
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
+import { RecordsCard } from '@/components/RecordsCard';
 import { TrainingSummary } from '@/components/TrainingSummary';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
@@ -88,6 +89,11 @@ export default function YouScreen() {
             this answers the one question a desk can't while you're standing
             in a gym: am I showing up. */}
         <TrainingSummary getToken={getToken} units={profile?.unit_system ?? 'metric'} />
+
+        {/* Records sit between the training summary and the profile facts:
+            they're the payoff for the logging above, and the thing people
+            actually open this tab to look at. */}
+        <RecordsCard getToken={getToken} units={profile?.unit_system ?? 'metric'} />
 
         <Text style={styles.sectionLabel}>Profile</Text>
         <View style={styles.card}>

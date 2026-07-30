@@ -136,3 +136,23 @@ func TestBestOneRM(t *testing.T) {
 		t.Error("a timed set should not produce a 1RM")
 	}
 }
+
+// Every load type the catalog's CHECK constraint permits must map to at least
+// one record kind.
+//
+// The failure this guards is silent: RecordKindsFor returns nil for anything
+// it doesn't recognise, and Records then skips that exercise with no error
+// anywhere — so a new load type would make records quietly vanish for every
+// exercise using it. This fails at CI instead.
+func TestRecordKindsFor_CoversEveryLoadType(t *testing.T) {
+	// Mirrors exercises_load_type_valid in migration 000004. Adding a value
+	// there without adding it here is exactly what this catches.
+	for _, lt := range []string{"weight_reps", "reps", "time", "distance", "distance_time"} {
+		if len(RecordKindsFor(lt)) == 0 {
+			t.Errorf("load type %q holds no records — new catalog type without a record kind?", lt)
+		}
+	}
+	if len(RecordKindsFor("something-new")) != 0 {
+		t.Error("an unknown load type should hold no records")
+	}
+}

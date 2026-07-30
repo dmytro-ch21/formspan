@@ -972,3 +972,176 @@ func TestSearch_FindsALiteralWildcardInAName(t *testing.T) {
 		t.Errorf(`"6_%%" should match nothing — _ is being treated as a wildcard`)
 	}
 }
+
+func TestRecords_DerivesBestsAndIgnoresWhatDoesNotCount(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const mine, theirs = "user_rec_mine", "user_rec_theirs"
+
+	fixtures := []NewSession{
+		histAt("ses-rec-a", mine, "strength", time.Date(2024, 5, 1, 12, 0, 0, 0, time.UTC), time.Hour, []Set{
+			// Heaviest set in the data, and a warm-up — must not be a record.
+			{ExerciseID: exSquat, SetType: SetTypeWarmup, Reps: ptrInt(3), WeightKg: ptrF(300), Completed: true},
+			{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(5), WeightKg: ptrF(100), Completed: true},
+			// Planned, never performed — also not a record.
+			{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(1), WeightKg: ptrF(250), Completed: false},
+		}),
+		histAt("ses-rec-b", mine, "strength", time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC), time.Hour, []Set{
+			// Heavier single, but 5x100 estimates higher (112.5 vs 110) — so
+			// the two record kinds must point at *different* sets.
+			{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(1), WeightKg: ptrF(110), Completed: true},
+		}),
+		histAt("ses-rec-other", theirs, "strength", time.Date(2024, 6, 2, 12, 0, 0, 0, time.UTC), time.Hour, []Set{
+			{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(5), WeightKg: ptrF(400), Completed: true},
+		}),
+	}
+	for _, f := range fixtures {
+		cleanup(t, pool, f.ID)
+		if _, err := repo.Create(ctx, f); err != nil {
+			t.Fatalf("create %s: %v", f.ID, err)
+		}
+	}
+
+	got, err := repo.Records(ctx, mine, []string{exSquat, exBJJ})
+	if err != nil {
+		t.Fatalf("records: %v", err)
+	}
+	if len(got) != 1 || got[0].ExerciseID != exSquat {
+		t.Fatalf("expected records for the squat only, got %+v", got)
+	}
+
+	byKind := map[RecordKind]Record{}
+	for _, r := range got[0].Records {
+		byKind[r.Kind] = r
+	}
+	heaviest, ok := byKind[RecordHeaviest]
+	if !ok {
+		t.Fatal("no heaviest-weight record")
+	}
+	// 110, not the 300 warm-up, the 250 never performed, or the other
+	// athlete's 400.
+	if heaviest.Value != 110 {
+		t.Errorf("heaviest = %v, want 110 (warm-up, unticked set or another user leaked in?)", heaviest.Value)
+	}
+	if heaviest.SessionID != "ses-rec-b" {
+		t.Errorf("heaviest came from %s, want ses-rec-b", heaviest.SessionID)
+	}
+
+	oneRM, ok := byKind[RecordOneRM]
+	if !ok {
+		t.Fatal("no estimated-1RM record")
+	}
+	// The point of having both: 5x100 estimates 112.5 and beats the 110
+	// single, so this record cites a different set than the heaviest does.
+	if !approx(oneRM.Value, 112.5) {
+		t.Errorf("1RM = %v, want 112.5", oneRM.Value)
+	}
+	if oneRM.SessionID != "ses-rec-a" {
+		t.Errorf("1RM cited %s, want ses-rec-a — the two kinds should differ here", oneRM.SessionID)
+	}
+	// Evidence travels with the number, or it can't be checked.
+	if oneRM.Reps == nil || *oneRM.Reps != 5 || oneRM.WeightKg == nil || *oneRM.WeightKg != 100 {
+		t.Errorf("1RM record lost its evidence: %+v", oneRM)
+	}
+	// Fixtures are from 2024; nothing here is new.
+	if heaviest.IsRecent || oneRM.IsRecent {
+		t.Error("two-year-old records should not be flagged recent")
+	}
+
+	// An athlete with no history has no records — not zeroes.
+	none, err := repo.Records(ctx, "user_rec_nobody", []string{exSquat})
+	if err != nil {
+		t.Fatalf("empty: %v", err)
+	}
+	if len(none) != 0 {
+		t.Errorf("expected no records, got %+v", none)
+	}
+}
+
+func TestPinnedExercises_RoundTripAndOrder(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const user = "user_pin"
+	t.Cleanup(func() {
+		pool.Exec(context.Background(), `DELETE FROM pinned_exercises WHERE user_id = $1`, user) //nolint:errcheck
+	})
+
+	if got, err := repo.PinnedExercises(ctx, user); err != nil || len(got) != 0 {
+		t.Fatalf("a new athlete should have no pins: %v %v", got, err)
+	}
+
+	want := []string{exBench, exSquat}
+	if err := repo.SetPinnedExercises(ctx, user, want); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	got, err := repo.PinnedExercises(ctx, user)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	// Order is the athlete's choice, not alphabetical — bench was pinned first.
+	if len(got) != 2 || got[0] != exBench || got[1] != exSquat {
+		t.Errorf("pins came back as %v, want %v", got, want)
+	}
+
+	// Replace wholesale, including reordering.
+	if err := repo.SetPinnedExercises(ctx, user, []string{exSquat}); err != nil {
+		t.Fatalf("replace: %v", err)
+	}
+	got, _ = repo.PinnedExercises(ctx, user)
+	if len(got) != 1 || got[0] != exSquat {
+		t.Errorf("replace left %v", got)
+	}
+
+	// Clearing is an empty list, not a special case.
+	if err := repo.SetPinnedExercises(ctx, user, nil); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if got, _ := repo.PinnedExercises(ctx, user); len(got) != 0 {
+		t.Errorf("clear left %v", got)
+	}
+
+	// An unknown exercise is the caller's mistake, surfaced as invalid input.
+	err = repo.SetPinnedExercises(ctx, user, []string{"not-an-exercise"})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Errorf("unknown exercise gave %v, want ErrInvalidInput", err)
+	}
+}
+
+// The API's order is the caller's order — the pinned `position` an athlete
+// chose, or most-trained-first for scope=all. Sorting in place returned
+// everything alphabetically instead, which looked fine and silently made the
+// reorder UI do nothing.
+func TestRecords_PreservesTheCallersOrder(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const user = "user_rec_order"
+
+	cleanup(t, pool, "ses-rec-order")
+	if _, err := repo.Create(ctx, strengthSession("ses-rec-order", user, []Set{
+		{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(5), WeightKg: ptrF(100), Completed: true},
+		{ExerciseID: exBench, SetType: SetTypeWorking, Reps: ptrInt(5), WeightKg: ptrF(80), Completed: true},
+	})); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// Must be an order a sort would *change*, or the test can't fail. The ids
+	// are "back-squat" and "bench-press", so asking bench-first is the
+	// non-alphabetical case; asking squat-first would pass either way and
+	// prove nothing.
+	asked := []string{exBench, exSquat}
+	got, err := repo.Records(ctx, user, asked)
+	if err != nil {
+		t.Fatalf("records: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected both exercises, got %d", len(got))
+	}
+	if got[0].ExerciseID != exBench || got[1].ExerciseID != exSquat {
+		t.Errorf("order was %s, %s — want %s, %s (sorted in place?)",
+			got[0].ExerciseID, got[1].ExerciseID, exBench, exSquat)
+	}
+	// And the caller's own slice must come back untouched.
+	if asked[0] != exBench || asked[1] != exSquat {
+		t.Errorf("Records mutated the caller's slice: %v", asked)
+	}
+}

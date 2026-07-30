@@ -486,3 +486,123 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// splitIDs parses a comma-separated exercise_ids parameter, matching how
+// Suggestions reads the same shape.
+func splitIDs(raw string) []string {
+	out := []string{}
+	for _, id := range strings.Split(raw, ",") {
+		if id = strings.TrimSpace(id); id != "" {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// defaultRecordExercises is how many "most trained" stand in for an unset
+// shortlist — enough to look considered, few enough to scan on a phone.
+const defaultRecordExercises = 5
+
+// maxRecordExercises bounds `scope=all`. The wide screen is where you go
+// through everything you've trained rather than a shortlist, and 200 distinct
+// exercises is far more than anyone accumulates in practice — but it still
+// wants a ceiling rather than a promise to return a career.
+const maxRecordExercises = 200
+
+// Records returns the caller's personal records.
+//
+// With no `exercise_ids`, it answers for their pinned shortlist, falling back
+// to what they train most. That fallback is the point: a records screen that
+// opens empty and asks to be configured is one nobody configures.
+func (h *Handler) Records(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.ClaimsFromContext(r.Context())
+
+	var ids []string
+	if raw := strings.TrimSpace(r.URL.Query().Get("exercise_ids")); raw != "" {
+		ids = splitIDs(raw)
+		if len(ids) > maxSuggestionIDs {
+			apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+				"too many exercise_ids")
+			return
+		}
+	} else if r.URL.Query().Get("scope") == "all" {
+		// Everything the caller has actually trained, most-used first. The
+		// desk view browses the whole log; the phone gets a shortlist.
+		all, err := h.repo.MostTrainedExercises(r.Context(), claims.UserID, maxRecordExercises)
+		if err != nil {
+			writeErr(w, r, err)
+			return
+		}
+		ids = all
+	} else {
+		pinned, err := h.repo.PinnedExercises(r.Context(), claims.UserID)
+		if err != nil {
+			writeErr(w, r, err)
+			return
+		}
+		ids = pinned
+		if len(ids) == 0 {
+			ids, err = h.repo.MostTrainedExercises(r.Context(), claims.UserID, defaultRecordExercises)
+			if err != nil {
+				writeErr(w, r, err)
+				return
+			}
+		}
+	}
+
+	records, err := h.repo.Records(r.Context(), claims.UserID, ids)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"records": records})
+}
+
+func (h *Handler) PinnedExercises(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.ClaimsFromContext(r.Context())
+	ids, err := h.repo.PinnedExercises(r.Context(), claims.UserID)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"exercise_ids": ids})
+}
+
+func (h *Handler) SetPinnedExercises(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.ClaimsFromContext(r.Context())
+
+	var body struct {
+		ExerciseIDs []string `json:"exercise_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "malformed JSON body")
+		return
+	}
+	if len(body.ExerciseIDs) > maxPinned {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"a shortlist is at most "+strconv.Itoa(maxPinned)+" exercises")
+		return
+	}
+	// Duplicates would violate the primary key with a 500; they're a client
+	// mistake, so say so.
+	seen := map[string]bool{}
+	for _, id := range body.ExerciseIDs {
+		if id == "" {
+			apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+				"exercise_ids must not contain blanks")
+			return
+		}
+		if seen[id] {
+			apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+				"exercise_ids must not repeat")
+			return
+		}
+		seen[id] = true
+	}
+
+	if err := h.repo.SetPinnedExercises(r.Context(), claims.UserID, body.ExerciseIDs); err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"exercise_ids": body.ExerciseIDs})
+}
