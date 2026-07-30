@@ -49,6 +49,30 @@ export function formatWeight(kg: number | null | undefined, u: UnitSystem): stri
 }
 
 /**
+ * Cumulative load, which lives at a different order of magnitude than a set.
+ *
+ * `formatWeight` is right for "100kg" on a bar and wrong for a quarter of a
+ * million: a block's tonnage through it reads `251147kg`, which nobody takes
+ * in at a glance — least of all on a phone. Tonnes above 1000kg, separators
+ * throughout.
+ *
+ * Deliberately not folded into `formatWeight`: abbreviating there would turn
+ * every heavy single on the session screen into `0.2t`.
+ */
+export function formatTonnage(kg: number | null | undefined, u: UnitSystem): string {
+  if (kg == null) return '—';
+  if (u === 'metric') {
+    // Rounded before the comparison, or 999.6 renders as "1,000kg".
+    if (Math.round(kg) < 1000) return `${Math.round(kg).toLocaleString()}kg`;
+    return `${(Math.round(kg / 100) / 10).toLocaleString(undefined, {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1,
+    })}t`;
+  }
+  return `${Math.round(kg * LB_PER_KG).toLocaleString()}lb`;
+}
+
+/**
  * Distance switches unit by magnitude, in both systems — nobody says "0.02
  * miles" and nobody says "5000 metres" for a run.
  */

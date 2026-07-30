@@ -898,6 +898,47 @@ be forever. And mobile has no equivalent — correctly, per the platform split,
 though "what did I do last time" on a phone is a different question worth
 answering separately.
 
+## 2026-07-30 — History on the phone, deliberately small
+
+The web history page answers "what happened, and let me interrogate it." The
+YOU tab now answers the one question a desk can't while you're standing in a
+gym: **am I showing up.** Three numbers with their direction, a grid of days,
+a bar per week. Two spans, 4 and 12 weeks. No filtering, no drill-down, no
+year view — those stay on web, per the platform split.
+
+The API does all the arithmetic, same as web. Mobile buckets days the server
+already rolled up and works out a streak from the dates; no volume rule
+crosses the wire.
+
+**The streak counts weeks, not days,** and that's a product decision rather
+than an implementation detail. A daily streak in a training app punishes rest
+days — which *are* training — so it pushes people toward the one behaviour the
+app should never encourage. Consecutive weeks with at least one session
+rewards showing up and stays silent about which days. The current week only
+counts once it has a session, so an unbroken run doesn't appear to reset every
+Monday morning.
+
+**The colour ramp was computed, not chosen.** The obvious move was lime at
+25/45/70/100% opacity, matching web. Run through a contrast and colour-vision
+validator against the mobile card, that ramp fails twice: the bottom step
+lands at 2.05:1 (invisible on a phone in daylight) and, once raised enough to
+clear 3:1, the top two steps collapse to ΔE 13.5 — below the threshold at
+which *full-colour* vision separates them reliably. Three steps clear both
+comfortably (ΔE 18.6+, all ≥3:1), so the ramp is three: `#567826 · #87BC28 ·
+#B8FF2C`, stored as composited hex rather than alphas because those are the
+values that were actually validated. Four levels of precision on a 13pt square
+was over-reading anyway.
+
+The mixed-sport bug the web version shipped was avoided here rather than
+rediscovered: `hasSets` is decided per period but read per day, so a mat day
+with no working sets is floored at the first colour step instead of rendering
+as a rest day.
+
+What this leaves: the phone still can't answer "how has my bench moved" — the
+per-exercise progression gap is the same one web has. And the summary is
+online-only, which sits oddly next to a logging flow that works with no signal
+at all; caching the last response would fit the offline-first story better.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

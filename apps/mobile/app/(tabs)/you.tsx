@@ -3,6 +3,7 @@ import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet } from 'react-native';
 
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
+import { TrainingSummary } from '@/components/TrainingSummary';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { getProfile, type Profile } from '@/lib/profile';
@@ -83,7 +84,12 @@ export default function YouScreen() {
           <Text style={styles.muted}>Tap Edit to tell VOLA who you are.</Text>
         )}
 
-        <Text style={styles.sectionLabel}>Training</Text>
+        {/* History, phone-sized. The web app owns the analytical surface —
+            this answers the one question a desk can't while you're standing
+            in a gym: am I showing up. */}
+        <TrainingSummary getToken={getToken} units={profile?.unit_system ?? 'metric'} />
+
+        <Text style={styles.sectionLabel}>Profile</Text>
         <View style={styles.card}>
           <Row label="Sports" value={modules.length ? modules.join(' · ') : 'None chosen yet'} />
           <Row
