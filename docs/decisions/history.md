@@ -1173,6 +1173,32 @@ gets a separate picker.
 `scope=all` backs it, capped at 200 distinct exercises — far past what anyone
 accumulates, but a ceiling rather than a promise to return a career.
 
+Review caught one thing that looked entirely fine and wasn't: `sort.Strings`
+was called on the caller's slice and the output loop then iterated that same
+slice, so **every response came back alphabetically**. That silently threw
+away both orderings the feature runs on — the `position` an athlete chose, and
+most-trained-first for `scope=all` — which made migration 000015's `position`
+column and the reorder UI inert while appearing to work, and contradicted the
+contract. The query now sorts a copy and the output keeps the caller's order.
+
+The test written to pin that down *also* didn't work, which is the more useful
+lesson. It asked for `[back-squat, bench-press]` — already alphabetical — so it
+passed with the bug deliberately reinstated. Fixed to ask bench-first, and
+re-verified by breaking the code again: it now fails on both the order and the
+mutated slice.
+
+Also from review: ties broke on `session_sets.id`, which `ReplaceSets`
+regenerates on every edit, so correcting an old session could silently move a
+tied record's date — now `started_at, id`. Two devices saving a shortlist at
+once each deleted under their own snapshot and collided on the primary key,
+returning 500 for what should be last-write-wins — now `ON CONFLICT DO
+UPDATE`, matching what `profile.SetExerciseUnit` already does. A weight logged
+without reps could become the "heaviest for at least one rep" record. And
+`RecordKindsFor` returns nil for an unknown load type, which `Records` then
+skips in silence — a table test over the catalog's own CHECK values now fails
+at CI the moment a load type is added without a record kind.
+
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

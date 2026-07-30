@@ -1106,3 +1106,42 @@ func TestPinnedExercises_RoundTripAndOrder(t *testing.T) {
 		t.Errorf("unknown exercise gave %v, want ErrInvalidInput", err)
 	}
 }
+
+// The API's order is the caller's order — the pinned `position` an athlete
+// chose, or most-trained-first for scope=all. Sorting in place returned
+// everything alphabetically instead, which looked fine and silently made the
+// reorder UI do nothing.
+func TestRecords_PreservesTheCallersOrder(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const user = "user_rec_order"
+
+	cleanup(t, pool, "ses-rec-order")
+	if _, err := repo.Create(ctx, strengthSession("ses-rec-order", user, []Set{
+		{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(5), WeightKg: ptrF(100), Completed: true},
+		{ExerciseID: exBench, SetType: SetTypeWorking, Reps: ptrInt(5), WeightKg: ptrF(80), Completed: true},
+	})); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// Must be an order a sort would *change*, or the test can't fail. The ids
+	// are "back-squat" and "bench-press", so asking bench-first is the
+	// non-alphabetical case; asking squat-first would pass either way and
+	// prove nothing.
+	asked := []string{exBench, exSquat}
+	got, err := repo.Records(ctx, user, asked)
+	if err != nil {
+		t.Fatalf("records: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected both exercises, got %d", len(got))
+	}
+	if got[0].ExerciseID != exBench || got[1].ExerciseID != exSquat {
+		t.Errorf("order was %s, %s — want %s, %s (sorted in place?)",
+			got[0].ExerciseID, got[1].ExerciseID, exBench, exSquat)
+	}
+	// And the caller's own slice must come back untouched.
+	if asked[0] != exBench || asked[1] != exSquat {
+		t.Errorf("Records mutated the caller's slice: %v", asked)
+	}
+}

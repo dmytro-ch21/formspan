@@ -859,7 +859,14 @@ func (r *PostgresRepository) Records(
 	if len(ids) == 0 {
 		return out, nil
 	}
-	sort.Strings(ids) // stable output regardless of caller order
+	// A *copy* is sorted for the query; the output below iterates the caller's
+	// original order. Sorting `ids` in place returned every exercise
+	// alphabetically, which silently threw away both orderings the feature
+	// runs on — the pinned `position` the athlete chose, and most-trained-first
+	// for `scope=all` — and made the reorder UI inert while looking like it
+	// worked.
+	queryIDs := append([]string(nil), ids...)
+	sort.Strings(queryIDs)
 
 	// Which records an exercise can hold comes from the catalog, not the
 	// caller — same as LastPerformances reads load_type for the progression
@@ -867,7 +874,7 @@ func (r *PostgresRepository) Records(
 	// wrong.
 	loadTypes := map[string]string{}
 	ltRows, err := r.pool.Query(ctx,
-		`SELECT id, load_type FROM exercises WHERE id = ANY($1)`, ids)
+		`SELECT id, load_type FROM exercises WHERE id = ANY($1)`, queryIDs)
 	if err != nil {
 		return nil, fmt.Errorf("session: records load types: %w", err)
 	}
@@ -895,12 +902,17 @@ func (r *PostgresRepository) Records(
 			JOIN sessions s ON s.id = ss.session_id
 			WHERE ss.user_id = $1 AND ss.exercise_id = ANY($2) AND `+workingSet+`
 		),
+		-- Ties break on when it happened, then on id for a total order.
+		-- Breaking on id alone was unstable: ReplaceSets deletes and
+		-- reinserts, so editing an old session regenerates its row ids and a
+		-- tied record would silently move its date to the later session.
 		ranked AS (
 			SELECT *,
-			  ROW_NUMBER() OVER (PARTITION BY exercise_id ORDER BY weight_kg  DESC NULLS LAST, id) AS rn_weight,
-			  ROW_NUMBER() OVER (PARTITION BY exercise_id ORDER BY reps       DESC NULLS LAST, id) AS rn_reps,
-			  ROW_NUMBER() OVER (PARTITION BY exercise_id ORDER BY seconds    DESC NULLS LAST, id) AS rn_seconds,
-			  ROW_NUMBER() OVER (PARTITION BY exercise_id ORDER BY distance_m DESC NULLS LAST, id) AS rn_distance
+			  ROW_NUMBER() OVER (PARTITION BY exercise_id ORDER BY (CASE WHEN reps IS NULL THEN NULL ELSE weight_kg END)
+			                    DESC NULLS LAST, started_at, id) AS rn_weight,
+			  ROW_NUMBER() OVER (PARTITION BY exercise_id ORDER BY reps       DESC NULLS LAST, started_at, id) AS rn_reps,
+			  ROW_NUMBER() OVER (PARTITION BY exercise_id ORDER BY seconds    DESC NULLS LAST, started_at, id) AS rn_seconds,
+			  ROW_NUMBER() OVER (PARTITION BY exercise_id ORDER BY distance_m DESC NULLS LAST, started_at, id) AS rn_distance
 			FROM scoped
 		)
 		SELECT exercise_id, reps, weight_kg, seconds, distance_m, rir, rpe,
@@ -908,7 +920,7 @@ func (r *PostgresRepository) Records(
 		       rn_weight = 1, rn_reps = 1, rn_seconds = 1, rn_distance = 1
 		FROM ranked
 		WHERE rn_weight = 1 OR rn_reps = 1 OR rn_seconds = 1 OR rn_distance = 1`,
-		userID, ids)
+		userID, queryIDs)
 	if err != nil {
 		return nil, fmt.Errorf("session: records: %w", err)
 	}
@@ -933,11 +945,11 @@ func (r *PostgresRepository) Records(
 		return nil, fmt.Errorf("session: records rows: %w", err)
 	}
 
-	best1RM, err := r.BestOneRMs(ctx, userID, ids)
+	best1RM, err := r.BestOneRMs(ctx, userID, queryIDs)
 	if err != nil {
 		return nil, err
 	}
-	oneRMSet, err := r.bestOneRMSets(ctx, userID, ids, best1RM)
+	oneRMSet, err := r.bestOneRMSets(ctx, userID, queryIDs, best1RM)
 	if err != nil {
 		return nil, err
 	}
@@ -1111,7 +1123,13 @@ func (r *PostgresRepository) SetPinnedExercises(ctx context.Context, userID stri
 	}
 	for i, id := range ids {
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO pinned_exercises (user_id, exercise_id, position) VALUES ($1,$2,$3)`,
+			// ON CONFLICT rather than a bare insert: two devices saving at once
+			// each delete under their own snapshot, see nothing, and then
+			// collide on the primary key — a 500 for what should be
+			// last-write-wins. Same shape profile.SetExerciseUnit uses.
+			`INSERT INTO pinned_exercises (user_id, exercise_id, position)
+			 VALUES ($1,$2,$3)
+			 ON CONFLICT (user_id, exercise_id) DO UPDATE SET position = EXCLUDED.position`,
 			userID, id, i); err != nil {
 			// An unknown exercise is the caller's mistake, not ours.
 			if t := translatePgError(err); !errors.Is(t, err) {

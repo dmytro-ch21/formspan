@@ -26,9 +26,14 @@ const (
 
 // RecordKindsFor lists the records an exercise can hold, from its load type.
 //
-// Deliberately mirrors measuresFor: a record can only exist for a measure the
-// exercise actually records, so the two must not drift. If a load type gains
-// a measure, it gains a record here.
+// This mirrors the clients' own `measuresFor` (there is no Go twin — it lives
+// in apps/web and apps/mobile), so a record can only exist for a measure the
+// exercise actually records.
+//
+// The failure mode worth guarding is silence: an unrecognised load type
+// returns nil, and Records then skips that exercise entirely with no error
+// anywhere. TestRecordKindsFor_CoversEveryLoadType fails the moment the
+// catalog's CHECK constraint gains a value this doesn't handle.
 func RecordKindsFor(loadType string) []RecordKind {
 	switch loadType {
 	case "weight_reps":
@@ -66,9 +71,9 @@ type Record struct {
 
 	AchievedAt time.Time `json:"achieved_at"`
 	SessionID  string    `json:"session_id"`
-	// True when the record was set in the most recent session containing this
-	// exercise — the "you just did this" moment, and the only reason a client
-	// needs to treat one record differently from another.
+	// True when the record was set within `recentWindow` — the "you just did
+	// this" moment, and the only reason a client needs to treat one record
+	// differently from another.
 	IsRecent bool `json:"is_recent"`
 }
 
