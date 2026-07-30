@@ -11,7 +11,8 @@ import {
   syncPendingActivities,
   type LocalActivity,
 } from '@/lib/activities';
-import { listSessions, type Session } from '@/lib/sessions';
+import type { Session } from '@/lib/sessions';
+import { countPendingSessions, listLocalSessions, syncSessions } from '@/lib/sessionStore';
 import { vola } from '@/constants/Colors';
 
 const SPORTS: { key: string; label: string }[] = [
@@ -37,6 +38,7 @@ export default function TodayScreen() {
   const [syncing, setSyncing] = useState(false);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [sessionError, setSessionError] = useState<string | null>(null);
+  const [pendingSessions, setPendingSessions] = useState(0);
 
   const refresh = useCallback(async () => {
     if (!userId) return;
@@ -55,13 +57,25 @@ export default function TodayScreen() {
   }, [refresh]);
 
   const refreshSessions = useCallback(async () => {
+    if (!userId) return;
     try {
-      setSessions(await listSessions(getToken, { limit: 5 }));
+      // Local first: the list must render with no signal, because that's
+      // exactly when you want to see the session you just logged.
+      setSessions(await listLocalSessions(userId, 5));
+      setPendingSessions(await countPendingSessions(userId));
       setSessionError(null);
     } catch (err) {
       setSessionError(err instanceof Error ? err.message : String(err));
     }
-  }, [getToken]);
+    // Then reconcile, and show whatever that produced.
+    try {
+      await syncSessions(userId, getToken);
+      setSessions(await listLocalSessions(userId, 5));
+      setPendingSessions(await countPendingSessions(userId));
+    } catch {
+      // Offline is not an error state here — the local list already rendered.
+    }
+  }, [getToken, userId]);
 
   // On focus rather than on mount: coming back from a session should show
   // its new numbers, not the list as it was when the tab first rendered.
@@ -147,7 +161,14 @@ export default function TodayScreen() {
 
       {sessions.length > 0 && (
         <View style={styles.card}>
-          <Text style={styles.label}>Recent sessions</Text>
+          <View style={styles.row}>
+            <Text style={styles.label}>Recent sessions</Text>
+            {pendingSessions > 0 && (
+              <Text style={styles.pending} testID="sessions-pending">
+                {pendingSessions} not synced
+              </Text>
+            )}
+          </View>
           {sessions.map((s) => (
             <Pressable
               key={s.id}
@@ -238,6 +259,15 @@ export default function TodayScreen() {
 
       <Pressable
         style={styles.signOut}
+        onPress={() => router.push('/settings')}
+        accessibilityRole="button"
+        testID="open-settings"
+      >
+        <Text style={styles.settingsLink}>Settings</Text>
+      </Pressable>
+
+      <Pressable
+        style={styles.signOut}
         onPress={() => signOut()}
         accessibilityRole="button"
         testID="sign-out"
@@ -307,5 +337,6 @@ const styles = StyleSheet.create({
   activityKind: { fontWeight: '600' },
   synced: { color: vola.green, fontSize: 12 },
   pending: { color: vola.warn, fontSize: 12 },
-  signOut: { marginTop: 24, alignItems: 'center', paddingVertical: 14 },
+  signOut: { marginTop: 8, alignItems: 'center', paddingVertical: 14 },
+  settingsLink: { color: vola.lime, fontWeight: '600' },
 });

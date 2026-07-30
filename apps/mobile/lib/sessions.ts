@@ -2,6 +2,7 @@ import { randomUUID } from 'expo-crypto';
 
 import type { Exercise } from './exercises';
 import { newTraceId, traceparent } from './trace';
+import { formatDistance, formatWeight, type UnitSystem } from './units';
 import type { WorkoutItem } from './workouts';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
@@ -224,13 +225,14 @@ export function similarTo(base: Exercise, all: Exercise[]): Exercise[] {
     .map((x) => x.e);
 }
 
-export function describeSet(s: LoggedSet): string {
+export function describeSet(s: LoggedSet, units: UnitSystem = 'metric'): string {
   const parts: string[] = [];
-  if (s.reps != null && s.weight_kg != null) parts.push(`${s.reps} × ${s.weight_kg}kg`);
+  const w = formatWeight(s.weight_kg, units);
+  if (s.reps != null && s.weight_kg != null) parts.push(`${s.reps} × ${w}`);
   else if (s.reps != null) parts.push(`${s.reps} reps`);
-  else if (s.weight_kg != null) parts.push(`${s.weight_kg}kg`);
+  else if (s.weight_kg != null) parts.push(w);
   if (s.seconds != null) parts.push(`${s.seconds}s`);
-  if (s.distance_m != null) parts.push(`${s.distance_m}m`);
+  if (s.distance_m != null) parts.push(formatDistance(s.distance_m, units));
   if (s.rpe != null) parts.push(`RPE ${s.rpe}`);
   else if (s.rir != null) parts.push(`${s.rir} RIR`);
   return parts.join(' · ') || 'Not recorded';
@@ -348,15 +350,24 @@ export async function getSession(
 
 export async function startSession(
   getToken: () => Promise<string | null>,
-  input: { sport: string; name: string; workout_id?: string | null; sets?: LoggedSet[] },
+  input: {
+    sport: string;
+    name: string;
+    workout_id?: string | null;
+    sets?: LoggedSet[];
+    /** Supplied when pushing a session that was started offline. */
+    id?: string;
+    started_at?: string;
+  },
 ): Promise<{ session: Session; volume: Volume }> {
   // Client-generated ID, so starting a session is idempotent on retry — the
-  // same contract offline activity logging relies on.
+  // same contract offline activity logging relies on, and what lets the
+  // offline store push a session it created hours earlier.
   return request(getToken, '/sessions', {
     method: 'POST',
     body: JSON.stringify({
-      id: randomUUID(),
-      started_at: new Date().toISOString(),
+      id: input.id ?? randomUUID(),
+      started_at: input.started_at ?? new Date().toISOString(),
       ...input,
     }),
   });
@@ -376,10 +387,13 @@ export async function replaceSets(
 export async function finishSession(
   getToken: () => Promise<string | null>,
   id: string,
+  /** Supplied when pushing a session finished offline — the real end time,
+   *  not the time the sync happened to run. */
+  endedAt?: string,
 ): Promise<{ session: Session; volume: Volume }> {
   return request(getToken, `/sessions/${encodeURIComponent(id)}/finish`, {
     method: 'POST',
-    body: JSON.stringify({ ended_at: new Date().toISOString() }),
+    body: JSON.stringify({ ended_at: endedAt ?? new Date().toISOString() }),
   });
 }
 

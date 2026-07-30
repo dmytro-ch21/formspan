@@ -1,3 +1,4 @@
+import { useAuth } from '@clerk/clerk-expo';
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
@@ -7,17 +8,36 @@ import { Text, View } from '@/components/Themed';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { vola } from '@/constants/Colors';
 import { restSecondsFor } from '@/lib/rest';
+import {
+  distanceInputUnit,
+  formatWeight,
+  fromDisplayDistance,
+  fromDisplayWeight,
+  toDisplayDistance,
+  toDisplayWeight,
+  weightUnit,
+  type UnitSystem,
+} from '@/lib/units';
+import { useUnits } from '@/lib/useUnits';
+import { getExerciseUnits, setExerciseUnit } from '@/lib/profile';
 import { fetchExercises, type Exercise } from '@/lib/exercises';
 import {
-  deleteSession,
+  cacheExercises,
+  cachedExercises,
+  countPendingSessions,
+  deleteLocalSession,
+  finishLocalSession,
+  hydrateSession,
+  readLocalSession,
+  saveLocalSets,
+  syncSessions,
+} from '@/lib/sessionStore';
+import { deleteSession } from '@/lib/sessions';
+import {
   describeSet,
   emptySet,
   fetchSuggestions,
-  finishSession,
-  getSession,
-  isValidationError,
   measuresFor,
-  replaceSets,
   SET_TYPES,
   type LoggedSet,
   type Measure,
@@ -42,6 +62,7 @@ import {
 export default function SessionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const getToken = useAuthToken();
+  const { userId } = useAuth();
   const router = useRouter();
 
   const [session, setSession] = useState<Session | null>(null);
@@ -53,28 +74,79 @@ export default function SessionScreen() {
   const [catalog, setCatalog] = useState<Map<string, Exercise>>(new Map());
   const [suggestions, setSuggestions] = useState<Map<string, Suggestion>>(new Map());
   const timerState = useRestTimer();
+  const { units } = useUnits();
+  // Per-exercise overrides: a lifter who thinks in kilograms still faces a
+  // leg press marked in pounds, and converting in your head at the moment
+  // you're trying to record a number is exactly what this avoids.
+  const [exerciseUnits, setExerciseUnits] = useState<Record<string, UnitSystem>>({});
+  useEffect(() => {
+    getExerciseUnits(getToken).then(setExerciseUnits).catch(() => {});
+  }, [getToken]);
+  const unitFor = useCallback(
+    (exerciseID: string): UnitSystem => exerciseUnits[exerciseID] ?? units,
+    [exerciseUnits, units],
+  );
+  const toggleUnitFor = useCallback(
+    (exerciseID: string) => {
+      const next: UnitSystem = unitFor(exerciseID) === 'metric' ? 'imperial' : 'metric';
+      // Cleared rather than stored when it matches the default, so the map
+      // only ever holds genuine exceptions.
+      const override = next === units ? null : next;
+      setExerciseUnits((m) => {
+        const copy = { ...m };
+        if (override) copy[exerciseID] = override;
+        else delete copy[exerciseID];
+        return copy;
+      });
+      setExerciseUnit(getToken, exerciseID, override).catch(() => {});
+    },
+    [getToken, unitFor, units],
+  );
   const [loading, setLoading] = useState(true);
   const [everLoaded, setEverLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // How many sessions the server still owes — the honest replacement for a
+  // "saving…" spinner once saving no longer depends on the network.
+  const [pending, setPending] = useState(0);
 
-  // Declared above persist, which clears it when a save fails for a reason
-  // that means the screen is out of date rather than the input was bad.
-  const pending = useRef<LoggedSet[] | null>(null);
+  const queued = useRef<LoggedSet[] | null>(null);
 
+  // Local first, always. The network can only ever *add* to what's on
+  // screen — it is never the thing the screen waits for.
   const load = useCallback(async () => {
-    if (!id) return;
+    if (!id || !userId) return;
     try {
-      const { session: s, volume: v } = await getSession(getToken, id);
-      const list = await fetchExercises(getToken, { sport: s.sport });
+      let s = await readLocalSession(userId, id);
+      if (!s) {
+        // Never seen on this device — started on the web, say. Needs the
+        // network, and offline there is genuinely nothing to show.
+        s = await hydrateSession(userId, id, getToken);
+      }
+      if (!s) {
+        setError('This session isn\'t on this device, and it can\'t be reached right now.');
+        setEverLoaded(true);
+        return;
+      }
       setSession(s);
       setSets(s.sets);
-      setVolume(v);
-      setCatalog(new Map(list.map((e) => [e.id, e])));
-      setEverLoaded(true);
+      setVolume(localVolume(s.sets));
       setError(null);
-      // Separate and non-blocking: the session must render even if the
-      // history lookup fails, since it's advice rather than content.
+      setEverLoaded(true);
+      setPending(await countPendingSessions(userId));
+
+      // The cache renders the screen; the fetch refreshes the cache for
+      // next time. Offline, the first half still works.
+      const cached = await cachedExercises(s.sport);
+      if (cached.length > 0) setCatalog(new Map(cached.map((e) => [e.id, e])));
+      fetchExercises(getToken, { sport: s.sport })
+        .then((list) => {
+          setCatalog(new Map(list.map((e) => [e.id, e])));
+          return cacheExercises(list);
+        })
+        .catch(() => {});
+
+      // Advice, not content — it simply doesn't appear offline.
       fetchSuggestions(
         getToken,
         s.sets.map((x) => x.exercise_id),
@@ -87,7 +159,7 @@ export default function SessionScreen() {
     } finally {
       setLoading(false);
     }
-  }, [getToken, id]);
+  }, [getToken, id, userId]);
 
   // Runs on mount and again on every return from the exercise picker, which
   // appends its set server-side — without this the new set wouldn't appear.
@@ -109,24 +181,24 @@ export default function SessionScreen() {
   // shows the newer one — a lost update with nothing left to reconcile it.
   const inFlight = useRef<Promise<unknown>>(Promise.resolve());
 
+  // The local write is the save. The push is an attempt, and failing it is
+  // an ordinary state — not an error worth interrupting a workout for.
   const persist = useCallback(
     (next: LoggedSet[]) => {
-      if (!id) return Promise.resolve();
+      if (!id || !userId) return Promise.resolve();
       const run = inFlight.current.then(async () => {
         setSaving(true);
         try {
-          const { volume: v } = await replaceSets(getToken, id, next);
-          setVolume(v);
+          await saveLocalSets(userId, id, next);
+          setVolume(localVolume(next));
           setError(null);
+          const result = await syncSessions(userId, getToken);
+          setPending(await countPendingSessions(userId));
+          // Only a rejection says the *data* is wrong; anything else is the
+          // network, which the outbox already handles.
+          if (result.error && /invalid|400/i.test(result.error)) setError(result.error);
         } catch (err) {
           setError(err instanceof Error ? err.message : String(err));
-          // Bad input is the caller's to correct — reloading would throw away
-          // every other edit made since the last good save. Only re-read when
-          // the server and the screen genuinely disagree about what exists.
-          if (!isValidationError(err)) {
-            pending.current = null;
-            load();
-          }
         } finally {
           setSaving(false);
         }
@@ -134,7 +206,7 @@ export default function SessionScreen() {
       inFlight.current = run.catch(() => {});
       return run;
     },
-    [getToken, id, load],
+    [getToken, id, userId],
   );
 
   // Typing a weight is several keystrokes; one PUT each would be a request
@@ -147,9 +219,9 @@ export default function SessionScreen() {
       clearTimeout(timer.current);
       timer.current = null;
     }
-    const queued = pending.current;
-    pending.current = null;
-    if (queued) await persist(queued);
+    const next = queued.current;
+    queued.current = null;
+    if (next) await persist(next);
     // Awaited even with nothing queued: a save may already be flying, and
     // callers flush precisely because they're about to read the session back.
     await inFlight.current;
@@ -157,7 +229,7 @@ export default function SessionScreen() {
 
   const persistSoon = useCallback(
     (next: LoggedSet[]) => {
-      pending.current = next;
+      queued.current = next;
       if (timer.current) clearTimeout(timer.current);
       timer.current = setTimeout(() => void flush(), 700);
     },
@@ -182,7 +254,7 @@ export default function SessionScreen() {
   // goes now, not on the debounce.
   function commit(updated: LoggedSet[]) {
     setSets(updated);
-    pending.current = updated;
+    queued.current = updated;
     void flush();
   }
 
@@ -256,7 +328,7 @@ export default function SessionScreen() {
             <Stat label="Reps" value={String(volume.total_reps)} />
             <Stat
               label="Tonnage"
-              value={volume.tonnage_kg > 0 ? `${Math.round(volume.tonnage_kg)}kg` : '—'}
+              value={volume.tonnage_kg > 0 ? formatWeight(volume.tonnage_kg, units) : '—'}
             />
             <Stat label="Top RPE" value={volume.hardest_rpe > 0 ? String(volume.hardest_rpe) : '—'} />
           </View>
@@ -274,6 +346,20 @@ export default function SessionScreen() {
             <View key={g.exerciseID + g.indices[0]} style={styles.group}>
               <View style={styles.groupHead}>
                 <Text style={styles.groupName}>{exercise?.name ?? g.exerciseID}</Text>
+                {!finished && (
+                  <Pressable
+                    onPress={() => toggleUnitFor(g.exerciseID)}
+                    hitSlop={10}
+                    style={styles.unitChip}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${exercise?.name ?? 'This exercise'} is in ${
+                      unitFor(g.exerciseID) === 'imperial' ? 'pounds' : 'kilograms'
+                    }. Switch.`}
+                    testID={`unit-${g.exerciseID}`}
+                  >
+                    <Text style={styles.unitChipText}>{weightUnit(unitFor(g.exerciseID))}</Text>
+                  </Pressable>
+                )}
                 {!finished && (
                   <Pressable
                     onPress={async () => {
@@ -302,6 +388,7 @@ export default function SessionScreen() {
                   onChange={(next) => update(i, next)}
                   onRemove={() => removeSet(i)}
                   onRest={() => startRest(g.exerciseID)}
+                  units={unitFor(g.exerciseID)}
                 />
               ))}
               {(() => {
@@ -315,7 +402,7 @@ export default function SessionScreen() {
                     <View style={styles.hintBody}>
                       <Text style={styles.hintLast}>
                         Last time: {hint.last_reps != null ? `${hint.last_reps} × ` : ''}
-                        {hint.last_weight_kg}kg
+                        {formatWeight(hint.last_weight_kg, unitFor(g.exerciseID))}
                         {hint.last_rir != null ? ` · ${hint.last_rir} RIR` : ''}
                         {hint.last_rir == null && hint.last_rpe != null ? ` · RPE ${hint.last_rpe}` : ''}
                       </Text>
@@ -334,12 +421,14 @@ export default function SessionScreen() {
                         }}
                         style={styles.hintApply}
                         accessibilityRole="button"
-                        accessibilityLabel={`Use ${target} kilograms for every set of ${
+                        accessibilityLabel={`Use ${formatWeight(target, unitFor(g.exerciseID))} for every set of ${
                           exercise?.name ?? 'this exercise'
                         }`}
                         testID={`apply-suggestion-${g.exerciseID}`}
                       >
-                        <Text style={styles.hintApplyText}>{target}kg</Text>
+                        <Text style={styles.hintApplyText}>
+                          {formatWeight(target, unitFor(g.exerciseID))}
+                        </Text>
                       </Pressable>
                     )}
                   </View>
@@ -390,10 +479,17 @@ export default function SessionScreen() {
             onPress={async () => {
               try {
                 await flush(); // the last set typed must land before the session closes
-                const { session: s, volume: v } = await finishSession(getToken, id!);
-                setSession(s);
-                setSets(s.sets);
-                setVolume(v);
+                await finishLocalSession(userId!, id!);
+                const s = await readLocalSession(userId!, id!);
+                if (s) {
+                  setSession(s);
+                  setSets(s.sets);
+                  setVolume(localVolume(s.sets));
+                }
+                syncSessions(userId!, getToken)
+                  .then(() => countPendingSessions(userId!))
+                  .then(setPending)
+                  .catch(() => {});
               } catch (err) {
                 setError(err instanceof Error ? err.message : String(err));
               }
@@ -416,7 +512,10 @@ export default function SessionScreen() {
                 style: 'destructive',
                 onPress: async () => {
                   try {
-                    await deleteSession(getToken, id!);
+                    await deleteLocalSession(userId!, id!);
+                    // Best-effort: gone locally either way, and a delete
+                    // that only lands when signal returns is still a delete.
+                    deleteSession(getToken, id!).catch(() => {});
                     router.back();
                   } catch (err) {
                     setError(err instanceof Error ? err.message : String(err));
@@ -445,6 +544,37 @@ export default function SessionScreen() {
   );
 }
 
+/**
+ * The same working-volume arithmetic the API performs, run locally.
+ *
+ * Duplicating it is a deliberate, narrow exception to "compute it once, on
+ * the server": a summary that blanks out the moment you lose signal is worse
+ * than a summary computed twice, and this is the one screen guaranteed to be
+ * used without a network. The rule it implements — warm-ups count toward
+ * nothing — is pinned on the server by TestSummarise_ExcludesWarmups; if the
+ * two ever disagree, that test is the authority.
+ */
+function localVolume(sets: LoggedSet[]): Volume {
+  const v: Volume = {
+    working_sets: 0,
+    total_reps: 0,
+    tonnage_kg: 0,
+    hardest_rpe: 0,
+    exercise_ids: [],
+  };
+  for (const s of sets) {
+    if (!v.exercise_ids.includes(s.exercise_id)) v.exercise_ids.push(s.exercise_id);
+    if (s.set_type === 'warmup') continue;
+    v.working_sets++;
+    if (s.rpe != null && s.rpe > v.hardest_rpe) v.hardest_rpe = s.rpe;
+    if (s.reps != null) {
+      v.total_reps += s.reps;
+      if (s.weight_kg != null) v.tonnage_kg += s.reps * s.weight_kg;
+    }
+  }
+  return v;
+}
+
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.stat}>
@@ -467,6 +597,7 @@ function SetRow({
   onChange,
   onRemove,
   onRest,
+  units,
 }: {
   index: number;
   ordinal: number;
@@ -476,6 +607,7 @@ function SetRow({
   onChange: (next: LoggedSet) => void;
   onRemove: () => void;
   onRest: () => void;
+  units: UnitSystem;
 }) {
   const [open, setOpen] = useState(false);
   const measures: Measure[] = exercise ? measuresFor(exercise.load_type) : ['reps'];
@@ -502,7 +634,7 @@ function SetRow({
         style={styles.setHead}
         onPress={() => editable && setOpen((v) => !v)}
         accessibilityRole={editable ? 'button' : undefined}
-        accessibilityLabel={`Set ${ordinal}. ${describeSet(set)}`}
+        accessibilityLabel={`Set ${ordinal}. ${describeSet(set, units)}`}
         accessibilityState={{ expanded: open }}
         testID={`set-${index}`}
       >
@@ -510,7 +642,7 @@ function SetRow({
           {ordinal}
           {typeShort ? <Text style={styles.setBadge}> {typeShort}</Text> : null}
         </Text>
-        <Text style={styles.setSummary}>{describeSet(set)}</Text>
+        <Text style={styles.setSummary}>{describeSet(set, units)}</Text>
         {editable && (
           // Sits on the collapsed row, because that's where your thumb
           // already is when you rack the bar — not behind a disclosure.
@@ -531,17 +663,49 @@ function SetRow({
       {open && editable && (
         <View style={styles.setEditor}>
           <View style={styles.fieldRow}>
-            {measures.map((m) => (
-              <Field
-                key={m}
-                label={MEASURE_LABEL[m]}
-                value={set[MEASURE_KEY[m]] as number | null}
-                onChangeText={num(MEASURE_KEY[m], m !== 'weight')}
-                integer={m !== 'weight'}
-                accessibilityLabel={`${MEASURE_LABEL[m]} for set ${ordinal} of ${exerciseName}`}
-                testID={`set-${index}-${m}`}
-              />
-            ))}
+            {measures.map((m) => {
+              const stored = set[MEASURE_KEY[m]] as number | null;
+              const label =
+                m === 'weight'
+                  ? `Weight ${weightUnit(units)}`
+                  : m === 'distance'
+                    ? distanceInputUnit(units)
+                    : MEASURE_LABEL[m];
+              // Converted for display, converted back on input — the stored
+              // value is always kilograms or metres, whatever is on screen.
+              const shown =
+                stored == null
+                  ? null
+                  : m === 'weight'
+                    ? toDisplayWeight(stored, units)
+                    : m === 'distance'
+                      ? toDisplayDistance(stored, units)
+                      : stored;
+              return (
+                <Field
+                  key={m}
+                  label={label}
+                  value={shown}
+                  onChangeText={(text) => {
+                    const raw = text.trim() === '' ? null : Number(text.replace(',', '.'));
+                    if (raw === null || !Number.isFinite(raw)) {
+                      onChange({ ...set, [MEASURE_KEY[m]]: null });
+                      return;
+                    }
+                    const canonical =
+                      m === 'weight'
+                        ? fromDisplayWeight(raw, units)
+                        : m === 'distance'
+                          ? Math.round(fromDisplayDistance(raw, units))
+                          : Math.round(raw);
+                    onChange({ ...set, [MEASURE_KEY[m]]: canonical });
+                  }}
+                  integer={m !== 'weight'}
+                  accessibilityLabel={`${label} for set ${ordinal} of ${exerciseName}`}
+                  testID={`set-${index}-${m}`}
+                />
+              );
+            })}
           </View>
 
           {/* Effort, side by side. Two views of the same thing — record
@@ -695,6 +859,15 @@ const styles = StyleSheet.create({
   groupHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   groupName: { flex: 1, fontSize: 16, fontWeight: '700' },
   swapText: { color: vola.lime, fontWeight: '600', fontSize: 14 },
+  unitChip: {
+    borderWidth: 1,
+    borderColor: vola.line,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    minHeight: 32,
+    justifyContent: 'center',
+  },
+  unitChipText: { fontSize: 12, fontWeight: '700', color: vola.textMuted },
   setRow: { backgroundColor: vola.surface, borderRadius: 12 },
   setHead: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12 },
   setOrdinal: { width: 34, fontWeight: '700', color: vola.textDim },

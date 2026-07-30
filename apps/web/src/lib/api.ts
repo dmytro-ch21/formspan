@@ -1,6 +1,7 @@
 "use client";
 
 import { newTraceId, traceparent } from "@/lib/trace";
+import { formatWeight, type UnitSystem } from "@/lib/units";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 const API_BASE = `${API_URL}/v1`;
@@ -99,6 +100,8 @@ export function targetFieldsFor(loadType: LoadType): TargetField[] {
 export const FIELD_LABEL: Record<TargetField, string> = {
   sets: "Sets",
   reps: "Reps",
+  // Overridden by the caller with the athlete's own unit — kept here only
+  // as the metric default for anything that hasn't been wired up yet.
   weight: "kg",
   seconds: "Secs",
   distance: "Metres",
@@ -112,12 +115,12 @@ export const FIELD_KEY: Record<TargetField, keyof WorkoutItem> = {
   distance: "target_distance_m",
 };
 
-export function summariseTargets(i: WorkoutItem): string {
+export function summariseTargets(i: WorkoutItem, units: UnitSystem = "metric"): string {
   const parts: string[] = [];
   if (i.target_sets && i.target_reps) parts.push(`${i.target_sets} × ${i.target_reps}`);
   else if (i.target_sets) parts.push(`${i.target_sets} sets`);
   else if (i.target_reps) parts.push(`${i.target_reps} reps`);
-  if (i.target_weight_kg) parts.push(`${i.target_weight_kg} kg`);
+  if (i.target_weight_kg) parts.push(formatWeight(i.target_weight_kg, units));
   if (i.target_seconds) {
     const m = Math.floor(i.target_seconds / 60);
     const s = i.target_seconds % 60;
@@ -388,6 +391,18 @@ export function describeSet(s: LoggedSet): string {
   return parts.join(" · ") || "Not recorded";
 }
 
+export type UnitSystemPref = "metric" | "imperial";
+
+export type Profile = {
+  user_id: string;
+  display_name: string | null;
+  unit_system: UnitSystemPref;
+  bjj_enabled: boolean;
+  strength_enabled: boolean;
+  nutrition_enabled: boolean;
+  running_enabled: boolean;
+};
+
 export type Token = () => Promise<string | null>;
 
 /**
@@ -515,6 +530,63 @@ export function applySuggestions(
     const weight = hit?.suggested_weight_kg ?? null;
     return weight == null ? s : { ...s, weight_kg: weight };
   });
+}
+
+/**
+ * Per-exercise unit overrides, as a map of exercise id → unit system. A
+ * missing key means "use the profile default"; clearing removes the key
+ * rather than storing a sentinel.
+ */
+export async function getExerciseUnits(
+  getToken: Token,
+  signal?: AbortSignal,
+): Promise<Record<string, UnitSystemPref>> {
+  const b = await request<{ exercise_units: Record<string, UnitSystemPref> }>(
+    getToken,
+    "/profile/exercise-units",
+    {},
+    signal,
+  );
+  return b.exercise_units ?? {};
+}
+
+/** Pass null to clear the override and fall back to the profile default. */
+export async function setExerciseUnit(
+  getToken: Token,
+  exerciseID: string,
+  unit: UnitSystemPref | null,
+): Promise<void> {
+  await request<void>(getToken, `/profile/exercise-units/${encodeURIComponent(exerciseID)}`, {
+    method: "PUT",
+    body: JSON.stringify({ unit_system: unit }),
+  });
+}
+
+export function getProfile(getToken: Token, signal?: AbortSignal): Promise<Profile> {
+  return request<Profile>(getToken, "/profile", {}, signal);
+}
+
+/**
+ * Sets the unit preference, creating the profile if there isn't one yet.
+ * PATCH on a missing profile is a 404 — the right answer for the API, but a
+ * dead end for someone who reaches Settings without having onboarded.
+ */
+export async function updateUnitSystem(
+  getToken: Token,
+  unit: UnitSystemPref,
+): Promise<Profile> {
+  const patch = () =>
+    request<Profile>(getToken, "/profile", {
+      method: "PATCH",
+      body: JSON.stringify({ unit_system: unit }),
+    });
+  try {
+    return await patch();
+  } catch (err) {
+    if (!(err instanceof ApiError) || err.status !== 404) throw err;
+    await request<Profile>(getToken, "/profile", { method: "POST", body: JSON.stringify({}) });
+    return patch();
+  }
 }
 
 export async function listSessions(

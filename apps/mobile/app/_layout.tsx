@@ -108,6 +108,7 @@ function RootLayoutNav() {
         {/* Pushed over the tabs so the workout keeps a back button to the
             list it came from, rather than becoming a tab of its own. */}
         <Stack.Screen name="workout/[id]" options={{ title: 'Workout' }} />
+        <Stack.Screen name="settings" options={{ title: 'Settings' }} />
         <Stack.Screen name="session/start" options={{ title: 'Start' }} />
         <Stack.Screen name="session/[id]" options={{ title: 'Session' }} />
         {/* Presented as a sheet: picking an exercise is an interruption of

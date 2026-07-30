@@ -17,6 +17,8 @@ import {
   type Sport,
   type Workout,
 } from "@/lib/api";
+import { formatWeight } from "@/lib/units";
+import { useUnits } from "@/lib/useUnits";
 
 /**
  * Training history, and the place a freeform session starts.
@@ -201,6 +203,7 @@ export default function SessionsPage() {
 }
 
 function SessionRow({ session }: { session: Session }) {
+  const { units } = useUnits();
   // Warm-ups excluded, matching the backend's own working-volume rule — a
   // number here that disagreed with the one inside the session would be
   // worse than no number.
@@ -234,7 +237,7 @@ function SessionRow({ session }: { session: Session }) {
 
         <Metric label="Exercises" value={String(exercises)} />
         <Metric label="Working sets" value={String(working.length)} />
-        <Metric label="Tonnage" value={tonnage > 0 ? `${Math.round(tonnage)}kg` : "—"} />
+        <Metric label="Tonnage" value={tonnage > 0 ? formatWeight(tonnage, units) : "—"} />
       </Link>
     </li>
   );

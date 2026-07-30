@@ -1,4 +1,5 @@
 import { Image } from 'expo-image';
+import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -9,7 +10,11 @@ import {
   TextInput,
 } from 'react-native';
 
+import { useAuth } from '@clerk/clerk-expo';
+
 import { Text, View } from '@/components/Themed';
+import { PREF_LIBRARY_SPORT, readPref, writePref } from '@/lib/prefs';
+import { cacheExercises } from '@/lib/sessionStore';
 import { useAuthToken } from '@/lib/useAuthToken';
 
 // Abort reasons, so a superseded request (silent) and a timeout (a real
@@ -48,8 +53,40 @@ export default function LibraryScreen() {
   const getToken = useAuthToken();
 
   const [exercises, setExercises] = useState<Exercise[]>([]);
-  const [sport, setSport] = useState<string>('');
+  const { userId } = useAuth();
+  const [sport, setSportState] = useState<string>('');
   const [query, setQuery] = useState('');
+
+  /**
+   * The filter is remembered; the search box is not.
+   *
+   * They're different kinds of thing. "I train strength" is a standing fact
+   * about you that shouldn't need re-stating every visit. "bench" is a
+   * question you asked once and already got the answer to — finding it still
+   * in the box next time is a small confusion every time, because the list
+   * looks short for no visible reason.
+   */
+  useEffect(() => {
+    if (!userId) return;
+    readPref(userId, PREF_LIBRARY_SPORT)
+      .then((v) => v && setSportState(v))
+      .catch(() => {});
+  }, [userId]);
+
+  const setSport = useCallback(
+    (next: string) => {
+      setSportState(next);
+      if (userId) writePref(userId, PREF_LIBRARY_SPORT, next).catch(() => {});
+    },
+    [userId],
+  );
+
+  // Clear the search on the way out, so the next visit starts open.
+  useFocusEffect(
+    useCallback(() => {
+      return () => setQuery('');
+    }, []),
+  );
   const [loading, setLoading] = useState(true);
   // "Have we ever successfully loaded?" — distinct from "are we loading now".
   // Without it, a retry after a failure renders "No exercises yet" while the
@@ -87,6 +124,10 @@ export default function LibraryScreen() {
         );
         if (!controller.signal.aborted) {
           setExercises(list);
+          // Warms the offline cache from the screen that already has the
+          // whole catalog — the first offline session shouldn't be the first
+          // time anything gets cached.
+          cacheExercises(list).catch(() => {});
           setEverLoaded(true);
         }
       } catch (err) {

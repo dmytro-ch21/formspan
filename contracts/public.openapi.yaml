@@ -77,6 +77,7 @@ components:
         - strength_enabled
         - nutrition_enabled
         - running_enabled
+        - unit_system
         - created_at
         - updated_at
       properties:
@@ -99,6 +100,15 @@ components:
           type: boolean
         running_enabled:
           type: boolean
+        unit_system:
+          type: string
+          enum: [metric, imperial]
+          description: >
+            Display units only. Training data is stored in kilograms and
+            metres regardless, so changing this can never alter a recorded
+            number — only how it's shown and entered. Storing converted
+            values would make every historical row ambiguous, and would break
+            the progression rule, which compares weights across sessions.
         created_at:
           type: string
           format: date-time
@@ -140,6 +150,15 @@ components:
           type: boolean
         running_enabled:
           type: boolean
+        unit_system:
+          type: string
+          enum: [metric, imperial]
+          description: >
+            Display units only. Training data is stored in kilograms and
+            metres regardless, so changing this can never alter a recorded
+            number — only how it's shown and entered. Storing converted
+            values would make every historical row ambiguous, and would break
+            the progression rule, which compares weights across sessions.
 
     Flag:
       type: object
@@ -814,6 +833,64 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /profile/exercise-units:
+    get:
+      summary: The caller's per-exercise unit overrides
+      operationId: listExerciseUnits
+      description: >
+        A map of exercise id to unit system. A **missing key means "use the
+        profile default"** — there is deliberately no third state, so
+        clearing an override removes the key rather than storing a sentinel.
+
+        Exists because a lifter who thinks in kilograms still faces a leg
+        press marked in pounds, and converting in your head at the moment
+        you're recording a number is exactly what this avoids.
+      responses:
+        "200":
+          description: Overrides only; exercises using the default are absent.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [exercise_units]
+                properties:
+                  exercise_units:
+                    type: object
+                    additionalProperties:
+                      type: string
+                      enum: [metric, imperial]
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /profile/exercise-units/{exerciseID}:
+    put:
+      summary: Set or clear one exercise's unit override
+      operationId: setExerciseUnit
+      parameters:
+        - name: exerciseID
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                unit_system:
+                  type: string
+                  nullable: true
+                  enum: [metric, imperial]
+                  description: Null clears the override, falling back to the profile default.
+      responses:
+        "204": { description: Stored, or cleared. }
+        "400":
+          description: An unknown exercise, or a unit outside metric/imperial.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
 
   /flags:
     get:

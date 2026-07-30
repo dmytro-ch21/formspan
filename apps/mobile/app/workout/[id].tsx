@@ -16,6 +16,7 @@ import {
 import { Text, View } from '@/components/Themed';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { fetchExercises, pickImage, type Exercise } from '@/lib/exercises';
+import type { UnitSystem } from '@/lib/units';
 import {
   deleteWorkout,
   emptyItem,
@@ -27,8 +28,11 @@ import {
   type Workout,
   type WorkoutItem,
 } from '@/lib/workouts';
-import { applySuggestions, fetchSuggestions, setsFromWorkout, startSession } from '@/lib/sessions';
+import { applySuggestions, fetchSuggestions, setsFromWorkout } from '@/lib/sessions';
+import { startLocalSession, syncSessions } from '@/lib/sessionStore';
 import { vola } from '@/constants/Colors';
+import { fromDisplayWeight, toDisplayWeight, weightUnit } from '@/lib/units';
+import { useUnits } from '@/lib/useUnits';
 
 export default function WorkoutDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -44,6 +48,7 @@ export default function WorkoutDetailScreen() {
   const [saving, setSaving] = useState(false);
   const [picking, setPicking] = useState(false);
   const [starting, setStarting] = useState(false);
+  const { units } = useUnits();
 
   // Compared against the loaded state so Save only appears when something
   // actually changed — a Save button that's always live trains people to
@@ -115,7 +120,7 @@ export default function WorkoutDetailScreen() {
   // you start from and then change — which is what makes the gap between
   // prescribed and actual measurable at all.
   async function start() {
-    if (starting || !workout) return;
+    if (starting || !workout || !userId) return;
     setStarting(true);
     setError(null);
     try {
@@ -130,12 +135,15 @@ export default function WorkoutDetailScreen() {
       } catch {
         /* start anyway */
       }
-      const { session } = await startSession(getToken, {
+      // Local first — the plan is on the phone, so starting it shouldn't
+      // need the network either.
+      const session = await startLocalSession(userId, {
         sport: workout.sport,
         name: workout.name,
         workout_id: workout.id,
         sets,
       });
+      syncSessions(userId, getToken).catch(() => {});
       router.push(`/session/${session.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -239,6 +247,7 @@ export default function WorkoutDetailScreen() {
               total={items.length}
               exercise={catalog.get(item.exercise_id)}
               editable={canEdit}
+              units={units}
               onChange={(next) => setItems(items.map((it, i) => (i === index ? next : it)))}
               onMove={(by) => move(index, by)}
               onRemove={() =>
@@ -292,6 +301,7 @@ function ItemRow({
   total,
   exercise,
   editable,
+  units,
   onChange,
   onMove,
   onRemove,
@@ -301,6 +311,7 @@ function ItemRow({
   total: number;
   exercise: Exercise | undefined;
   editable: boolean;
+  units: UnitSystem;
   onChange: (next: WorkoutItem) => void;
   onMove: (by: -1 | 1) => void;
   onRemove: () => void;
@@ -325,7 +336,7 @@ function ItemRow({
         onPress={() => editable && setOpen((v) => !v)}
         accessibilityRole={editable ? 'button' : undefined}
         accessibilityLabel={
-          exercise ? `${exercise.name}. ${summariseTargets(item)}` : item.exercise_id
+          exercise ? `${exercise.name}. ${summariseTargets(item, units)}` : item.exercise_id
         }
         accessibilityState={{ expanded: open }}
         testID={`workout-item-${index}`}
@@ -338,7 +349,7 @@ function ItemRow({
         )}
         <View style={styles.itemBody}>
           <Text style={styles.itemName}>{exercise?.name ?? item.exercise_id}</Text>
-          <Text style={styles.muted}>{summariseTargets(item)}</Text>
+          <Text style={styles.muted}>{summariseTargets(item, units)}</Text>
         </View>
         {editable && <Text style={styles.disclosure}>{open ? '⌃' : '⌄'}</Text>}
       </Pressable>
@@ -346,22 +357,41 @@ function ItemRow({
       {open && editable && (
         <View style={styles.itemEditor}>
           <View style={styles.fieldRow}>
-            {fields.map((f) => (
-              <View key={f} style={styles.field}>
-                <Text style={styles.fieldLabel}>{FIELD_LABEL[f]}</Text>
-                <TextInput
-                  style={styles.fieldInput}
-                  keyboardType="numeric"
-                  inputMode="numeric"
-                  accessibilityLabel={`${FIELD_LABEL[f]} for ${exercise?.name ?? 'this exercise'}`}
-                  value={FIELD_VALUE[f](item)?.toString() ?? ''}
-                  onChangeText={set(FIELD_KEY[f])}
-                  placeholder="—"
-                  placeholderTextColor="#9aa0a6"
-                  testID={`workout-item-${index}-${f}`}
-                />
-              </View>
-            ))}
+            {fields.map((f) => {
+              const label = f === 'weight' ? `Weight (${weightUnit(units)})` : FIELD_LABEL[f];
+              const stored = FIELD_VALUE[f](item);
+              // Shown in the athlete's units, stored in kilograms — the same
+              // rule the session logger follows, so a template written in
+              // pounds and performed in kilograms is still the same plan.
+              const shown =
+                stored == null ? '' : String(f === 'weight' ? toDisplayWeight(stored, units) : stored);
+              return (
+                <View key={f} style={styles.field}>
+                  <Text style={styles.fieldLabel}>{label}</Text>
+                  <TextInput
+                    style={styles.fieldInput}
+                    keyboardType={f === 'weight' ? 'decimal-pad' : 'number-pad'}
+                    inputMode={f === 'weight' ? 'decimal' : 'numeric'}
+                    accessibilityLabel={`${label} for ${exercise?.name ?? 'this exercise'}`}
+                    value={shown}
+                    onChangeText={(text) => {
+                      const n = text.trim() === '' ? null : Number(text.replace(',', '.'));
+                      if (n === null || !Number.isFinite(n)) {
+                        onChange({ ...item, [FIELD_KEY[f]]: null });
+                        return;
+                      }
+                      onChange({
+                        ...item,
+                        [FIELD_KEY[f]]: f === 'weight' ? fromDisplayWeight(n, units) : Math.round(n),
+                      });
+                    }}
+                    placeholder="—"
+                    placeholderTextColor="#9aa0a6"
+                    testID={`workout-item-${index}-${f}`}
+                  />
+                </View>
+              );
+            })}
           </View>
           {exercise?.is_unilateral && (
             <Text style={styles.hint}>Per side — 8 reps here means 8 each side.</Text>
@@ -408,7 +438,7 @@ function ItemRow({
 const FIELD_LABEL: Record<TargetField, string> = {
   sets: 'Sets',
   reps: 'Reps',
-  weight: 'Weight (kg)',
+  weight: 'Weight',
   seconds: 'Seconds',
   distance: 'Distance (m)',
 };

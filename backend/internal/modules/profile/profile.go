@@ -17,16 +17,20 @@ var (
 )
 
 type Profile struct {
-	UserID           string    `json:"user_id"`
-	DisplayName      *string   `json:"display_name"`
-	DateOfBirth      *string   `json:"date_of_birth"` // "YYYY-MM-DD"
-	Sex              *string   `json:"sex"`           // "male" | "female" | null
-	BJJEnabled       bool      `json:"bjj_enabled"`
-	StrengthEnabled  bool      `json:"strength_enabled"`
-	NutritionEnabled bool      `json:"nutrition_enabled"`
-	RunningEnabled   bool      `json:"running_enabled"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	UserID           string  `json:"user_id"`
+	DisplayName      *string `json:"display_name"`
+	DateOfBirth      *string `json:"date_of_birth"` // "YYYY-MM-DD"
+	Sex              *string `json:"sex"`           // "male" | "female" | null
+	BJJEnabled       bool    `json:"bjj_enabled"`
+	StrengthEnabled  bool    `json:"strength_enabled"`
+	NutritionEnabled bool    `json:"nutrition_enabled"`
+	RunningEnabled   bool    `json:"running_enabled"`
+	// UnitSystem is display only — "metric" | "imperial". Training data is
+	// stored in kilograms and metres regardless, so changing it can never
+	// alter a recorded number, only how it's shown and entered.
+	UnitSystem string    `json:"unit_system"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 // NewProfile is the input for onboarding. Module toggles aren't set here —
@@ -47,10 +51,20 @@ type ProfileUpdate struct {
 	StrengthEnabled  *bool
 	NutritionEnabled *bool
 	RunningEnabled   *bool
+	UnitSystem       *string
 }
+
+// ValidUnitSystem guards the only two the clients can render.
+func ValidUnitSystem(v string) bool { return v == "metric" || v == "imperial" }
 
 type Repository interface {
 	Get(ctx context.Context, userID string) (*Profile, error)
+	// ListExerciseUnits returns the caller's per-exercise overrides. A missing
+	// key means "use the profile default" — there is deliberately no third
+	// state, so clearing an override is a delete rather than a value.
+	ListExerciseUnits(ctx context.Context, userID string) (map[string]string, error)
+	// SetExerciseUnit stores an override, or removes it when unit is empty.
+	SetExerciseUnit(ctx context.Context, userID, exerciseID, unit string) error
 	Create(ctx context.Context, userID string, in NewProfile) (*Profile, error)
 	Update(ctx context.Context, userID string, in ProfileUpdate) (*Profile, error)
 }

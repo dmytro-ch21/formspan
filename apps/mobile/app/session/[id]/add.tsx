@@ -3,11 +3,20 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, TextInput } from 'react-native';
 
+import { useAuth } from '@clerk/clerk-expo';
+
 import { Text, View } from '@/components/Themed';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { vola } from '@/constants/Colors';
 import { fetchExercises, pickImage, type Exercise } from '@/lib/exercises';
-import { emptySet, getSession, replaceSets, similarTo, swapExercise } from '@/lib/sessions';
+import { emptySet, similarTo, swapExercise } from '@/lib/sessions';
+import {
+  cachedExercises,
+  cacheExercises,
+  readLocalSession,
+  saveLocalSets,
+  syncSessions,
+} from '@/lib/sessionStore';
 
 /**
  * Picking an exercise mid-session — either to add one, or to swap one you've
@@ -29,6 +38,7 @@ import { emptySet, getSession, replaceSets, similarTo, swapExercise } from '@/li
 export default function AddExerciseToSessionScreen() {
   const { id, swap } = useLocalSearchParams<{ id: string; swap?: string }>();
   const getToken = useAuthToken();
+  const { userId } = useAuth();
   const router = useRouter();
 
   const [sport, setSport] = useState<string | null>(null);
@@ -44,11 +54,11 @@ export default function AddExerciseToSessionScreen() {
   const swapping = typeof swap === 'string' && swap.length > 0;
 
   useEffect(() => {
-    if (!id) return;
-    getSession(getToken, id)
-      .then(({ session }) => setSport(session.sport))
+    if (!id || !userId) return;
+    readLocalSession(userId, id)
+      .then((s) => s && setSport(s.sport))
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
-  }, [getToken, id]);
+  }, [userId, id]);
 
   useEffect(() => {
     if (!sport) return;
@@ -66,11 +76,18 @@ export default function AddExerciseToSessionScreen() {
           setResults(list);
           setEverLoaded(true);
           setError(null);
+          cacheExercises(list).catch(() => {});
         }
-      } catch (err) {
+      } catch {
         if (controller.signal.aborted) return;
-        setError(err instanceof Error ? err.message : String(err));
+        // Offline: search the cache instead. Substring matching locally is
+        // the same thing the API's `q` does, and adding an exercise you've
+        // seen before is the whole point of having cached it.
+        const q = query.trim().toLowerCase();
+        const cached = await cachedExercises(sport);
+        setResults(q ? cached.filter((e) => e.name.toLowerCase().includes(q)) : cached);
         setEverLoaded(true);
+        setError(null);
       }
     }, 250);
     return () => clearTimeout(t);
@@ -95,14 +112,16 @@ export default function AddExerciseToSessionScreen() {
   );
 
   async function choose(exercise: Exercise) {
-    if (!id || busy) return;
+    if (!id || !userId || busy) return;
     setBusy(exercise.id);
     try {
-      const { session } = await getSession(getToken, id);
+      const session = await readLocalSession(userId!, id);
+      if (!session) throw new Error('Session not found on this device.');
       const next = swapping
         ? swapExercise(session.sets, swap, exercise, current?.load_type)
         : [...session.sets, emptySet(exercise.id, session.sets.length)];
-      await replaceSets(getToken, id, next);
+      await saveLocalSets(userId!, id, next);
+      syncSessions(userId!, getToken).catch(() => {});
       router.back();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

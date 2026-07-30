@@ -540,6 +540,72 @@ Domain: the countdown between sets. **Mobile only, permanently** — an in-progr
 
 ---
 
+## Offline workout execution (`apps/mobile`)
+
+Domain: logging a session with no connectivity. **Test this by actually stopping the API**, not by mocking a failure — both gaps found during development were things a mocked failure would have hidden.
+
+**Happy path, with the API stopped**
+- Starting a session (empty or from a cached workout) succeeds and opens immediately.
+- The session screen renders: exercise names, the right measures per `load_type`, and a working volume summary — all from local data.
+- Editing sets, adding, removing and swapping all persist locally.
+- The exercise picker falls back to the cached catalog and filters it by substring.
+- The start screen lists **cached workouts**. It must never say "no workouts yet" when the account has some — that's a lie at the worst possible moment.
+- Finishing a session works offline.
+
+**On reconnect**
+- The session pushes and the dirty flag clears; Today's "N not synced" count goes to zero.
+- **`started_at` is the real start time, not the sync time.** Verified: a session created at 22:42:30 with the API down arrived in Postgres with that timestamp.
+- A retried push cannot duplicate — the ID is client-generated and create is idempotent.
+- Push happens **before** pull, or the server's older copy overwrites unsynced local work.
+- A session the device holds dirty is never overwritten by the pull.
+
+**Edge cases**
+- A corrupt `sets_json` blob must leave the session openable (empty set list), not throw.
+- Local rows are scoped by `user_id` — a shared device must not show or push one account's sessions under another's token.
+- Deleting offline removes it locally and best-effort remotely.
+- A session started on another device cannot be opened offline; it must say so rather than appear empty.
+
+**Known gaps to write scenarios for once built**
+- **Sync is trigger-based** (screen focus, next edit, session start) — there is no connectivity listener, so regaining signal doesn't itself push. A `NetInfo`-driven retry is the next step.
+- Suggestions are server-computed and don't appear offline.
+- The workout cache covers `scope=mine` only.
+
+---
+
+## Units and settings (`profiles.unit_system`, both clients)
+
+**The property everything else depends on: storage is always kilograms and metres.** Units are display and input only.
+
+- Switching units must **never** change a stored value. Verified by round trip: with Imperial selected, typing `225` into "Weight lb" stores `102.06` kg, which renders back as exactly `225.0` lb.
+- Switching to Imperial and back to Metric must leave every logged number identical.
+- `PATCH /v1/profile` with `unit_system` outside `metric|imperial` → `400` naming the field.
+- **`PATCH` on an account with no profile row** must not dead-end: the clients create the profile and retry, because Settings is reachable without onboarding.
+- The preference is per **account**, not per device — set it on the phone, and the web app shows it too.
+- Mobile reads it from a local cache first, so a session opens in the right units with no signal.
+- The progression suggestion's `reason` must contain **neither "kg" nor "lb"** — the client renders the target in the athlete's own units, and a hardcoded unit would leak metric into a pounds interface. Asserted in `TestSuggest_IncreasesWhenRepsWereLeftInReserve`.
+- Distance display switches by magnitude in both systems (m/km, yd/mi) — nobody says "0.02 miles".
+
+**Per-exercise overrides** (`GET`/`PUT /v1/profile/exercise-units`)
+- A **missing key means "use the profile default"** — no third state. Clearing an override deletes the row; the client drops the key rather than storing a sentinel.
+- Flipping an exercise back to the account default must remove the override, not store a duplicate of the default.
+- Overrides are per user: another account's must never appear in yours (`TestExerciseUnits_SetClearAndScope`).
+- Setting the same exercise twice upserts rather than erroring.
+- An unknown `exerciseID` → `400`, **not `500`** — the foreign-key violation is translated (`TestExerciseUnits_RejectsUnknownExercise`).
+- A unit outside `metric|imperial` → `400`.
+- **No raw Postgres text may reach the client.** A check violation is mapped by constraint name; the module used to echo `pgErr.Message`, which includes the offending value and the constraint body.
+
+**Unit-aware surfaces:** session logger, workout template editor, workout cards, start chooser. The exercise library shows no weights, so there is nothing to convert there.
+
+**Not yet:** the override applies on the session screen only — the workout editor uses the account default. Distance conversion is implemented but no screen takes a distance input yet, so that path is untested in anger.
+
+## Library filter and search memory (`apps/mobile` Library tab)
+
+- The **sport filter persists** across visits and app launches; it's a standing fact about the athlete.
+- The **search box clears** on leaving the tab; it's a question already answered, and finding it still there makes the list look short for no visible reason.
+- Both are stored per user — a shared device must not hand one account's filters to the next person.
+
+---
+
 ## Not yet covered (tracked here so it isn't lost, not because it's blocking)
 
 - Mobile has no auth yet (Clerk Expo SDK is a separate future increment) — no sign-in/sign-out scenarios apply to mobile today.

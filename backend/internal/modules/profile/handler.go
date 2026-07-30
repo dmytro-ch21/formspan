@@ -55,6 +55,52 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	apihttp.WriteJSON(w, http.StatusCreated, p)
 }
 
+// ExerciseUnits returns the caller's per-exercise overrides as a map.
+func (h *Handler) ExerciseUnits(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.ClaimsFromContext(r.Context())
+	units, err := h.repo.ListExerciseUnits(r.Context(), claims.UserID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"exercise_units": units})
+}
+
+type setExerciseUnitRequest struct {
+	// Null or empty clears the override, falling back to the profile default.
+	UnitSystem *string `json:"unit_system"`
+}
+
+func (h *Handler) SetExerciseUnit(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.ClaimsFromContext(r.Context())
+	exerciseID := r.PathValue("exerciseID")
+	if exerciseID == "" {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "exercise id is required")
+		return
+	}
+
+	var req setExerciseUnitRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
+		return
+	}
+	unit := ""
+	if req.UnitSystem != nil {
+		unit = *req.UnitSystem
+	}
+	if unit != "" && !ValidUnitSystem(unit) {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"unit_system must be metric or imperial")
+		return
+	}
+
+	if err := h.repo.SetExerciseUnit(r.Context(), claims.UserID, exerciseID, unit); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 type updateRequest struct {
 	DisplayName      *string `json:"display_name"`
 	DateOfBirth      *string `json:"date_of_birth"`
@@ -63,6 +109,7 @@ type updateRequest struct {
 	StrengthEnabled  *bool   `json:"strength_enabled"`
 	NutritionEnabled *bool   `json:"nutrition_enabled"`
 	RunningEnabled   *bool   `json:"running_enabled"`
+	UnitSystem       *string `json:"unit_system"`
 }
 
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
@@ -74,6 +121,12 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.UnitSystem != nil && !ValidUnitSystem(*req.UnitSystem) {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"unit_system must be metric or imperial")
+		return
+	}
+
 	p, err := h.repo.Update(r.Context(), claims.UserID, ProfileUpdate{
 		DisplayName:      req.DisplayName,
 		DateOfBirth:      req.DateOfBirth,
@@ -82,6 +135,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		StrengthEnabled:  req.StrengthEnabled,
 		NutritionEnabled: req.NutritionEnabled,
 		RunningEnabled:   req.RunningEnabled,
+		UnitSystem:       req.UnitSystem,
 	})
 	if err != nil {
 		writeError(w, r, err)

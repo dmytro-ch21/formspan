@@ -4,8 +4,12 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet } from 'react-nati
 
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { useAuth } from '@clerk/clerk-expo';
+
 import { useAuthToken } from '@/lib/useAuthToken';
-import { applySuggestions, fetchSuggestions, setsFromWorkout, startSession } from '@/lib/sessions';
+import { useUnits } from '@/lib/useUnits';
+import { applySuggestions, fetchSuggestions, setsFromWorkout } from '@/lib/sessions';
+import { cachedWorkouts, cacheWorkouts, startLocalSession, syncSessions } from '@/lib/sessionStore';
 import { listWorkouts, SPORTS, summariseTargets, type Sport, type Workout } from '@/lib/workouts';
 
 /**
@@ -22,6 +26,8 @@ import { listWorkouts, SPORTS, summariseTargets, type Sport, type Workout } from
 export default function StartSessionScreen() {
   const { sport } = useLocalSearchParams<{ sport: Sport }>();
   const getToken = useAuthToken();
+  const { userId } = useAuth();
+  const { units } = useUnits();
   const router = useRouter();
 
   const [workouts, setWorkouts] = useState<Workout[]>([]);
@@ -32,24 +38,33 @@ export default function StartSessionScreen() {
   const label = SPORTS.find((s) => s.key === sport)?.label ?? 'Session';
 
   const load = useCallback(async () => {
-    if (!sport) return;
+    if (!sport || !userId) return;
+    // Cache first so the list renders with no signal, then refresh it.
+    try {
+      const cached = await cachedWorkouts(userId, sport);
+      if (cached.length > 0) setWorkouts(cached);
+    } catch {
+      /* an empty cache is just an empty list */
+    }
     try {
       const list = await listWorkouts(getToken, 'mine');
       setWorkouts(list.filter((w) => w.sport === sport));
+      await cacheWorkouts(userId, list);
       setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+    } catch {
+      // Offline is not an error here — whatever the cache had is on screen,
+      // and an empty session is always available below.
     } finally {
       setLoading(false);
     }
-  }, [getToken, sport]);
+  }, [getToken, sport, userId]);
 
   useEffect(() => {
     load();
   }, [load]);
 
   async function begin(workout: Workout | null) {
-    if (starting || !sport) return;
+    if (starting || !sport || !userId) return;
     setStarting(true);
     setError(null);
     try {
@@ -66,12 +81,16 @@ export default function StartSessionScreen() {
           // weight is an inconvenience, a blocked workout is a lost one.
         }
       }
-      const { session } = await startSession(getToken, {
+      // Created locally, so a session starts with no signal at all. The push
+      // is opportunistic — the ID is already fixed, so it can land later
+      // without duplicating anything.
+      const session = await startLocalSession(userId, {
         sport,
         name: workout ? workout.name : `${label} session`,
         workout_id: workout ? workout.id : null,
         sets,
       });
+      syncSessions(userId, getToken).catch(() => {});
       // replace, not push: finishing a session and pressing back should not
       // land on the chooser that created it.
       router.replace(`/session/${session.id}`);
@@ -127,7 +146,7 @@ export default function StartSessionScreen() {
                   <Text style={styles.cardTitle}>{w.name}</Text>
                   <Text style={styles.muted}>
                     {w.items.length} {w.items.length === 1 ? 'exercise' : 'exercises'}
-                    {w.items[0] ? ` · ${summariseTargets(w.items[0])}` : ''}
+                    {w.items[0] ? ` · ${summariseTargets(w.items[0], units)}` : ''}
                   </Text>
                 </View>
                 <Text style={styles.chevron}>›</Text>

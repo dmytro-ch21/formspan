@@ -1,6 +1,7 @@
 import { randomUUID } from 'expo-crypto';
 
 import type { Exercise } from './exercises';
+import { formatWeight, type UnitSystem } from './units';
 import { newTraceId, traceparent } from './trace';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
@@ -75,12 +76,12 @@ export function targetFieldsFor(loadType: Exercise['load_type']): TargetField[] 
 }
 
 /** A one-line human summary of an item's targets, e.g. "3 × 5 · 100kg". */
-export function summariseTargets(item: WorkoutItem): string {
+export function summariseTargets(item: WorkoutItem, units: UnitSystem = 'metric'): string {
   const parts: string[] = [];
   if (item.target_sets && item.target_reps) parts.push(`${item.target_sets} × ${item.target_reps}`);
   else if (item.target_sets) parts.push(`${item.target_sets} sets`);
   else if (item.target_reps) parts.push(`${item.target_reps} reps`);
-  if (item.target_weight_kg) parts.push(`${item.target_weight_kg}kg`);
+  if (item.target_weight_kg) parts.push(formatWeight(item.target_weight_kg, units));
   if (item.target_seconds) {
     const m = Math.floor(item.target_seconds / 60);
     const s = item.target_seconds % 60;

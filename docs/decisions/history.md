@@ -505,6 +505,69 @@ Defaults come from the same movement-pattern table (180s for squat/hinge/olympic
 **Still open:** nothing yet *reads* the history back as trends — the suggestion is the first consumer of RIR/RPE, and the analysis surface the web app is now explicitly for hasn't been built. Sessions remain online-only. Everything is still kilograms and metres.
 
 
+## 2026-07-29 — Offline workout execution
+
+Session logging was online-only, which meant it failed in a basement gym — the place it is most likely to be used. It is now local-first: every read and write on the session screen goes to SQLite, and the network is a background reconciliation concern the UI never waits on.
+
+**The design rests entirely on two properties the API already had**, which is why it stayed small enough to trust:
+
+1. The session ID is **client-generated**, so a session created offline and pushed hours later cannot duplicate — the server's create is idempotent on that ID.
+2. Sets are replaced as a **whole ordered list**, so the outbox stores desired *state*, not a log of operations. Replaying is just "send what the row says now", which means a failed push followed by three more edits still costs one request. An operation log would have needed ordering, compaction and conflict resolution; last-write-wins on a whole list needs none of it, and is correct because a live session is edited on exactly one device.
+
+Sets live in the local row as a JSON blob rather than their own table — nothing anywhere touches a single set in isolation, so rows would buy a join and a reconciliation step and nothing else.
+
+**Push before pull, and that order is not incidental.** Pulling first would overwrite unsynced local work with the server's older copy — precisely the data loss the store exists to prevent. On the pull side, any session the device holds dirty is skipped.
+
+**Caching the sessions turned out to be the easy half.** Testing against a genuinely stopped API surfaced two gaps that no amount of reading the code would have:
+
+- **The exercise catalog wasn't cached**, so an offline session had set rows and no idea what exercise they belonged to, which measures to render, or what to call them. A log you can write but not read is not offline support.
+- **Workouts weren't cached either**, so the start screen said *"No Strength workouts yet"* and offered to create one — a lie told at the exact moment someone is standing in a gym about to train. Worse than an error, because it looks like data.
+
+Both are now cached, and the catalog is warmed from the Library tab rather than lazily on first offline use — the first offline session shouldn't be the first time anything gets cached.
+
+**The volume summary is now computed locally too**, a deliberate and narrow exception to "compute it once, on the server". A summary that blanks out the moment you lose signal is worse than one computed twice. The server's `Summarise` remains the authority, pinned by its own test; if the two ever disagree, that test wins.
+
+**Verified against a stopped API, not a mocked one.** With `dev:api` killed: a session started, the screen rendered with no error, the picker fell back to the cache, and the row was written locally. On restart, returning to Today triggered the sync and the session landed in Postgres — keeping its **real** `started_at` of 22:42:30, the moment it was created offline, not the moment it synced. That timestamp is the whole point of the exercise.
+
+**Honest remaining gaps.** Sync is **trigger-based, not event-driven**: it runs on screen focus, on the next edit, and when a session starts — there is no connectivity listener, so a phone that regains signal while sitting on a bench won't push until something touches it. A `NetInfo` subscription is the obvious next step and was deliberately not added here rather than bolted on untested. Also: a session started on *another* device still can't be opened offline (it has to be fetched once), suggestions are server-computed and so simply don't appear offline, and the workout cache covers `scope=mine` only. The web app is unchanged and stays online-only, which is correct under the platform rule — it is the planning and analysis surface, not the one used in a gym.
+
+
+## 2026-07-29 — Units, a settings screen, and remembering the right things
+
+**Everything is still stored in kilograms and metres. Units are a display and input transform, nothing more.** That is the whole design, and the reason the change stayed contained.
+
+Storing converted values would have made every historical row ambiguous the moment someone flipped the setting — was that 100 recorded as kg or lb? — and it would have silently broken the progression rule, which compares weights across sessions. So conversion happens at the last possible moment on the way out and the first possible moment on the way in. The settings screen says this in plain language, because a units toggle is exactly the control people expect to rewrite their history.
+
+`profiles.unit_system` holds it, so the preference is an **account** property, not a device one: someone who thinks in pounds thinks in pounds on the web app and on their next phone. Mobile caches it locally so the session screen renders correctly with no signal — showing kilograms to a pounds user purely because the phone is offline would be a worse failure than showing nothing.
+
+**One thing the units work forced a change in.** The progression suggestion's reason read *"add 5 kg"* — hardcoded metric, which would have leaked into a pounds interface. The button beside it already shows the target weight in the athlete's own units, so the delta didn't belong in the prose at all. The reason is now unit-free and there's a test asserting it contains neither "kg" nor "lb".
+
+**A gap found on the way:** `PATCH /v1/profile` 404s when no profile row exists, which is the right answer for the API and a dead end for a real person — you can reach Settings without ever having onboarded, and "choose your units" failing because of a missing row explains nothing. Both clients now create the profile and retry.
+
+**Verified end to end**, which for this feature means the round trip: switched to Imperial on the phone, confirmed `unit_system = 'imperial'` on the profile row, then typed **225** into a field labelled "Weight lb" and read **102.06 kg** back out of Postgres — which converts back to exactly 225.0 lb.
+
+**Separately, the Library now remembers the right half of its state.** The sport filter persists across visits; the search box clears. They're different kinds of thing: "I train strength" is a standing fact that shouldn't need re-stating, while "bench" is a question already answered — finding it still in the box next time is a small confusion every visit, because the list looks short for no visible reason. Filters live in a per-user local `prefs` table, keyed by user because a shared device must not hand one account's settings to the next person.
+
+**Still not done:** the workout editor and exercise library show weights in kilograms regardless — only the session surfaces are unit-aware so far. Distances convert but no screen currently takes a distance input in anger. And there's no per-exercise unit override, which some lifters want for machines marked in pounds.
+
+
+## 2026-07-29 — Units everywhere, and a per-exercise override
+
+Two follow-ups to the units work, both flagged in the previous entry rather than discovered later.
+
+**The workout surfaces are unit-aware now.** The template editor's weight field, the target summary on every workout card, and the start chooser all render and accept the athlete's own unit, converting back to kilograms before anything is stored — the same rule the session logger already followed, so a template written in pounds and performed in kilograms is still the same plan.
+
+The exercise library turned out to need nothing: it shows no weights at all. The earlier flag was overcautious, and saying so is cheaper than "fixing" something that was never broken.
+
+**Per-exercise overrides, because equipment doesn't care what you think in.** A lifter who works in kilograms still faces a leg press marked in pounds, and forcing the whole account to one system makes them convert in their head at exactly the moment they're trying to record a number. `exercise_unit_prefs (user_id, exercise_id, unit_system)` holds the exceptions, and the session screen gets a small `kg`/`lb` chip on each exercise header.
+
+The modelling decision worth keeping: **a missing row means "use the profile default"**, so there is no third state to reason about, and clearing an override is a `DELETE` rather than a sentinel value. The clients mirror that — flipping an exercise back to the account default removes the key rather than storing it, so the map only ever holds genuine exceptions.
+
+**A pre-existing leak fixed on the way past.** `profile.translatePgError` echoed `pgErr.Message` straight to the client on a check violation. Postgres includes the offending value and the constraint body in that text, and `CLAUDE.md` has forbidden exactly this since the API conventions were written — it had simply never been audited in this module. Now mapped by constraint name, like the session module does. The FK case was missing entirely, so an unknown exercise id would have surfaced as a 500; it's a 400 now, with a test.
+
+**Still open:** distances convert but no screen currently takes a distance input in anger, so that path is typed but unexercised. And the override is available on the session screen only — the workout editor uses the account default, which is arguably wrong for a template built around one specific machine.
+
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.
