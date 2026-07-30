@@ -1419,7 +1419,12 @@ argument for running reviewers fresh rather than continuing one that has
 already seen its own conclusions.
 
 The test written specifically to catch this class **passed over it**, twice
-over. It asserted "if a set beats the incumbent, the filter keeps it" with the
+over. Note where that test lives: `strength_test.go` on the branch
+`feature/strength-calc-tests`, which is **not merged**. Nothing described in
+the next two paragraphs is in this tree — go to that branch to find it, and
+the corrections below are still *pending* there rather than applied.
+
+It asserted "if a set beats the incumbent, the filter keeps it" with the
 incumbent taken as `heaviest` — a *weight*. What a winner actually has to beat
 is the best surviving *estimate*, and the two coincide only when the heaviest
 candidate is itself estimable, which is exactly what fails here. And the
@@ -1427,13 +1432,15 @@ fixture's deliberately-unestimable set used 25 reps, which `reps <= 12`
 excluded from the candidate pool entirely — so no fixture row was ever the
 thing that matters: a candidate that cannot be estimated.
 
-A second correction from the same review: the ulp reasoning in that test was
-defending a claim that does not apply. `$4` is inferred as `numeric`, not
+A second correction, **still to be applied on that branch**: the ulp reasoning
+in that test is defending a claim that does not apply. `$4` is inferred as `numeric`, not
 `float8` (the operand `weight_kg` is `NUMERIC(6,2)`), and pgx encodes the
 float as its shortest round-tripping decimal — so Postgres computes
 `42.5 × 1.44` in exact decimal arithmetic. The comment claiming the test
-models "exactly the comparison postgres.go makes" was wrong about the
-arithmetic, even though its conclusion happened to survive.
+models "exactly the comparison postgres.go makes" is wrong about the
+arithmetic, even though its conclusion happens to survive. Both that comment
+and the weight-as-incumbent property must be fixed before
+`feature/strength-calc-tests` merges, or they land as written.
 
 ## Open items / known gaps as of this entry
 

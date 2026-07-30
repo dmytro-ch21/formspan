@@ -1199,3 +1199,70 @@ func TestBestOneRMs_KeepsTheWinnerWhenTheHeaviestSetIsNotEstimable(t *testing.T)
 		t.Errorf("want 86.4 from the 12 × 60, got %.4f", best)
 	}
 }
+
+// The same poisoning through the RPE path, plus the two seams around it.
+//
+// The RIR case above is the one that was reported; this is the one that would
+// have been missed. Effort reaches the filter by two routes and they have to
+// agree, because the SQL expresses as COALESCE what Go expresses as a switch —
+// and a COALESCE that skipped a real zero, or an RPE conversion that rounded,
+// would each be invisible to a RIR-only fixture.
+func TestBestOneRMs_EffortPathsMatchTheEstimator(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	cleanup(t, pool, "ses-effort-paths")
+
+	sets := []Set{
+		// RPE 7 is 3 in reserve: 13 effective. Poisons the pool exactly as
+		// the RIR row does, by a different route.
+		{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(10), WeightKg: ptrF(100), RPE: ptrF(7), Completed: true},
+		// RPE 10 is nothing in reserve: 12 effective, estimates 86.4.
+		{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(12), WeightKg: ptrF(60), RPE: ptrF(10), Completed: true},
+		// RIR 0 *with* an RPE present. The classic COALESCE trap: zero is a
+		// real value, so RIR must win and this is 12 effective, not 17. If
+		// COALESCE skipped it, this row would be excluded and its estimate lost.
+		{ExerciseID: exBench, SetType: SetTypeWorking, Reps: ptrInt(12), WeightKg: ptrF(70), RIR: ptrInt(0), RPE: ptrF(5), Completed: true},
+		// Fractional RPE at the boundary: 8.5 is 1.5 reserve, so 12.5
+		// effective — over the ceiling. Rounding it away would wrongly admit
+		// this row and re-inflate the bar.
+		{ExerciseID: exBench, SetType: SetTypeWorking, Reps: ptrInt(11), WeightKg: ptrF(200), RPE: ptrF(8.5), Completed: true},
+	}
+	if _, err := repo.Create(ctx, strengthSession("ses-effort-paths", "user_effort_paths", sets)); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	got, err := repo.BestOneRMs(ctx, "user_effort_paths", []string{exSquat, exBench})
+	if err != nil {
+		t.Fatalf("best 1rms: %v", err)
+	}
+
+	// Squat: the RPE-path poisoner must not prune the 12 × 60.
+	squat, ok := got[exSquat]
+	if !ok {
+		t.Error("RPE path: no 1RM, the unestimable 10 @ RPE 7 pruned the winner")
+	} else if math.Abs(squat-86.4) > 0.01 {
+		t.Errorf("RPE path: want 86.4, got %.4f", squat)
+	}
+
+	// Bench: the 200kg row is 12.5 effective and must be excluded, so the
+	// answer comes from the RIR-0 row — 12 × 70 = 100.8.
+	bench, ok := got[exBench]
+	if !ok {
+		t.Fatal("bench: no 1RM — RIR 0 alongside an RPE was skipped by COALESCE, " +
+			"or the fractional RPE row was admitted and pruned it")
+	}
+	if math.Abs(bench-100.8) > 0.01 {
+		t.Errorf("bench: want 100.8 from the RIR-0 row, got %.4f", bench)
+	}
+
+	// And both must agree with the Go implementation over the same sets.
+	for id, want := range map[string][]Set{exSquat: sets[:2], exBench: sets[2:]} {
+		expected, _, hasGo := BestOneRM(want)
+		if !hasGo {
+			t.Fatalf("%s: fixture problem, Go found no estimate", id)
+		}
+		if math.Abs(got[id]-expected) > 0.01 {
+			t.Errorf("%s: SQL %.4f, Go %.4f", id, got[id], expected)
+		}
+	}
+}

@@ -893,6 +893,13 @@ func (r *PostgresRepository) BestOneRMs(
 			  -- 100kg x 10 @ 3 RIR alongside 60kg x 12 @ 0 RIR returned no
 			  -- record at all, where the real best is 86.4kg. Ordinary
 			  -- hypertrophy data, not an edge case.
+			  --
+			  -- The trailing 0 arm is deliberately kept although it is
+			  -- unreachable here: GREATEST/LEAST *ignore* NULLs in Postgres,
+			  -- so with no RPE the second arm already evaluates to 0 rather
+			  -- than to NULL. It stays because the expression is then correct
+			  -- under ordinary NULL propagation too — don't "simplify" this
+			  -- into a CASE without re-checking the no-effort row.
 			  AND ss.reps + COALESCE(
 			        ss.rir::numeric,
 			        GREATEST(0, 10 - LEAST(ss.rpe, 10)),
