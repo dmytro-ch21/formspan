@@ -27,6 +27,7 @@ import { fetchExercises, type Exercise } from '@/lib/exercises';
 import {
   cacheExercises,
   cachedExercises,
+  cachedWorkouts,
   deleteLocalSession,
   finishLocalSession,
   hydrateSession,
@@ -48,8 +49,10 @@ import {
   type Session,
   type SetType,
   type Suggestion,
+  type SuggestionCode,
   type Volume,
 } from '@/lib/sessions';
+import { getWorkout } from '@/lib/workouts';
 
 /**
  * Logging a session, on the phone, mid-workout.
@@ -77,6 +80,12 @@ export default function SessionScreen() {
   const [volume, setVolume] = useState<Volume | null>(null);
   const [catalog, setCatalog] = useState<Map<string, Exercise>>(new Map());
   const [suggestions, setSuggestions] = useState<Map<string, Suggestion>>(new Map());
+  // The workout's goal, resolved once. Immutable for the life of a session,
+  // and `load` re-runs on every focus.
+  const goalRef = useRef<{ workoutID: string | null; goal: string | null }>({
+    workoutID: null,
+    goal: null,
+  });
   const timerState = useRestTimer();
   // The switch in Settings writes this; reading the same hook is what makes
   // the two agree. An earlier version imported the hook and never called it,
@@ -176,12 +185,47 @@ export default function SessionScreen() {
         .catch(() => {});
 
       // Advice, not content — it simply doesn't appear offline.
-      fetchSuggestions(
-        getToken,
-        s.sets.map((x) => x.exercise_id),
-      )
-        .then(setSuggestions)
-        .catch(() => {});
+      //
+      // The workout's goal picks the rep range the rule progresses inside, so
+      // this is fetched even though it costs a request: without it a mobile
+      // session would advance on the general 5-8 range while web advanced the
+      // same session on 3-5, and the two clients would quietly disagree about
+      // what the athlete is doing.
+      (async () => {
+        let goal: string | null = null;
+        if (s.workout_id) {
+          // Resolved once per session, not once per focus. `load` runs under
+          // useFocusEffect, so it re-fires every time you come back from the
+          // exercise picker or the rest timer — and a workout's goal cannot
+          // change mid-session, so re-fetching it is pure waste.
+          //
+          // The cache is consulted first and is usually enough: the plan is
+          // already on the phone, and since schema v6 it carries the goal.
+          // That also makes this work with no signal at all, where the
+          // network path would silently fall back to the general rep range.
+          if (goalRef.current.workoutID === s.workout_id) {
+            goal = goalRef.current.goal;
+          } else {
+            const local = (await cachedWorkouts(userId, s.sport).catch(() => []))
+              .find((w) => w.id === s.workout_id);
+            // Advisory: a template deleted since must not stop the
+            // suggestions appearing, it just costs the narrower range.
+            goal =
+              local?.goal ??
+              (await getWorkout(getToken, s.workout_id)
+                .then((w) => w.goal)
+                .catch(() => null));
+            goalRef.current = { workoutID: s.workout_id, goal };
+          }
+        }
+        setSuggestions(
+          await fetchSuggestions(
+            getToken,
+            s.sets.map((x) => x.exercise_id),
+            goal,
+          ),
+        );
+      })().catch(() => {});
 
       // Drain the outbox once, on focus. Saves push only their own session
       // now, so without this a session logged with no signal would sit dirty
@@ -497,32 +541,72 @@ export default function SessionScreen() {
               ))}
               {(() => {
                 const hint = suggestions.get(g.exerciseID);
-                if (!hint || hint.last_weight_kg == null) return null;
-                const target = hint.suggested_weight_kg;
+                if (!hint || hint.code === 'not_applicable') return null;
+                const u = unitFor(g.exerciseID);
+                const phase = PROGRESSION_PHASE[hint.code] ?? UNKNOWN_PHASE;
+                // Defaulted rather than dereferenced: an app build newer than
+                // the deployed API is routine with Expo Go against a rolling
+                // backend, and a missing field should cost the pips, not throw
+                // inside the logging screen's render.
+                const range = hint.rep_range ?? { low: 0, high: 0 };
+                const w = hint.target_weight_kg;
+                const reps = hint.target_reps;
+                // Applied is judged on the first set: a session mid-flight
+                // legitimately has later sets still empty, and treating that
+                // as un-applied leaves the button offering what's already done.
+                // Only the sets still ahead of you. A completed set is a
+                // record of what happened — rewriting its reps to a target
+                // would put numbers in the log nobody performed, and then
+                // count them in the volume. `add_reps` is where most sessions
+                // land, so this control is visible exactly when the early sets
+                // hold fresh real data.
+                const pending = g.indices.filter(
+                  (i) => !sets[i]?.completed && sets[i]?.set_type !== 'warmup',
+                );
+                const first = sets[pending[0]];
+                const applied =
+                  pending.length > 0 &&
+                  (w == null || first?.weight_kg === w) &&
+                  (reps == null || first?.reps === reps);
                 const canApply =
-                  !finished && target != null && sets[g.indices[0]]?.weight_kg !== target;
+                  !finished && !applied && pending.length > 0 && (w != null || reps != null);
+                const target = [
+                  w != null ? formatWeight(w, u) : null,
+                  reps != null ? `× ${reps}` : null,
+                ]
+                  .filter(Boolean)
+                  .join(' ');
                 return (
                   <View style={styles.hintRow}>
                     <View style={styles.hintBody}>
-                      <Text style={styles.hintLast}>
-                        Last time: {hint.last_reps != null ? `${hint.last_reps} × ` : ''}
-                        {formatWeight(hint.last_weight_kg, unitFor(g.exerciseID))}
-                        {hint.last_rir != null ? ` · ${hint.last_rir} RIR` : ''}
-                        {hint.last_rir == null && hint.last_rpe != null ? ` · RPE ${hint.last_rpe}` : ''}
-                      </Text>
+                      <View style={styles.hintPhaseRow}>
+                        <View style={[styles.hintDot, { backgroundColor: phase.color }]} />
+                        <Text style={styles.hintPhase}>{phase.label}</Text>
+                        <RepRangePips
+                          low={range.low}
+                          high={range.high}
+                          reached={hint.last_min_reps}
+                          color={phase.color}
+                        />
+                      </View>
+                      {target !== '' && <Text style={styles.hintTarget}>{target}</Text>}
                       {/* The reason, verbatim from the API. It's the whole
                           point: a number you can argue with. */}
                       <Text style={styles.hintReason}>{hint.reason}</Text>
-                      {/* Read off the same set the suggestion reasons from,
-                          so the two can't tell different stories. Absent
-                          rather than zero when the set can't support one. */}
-                      {hint.estimated_1rm_kg != null && (
-                        <Text style={styles.hintOneRm}>
-                          Est. 1RM {formatEstimate(hint.estimated_1rm_kg, unitFor(g.exerciseID))}
-                          {hint.best_1rm_kg != null &&
-                            formatEstimate(hint.estimated_1rm_kg, unitFor(g.exerciseID)) ===
-                              formatEstimate(hint.best_1rm_kg, unitFor(g.exerciseID)) &&
-                            ' · your best'}
+                      {hint.last_weight_kg != null && (
+                        <Text style={styles.hintLast}>
+                          Last {hint.last_reps != null ? `${hint.last_reps} × ` : ''}
+                          {formatWeight(hint.last_weight_kg, u)}
+                          {hint.last_rir != null ? ` · ${hint.last_rir} RIR` : ''}
+                          {hint.last_rir == null && hint.last_rpe != null
+                            ? ` · RPE ${hint.last_rpe}`
+                            : ''}
+                          {/* Read off the same set the plan reasons from, so
+                              the two can't tell different stories. Absent
+                              rather than zero when there can't be one. */}
+                          {hint.estimated_1rm_kg != null
+                            ? ` · Est. 1RM ${formatEstimate(hint.estimated_1rm_kg, u)}`
+                            : ''}
                         </Text>
                       )}
                     </View>
@@ -531,20 +615,32 @@ export default function SessionScreen() {
                         onPress={() => {
                           commit(
                             sets.map((st, i) =>
-                              g.indices.includes(i) ? { ...st, weight_kg: target } : st,
+                              pending.includes(i)
+                                ? {
+                                    ...st,
+                                    ...(w != null ? { weight_kg: w } : {}),
+                                    ...(reps != null ? { reps } : {}),
+                                  }
+                                : st,
                             ),
                           );
                         }}
                         style={styles.hintApply}
                         accessibilityRole="button"
-                        accessibilityLabel={`Use ${formatWeight(target, unitFor(g.exerciseID))} for every set of ${
+                        // Built from the numbers, not from `target`: screen
+                        // readers announce "×" as "multiplication sign", which
+                        // turns a rep target into gibberish.
+                        accessibilityLabel={`Use ${[
+                          w != null ? formatWeight(w, u) : null,
+                          reps != null ? `for ${reps} reps` : null,
+                        ]
+                          .filter(Boolean)
+                          .join(' ')} on the remaining sets of ${
                           exercise?.name ?? 'this exercise'
                         }`}
                         testID={`apply-suggestion-${g.exerciseID}`}
                       >
-                        <Text style={styles.hintApplyText}>
-                          {formatWeight(target, unitFor(g.exerciseID))}
-                        </Text>
+                        <Text style={styles.hintApplyText}>Use</Text>
                       </Pressable>
                     )}
                   </View>
@@ -677,6 +773,101 @@ export default function SessionScreen() {
  * TestSummarise_CountsOnlyCompletedSets and TestSummarise_ExcludesWarmups.
  * If the two ever disagree, those tests are the authority.
  */
+/**
+ * The double-progression phase, as a label and a colour.
+ *
+ * Kept beside the screen that renders it rather than in a shared module: the
+ * rule itself lives only on the server, and this is presentation for one
+ * surface. Web has its own copy with its own wording, deliberately — mobile is
+ * read between sets and needs the shortest true label, not the same one.
+ *
+ * The label carries the meaning and the dot is redundant encoding, so nothing
+ * here depends on telling two colours apart.
+ */
+/**
+ * The fallback for a code this build doesn't know — a server deployed ahead of
+ * the app, which is routine with Expo Go. Nameless on purpose: labelling an
+ * unknown phase "HOLD" would state something confident and wrong right next to
+ * a `reason` saying otherwise, and the reason is the part that stays true.
+ */
+const UNKNOWN_PHASE = { label: '', color: vola.textMuted };
+
+const PROGRESSION_PHASE: Record<SuggestionCode, { label: string; color: string }> = {
+  add_load: { label: 'ADD LOAD', color: vola.lime },
+  add_reps: { label: 'ADD A REP', color: vola.green },
+  deload: { label: 'DELOAD', color: vola.warn },
+  hold: { label: 'HOLD', color: vola.textMuted },
+  repeat_hard: { label: 'REPEAT', color: vola.warn },
+  repeat_stale: { label: 'RESTART', color: vola.textMuted },
+  repeat_unknown_effort: { label: 'LOG EFFORT', color: vola.textMuted },
+  no_history: { label: 'FIRST TIME', color: vola.textMuted },
+  not_applicable: { label: '', color: vola.textMuted },
+};
+
+/**
+ * Where the lift sits in its rep range, as dots.
+ *
+ * `reached` is the *weakest* working set, which is what the rule gates on —
+ * a session opening at 10 and ending at 6 is exactly the case where load
+ * doesn't move, and filling to the best set would explain the wrong thing.
+ *
+ * Ranges wider than 8 (endurance work) would be an unreadable row of dots, so
+ * they degrade to "6-10"-style text. Nobody counts nine dots on a phone.
+ */
+function RepRangePips({
+  low,
+  high,
+  reached,
+  color,
+}: {
+  low: number;
+  high: number;
+  reached: number | null;
+  color: string;
+}) {
+  const span = high - low + 1;
+  if (span <= 0) return null;
+  if (span > 8) {
+    return (
+      // The digits alone announce as "4 slash 12 dash 20", so the label
+      // carries it and the glyphs are the visual shorthand.
+      <Text
+        style={styles.hintRangeText}
+        accessibilityLabel={
+          reached != null
+            ? `Reached ${reached} of a ${low} to ${high} rep range`
+            : `Rep range ${low} to ${high}`
+        }
+      >
+        {reached != null ? `${reached}/` : ''}
+        {low}-{high}
+      </Text>
+    );
+  }
+  return (
+    <View
+      style={styles.hintPips}
+      accessible
+      accessibilityLabel={
+        reached != null
+          ? `Reached ${reached} of a ${low} to ${high} rep range`
+          : `Rep range ${low} to ${high}`
+      }
+    >
+      {Array.from({ length: span }, (_, i) => {
+        const rep = low + i;
+        const filled = reached != null && rep <= reached;
+        return (
+          <View
+            key={rep}
+            style={[styles.hintPip, { backgroundColor: filled ? color : vola.line }]}
+          />
+        );
+      })}
+    </View>
+  );
+}
+
 function localVolume(sets: LoggedSet[]): Volume {
   const v: Volume = {
     working_sets: 0,
@@ -1060,7 +1251,7 @@ const styles = StyleSheet.create({
   chipTextActive: { color: vola.navy },
   hintRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 10,
     backgroundColor: vola.surfaceRaised,
     borderRadius: 12,
@@ -1068,8 +1259,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   hintBody: { flex: 1, gap: 2 },
-  hintLast: { fontSize: 13, fontWeight: '600' },
-  hintOneRm: { fontSize: 12, color: vola.lime, fontWeight: '600', marginTop: 2 },
+  hintPhaseRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  hintDot: { width: 7, height: 7, borderRadius: 999 },
+  hintPhase: { fontSize: 10, fontWeight: '800', letterSpacing: 0.6, color: vola.text },
+  hintPips: { flexDirection: 'row', alignItems: 'center', gap: 3, marginLeft: 2 },
+  hintPip: { width: 6, height: 6, borderRadius: 999 },
+  hintRangeText: { fontSize: 10, color: vola.textMuted, fontVariant: ['tabular-nums'] },
+  hintTarget: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: vola.text,
+    fontVariant: ['tabular-nums'],
+  },
+  hintLast: { fontSize: 12, color: vola.textMuted, fontVariant: ['tabular-nums'] },
   hintReason: { fontSize: 12, color: vola.textMuted },
   hintApply: {
     backgroundColor: vola.lime,

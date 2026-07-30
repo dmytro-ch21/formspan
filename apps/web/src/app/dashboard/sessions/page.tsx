@@ -196,7 +196,11 @@ export default function HistoryPage() {
         try {
           sets = applySuggestions(
             sets,
-            await fetchSuggestions(getToken, sets.map((x) => x.exercise_id)),
+            await fetchSuggestions(
+              getToken,
+              sets.map((x) => x.exercise_id),
+              workout?.goal ?? null,
+            ),
           );
         } catch {
           // A failed lookup must not stop the session starting.

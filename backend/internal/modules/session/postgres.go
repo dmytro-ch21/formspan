@@ -411,64 +411,132 @@ func (r *PostgresRepository) attachSets(ctx context.Context, sessions []Session,
 	return nil
 }
 
-// LastPerformances finds the top working set of the most recent session
-// containing each requested exercise.
+// RecentEfforts loads what the progression rule reads: for each requested
+// exercise, its last `progressionWindow` sessions with every working set in
+// them.
+//
+// Whole sessions rather than one top set per exercise, because the rule keys
+// off the *weakest* working set (a session falling 10→6 is not a 10-rep
+// session) and off whether a load has repeated across sessions (the stall
+// check). Neither question can be answered from a single row.
 //
 // One query for the whole list, not one per exercise — a session screen asks
-// about every movement in the workout at once, and the N+1 here would be
-// paid on the slowest screen in the app.
+// about every movement in the workout at once, and the N+1 here would be paid
+// on the slowest screen in the app.
 //
-// DISTINCT ON does the work: ordered by exercise, then most recent session,
-// then heaviest and most reps, so the first row per exercise is the top set
-// of the latest session. Warm-ups are excluded — progressing off a warm-up
-// would recommend a weight nobody worked at.
-func (r *PostgresRepository) LastPerformances(
+// DENSE_RANK, not ROW_NUMBER: the rank has to number *sessions*, so every set
+// belonging to one session must share a rank. ROW_NUMBER would number the set
+// rows and the window would then cut a session in half, silently — the sets
+// beyond the cut would vanish and the weakest-set gate would read the
+// remainder as the whole session, which is the exact failure the gate exists
+// to prevent.
+func (r *PostgresRepository) RecentEfforts(
 	ctx context.Context, userID string, exerciseIDs []string,
-) (map[string]Performance, error) {
-	out := map[string]Performance{}
+) (map[string]ProgressionInput, error) {
+	out := map[string]ProgressionInput{}
 	if len(exerciseIDs) == 0 {
 		return out, nil
 	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT DISTINCT ON (ss.exercise_id)
-		       ss.exercise_id, s.started_at, ss.reps, ss.weight_kg, ss.rir, ss.rpe,
-		       e.movement_pattern, e.load_type
-		FROM session_sets ss
-		JOIN sessions s ON s.id = ss.session_id
-		JOIN exercises e ON e.id = ss.exercise_id
-		WHERE s.user_id = $1
-		  -- Redundant against the join, and deliberately so: it lets the
-		  -- planner seek session_sets_user_exercise_idx first instead of
-		  -- walking every session this athlete has. Same result set, by the
-		  -- same invariant BestOneRMs relies on.
-		  AND ss.user_id = $1
-		  AND ss.exercise_id = ANY($2)
-		  AND ss.set_type <> 'warmup'
-		  AND ss.completed
-		  -- A set with nothing recorded isn't a performance. Without this, an
-		  -- exercise added to a session and then not actually done would be
-		  -- the "most recent" one and would erase real history behind it.
-		  AND (ss.reps IS NOT NULL OR ss.weight_kg IS NOT NULL
-		       OR ss.seconds IS NOT NULL OR ss.distance_m IS NOT NULL)
-		ORDER BY ss.exercise_id,
-		         s.started_at DESC,
-		         ss.weight_kg DESC NULLS LAST,
-		         ss.reps DESC NULLS LAST`, userID, exerciseIDs)
+		WITH ranked AS (
+			SELECT ss.exercise_id, ss.session_id, s.started_at, ss.position,
+			       ss.set_type, ss.reps, ss.weight_kg, ss.rir, ss.rpe,
+			       DENSE_RANK() OVER (
+			           PARTITION BY ss.exercise_id
+			           ORDER BY s.started_at DESC, ss.session_id
+			       ) AS session_rank
+			FROM session_sets ss
+			JOIN sessions s ON s.id = ss.session_id
+			WHERE s.user_id = $1
+			  -- Redundant against the join, and deliberately so: it lets the
+			  -- planner seek session_sets_user_exercise_idx instead of walking
+			  -- every session this athlete has. Provably equivalent, not just
+			  -- correlated — migration 000014's composite FK makes a set row
+			  -- naming a (session, owner) pair that isn't real impossible.
+			  AND ss.user_id = $1
+			  AND ss.exercise_id = ANY($2)
+			  AND `+workingSet+`
+			  -- A set with nothing recorded isn't a performance. Without this,
+			  -- an exercise added to a session and never actually done would
+			  -- rank as the most recent and hide real history behind it.
+			  AND (ss.reps IS NOT NULL OR ss.weight_kg IS NOT NULL
+			       OR ss.seconds IS NOT NULL OR ss.distance_m IS NOT NULL)
+		)
+		-- Driven from the *requested* ids rather than from history, which is
+		-- what makes "never logged" distinguishable from "not a weighted
+		-- lift". Reading the catalog off the set rows meant an exercise with
+		-- no history came back with an empty load_type, and the rule then
+		-- told a first-time squatter their barbell squat wasn't measured in
+		-- weight. LEFT JOIN, so every requested id gets at least one row.
+		--
+		-- The catalog join also belongs out here rather than inside the CTE:
+		-- movement_pattern and load_type are constant per exercise, and
+		-- joining per set row made that lookup ~95% of the query's buffer
+		-- traffic for values that never vary.
+		SELECT ex.id, e.movement_pattern, e.load_type,
+		       r.session_id, r.started_at, r.position, r.set_type,
+		       r.reps, r.weight_kg, r.rir, r.rpe
+		FROM unnest($2::text[]) AS ex(id)
+		JOIN exercises e ON e.id = ex.id
+		LEFT JOIN ranked r ON r.exercise_id = ex.id AND r.session_rank <= $3
+		ORDER BY ex.id, r.started_at DESC NULLS LAST, r.session_id, r.position`,
+		userID, exerciseIDs, progressionWindow)
 	if err != nil {
-		return nil, fmt.Errorf("session: last performances: %w", err)
+		return nil, fmt.Errorf("session: recent efforts: %w", err)
 	}
 	defer rows.Close()
 
 	for rows.Next() {
-		var p Performance
-		if err := rows.Scan(&p.ExerciseID, &p.PerformedAt, &p.Reps, &p.WeightKg,
-			&p.RIR, &p.RPE, &p.MovementPattern, &p.LoadType); err != nil {
-			return nil, fmt.Errorf("session: scan performance: %w", err)
+		var (
+			exerciseID        string
+			pattern, loadType string
+			// Null for a requested exercise with no history — the row the
+			// LEFT JOIN produces so the catalog fields still arrive.
+			sessionID *string
+			startedAt *time.Time
+			position  *int
+			setType   *SetType
+			s         Set
+		)
+		if err := rows.Scan(&exerciseID, &pattern, &loadType,
+			&sessionID, &startedAt, &position, &setType,
+			&s.Reps, &s.WeightKg, &s.RIR, &s.RPE); err != nil {
+			return nil, fmt.Errorf("session: scan recent effort: %w", err)
 		}
-		out[p.ExerciseID] = p
+
+		in := out[exerciseID]
+		in.ExerciseID = exerciseID
+		in.MovementPattern, in.LoadType = pattern, loadType
+		if sessionID == nil {
+			// Catalog-only row: the exercise exists, the history doesn't.
+			// Recent stays empty, which is exactly what "no history" means to
+			// the rule.
+			out[exerciseID] = in
+			continue
+		}
+
+		// Every set row here already passed the workingSet filter, and
+		// Progress re-checks Completed on the domain side. Setting it keeps
+		// the two consistent rather than relying on Go's zero value.
+		s.Completed = true
+		s.ExerciseID = exerciseID
+		s.Position, s.SetType = *position, *setType
+
+		// Rows arrive grouped and newest-first, so a new session ID is always
+		// a new bucket appended in the order the rule expects.
+		if n := len(in.Recent); n > 0 && in.Recent[n-1].SessionID == *sessionID {
+			in.Recent[n-1].Sets = append(in.Recent[n-1].Sets, s)
+		} else {
+			in.Recent = append(in.Recent, SessionEffort{
+				SessionID:   *sessionID,
+				PerformedAt: *startedAt,
+				Sets:        []Set{s},
+			})
+		}
+		out[exerciseID] = in
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("session: performance rows: %w", err)
+		return nil, fmt.Errorf("session: recent effort rows: %w", err)
 	}
 	return out, nil
 }
@@ -869,7 +937,7 @@ func (r *PostgresRepository) Records(
 	sort.Strings(queryIDs)
 
 	// Which records an exercise can hold comes from the catalog, not the
-	// caller — same as LastPerformances reads load_type for the progression
+	// caller — same as RecentEfforts reads load_type for the progression
 	// rule. A client that guessed would be one catalog change from being
 	// wrong.
 	loadTypes := map[string]string{}

@@ -74,7 +74,11 @@ export default function StartSessionScreen() {
         // last week's numbers yourself, which is the job the app exists to
         // do. Where the plan doesn't prescribe a weight, history fills it.
         try {
-          const suggestions = await fetchSuggestions(getToken, sets.map((x) => x.exercise_id));
+          const suggestions = await fetchSuggestions(
+            getToken,
+            sets.map((x) => x.exercise_id),
+            workout?.goal ?? null,
+          );
           sets = applySuggestions(sets, suggestions);
         } catch {
           // A failed lookup must not stop the session starting — an empty

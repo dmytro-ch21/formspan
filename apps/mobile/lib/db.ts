@@ -67,6 +67,7 @@ const CREATE_WORKOUT_CACHE = `
     user_id TEXT NOT NULL,
     sport TEXT NOT NULL,
     name TEXT NOT NULL,
+    goal TEXT,
     items_json TEXT NOT NULL DEFAULT '[]',
     cached_at TEXT NOT NULL
   );
@@ -96,7 +97,7 @@ const CREATE_EXERCISE_CACHE = `
  * "no such column" crash the guard was supposed to prevent. A version number
  * can't develop that blind spot.
  */
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
@@ -172,6 +173,22 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     await db.execAsync(
       `ALTER TABLE local_sessions ADD COLUMN remote INTEGER NOT NULL DEFAULT 0;`,
     );
+  }
+
+  if (current < 6) {
+    // v5 -> v6: cache the workout's goal alongside the plan.
+    //
+    // The goal picks the rep range the progression rule works inside, so a
+    // cached workout without one starts an offline session on the general 5-8
+    // range that the session screen — once it has signal — re-derives on 3-5.
+    // Nothing errors; the two just quietly disagree about what the athlete is
+    // doing, which is the failure this whole feature is built to avoid.
+    //
+    // Existing rows get NULL, which is exactly what they already reported, and
+    // they self-correct on the next `cacheWorkouts`. `IF NOT EXISTS` isn't
+    // available for ADD COLUMN in this SQLite build, but a device at v5 by
+    // definition lacks the column.
+    await db.execAsync(`ALTER TABLE workout_cache ADD COLUMN goal TEXT;`);
   }
 
   await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION};`);

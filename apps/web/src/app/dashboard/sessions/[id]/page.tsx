@@ -5,10 +5,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
 
+import ProgressionCard from "./ProgressionCard";
 import {
   deleteSession,
   emptySet,
   fetchSuggestions,
+  getWorkout,
   finishSession,
   getExerciseUnits,
   getSession,
@@ -33,9 +35,7 @@ import {
 } from "@/lib/api";
 import {
   distanceInputUnit,
-  formatEstimate,
   formatVolume,
-  formatWeight,
   fromDisplayDistance,
   fromDisplayWeight,
   toDisplayDistance,
@@ -124,13 +124,27 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       setError(null);
       // Non-blocking: the session must render even if the history lookup
       // fails, since it's advice rather than content.
-      fetchSuggestions(
-        getToken,
-        s.sets.map((x) => x.exercise_id),
-        controller.signal,
-      )
-        .then(setSuggestions)
-        .catch(() => {});
+      // The rep range the rule progresses inside comes from the workout's
+      // goal, so a strength block advances on 3-5 and a hypertrophy block on
+      // 6-10. A freeform session has no template and falls back to the
+      // general range, which is the correct answer rather than a gap.
+      (async () => {
+        let goal: string | null = null;
+        if (s.workout_id) {
+          // Advisory: a template that has since been deleted must not stop
+          // the session rendering, it just costs the narrower rep range.
+          goal = await getWorkout(getToken, s.workout_id, controller.signal)
+            .then((w) => w.goal)
+            .catch(() => null);
+        }
+        const found = await fetchSuggestions(
+          getToken,
+          s.sets.map((x) => x.exercise_id),
+          goal,
+          controller.signal,
+        );
+        setSuggestions(found);
+      })().catch(() => {});
     } catch (err) {
       if (controller.signal.aborted) return;
       setError(err instanceof Error ? err.message : String(err));
@@ -256,15 +270,38 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     [commit, sets],
   );
 
-  /** Applies a recommended weight to every set of one exercise at once. */
+  /**
+   * Applies a recommendation to the sets of one exercise that are still ahead
+   * of you.
+   *
+   * Both halves together: under double progression the rep target is half the
+   * recommendation, so applying only the weight would silently drop the part
+   * that moves in most sessions.
+   *
+   * **Never touches a completed set or a warm-up.** A set already ticked off
+   * is a record of what happened, and rewriting its reps to a target would
+   * put numbers in the log that nobody performed — then count them in the
+   * volume. That matters far more now than it did when only weight moved:
+   * `add_reps` is where most sessions land, so the control is visible exactly
+   * when the early sets hold fresh real data.
+   */
   const applySuggestion = useCallback(
-    (indices: number[], weight: number) => {
-      const next = sets.map((s, i) => (indices.includes(i) ? { ...s, weight_kg: weight } : s));
+    (indices: number[], weightKg: number | null, reps: number | null) => {
+      const next = sets.map((s, i) =>
+        indices.includes(i)
+          ? {
+              ...s,
+              ...(weightKg != null ? { weight_kg: weightKg } : {}),
+              ...(reps != null ? { reps } : {}),
+            }
+          : s,
+      );
       setSets(next);
       commit(next);
     },
     [commit, sets],
   );
+
 
   function addExercise(e: Exercise) {
     setCatalog((c) => (c.has(e.id) ? c : new Map(c).set(e.id, e)));
@@ -486,7 +523,7 @@ function ExerciseBlock({
   onSwap: (exerciseID: string) => void;
   swapping: boolean;
   suggestion: Suggestion | undefined;
-  onApplySuggestion: (indices: number[], weight: number) => void;
+  onApplySuggestion: (indices: number[], weightKg: number | null, reps: number | null) => void;
   units: UnitSystem;
   onToggleUnit: (exerciseID: string) => void;
 }) {
@@ -494,6 +531,11 @@ function ExerciseBlock({
   // Data-driven from the catalog's load_type, so a plank asks for seconds
   // and a squat asks for weight without this component knowing either.
   const measures: Measure[] = exercise ? measuresFor(exercise.load_type) : ["reps"];
+  // The sets a recommendation may write to: still to come, and not warm-ups.
+  // A completed set is a record of what happened, not a slot to fill.
+  const pending = indices.filter(
+    (i) => !sets[i]?.completed && sets[i]?.set_type !== "warmup",
+  );
 
   return (
     <div className="flex flex-col gap-2">
@@ -541,45 +583,30 @@ function ExerciseBlock({
         )}
       </div>
 
-      {suggestion && suggestion.last_weight_kg != null && (
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-card border border-line bg-surface-raised px-4 py-2.5">
-          <p className="min-w-0 flex-1 text-sm">
-            <span className="font-medium">
-              Last time: {suggestion.last_reps != null ? `${suggestion.last_reps} × ` : ""}
-              {formatWeight(suggestion.last_weight_kg, units)}
-              {suggestion.last_rir != null
-                ? ` · ${suggestion.last_rir} RIR`
-                : suggestion.last_rpe != null
-                  ? ` · RPE ${suggestion.last_rpe}`
-                  : ""}
-            </span>{" "}
-            {/* The reason verbatim from the API — the point is a number you
-                can argue with, not one you have to trust. */}
-            <span className="text-text-muted">{suggestion.reason}</span>{" "}
-            {/* Read off the same set the suggestion reasons from, so the two
-                can't tell different stories. */}
-            {suggestion.estimated_1rm_kg != null && (
-              <span className="whitespace-nowrap font-medium text-lime">
-                Est. 1RM {formatEstimate(suggestion.estimated_1rm_kg, units)}
-                {suggestion.best_1rm_kg != null &&
-                  formatEstimate(suggestion.estimated_1rm_kg, units) ===
-                    formatEstimate(suggestion.best_1rm_kg, units) &&
-                  " · your best"}
-              </span>
-            )}
-          </p>
-          {editable &&
-            suggestion.suggested_weight_kg != null &&
-            sets[indices[0]]?.weight_kg !== suggestion.suggested_weight_kg && (
-              <button
-                type="button"
-                onClick={() => onApplySuggestion(indices, suggestion.suggested_weight_kg!)}
-                className="shrink-0 rounded-pill bg-accent-fill px-4 py-1.5 text-sm font-bold text-accent-on-fill transition hover:brightness-110"
-              >
-                Use {formatWeight(suggestion.suggested_weight_kg, units)}
-              </button>
-            )}
-        </div>
+      {/* The sets a recommendation may write to: still to come, and not
+          warm-ups. A completed set is a record of what happened. */}
+      {suggestion && (
+        <ProgressionCard
+          suggestion={suggestion}
+          exerciseName={exercise?.name ?? "this exercise"}
+          units={units}
+          // Nothing left to write to — every set of this exercise is done or a
+          // warm-up — so there is no action to offer.
+          editable={editable && pending.length > 0}
+          // "Applied" is judged against the first set the control would
+          // actually write to, not the first set in the group: a session
+          // mid-flight legitimately has completed sets ahead of it, and
+          // judging on those would leave the button offering to redo what's
+          // already been done.
+          applied={
+            pending.length > 0 &&
+            (suggestion.target_weight_kg == null ||
+              sets[pending[0]]?.weight_kg === suggestion.target_weight_kg) &&
+            (suggestion.target_reps == null ||
+              sets[pending[0]]?.reps === suggestion.target_reps)
+          }
+          onApply={(weightKg, reps) => onApplySuggestion(pending, weightKg, reps)}
+        />
       )}
 
       <div className="overflow-x-auto rounded-card border border-line bg-surface">
@@ -684,7 +711,7 @@ function SetRow({
         {/* Web could create sets but never mark one done, so every
             web-logged session reported zero volume and dropped out of the
             progression history entirely — completed sets are the only ones
-            Summarise and LastPerformances count. */}
+            Summarise and RecentEfforts count. */}
         <input
           type="checkbox"
           checked={set.completed}

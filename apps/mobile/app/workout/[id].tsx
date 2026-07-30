@@ -126,11 +126,15 @@ export default function WorkoutDetailScreen() {
     try {
       let sets = setsFromWorkout(items);
       try {
-        // Where the plan is silent on weight, last time's is the sensible
+        // Where the plan is silent, last time's numbers are the sensible
         // starting point. A failed lookup mustn't block the session.
+        //
+        // The goal goes with it: it decides the rep range the recommendation
+        // is expressed in, so omitting it here would pre-fill a session on the
+        // general 5-8 range that the session screen then re-derives on 3-5.
         sets = applySuggestions(
           sets,
-          await fetchSuggestions(getToken, sets.map((x) => x.exercise_id)),
+          await fetchSuggestions(getToken, sets.map((x) => x.exercise_id), workout.goal),
         );
       } catch {
         /* start anyway */

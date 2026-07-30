@@ -309,7 +309,16 @@ func (h *Handler) Suggestions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	last, err := h.repo.LastPerformances(r.Context(), claims.UserID, ids)
+	// The rep range is a property of the session's goal, not the exercise —
+	// the same squat is a 3-rep lift in a strength block and a 10-rep lift in
+	// a hypertrophy one. The client knows which workout it's starting, so it
+	// passes the goal rather than the server re-deriving it. Unknown or absent
+	// values fall through to the general range, which is why this isn't
+	// validated: a goal the server doesn't recognise is not a bad request, it
+	// just doesn't narrow anything.
+	goal := strings.TrimSpace(r.URL.Query().Get("goal"))
+
+	efforts, err := h.repo.RecentEfforts(r.Context(), claims.UserID, ids)
 	if err != nil {
 		writeErr(w, r, err)
 		return
@@ -324,17 +333,17 @@ func (h *Handler) Suggestions(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	suggestions := make([]Suggestion, 0, len(ids))
 	for _, id := range ids {
-		var p *Performance
-		if v, ok := last[id]; ok {
-			p = &v
-		}
-		s := Suggest(p, now)
-		// Suggest can't know the id when there's no history to carry it.
-		s.ExerciseID = id
-		// Estimated off the last *working* set, effort included — the same
-		// set the suggestion itself reasons from, so the two agree.
-		if p != nil && p.Reps != nil && p.WeightKg != nil {
-			if est, ok := EstimateOneRM(*p.Reps, *p.WeightKg, p.RIR, p.RPE); ok {
+		// Zero value is the "never logged" case, and Progress reads it as
+		// such — no history, so no claim.
+		in := efforts[id]
+		in.ExerciseID, in.Goal = id, goal
+
+		s := Suggestion{ExerciseID: id, Plan: Progress(in, now)}
+
+		// Estimated off the same top set the plan reasons from, so the two
+		// always agree about which set they're describing.
+		if s.LastWeightKg != nil && s.LastReps != nil {
+			if est, ok := EstimateOneRM(*s.LastReps, *s.LastWeightKg, s.LastRIR, s.LastRPE); ok {
 				s.EstimatedOneRMKg = &est
 			}
 		}

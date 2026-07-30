@@ -205,36 +205,69 @@ export type Session = {
 };
 
 
+/**
+ * The outcomes of the progression rule.
+ *
+ * The first four are the double-progression cycle proper; the rest are the
+ * cases where the rule declines to advance and says why. Branch on these —
+ * never pattern-match `reason`, which is prose and may change.
+ */
 export type SuggestionCode =
+  /** Same load, one more rep — the first half of double progression. */
+  | "add_reps"
+  /** Top of the rep range hit on every set: load moves, reps reset. */
+  | "add_load"
+  /** Stalled three sessions at one load: back off ~10% and re-approach. */
+  | "deload"
+  /** The range isn't finished at this load yet. Repeat it. */
+  | "hold"
   | "no_history"
   | "not_applicable"
-  | "increase"
   | "repeat_hard"
   | "repeat_unknown_effort"
-  | "repeat_stale"
-  | "repeat_consolidate";
+  | "repeat_stale";
+
+/** The rep window a lift progresses inside before load moves. */
+export type RepRange = { low: number; high: number };
 
 /**
- * What to load today, derived from what you actually did last time.
+ * What to load today and for how many reps, derived from what you actually
+ * did last time.
  *
  * The evidence travels with the recommendation on purpose — `last_*` is
  * always populated when there is history, even when the answer is "repeat
  * it". A number you can check beats a number you have to trust, and it is
  * the difference between a recommendation and an oracle.
  *
- * Branch on `code`; never pattern-match `reason`, which is prose.
+ * `last_weight_kg`, `last_reps`, `last_rir` and `last_rpe` all describe the
+ * same single top set and are only meaningful together. `last_min_reps` /
+ * `last_max_reps` are the spread across every working set, which belongs to
+ * the session rather than to any one set.
  */
 export type Suggestion = {
   exercise_id: string;
-  last_performed_at: string | null;
-  last_reps: number | null;
-  last_weight_kg: number | null;
-  last_rir: number | null;
-  last_rpe: number | null;
-  suggested_weight_kg: number | null;
   code: SuggestionCode;
   reason: string;
-  /** What the last set implies you could lift once, effort included. */
+
+  /** The prescription. Null when the exercise isn't loaded in weight. */
+  target_weight_kg: number | null;
+  target_reps: number | null;
+  rep_range: RepRange;
+
+  last_performed_at: string | null;
+  last_weight_kg: number | null;
+  last_reps: number | null;
+  last_rir: number | null;
+  last_rpe: number | null;
+  last_min_reps: number | null;
+  last_max_reps: number | null;
+  working_sets: number;
+  /** Consecutive recent sessions at this same load — the stall signal. */
+  sessions_at_load: number;
+  /** Every working set finished at or above the target reserve. */
+  hit_target_effort: boolean;
+
+  /** What the last top set implies you could lift once, effort included. */
   estimated_1rm_kg: number | null;
   /** The highest estimate anywhere in your history for this exercise. */
   best_1rm_kg: number | null;
@@ -513,16 +546,25 @@ export async function deleteWorkout(getToken: Token, id: string): Promise<void> 
   await request<void>(getToken, `/workouts/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
+/**
+ * `goal` picks the rep range the rule progresses inside — the same squat is a
+ * 3-rep lift in a strength block and a 10-rep lift in a hypertrophy one. Pass
+ * the goal of the workout being performed; omitting it falls back to a general
+ * 5–8 range rather than failing.
+ */
 export async function fetchSuggestions(
   getToken: Token,
   exerciseIDs: string[],
+  goal?: string | null,
   signal?: AbortSignal,
 ): Promise<Map<string, Suggestion>> {
   const unique = [...new Set(exerciseIDs)].filter(Boolean);
   if (unique.length === 0) return new Map();
+  const q = new URLSearchParams({ exercise_ids: unique.join(",") });
+  if (goal) q.set("goal", goal);
   const b = await request<{ suggestions: Suggestion[] }>(
     getToken,
-    `/sessions/suggestions?exercise_ids=${encodeURIComponent(unique.join(","))}`,
+    `/sessions/suggestions?${q}`,
     {},
     signal,
   );
@@ -530,19 +572,29 @@ export async function fetchSuggestions(
 }
 
 /**
- * Fills in the weight for sets that don't already carry one. A template's own
- * prescription always wins — it's an instruction, not a guess. Reps are left
- * alone: the plan owns those.
+ * Fills in the weight and reps for sets that don't already carry them. A
+ * template's own prescription always wins — it's an instruction, not a guess.
+ *
+ * Reps are filled now where they weren't before: under double progression the
+ * rep target *is* half the recommendation, and a session that pre-filled the
+ * weight but left reps blank would silently drop the half that moves most
+ * often.
  */
 export function applySuggestions(
   sets: LoggedSet[],
   suggestions: Map<string, Suggestion>,
 ): LoggedSet[] {
   return sets.map((s) => {
-    if (s.weight_kg != null) return s;
     const hit = suggestions.get(s.exercise_id);
-    const weight = hit?.suggested_weight_kg ?? null;
-    return weight == null ? s : { ...s, weight_kg: weight };
+    if (!hit) return s;
+    let next = s;
+    if (next.weight_kg == null && hit.target_weight_kg != null) {
+      next = { ...next, weight_kg: hit.target_weight_kg };
+    }
+    if (next.reps == null && hit.target_reps != null) {
+      next = { ...next, reps: hit.target_reps };
+    }
+    return next;
   });
 }
 

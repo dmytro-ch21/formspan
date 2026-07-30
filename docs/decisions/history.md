@@ -1199,6 +1199,190 @@ skips in silence — a table test over the catalog's own CHECK values now fails
 at CI the moment a load type is added without a record kind.
 
 
+## 2026-07-30 — Progression rules: double progression, and deleting the old one
+
+There was already a progression rule (`Suggest`), and it wasn't one. It looked
+at a single top set and added weight whenever two reps were left in reserve.
+That reads as progression but isn't: it moves load off one good set regardless
+of whether the session's other sets held up, it has no concept of a rep target,
+and its only answer to a plateau is "repeat" — forever, with no branch that
+ever says anything else.
+
+Replaced with the scheme the strength literature actually converges on for
+non-novice lifters, deliberately the *basic* one:
+
+1. **Work inside a rep range**, chosen by the workout's `goal` rather than by
+   the exercise — the same squat is a 3-rep lift in a powerlifting block and a
+   10-rep lift in a hypertrophy one. Powerlifting 3–5, hypertrophy 6–10,
+   endurance 12–20, general 5–8.
+2. **Add reps first.** Same load, one more rep, until every working set reaches
+   the top of the range.
+3. **Then add load** and drop back to the bottom. Load and reps advance
+   alternately — hence "double progression".
+4. **Effort gates both halves.** A set taken to failure is not evidence of
+   room, so RIR/RPE decides whether a rep is even available (2 RIR is the
+   target reserve). This is finally the thing that justifies collecting effort
+   at all.
+5. **A stall deloads.** Three consecutive sessions at one load without gaining
+   a rep is a plateau; the answer is ~10% off and a rebuild, not more grinding.
+
+Two smaller corrections that matter more than they look. The gate is the
+**weakest** working set, not the top one — a session opening at 10 and
+collapsing to 6 is not a 10-rep session, and the old rule would have added
+weight to it. And the increment is now capped at **5% of what's on the bar**:
+2.5 kg is 1.8% of a 140 kg bench and 6% of a 40 kg one, and treating those as
+the same number is how a beginner gets pushed into a stall by an increase that
+looks modest written down.
+
+**The old rule was deleted, not left beside the new one.** `Suggest`,
+`Performance` and `LastPerformances` are gone. Two rules that can disagree is
+the exact drift this codebase has been bitten by twice (the working-set
+definition, both times), and "we'll keep the old one for compatibility" is how
+you get there. There is one progression rule, it lives on the server, and no
+client has a copy.
+
+### What the clients got
+
+Web is the analytical surface, so it gets the whole reasoning: a
+`ProgressionCard` with the phase, the prescription as `weight × reps`, the
+reason verbatim, the evidence, and a **rep-range track** — pips filling toward
+the top of the range and resetting one weight higher. Double progression is a
+two-phase cycle that no sentence explains well; five dots explain it at a
+glance, and they make "why am I not adding weight yet" answerable without
+reading anything.
+
+Mobile gets the same recommendation compressed to a card read between sets:
+phase, pips, target, one line of reason, one line of evidence. Same rule, same
+numbers, less prose — the standing mobile-vs-web split.
+
+`applySuggestions` now fills **reps as well as weight**. It deliberately didn't
+before, because the old rule only moved load and inventing reps would have
+overwritten the programme. Under double progression the rep target *is* half
+the recommendation, so filling only the weight silently drops the half that
+moves in most sessions.
+
+The `goal` had to be threaded through every "start a session" path on both
+clients. Missing one wouldn't have failed anything — it would have pre-filled a
+session on the general 5–8 range that the session screen then re-derived on
+3–5, and the two would have quietly disagreed about what the athlete was doing.
+
+### Verification
+
+The rule is a pure function and every branch is pinned, but the useful part was
+**mutation testing** rather than the tests passing. Eight bugs were reinstated
+deliberately, one at a time; six were caught, and **two escaped**:
+
+- Removing the effort gate from `readyForLoad` — nothing failed, because no
+  test covered "top of the range at 1 RIR", the case that is neither failure
+  nor sufficient reserve.
+- Changing the stall counter's `break` to `continue` — nothing failed, because
+  no test covered a lifter who deloaded and came back to the same weight, whom
+  a non-consecutive count would deload again immediately.
+
+Both gaps are now covered and both mutations are caught. The same method found
+the `ROW_NUMBER`-vs-`DENSE_RANK` bug in `RecentEfforts`: the window has to
+number *sessions*, and numbering set rows instead cuts a session in half — the
+surviving sets then look like the whole session to the weakest-set gate, which
+is precisely the failure that gate exists to prevent. Verified by swapping the
+function and watching the test report 1 session where it wanted 3.
+
+### Two bugs review caught that testing didn't
+
+Both were shipped-quality by every check I had: green suite, green mutation
+tests, green integration run. Both were found by the `backend-reviewer`
+reading for intent.
+
+**The deload spiral.** `sessionsAtLoad` counted consecutive sessions at a
+weight, and the deload fired at three. But climbing 6 → 7 → 8 reps at a fixed
+weight *is* double progression — it is the entire first phase of the cycle. So
+a lifter doing exactly what the app prescribed got deloaded on their third
+session. And because a deload takes 10% off while the following `add_load`
+gives about 5% back, the prescribed load ratcheted **downward** roughly 5%
+every four sessions, forever:
+
+```
+session 1: did 100.00 x 6 -> add_reps  next 100.00 x 7
+session 2: did 100.00 x 7 -> add_reps  next 100.00 x 8
+session 3: did 100.00 x 8 -> deload    next  90.00 x 10   <-- gained a rep every session
+session 4: did  90.00 x 10 -> add_load next  92.50 x 6
+session 7: did  92.50 x 8 -> deload    next  83.75 x 10
+```
+
+The reason string shipped alongside it said "Three sessions at this weight
+without gaining a rep" while `last_min_reps` in the same response said 8 on a
+history of 6 → 7 → 8 — the module's own stated property (if the reason is
+wrong, the data behind it is in the same response) catching the bug, with
+nobody reading it. Fixed by ending the stalled run when a rep was gained.
+Same lifter now: 100×6→7→8→9→10 → 102.5×6. Pinned by
+`TestProgress_ObedientLifterNeverRegresses`, which asserts the prescribed load
+never falls, and verified by disabling the check and watching it fail.
+
+Worth naming why my own tests missed it: `TestProgress_StallTriggersDeload`
+used a flat 7/7/7, and `TestProgress_ProgressingLiftIsNotAStall` used a lift
+already at the top of the range, which short-circuits the stall check
+entirely. Neither covered *climbing inside* the range — where most sessions
+actually live. Mutation testing doesn't help here either, because the bug
+wasn't a wrong line; it was a missing concept.
+
+**`no_history` was unreachable.** `RecentEfforts` learned an exercise's
+`load_type` from the joined catalog row of a set that existed, so an exercise
+with no history came back with an empty load type — and the `not_applicable`
+guard runs before the `no_history` one. Every exercise in a new user's first
+session was told "Not measured in weight — progress this by time or distance
+instead", about a barbell squat. The first-timer text was dead code in
+production.
+
+The test that should have caught it constructed its input with a fixture that
+hardcoded `LoadType: "weight_reps"` — an input the handler can never produce.
+Fixed by driving the query from `unnest($2::text[]) JOIN exercises` so every
+requested id returns its catalog row whether or not history exists, with the
+sets `LEFT JOIN`ed on. That also moved the catalog join out of the window CTE,
+where it had been evaluated per set row and accounted for most of the query's
+buffer traffic for values that never vary.
+
+The security test had to be re-aimed rather than deleted: every requested id
+now yields a map entry, so "did another user's history leak" is no longer "is
+the key present" but "did any of their sets come with it". The assertion now
+checks `len(Recent) == 0`.
+
+Three smaller review findings fixed alongside: `target_reps` could land
+outside `rep_range` on the four "repeat what you did" branches (the range is
+the *current* workout's goal, the history may be from a different block);
+`sessions_at_load` and `hit_target_effort` shipped as 0/false on the two early
+returns, describing the branch rather than the history; and an unusable newest
+session (weight logged, reps not) erased a real session behind it, because
+only `Recent[0]` was read.
+
+### The query, measured rather than assumed
+
+`RecentEfforts` is the new query and the one that will hurt first at scale, so
+it was measured against realistic data rather than the dev database's 149
+sessions — which is small enough that Postgres seq-scans it and the plan says
+nothing. Seeded 300 athletes × 120 sessions × 21 exercises into the *test*
+database (2.4M `session_sets` rows) and ran `EXPLAIN (ANALYZE, BUFFERS)`:
+
+- **30 ms** for a 21-exercise workout against 120 sessions of history.
+- Driven by `session_sets_user_exercise_idx` with **both** columns in the
+  `Index Cond` (`user_id = … AND exercise_id = ANY(…)`). No sequential scan.
+- Postgres pushes the window's `session_rank <= 3` down as a `Run Condition`,
+  so it stops ranking early.
+
+The cost scales with **one athlete's own history**, not with table size, which
+is the property that matters — but it does grow linearly in that history,
+because `DENSE_RANK` has to rank every session to find the most recent three.
+A five-year athlete would be a few times slower. Not optimised now: there's no
+correct date bound to apply, since a lift untouched for two years still needs
+its last session to report `repeat_stale` rather than `no_history`. Recorded
+here so the next person doesn't have to rediscover the shape.
+
+One bug was caught in my own wiring rather than by a test: `last_max_reps` is
+the session's best rep count while `last_weight_kg` is the *top set's* load,
+and I fed both to `EstimateOneRM` — modelling a set that never happened (10
+reps at the weight only done for 5) and inflating the estimate by exactly that
+fiction. The fields are now named for what they hold, `last_reps` carries the
+top set's own reps, and a test pins that the top-set evidence describes one
+real set.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

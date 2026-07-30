@@ -438,7 +438,7 @@ Domain: a training session that **actually happened**, and the sets in it — re
 - **`completed` must survive the Postgres round trip.** It was written by `insertSets` and never selected back by `attachSets`, so every response reported zero volume and the mobile sync cycle would have written `false` over real flags. Assert it in `TestCreateAndGet_RecordsEveryMeasure` — adding it to that test's *fixtures* without an assertion is what let the bug ship green.
 - **Migration check:** existing sets backfill to completed, so historical sessions keep their volume. Only new sets default to not-done.
 - **There are five copies of the working-volume rule.** `Summarise` (Go), `localVolume` (mobile session), `workingSets` (mobile Today), the web history list's `working` filter, and the web session header. Changing the rule means changing all five — four of them drifted the first time, and the symptom is two screens reporting different numbers for the same session.
-- **Every client that can create a set must be able to mark it completed.** The web logger couldn't, so web-logged sessions reported zero volume and vanished from `LastPerformances` entirely.
+- **Every client that can create a set must be able to mark it completed.** The web logger couldn't, so web-logged sessions reported zero volume and vanished from the progression history entirely (then `LastPerformances`, now `RecentEfforts`).
 - **The client's `localVolume` must match the server's `Summarise` exactly.** It's a deliberate duplicate so the header works offline, and it has already drifted once — the completion rule went into Go only, and a live session showed the plan's full tonnage against unticked sets.
 
 **What the header shows**
@@ -528,40 +528,70 @@ Domain: a training session that **actually happened**, and the sets in it — re
 
 ---
 
-## Progressive-overload suggestions (`GET /v1/sessions/suggestions`, both clients)
+## Progression rules — double progression (`GET /v1/sessions/suggestions`, both clients)
 
-Domain: what to load today for a given exercise, computed from the caller's own history. The first thing in the product that advises rather than records, so it follows the standing rule — deterministic, and it always states its evidence.
+Domain: what to load today and for how many reps, computed from the caller's own last few sessions. The thing in the product that advises rather than records, so it follows the standing rule — deterministic, and it always states its evidence.
 
-**The rule, branch by branch** (all covered by pure-function tests, no database needed)
-- 2+ RIR, or RPE ≤ 8 → `increase` by the movement's increment.
-- RIR 1, or RPE strictly between 8 and 9.5 → `repeat_consolidate`.
-- RIR 0, or RPE ≥ 9.5 → `repeat_hard`.
-- No RIR **and** no RPE → `repeat_unknown_effort`. **It must never guess** — the absence of effort data is not evidence that a set was easy.
-- Last performed over 28 days ago → `repeat_stale`, **and this outranks effort**: a four-month-old easy set describes someone who has since detrained. Boundary tested at 27 and 29 days.
-- Not `weight_reps`, or no weight recorded → `not_applicable`, with no suggested weight.
-- Never logged → `no_history`, with no suggested weight.
+Replaced the earlier single-set rule (`increase`/`repeat_consolidate`, now gone). **There is only one progression rule and it lives on the server** — no client has a copy, deliberately, because the working-set definition has drifted between copies twice before.
 
-**Increments scale with the movement**: 5 kg for squat/hinge/olympic, 2.5 kg for push/pull/lunge, 1.25 kg for isolation, core, rotation and anything unmapped.
+**The cycle** (all covered by pure-function tests, no database needed)
+- Reserve left but the range unfinished → `add_reps`: same load, one more rep. Where most sessions land.
+- Every working set at the top of the range **with reserve to spare** → `add_load`: add the movement's increment and reset reps to the bottom of the range.
+- Three consecutive sessions at one load **with no rep gained** → `deload`: ~10% off, rebuild from the top of the range.
+- **Climbing reps at a fixed weight is not a stall — it is the scheme working.** A lifter going 6 → 7 → 8 in a 6–10 range must never be deloaded. Counting "sessions at this weight" without checking reps deloaded them on session 3, and since a deload takes 10% off while the next `add_load` returns ~5%, the prescribed load ratcheted **downward** ~5% every four sessions forever. The regression test is an 8-session simulation of an athlete who does exactly what they're told, asserting the prescribed load never falls.
+- At least one set short of the target reserve → `hold`.
 
-**Which set the advice comes from**
-- The **top working set of the most recent session** containing the exercise — heaviest, then most reps.
+**The gates, each independently testable**
+- **The weakest set gates load, not the top one.** A session running 10 → 8 → 6 must never earn a load increase; it builds from the 6. The old top-set-only rule would have added weight to it.
+- **Effort gates independently of reps.** Top of the range at 1 RIR is `hold`, not `add_load` — reaching the range by grinding is not the same lift. (This branch escaped the first round of mutation testing; it is covered now.)
+- RIR 0, or RPE ≥ 9.5 → `repeat_hard`, whatever the reps said.
+- No RIR **and** no RPE anywhere in the session → `repeat_unknown_effort`. **It must never guess** — absent effort data is not evidence a set was easy.
+- Last performed over 28 days ago → `repeat_stale`, **and this outranks effort**.
+- Not `weight_reps` → `not_applicable`. Never logged → `no_history`. **These two must be tested with an input built the way the handler builds it** (indexing a map that has no such key), not from a fixture that hardcodes `load_type`. A fixture-shaped test hid a bug where every exercise in a new user's first session was told a barbell squat "isn't measured in weight" — the query only learned an exercise's load type from a set row that existed, so no-history exercises arrived with an empty load type and hit the `not_applicable` guard first.
+- **`target_reps` is always inside `rep_range`**, including on the "repeat what you did" branches. The range belongs to the *current* workout's goal while the history may come from a block with a different one, so a 15-rep hypertrophy set re-read under a powerlifting goal must not return "range 3–5, target 15".
+- **`sessions_at_load` and `hit_target_effort` describe the history, not the branch taken.** They must be populated even on `repeat_stale` / `repeat_unknown_effort`, which return early.
+- **An unusable newest session must not erase a real one behind it.** The SQL admits a row with any measure; the rule needs reps *and* weight. A weight-only row on a weighted lift passes one filter and fails the other, so the rule walks forward to the first usable session rather than reading only the newest.
+- **Uncompleted sets are plan, not performance** — a template opened and abandoned must not become the next session's prescription.
+
+**Rep range follows the workout's `goal`, not the exercise**: powerlifting 3–5, hypertrophy 6–10, endurance 12–20, general (and any unrecognised value) 5–8. The same 5-rep set at 2 RIR is `add_load` in a powerlifting block and not even at the top of the range in a hypertrophy one. An unknown `goal` must **not** 400 — it falls through to the general range.
+
+**Increments** scale with the movement (5 kg squat/hinge/olympic, 2.5 kg push/pull/lunge, 1.25 kg isolation) **and are capped at 5% of the bar** — 2.5 kg is 1.8% of a 140 kg bench and 6% of a 40 kg one. Every suggested weight lands on a loadable 1.25 kg step; 63.7 kg is arithmetic, not a plate.
+
+**Stall counting is consecutive.** A lifter who deloaded and worked back up to the same weight is on a fresh attempt, not a continuing plateau — counting every historical appearance would deload them the moment they returned. (This also escaped the first round of mutation testing.)
+
+**Which sets the advice comes from** (`RecentEfforts`)
+- The **working sets of the last 3 sessions** containing the exercise — whole sessions, because the rule reads the weakest set and repeated loads, and neither is answerable from one row.
+- **Driven from the requested ids** (`unnest($2) JOIN exercises`, sets `LEFT JOIN`ed), so every requested exercise returns its catalog fields whether or not it has history — that's what makes "never logged" tellable from "not a weighted lift". Consequence for the security test: a leak is no longer "is the key present" (it always is) but "did any of another user's sets come with it".
+- **The window numbers sessions, not rows** (`DENSE_RANK`, not `ROW_NUMBER`). A row-based window cuts a session in half and the surviving sets then look like the whole session to the weakest-set gate — the exact failure that gate exists to prevent.
 - **Warm-ups are excluded**, even when heavier than the working sets. Tested with a deliberately heavier warm-up.
-- **Sets with nothing recorded are excluded.** Found against real data: an exercise added to a session and never performed was winning over a real set behind it, erasing genuine history and reporting "not measured in weight".
+- **Sets with nothing recorded are excluded.** Found against real data: an exercise added to a session and never performed was winning over a real set behind it, erasing genuine history.
+
+**Evidence must describe one real set**
+- `last_weight_kg` / `last_reps` / `last_rir` / `last_rpe` all come from the **same top set**. `last_min_reps` / `last_max_reps` are the session-wide spread.
+- Pairing the top set's weight with the session's best rep count describes a set nobody performed — and the 1RM estimate derived from it inherits the fiction. Caught during wiring; pinned by a test where the back-off set carries the most reps.
 
 **Auth & security**
-- Scoped to the caller — this reads training history, and `TestLastPerformances_IsUserScoped` is the test that would catch it leaking.
+- Scoped to the caller — this reads training history, and `TestRecentEfforts_IsUserScoped` is the test that would catch it leaking.
 - Missing `exercise_ids` → `400`. More than 100 → `400`.
 - The route must not shadow `GET /v1/sessions/{sessionID}`; both are live (verify with two unauthenticated calls, each `401` rather than one `404`).
 
 **Clients**
-- Starting a session from a template pre-fills weights: **the plan's prescription wins**, history fills the gaps, reps are never inferred.
-- A failed suggestions lookup must not block the session starting — an empty weight is an inconvenience, a blocked workout is a lost one.
-- The session screen shows the evidence and the reason verbatim, with a one-tap control to apply the suggested weight to every set of that exercise.
-- The apply control is hidden once the sets already carry the suggested weight, and on a finished session.
+- Starting a session from a template pre-fills **weight and reps**: the plan's prescription wins, the recommendation fills the gaps. Reps are filled now where they deliberately weren't before — under double progression the rep target is half the recommendation.
+- **The workout cache carries `goal`** (mobile SQLite schema v6). Without it the offline-first path — the one mobile exists for — always sent null and started sessions on the general 5–8 range while the session screen re-derived on 3–5. Test with the device offline and a cached template.
+- **Applying a recommendation must never touch a completed set or a warm-up.** It writes only to sets still ahead of you. Rewriting a completed set's reps to a target puts numbers in the log that nobody performed and then counts them in the volume — and `add_reps`, where most sessions land, makes the control visible precisely when the early sets hold fresh real data.
+- **The `goal` must be passed on every start path** (web workout detail, web history, mobile workout detail, mobile session start) and on the session screen itself. Missing it on one path fails nothing loudly — it pre-fills on the general 5–8 range that the session screen then re-derives on 3–5, and the two disagree quietly. Worth an explicit test per path.
+- A failed suggestions lookup must not block the session starting — an empty weight is an inconvenience, a blocked workout is a lost one. A deleted template must likewise only cost the narrower rep range.
+- Web (`ProgressionCard`) shows the phase, the target as `weight × reps`, the reason verbatim, the rep-range track, and the evidence. The rep-range pips fill to `last_min_reps` — filling to the best set would explain the wrong thing.
+- Mobile shows the same recommendation compressed: phase, pips, target, one line of reason, one of evidence.
+- The apply control is hidden once the first set already carries both halves, and on a finished session. Judged on the first set specifically: a session mid-flight legitimately has later sets empty.
+- Rep ranges wider than the pip cap (endurance, 12–20) must degrade to a labelled bar (web) or text (mobile) rather than an uncountable row of dots.
+- Phase colour is never the only carrier of meaning — every phase states its name in full-contrast text. `--c-lime` on a light surface is 3.27:1, fine for a graphic and not for a word.
 
 **Not yet covered / deferred**
-- One data point only — no trend, no volume landmarks, no deload logic, and no awareness of a programme's own progression scheme.
-- Rep progression isn't suggested, only load. Double progression (add reps to a ceiling, then add weight) is the obvious next rule.
+- No awareness of a programme's own periodisation — this is per-exercise autoregulation, not a block plan.
+- No per-muscle-group or weekly volume landmarks, so "you are doing too much" is unanswerable.
+- The rep range is the workout's goal, not a per-exercise choice — an accessory movement in a powerlifting session still gets 3–5.
+- Deload adjusts load only, never set count or frequency.
 
 ---
 
