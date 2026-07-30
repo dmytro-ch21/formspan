@@ -1538,6 +1538,46 @@ no amount of running them would reveal. Mutation testing caught the ones where
 a line was wrong; only reading the reasoning caught the ones where the premise
 was.
 
+## 2026-07-30 — The web session showed no recommendation for anything you added
+
+Found by the web functional spec on its first honest run, which is the whole
+argument for writing it.
+
+`fetchSuggestions` was called once, inside the session page's `load`, on mount.
+`addExercise` never refetched. A freeform session starts empty, so that single
+call asked about **zero** exercises and returned an empty map — and every
+exercise added from the catalog afterwards had no entry in it. No target, no
+reason, no rep range, no card at all, until the page was reloaded.
+
+On the surface that is meant to be the *detailed* one for progression, and for
+every freeform session, which is the common case.
+
+Mobile never had it, and not by design: adding an exercise there navigates to a
+separate screen, and its loader runs under `useFocusEffect`, so returning
+happens to refetch. The web page has an always-visible catalog and never
+navigates, so nothing re-triggered it.
+
+Fixed with an effect keyed on a **deduped, sorted exercise list**, so it fires
+once per change to *which movements are in the session* — not per set, per row,
+or per keystroke. That distinction is load-bearing here specifically: this
+codebase has twice shipped a hook that fired one request per row, once at 200
+concurrent `/v1/profile` calls.
+
+The spec that caught it now passes, and the fix is confirmed by the failure
+*moving*: before, "First time" was absent entirely; after, the card renders in
+full and the only failures left were two over-reaching assertions of my own.
+
+### Two harness lessons from the same run
+
+`web.spec.ts` still asserts a heading named "Formspan" while the app renders
+**VOLA** — stale since the rename, failing on the one test that never signs up.
+And the sign-up helper derived its phone number from `Date.now() % 100`, so two
+sign-ups in the same second generated the *same* number, Clerk rejected the
+duplicate, and it surfaced as sign-up silently never completing — a symptom
+pointing nowhere near the cause. I diagnosed that as Clerk rate limiting first
+and was wrong; running one test alone, serially, failed identically, which is
+what disproved it.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

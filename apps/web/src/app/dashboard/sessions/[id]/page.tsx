@@ -105,6 +105,10 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   // The exercise being replaced, if any. The catalog pane doubles as the
   // swap picker rather than growing a second modal.
   const [swapping, setSwapping] = useState<string | null>(null);
+  // The workout's goal, resolved once per session load. Immutable for the
+  // life of a session, so it is not part of the suggestions effect's work —
+  // only one of its inputs.
+  const [goal, setGoal] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const load = useCallback(async () => {
@@ -122,29 +126,26 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       setCatalog(new Map(list.map((e) => [e.id, e])));
       setEverLoaded(true);
       setError(null);
-      // Non-blocking: the session must render even if the history lookup
-      // fails, since it's advice rather than content.
+      // Non-blocking: the session must render even if this fails, since it's
+      // advice rather than content.
+      //
+      // Only the goal is resolved here. The suggestions themselves are keyed
+      // on the exercise list in an effect below, because that list changes
+      // *during* the session — see the comment there.
+      //
       // The rep range the rule progresses inside comes from the workout's
       // goal, so a strength block advances on 3-5 and a hypertrophy block on
       // 6-10. A freeform session has no template and falls back to the
       // general range, which is the correct answer rather than a gap.
-      (async () => {
-        let goal: string | null = null;
-        if (s.workout_id) {
-          // Advisory: a template that has since been deleted must not stop
-          // the session rendering, it just costs the narrower rep range.
-          goal = await getWorkout(getToken, s.workout_id, controller.signal)
-            .then((w) => w.goal)
-            .catch(() => null);
-        }
-        const found = await fetchSuggestions(
-          getToken,
-          s.sets.map((x) => x.exercise_id),
-          goal,
-          controller.signal,
-        );
-        setSuggestions(found);
-      })().catch(() => {});
+      if (s.workout_id) {
+        // Advisory: a template that has since been deleted must not stop the
+        // session rendering, it just costs the narrower rep range.
+        getWorkout(getToken, s.workout_id, controller.signal)
+          .then((w) => setGoal(w.goal))
+          .catch(() => setGoal(null));
+      } else {
+        setGoal(null);
+      }
     } catch (err) {
       if (controller.signal.aborted) return;
       setError(err instanceof Error ? err.message : String(err));
@@ -159,6 +160,51 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     load();
     return () => abortRef.current?.abort();
   }, [load]);
+
+  /**
+   * The exercises currently in the session, as a stable key.
+   *
+   * Deduped and sorted, so reordering sets, editing a weight or ticking a set
+   * done does not look like a change — only *which movements are in the
+   * session* does. Without that, this would refetch on every keystroke.
+   */
+  const exerciseKey = useMemo(
+    () => [...new Set(sets.map((s) => s.exercise_id))].sort().join(","),
+    [sets],
+  );
+
+  /**
+   * Recommendations follow the exercise list, not just the initial load.
+   *
+   * This used to live inside `load`, which runs once on mount — so an exercise
+   * added from the catalog mid-session got no recommendation at all: no
+   * target, no reason, no rep range, until the page was reloaded. And a
+   * session started empty asked for suggestions for zero exercises, so the
+   * card never appeared for anything the athlete added, which is every
+   * freeform session. On the surface that is meant to be the *detailed* one
+   * for progression.
+   *
+   * Mobile never had it, and not by design: adding an exercise there navigates
+   * to a separate screen, and its loader runs under `useFocusEffect`, so
+   * coming back happens to refetch.
+   *
+   * Keyed on `exerciseKey`, so this is one request per change to the movement
+   * list — not one per set, per row, or per render. That distinction has
+   * bitten this codebase before.
+   */
+  useEffect(() => {
+    // Nothing to ask about. Deliberately does not clear the map: with no
+    // exercises there are no groups rendered, so a stale entry is invisible,
+    // and clearing here would be a synchronous setState inside an effect.
+    if (!exerciseKey) return;
+
+    const controller = new AbortController();
+    fetchSuggestions(getToken, exerciseKey.split(","), goal, controller.signal)
+      // Advice, not content: a failed lookup leaves the session usable.
+      .then(setSuggestions)
+      .catch(() => {});
+    return () => controller.abort();
+  }, [exerciseKey, goal, getToken]);
 
   const pending = useRef<LoggedSet[] | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
