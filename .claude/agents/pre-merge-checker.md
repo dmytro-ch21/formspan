@@ -19,6 +19,12 @@ cd backend && go test ./...     # note: integration tests skip gracefully withou
 # OpenAPI
 pnpm run lint:openapi           # from repo root
 
+# Mobile — typecheck is the *only* static check apps/mobile has (no ESLint
+# config exists there), and it now enforces noUnusedLocals/noUnusedParameters.
+# That is what catches a hook imported but never called, which is exactly how
+# the "Track effort" setting once shipped wired to nothing.
+pnpm run typecheck:mobile
+
 # Web
 pnpm run lint:web
 pnpm run typecheck:web

@@ -715,6 +715,54 @@ Go's zero value rather than stated in the contract, `exercise_ids`' doc
 comment disagreed with its own behaviour, and the down migration didn't warn
 that a down-then-up cycle re-backfills every row to `true` — silently
 marking skipped sets as performed.
+## 2026-07-30 — What the reviewers found the second time
+
+Running `frontend-reviewer` on the merged shell work turned up **five blocking
+defects**, all already on `main`, and one of them was mine from the commit
+immediately before.
+
+**The "Track effort" switch did nothing.** The session screen imported
+`useTrackEffort` and never called it, sitting next to a `useState(true)` that
+nothing ever updated. The commit that introduced it claimed the opposite in
+its own message: *"Settings and the session screen read the same hook, so the
+switch and the visibility of the RIR/RPE fields can't disagree."* They
+couldn't disagree because one of them wasn't reading anything.
+
+**Three more copies of the volume rule had drifted.** `localVolume` — the one
+duplicate I was worried enough about to leave a warning comment on — was
+correct. The problem was the three nobody was watching: Today's `workingSets`,
+the web history list's `working` filter, and the web session table, which had
+no way to mark a set complete at all. So Today said "5 working sets", the
+session it linked to said "Sets 0", and any session logged on web reported
+zero volume *and* disappeared from the progression history, since
+`LastPerformances` now requires `completed`.
+
+The lesson is about where I aimed my attention: I guarded the duplicate I had
+just created and never asked how many others existed. There are five copies
+of that rule. Four of them needed changing and I changed one.
+
+**The offline store could push bad data on upgrade.** `toSession` parses a
+`sets_json` blob written before `completed` existed, so those sets read as
+`undefined` → falsy. A session that happened to be dirty at upgrade time would
+push `completed: false` for every set, overwriting the server migration's
+backfill for work that was actually done. Now defaulted to `true` on read,
+mirroring the migration.
+
+**The root cause of the first one is a missing check, not a lapse.**
+`apps/mobile` has no ESLint config, and `typecheck:mobile` wasn't in the
+pre-push list. An unused import and an orphaned `useState` were invisible to
+every check that ran. Rather than add a second lint toolchain, `noUnusedLocals`
+and `noUnusedParameters` are now on in the mobile tsconfig, and
+`typecheck:mobile` is in both `CLAUDE.md`'s check list and the
+`pre-merge-checker` agent.
+
+Turning them on immediately found five dead symbols, two of which were real
+losses rather than tidiness: **the session-duration display on Today had been
+silently dropped** by a later edit to the same block, and `pending` was running
+a SQLite count on every save while being rendered nowhere.
+
+That is two reviews in a row where the *green check suite* was the thing that
+gave false confidence. The checks are necessary and they are not evidence.
 
 
 ## Open items / known gaps as of this entry

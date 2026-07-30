@@ -1,6 +1,13 @@
 {
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
+    // The cheapest possible guard against the exact bug that shipped: a hook
+    // imported and never called, next to a useState nothing ever updated, so
+    // the "Track effort" setting silently did nothing. apps/mobile has no
+    // ESLint, and typecheck alone was blind to both. These two flags catch
+    // that class without adding a dependency or a second lint config.
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "strict": true,
     "paths": {
       "@/*": [

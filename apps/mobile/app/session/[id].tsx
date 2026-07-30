@@ -25,7 +25,6 @@ import { fetchExercises, type Exercise } from '@/lib/exercises';
 import {
   cacheExercises,
   cachedExercises,
-  countPendingSessions,
   deleteLocalSession,
   finishLocalSession,
   hydrateSession,
@@ -75,6 +74,11 @@ export default function SessionScreen() {
   const [catalog, setCatalog] = useState<Map<string, Exercise>>(new Map());
   const [suggestions, setSuggestions] = useState<Map<string, Suggestion>>(new Map());
   const timerState = useRestTimer();
+  // The switch in Settings writes this; reading the same hook is what makes
+  // the two agree. An earlier version imported the hook and never called it,
+  // leaving a useState(true) nothing ever updated — so the setting silently
+  // did nothing while the commit claimed it worked.
+  const { trackEffort: showEffort } = useTrackEffort();
 
   /**
    * How long you've been training. Derived from started_at on every tick
@@ -99,9 +103,6 @@ export default function SessionScreen() {
   // leg press marked in pounds, and converting in your head at the moment
   // you're trying to record a number is exactly what this avoids.
   const [exerciseUnits, setExerciseUnits] = useState<Record<string, UnitSystem>>({});
-  // Defaults to showing effort: the progression rule is built on it, and a
-  // failed profile fetch shouldn't quietly disable the app's only input.
-  const [showEffort, setShowEffort] = useState(true);
   // Off unless asked for — see PREF_AUTO_REST for why that's the default.
   const [autoRest, setAutoRest] = useState(false);
   useEffect(() => {
@@ -134,9 +135,6 @@ export default function SessionScreen() {
   const [everLoaded, setEverLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  // How many sessions the server still owes — the honest replacement for a
-  // "saving…" spinner once saving no longer depends on the network.
-  const [pending, setPending] = useState(0);
 
   const queued = useRef<LoggedSet[] | null>(null);
 
@@ -161,7 +159,6 @@ export default function SessionScreen() {
       setVolume(localVolume(s.sets));
       setError(null);
       setEverLoaded(true);
-      setPending(await countPendingSessions(userId));
 
       // The cache renders the screen; the fetch refreshes the cache for
       // next time. Offline, the first half still works.
@@ -221,8 +218,7 @@ export default function SessionScreen() {
           setVolume(localVolume(next));
           setError(null);
           const result = await syncSessions(userId, getToken);
-          setPending(await countPendingSessions(userId));
-          // Only a rejection says the *data* is wrong; anything else is the
+              // Only a rejection says the *data* is wrong; anything else is the
           // network, which the outbox already handles.
           if (result.error && /invalid|400/i.test(result.error)) setError(result.error);
         } catch (err) {
@@ -563,10 +559,7 @@ export default function SessionScreen() {
                   setSets(s.sets);
                   setVolume(localVolume(s.sets));
                 }
-                syncSessions(userId!, getToken)
-                  .then(() => countPendingSessions(userId!))
-                  .then(setPending)
-                  .catch(() => {});
+                syncSessions(userId!, getToken).catch(() => {});
               } catch (err) {
                 setError(err instanceof Error ? err.message : String(err));
               }

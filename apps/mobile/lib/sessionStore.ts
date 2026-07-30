@@ -60,7 +60,15 @@ type Row = {
 function toSession(r: Row): LocalSession {
   let sets: LoggedSet[] = [];
   try {
-    sets = JSON.parse(r.sets_json) as LoggedSet[];
+    // `completed` post-dates some cached rows. Defaulting it to true mirrors
+    // the server migration's backfill — without it, a session cached before
+    // the upgrade reads as entirely unperformed, and if it happens to be
+    // dirty the next push writes those false flags straight over the
+    // server's backfilled ones.
+    sets = (JSON.parse(r.sets_json) as LoggedSet[]).map((s) => ({
+      ...s,
+      completed: s.completed ?? true,
+    }));
   } catch {
     // A corrupt blob must not make the session unopenable — an empty list
     // loses the sets, but a throw here would lose the whole workout.
