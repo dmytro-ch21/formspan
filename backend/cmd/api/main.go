@@ -4,7 +4,9 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	// The history endpoint resolves the caller's IANA timezone to bucket
 	// sessions into calendar days. The runtime image is alpine with only
@@ -16,6 +18,7 @@ import (
 	"github.com/dmytro-ch21/vola/backend/internal/modules/activity"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/exercise"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/featureflag"
+	"github.com/dmytro-ch21/vola/backend/internal/modules/health"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/profile"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/session"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/technique"
@@ -105,8 +108,31 @@ func main() {
 	mux.Handle("GET /v1/admin/users", verifier.RequireAdmin(http.HandlerFunc(activityHandler.AdminListUsers)))
 	mux.Handle("GET /v1/admin/users/{userID}/activities", verifier.RequireAdmin(http.HandlerFunc(activityHandler.AdminListUserActivities)))
 
-	logger.Info("api listening", "port", port)
-	if err := http.ListenAndServe(":"+port, httplog.Middleware(logger)(withCORS(mux))); err != nil {
+	healthRepo := health.NewPostgresRepository(pool)
+	healthHandler := health.NewHandler(healthRepo)
+	mux.Handle("POST /v1/client-errors", verifier.RequireAuth(http.HandlerFunc(healthHandler.Report)))
+	mux.Handle("GET /v1/admin/health", verifier.RequireAdmin(http.HandlerFunc(healthHandler.AdminList)))
+
+	// A successful request past this is a symptom worth a row. Two seconds
+	// because this API's slowest legitimate call is a full 524-entry catalog
+	// read, which is comfortably under it — so anything crossing the line is
+	// genuinely unusual rather than a busy afternoon.
+	//
+	// Overridable because the right value is environment-specific: a shared
+	// Railway instance and a laptop with a local Postgres do not agree on what
+	// "slow" means.
+	slowRequestAfter := 2 * time.Second
+	if raw := os.Getenv("SLOW_REQUEST_MS"); raw != "" {
+		if ms, convErr := strconv.Atoi(raw); convErr == nil && ms > 0 {
+			slowRequestAfter = time.Duration(ms) * time.Millisecond
+		} else {
+			logger.Warn("ignoring unparseable SLOW_REQUEST_MS", "value", raw)
+		}
+	}
+	recorder := health.NewRecorder(healthRepo, slowRequestAfter, logger)
+
+	logger.Info("api listening", "port", port, "slow_request_ms", slowRequestAfter.Milliseconds())
+	if err := http.ListenAndServe(":"+port, httplog.Middleware(logger, recorder.Observe)(withCORS(mux))); err != nil {
 		logger.Error("server exited", "err", err)
 		os.Exit(1)
 	}

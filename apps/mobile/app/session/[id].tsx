@@ -36,7 +36,8 @@ import {
   saveLocalSets,
   syncSessions,
 } from '@/lib/sessionStore';
-import { isPermanentRejection } from '@/lib/apiError';
+import { ApiError, isPermanentRejection } from '@/lib/apiError';
+import { report } from '@/lib/report';
 import { deleteSession } from '@/lib/sessions';
 import {
   describeSet,
@@ -295,7 +296,18 @@ export default function SessionScreen() {
             // forever, and staying quiet about that means finishing a
             // workout that was never going to sync.
             if (isPermanentRejection(err)) {
-              setError(err instanceof Error ? err.message : String(err));
+              const detail = err instanceof Error ? err.message : String(err);
+              setError(detail);
+              // Tell the server, because it will never find out otherwise: the
+              // request that would carry this session is not going to be made
+              // again, so every API-side metric stays green while the training
+              // sits on this phone. The athlete sees the message above; this
+              // is what puts it in front of an operator.
+              report(getToken, 'sync_blocked', detail, {
+                session_id: id,
+                error_code: err instanceof ApiError ? err.code : 'unknown',
+                status: err instanceof ApiError ? err.status : null,
+              });
             }
           }
         } finally {

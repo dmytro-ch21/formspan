@@ -2117,6 +2117,136 @@ And the Postman collection generated from the OpenAPI spec by
 because a hand-maintained collection drifts from the contract silently, and you
 find out when a request 404s against a route renamed months ago.
 
+## 2026-07-31 — Making "is anything wrong?" a question with an answer
+
+The logs already carried every request. They could not answer a single question
+anyone actually asks.
+
+They go to stdout and are read through Railway's viewer: **not queryable from
+the admin console, expiring, and carrying no `user_id` at all.** So "this
+athlete says their training isn't syncing" had no query behind it — you could
+see that *someone* got a 500, never who. That is not an awkward log format; it
+is a missing field that made the whole stream unusable for support.
+
+Three things now exist.
+
+**`user_id` on every request line.** Cheap, and the single highest-value field
+in the whole change. It needed one piece of plumbing that is worth writing down:
+`httplog` is the *outermost* middleware — it has to be, to time and correlate
+everything inside it — while authentication happens further in. A context value
+set by inner middleware is invisible to the outer one when control returns, so
+the id cannot travel outward as an ordinary value. It travels through a pointer
+instead: the middleware puts a mutable slot in the context, and `RequireAuth`
+fills it. Set in the auth middleware rather than per-handler, because something
+every handler must remember to do is something a handler eventually forgets.
+
+**A `health_events` table**, because the admin console cannot query stdout.
+**Only notable events are recorded, never every request** — a row per request
+puts a database write on the hot path of every call, and the healthy case is
+precisely the case with nothing to say. What lands there is 5xx and requests
+past a latency threshold (2s default, `SLOW_REQUEST_MS` to override, since a
+Railway instance and a laptop disagree about "slow").
+
+4xx are deliberately excluded. A 404 for a deleted session and a 401 for an
+expired token are ordinary, and filling an operator's screen with routine client
+mistakes is how a health page becomes one nobody opens. On a healthy system this
+table stays near-empty, and that emptiness is the signal.
+
+**`POST /v1/client-errors`**, which is the part that matters most and the part
+with no server-side substitute. When a push is permanently refused the mobile
+client stops retrying — correctly — and at that moment the training exists only
+on that device while *every API metric stays green*, because the request that
+would have carried it is never made again. There is no server-side observation
+of this failure. Only the client knows, so only the client can say.
+
+### Measured versus claimed
+
+The two feeds are kept distinct throughout — `source` on the row, a badge on the
+screen — because their trustworthiness differs and an operator has to know which
+they are looking at before acting.
+
+That distinction is enforced, not just labelled. A client may report only
+`client_error` and `sync_blocked`; it cannot claim `server_error` or
+`slow_request`, and the user is attributed from the verified token rather than
+the request body. A client that could name the user could file noise against
+someone else — and, more corrosively, could not be trusted when reporting its
+own trouble, which is the entire value of the endpoint. Message length is
+bounded so the endpoint cannot become free storage.
+
+Reporting is fire-and-forget by construction: never throws, never blocks, never
+retries. A device that cannot reach the API to *sync* cannot reach it to
+complain either, and queuing failed reports would build a second outbox whose
+failure mode is indistinguishable from the first — while spending exactly the
+connectivity the real outbox needs. Losing a report is acceptable; losing
+training data is not. The two are ranked rather than balanced.
+
+### The admin screen
+
+`/health` shows a summary over the last 24 hours and the events behind it, in
+one response — a summary alone invites "12 errors" with no way to see them, and
+a list alone makes an operator count.
+
+**Affected athletes is counted distinctly, not as a total.** Twenty rows from one
+person on a bad connection is a very different morning from twenty people
+hitting one broken endpoint, and a raw count cannot tell them apart. Each row
+carries its `request_id`, which is the pivot the table exists for: the row says
+*that* something went wrong, the log line says what the request was doing.
+
+`proxy.ts` gained `/health(.*)` — it had only ever matched `/users(.*)`, so a
+new admin surface would have reached the layout's own allowlist check instead of
+a sign-in prompt. The layout does refuse them, but "protected" belongs declared
+once rather than rediscovered per screen.
+
+### What this leaves open
+
+**Retention.** The table grows with every incident and nothing prunes it. There
+is no scheduler in this project yet, so the honest answer today is that it is
+small and bounded by how often things break — but it is a real gap, and the
+first thing to revisit if the health screen ever slows down.
+
+**Nothing reports `client_error` yet.** The only wired reporter is the permanent
+sync rejection on the session screen — the one signal that genuinely exists
+today. The richer source, an outbox row that has exhausted its retries, arrives
+with the sync orchestrator, and the endpoint is deliberately in place first so
+that work has somewhere to report to.
+
+**A panicking handler is still invisible.** `net/http` recovers per connection
+*above* this middleware, so a panic produces neither a log line nor a recorded
+event — the most severe 5xx class is the one class this cannot see. Closing it
+means a recover layer in `httplog`, which changes what a panicking request
+returns, so it wants its own decision rather than riding along here.
+
+**No rate limit on `POST /v1/client-errors`.** One authenticated client can
+insert unbounded rows, which both grows a table nothing prunes and pushes other
+athletes' events below the default view — degrading the screen exactly when it
+is needed. Nothing in this stack rate-limits anything yet, so adding it only
+here would be a lone convention; the cheap version when it matters is a per-user
+hourly cap or dedupe on `(user_id, kind, error_code)` within a window.
+
+### The bug the review caught, which is the interesting part
+
+The recorder originally wrote **synchronously** from the middleware, on the
+reasoning that the request had already been served by then. That reasoning was
+wrong, and measurably so: `net/http` buffers the response and only flushes once
+the entire middleware chain returns, so a slow insert delayed the client's first
+byte by its own duration — a 2s stall produced a 2s time-to-first-byte.
+
+Which made the failure mode precisely inverted. During an incident where the
+database is struggling and everything is 5xx-ing, every one of those failing
+requests would then queue behind an INSERT into that same struggling database,
+adding seconds to a response that had already failed. **The observability would
+have amplified the outage it existed to observe.**
+
+It now hands events to a writer goroutine through a small buffered channel, and
+**drops rather than blocks** when that fills. Under a storm the choice is
+between losing some observability and slowing every request, and a health system
+that degrades the service it watches has inverted its purpose. Drops are counted
+and logged so the gap is visible rather than silent.
+
+Worth recording because it is the same shape as the mutation-testing and
+fresh-install entries above: a plausible premise ("the response is already
+sent"), never checked, that a green test suite could not contradict.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

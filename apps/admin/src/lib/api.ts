@@ -81,3 +81,55 @@ export async function listUserActivities(userID: string): Promise<Activity[]> {
   );
   return data.activities;
 }
+
+export type HealthEventKind = "server_error" | "slow_request" | "client_error" | "sync_blocked";
+
+export type HealthEvent = {
+  id: number;
+  occurred_at: string;
+  /**
+   * `api` was measured by the server; `client` was claimed by an app. Kept
+   * distinct on screen too — an operator needs to know which of the two they
+   * are looking at before deciding how much to trust it.
+   */
+  source: "api" | "client";
+  kind: HealthEventKind;
+  user_id: string | null;
+  method: string | null;
+  path: string | null;
+  status: number | null;
+  duration_ms: number | null;
+  error_code: string;
+  message: string;
+  /** Pivot from this row to the full request in the log stream. */
+  request_id: string;
+  trace_id: string;
+  details: Record<string, unknown> | null;
+};
+
+export type HealthSummary = {
+  since: string;
+  total: number;
+  by_kind: Record<string, number>;
+  /** Distinct people, not events — see the API description for why. */
+  affected_users: number;
+  slowest_paths_ms: Record<string, number>;
+};
+
+export type HealthReport = { summary: HealthSummary; events: HealthEvent[] };
+
+/**
+ * Recent operational problems.
+ *
+ * `userID` narrows to one athlete — the question "is this specific person
+ * having trouble?", which had no answer at all before this because the logs
+ * carried no user id. Not yet called with one: the user-detail page is the
+ * obvious consumer and is left for when that screen is next touched.
+ */
+export async function fetchHealth(opts: { hours?: number; userID?: string } = {}) {
+  const params = new URLSearchParams();
+  if (opts.hours) params.set("hours", String(opts.hours));
+  if (opts.userID) params.set("user_id", opts.userID);
+  const qs = params.toString();
+  return adminFetch<HealthReport>(`/admin/health${qs ? `?${qs}` : ""}`);
+}

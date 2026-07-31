@@ -19,7 +19,19 @@ This repo is a pnpm + Go monorepo, built incrementally, one verified piece at a 
 - `tests/functional/` — a Playwright-based functional test suite (user-authored, in progress).
 - `assets/brand/` — the VOLA brand kit and source of truth for identity: logos, app-icon/splash masters, 25 `currentColor` UI icons, and `design-tokens.json`. All SVG; the PNGs under `apps/mobile/assets/images/` are generated from these.
 
-### Run it locally
+#### Observability
+
+`GET /v1/admin/health` returns recent operational problems with a summary, and
+`POST /v1/client-errors` lets a client report a failure the server cannot see —
+a push it has given up retrying, which would otherwise leave training on the
+device while every server metric stayed green. The admin console reads them at
+`/health`.
+
+Only notable events are stored (5xx and requests slower than `SLOW_REQUEST_MS`,
+default 2000) — never every request. On a healthy system the table stays close
+to empty, and that emptiness is the signal.
+
+## Run it locally
 
 ```bash
 docker compose up -d              # local Postgres on :5432

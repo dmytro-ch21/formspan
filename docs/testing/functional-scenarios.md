@@ -1093,6 +1093,69 @@ installing historical builds:
   the v0 scenario above has to keep passing. This is the check that keeps the
   invariant honest, since nothing structural enforces it.
 
+## Health and observability (`/v1/client-errors`, `/v1/admin/health`, admin `/health`)
+
+The property: **a problem that loses an athlete's data must become visible to an
+operator.** Everything else here is in service of that.
+
+**Happy path**
+
+- **`user_id` appears on every authenticated request line.** The field the whole
+  change hangs off — without it "which athlete hit this 500" is unanswerable.
+  Check an authenticated call and an anonymous one (`/v1/healthz`); the latter
+  should carry an empty user, not a fabricated one.
+- **A 5xx returned through `apihttp.WriteInternal` lands in `health_events`**
+  and shows on `/health` with its `request_id`, and that id finds the full
+  request in the log stream. The pivot is the point.
+- **A *panicking* handler currently records nothing** — `net/http` recovers per
+  connection above this middleware, so neither the log line nor the recorder
+  runs. That is the most severe 5xx class and it is invisible. Worth a scenario
+  now so it isn't mistaken for coverage; closing it needs a recover layer in
+  `httplog`, which is a behaviour change and deliberately not in this PR.
+- **A slow request is recorded** past `SLOW_REQUEST_MS` even though it
+  succeeded — set the threshold low to force one.
+- **`POST /v1/client-errors` with `sync_blocked` shows up as "reported by
+  client"** and links to that athlete.
+
+**The exclusions, which are as load-bearing as the inclusions**
+
+- **A 404 or 401 records nothing.** Routine client mistakes must not fill the
+  screen; a health page that cries wolf is one nobody opens. Delete a session
+  and re-request it — the 404 must leave no row.
+- **A successful fast request records nothing.** Confirm the table is untouched
+  after ordinary traffic — a row per request would be a write on the hot path of
+  every call.
+
+**Auth and trust**
+
+- **A client cannot claim `server_error` or `slow_request`** — `POST
+  /v1/client-errors` with either must 400. This is what keeps *measured* and
+  *claimed* distinguishable, which is the table's whole value.
+- **A client cannot report as another user.** There is no user field; the
+  attribution comes from the token. Report as A, confirm the row is A's.
+- **An oversized message is rejected** (>500 chars), so the endpoint can't be
+  used as storage.
+- **`GET /v1/admin/health` is admin-only** — 403 for an authenticated
+  non-admin, 401 unauthenticated. The backend allowlist is the real boundary;
+  the admin app's own gate is defence in depth.
+- **`/health` in the admin app requires sign-in**, via `proxy.ts` — it matched
+  only `/users(.*)` before this, so the scenario is that a signed-out visitor
+  gets a sign-in prompt rather than the layout's "not authorized".
+
+**Edge cases**
+
+- **A quiet page reads as good news**, not as a failed load: "nothing recorded"
+  rather than an empty table. A *fetch* failure must surface through
+  `error.tsx` instead, so the two can't be confused.
+- **Reporting never breaks the app.** With the API unreachable, a permanent sync
+  rejection still shows its message on the session screen and no unhandled
+  rejection fires — the report is fire-and-forget and its loss is acceptable.
+- **Affected-athlete count is distinct users, not events.** Record five events
+  for one user; the summary must say 1.
+- **A recorder failure doesn't fail the request.** Point the pool at a dead
+  database mid-request and confirm the user still gets their response —
+  observability failing must not become an outage of its own.
+
 ## Not yet covered (tracked here so it isn't lost, not because it's blocking)
 
 - Mobile has **sign-in but no sign-up** — `app/sign-in.tsx` handles email+password plus a second factor, and there is no `sign-up.tsx` at all. A new athlete cannot create an account from the phone; they must register on the web app first. Add mobile registration scenarios when that screen is actually built.

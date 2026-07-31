@@ -109,6 +109,13 @@ func (v *Verifier) RequireAuth(next http.Handler) http.Handler {
 			return
 		}
 
+		// Hand the identity back out to the request logger. Done here rather
+		// than in each handler because it should hold for every authenticated
+		// request, and something every handler has to remember is something a
+		// handler eventually forgets. See `httplog.SetUserID` for why this
+		// can't be an ordinary context value.
+		httplog.SetUserID(r.Context(), claims.UserID)
+
 		ctx := context.WithValue(r.Context(), claimsContextKey, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
