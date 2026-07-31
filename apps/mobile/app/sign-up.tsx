@@ -10,9 +10,11 @@ import {
   TextInput,
 } from 'react-native';
 
+import { GoogleAuthButton } from '@/components/GoogleAuthButton';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { AuthFieldErrors, AuthFieldKey, hasClerkCode, toFieldErrors } from '@/lib/clerkErrors';
+import { useGoogleSignIn } from '@/lib/useGoogleSignIn';
 
 /**
  * Email + password sign-up, then the emailed verification code.
@@ -57,6 +59,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function SignUpScreen() {
   const { signUp, setActive, isLoaded } = useSignUp();
+  const { signInWithGoogle, googleBusy } = useGoogleSignIn();
   const router = useRouter();
   // Sign-in hands the address over when someone arrives there without an
   // account, so it isn't typed twice on a phone keyboard.
@@ -124,6 +127,37 @@ export default function SignUpScreen() {
 
   function clearFieldError(field: AuthFieldKey) {
     setErrors((prev) => (prev[field] ? { ...prev, [field]: undefined } : prev));
+  }
+
+  async function onGoogle() {
+    setErrors({});
+    const outcome = await signInWithGoogle();
+    if (outcome.kind === 'signed_in' || outcome.kind === 'cancelled') return;
+
+    if (outcome.kind === 'failed') {
+      setErrors({ form: outcome.message });
+      return;
+    }
+
+    // Google matched an existing account that has 2FA. Only sign-in has the
+    // second-factor UI, so that's where they have to finish.
+    //
+    // It does NOT resume. An earlier version of this comment claimed Clerk's
+    // client-persisted `signIn` would be picked up over there — the resource
+    // does persist, but nothing on sign-in reads it at mount, so the user
+    // would land on an email+password form for an account that has no
+    // password. What actually works is tapping Continue with Google again on
+    // that screen: `startSSOFlow` begins with `signIn.create`, so it restarts
+    // cleanly and re-lands on the second factor, which sign-in then drives.
+    //
+    // A mount effect on sign-in could make the resume real, but it would have
+    // to call `prepareBestSecondFactor` — a call that *sends* an SMS or email
+    // code. Firing that on every mount that happens to find a stale in-flight
+    // attempt would spray unrequested codes at people. So the copy tells them
+    // the one action that works instead.
+    setErrors({
+      form: 'That Google account already exists and needs its two-factor code. Go to sign in and tap Continue with Google there.',
+    });
   }
 
   function goToSignIn() {
@@ -281,7 +315,7 @@ export default function SignUpScreen() {
   }
 
   const meetsLength = password.length >= MIN_PASSWORD;
-  const submitting = busy || !isLoaded;
+  const submitting = busy || googleBusy || !isLoaded;
 
   const submitLabel =
     step === 'details' ? 'Create account' : verified ? 'Continue' : 'Verify email';
@@ -337,6 +371,12 @@ export default function SignUpScreen() {
 
       {step === 'details' ? (
         <View style={styles.form}>
+          <GoogleAuthButton
+            onPress={onGoogle}
+            busy={googleBusy}
+            disabled={busy || !isLoaded}
+            label="Sign up with Google"
+          />
           <View style={styles.field}>
             <Text style={styles.label}>Email</Text>
             <TextInput

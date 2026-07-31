@@ -1,17 +1,25 @@
 import { useSignIn } from '@clerk/clerk-expo';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, TextInput } from 'react-native';
+import { useEffect, useState } from 'react';
+import {
+  AccessibilityInfo,
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  TextInput,
+} from 'react-native';
 
+import { GoogleAuthButton } from '@/components/GoogleAuthButton';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
-import { firstClerkMessage } from '@/lib/clerkErrors';
+import { firstClerkMessage, hasClerkCode } from '@/lib/clerkErrors';
 import {
   describeFactors,
   prepareBestSecondFactor,
   secondFactorPrompt,
   SecondFactorStrategy,
 } from '@/lib/secondFactor';
+import { useGoogleSignIn } from '@/lib/useGoogleSignIn';
 
 /**
  * Minimal email + password sign-in, plus the second-factor step Clerk
@@ -24,6 +32,7 @@ import {
  */
 export default function SignInScreen() {
   const { signIn, setActive, isLoaded } = useSignIn();
+  const { signInWithGoogle, googleBusy } = useGoogleSignIn();
   const router = useRouter();
   // Set when sign-up hands off an address that already has an account, so
   // the same email isn't typed twice on a phone keyboard.
@@ -35,6 +44,60 @@ export default function SignInScreen() {
   const [secondFactor, setSecondFactor] = useState<SecondFactorStrategy | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Set when the failure looks like "this account has no password because it
+  // was created through Google", so the answer can point at the button above
+  // instead of leaving them retyping a password that never existed.
+  const [tryGoogle, setTryGoogle] = useState(false);
+
+  // `accessibilityRole="alert"` doesn't make VoiceOver announce a message
+  // *appearing*, so without this the errors on this screen are visual-only —
+  // including the "use Google" hint, whose entire job is to un-stick someone.
+  // sign-up.tsx already does this; the two screens should not differ.
+  useEffect(() => {
+    if (error) AccessibilityInfo.announceForAccessibility(error);
+  }, [error]);
+
+  async function onGoogle() {
+    setError(null);
+    setTryGoogle(false);
+    const outcome = await signInWithGoogle();
+
+    // 'signed_in' needs nothing: the root layout's auth effect routes onward.
+    // 'cancelled' needs nothing either — backing out of the sheet is a
+    // decision, and reporting it as an error would be a lie about what
+    // happened.
+    if (outcome.kind === 'signed_in' || outcome.kind === 'cancelled') return;
+
+    if (outcome.kind === 'failed') {
+      setError(outcome.message);
+      return;
+    }
+
+    // Google authenticated them but the account has 2FA. This is the *same*
+    // state the password path reaches, so it reuses the same step rather than
+    // growing a second copy of the second-factor UI.
+    //
+    // `busy` is held across the prepare because it *sends* the code. Without
+    // it both buttons stay live during a network call, and a stray "Sign in"
+    // tap would fire `signIn.create` and replace the attempt just prepared.
+    // The password path already holds it across the identical call.
+    setBusy(true);
+    try {
+      const supported = outcome.signIn.supportedSecondFactors ?? [];
+      const chosen = await prepareBestSecondFactor(outcome.signIn, supported);
+      if (chosen) {
+        setSecondFactor(chosen);
+      } else {
+        setError(
+          `Unsupported second factor (${describeFactors(supported)}). Sign in on web instead for now.`,
+        );
+      }
+    } catch (err) {
+      setError(firstClerkMessage(err, 'Sign in failed.'));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function onSubmitPassword() {
     if (!isLoaded || busy) return;
@@ -69,6 +132,12 @@ export default function SignInScreen() {
       setError(`Additional step required (${attempt.status}).`);
     } catch (err) {
       setError(firstClerkMessage(err, 'Sign in failed.'));
+      // Clerk's code for "that strategy isn't valid for this user", which is
+      // what a password attempt against a Google-only account produces. The
+      // exact code is unverified against this instance; if it differs the
+      // generic message still shows and the Google button is still on screen,
+      // so this only ever adds signal.
+      setTryGoogle(hasClerkCode(err, 'strategy_for_user_invalid'));
     } finally {
       setBusy(false);
     }
@@ -105,6 +174,7 @@ export default function SignInScreen() {
 
       {secondFactor === null ? (
         <>
+          <GoogleAuthButton onPress={onGoogle} busy={googleBusy} disabled={busy || !isLoaded} />
           <TextInput
             style={styles.input}
             placeholder="Email"
@@ -149,14 +219,19 @@ export default function SignInScreen() {
           {error}
         </Text>
       )}
+      {tryGoogle && (
+        <Text style={styles.hint} testID="sign-in-use-google">
+          This account was created with Google — use Continue with Google above.
+        </Text>
+      )}
 
       <Pressable
         style={[styles.button, busy && styles.buttonDisabled]}
         onPress={secondFactor === null ? onSubmitPassword : onSubmitCode}
-        disabled={busy || !isLoaded}
+        disabled={busy || googleBusy || !isLoaded}
         accessibilityRole="button"
         accessibilityLabel={secondFactor === null ? 'Sign in' : 'Verify code'}
-        accessibilityState={{ busy, disabled: busy || !isLoaded }}
+        accessibilityState={{ busy, disabled: busy || googleBusy || !isLoaded }}
         testID="sign-in-submit"
       >
         {busy ? (

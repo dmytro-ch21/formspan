@@ -2674,6 +2674,108 @@ Left alone deliberately: `apps/admin`'s modal is equally unstyled, but its own
 button tokens are fine and it is an internal tool, so it stays out of a
 customer-facing change. Same `appearance` pattern will port to it directly.
 
+## 2026-07-31 — The accounts that could never sign in on a phone
+
+Asked plainly by the user, and the answer was worse than expected: *"why does
+sign-in in VOLA not have Google, as on web? how does someone who registered
+with a Google account sign in here?"*
+
+They couldn't. The Clerk instance has Google enabled and `apps/web`'s prebuilt
+modal has been offering "Continue with Google" since web shipped, so athletes
+have been creating Google accounts all along. **Those accounts have no
+password.** Mobile's only path was `signIn.create({ identifier, password })`,
+which can never authenticate an account that has no password to check. Not a
+degraded experience — a locked door.
+
+### A correction, because it was recorded wrong twice
+
+Both the sign-up and password-reset entries above call OAuth "a want rather
+than a hole — every account is reachable without it." **That is false, and it
+was false when written.** The reasoning was that email+password covers
+everybody, which is only true of accounts *created* with a password. Web had
+been minting passwordless accounts the whole time. Worth leaving the wrong
+claim visible above rather than editing it away: it is a good example of a
+gap that stays invisible because you keep checking the same path.
+
+There is an accidental escape hatch, discovered while thinking this through:
+`forgot-password.tsx` uses `reset_password_email_code`, which *sets* a
+password — on a passwordless account that effectively adds one. So a Google
+user could have "reset" a password they never had. Unverified, and nobody
+would ever guess it. It is not a design.
+
+### One hook, because Clerk doesn't distinguish
+
+`lib/useGoogleSignIn.ts` wraps `useSSO().startSSOFlow`, and both screens use
+it. Clerk's OAuth does not separate sign-in from sign-up — an existing Google
+identity signs in, a new one is created — so two copies with different labels
+would have been two chances to diverge. `components/GoogleAuthButton.tsx`
+exists for the same reason: it is the one element that must look identical on
+both screens, which own separate StyleSheets.
+
+The outcome type is a discriminated union rather than a boolean, and the
+interesting member is `cancelled`. Backing out of the browser sheet is a
+*decision*, not a failure, and reporting it as an error would be the same
+class of lie as an empty state claiming "you have none" after a failed read —
+the rule this codebase keeps rediscovering.
+
+`needs_second_factor` routes into the **existing** second-factor step on
+sign-in rather than a new one, because Clerk's client is a singleton: the
+`signIn` resource handed back by the SSO flow is the same object the screen's
+own `useSignIn()` holds. Confirmed at source level in review, not assumed.
+
+The neighbouring claim was **wrong**, and it is the useful part of this entry.
+The first version said sign-up could point at sign-in because "the in-flight
+resource is waiting there" — implying it resumes. The resource does persist,
+but **nothing on sign-in reads it at mount**, so the user would land on an
+email+password form for an account that has no password. It escapes only
+because tapping Continue with Google again restarts the flow cleanly. Both the
+code comment and the functional-scenarios line said "resumes", which means a
+test would have been written asserting behaviour that does not exist — the
+same failure as the `completed` flag written but never read.
+
+It was fixed by correcting the claim rather than by building the resume,
+because making it true means calling `prepareBestSecondFactor` on mount — a
+call that *sends* an SMS or email code. Any mount that happened to find a
+stale in-flight attempt would spray unrequested codes at people. The copy now
+names the action that actually works.
+
+### Verified on a device
+
+Built Release and installed on a real iPhone 13 Pro Max, and the round trip
+that motivated the whole change was **confirmed by hand: an account created
+through Google on web signs in on the phone.** That class of account had no
+route in at all before.
+
+Worth stating plainly because it could not be automated or simulated — see
+the constraint below. The only verification available was a person with the
+phone in their hand.
+
+### The constraint that shaped the testing
+
+**OAuth cannot work in Expo Go.** The redirect returns through `vola://`, the
+scheme in `app.json`, and Expo Go registers `exp://`; it has no way to hand a
+callback to a project it is only hosting. So the simulator flow used to verify
+every other auth screen this week is useless here, and this had to go onto a
+real device via `expo run:ios --device`.
+
+That build surfaced two traps worth the entry in CLAUDE.md, because both look
+like broken code and neither is: `pod install` dies with a Ruby
+`Encoding::CompatibilityError` when `LANG` is unset, and `devicectl` and
+`xctrace` report **different UDIDs for the same phone** — Expo matches
+xctrace's, so the devicectl one yields "No device UDID or name matching" for a
+device sitting plainly connected.
+
+### Gaps
+
+- The "this account was created with Google" hint keys on Clerk's
+  `strategy_for_user_invalid`, **unverified against this instance**. If the
+  real code differs the hint stays hidden and the generic error shows — the
+  Google button is on screen either way, so the failure mode is a missed
+  nicety, not a dead end.
+- Apple sign-in is not offered. iOS App Store review requires it once a
+  third-party social login exists, so this becomes a shipping requirement the
+  moment VOLA goes to TestFlight for real.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.
