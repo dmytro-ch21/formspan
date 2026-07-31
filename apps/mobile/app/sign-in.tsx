@@ -1,4 +1,5 @@
 import { useSignIn } from '@clerk/clerk-expo';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, TextInput } from 'react-native';
 
@@ -11,13 +12,18 @@ type SecondFactorStrategy = 'totp' | 'phone_code' | 'backup_code' | 'email_code'
  * Minimal email + password sign-in, plus the second-factor step Clerk
  * requires when the account has 2FA enabled. Scope matches apps/web's
  * original hello-world auth: enough to obtain a real session token so the
- * app can call authenticated endpoints. No sign-up, OAuth, or password
- * reset yet — those are their own increment.
+ * app can call authenticated endpoints. No OAuth or password reset yet —
+ * those are their own increment. Account creation lives on `sign-up.tsx`,
+ * which links here (and prefills `email`) when the address is already taken.
  */
 export default function SignInScreen() {
   const { signIn, setActive, isLoaded } = useSignIn();
+  const router = useRouter();
+  // Set when sign-up hands off an address that already has an account, so
+  // the same email isn't typed twice on a phone keyboard.
+  const { email: prefill } = useLocalSearchParams<{ email?: string }>();
 
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(prefill ?? '');
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
   const [secondFactor, setSecondFactor] = useState<SecondFactorStrategy | null>(null);
@@ -189,6 +195,26 @@ export default function SignInScreen() {
           <Text style={styles.buttonText}>{secondFactor === null ? 'Sign in' : 'Verify'}</Text>
         )}
       </Pressable>
+
+      {/* Only on the first step: partway through a second factor there is an
+          account already, so offering to create one is noise. */}
+      {secondFactor === null && (
+        <Pressable
+          style={styles.footer}
+          onPress={() =>
+            router.replace(
+              email.trim() ? { pathname: '/sign-up', params: { email: email.trim() } } : '/sign-up'
+            )
+          }
+          accessibilityRole="link"
+          accessibilityLabel="New to VOLA? Create an account"
+          testID="sign-in-to-sign-up"
+        >
+          <Text style={styles.footerText}>
+            New to VOLA? <Text style={styles.footerLink}>Create an account</Text>
+          </Text>
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -238,5 +264,17 @@ const styles = StyleSheet.create({
   error: {
     color: vola.danger,
     fontSize: 14,
+  },
+  footer: {
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  footerText: {
+    color: vola.textMuted,
+    fontSize: 14,
+  },
+  footerLink: {
+    color: vola.lime,
+    fontWeight: '600',
   },
 });

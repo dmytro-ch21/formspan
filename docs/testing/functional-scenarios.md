@@ -1156,8 +1156,110 @@ operator.** Everything else here is in service of that.
   database mid-request and confirm the user still gets their response —
   observability failing must not become an outage of its own.
 
+## Mobile sign-up (`apps/mobile/app/sign-up.tsx`)
+
+The property: **an athlete with a phone and no account can get from the App
+Store to a logged set without ever opening a desktop browser.** Every scenario
+below is either that path or a way of falling off it.
+
+**Happy path**
+
+- **Create an account end to end.** Email + password → the emailed code → landed
+  in the app, signed in, with a session token that authenticates a real backend
+  call. The last clause is the one worth asserting: `setActive` succeeding is
+  not the same as the app being usable.
+- **Both entry points reach the screen.** "Create an account" from sign-in, and
+  a direct load of `/sign-up`.
+
+**Routing — this is where the screen was nearly unreachable**
+
+- **A signed-out user opening `/sign-up` stays there.** The root layout's guard
+  keyed on `segments[0] === 'sign-in'` alone before this; anything else got
+  `router.replace('/sign-in')`, so the screen would have bounced instantly.
+  Test the redirect in both directions: signed-out reaches either auth screen,
+  and a **signed-in** user opening either one is bounced into the app.
+- **The address survives the hop between the two screens.** Sign-in → sign-up
+  and sign-up → sign-in both carry `email` as a route param. Typing an address
+  twice on a phone keyboard is the thing this prevents.
+
+**Interruption and resumption — the dead end this screen is built to avoid**
+
+- **Force-quit at the verify step, reopen: you are still at the verify step.**
+  Two separate mechanisms have to both work, and testing only the second one
+  proves nothing:
+  1. **The root guard sends you to `/sign-up`, not `/sign-in`.** A relaunch is
+     signed-out, and the guard's default for signed-out is sign-in. It checks
+     for an in-flight `signUp` first. Without this the resume below is dead
+     code — reachable only by a user who happens to tap "Create an account".
+  2. **The screen restores the verify step** from `status ===
+     'missing_requirements'` + `unverifiedFields`.
+  Skip either and the app reopens on a blank form that then rejects *its own*
+  half-registered email as already taken, with no way forward but a different
+  address. This is the highest-value scenario on the page.
+- **The password you just chose cannot sign you in yet.** Worth asserting
+  explicitly, because it is *why* the routing above matters: an unverified
+  account fails password sign-in with an error that says nothing about sign-up.
+- **Resend is immediately available after a resume**, not behind a cooldown
+  counted from a mount that knows nothing about when the first code was sent.
+- **The resume cannot fire twice.** It is guarded by a ref, not by dependencies;
+  a re-render while someone is typing on the details step must not yank them
+  back to verify.
+
+**Edge cases and errors**
+
+- **A rejected code clears the field; a network failure does not.** Wrong code →
+  cleared, ready to retype. Airplane mode mid-verify → the six digits you
+  correctly typed are still there. Retyping a code because the wifi dropped is a
+  punishment for the wrong mistake.
+- **The sixth digit submits on its own**, exactly once — no double-submit when
+  the button is also tapped, and no retry loop when the code is wrong.
+- **A short password never reaches the network.** Under 8 characters is caught
+  locally, focuses the offending field, and costs no round trip.
+- **Clerk's own password rejection lands under the password field** — a
+  breached-password or too-common rejection, surfaced verbatim rather than
+  paraphrased. The instance is the authority on its rules; the screen asserts
+  only the 8-character minimum it can back.
+- **An already-registered email errors on the email field** and offers "Sign in
+  to that account instead", carrying the address across.
+- **`create` succeeds but the code send fails** → you land on the verify step
+  with "tap Resend", not back on a details form that would now claim your own
+  brand-new account's email is taken. **And the heading must not say "we sent a
+  code"** — the send is precisely what failed. Same rule on a resumed sign-up,
+  where whether a code is waiting is genuinely unknown.
+- **Verification succeeds but `setActive` fails.** The verification is spent, so
+  a second Verify tap can only produce a confusing rejection. The button must
+  become **Continue** and retry the activation alone. Force it by killing
+  connectivity in the instant between the two calls.
+- **A pasted code with spaces or padding still works** — `"123 456"` must
+  verify. A native `maxLength` would truncate it to five digits before any
+  sanitizing runs, silently.
+- **Resend cooldown counts down and then re-enables**, and a successful resend
+  says so.
+- **A network failure never claims a field is wrong.** With the API unreachable,
+  the message is form-level and honest — no `errors` array means nothing is
+  known to be wrong with the input.
+- **Verified but still `missing_requirements`** names the fields the instance
+  wants instead of dead-ending, the same way sign-in names an unsupported second
+  factor. Only reachable by reconfiguring the Clerk instance, but the branch
+  exists precisely so a config change surfaces as a sentence and not a hang.
+
+**Accessibility and input**
+
+- **Nothing is signalled by colour alone** — every invalid field carries a
+  written message beneath it as well as a red border.
+- **The password can be revealed.** Typing a strong password blind on a phone
+  keyboard is a top source of sign-up abandonment.
+- **The keyboard doesn't bury the submit button** on a small device (iPhone SE
+  is the case that matters), and the code field autofocuses on arrival.
+- **Autofill hints are right**: `emailAddress`, `newPassword`, `oneTimeCode`.
+  The one-time-code hint is what puts the emailed code in the QuickType bar.
+
 ## Not yet covered (tracked here so it isn't lost, not because it's blocking)
 
-- Mobile has **sign-in but no sign-up** — `app/sign-in.tsx` handles email+password plus a second factor, and there is no `sign-up.tsx` at all. A new athlete cannot create an account from the phone; they must register on the web app first. Add mobile registration scenarios when that screen is actually built.
+- Mobile sign-up has **no OAuth and no password reset**. Password reset is the
+  more urgent of the two and belongs on `sign-in.tsx`, not here: today an
+  athlete who forgets their password has no route back in from the phone at all.
+- Mobile sign-up **collects no terms/privacy consent**, because there is no
+  terms or privacy URL to link to yet. Add the scenario when there is one.
 - Web/mobile nav destinations beyond Dashboard/Today (Calendar, Strength, BJJ, Nutrition, Insights, Account / Plan, Log, Progress, Profile) don't exist yet — add their scenarios here when each one is actually built, not preemptively.
 - Admin has no real backend data (subscriptions, device/platform tracking, integration sync, support tickets) and no `Jobs & Webhooks`/`Audit Log` screens — none of these are designed yet; add scenarios once each lands for real.

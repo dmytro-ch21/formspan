@@ -2247,6 +2247,145 @@ Worth recording because it is the same shape as the mutation-testing and
 fresh-install entries above: a plausible premise ("the response is already
 sent"), never checked, that a green test suite could not contradict.
 
+## 2026-07-31 — The front door was on a different device
+
+A mobile-first training app shipped without a way to create an account on the
+phone. `app/sign-in.tsx` had been sign-in only since Phase 2, where the scope
+was deliberately "obtain a real session token so the app can call authenticated
+endpoints" — correct then, and quietly wrong ever since. A new athlete had to
+find the deployed web app, register there, and know to set a password (mobile
+sign-in is email+password, so an OAuth-only web signup would leave them locked
+out of the phone). Nobody was going to do that standing in a gym.
+
+`app/sign-up.tsx` closes it: email + password, then the emailed six-digit code,
+then straight into the app.
+
+### The bug that would have made the whole screen unreachable
+
+The root layout's auth guard read:
+
+```ts
+const onSignIn = segments[0] === 'sign-in';
+if (!isSignedIn && !onSignIn) router.replace('/sign-in');
+```
+
+Adding a route is normally additive. Here it is not: a signed-out user — which
+is *every* user of a sign-up screen — opening `/sign-up` matches `!onSignIn`,
+and gets replaced back to `/sign-in` on the next effect tick. The screen would
+have rendered for one frame and vanished, and the tempting diagnosis would have
+been the new file rather than the six-month-old line that never mentioned it.
+
+Found by reading the guard before writing the screen rather than after, which is
+the only reason it isn't a debugging story. It is now keyed on a *set* of auth
+routes, with a comment saying why it is a set — because the next person adding
+`forgot-password` will hit exactly this.
+
+### Three UX properties, each of which is a specific failure it avoids
+
+**Errors land on the field that caused them.** Clerk tags every error with
+`meta.paramName`, so "that email is taken" is routed under the email input
+rather than pooled into one message at the bottom of the form. The fallback is
+the honest part: a failure with no `errors` array at all — no signal, DNS, a
+5xx — becomes a single form-level message, because nothing about the input is
+known to be wrong. Same discipline as the honest-failure-states work: don't
+report a fact you didn't establish.
+
+**An interrupted sign-up resumes where it stopped.** Clerk keeps the in-flight
+`signUp` on the client, so the mount effect restores the verify step from
+`status === 'missing_requirements'` + `unverifiedFields`. Without it, an app
+killed between "create" and "verify" — a phone call, a swipe-up, iOS reclaiming
+memory — reopens on a blank form that then rejects *its own* half-registered
+email as already taken. That is a dead end with no exit but a second email
+address, and it happens at the single least forgiving moment in the product.
+
+**And that feature shipped dead**, until the review caught it. Writing the
+resume effect is only half of it: a relaunched app is signed-out, and the root
+guard's answer for signed-out is `/sign-in`. So the screen that knows how to
+resume was never the screen the user arrived at, and password sign-in against an
+unverified account fails with an error that mentions nothing about sign-up. The
+guard now checks for a pending sign-up and prefers `/sign-up` for that case.
+
+Worth recording because of the shape, which this log keeps finding: **a
+mechanism verified in isolation, whose trigger was never checked.** The effect
+was correct. It just never ran. Same family as the `completed` flag that was
+written but never read back, and the `updated_at` that could be dropped from a
+SELECT without failing a single test.
+
+**The password rule is stated before it is enforced**, and only the rule that
+can be backed. The 8-character minimum is Clerk's documented default and is
+shown live from the first frame; nothing else is asserted, because the
+instance's full password config hasn't been read and inventing a rule list would
+be the same failure as inventing a data field. Whatever else Clerk rejects is
+surfaced verbatim under the field.
+
+### Three smaller things the review found, all the same kind
+
+Each is a state the screen could reach and then describe wrongly — the failure
+mode this codebase has spent several entries learning to distrust:
+
+- **The verify heading said "we sent a code to you" even when the send was
+  exactly what had just failed**, and on a resumed sign-up, where whether a
+  code is waiting is genuinely unknown. Now gated on an actual successful send,
+  with neutral copy otherwise.
+- **A `setActive` that failed after a successful verification left a dead
+  button.** The verification is spent, so tapping Verify again could only
+  produce a confusing rejection; the escape existed but ran through relaunch →
+  "email taken" → sign-in. The button now becomes **Continue** and retries only
+  the activation.
+- **`maxLength={6}` on the code field truncated pasted input natively**, before
+  the sanitizer could strip the space out of `"123 456"` — five digits, no
+  explanation. Removed; the existing `.slice(0, 6)` already bounds it.
+
+### One non-obvious ordering decision
+
+If `signUp.create` succeeds but `prepareEmailAddressVerification` throws, the
+screen still advances to the verify step and shows "tap Resend". Returning to
+the details form would be worse than useless: the account now exists, so
+resubmitting it would report that the email is already taken — about the
+half-registered account created one line earlier. The verify step's Resend *is*
+the retry for a failed code send, so that is where the user belongs.
+
+### What is not verified
+
+Neither browser nor simulator could render this, and both for reasons unrelated
+to it:
+
+- **Expo web won't bundle at all.** `expo-sqlite`'s web build imports
+  `./wa-sqlite/wa-sqlite.wasm`, which isn't present in the pnpm store, and
+  Expo Router's `require.context` pulls every route into one bundle — so
+  `(tabs)/library.tsx` → `lib/sessionStore.ts` → `lib/db.ts` breaks the build
+  for `/sign-up` too. Pre-existing on `main`, not caused here, and not worth
+  fixing inside a sign-up PR.
+- **The iOS Simulator is gated** on a device-access grant that is pending.
+
+So: typecheck and the full CI-equivalent suite pass, and the frontend reviewer
+ran. Layout — the reveal button overlapping the password input, the
+letter-spaced code field, behaviour on an SE-sized screen — is **unproven** and
+wants one pass on a real device before this is trusted.
+
+One layout decision was made specifically *because* it can't be tested here.
+`KeyboardAvoidingView` with `behavior="padding"` needs a `keyboardVerticalOffset`
+equal to the nav header's height, and reading that height means importing
+`useHeaderHeight` from `@react-navigation/elements` — which pnpm's strict
+`node_modules` doesn't expose, since nothing declares it directly. Rather than
+add a dependency to compute a number, the screen uses the scroll view's
+`automaticallyAdjustKeyboardInsets`: UIKit doing the same job natively, header
+included, and a no-op on Android where Expo's `resize` mode already handles it.
+The content also still scrolls by hand, so the worst case is inelegant rather
+than unreachable — which is the property to want when you can't see the screen.
+
+### Gaps this leaves
+
+- **No password reset**, which is now the most urgent hole in mobile auth and is
+  worse than the one just closed: an athlete who forgets their password has no
+  route back into the app from the phone at all. It belongs on `sign-in.tsx`.
+- **No OAuth.**
+- **No terms/privacy consent**, because there is no terms or privacy URL to link
+  to. Left absent rather than linked to a page that doesn't exist.
+- **iOS Strong Password won't actually offer** in Expo Go — the AASA/associated-
+  domains setup needs a custom dev client. `textContentType="newPassword"` is
+  still correct markup and costs nothing, but it does not work today.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.
@@ -2261,5 +2400,5 @@ sent"), never checked, that a green test suite could not contradict.
 - Structured logging + request/trace IDs exist in the API (`backend/internal/platform/httplog`), and `apps/web`/`apps/mobile` now propagate a `traceparent` on their real backend calls. `apps/admin` still doesn't — it has no backend calls of any kind yet, not a tracing gap specifically.
 - Feature flags exist (`GET /v1/flags`, `internal/modules/featureflag`) but are read-only — no write endpoint or admin-console screen yet (real backend admin authorization now exists, see below, so this is no longer the blocker it was). No frontend app fetches or gates on one yet.
 - First end-to-end vertical slice: **complete** — all five phases done and verified together on a real Simulator (offline log → sync → Postgres → web → admin → log grep). Remaining gaps within it, all deliberate: mobile sync is manual/on-log with **no background sync**; there's **no conflict resolution** (activities are append-only); only one activity `kind` is loggable from the UI; and there's still no in-app log viewer (tracing is by grepping the real log stream for a `request_id`).
-- Mobile sign-in covers email+password plus TOTP/SMS/email-code/backup second factors, but has **no sign-up, OAuth, or password reset** — a user must already exist. Email-code 2FA needed a cast around Clerk's own typings, which don't list it among second-factor params; worth revisiting when `@clerk/clerk-expo` updates.
+- Mobile auth now covers sign-in (email+password plus TOTP/SMS/email-code/backup second factors) **and sign-up** (`app/sign-up.tsx` — email+password then an emailed code). Still **no OAuth and no password reset**; reset is the more urgent of the two, since a forgotten password currently has no recovery path on the phone at all. Email-code 2FA needed a cast around Clerk's own typings, which don't list it among second-factor params; worth revisiting when `@clerk/clerk-expo` updates. The sign-up screen's layout is **not yet device-verified** — see the entry above for why neither the web preview nor the Simulator could render it.
 - The new `backend-module-scaffolder` agent and `/new-module` skill are still unverified in practice — the feature-flags module was scaffolded by hand instead, since its shape (global, ownerless, read-only) didn't fit the agent's per-user-CRUD template. No module has gone through the agent for real yet (the `profile` module it's modeled on predates it) — worth checking it actually produces correct output the first time it's used for a module that *does* fit the template (e.g. a future `goals` module).
