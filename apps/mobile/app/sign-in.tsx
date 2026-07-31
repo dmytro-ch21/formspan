@@ -1,7 +1,13 @@
 import { useSignIn } from '@clerk/clerk-expo';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, TextInput } from 'react-native';
+import { useEffect, useState } from 'react';
+import {
+  AccessibilityInfo,
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  TextInput,
+} from 'react-native';
 
 import { GoogleAuthButton } from '@/components/GoogleAuthButton';
 import { Text, View } from '@/components/Themed';
@@ -43,6 +49,14 @@ export default function SignInScreen() {
   // instead of leaving them retyping a password that never existed.
   const [tryGoogle, setTryGoogle] = useState(false);
 
+  // `accessibilityRole="alert"` doesn't make VoiceOver announce a message
+  // *appearing*, so without this the errors on this screen are visual-only —
+  // including the "use Google" hint, whose entire job is to un-stick someone.
+  // sign-up.tsx already does this; the two screens should not differ.
+  useEffect(() => {
+    if (error) AccessibilityInfo.announceForAccessibility(error);
+  }, [error]);
+
   async function onGoogle() {
     setError(null);
     setTryGoogle(false);
@@ -62,6 +76,12 @@ export default function SignInScreen() {
     // Google authenticated them but the account has 2FA. This is the *same*
     // state the password path reaches, so it reuses the same step rather than
     // growing a second copy of the second-factor UI.
+    //
+    // `busy` is held across the prepare because it *sends* the code. Without
+    // it both buttons stay live during a network call, and a stray "Sign in"
+    // tap would fire `signIn.create` and replace the attempt just prepared.
+    // The password path already holds it across the identical call.
+    setBusy(true);
     try {
       const supported = outcome.signIn.supportedSecondFactors ?? [];
       const chosen = await prepareBestSecondFactor(outcome.signIn, supported);
@@ -74,6 +94,8 @@ export default function SignInScreen() {
       }
     } catch (err) {
       setError(firstClerkMessage(err, 'Sign in failed.'));
+    } finally {
+      setBusy(false);
     }
   }
 

@@ -140,12 +140,23 @@ export default function SignUpScreen() {
     }
 
     // Google matched an existing account that has 2FA. Only sign-in has the
-    // second-factor UI, and Clerk keeps the in-flight `signIn` on the client,
-    // so sending them there resumes it rather than restarting. Saying which
-    // account it matched matters — otherwise "go to sign in" reads like the
-    // sign-up failed.
+    // second-factor UI, so that's where they have to finish.
+    //
+    // It does NOT resume. An earlier version of this comment claimed Clerk's
+    // client-persisted `signIn` would be picked up over there — the resource
+    // does persist, but nothing on sign-in reads it at mount, so the user
+    // would land on an email+password form for an account that has no
+    // password. What actually works is tapping Continue with Google again on
+    // that screen: `startSSOFlow` begins with `signIn.create`, so it restarts
+    // cleanly and re-lands on the second factor, which sign-in then drives.
+    //
+    // A mount effect on sign-in could make the resume real, but it would have
+    // to call `prepareBestSecondFactor` — a call that *sends* an SMS or email
+    // code. Firing that on every mount that happens to find a stale in-flight
+    // attempt would spray unrequested codes at people. So the copy tells them
+    // the one action that works instead.
     setErrors({
-      form: 'That Google account already exists and needs its two-factor code. Continue on the sign-in screen.',
+      form: 'That Google account already exists and needs its two-factor code. Go to sign in and tap Continue with Google there.',
     });
   }
 

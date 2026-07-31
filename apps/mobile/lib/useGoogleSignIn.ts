@@ -1,7 +1,7 @@
 import { useSSO } from '@clerk/clerk-expo';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { firstClerkMessage } from './clerkErrors';
 import type { SignInResource } from './secondFactor';
@@ -51,6 +51,16 @@ export type GoogleOutcome =
 export function useGoogleSignIn() {
   const { startSSOFlow } = useSSO();
   const [busy, setBusy] = useState(false);
+  /**
+   * The re-entrancy guard proper. `busy` state exists to drive the spinner,
+   * but it lands a render too late to stop two taps in the same frame — both
+   * would read `busy === false` and proceed. That is not theoretical: the
+   * second `openAuthSessionAsync` returns `{ type: 'locked' }`, which would
+   * surface as a spurious "didn't complete" error *while the real sheet is
+   * open*, and the second `signIn.create` would replace the attempt the first
+   * flow is about to reload against.
+   */
+  const inFlight = useRef(false);
 
   // Android opens the OAuth tab noticeably faster when the browser has been
   // warmed; harmless elsewhere. Cooled down on unmount so it isn't held open.
@@ -62,16 +72,19 @@ export function useGoogleSignIn() {
   }, []);
 
   const signInWithGoogle = useCallback(async (): Promise<GoogleOutcome> => {
-    if (busy) return { kind: 'cancelled' };
+    if (inFlight.current) return { kind: 'cancelled' };
+    inFlight.current = true;
     setBusy(true);
     try {
-      const { createdSessionId, setActive, signIn, authSessionResult } = await startSSOFlow({
-        strategy: 'oauth_google',
-        // Resolves to `vola://` in a real build. In Expo Go it resolves to an
-        // `exp://` URL that the OAuth provider will not redirect back to —
-        // see the note at the top of this file.
-        redirectUrl: Linking.createURL('/'),
-      });
+      const { createdSessionId, setActive, signIn, signUp, authSessionResult } = await startSSOFlow(
+        {
+          strategy: 'oauth_google',
+          // Resolves to `vola://` in a real build. In Expo Go it resolves to an
+          // `exp://` URL that the OAuth provider will not redirect back to —
+          // see the note at the top of this file.
+          redirectUrl: Linking.createURL('/'),
+        },
+      );
 
       if (createdSessionId && setActive) {
         await setActive({ session: createdSessionId });
@@ -91,7 +104,11 @@ export function useGoogleSignIn() {
 
       // No session, not cancelled, no second factor: name the state instead of
       // showing a generic failure for something that isn't generic.
-      const state = signIn?.status ?? authSessionResult?.type ?? 'unknown';
+      // A new Google identity goes through `signUp` (Clerk transfers the
+      // OAuth attempt), so naming only `signIn`'s status would report the
+      // wrong resource's state — e.g. "(needs_identifier)" for a sign-up that
+      // stalled on a field the instance requires.
+      const state = signIn?.status ?? signUp?.status ?? authSessionResult?.type ?? 'unknown';
       return {
         kind: 'failed',
         message: `Google sign-in didn't complete (${state}). Try again, or use your email and password.`,
@@ -99,9 +116,10 @@ export function useGoogleSignIn() {
     } catch (err) {
       return { kind: 'failed', message: firstClerkMessage(err, 'Google sign-in failed.') };
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
-  }, [busy, startSSOFlow]);
+  }, [startSSOFlow]);
 
   return { signInWithGoogle, googleBusy: busy };
 }

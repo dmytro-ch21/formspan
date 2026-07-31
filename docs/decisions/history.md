@@ -2721,8 +2721,23 @@ the rule this codebase keeps rediscovering.
 `needs_second_factor` routes into the **existing** second-factor step on
 sign-in rather than a new one, because Clerk's client is a singleton: the
 `signIn` resource handed back by the SSO flow is the same object the screen's
-own `useSignIn()` holds. That is also why sign-up, which has no second-factor
-UI, can simply point at sign-in — the in-flight resource is waiting there.
+own `useSignIn()` holds. Confirmed at source level in review, not assumed.
+
+The neighbouring claim was **wrong**, and it is the useful part of this entry.
+The first version said sign-up could point at sign-in because "the in-flight
+resource is waiting there" — implying it resumes. The resource does persist,
+but **nothing on sign-in reads it at mount**, so the user would land on an
+email+password form for an account that has no password. It escapes only
+because tapping Continue with Google again restarts the flow cleanly. Both the
+code comment and the functional-scenarios line said "resumes", which means a
+test would have been written asserting behaviour that does not exist — the
+same failure as the `completed` flag written but never read.
+
+It was fixed by correcting the claim rather than by building the resume,
+because making it true means calling `prepareBestSecondFactor` on mount — a
+call that *sends* an SMS or email code. Any mount that happened to find a
+stale in-flight attempt would spray unrequested codes at people. The copy now
+names the action that actually works.
 
 ### The constraint that shaped the testing
 

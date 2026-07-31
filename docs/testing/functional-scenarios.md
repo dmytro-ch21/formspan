@@ -1386,8 +1386,13 @@ auth screens cannot exercise this at all. `expo run:ios --device`.
   empty state claiming "you have none" after a failed read.
 - **A Google account with 2FA** completes through the *existing* second-factor
   step on sign-in, not a second copy of that UI.
-- **The same case from sign-up** points the user at sign-in and the in-flight
-  sign-in resumes there rather than restarting.
+- **The same case from sign-up** points the user at sign-in, where **tapping
+  Continue with Google again** completes it. Assert the instruction says that,
+  not merely "go to sign in": sign-in does **not** auto-resume the in-flight
+  attempt — it has no mount-time check of `signIn.status` — so a user who just
+  navigates there sees an email+password form for an account with no password.
+  Deliberate: auto-resuming would mean calling `prepareBestSecondFactor` on
+  mount, which *sends* a code nobody asked for.
 - **The primary submit is disabled while the OAuth sheet is open**, on both
   screens, so a password attempt can't race the SSO flow.
 - **Password sign-in against a Google-only account** should surface "this
