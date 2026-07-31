@@ -5,16 +5,22 @@ import { ActivityIndicator, Pressable, StyleSheet, TextInput } from 'react-nativ
 
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
-
-type SecondFactorStrategy = 'totp' | 'phone_code' | 'backup_code' | 'email_code';
+import { firstClerkMessage } from '@/lib/clerkErrors';
+import {
+  describeFactors,
+  prepareBestSecondFactor,
+  secondFactorPrompt,
+  SecondFactorStrategy,
+} from '@/lib/secondFactor';
 
 /**
  * Minimal email + password sign-in, plus the second-factor step Clerk
  * requires when the account has 2FA enabled. Scope matches apps/web's
  * original hello-world auth: enough to obtain a real session token so the
- * app can call authenticated endpoints. No OAuth or password reset yet —
- * those are their own increment. Account creation lives on `sign-up.tsx`,
- * which links here (and prefills `email`) when the address is already taken.
+ * app can call authenticated endpoints. No OAuth yet — that's its own
+ * increment. Account creation lives on `sign-up.tsx` and password reset on
+ * `forgot-password.tsx`; all three link to each other and hand the typed
+ * address across as an `email` route param.
  */
 export default function SignInScreen() {
   const { signIn, setActive, isLoaded } = useSignIn();
@@ -30,15 +36,6 @@ export default function SignInScreen() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  function readClerkError(err: unknown): string {
-    if (err && typeof err === 'object' && 'errors' in err) {
-      // Clerk returns a structured errors array; longMessage is user-facing.
-      const first = (err as { errors?: { longMessage?: string }[] }).errors?.[0];
-      if (first?.longMessage) return first.longMessage;
-    }
-    return 'Sign in failed.';
-  }
-
   async function onSubmitPassword() {
     if (!isLoaded || busy) return;
     setBusy(true);
@@ -52,46 +49,26 @@ export default function SignInScreen() {
       }
 
       if (attempt.status === 'needs_second_factor') {
-        // Use whatever Clerk actually offers for this account. TOTP and
-        // backup codes are entered directly; phone codes must be requested
-        // first. Preference order: authenticator app, then SMS, then a
-        // backup code.
+        // Whatever Clerk actually offers for this account, in preference
+        // order — shared with forgot-password.tsx, which reaches the same
+        // state after a reset on a 2FA account.
         const supported = attempt.supportedSecondFactors ?? [];
-        const phone = supported.find((f) => f.strategy === 'phone_code');
-        const emailCode = supported.find((f) => f.strategy === 'email_code');
-
-        if (supported.some((f) => f.strategy === 'totp')) {
-          setSecondFactor('totp');
-        } else if (phone) {
-          await signIn.prepareSecondFactor({
-            strategy: 'phone_code',
-            phoneNumberId: (phone as { phoneNumberId: string }).phoneNumberId,
-          });
-          setSecondFactor('phone_code');
-        } else if (emailCode) {
-          // Emailed codes, like SMS ones, have to be requested before they
-          // can be entered. Clerk's typings don't include email_code among
-          // the second-factor params even though instances can be
-          // configured to use it, hence the cast.
-          await signIn.prepareSecondFactor({
-            strategy: 'email_code',
-            emailAddressId: (emailCode as { emailAddressId: string }).emailAddressId,
-          } as unknown as Parameters<typeof signIn.prepareSecondFactor>[0]);
-          setSecondFactor('email_code');
-        } else if (supported.some((f) => f.strategy === 'backup_code')) {
-          setSecondFactor('backup_code');
+        const chosen = await prepareBestSecondFactor(signIn, supported);
+        if (chosen) {
+          setSecondFactor(chosen);
         } else {
           // Name what Clerk actually returned instead of a dead end, so the
           // gap is diagnosable rather than mysterious.
-          const names = supported.map((f) => f.strategy).join(', ') || 'none reported';
-          setError(`Unsupported second factor (${names}). Sign in on web instead for now.`);
+          setError(
+            `Unsupported second factor (${describeFactors(supported)}). Sign in on web instead for now.`,
+          );
         }
         return;
       }
 
       setError(`Additional step required (${attempt.status}).`);
     } catch (err) {
-      setError(readClerkError(err));
+      setError(firstClerkMessage(err, 'Sign in failed.'));
     } finally {
       setBusy(false);
     }
@@ -114,20 +91,13 @@ export default function SignInScreen() {
         setError(`Verification incomplete (${attempt.status}).`);
       }
     } catch (err) {
-      setError(readClerkError(err));
+      setError(firstClerkMessage(err, 'Sign in failed.'));
     } finally {
       setBusy(false);
     }
   }
 
-  const codeLabel =
-    secondFactor === 'phone_code'
-      ? 'Enter the code we texted you'
-      : secondFactor === 'email_code'
-        ? 'Enter the code we emailed you'
-        : secondFactor === 'backup_code'
-          ? 'Enter a backup code'
-          : 'Enter the code from your authenticator app';
+  const codeLabel = secondFactor ? secondFactorPrompt(secondFactor) : '';
 
   return (
     <View style={styles.container}>
@@ -197,23 +167,48 @@ export default function SignInScreen() {
       </Pressable>
 
       {/* Only on the first step: partway through a second factor there is an
-          account already, so offering to create one is noise. */}
+          account already and its password already worked, so neither of these
+          is anything but noise. */}
       {secondFactor === null && (
-        <Pressable
-          style={styles.footer}
-          onPress={() =>
-            router.replace(
-              email.trim() ? { pathname: '/sign-up', params: { email: email.trim() } } : '/sign-up'
-            )
-          }
-          accessibilityRole="link"
-          accessibilityLabel="New to VOLA? Create an account"
-          testID="sign-in-to-sign-up"
-        >
-          <Text style={styles.footerText}>
-            New to VOLA? <Text style={styles.footerLink}>Create an account</Text>
-          </Text>
-        </Pressable>
+        <>
+          {/* Above "create an account", because a wrong password is the more
+              likely reason someone is stuck on this screen than no account. */}
+          <Pressable
+            style={styles.footer}
+            onPress={() =>
+              router.replace(
+                email.trim()
+                  ? { pathname: '/forgot-password', params: { email: email.trim() } }
+                  : '/forgot-password',
+              )
+            }
+            hitSlop={12}
+            accessibilityRole="link"
+            accessibilityLabel="Forgot your password?"
+            testID="sign-in-to-forgot"
+          >
+            <Text style={styles.footerLink}>Forgot your password?</Text>
+          </Pressable>
+
+          <Pressable
+            style={styles.footer}
+            onPress={() =>
+              router.replace(
+                email.trim()
+                  ? { pathname: '/sign-up', params: { email: email.trim() } }
+                  : '/sign-up',
+              )
+            }
+            hitSlop={12}
+            accessibilityRole="link"
+            accessibilityLabel="New to VOLA? Create an account"
+            testID="sign-in-to-sign-up"
+          >
+            <Text style={styles.footerText}>
+              New to VOLA? <Text style={styles.footerLink}>Create an account</Text>
+            </Text>
+          </Pressable>
+        </>
       )}
     </View>
   );

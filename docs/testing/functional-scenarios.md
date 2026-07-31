@@ -1254,11 +1254,79 @@ below is either that path or a way of falling off it.
 - **Autofill hints are right**: `emailAddress`, `newPassword`, `oneTimeCode`.
   The one-time-code hint is what puts the emailed code in the QuickType bar.
 
+## Mobile password reset (`apps/mobile/app/forgot-password.tsx`)
+
+The property: **forgetting a password must not cost an athlete their account.**
+Before this screen it effectively did — there was no reset path on the phone at
+all, and the web one is only findable if you already know the web app exists.
+
+**Happy path**
+
+- **Reset end to end**: email → emailed code + new password → signed in, with a
+  token that authenticates a real backend call.
+- **The new password actually works.** Sign out afterwards and sign in with it.
+  Worth its own scenario: everything else here can pass while the reset silently
+  didn't take.
+- **Reachable from sign-in** via "Forgot your password?", with the typed address
+  carried across.
+
+**The 2FA window — the part unique to reset**
+
+- **On a 2FA account the password is saved *before* sign-in completes.** Clerk's
+  `attemptFirstFactor` sets the password and *then* reports
+  `needs_second_factor`. Test with a 2FA-enabled account and assert the screen
+  says the password is saved on the second-factor step. A user who abandons here
+  believing nothing happened will reset again — and the second reset invalidates
+  the password they now actually have.
+- **Abandoning at the second factor still leaves the new password live.** Kill
+  the app at that step, then sign in normally with the new password.
+- **An unsupported second factor names itself** and says the password is saved,
+  rather than dead-ending.
+- **The second-factor *send* failing must still say the password is saved.**
+  Preparing an emailed code is a network call on the common path — kill
+  connectivity between accepting the code and sending the 2FA code. The screen
+  must not fall back to a generic "check your connection and try again" over a
+  spent code, which is the one message that makes someone reset a second time.
+- **`needs_new_password` must NOT claim the password was saved** — that status
+  means the code was accepted and the password was not set. Only reachable by
+  omitting the password from the attempt, but it is the one status where the
+  claim would be exactly backwards.
+- **A `complete` attempt with no session id doesn't silently do nothing.**
+  `setActive({ session: null })` is a legal deactivate call that resolves —
+  navigating nowhere and reporting nothing.
+
+**Edge cases and errors**
+
+- **Unknown email** reports that no account was found and offers to create one,
+  carrying the address to sign-up. See the note below on why this is not the
+  neutral "if an account exists…" wording.
+- **Wrong or expired code** errors on the code field and clears it; a **network
+  failure does not clear** a correctly typed code.
+- **Weak new password** is caught locally under 8 characters; Clerk's own
+  rejection (breached, too common) surfaces verbatim under the password field.
+- **Resend cooldown** counts down, re-enables, and confirms on success.
+- **Send failure** must not produce a heading claiming a code was sent — the
+  send is exactly what failed. Same on "Use a different email".
+- **`setActive` fails after a successful reset** → the button becomes
+  **Continue** and retries only the activation. The verification is spent; a
+  second Verify could only be rejected.
+- **A network failure never claims a field is wrong** — form-level only.
+- **A pasted code with spaces** (`"123 456"`) still verifies.
+
+**Security**
+
+- **The screen never signs anyone in without the emailed code.** The obvious
+  one, worth an explicit negative test: submit the reset with a wrong code and
+  assert no session is created and the old password still works.
+- **Enumeration is deliberately not hidden here**, because `sign-up.tsx` already
+  reveals whether an address is registered by refusing to reuse it. Neutral copy
+  on reset alone would close nothing and would cost the user who mistyped their
+  address a silent wait for an email that was never coming. **If sign-up ever
+  stops leaking it, change both together** — that is the scenario to write then.
+
 ## Not yet covered (tracked here so it isn't lost, not because it's blocking)
 
-- Mobile sign-up has **no OAuth and no password reset**. Password reset is the
-  more urgent of the two and belongs on `sign-in.tsx`, not here: today an
-  athlete who forgets their password has no route back in from the phone at all.
+- Mobile auth has **no OAuth**.
 - Mobile sign-up **collects no terms/privacy consent**, because there is no
   terms or privacy URL to link to yet. Add the scenario when there is one.
 - Web/mobile nav destinations beyond Dashboard/Today (Calendar, Strength, BJJ, Nutrition, Insights, Account / Plan, Log, Progress, Profile) don't exist yet — add their scenarios here when each one is actually built, not preemptively.

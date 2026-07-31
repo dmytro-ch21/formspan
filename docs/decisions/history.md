@@ -2386,6 +2386,117 @@ than unreachable — which is the property to want when you can't see the screen
   domains setup needs a custom dev client. `textContentType="newPassword"` is
   still correct markup and costs nothing, but it does not work today.
 
+## 2026-07-31 — Forgetting a password stops costing you the account
+
+Sign-up (above) closed the front door; this closes the one that mattered more.
+An athlete who forgot their password had **no** route into the app from the
+phone — and unlike the sign-up gap there wasn't even a workaround, because
+"reset it on the web app" is only advice you can follow if you already know the
+web app exists. `app/forgot-password.tsx`: emailed code, new password, straight
+into the app.
+
+### The window where the password has changed and you are not signed in
+
+This is the thing that makes reset different from the other two auth screens,
+and it isn't obvious from the API. Clerk's `attemptFirstFactor` with
+`reset_password_email_code` **sets the new password and then tells you whether
+the account still needs a second factor.** So on a 2FA account there is a real
+interval where the password is already updated and the user is not yet signed
+in.
+
+Getting the copy wrong there is not cosmetic. A screen that says "enter your
+authenticator code" and nothing else invites someone to give up believing
+nothing happened — and then reset again, which invalidates the password they
+now actually have. Every path past that call says the password is saved: the
+second-factor step, the unsupported-factor message, and the footer link back to
+sign-in.
+
+### Telling the truth about an unknown email, on purpose
+
+The standard advice is neutral copy — "if an account exists, we've sent a
+code" — so reset can't be used to test whether an address is registered. It is
+good advice when it works. It doesn't work here: **`sign-up.tsx` already leaks
+exactly the same fact**, unavoidably, by refusing to reuse a taken address. So
+neutral wording on reset alone would close nothing while costing a real user —
+the one who mistyped their address — a silent wait for an email that was never
+going to arrive.
+
+Recorded rather than just done, because the reasoning has a dependency: if
+sign-up ever stops leaking it, this must change *with* it, not on its own. A
+future reader finding non-neutral reset copy should be able to tell it was a
+decision and what would invalidate it.
+
+### Two extractions, one of which had a real bug in it
+
+`lib/clerkErrors.ts` (error→field routing) came out of `sign-up.tsx`, and
+`lib/secondFactor.ts` (2FA selection and preparation) out of `sign-in.tsx`.
+Reset needs both — and it reaches `needs_second_factor` by a completely
+different route than sign-in does, which is precisely why that logic shouldn't
+have had two copies.
+
+The second-factor extraction is the one worth noting. Typing the factor list as
+a hand-written `{ strategy: string }` **compiled**, and silently invalidated the
+two casts inside it — `phoneNumberId` and `emailAddressId` exist only on their
+respective variants of Clerk's union, so the narrowing is what makes those casts
+safe. Deriving the type from Clerk's own
+(`NonNullable<SignInResource['supportedSecondFactors']>[number]`) is what caught
+it. A restated type is a type that stops matching.
+
+### What the review found, which was the same failure twice
+
+The blocking finding was a path where the screen would have said the wrong
+thing at exactly the moment it exists to say the right one. Preparing an
+emailed second factor is a **network call**, and email code is this instance's
+configured method — so it is the common path, not an exotic one. It sat inside
+the same `try` as `attemptFirstFactor`, so a flaky network there produced
+"Something went wrong, check your connection and try again" over the reset form
+with a now-spent code still in it — while the password had, in fact, already
+changed. The generic retry message and the footer saying "Password saved"
+contradicted each other on the same screen.
+
+`sign-up.tsx` had already established the fix a few hours earlier, for the same
+reason in different clothes: create-then-prepare, where "the account exists from
+here on" meant the prepare failure must not send you back to the form. Here the
+invariant is "the password is saved from here on", and it wasn't honored. Worth
+recording because the lesson didn't transfer on its own — the pattern was known,
+written down, and still not applied to the next screen that needed it.
+
+Two smaller ones of the same family, both now fixed: the catch-all status branch
+asserted the password was saved for *any* unrecognised status, including
+`needs_new_password`, which means precisely that it wasn't; and `setActive({
+session: null })` is a legal *deactivate* call that resolves, so a null session
+id would have navigated nowhere and reported nothing.
+
+The review also killed three casts. Two were mine and one was inherited: the
+`email_code` prepare cast dated from a Clerk version whose types genuinely
+omitted `email_code`, and at the pinned version they don't — it had been
+suppressing type checking on those props for nothing. Deleting it and
+recompiling was the whole verification. The per-factor `phoneNumberId` /
+`emailAddressId` casts went too, since TypeScript's inferred type predicates
+narrow `.find((f) => f.strategy === '…')` to the right variant on their own.
+
+And one piece of state got deleted rather than fixed: `codeSent` became
+write-only once its only reader turned out to be an unreachable branch. This
+codebase has been bitten by a written-but-never-read flag before (the
+`completed` one that zeroed every session's volume), so a write with no reader
+now gets removed rather than left looking load-bearing.
+
+### Gaps this leaves
+
+- **OAuth** is now the only auth path still missing, and it is a want rather
+  than a hole — every account is reachable without it.
+- No terms/privacy consent anywhere in auth, still, because there is no URL to
+  link to.
+- `forgot-password.tsx` duplicates ~80 lines of `StyleSheet` from
+  `sign-up.tsx`. A deliberate call: extracting shared auth styles would mean
+  churning a screen that merged an hour earlier and is still not device-verified.
+  Worth doing once both have been seen on a phone.
+- **Still not device-verified**, for the same two reasons as sign-up — Expo web
+  can't bundle any route (now recorded in CLAUDE.md's gotchas) and the Simulator
+  is gated on a pending device-access grant. Three auth screens have now been
+  built without one of them being looked at on a phone. That is the largest
+  outstanding risk in this area and it is not a code problem.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.
@@ -2400,5 +2511,5 @@ than unreachable — which is the property to want when you can't see the screen
 - Structured logging + request/trace IDs exist in the API (`backend/internal/platform/httplog`), and `apps/web`/`apps/mobile` now propagate a `traceparent` on their real backend calls. `apps/admin` still doesn't — it has no backend calls of any kind yet, not a tracing gap specifically.
 - Feature flags exist (`GET /v1/flags`, `internal/modules/featureflag`) but are read-only — no write endpoint or admin-console screen yet (real backend admin authorization now exists, see below, so this is no longer the blocker it was). No frontend app fetches or gates on one yet.
 - First end-to-end vertical slice: **complete** — all five phases done and verified together on a real Simulator (offline log → sync → Postgres → web → admin → log grep). Remaining gaps within it, all deliberate: mobile sync is manual/on-log with **no background sync**; there's **no conflict resolution** (activities are append-only); only one activity `kind` is loggable from the UI; and there's still no in-app log viewer (tracing is by grepping the real log stream for a `request_id`).
-- Mobile auth now covers sign-in (email+password plus TOTP/SMS/email-code/backup second factors) **and sign-up** (`app/sign-up.tsx` — email+password then an emailed code). Still **no OAuth and no password reset**; reset is the more urgent of the two, since a forgotten password currently has no recovery path on the phone at all. Email-code 2FA needed a cast around Clerk's own typings, which don't list it among second-factor params; worth revisiting when `@clerk/clerk-expo` updates. The sign-up screen's layout is **not yet device-verified** — see the entry above for why neither the web preview nor the Simulator could render it.
+- Mobile auth now covers **sign-in** (email+password plus TOTP/SMS/email-code/backup second factors), **sign-up** (`app/sign-up.tsx`) and **password reset** (`app/forgot-password.tsx`). Only **OAuth** is still missing, and it's a want rather than a hole — every account is reachable without it. The old note here said email-code 2FA needed a cast around Clerk's typings "worth revisiting when `@clerk/clerk-expo` updates": that revisit happened, and the cast was already unnecessary at the pinned version — see the entry above. **None of the three screens is device-verified** — see the sign-up entry for why neither the web preview nor the Simulator could render one.
 - The new `backend-module-scaffolder` agent and `/new-module` skill are still unverified in practice — the feature-flags module was scaffolded by hand instead, since its shape (global, ownerless, read-only) didn't fit the agent's per-user-CRUD template. No module has gone through the agent for real yet (the `profile` module it's modeled on predates it) — worth checking it actually produces correct output the first time it's used for a module that *does* fit the template (e.g. a future `goals` module).
