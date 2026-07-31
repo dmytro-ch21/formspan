@@ -1685,6 +1685,39 @@ first time. Nothing about this was visible locally, where every client is
 same-origin or native — CORS only has opinions once a browser talks to a
 different host, which is a thing that first happened today.
 
+## 2026-07-30 — iOS build configuration, ahead of a real device
+
+The app has only ever run under Expo Go. Nothing in the repo could produce an
+installable binary: `app.json`'s `ios` block held `supportsTablet` and nothing
+else — no bundle identifier — and there was no `eas.json` at all.
+
+Added the identity (`com.vola.fitness` for both platforms), build/version
+numbers, and three EAS profiles. The choice worth recording is what the
+profiles point at: `preview` and `production` both target the **staging** API,
+because there is no production API yet. A profile aimed at a host that does
+not exist is worse than one aimed at a real one, so `production` moves when
+production does and not before.
+
+**`EXPO_PUBLIC_*` is inlined at bundle time, not read at runtime**, which is
+why `EXPO_PUBLIC_API_URL` lives in `eas.json` per profile rather than in
+`.env.local`. A build made from a developer's machine would otherwise carry
+their LAN IP and work on exactly one desk — the kind of thing that looks fine
+until a tester installs it.
+
+The Clerk publishable key deliberately stays out of `eas.json` and goes in as
+an EAS environment variable. It is publishable and ships in the bundle either
+way, so this is not about secrecy: it is about there being one answer to
+"where do keys live in this repo", and that answer already being "not in git".
+
+`ITSAppUsesNonExemptEncryption: false` is set because App Store Connect
+otherwise blocks every submission on an export-compliance question. The app
+uses only HTTPS and the OS keychain, which is exempt.
+
+Deferred, and flagged in `docs/architecture/ios-testflight.md`: no
+`expo-updates`, so every JS change needs a fresh build and another TestFlight
+round trip. Adding it changes the release model enough to deserve its own
+decision rather than riding along with build configuration.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.
