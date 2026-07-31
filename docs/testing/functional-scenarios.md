@@ -875,8 +875,63 @@ Domain: the properties that hold **across** the strength arithmetic rather than 
 
 ---
 
+## Local schema migration (`apps/mobile/lib/db.ts`)
+
+The gap this closes: every scenario above starts from an app that already works,
+so they all exercise the **upgrade** path. The **install** path — a database
+that does not exist yet — had no coverage at all, and that is precisely where
+`duplicate column name: remote` bricked every new install (see the 2026-07-30
+history entry). A simulator that has run any earlier build cannot reproduce it.
+
+**Happy path**
+
+- **Fresh install can log an activity.** Delete the app (or the `vola.db` file),
+  launch, sign in, log an activity, and confirm it appears with a pending count.
+  This is the single scenario that would have caught the bug; nothing subtler is
+  needed.
+- **Fresh install can start and save a session.** Same starting state: Start
+  session, add an exercise, enter a set, confirm it persists across an app
+  restart.
+- **Every offline surface works on a fresh install** — Today's activity list,
+  the workout cache, the exercise catalog cache, and unit prefs. They share one
+  database and one migration, so a migration failure takes all of them at once
+  and any single one of them proves the migration ran.
+
+**Upgrade paths** — each should reach the current shape and stamp the version.
+Worth driving from a database seeded at a given `user_version` rather than by
+installing historical builds:
+
+- **v0 (no database)** — runs every branch. The case that broke.
+- **v1** (`activities` only) — creates `local_sessions` and `workout_cache` at
+  current shape, then must *skip* both `ADD COLUMN` steps.
+- **v3, v4** — genuinely lack `remote`/`goal`, so both `ALTER`s must *run*. The
+  mirror of the above: a guard that always skipped would pass the v1 case and
+  fail these.
+- **v6** — early return, no statements issued.
+
+**Edge cases & errors**
+
+- **A device bricked by the old code self-heals.** Seed the exact broken state —
+  all tables at current shape, `user_version = 0` — launch, and confirm the app
+  works with its rows intact. No reinstall, no data loss.
+- **The v5-era mixed state heals too**: `local_sessions` *has* `remote`,
+  `workout_cache` *lacks* `goal`, version 0. One guard must skip while the other
+  fires, in the same run.
+- **Interrupted migration.** Kill the app mid-migration and relaunch; it should
+  converge rather than fail. `migrate()` is not transactional, so this asserts
+  that every step is individually idempotent.
+- **A failed migration doesn't cache its own failure.** `getDb()` nulls its
+  promise on rejection, so a transient failure must not present as the database
+  being permanently gone.
+
+**Regression guard for the next column**
+
+- **Adding a v7 column must not break fresh installs.** Whatever form it takes,
+  the v0 scenario above has to keep passing. This is the check that keeps the
+  invariant honest, since nothing structural enforces it.
+
 ## Not yet covered (tracked here so it isn't lost, not because it's blocking)
 
-- Mobile has no auth yet (Clerk Expo SDK is a separate future increment) — no sign-in/sign-out scenarios apply to mobile today.
+- Mobile has **sign-in but no sign-up** — `app/sign-in.tsx` handles email+password plus a second factor, and there is no `sign-up.tsx` at all. A new athlete cannot create an account from the phone; they must register on the web app first. Add mobile registration scenarios when that screen is actually built.
 - Web/mobile nav destinations beyond Dashboard/Today (Calendar, Strength, BJJ, Nutrition, Insights, Account / Plan, Log, Progress, Profile) don't exist yet — add their scenarios here when each one is actually built, not preemptively.
 - Admin has no real backend data (subscriptions, device/platform tracking, integration sync, support tickets) and no `Jobs & Webhooks`/`Audit Log` screens — none of these are designed yet; add scenarios once each lands for real.
