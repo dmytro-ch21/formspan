@@ -1371,9 +1371,10 @@ auth screens cannot exercise this at all. `expo run:ios --device`.
 **Happy path**
 
 - **An account created with Google on web signs in on the phone.** The
-  regression test for the entire feature. Create via web's modal, then sign in
-  on mobile with Continue with Google, and confirm an authenticated backend call
-  succeeds afterwards.
+  regression test for the entire feature — **manually confirmed working on a
+  real device (2026-07-31)**. Create via web's modal, then sign in on mobile
+  with Continue with Google, and confirm an authenticated backend call succeeds
+  afterwards.
 - **A brand-new Google identity signs *up* from the mobile sign-up screen** and
   lands in the app — Clerk's OAuth covers both directions through one call.
 - The button renders identically on sign-in and sign-up (shared component).

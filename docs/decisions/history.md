@@ -2739,6 +2739,17 @@ call that *sends* an SMS or email code. Any mount that happened to find a
 stale in-flight attempt would spray unrequested codes at people. The copy now
 names the action that actually works.
 
+### Verified on a device
+
+Built Release and installed on a real iPhone 13 Pro Max, and the round trip
+that motivated the whole change was **confirmed by hand: an account created
+through Google on web signs in on the phone.** That class of account had no
+route in at all before.
+
+Worth stating plainly because it could not be automated or simulated — see
+the constraint below. The only verification available was a person with the
+phone in their hand.
+
 ### The constraint that shaped the testing
 
 **OAuth cannot work in Expo Go.** The redirect returns through `vola://`, the
