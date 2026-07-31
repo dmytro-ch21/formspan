@@ -112,7 +112,11 @@ func (r *PostgresRepository) attachMedia(ctx context.Context, exercises []Exerci
 	// `position` leads so an author can override; the CASE breaks ties
 	// deterministically when every row leaves position at its default.
 	rows, err := r.pool.Query(ctx, `
-		SELECT exercise_id, kind, storage_key, content_type, width, height, position
+		SELECT exercise_id, kind, storage_key, content_type, width, height, position,
+			-- Versions the URL the handler assembles, so replacing the bytes at
+			-- a storage key actually reaches clients instead of being masked by
+			-- every cache between here and the phone.
+			updated_at
 		FROM exercise_media
 		WHERE exercise_id = ANY($1)
 		ORDER BY exercise_id, position,
@@ -136,7 +140,7 @@ func (r *PostgresRepository) attachMedia(ctx context.Context, exercises []Exerci
 			m          Media
 		)
 		if err := rows.Scan(&exerciseID, &m.Kind, &m.StorageKey, &m.ContentType,
-			&m.Width, &m.Height, &m.Position); err != nil {
+			&m.Width, &m.Height, &m.Position, &m.UpdatedAt); err != nil {
 			return fmt.Errorf("exercise: scan media: %w", err)
 		}
 		byExercise[exerciseID] = append(byExercise[exerciseID], m)

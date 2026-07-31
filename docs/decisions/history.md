@@ -1967,6 +1967,80 @@ Worth noting for whoever adds the next screen: the invariant is that **an empty
 state may only claim "you have none" after a successful read.** Nothing
 structural enforces it.
 
+## 2026-07-31 — A replaced picture that reached nobody
+
+Swapping an exercise image in R2, under the same filename, changed nothing on
+the phone. Not a slow propagation — a permanent one.
+
+The URL was a plain concatenation, `MEDIA_BASE_URL + "/" + storage_key`, and
+storage keys are stable by design: an exercise's thumbnail is
+`.../thumbnail.webp` for as long as the exercise exists. So new bytes arrived
+at a byte-identical URL, and every cache in the path did exactly what it is
+supposed to do. Three of them, in the order they bite:
+
+1. **`expo-image`'s disk cache on the phone**, which is keyed by URL and
+   **never revalidates**. A device that loaded the old picture keeps it until
+   the app is deleted. There is no in-app cache-clear. This is what turns a
+   caching annoyance into a permanent one, and no amount of work on the bucket
+   touches it.
+2. **Cloudflare's edge**, serving what it holds.
+3. **No `Cache-Control` on the objects at all** — R2 returns only `ETag` and
+   `Last-Modified`, so caches apply *heuristic* freshness, which lengthens as a
+   file ages and is unpredictable by construction.
+
+**The fix: version the URL.** `?v=<exercise_media.updated_at>` makes new bytes a
+new resource, which is the one lever all three layers honour. The bucket ignores
+the parameter and returns the object — checked against the live bucket rather
+than assumed, same `ETag`, HTTP 200.
+
+`updated_at` was already on the table and simply unused. It is folded into the
+URL rather than exposed as a JSON field, because no client needs to *read* it —
+they need the URL to differ, and it does. Adding contract surface nothing
+consumes is how a contract becomes hard to change. What the contract does now
+say, loudly, is that `url` is **opaque**: rebuilding it from `storage_key`
+throws the version away and reinstates the entire problem.
+
+### The part that isn't in the code
+
+Versioning only helps if `updated_at` moves, and **uploading to R2 touches
+nothing in Postgres.** Worse, re-running `cmd/seed` doesn't help either: its
+upsert guard only writes when `(storage_key, content_type, width, height)`
+differ, so a pure byte swap is invisible to the database. That guard is right
+for its purpose — don't churn rows — but it means the database genuinely cannot
+know the picture changed.
+
+So the recommended workflow is **not** "keep the filename and bust the cache".
+It is **put a content hash in the storage key** — `thumbnail.a3f9c1.webp`. The
+seed's guard then fires by itself, `updated_at` bumps, the parent exercise is
+touched (which is what lets a delta-syncing client learn an image changed at
+all), and the failure mode stops existing rather than being worked around. The
+`?v=` mechanism is the safety net for the times someone doesn't, and for the
+524-asset backfill now in progress it costs nothing to generate hashed names
+from the start.
+
+### Left open, and worth fixing before real users
+
+**`MEDIA_BASE_URL` points at an `r2.dev` URL.** That is Cloudflare's development
+endpoint — rate-limited, and with no zone attached, which means **there is no
+cache-purge API for it**. Once the edge holds an object, waiting is the only
+option. A custom domain restores purge and `Cache-Control`. Recorded in
+`deployment.md` rather than fixed here because it is an infrastructure change,
+not a code one.
+
+**No `Cache-Control` is set at upload.** With versioned URLs the correct value
+is `public, max-age=31536000, immutable` — caching forever is right precisely
+because a URL can never mean different bytes.
+
+**The sport placeholders have no row**, so their version is a hand-maintained
+constant, `defaultMediaRevision`. A stale constant is at least a visible mistake
+where a missing mechanism was not, and a test now fails if a placeholder ever
+loses its revision.
+
+The unit test pins the property the whole change exists for — different
+`updated_at`, different URL — and was verified by breaking it: pinning the
+version to a constant still compiles, still returns 200, and is silently
+useless, which is exactly the failure a reader would not spot.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.
