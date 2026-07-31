@@ -388,7 +388,7 @@ export default function SignUpScreen() {
               <TextInput
                 ref={passwordRef}
                 style={[styles.input, styles.passwordInput, errors.password && styles.inputInvalid]}
-                placeholder={`At least ${MIN_PASSWORD} characters`}
+                placeholder="Create a password"
                 placeholderTextColor={vola.textDim}
                 value={password}
                 onChangeText={(v) => {

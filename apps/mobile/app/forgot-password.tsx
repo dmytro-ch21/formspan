@@ -530,7 +530,7 @@ export default function ForgotPasswordScreen() {
               <TextInput
                 ref={passwordRef}
                 style={[styles.input, styles.passwordInput, errors.password && styles.inputInvalid]}
-                placeholder={`At least ${MIN_PASSWORD} characters`}
+                placeholder="Enter a new password"
                 placeholderTextColor={vola.textDim}
                 value={password}
                 onChangeText={(v) => {

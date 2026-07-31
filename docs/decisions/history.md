@@ -2491,11 +2491,37 @@ now gets removed rather than left looking load-bearing.
   `sign-up.tsx`. A deliberate call: extracting shared auth styles would mean
   churning a screen that merged an hour earlier and is still not device-verified.
   Worth doing once both have been seen on a phone.
-- **Still not device-verified**, for the same two reasons as sign-up — Expo web
-  can't bundle any route (now recorded in CLAUDE.md's gotchas) and the Simulator
-  is gated on a pending device-access grant. Three auth screens have now been
-  built without one of them being looked at on a phone. That is the largest
-  outstanding risk in this area and it is not a code problem.
+### Then they were actually run
+
+Simulator access was granted and all three auth screens were driven on a booted
+iPhone 15 Pro (Expo Go, SDK 57). What that proved, and what it didn't:
+
+**Verified live.** The `AUTH_ROUTES` guard — tapping "Create an account" reaches
+sign-up and *stays* there, which is the failure that would have made the whole
+screen unreachable. Sign-in shows both new links. Local validation on sign-up
+flags both fields, focuses the offending one, and the content scrolls clear of
+the keyboard, which settles the `automaticallyAdjustKeyboardInsets` bet made
+blind. The email keyboard carries `@` and `.` and a `next` return key.
+
+**The best single result** was the unknown-email path against real Clerk: it
+returns `form_identifier_not_found`, and the message lands *under the email
+field* rather than in a generic blob — which is the `identifier` param mapping
+added to `lib/clerkErrors.ts` this round, proving itself on a live response
+rather than by reading the code. The "create an account with that email instead"
+affordance fired with it.
+
+**One real defect found, which only looking could have found.** The password
+placeholder read "At least 8 characters" directly above a hint reading "• At
+least 8 characters" — the same six words, stacked, on both sign-up and reset.
+Every check in the suite passed with that on screen, and the reviewer couldn't
+see it either; it is a rendering fact, not a code fact. Placeholders are now
+"Create a password" / "Enter a new password" and the hint keeps the rule.
+
+**Still unverified, honestly:** the reset step's *behaviour*, and the whole
+second-factor branch. Both need a real emailed code, which needs a real inbox.
+The reset step's **layout** was inspected by forcing the step locally (reverted)
+— code field centring, the reveal button, the resend row all correct. The 2FA
+branch has been reasoned about and never executed.
 
 ## Open items / known gaps as of this entry
 

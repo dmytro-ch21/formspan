@@ -1243,6 +1243,15 @@ below is either that path or a way of falling off it.
   factor. Only reachable by reconfiguring the Clerk instance, but the branch
   exists precisely so a config change surfaces as a sentence and not a hang.
 
+**Verified on a simulator already (2026-07-31) — keep as regression checks**
+
+- The `AUTH_ROUTES` guard: sign-in → "Create an account" reaches sign-up and
+  stays. This is the one that silently breaks when a new auth screen is added.
+- Unknown email on reset routes Clerk's message to the **email field**, with the
+  create-an-account affordance.
+- Sign-up local validation flags both fields, focuses the first bad one, and the
+  content scrolls clear of the keyboard.
+
 **Accessibility and input**
 
 - **Nothing is signalled by colour alone** — every invalid field carries a
