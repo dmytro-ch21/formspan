@@ -1,11 +1,11 @@
 import { randomUUID } from 'expo-crypto';
 import type * as SQLite from 'expo-sqlite';
 
+import { ApiError } from './apiError';
 import { getDb } from './db';
 import type { Exercise } from './exercises';
 import type { Workout, WorkoutItem } from './workouts';
 import {
-  ApiError,
   finishSession as pushFinish,
   getSession as pullSession,
   listSessions as pullSessions,

@@ -36,12 +36,12 @@ import {
   saveLocalSets,
   syncSessions,
 } from '@/lib/sessionStore';
+import { isPermanentRejection } from '@/lib/apiError';
 import { deleteSession } from '@/lib/sessions';
 import {
   describeSet,
   emptySet,
   fetchSuggestions,
-  isPermanentRejection,
   measuresFor,
   SET_TYPES,
   type LoggedSet,

@@ -34,6 +34,19 @@ export async function writePref(userID: string, key: string, value: string): Pro
  */
 export const PREF_UNIT_SYSTEM = 'unit_system';
 /**
+ * `'1'` while the local unit choice hasn't reached the account.
+ *
+ * Persisted rather than held in component state because Settings is a screen
+ * people leave immediately: a flag that dies on unmount would stop admitting
+ * the change was local-only while it still was. It also gates the server-wins
+ * refresh in `useUnits`, so a pending choice can't be silently reverted by the
+ * next successful profile read.
+ *
+ * A one-key stand-in for the preference outbox that arrives with the sync
+ * orchestrator — deliberately not generalised here.
+ */
+export const PREF_UNIT_SYSTEM_OWED = 'unit_system_owed';
+/**
  * Whether ticking a set starts the rest countdown.
  *
  * Local rather than on the profile, for the same reason the per-exercise

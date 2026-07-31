@@ -30,6 +30,10 @@ export default function PinnedRecordsScreen() {
   const [pinned, setPinnedState] = useState<string[] | null>(null);
   const [query, setQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // `pinned === null` means "not answered yet". This means "asked, and the
+  // answer never came" — a different thing, and one the screen must not
+  // silently round down to an empty list.
+  const [unavailable, setUnavailable] = useState(false);
 
   useEffect(() => {
     const c = new AbortController();
@@ -45,7 +49,13 @@ export default function PinnedRecordsScreen() {
       .catch(() => {});
     fetchPinned(getToken, c.signal)
       .then(setPinnedState)
-      .catch(() => setPinnedState([]));
+      // This used to be `setPinnedState([])`, which made a failed load
+      // indistinguishable from "nothing pinned" — the screen then told someone
+      // with twelve pins that they had none, and a tap from that false
+      // baseline would PUT a list that wiped the eleven it never knew about.
+      .catch(() => {
+        if (!c.signal.aborted) setUnavailable(true);
+      });
     return () => c.abort();
   }, [getToken]);
 
@@ -105,7 +115,20 @@ export default function PinnedRecordsScreen() {
         </Text>
       )}
 
-      {pinned === null ? (
+      {unavailable ? (
+        // The exercise list would render fine from cache, but every row would
+        // show an empty tick box — which says "not pinned" about twelve lifts
+        // that may well be. Withholding the list is the honest option.
+        <View style={styles.unavailable} testID="pinned-unavailable">
+          <Text style={styles.unavailableText}>
+            Couldn&apos;t load which lifts you&apos;ve pinned, so they can&apos;t be changed right
+            now.
+          </Text>
+          <Text style={styles.unavailableHint}>
+            Nothing has changed. Try again when you&apos;re back online.
+          </Text>
+        </View>
+      ) : pinned === null ? (
         <ActivityIndicator style={styles.loading} accessibilityLabel="Loading your choices" />
       ) : (
         <FlatList
@@ -162,6 +185,9 @@ const styles = StyleSheet.create({
     backgroundColor: vola.surface,
   },
   loading: { marginTop: 32 },
+  unavailable: { marginTop: 32, gap: 8 },
+  unavailableText: { fontSize: 15, fontWeight: '600' },
+  unavailableHint: { color: vola.textMuted, fontSize: 13 },
   list: { gap: 4, paddingBottom: 32 },
   hint: { color: vola.textDim, fontSize: 12, marginBottom: 8 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10 },

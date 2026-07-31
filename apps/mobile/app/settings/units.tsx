@@ -14,7 +14,7 @@ import { useUnits } from '@/lib/useUnits';
  * control per feature becomes unnavigable long before it becomes complete.
  */
 export default function UnitsSettingsScreen() {
-  const { units, setUnits } = useUnits();
+  const { units, setUnits, unsynced } = useUnits();
 
   return (
     <ScrollView contentContainerStyle={styles.scroll} testID="units-screen">
@@ -42,6 +42,13 @@ export default function UnitsSettingsScreen() {
           );
         })}
       </View>
+
+      {unsynced && (
+        <Text style={styles.unsynced} accessibilityLiveRegion="polite" testID="units-unsynced">
+          Changed on this phone, but not yet on your account — the web app and any other device will
+          still use the old setting until you&apos;re back online.
+        </Text>
+      )}
 
       <Text style={styles.note}>
         Your training is always stored in kilograms and metres — this only changes how weights and
@@ -74,4 +81,5 @@ const styles = StyleSheet.create({
   muted: { color: vola.textMuted, fontSize: 13 },
   tick: { color: vola.lime, fontSize: 18, fontWeight: '700' },
   note: { color: vola.textDim, fontSize: 12, lineHeight: 17, paddingHorizontal: 4 },
+  unsynced: { color: vola.warn, fontSize: 13, lineHeight: 18, paddingHorizontal: 4 },
 });

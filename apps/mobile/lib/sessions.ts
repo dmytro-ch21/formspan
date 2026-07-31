@@ -1,5 +1,6 @@
 import { randomUUID } from 'expo-crypto';
 
+import { ApiError } from './apiError';
 import type { Exercise } from './exercises';
 import { newTraceId, traceparent } from './trace';
 import { formatDistance, formatWeight, type UnitSystem } from './units';
@@ -284,50 +285,6 @@ export function describeSet(s: LoggedSet, units: UnitSystem = 'metric'): string 
   if (s.rpe != null) parts.push(`RPE ${s.rpe}`);
   else if (s.rir != null) parts.push(`${s.rir} RIR`);
   return parts.join(' · ') || 'Not recorded';
-}
-
-/**
- * An API failure that kept the error *code* from the response envelope.
- *
- * Codes are part of the contract; messages explicitly are not. Callers need
- * the code to tell "you typed an impossible RPE" (keep the screen, show the
- * message) apart from "this session no longer exists" (re-read the server).
- */
-export class ApiError extends Error {
-  constructor(
-    message: string,
-    readonly code: string,
-    readonly status: number,
-  ) {
-    super(message);
-    this.name = 'ApiError';
-  }
-}
-
-/** True when the server rejected the input rather than the request. */
-export function isValidationError(err: unknown): boolean {
-  return err instanceof ApiError && err.code === 'invalid_input';
-}
-
-/**
- * True when retrying is pointless — the server understood the request and
- * refused it.
- *
- * The offline store's whole premise is that a failed push is an ordinary
- * state: the row stays dirty and goes out with the next sync. That's true of
- * a dead network and of a 5xx, and it is *not* true of a 404 (deleted
- * elsewhere), a 409 (the ID belongs to someone else) or a validation error —
- * those will fail identically forever, so staying quiet about them means an
- * athlete finishes a workout that was never going to sync.
- *
- * 408 and 429 are 4xx by number but retryable by meaning, so they're
- * excluded. Anything that isn't an `ApiError` never reached the server —
- * no token yet, no signal, request aborted — and stays silent.
- */
-export function isPermanentRejection(err: unknown): boolean {
-  if (!(err instanceof ApiError)) return false;
-  if (err.status === 408 || err.status === 429) return false;
-  return err.status >= 400 && err.status < 500;
 }
 
 async function request<T>(

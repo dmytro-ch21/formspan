@@ -7,6 +7,7 @@ import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { fetchExercises, pickImage, type Exercise } from '@/lib/exercises';
 import { fetchSuggestions, type Suggestion } from '@/lib/sessions';
+import { cachedExercises } from '@/lib/sessionStore';
 import { formatEstimate, formatWeight } from '@/lib/units';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
@@ -32,6 +33,16 @@ export default function ExerciseDetailScreen() {
   const [exercise, setExercise] = useState<Exercise | null>(null);
   const [stats, setStats] = useState<Suggestion | null>(null);
   const [loading, setLoading] = useState(true);
+  // `stats === null` after a *successful* fetch means "never logged". This
+  // means the question was never answered. Conflating them is how the screen
+  // came to tell people they'd never done an exercise they do every week.
+  const [statsUnavailable, setStatsUnavailable] = useState(false);
+  const [detailsUnavailable, setDetailsUnavailable] = useState(false);
+  // The offline cache stores name, sport, movement pattern and load type —
+  // and not equipment, muscles or instructions. A cache hit is therefore
+  // *partial*, and rendering it as if complete would quietly assert that a
+  // barbell lift needs no equipment and has no technique notes.
+  const [detailsFromCache, setDetailsFromCache] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -40,15 +51,23 @@ export default function ExerciseDetailScreen() {
         const list = await fetchExercises(getToken, {});
         setExercise(list.find((e) => e.id === id) ?? null);
       } catch {
-        /* the empty state covers it */
+        // Offline: the catalog cache still holds this exercise's name and how
+        // it's measured. Without consulting it the screen rendered the raw
+        // UUID as its heading, which told the athlete nothing at all.
+        const cached = await cachedExercises().catch(() => [] as Exercise[]);
+        const hit = cached.find((e) => e.id === id) ?? null;
+        setExercise(hit);
+        if (hit) setDetailsFromCache(true);
+        else setDetailsUnavailable(true);
       } finally {
         setLoading(false);
       }
       // History is a bonus, never a blocker — the catalog entry renders
-      // whether or not this succeeds.
+      // whether or not this succeeds. But a failure has to be *said*, not
+      // rendered as an absence of history.
       fetchSuggestions(getToken, [id])
         .then((m) => setStats(m.get(id) ?? null))
-        .catch(() => {});
+        .catch(() => setStatsUnavailable(true));
     })();
   }, [getToken, id]);
 
@@ -69,11 +88,27 @@ export default function ExerciseDetailScreen() {
 
       {uri && <Image source={{ uri }} style={styles.hero} contentFit="cover" alt="" />}
 
-      <Text style={styles.name}>{exercise?.name ?? id}</Text>
-      <Text style={styles.meta}>
-        {exercise?.movement_pattern.replace(/_/g, ' ')}
-        {exercise?.equipment?.length ? ` · ${exercise.equipment[0].replace(/-/g, ' ')}` : ''}
-      </Text>
+      {/* Never the bare id: a UUID as a heading is not a name, it's a leaked
+          implementation detail standing where the answer should be. */}
+      <Text style={styles.name}>{exercise?.name ?? 'Exercise'}</Text>
+      {detailsUnavailable ? (
+        <Text style={styles.meta}>Couldn&apos;t load this exercise&apos;s details right now.</Text>
+      ) : (
+        <Text style={styles.meta}>
+          {exercise?.movement_pattern.replace(/_/g, ' ')}
+          {/* Equipment is omitted for a cached entry rather than shown as
+              absent: the cache never stored it, so "no suffix" would read as
+              "needs no equipment" instead of "not known on this device". */}
+          {!detailsFromCache && exercise?.equipment?.length
+            ? ` · ${exercise.equipment[0].replace(/-/g, ' ')}`
+            : ''}
+        </Text>
+      )}
+      {detailsFromCache && (
+        <Text style={styles.muted} testID="exercise-details-partial">
+          Showing what&apos;s saved on this phone — equipment and technique notes need a connection.
+        </Text>
+      )}
 
       <Text style={styles.sectionLabel}>Your last session</Text>
       {done ? (
@@ -129,6 +164,13 @@ export default function ExerciseDetailScreen() {
           {/* The recommendation's own words, so this screen and the session
               screen never disagree about what to do next. */}
           {stats?.reason && <Text style={styles.reason}>{stats.reason}</Text>}
+        </View>
+      ) : statsUnavailable ? (
+        <View style={styles.card} testID="exercise-stats-unavailable">
+          <Text style={styles.muted}>
+            Couldn&apos;t load your history for this exercise. Anything you&apos;ve logged is still
+            there — this screen just can&apos;t reach it right now.
+          </Text>
         </View>
       ) : (
         <View style={styles.card}>

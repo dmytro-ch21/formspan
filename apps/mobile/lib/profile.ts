@@ -1,3 +1,4 @@
+import { ApiError, isNotFound } from './apiError';
 import { newTraceId, traceparent } from './trace';
 import type { UnitSystem } from './units';
 
@@ -45,7 +46,13 @@ export async function updateProfile(
   try {
     return await send();
   } catch (err) {
-    if (!/not found/i.test(err instanceof Error ? err.message : '')) throw err;
+    // Branch on the status, not the message. Messages are explicitly not part
+    // of the contract, so matching /not found/ broke two ways: it would stop
+    // working the day someone reworded the string server-side, and — worse —
+    // it treated *any* failure whose message happened to contain those words
+    // as "no profile yet". Offline it also cost two doomed requests instead of
+    // one, because a network error can't match and can't create either.
+    if (!isNotFound(err)) throw err;
     await request<Profile>(getToken, '/profile', { method: 'POST', body: JSON.stringify({}) });
     return send();
   }
@@ -69,7 +76,13 @@ async function request<T>(
   });
   if (res.status === 204) return undefined as T;
   const body = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(body?.error?.message ?? `Request failed (${res.status}).`);
+  if (!res.ok) {
+    throw new ApiError(
+      body?.error?.message ?? `Request failed (${res.status}).`,
+      body?.error?.code ?? 'unknown',
+      res.status,
+    );
+  }
   return body as T;
 }
 
@@ -133,7 +146,8 @@ export async function updateUnitSystem(
   try {
     return await patch();
   } catch (err) {
-    if (!/not found/i.test(err instanceof Error ? err.message : '')) throw err;
+    // Status, not message — see updateProfile above.
+    if (!isNotFound(err)) throw err;
     await request<Profile>(getToken, '/profile', { method: 'POST', body: JSON.stringify({}) });
     return patch();
   }

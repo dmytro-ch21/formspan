@@ -1,5 +1,6 @@
 import { randomUUID } from 'expo-crypto';
 
+import { isPermanentStatus } from './apiError';
 import { getDb } from './db';
 import { newTraceId, traceparent } from './trace';
 
@@ -116,11 +117,13 @@ export async function syncPendingActivities(
       }
 
       failed++;
-      // 4xx other than auth/rate-limit means the server will never accept
-      // this row. Retrying forever would silently inflate the pending count
-      // with a row that can't drain, so surface it instead of looping.
-      const permanent = res.status >= 400 && res.status < 500 && ![401, 408, 429].includes(res.status);
-      firstError ??= permanent
+      // A 4xx the server will never accept means retrying forever would
+      // silently inflate the pending count with a row that can't drain, so
+      // surface it instead of looping. The boundary lives in `apiError` rather
+      // than here: this used to be an inline copy that disagreed with
+      // `isPermanentRejection` about 401, so the same token expiry was
+      // transient on this path and fatal on the session path.
+      firstError ??= isPermanentStatus(res.status)
         ? `Rejected (${res.status}) — this entry can't sync.`
         : `API responded ${res.status}`;
     } catch (err) {
