@@ -875,7 +875,6 @@ Domain: the properties that hold **across** the strength arithmetic rather than 
 
 ---
 
-<<<<<<< HEAD
 ## Honest failure states (`apps/mobile`, every screen that loads before it writes)
 
 The property under test is one sentence: **an empty state may only claim "you
@@ -965,7 +964,6 @@ athletes actually hit.
   the predicate every load screen above branches on.
 - `isPermanentStatus` and `isPermanentRejection` agree for every status, since
   the whole point of the module is that they cannot drift apart.
-=======
 ## Local schema migration (`apps/mobile/lib/db.ts`)
 
 The gap this closes: every scenario above starts from an app that already works,
@@ -1020,7 +1018,6 @@ installing historical builds:
 - **Adding a v7 column must not break fresh installs.** Whatever form it takes,
   the v0 scenario above has to keep passing. This is the check that keeps the
   invariant honest, since nothing structural enforces it.
->>>>>>> origin/main
 
 ## Not yet covered (tracked here so it isn't lost, not because it's blocking)
 
