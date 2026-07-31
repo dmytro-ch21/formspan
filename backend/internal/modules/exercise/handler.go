@@ -3,7 +3,9 @@ package exercise
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
 )
@@ -45,9 +47,38 @@ func (h *Handler) withMediaURLs(exercises []Exercise) {
 	for i := range exercises {
 		for j := range exercises[i].Media {
 			m := &exercises[i].Media[j]
-			m.URL = h.mediaBaseURL + "/" + strings.TrimLeft(m.StorageKey, "/")
+			m.URL = mediaURL(h.mediaBaseURL, m.StorageKey, m.UpdatedAt)
 		}
 	}
+}
+
+// mediaURL assembles the public URL for one asset, versioned by when the row
+// last changed.
+//
+// The `?v=` is the entire point. Storage keys are stable by design — an
+// exercise's thumbnail is `.../thumbnail.webp` for as long as the exercise
+// exists — so replacing the picture leaves the URL byte-identical. Every cache
+// in the path then behaves correctly and unhelpfully: Cloudflare's edge serves
+// what it has, and `expo-image`'s disk cache on the phone never revalidates at
+// all, so a device that loaded the old image keeps it until the app is
+// deleted. Versioning the URL is the one lever all of them honour.
+//
+// The bucket ignores the parameter and returns the object; it exists purely to
+// make the cache key differ.
+//
+// Zero time can't come from the database — `exercise_media.updated_at` is
+// NOT NULL DEFAULT now(), so every scanned row carries a real one, including
+// every row that existed before this. It is reachable only for Media built
+// outside the repository, which makes the branch a backstop: if a future
+// refactor drops `updated_at` from the SELECT, this emits bare URLs rather
+// than a uniform `?v=0` that would look like a version and act like a
+// constant. `TestAttachMediaPopulatesUpdatedAt` is what actually catches that.
+func mediaURL(base, storageKey string, updatedAt time.Time) string {
+	u := base + "/" + strings.TrimLeft(storageKey, "/")
+	if updatedAt.IsZero() {
+		return u
+	}
+	return u + "?v=" + strconv.FormatInt(updatedAt.Unix(), 10)
 }
 
 // maxQueryLen bounds the ?q= search term. No exercise name comes close, so

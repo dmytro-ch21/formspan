@@ -785,6 +785,14 @@ components:
         per row. `url` is empty when no media origin is configured (local dev
         and CI) — clients should treat an empty url as "no image available"
         rather than attempting to load it.
+
+        `url` carries a `?v=` cache-busting parameter derived from when the
+        asset last changed. **Treat `url` as opaque and use it verbatim** —
+        do not reconstruct it from `storage_key`, and do not strip the query
+        string. Storage keys are stable, so a rebuilt URL would be the same
+        string forever and every cache in the path would keep serving a
+        replaced image indefinitely. A changed `url` for an unchanged
+        `storage_key` means the picture was replaced and should be refetched.
       required: [kind, storage_key, url, content_type, width, height, position, is_default]
       properties:
         kind:
@@ -795,7 +803,10 @@ components:
           example: exercises/barbell-back-squat/start.webp
         url:
           type: string
-          example: https://media.vola.app/exercises/barbell-back-squat/start.webp
+          description: >
+            Opaque, versioned URL. Use as-is; the `?v=` is what makes a
+            replaced image reach clients rather than being masked by caches.
+          example: https://media.vola.app/exercises/barbell-back-squat/start.webp?v=1785499200
         content_type:
           type: string
           example: image/webp

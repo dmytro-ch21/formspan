@@ -53,6 +53,55 @@ That command is `/app/bin/predeploy`, a script baked into the image that runs `m
 
 The seed is part of pre-deploy rather than a one-off because migration 000004 creates an empty `exercises` table; without it the API serves `{"exercises": []}` forever, which no healthcheck or error can distinguish from working. It is idempotent, so running it on every deploy is the intended usage.
 
+### Exercise media — R2, and why replacing a picture is not enough
+
+Assets live in a Cloudflare R2 bucket. Only the **storage key** is in Postgres (`exercise_media.storage_key`); the API assembles the public URL at read time from `MEDIA_BASE_URL`, so moving bucket or CDN is an env-var change rather than a data migration.
+
+**Replacing the bytes at a key does not, on its own, reach anyone.** Storage keys are stable by design — an exercise's thumbnail is `.../thumbnail.webp` for as long as the exercise exists — so a re-upload leaves the URL byte-identical and every cache in the path keeps serving the old picture. Three layers, in the order they bite:
+
+1. **`expo-image`'s disk cache on the phone.** Keyed by URL, and it **never revalidates**. A device that loaded the old image keeps it until the app is deleted. There is no in-app cache-clear. This is the one that makes the problem permanent rather than temporary.
+2. **Cloudflare's edge.** Serves what it has for as long as it considers it fresh.
+3. **No `Cache-Control` on the objects.** R2 returns only `ETag` and `Last-Modified`, so caches fall back to *heuristic* freshness — commonly ~10% of the age since `Last-Modified`, which lengthens as the file gets older and is unpredictable by design.
+
+So the API versions the URL: `?v=<exercise_media.updated_at as unix seconds>`. New bytes become a new resource, which is the one lever all three layers honour. The bucket ignores the parameter and returns the object — verified against the live bucket, same `ETag`, HTTP 200.
+
+**Clients must treat `url` as opaque.** Reconstructing it from `storage_key` throws the version away and reinstates the whole problem.
+
+#### How to actually replace an image
+
+**Preferred: change the storage key.** Put a content hash in the filename — `thumbnail.a3f9c1.webp`. The seed's upsert only writes when `(storage_key, content_type, width, height)` differ, so a new key bumps `updated_at`, touches the parent exercise's `updated_at` (which is what lets a delta-syncing client learn an image changed at all), and produces a new URL. No manual step, and it makes the stale-cache failure structurally impossible.
+
+Storage keys are validated at seed time against `^[a-z0-9/._-]+$`. `?` and `#` are rejected rather than escaped because both break the assembled URL silently — a `?` truncates the path, and a `#` makes everything after it a fragment the server never receives, which turns cache-busting off for that one asset with nothing reporting it.
+
+**If you must keep the filename**, uploading to R2 touches nothing in Postgres, and re-running `cmd/seed` will *not* help — its `IS DISTINCT FROM` guard sees identical values and suppresses the update. Bump both rows by hand:
+
+```sql
+UPDATE exercise_media SET updated_at = now()
+WHERE storage_key = 'exercises/barbell-back-squat/thumbnail.webp';
+
+-- The parent too. `upsertMedia` deliberately touches it whenever media
+-- changes, because a client delta-syncing on `exercises.updated_at` would
+-- otherwise never learn an image was swapped — the exercise row itself didn't
+-- change. Bumping only the media row reintroduces exactly that blind spot.
+UPDATE exercises SET updated_at = now()
+WHERE id = 'barbell-back-squat';
+```
+
+(No client delta-syncs yet — mobile refetches the whole catalog — so today only the first statement is load-bearing. The second is what stops this runbook silently defeating the delta sync the moment one exists.)
+
+To verify what R2 actually holds, bypassing every cache:
+
+```bash
+curl -sI "$MEDIA_BASE_URL/exercises/.../thumbnail.webp?bust=$(date +%s)" | grep -iE 'etag|last-modified'
+```
+
+#### Two things to fix before real users
+
+- **`MEDIA_BASE_URL` currently points at an `r2.dev` URL.** That is Cloudflare's *development* endpoint: rate-limited, and — the part that matters — it has **no zone, so there is no cache-purge API for it**. Once the edge holds an object you wait it out. A custom domain on the bucket restores purge and `Cache-Control` control. Cloudflare documents r2.dev as development-only.
+- **Set `Cache-Control` at upload time.** With versioned URLs the right value is `public, max-age=31536000, immutable` — cache forever is correct precisely because a given URL can never mean different bytes.
+
+The per-sport placeholders in `defaultMedia` have no database row, so their version comes from the hand-maintained `defaultMediaRevision` constant. **Bump it when you replace a `_defaults/` asset**, or those are the one set of images that can never change.
+
 ### PR / preview environments (planned, deferred)
 
 Not set up yet. When added, they must use separate database/bucket instances from staging and production — never production data.

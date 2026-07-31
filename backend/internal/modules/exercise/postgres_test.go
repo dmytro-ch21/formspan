@@ -292,6 +292,19 @@ func TestPostgresRepository_Media(t *testing.T) {
 	if got.Media[0].Width == nil || *got.Media[0].Width != 1200 {
 		t.Error("intrinsic width did not round-trip; a client can't reserve layout space without it")
 	}
+	// The seam that cache busting hangs off, and the only place it can be
+	// checked. `updated_at` is what the handler folds into the URL as `?v=`,
+	// so if it stops being SELECTed here every Media comes back zero-valued,
+	// the handler's zero-time branch quietly emits bare URLs, and a replaced
+	// image never reaches a device that cached the old one. Nothing else
+	// fails: it compiles, it returns 200, and the unit tests around
+	// `mediaURL` all still pass because they construct their own timestamps.
+	for _, m := range got.Media {
+		if m.UpdatedAt.IsZero() {
+			t.Errorf("media %q came back with no updated_at — its URL would carry no "+
+				"?v=, so replacing the image could never reach a client", m.Kind)
+		}
+	}
 
 	// A media change must mark the parent exercise stale. Without this a
 	// client delta-syncing on exercises.updated_at would never learn that an

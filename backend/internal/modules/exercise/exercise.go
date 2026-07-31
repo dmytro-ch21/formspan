@@ -67,6 +67,18 @@ type Media struct {
 	Width       *int      `json:"width"`
 	Height      *int      `json:"height"`
 	Position    int       `json:"position"`
+	// UpdatedAt versions the assembled URL and is deliberately not serialised.
+	//
+	// Replacing the bytes at a storage key leaves the URL identical, and every
+	// cache downstream is then entitled to keep serving the old picture —
+	// permanently, in the case of `expo-image`'s disk cache, which never
+	// revalidates. Folding this into the URL as `?v=` makes new bytes a new
+	// resource, which is the only thing all those caches agree to respect.
+	//
+	// Internal rather than a JSON field because no client needs to *read* it —
+	// they need the URL to differ, and it does. Adding contract surface that
+	// nothing consumes is how a contract becomes hard to change.
+	UpdatedAt time.Time `json:"-"`
 	// IsDefault marks a sport-level placeholder standing in for an exercise
 	// that has no photo of its own. Exposed rather than hidden so a client
 	// can present it differently, and so "how much of the catalog actually
@@ -106,6 +118,17 @@ var defaultMedia = map[string][]Media{
 
 func intp(v int) *int { return &v }
 
+// defaultMediaRevision versions the placeholder assets' URLs.
+//
+// The placeholders have no `exercise_media` row, so nothing bumps an
+// `updated_at` for them — swap a `_defaults/` file in the bucket and every
+// cache keeps the old one forever, which is precisely the trap the URL
+// versioning exists to close. **Bump this by hand whenever you replace a
+// `_defaults/` asset.** It is hand-maintained because there is no row to
+// automate it from, and a stale constant is a visible mistake where a missing
+// mechanism is not.
+var defaultMediaRevision = time.Date(2026, 7, 29, 18, 14, 20, 0, time.UTC)
+
 // DefaultMediaFor returns the placeholder set for a sport, or nil if that
 // sport has none — in which case a client renders its own empty state rather
 // than a broken image.
@@ -118,6 +141,9 @@ func DefaultMediaFor(sport string) []Media {
 	// through into the shared package-level map.
 	out := make([]Media, len(src))
 	copy(out, src)
+	for i := range out {
+		out[i].UpdatedAt = defaultMediaRevision
+	}
 	return out
 }
 

@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"regexp"
 )
 
 // The catalog lives in version-controlled JSON rather than behind an
@@ -83,10 +84,33 @@ func validate(exercises []Exercise) error {
 		case !validLoadTypes[e.LoadType]:
 			return fmt.Errorf("exercise: seed %q has unknown load_type %q", e.ID, e.LoadType)
 		}
+		for _, m := range e.Media {
+			if !validStorageKey.MatchString(m.StorageKey) {
+				return fmt.Errorf(
+					"exercise: seed %q has an unusable storage_key %q for %s media — "+
+						"allowed characters are a-z 0-9 / . _ -", e.ID, m.StorageKey, m.Kind)
+			}
+		}
 		seen[e.ID] = true
 	}
 	return nil
 }
+
+// validStorageKey bounds what may appear in a bucket path, because two
+// characters break the assembled URL in ways nothing would report.
+//
+// The URL is `MEDIA_BASE_URL + "/" + storage_key + "?v=..."`. A `?` in the key
+// truncates the path at the first one — the object lookup fails and the
+// version parameter becomes trailing noise. A `#` is worse: everything after
+// it is a fragment, never sent to the server, so cache-busting silently stops
+// working for that one asset and nothing anywhere says so.
+//
+// Rejected at seed time rather than escaped at read time on purpose.
+// Percent-encoding the key would make both cases "work" while producing a URL
+// nobody intended, and identifiers in a bucket path have no business
+// containing either character. Failing loudly here matches how this file
+// already treats a typo'd sport or load type.
+var validStorageKey = regexp.MustCompile(`^[a-z0-9/._-]+$`)
 
 // Seed upserts the embedded catalog in one transaction. Idempotent — safe to
 // run on every deploy, and re-running after editing the JSON is how the
