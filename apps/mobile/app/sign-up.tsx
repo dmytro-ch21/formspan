@@ -10,9 +10,11 @@ import {
   TextInput,
 } from 'react-native';
 
+import { GoogleAuthButton } from '@/components/GoogleAuthButton';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { AuthFieldErrors, AuthFieldKey, hasClerkCode, toFieldErrors } from '@/lib/clerkErrors';
+import { useGoogleSignIn } from '@/lib/useGoogleSignIn';
 
 /**
  * Email + password sign-up, then the emailed verification code.
@@ -57,6 +59,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function SignUpScreen() {
   const { signUp, setActive, isLoaded } = useSignUp();
+  const { signInWithGoogle, googleBusy } = useGoogleSignIn();
   const router = useRouter();
   // Sign-in hands the address over when someone arrives there without an
   // account, so it isn't typed twice on a phone keyboard.
@@ -124,6 +127,26 @@ export default function SignUpScreen() {
 
   function clearFieldError(field: AuthFieldKey) {
     setErrors((prev) => (prev[field] ? { ...prev, [field]: undefined } : prev));
+  }
+
+  async function onGoogle() {
+    setErrors({});
+    const outcome = await signInWithGoogle();
+    if (outcome.kind === 'signed_in' || outcome.kind === 'cancelled') return;
+
+    if (outcome.kind === 'failed') {
+      setErrors({ form: outcome.message });
+      return;
+    }
+
+    // Google matched an existing account that has 2FA. Only sign-in has the
+    // second-factor UI, and Clerk keeps the in-flight `signIn` on the client,
+    // so sending them there resumes it rather than restarting. Saying which
+    // account it matched matters — otherwise "go to sign in" reads like the
+    // sign-up failed.
+    setErrors({
+      form: 'That Google account already exists and needs its two-factor code. Continue on the sign-in screen.',
+    });
   }
 
   function goToSignIn() {
@@ -281,7 +304,7 @@ export default function SignUpScreen() {
   }
 
   const meetsLength = password.length >= MIN_PASSWORD;
-  const submitting = busy || !isLoaded;
+  const submitting = busy || googleBusy || !isLoaded;
 
   const submitLabel =
     step === 'details' ? 'Create account' : verified ? 'Continue' : 'Verify email';
@@ -337,6 +360,12 @@ export default function SignUpScreen() {
 
       {step === 'details' ? (
         <View style={styles.form}>
+          <GoogleAuthButton
+            onPress={onGoogle}
+            busy={googleBusy}
+            disabled={busy || !isLoaded}
+            label="Sign up with Google"
+          />
           <View style={styles.field}>
             <Text style={styles.label}>Email</Text>
             <TextInput

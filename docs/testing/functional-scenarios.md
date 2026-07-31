@@ -1358,7 +1358,54 @@ it has to look like VOLA and it has to actually offer every route in.**
   style that never applied can look perfectly correct in dark mode. The light
   theme is the one that exposes it.
 
+## Google sign-in on mobile (`apps/mobile`, `lib/useGoogleSignIn.ts`)
+
+The property: **every account that can be created on web can sign in on the
+phone.** Google accounts have no password, so before this they simply could not
+— which is the scenario to lead with.
+
+**Must be run on a real device.** OAuth redirects through the `vola://` scheme
+and Expo Go registers `exp://`, so the simulator/Expo Go flow used for the other
+auth screens cannot exercise this at all. `expo run:ios --device`.
+
+**Happy path**
+
+- **An account created with Google on web signs in on the phone.** The
+  regression test for the entire feature. Create via web's modal, then sign in
+  on mobile with Continue with Google, and confirm an authenticated backend call
+  succeeds afterwards.
+- **A brand-new Google identity signs *up* from the mobile sign-up screen** and
+  lands in the app — Clerk's OAuth covers both directions through one call.
+- The button renders identically on sign-in and sign-up (shared component).
+
+**Edge cases**
+
+- **Cancelling the browser sheet shows no error.** Open Continue with Google,
+  dismiss it, and assert the screen is unchanged — no error text, button
+  re-enabled. Reporting a deliberate back-out as a failure is the same lie as an
+  empty state claiming "you have none" after a failed read.
+- **A Google account with 2FA** completes through the *existing* second-factor
+  step on sign-in, not a second copy of that UI.
+- **The same case from sign-up** points the user at sign-in and the in-flight
+  sign-in resumes there rather than restarting.
+- **The primary submit is disabled while the OAuth sheet is open**, on both
+  screens, so a password attempt can't race the SSO flow.
+- **Password sign-in against a Google-only account** should surface "this
+  account was created with Google". *Unverified*: it keys on Clerk's
+  `strategy_for_user_invalid`, which hasn't been confirmed for this instance. If
+  it never fires, the generic error still shows and the button is still visible.
+
+**Security**
+
+- **No token, code or session id is ever logged.** The OAuth flow handles
+  credentials; grep the changed files for `console.*` as part of review.
+- **Cancelling must not leave a partial session** — assert still signed out.
+
 ## Not yet covered (tracked here so it isn't lost, not because it's blocking)
+
+- **Sign in with Apple.** App Store review requires it once an app offers a
+  third-party social login, so shipping Google to TestFlight makes Apple a
+  requirement rather than an option.
 
 - Mobile auth has **no OAuth**.
 - Mobile sign-up **collects no terms/privacy consent**, because there is no
