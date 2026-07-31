@@ -691,6 +691,72 @@ Domain: logging a session with no connectivity. **Test this by actually stopping
 - The **search box clears** on leaving the tab; it's a question already answered, and finding it still there makes the list look short for no visible reason.
 - Both are stored per user — a shared device must not hand one account's filters to the next person.
 
+## Today (`apps/mobile` Today tab)
+
+The screen answers one question — *what am I doing right now, or next* — so
+almost every scenario is about **hierarchy**: is the most urgent thing also the
+most prominent thing.
+
+**Happy path**
+
+- **An unfinished session dominates.** With one open, `resume-session` renders
+  above everything, the sport start buttons do **not**, and the elapsed time
+  ticks. This is the regression that matters: it used to be a small "in
+  progress" label on a row in a list, indistinguishable from finished sessions.
+- **With no session open**, the start buttons render and `resume-session` does
+  not. `start-session-strength` is the primary; `start-session-running` is
+  visibly secondary.
+- **`week-summary` counts only this week**, Monday-based, in the device's
+  timezone. Log a session, check the count rises; a session from last Sunday
+  must not be included.
+- **Volume matches the session screen.** Working sets only — completed and not
+  warm-up. A session showing "Sets 0" internally must contribute 0 here; the two
+  screens disagreeing is the specific bug this rule exists to prevent.
+- **`session-{id}` opens that session.**
+
+**Edge cases & errors**
+
+- **`start-session-bjj` does not exist.** BJJ is temporarily off Today because
+  there is no BJJ module. When one lands, this scenario inverts.
+- **The elapsed clock survives backgrounding.** Background the app mid-session
+  for a minute and return: the time must be correct, not a minute behind — it
+  recomputes from `started_at` rather than incrementing.
+- **The date is never stale.** The regression to watch, because a tab screen
+  never unmounts: use the app late on Sunday, background it, reopen on Monday.
+  The header must read Monday and `week-summary` must be **empty or this
+  week's** — not Sunday's date over last week's totals, which is what a
+  mount-frozen clock produces. Both the focus and the app-foreground path need
+  checking; they are different code paths and only one involves a tab change.
+- **A session left open overnight stops pretending to tick.** Past 24h the card
+  reads UNFINISHED with the start date instead of a running clock, and offers
+  "Finish or discard". A resume button reading `506:24:12` is not information.
+- **A second unfinished session is still reachable.** Start one on web (or from
+  a workout) while another is open: the newest owns the resume card and the
+  older appears in the list marked `unfinished`. It must not vanish — it still
+  counts toward `week-summary`, so hiding it makes the header disagree with the
+  list below it.
+- **A permanently-refused session says why.** Retry must surface `sync-error`
+  rather than spinning silently; `syncSessions` reports failures in its return
+  value instead of throwing, so a discarded result means a stuck row is
+  invisible forever.
+- **`sessions-pending` appears only when something is pending.** With everything
+  synced there is no counter and no Retry — the old permanent "0 pending · 0
+  synced" is gone.
+- **`retry-sync` drains and the counter clears.** Offline, log a session, come
+  back online, tap Retry.
+- **`today-empty` only after a successful local read.** A brand-new account sees
+  it; a *failed* read must show `session-list-error` instead. An empty state is
+  a claim about the athlete and has to be earned.
+- **Everything renders offline** — the whole screen is local-first, including
+  the week summary.
+
+**Gone, and should stay gone**
+
+- No activity logging UI. `activity-notes`, `log-activity`, `pending-count`,
+  `sync-now` and `sync-status` were removed with the scaffolding. Nothing in the
+  app creates activities now, so the admin activity list shows only historical
+  rows — expected, not a bug.
+
 ## Mobile shell (`apps/mobile` tab navigator)
 
 - **No seams.** Header, content and tab bar share one background; there must be no hairline rule or colour step between them, on tab screens *and* pushed stack screens.
