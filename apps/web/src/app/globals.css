@@ -1,3 +1,12 @@
+/* Layer order, declared before the Tailwind import because the FIRST @layer
+   statement fixes the order and Tailwind's own import declares one too.
+   `clerk` sits below `components`/`utilities` deliberately: Clerk injects its
+   stylesheet at runtime UNLAYERED, and an unlayered declaration beats every
+   layered one regardless of specificity or source order — so without naming a
+   layer for it (see `cssLayerName` in clerkAppearance.ts), any Tailwind class
+   passed to Clerk's `appearance.elements` silently loses. Three of them did. */
+@layer theme, base, clerk, components, utilities;
+
 @import "tailwindcss";
 
 /*
@@ -107,6 +116,7 @@
   --font-display: var(--font-barlow-condensed), var(--font-barlow), system-ui;
   --font-body: var(--font-barlow), system-ui;
 
+  --radius-control: 10px;
   --radius-card: 14px;
   --radius-pill: 999px;
 }
