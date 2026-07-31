@@ -875,6 +875,97 @@ Domain: the properties that hold **across** the strength arithmetic rather than 
 
 ---
 
+<<<<<<< HEAD
+## Honest failure states (`apps/mobile`, every screen that loads before it writes)
+
+The property under test is one sentence: **an empty state may only claim "you
+have none" after a successful read.** Everything below is a variation on
+running the same screen twice — once with a genuine 404, once with no network —
+and asserting the two look different. Nothing structural enforces this, so a
+new screen can reintroduce it silently.
+
+Run every scenario in **airplane mode**, not against a stubbed 500: a dead
+socket and an HTTP error take different code paths, and the offline one is what
+athletes actually hit.
+
+**Profile editing (`app/profile/edit.tsx`)**
+
+- **A failed load withholds the form.** Offline, the screen shows
+  `profile-edit-unavailable` and no fields — never a blank form with a live
+  Save button.
+- **The destructive case, explicitly.** With a profile that has a name, a date
+  of birth and a sex set: go offline, open Edit, and confirm there is nothing
+  to save. Then reconnect and confirm all three fields survive. This is the
+  regression that matters — the old behaviour PATCHed nulls over all of them.
+- **A genuine first run still works.** A brand-new account (real 404, online)
+  must still get an empty form with Strength pre-enabled, and saving must
+  create the profile.
+
+**Pinned records (`app/records/pinned.tsx`)**
+
+- **A failed load withholds the list.** Offline, `pinned-unavailable` shows and
+  no exercise rows render — an all-unticked list asserts "none pinned" just as
+  loudly as the old empty array did.
+- **The destructive case.** With twelve lifts pinned: go offline, open the
+  screen, confirm no tick boxes are reachable. Reconnect and confirm all twelve
+  are still pinned.
+- **A genuine empty list is still distinguishable.** Online with nothing
+  pinned, "Nothing pinned — your profile shows the lifts you train most."
+
+**You tab (`app/(tabs)/you.tsx`)**
+
+- **A failed refocus keeps the profile.** With a loaded profile, go offline and
+  navigate away and back. The name, sports and units must all survive, with an
+  error line explaining the refresh failed. The old behaviour reverted an
+  established athlete to "Add your name".
+- **A failed *first* load withholds the body.** Cold-start the app offline and
+  open You: `you-unavailable` shows, and none of "Add your name" / "None chosen
+  yet" / "kilograms · metres" render. These are defaults standing in for
+  unknowns, and an error banner above them doesn't stop them being read as
+  fact — the refocus fix alone left this case wrong.
+- **A genuine 404 still shows the empty state**, with no error line.
+
+**Exercise detail (`app/exercise/[id].tsx`)**
+
+- **"You haven't logged this yet" is never shown on failure.** Offline, an
+  exercise you *have* logged shows `exercise-stats-unavailable`, not the
+  never-logged copy.
+- **The heading is never a UUID.** Offline the name comes from
+  `exercise_cache`; with a cold cache it reads "Exercise" plus a note, never
+  the raw id.
+- **A cached entry admits it is partial.** Offline with a warm cache,
+  `exercise-details-partial` shows and **no equipment suffix** is rendered. The
+  cache doesn't store equipment, so printing the movement pattern alone would
+  make a barbell lift read exactly like a bodyweight one — a new false claim
+  introduced by the cache fallback rather than fixed by it.
+
+**Units (`app/settings/units.tsx`)**
+
+- **An offline change says it is local-only.** Switch units in airplane mode:
+  the app switches immediately, `units-unsynced` appears, and no unhandled
+  rejection fires.
+- **The admission survives leaving the screen.** Still offline, navigate away
+  from Settings and back. `units-unsynced` must still be there — it is stored
+  in `prefs`, not component state, because the claim is still true and Settings
+  is a screen people leave straight away.
+- **Reconnecting propagates the choice rather than reverting it.** Come back
+  online and reopen the app: the change must reach the account, `units-unsynced`
+  must clear, and the *web app* must show the new setting. The regression to
+  watch for is the opposite — the profile read winning and silently restoring
+  the old units, which is what happened before the pending flag gated it.
+
+**Error classification (`lib/apiError.ts`) — pure, no device needed**
+
+- **401 is transient, not permanent.** The regression guard: an expired token
+  mid-drain must leave the row pending, never blocked. It was classified as
+  permanent on the session path and transient on the activity path, and the
+  session path's answer would mark real training data dead.
+- 408 and 429 transient; other 4xx permanent; 5xx and non-`ApiError` transient.
+- `isNotFound` true only for a real 404, false for a network failure — this is
+  the predicate every load screen above branches on.
+- `isPermanentStatus` and `isPermanentRejection` agree for every status, since
+  the whole point of the module is that they cannot drift apart.
+=======
 ## Local schema migration (`apps/mobile/lib/db.ts`)
 
 The gap this closes: every scenario above starts from an app that already works,
@@ -929,6 +1020,7 @@ installing historical builds:
 - **Adding a v7 column must not break fresh installs.** Whatever form it takes,
   the v0 scenario above has to keep passing. This is the check that keeps the
   invariant honest, since nothing structural enforces it.
+>>>>>>> origin/main
 
 ## Not yet covered (tracked here so it isn't lost, not because it's blocking)
 

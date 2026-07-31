@@ -4,6 +4,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, TextInput } from 
 
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { isNotFound } from '@/lib/apiError';
 import { getProfile, updateProfile, type ProfilePatch } from '@/lib/profile';
 import { useAuthToken } from '@/lib/useAuthToken';
 
@@ -31,6 +32,9 @@ export default function EditProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Distinct from `error`, which also covers a failed *save*. This one means
+  // we never learned what the profile says, so there is nothing safe to edit.
+  const [unavailable, setUnavailable] = useState(false);
 
   useEffect(() => {
     getProfile(getToken)
@@ -45,14 +49,29 @@ export default function EditProfileScreen() {
           nutrition_enabled: p.nutrition_enabled,
         }),
       )
-      // No profile yet is the ordinary first-run case, not a failure — the
-      // form simply starts empty and creates one on save.
-      .catch(() => setPatch({ strength_enabled: true }))
+      .catch((err) => {
+        // A 404 is the ordinary first-run case: there genuinely is no profile
+        // yet, so an empty form is the truth and saving creates one.
+        if (isNotFound(err)) {
+          setPatch({ strength_enabled: true });
+          return;
+        }
+        // Anything else — offline, 5xx, no token — means we don't know what
+        // is stored. This used to fall into the same branch as the 404, so a
+        // failed load opened a blank form that looked like a new account, and
+        // saving it PATCHed `display_name: null, date_of_birth: null,
+        // sex: null` straight over a real profile as soon as the network came
+        // back. The form is withheld rather than shown empty.
+        setUnavailable(true);
+      })
       .finally(() => setLoading(false));
   }, [getToken]);
 
   async function save() {
-    if (saving) return;
+    // Belt and braces: the form isn't rendered when `unavailable`, so this is
+    // unreachable today. It stays because the cost of being wrong is
+    // overwriting someone's profile with nulls.
+    if (saving || unavailable) return;
     setSaving(true);
     setError(null);
     try {
@@ -72,6 +91,23 @@ export default function EditProfileScreen() {
     return (
       <View style={styles.centre}>
         <ActivityIndicator accessibilityLabel="Loading your profile" />
+      </View>
+    );
+  }
+
+  // No form, deliberately. An empty one would read as "you've filled nothing
+  // in", which is a claim about the athlete rather than about the network —
+  // and it is the claim that made saving destructive.
+  if (unavailable) {
+    return (
+      <View style={styles.centre} testID="profile-edit-unavailable">
+        <Stack.Screen options={{ title: 'Edit profile' }} />
+        <Text style={styles.unavailable} accessibilityLiveRegion="polite">
+          Your profile couldn&apos;t be loaded, so it can&apos;t be edited right now.
+        </Text>
+        <Text style={styles.unavailableHint}>
+          Nothing has changed. Try again when you&apos;re back online.
+        </Text>
       </View>
     );
   }
@@ -196,7 +232,9 @@ function Field({
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  centre: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  centre: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 8 },
+  unavailable: { fontSize: 16, fontWeight: '600', textAlign: 'center' },
+  unavailableHint: { color: vola.textMuted, fontSize: 13, textAlign: 'center' },
   scroll: { padding: 20, gap: 8, paddingBottom: 48 },
   headerAction: { color: vola.lime, fontWeight: '700', fontSize: 16 },
   field: { gap: 6 },

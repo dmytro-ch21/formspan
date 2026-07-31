@@ -7,6 +7,7 @@ import { RecordsCard } from '@/components/RecordsCard';
 import { TrainingSummary } from '@/components/TrainingSummary';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { isNotFound } from '@/lib/apiError';
 import { getProfile, type Profile } from '@/lib/profile';
 import { UNIT_SYSTEMS } from '@/lib/units';
 import { useAuthToken } from '@/lib/useAuthToken';
@@ -27,6 +28,13 @@ export default function YouScreen() {
 
   const [profile, setProfile] = useState<Profile | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Whether the server has ever answered on this screen. Without it the
+  // initial `profile === null` is indistinguishable from a confirmed "no
+  // profile yet", so a *first* load that fails renders the whole new-user
+  // empty state — "Add your name", "None chosen yet", "kilograms · metres" —
+  // which is the same claim this screen was fixed to stop making, merely
+  // contradicted by a banner instead of withheld.
+  const [answered, setAnswered] = useState(false);
 
   // On focus, so returning from Edit shows what was just saved.
   useFocusEffect(
@@ -35,10 +43,24 @@ export default function YouScreen() {
         .then((p) => {
           setProfile(p);
           setError(null);
+          setAnswered(true);
         })
-        // A missing profile isn't an error — it's someone who hasn't
-        // filled one in yet, and the empty state below says so.
-        .catch(() => setProfile(null));
+        .catch((err) => {
+          // A missing profile isn't an error — it's someone who hasn't
+          // filled one in yet, and the empty state below says so.
+          if (isNotFound(err)) {
+            setProfile(null);
+            setError(null);
+            setAnswered(true);
+            return;
+          }
+          // Everything else: keep what's already on screen. This used to
+          // `setProfile(null)` for any failure, so an established athlete
+          // coming back from Edit while offline was shown a blank new-user
+          // profile, asserted as fact — and silently, because `error` was only
+          // ever assigned null, which made the banner below dead code.
+          setError("Couldn't reach your profile just now.");
+        });
     }, [getToken]),
   );
 
@@ -80,34 +102,47 @@ export default function YouScreen() {
       <View style={styles.body}>
         {error && <Text style={styles.error}>{error}</Text>}
 
-        <Text style={styles.name}>{profile?.display_name || 'Add your name'}</Text>
-        {!profile?.display_name && (
-          <Text style={styles.muted}>Tap Edit to tell VOLA who you are.</Text>
+        {/* Nothing has ever loaded, so every field below would be a default
+            standing in for an unknown. Say so rather than render them. */}
+        {!answered && error ? (
+          <Text style={styles.muted} testID="you-unavailable">
+            Your profile, training summary and records will appear here once VOLA can reach your
+            account. Nothing you&apos;ve logged is affected.
+          </Text>
+        ) : (
+          <>
+            <Text style={styles.name}>{profile?.display_name || 'Add your name'}</Text>
+            {!profile?.display_name && (
+              <Text style={styles.muted}>Tap Edit to tell VOLA who you are.</Text>
+            )}
+
+            {/* History, phone-sized. The web app owns the analytical surface —
+                this answers the one question a desk can't while you're standing
+                in a gym: am I showing up. */}
+            <TrainingSummary getToken={getToken} units={profile?.unit_system ?? 'metric'} />
+
+            {/* Records sit between the training summary and the profile facts:
+                they're the payoff for the logging above, and the thing people
+                actually open this tab to look at. */}
+            <RecordsCard getToken={getToken} units={profile?.unit_system ?? 'metric'} />
+
+            <Text style={styles.sectionLabel}>Profile</Text>
+            <View style={styles.card}>
+              <Row
+                label="Sports"
+                value={modules.length ? modules.join(' · ') : 'None chosen yet'}
+              />
+              <Row
+                label="Units"
+                value={
+                  UNIT_SYSTEMS.find((u) => u.key === profile?.unit_system)?.detail ??
+                  'kilograms · metres'
+                }
+              />
+              {profile?.date_of_birth && <Row label="Born" value={profile.date_of_birth} />}
+            </View>
+          </>
         )}
-
-        {/* History, phone-sized. The web app owns the analytical surface —
-            this answers the one question a desk can't while you're standing
-            in a gym: am I showing up. */}
-        <TrainingSummary getToken={getToken} units={profile?.unit_system ?? 'metric'} />
-
-        {/* Records sit between the training summary and the profile facts:
-            they're the payoff for the logging above, and the thing people
-            actually open this tab to look at. */}
-        <RecordsCard getToken={getToken} units={profile?.unit_system ?? 'metric'} />
-
-        <Text style={styles.sectionLabel}>Profile</Text>
-        <View style={styles.card}>
-          <Row label="Sports" value={modules.length ? modules.join(' · ') : 'None chosen yet'} />
-          <Row
-            label="Units"
-            value={
-              UNIT_SYSTEMS.find((u) => u.key === profile?.unit_system)?.detail ??
-              'kilograms · metres'
-            }
-          />
-          {profile?.date_of_birth && <Row label="Born" value={profile.date_of_birth} />}
-        </View>
-
       </View>
     </ScrollView>
   );
