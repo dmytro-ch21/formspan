@@ -96,10 +96,76 @@ const CREATE_EXERCISE_CACHE = `
  * so the *next* column added would have sailed straight past it and hit the
  * "no such column" crash the guard was supposed to prevent. A version number
  * can't develop that blind spot.
+ *
+ * **The invariant every version branch must hold.** The `CREATE TABLE`
+ * statements above are maintained at the *current* shape, and a device at
+ * version 0 runs **every** branch in order. So each branch must be a no-op
+ * against a table that was just created at the current shape — otherwise it
+ * fires on fresh installs, where it was never meant to run.
+ *
+ * Concretely: **route every `ADD COLUMN` through `addColumnIfMissing`**, never
+ * a bare `ALTER`. Ignoring this is what shipped `duplicate column name: remote`
+ * in v5 and bricked every new install until it was found on a real phone —
+ * `migrate()` threw, the version was never stamped, and `getDb()` failed for
+ * the life of the install.
+ *
+ * The guard only covers `ADD COLUMN`. A future `RENAME COLUMN`, `DROP COLUMN`,
+ * or data backfill has the same hazard and no guard — it would run against a
+ * current-shape table on a fresh install and fail. If one is needed, either
+ * make it independently idempotent or freeze the `CREATE` statements at their
+ * historical shapes from that version onward.
  */
 const SCHEMA_VERSION = 6;
 
+/** Tables this file owns. Typed so a guard can't be pointed at a typo. */
+type LocalTable =
+  | 'activities'
+  | 'local_sessions'
+  | 'prefs'
+  | 'workout_cache'
+  | 'exercise_cache';
+
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
+
+/**
+ * Adds a column only if the table doesn't already have it.
+ *
+ * Necessary because the `CREATE TABLE` statements above are kept at the
+ * *current* schema shape rather than frozen at the version that introduced
+ * them. A device creating a table for the first time therefore receives every
+ * column at once — including ones a later `ALTER` step also tries to add.
+ * SQLite rejects the duplicate, the migration throws, `user_version` is never
+ * stamped, and `getDb()` then fails for the life of the install. That is not a
+ * degraded mode: it is every offline feature dead on arrival, on exactly the
+ * path a new user takes.
+ *
+ * This is not a return to the column-sniffing the version counter replaced.
+ * That guard asked "does `user_id` exist?" to decide whether to run *any*
+ * migration, so it went blind the moment a second column was added. This asks
+ * about precisely the column it is about to add — a question that cannot go
+ * stale as the schema grows.
+ *
+ * `table` is a `LocalTable`, and `column`/`definition` are literals from this
+ * file — never user input. Identifiers cannot be bound as parameters in DDL
+ * anyway, so the `ALTER` has to interpolate regardless; the type is what keeps
+ * that honest.
+ *
+ * Note that `table_info` returns zero rows for a table that doesn't exist
+ * rather than erroring, so a missing table reads here as "column missing" and
+ * then fails loudly on the `ALTER` with "no such table". Unreachable from
+ * `migrate()`, where the `CREATE`s always precede the `ALTER`s, but worth
+ * knowing before calling this from anywhere else.
+ */
+async function addColumnIfMissing(
+  db: SQLite.SQLiteDatabase,
+  table: LocalTable,
+  column: string,
+  definition: string,
+): Promise<void> {
+  const cols = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(${table});`);
+  if (cols.some((c) => c.name === column)) return;
+  await db.execAsync(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition};`);
+}
 
 async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
   const row = await db.getFirstAsync<{ user_version: number }>(`PRAGMA user_version`);
@@ -170,8 +236,15 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     //
     // Existing rows default to 0, which costs exactly one redundant create
     // each and then corrects itself — no backfill needed.
-    await db.execAsync(
-      `ALTER TABLE local_sessions ADD COLUMN remote INTEGER NOT NULL DEFAULT 0;`,
+    //
+    // Guarded: a device that created `local_sessions` at v2 or later got this
+    // column from CREATE_SESSIONS already, and the bare ALTER would fail with
+    // "duplicate column name: remote".
+    await addColumnIfMissing(
+      db,
+      'local_sessions',
+      'remote',
+      'INTEGER NOT NULL DEFAULT 0',
     );
   }
 
@@ -185,10 +258,14 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     // doing, which is the failure this whole feature is built to avoid.
     //
     // Existing rows get NULL, which is exactly what they already reported, and
-    // they self-correct on the next `cacheWorkouts`. `IF NOT EXISTS` isn't
-    // available for ADD COLUMN in this SQLite build, but a device at v5 by
-    // definition lacks the column.
-    await db.execAsync(`ALTER TABLE workout_cache ADD COLUMN goal TEXT;`);
+    // they self-correct on the next `cacheWorkouts`.
+    //
+    // Guarded for the same reason as `remote` above. The original comment here
+    // claimed "a device at v5 by definition lacks the column" — true of a v5
+    // device, but the fresh-install path runs *every* branch from v0, and its
+    // CREATE_WORKOUT_CACHE already declared `goal`. `IF NOT EXISTS` is not
+    // available for ADD COLUMN in this SQLite build, hence the explicit check.
+    await addColumnIfMissing(db, 'workout_cache', 'goal', 'TEXT');
   }
 
   await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION};`);
