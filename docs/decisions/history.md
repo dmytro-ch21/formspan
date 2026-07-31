@@ -1718,84 +1718,6 @@ Deferred, and flagged in `docs/architecture/ios-testflight.md`: no
 round trip. Adding it changes the release model enough to deserve its own
 decision rather than riding along with build configuration.
 
-<<<<<<< HEAD
-## 2026-07-31 — Five screens that turned "I couldn't ask" into a fact about you
-
-Surveying the mobile app before making it work offline turned up something
-worse than the offline gap itself: **a rejected promise carries two entirely
-different meanings — "the server says there is nothing here" and "I could not
-reach the server" — and five places collapsed them into one.** Each then
-rendered the first when the truth was the second, which is how a network
-failure came to make claims about the athlete.
-
-Two were destructive rather than merely misleading:
-
-- **`app/profile/edit.tsx`** caught *any* failed load and opened the form as a
-  first run. So offline it showed an established athlete a blank form, and
-  saving it PATCHed `display_name: null, date_of_birth: null, sex: null` over
-  their real profile the moment the network returned. The screen did not need
-  to be wrong for long — one Save was enough.
-- **`app/records/pinned.tsx`** turned a failed `fetchPinned` into `[]`, making
-  "couldn't load" indistinguishable from "nothing pinned". It then told someone
-  with twelve pinned lifts that they had none, and because `setPinned` is a
-  whole-list PUT, one tap from that false baseline would have written a list
-  that erased the eleven it never knew about.
-
-The other three lied without deleting: `app/(tabs)/you.tsx` cleared an
-already-loaded profile on a failed refocus, showing "Add your name" and
-"None chosen yet" to an established user — silently, because its `error` state
-was only ever assigned `null` and the banner was dead code.
-`app/exercise/[id].tsx` rendered "You haven't logged this yet" whenever the
-suggestions call failed, and the bare UUID as the heading whenever the catalog
-call did. `lib/useUnits.ts` called `updateUnitSystem` unguarded, so offline the
-tick moved, an unhandled rejection fired, and the change never reached the
-account or the web app with nothing said.
-
-**The fix is the same shape in all five: distinguish the two meanings, and
-withhold rather than invent.** Where the state is unknown, the screens now say
-so instead of rendering an empty version of it — the profile form is not shown
-at all rather than shown blank, and the pinned list is withheld rather than
-drawn with every tick box empty, because an unticked list is the same lie in
-another font.
-
-### The thing that made it impossible to do right
-
-`lib/profile.ts` threw a bare `Error`, so nothing downstream could tell a 404
-from a dead socket. `updateProfile` worked around that by matching
-`/not found/i` **on the message** — which the project's own API conventions
-forbid in as many words ("codes are part of the contract; messages are not").
-That would have broken silently the day someone reworded the string
-server-side, and it also cost two doomed requests offline, since a network
-error can neither match the pattern nor create the profile.
-
-So `profile.ts` now throws the same `ApiError` the session module already did,
-and the classifiers moved into a new `lib/apiError.ts`. That module is the
-answer to "is this worth retrying?", and it exists because there were **two
-copies of that answer and they disagreed**: `isPermanentRejection` counted 401
-as permanent, while `lib/activities.ts` had an inline copy that counted it as
-transient. Activities was right — Clerk tokens are short-lived and `getToken()`
-refreshes internally, so a long outbox drain can expire its token partway
-through and the next attempt succeeds. Under the session path's answer, one
-badly-timed token expiry marked real training data as permanently dead. There
-is now one definition, exposed twice (`isPermanentStatus` for callers holding a
-raw `Response`, `isPermanentRejection` for callers holding an error) so the
-next module can't fork it again.
-
-`isNotFound` is new and is what the load screens branch on.
-
-### What this leaves
-
-None of this is offline support — it is the honesty that offline support has to
-be built on, and it lands first precisely because every later phase gets easier
-once "failed" and "empty" are different states. The queue that would make an
-offline unit change actually reach the account arrives with the sync
-orchestrator; until then `useUnits` reports `unsynced` and the Units screen
-says plainly that the change is on this phone only.
-
-Worth noting for whoever adds the next screen: the invariant is that **an empty
-state may only claim "you have none" after a successful read.** Nothing
-structural enforces it.
-=======
 ## 2026-07-30 — The local schema migration bricked every fresh install
 
 Found the only way it could be found: by installing the app on a phone that had
@@ -1968,7 +1890,82 @@ and `com.vola.fitness` are what EAS uses too.
 ceiling rather than bury it, since its previous first instruction — "install
 Expo Go from the App Store, scan the QR" — described a path that cannot work at
 SDK 57 and is what sent this session down the detour.
->>>>>>> origin/main
+## 2026-07-31 — Five screens that turned "I couldn't ask" into a fact about you
+
+Surveying the mobile app before making it work offline turned up something
+worse than the offline gap itself: **a rejected promise carries two entirely
+different meanings — "the server says there is nothing here" and "I could not
+reach the server" — and five places collapsed them into one.** Each then
+rendered the first when the truth was the second, which is how a network
+failure came to make claims about the athlete.
+
+Two were destructive rather than merely misleading:
+
+- **`app/profile/edit.tsx`** caught *any* failed load and opened the form as a
+  first run. So offline it showed an established athlete a blank form, and
+  saving it PATCHed `display_name: null, date_of_birth: null, sex: null` over
+  their real profile the moment the network returned. The screen did not need
+  to be wrong for long — one Save was enough.
+- **`app/records/pinned.tsx`** turned a failed `fetchPinned` into `[]`, making
+  "couldn't load" indistinguishable from "nothing pinned". It then told someone
+  with twelve pinned lifts that they had none, and because `setPinned` is a
+  whole-list PUT, one tap from that false baseline would have written a list
+  that erased the eleven it never knew about.
+
+The other three lied without deleting: `app/(tabs)/you.tsx` cleared an
+already-loaded profile on a failed refocus, showing "Add your name" and
+"None chosen yet" to an established user — silently, because its `error` state
+was only ever assigned `null` and the banner was dead code.
+`app/exercise/[id].tsx` rendered "You haven't logged this yet" whenever the
+suggestions call failed, and the bare UUID as the heading whenever the catalog
+call did. `lib/useUnits.ts` called `updateUnitSystem` unguarded, so offline the
+tick moved, an unhandled rejection fired, and the change never reached the
+account or the web app with nothing said.
+
+**The fix is the same shape in all five: distinguish the two meanings, and
+withhold rather than invent.** Where the state is unknown, the screens now say
+so instead of rendering an empty version of it — the profile form is not shown
+at all rather than shown blank, and the pinned list is withheld rather than
+drawn with every tick box empty, because an unticked list is the same lie in
+another font.
+
+### The thing that made it impossible to do right
+
+`lib/profile.ts` threw a bare `Error`, so nothing downstream could tell a 404
+from a dead socket. `updateProfile` worked around that by matching
+`/not found/i` **on the message** — which the project's own API conventions
+forbid in as many words ("codes are part of the contract; messages are not").
+That would have broken silently the day someone reworded the string
+server-side, and it also cost two doomed requests offline, since a network
+error can neither match the pattern nor create the profile.
+
+So `profile.ts` now throws the same `ApiError` the session module already did,
+and the classifiers moved into a new `lib/apiError.ts`. That module is the
+answer to "is this worth retrying?", and it exists because there were **two
+copies of that answer and they disagreed**: `isPermanentRejection` counted 401
+as permanent, while `lib/activities.ts` had an inline copy that counted it as
+transient. Activities was right — Clerk tokens are short-lived and `getToken()`
+refreshes internally, so a long outbox drain can expire its token partway
+through and the next attempt succeeds. Under the session path's answer, one
+badly-timed token expiry marked real training data as permanently dead. There
+is now one definition, exposed twice (`isPermanentStatus` for callers holding a
+raw `Response`, `isPermanentRejection` for callers holding an error) so the
+next module can't fork it again.
+
+`isNotFound` is new and is what the load screens branch on.
+
+### What this leaves
+
+None of this is offline support — it is the honesty that offline support has to
+be built on, and it lands first precisely because every later phase gets easier
+once "failed" and "empty" are different states. The queue that would make an
+offline unit change actually reach the account arrives with the sync
+orchestrator; until then `useUnits` reports `unsynced` and the Units screen
+says plainly that the change is on this phone only.
+
+Worth noting for whoever adds the next screen: the invariant is that **an empty
+state may only claim "you have none" after a successful read.** Nothing
+structural enforces it.
 
 ## Open items / known gaps as of this entry
 
