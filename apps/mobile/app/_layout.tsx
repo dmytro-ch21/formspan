@@ -69,6 +69,13 @@ export default function RootLayout() {
   );
 }
 
+/**
+ * Every screen a signed-out user is allowed to be on. Adding a route here is
+ * not optional bookkeeping — the guard below replaces any path not in this
+ * list with `/sign-in`, so a missing entry makes the new screen unreachable.
+ */
+const AUTH_ROUTES = ['sign-in', 'sign-up', 'forgot-password'];
+
 function RootLayoutNav() {
   const { isLoaded, isSignedIn } = useAuth();
   const { signUp } = useSignUp();
@@ -96,10 +103,13 @@ function RootLayoutNav() {
     // (tabs) — harmless while sign-in was the only such route, but it made
     // every pushed screen unreachable the moment one existed: tapping a
     // workout navigated and was instantly replaced back to the tab root.
-    // A *set* of auth routes, not one route: sign-up sits outside the signed-in
-    // app just as sign-in does, and keying on sign-in alone would bounce a
-    // signed-out user straight back off the sign-up screen they just opened.
-    const onAuthScreen = segments[0] === 'sign-in' || segments[0] === 'sign-up';
+    // A *set* of auth routes, not one route: each of these sits outside the
+    // signed-in app just as sign-in does, and keying on sign-in alone would
+    // bounce a signed-out user straight back off the screen they just opened —
+    // silently, one frame after it rendered. Every new auth screen belongs in
+    // AUTH_ROUTES; that is the whole reason it's a named constant next to the
+    // routes themselves rather than an inline `||` chain that grows.
+    const onAuthScreen = AUTH_ROUTES.includes(segments[0] as string);
     if (!isSignedIn && !onAuthScreen) {
       router.replace(hasPendingSignUp ? '/sign-up' : '/sign-in');
     } else if (isSignedIn && onAuthScreen) {
@@ -135,6 +145,7 @@ function RootLayoutNav() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false, title: 'Today' }} />
         <Stack.Screen name="sign-in" options={{ title: 'Sign in' }} />
         <Stack.Screen name="sign-up" options={{ title: 'Create account' }} />
+        <Stack.Screen name="forgot-password" options={{ title: 'Reset password' }} />
         {/* Pushed over the tabs so the workout keeps a back button to the
             list it came from, rather than becoming a tab of its own. */}
         <Stack.Screen name="workout/[id]" options={{ title: 'Workout' }} />

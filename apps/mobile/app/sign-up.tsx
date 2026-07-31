@@ -12,6 +12,7 @@ import {
 
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { AuthFieldErrors, AuthFieldKey, hasClerkCode, toFieldErrors } from '@/lib/clerkErrors';
 
 /**
  * Email + password sign-up, then the emailed verification code.
@@ -54,57 +55,6 @@ const RESEND_COOLDOWN_SECONDS = 30;
  */
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-const GENERIC_ERROR = 'Something went wrong. Check your connection and try again.';
-
-type FieldKey = 'email' | 'password' | 'code' | 'form';
-type FieldErrors = Partial<Record<FieldKey, string>>;
-
-type ClerkFieldError = {
-  code?: string;
-  message?: string;
-  longMessage?: string;
-  meta?: { paramName?: string };
-};
-
-/** Clerk's param names for the three inputs this screen collects. */
-const PARAM_TO_FIELD: Record<string, FieldKey> = {
-  email_address: 'email',
-  password: 'password',
-  code: 'code',
-};
-
-function clerkErrors(err: unknown): ClerkFieldError[] {
-  if (err && typeof err === 'object' && 'errors' in err) {
-    const list = (err as { errors?: ClerkFieldError[] }).errors;
-    if (Array.isArray(list)) return list;
-  }
-  return [];
-}
-
-/**
- * Route each Clerk error to the input that produced it. A non-Clerk failure
- * (no signal, DNS, a 5xx) has no `errors` array at all and becomes a single
- * form-level message — the honest answer, since nothing about the user's
- * input is known to be wrong.
- */
-function toFieldErrors(err: unknown): FieldErrors {
-  const list = clerkErrors(err);
-  if (list.length === 0) return { form: GENERIC_ERROR };
-
-  const out: FieldErrors = {};
-  for (const e of list) {
-    const field = PARAM_TO_FIELD[e.meta?.paramName ?? ''] ?? 'form';
-    // First message per field wins: Clerk can return several for one param
-    // and stacking them reads as noise on a phone.
-    if (!out[field]) out[field] = e.longMessage || e.message || GENERIC_ERROR;
-  }
-  return out;
-}
-
-function hasClerkCode(err: unknown, code: string): boolean {
-  return clerkErrors(err).some((e) => e.code === code);
-}
-
 export default function SignUpScreen() {
   const { signUp, setActive, isLoaded } = useSignUp();
   const router = useRouter();
@@ -117,7 +67,7 @@ export default function SignUpScreen() {
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [errors, setErrors] = useState<FieldErrors>({});
+  const [errors, setErrors] = useState<AuthFieldErrors>({});
   const [notice, setNotice] = useState<string | null>(null);
   const [emailTaken, setEmailTaken] = useState(false);
   const [resendIn, setResendIn] = useState(0);
@@ -172,7 +122,7 @@ export default function SignUpScreen() {
     if (message) AccessibilityInfo.announceForAccessibility(message);
   }, [errors, notice]);
 
-  function clearFieldError(field: FieldKey) {
+  function clearFieldError(field: AuthFieldKey) {
     setErrors((prev) => (prev[field] ? { ...prev, [field]: undefined } : prev));
   }
 
@@ -190,7 +140,7 @@ export default function SignUpScreen() {
     // Validate locally first: an obviously incomplete form should cost no
     // round trip, and the message should land on the field that caused it.
     const trimmed = email.trim();
-    const local: FieldErrors = {};
+    const local: AuthFieldErrors = {};
     if (!trimmed) local.email = 'Enter your email address.';
     else if (!EMAIL_RE.test(trimmed)) local.email = "That doesn't look like an email address.";
     if (!password) local.password = 'Choose a password.';
@@ -438,7 +388,7 @@ export default function SignUpScreen() {
               <TextInput
                 ref={passwordRef}
                 style={[styles.input, styles.passwordInput, errors.password && styles.inputInvalid]}
-                placeholder={`At least ${MIN_PASSWORD} characters`}
+                placeholder="Create a password"
                 placeholderTextColor={vola.textDim}
                 value={password}
                 onChangeText={(v) => {
