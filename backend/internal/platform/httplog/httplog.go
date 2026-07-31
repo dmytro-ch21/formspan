@@ -27,7 +27,63 @@ const (
 	loggerCtxKey    ctxKey = "httplog.logger"
 	requestIDCtxKey ctxKey = "httplog.request_id"
 	traceIDCtxKey   ctxKey = "httplog.trace_id"
+	userSlotCtxKey  ctxKey = "httplog.user_slot"
 )
+
+// userSlot is a mutable box the middleware puts in the context so that
+// authentication — which runs *inside* it — can hand the user id back out.
+//
+// A plain context value cannot do this. `context.WithValue` returns a new
+// context, and the one an inner middleware builds is visible only to handlers
+// further in; by the time control returns here to write the log line, that
+// value is gone. Since this middleware is outermost (it has to be, to time and
+// correlate everything else), the id has to travel outward through a pointer
+// rather than inward through a value.
+//
+// One request is served by one goroutine, so this is written once and read once
+// with a happens-before edge between them.
+//
+// **`http.TimeoutHandler` breaks that assumption**, and it is the only thing in
+// the standard library that does silently: it runs the inner chain on a second
+// goroutine and can reply while that goroutine is still running, so a write
+// here would race the read below. Verified with the race detector. Nothing in
+// this service uses it — but "add request timeouts" is an obvious future
+// change, and whoever makes it needs to see this first. A handler that spawns
+// goroutines and authenticates from them has the same problem.
+type userSlot struct{ id string }
+
+// SetUserID attaches the authenticated user to this request's log line and to
+// the observation handed to the recorder.
+//
+// Called from the auth middleware rather than from handlers: it should be true
+// of every authenticated request, and something every handler must remember to
+// do is something a handler will eventually forget.
+func SetUserID(ctx context.Context, id string) {
+	if s, ok := ctx.Value(userSlotCtxKey).(*userSlot); ok {
+		s.id = id
+	}
+}
+
+// Observation is one completed request, handed to the recorder so it can decide
+// whether the event is worth keeping.
+//
+// The middleware deliberately does not decide that. Whether a 503 or an
+// eight-second read matters is a product question, and answering it here would
+// put policy in the transport layer and a database dependency in a logging
+// package.
+type Observation struct {
+	Method    string
+	Path      string
+	Status    int
+	Duration  time.Duration
+	UserID    string
+	RequestID string
+	TraceID   string
+}
+
+// ObserveFunc receives every completed request. Nil is fine — logging works
+// without a recorder, which is what local dev and CI run with.
+type ObserveFunc func(ctx context.Context, o Observation)
 
 // FromContext returns the request-scoped logger stashed by Middleware,
 // already tagged with request_id/trace_id/span_id. Falls back to the
@@ -58,7 +114,7 @@ func TraceIDFromContext(ctx context.Context) string {
 // every request, injects a logger carrying both into the request context,
 // echoes both back as response headers, and logs one structured line per
 // request on completion.
-func Middleware(base *slog.Logger) func(http.Handler) http.Handler {
+func Middleware(base *slog.Logger, observe ObserveFunc) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			requestID := r.Header.Get("X-Request-ID")
@@ -73,9 +129,11 @@ func Middleware(base *slog.Logger) func(http.Handler) http.Handler {
 			spanID := newHexID(8)
 
 			logger := base.With("request_id", requestID, "trace_id", traceID, "span_id", spanID)
+			slot := &userSlot{}
 			ctx := context.WithValue(r.Context(), loggerCtxKey, logger)
 			ctx = context.WithValue(ctx, requestIDCtxKey, requestID)
 			ctx = context.WithValue(ctx, traceIDCtxKey, traceID)
+			ctx = context.WithValue(ctx, userSlotCtxKey, slot)
 
 			w.Header().Set("X-Request-ID", requestID)
 			w.Header().Set("traceparent", fmt.Sprintf("00-%s-%s-01", traceID, spanID))
@@ -83,13 +141,32 @@ func Middleware(base *slog.Logger) func(http.Handler) http.Handler {
 			rw := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 			start := time.Now()
 			next.ServeHTTP(rw, r.WithContext(ctx))
+			elapsed := time.Since(start)
 
+			// `user_id` is the field that turns the log from a traffic record
+			// into something you can investigate with. Without it, "this
+			// athlete says syncing is broken" had no query — you could see
+			// that *someone* got a 500, never who. Empty for unauthenticated
+			// requests, which is a fact rather than a gap.
 			logger.Info("request",
 				"method", r.Method,
 				"path", r.URL.Path,
 				"status", rw.status,
-				"duration_ms", time.Since(start).Milliseconds(),
+				"duration_ms", elapsed.Milliseconds(),
+				"user_id", slot.id,
 			)
+
+			if observe != nil {
+				observe(ctx, Observation{
+					Method:    r.Method,
+					Path:      r.URL.Path,
+					Status:    rw.status,
+					Duration:  elapsed,
+					UserID:    slot.id,
+					RequestID: requestID,
+					TraceID:   traceID,
+				})
+			}
 		})
 	}
 }

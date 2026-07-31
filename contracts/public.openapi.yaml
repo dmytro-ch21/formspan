@@ -1003,6 +1003,110 @@ components:
           format: date-time
           nullable: true
 
+    ClientErrorReport:
+      type: object
+      description: >
+        A problem the client hit. The user is attributed from the token, so
+        there is deliberately no user field here — a client that could name the
+        user could file noise against someone else, and could not be trusted
+        when reporting its own trouble.
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          enum: [client_error, sync_blocked]
+          description: >
+            `sync_blocked` is the serious one: the client has given up pushing
+            something, so the training exists only on that device.
+        message:
+          type: string
+          maxLength: 500
+          description: Human context. Bounded so the endpoint can't be used as storage.
+        error_code:
+          type: string
+          maxLength: 64
+        details:
+          type: object
+          additionalProperties: true
+          description: >
+            Shape-specific context — the entity id and attempt count for a
+            blocked sync, say. Free-form so a new kind of report doesn't need a
+            new column.
+
+    HealthEvent:
+      type: object
+      description: >
+        One notable thing that happened. Request fields are null for
+        client-reported events, which have no request — absence rather than a
+        zero that would read as a measurement.
+      required: [id, occurred_at, source, kind]
+      properties:
+        id:
+          type: integer
+          format: int64
+        occurred_at:
+          type: string
+          format: date-time
+        source:
+          type: string
+          enum: [api, client]
+          description: >
+            `api` is the server observing itself — measured. `client` is an app
+            reporting what the server cannot see — claimed. Kept distinct
+            because their trustworthiness differs.
+        kind:
+          type: string
+          enum: [server_error, slow_request, client_error, sync_blocked]
+        user_id:
+          type: string
+          nullable: true
+          description: Null for unauthenticated failures, which genuinely have no user.
+        method: { type: string, nullable: true }
+        path: { type: string, nullable: true }
+        status: { type: integer, nullable: true }
+        duration_ms: { type: integer, nullable: true }
+        error_code: { type: string }
+        message: { type: string }
+        request_id:
+          type: string
+          description: Pivot from this row to the full request in the log stream.
+        trace_id: { type: string }
+        details:
+          type: object
+          additionalProperties: true
+          nullable: true
+
+    HealthSummary:
+      type: object
+      required: [since, total, by_kind, affected_users, slowest_paths_ms]
+      properties:
+        since: { type: string, format: date-time }
+        total: { type: integer }
+        by_kind:
+          type: object
+          additionalProperties: { type: integer }
+        affected_users:
+          type: integer
+          description: >
+            Distinct people, not events. Twenty rows from one athlete on a bad
+            connection is a very different morning from twenty athletes hitting
+            one broken endpoint, and a raw total cannot tell them apart.
+        slowest_paths_ms:
+          type: object
+          additionalProperties: { type: integer }
+          description: Worst observed latency per route, so a slow endpoint is named.
+
+    HealthReport:
+      type: object
+      required: [summary, events]
+      properties:
+        summary:
+          $ref: "#/components/schemas/HealthSummary"
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/HealthEvent"
+
     AdminUserList:
       type: object
       required: [users]
@@ -1899,6 +2003,87 @@ paths:
               schema: { $ref: "#/components/schemas/SessionWithVolume" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+
+  /client-errors:
+    post:
+      summary: Report a problem the client hit that the server cannot observe
+      operationId: reportClientError
+      description: >
+        For failures the API has no way to see: a push the device has given up
+        retrying, a local write that failed. This is the class of problem that
+        loses training data silently — the athlete's session sits on their
+        phone, every server-side metric looks healthy, and nobody finds out.
+
+
+        The user is taken from the verified token, never the body. `kind` is
+        restricted to `client_error` and `sync_blocked`: a client cannot claim
+        `server_error` or `slow_request`, because the value of the health record
+        is that an operator can tell what was *measured* from what was
+        *claimed*. Returns `202` — the report is accepted, not stored as a
+        resource anyone reads back.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClientErrorReport"
+      responses:
+        "202":
+          description: Report accepted.
+        "400":
+          $ref: "#/components/responses/InvalidInput"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /admin/health:
+    get:
+      summary: Recent operational problems, with a summary (admin-only)
+      operationId: adminHealth
+      description: >
+        Answers "is anything wrong, and for whom?" without reading logs. The
+        structured logs carry every request but go to stdout, so they are not
+        queryable from the admin console and they expire; only notable events
+        are persisted, and this is how they are read back.
+
+
+        Summary and events come together in one response deliberately: the
+        summary alone invites "12 errors" with no way to see them, and the list
+        alone makes an operator count.
+      parameters:
+        - name: hours
+          in: query
+          description: Window to look back over. Defaults to 24, capped at 720.
+          schema:
+            type: integer
+            minimum: 1
+        - name: kind
+          in: query
+          schema:
+            type: string
+            enum: [server_error, slow_request, client_error, sync_blocked]
+        - name: user_id
+          in: query
+          description: Narrow to one athlete — "is this person having trouble?"
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Summary and the events behind it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthReport"
+        "400":
+          $ref: "#/components/responses/InvalidInput"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /admin/users:
     get:
