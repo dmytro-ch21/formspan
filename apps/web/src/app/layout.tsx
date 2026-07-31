@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
+import { clerkAppearance, clerkLocalization } from "./clerkAppearance";
 import { Barlow, Barlow_Condensed } from "next/font/google";
 import "./globals.css";
 import { ThemeScript } from "./ThemeToggle";
@@ -29,7 +30,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <ClerkProvider>
+    <ClerkProvider appearance={clerkAppearance} localization={clerkLocalization}>
       {/*
         suppressHydrationWarning is load-bearing, not a silencer.
 

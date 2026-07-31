@@ -2522,6 +2522,157 @@ second-factor branch. Both need a real emailed code, which needs a real inbox.
 The reset step's **layout** was inspected by forcing the step locally (reverted)
 — code field centring, the reveal button, the resend row all correct. The 2FA
 branch has been reasoned about and never executed.
+## 2026-07-31 — Web keeps Clerk's auth UI, and finally looks like it owns it
+
+A question worth writing down because the answer isn't the obvious one: does
+any of the mobile auth work apply to web? **None of it.** `apps/web` and
+`apps/admin` each hand the entire flow to Clerk's prebuilt
+`<SignInButton mode="modal">` — twelve lines apiece — while `apps/mobile` is
+~1,400 lines of hand-built screens on the headless hooks.
+
+That asymmetry is right and stays. Mobile needed the *flows* designed: errors
+that don't lie when the network drops, a sign-up that resumes after iOS kills
+the app, a code that may or may not have been sent. None of those pressures
+exist at a desk. Clerk's component already does sign-in, sign-up, password
+reset, OAuth and 2FA correctly there, and a third hand-rolled copy would carry
+risk without carrying a product opinion.
+
+So web was never *missing* sign-up or reset — that is precisely why "register
+on the web app first" was the workaround while mobile had neither. What was
+wrong is that it looked like Clerk instead of like VOLA.
+
+### Two things found by opening the page, which nothing else would have caught
+
+**The landing page's only call to action was invisible as a button.**
+`SignInPrompt.tsx` styled it `bg-foreground text-background`. Neither token is
+in this app's `@theme`, so Tailwind emitted nothing at all and
+`getComputedStyle` returned `rgba(0,0,0,0)` — plain black text on the grey
+ground, on the public entry point of the customer app. It typechecked, it
+linted, it built, and it shipped. Tailwind's failure mode for an unknown
+utility is silence, which makes "look at it" the only detector. Now
+`bg-accent-fill` / `text-accent-on-fill`, the pair the theme defines for solid
+controls.
+
+**Every athlete signing in read "Sign in to Formspan dev".** Clerk composes its
+titles from the application name in the Clerk dashboard, and the VOLA rename
+covered the repo and the code but never the external service accounts. A
+`localization` override fixes the two customer-visible strings. It is a patch
+over a wrong setting, not a fix for it — **Clerk's transactional emails are
+generated server-side and still say Formspan** until someone renames the
+application in the dashboard.
+
+### The styling decision worth keeping
+
+`appearance.variables` are **`var(--c-*)` references, never hex literals.**
+Web is light-first with an opt-in dark mode that `ThemeScript` applies to
+`<html>` before hydration. Because the vars resolve at paint time against
+`:root`, the modal inherits the theme for free: no theme detection, no second
+config, and nothing rendered server-side that the client then contradicts.
+
+Verified rather than assumed, and the first version of this paragraph was
+wrong. Opening the modal under each theme gives the right result both ways, and
+the primary button *inverts* — navy-on-lime in light, lime-on-navy in dark —
+because `--c-accent-fill` and `--c-accent-on-fill` swap between the two blocks.
+That inversion is the design system's own intent (the brand lime is only
+legible as a fill against dark; on light it has to be a rule or a tint) and it
+came out for free from naming the semantic pair rather than a colour.
+
+What is **not** true, and was claimed here first time round: that the modal
+re-themes *live*. Clerk resolves `variables` when the modal mounts and does not
+re-resolve them afterwards, so flipping `data-theme` with the modal already
+open leaves the card and button on stale colours. The `elements` classes, being
+ordinary CSS, do follow — which is what made the earlier reading look like a
+success, since the one thing that visibly changed was the piece backed by a
+real CSS rule.
+
+It doesn't matter today, and the reason is worth writing down: `ThemeToggle` is
+rendered only by `dashboard/layout.tsx`, behind auth. A signed-out user looking
+at this modal has no control that could change the theme. `ThemeScript` has
+already applied their stored preference before hydration, so the modal only
+ever mounts into a settled theme. **Add a theme toggle to the public landing
+page and this becomes a real bug** — the modal would need remounting on theme
+change. Recorded because that future change looks completely unrelated to this
+file.
+
+### Cascade layers, and why three-quarters of the styling was silently dead
+
+The best finding of the change, and it came from review rather than from me.
+
+Clerk's `appearance` has two surfaces: `variables`, which it resolves into its
+own stylesheet, and `elements`, which appends class names to its markup. The
+variables all worked. **Three of four `elements` overrides did nothing at all** —
+`card: "border border-line"` computed `border-width: 0`, `footer: "bg-surface"`
+computed `rgba(0,0,0,0)`, and `footerActionLink: "text-lime"` never applied.
+
+My first diagnosis was "Clerk's styles win on specificity, so put colour in
+`variables` and keep `elements` nearly empty." That was wrong about the
+mechanism and therefore wrong about the fix. The real cause is **cascade
+layers**: Tailwind v4 emits utilities inside `@layer utilities`, Clerk injects
+its stylesheet **unlayered**, and an unlayered declaration beats every layered
+one regardless of specificity or source order. No amount of class-writing was
+ever going to win.
+
+Clerk's own `Appearance` has the escape hatch: `cssLayerName`. Setting
+`cssLayerName: "clerk"` and declaring `@layer theme, base, clerk, components,
+utilities;` **before** the Tailwind import in `globals.css` (the first `@layer`
+statement fixes the order) puts Clerk's CSS in a layer our utilities outrank.
+Verified behaviourally rather than reasoned: with the layer named, a throwaway
+`card: "bg-warn"` turned the card amber — something the identical mechanism
+could not do minutes earlier.
+
+**The sharp edge, which is the part worth remembering.** That fix makes
+previously-inert config suddenly live. Had `cssLayerName` been added while the
+original `elements` block was still in place, it would have *introduced* an
+accessibility failure: `footerActionLink: "text-lime"` on the light theme is
+`#6f9c00` on white, **3.27:1**, under AA for small text. It had been harmless
+purely because it was broken. It stays out; Clerk's own link colour derives
+from `colorPrimary` and is navy on light at 18.28:1.
+
+Two more measurement lessons from the same pass:
+
+- **Dark mode could not detect the dead link style.** In dark, `--c-lime` and
+  `--c-accent-fill` are the same colour, so the link looked exactly as intended
+  whether the class applied or not. Only light, where the two differ, exposed
+  it. Anything styled here gets checked in **both** themes.
+- **A stale portal node produced a measurement that contradicted the
+  screenshot.** `document.querySelector(".cl-formButtonPrimary")` matched a
+  detached node from a previous modal instance; scoping to `[role=dialog]`
+  fixed it. When a measurement and a picture disagree, the picture is what the
+  user gets — the picture was right both times.
+
+### Two colours deliberately not branded
+
+`colorNeutral` was left at Clerk's default, which is literally `black`, and it
+drives borders, dividers, hover fills and focus rings. On the dark theme that
+derives all of them from black against a near-black surface. Now
+`var(--c-text)` — the token that already flips ink direction per theme — with
+`colorModalBackdrop` pinned to `var(--c-navy)`, because the backdrop otherwise
+defaults to the neutral at ~73% and would have dropped a near-*white* scrim
+over the dark theme. Measured after: input and social-button borders are now
+light ink at 11% instead of invisible.
+
+`colorSuccess` and `colorWarning` are **not** set to VOLA's tokens, against the
+instinct to brand everything. Clerk renders both as small text, and against the
+light surface `--c-green` (#42f58d) is **1.43:1** — effectively invisible — and
+`--c-warn` is 4.28:1, under AA. `--c-green` is also identical in both theme
+blocks, so there is no legible-on-light variant to reach for. Legibility beats
+brand on status text; Clerk's defaults are readable. The real fix is a
+light-theme success step in the palette, which is a design-system job.
+
+### Verified, and not
+
+Browser-verified: the broken button, the VOLA titles, Barlow throughout, both
+themes, and **the sign-up view exists and is reachable** from the modal footer.
+
+**Not verified: the "Forgot password?" link.** It lives on the password step,
+which only renders after submitting a real email address, and testing it means
+touching a real account. Web reset is therefore *believed* to work and not
+demonstrated — worth a ten-second manual check by someone signed out with their
+own address.
+
+Left alone deliberately: `apps/admin`'s modal is equally unstyled, but its own
+button tokens are fine and it is an internal tool, so it stays out of a
+customer-facing change. Same `appearance` pattern will port to it directly.
 
 ## Open items / known gaps as of this entry
 

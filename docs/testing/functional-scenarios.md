@@ -1332,6 +1332,31 @@ all, and the web one is only findable if you already know the web app exists.
   on reset alone would close nothing and would cost the user who mistyped their
   address a silent wait for an email that was never coming. **If sign-up ever
   stops leaking it, change both together** — that is the scenario to write then.
+## Web auth presentation (`apps/web`, Clerk prebuilt modal)
+
+The property: **the auth modal is the first VOLA surface a web athlete sees, so
+it has to look like VOLA and it has to actually offer every route in.**
+
+- **The landing page's Sign in control is a visible button.** Sounds trivial;
+  it shipped as transparent text because `bg-foreground` isn't a token in this
+  app's theme and Tailwind fails silently on unknown utilities. Assert a
+  non-transparent computed `background-color`, not just that the element exists.
+- **The modal says "Sign in to VOLA"**, never the Clerk dashboard's application
+  name.
+- **It follows the theme toggle.** Open the modal, switch light↔dark, and the
+  card, inputs and buttons all re-theme — including the primary button
+  inverting its fill/label pair. A hardcoded colour anywhere in `appearance`
+  gives a white modal in dark mode.
+- **Sign up is reachable** from the modal footer and lands on a VOLA-titled
+  sign-up view.
+- **Password reset is reachable** — the "Forgot password?" link on the password
+  step. *Currently unverified*: it only renders after a real email is
+  submitted. Worth doing once by hand.
+- **Contrast holds in both themes** for the primary button and the footer link.
+- **Check styling in BOTH themes, never just one.** `--c-lime` and
+  `--c-accent-fill` are the same colour in dark and different in light, so a
+  style that never applied can look perfectly correct in dark mode. The light
+  theme is the one that exposes it.
 
 ## Not yet covered (tracked here so it isn't lost, not because it's blocking)
 
