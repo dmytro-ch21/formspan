@@ -1718,6 +1718,105 @@ Deferred, and flagged in `docs/architecture/ios-testflight.md`: no
 round trip. Adding it changes the release model enough to deserve its own
 decision rather than riding along with build configuration.
 
+## 2026-07-30 — Expo Go can't run this app on a phone, and four wrong turns finding out why
+
+Getting VOLA onto a real iPhone for the first time. The QR scanned, Expo Go
+connected to Metro, and then: **"Project is incompatible with this version of
+Expo Go."**
+
+**App Store Expo Go is pinned at SDK 54. This project is on SDK 57.** Apple's
+review queue is the constraint — Expo's May 2026 changelog records the SDK 55
+build still unapproved, and the SDK 57 changelog says plainly that they are
+"still waiting on approval." There is no released Expo Go that can load this
+project on a physical device, and no amount of updating from the App Store
+changes that.
+
+The decision: **do not downgrade to SDK 54** to regain it. Three SDK versions
+and a React Native downgrade, to accommodate a review queue, on a project that
+already works. Written down as a trade declined rather than overlooked —
+especially because from SDK 56 onward `create-expo-app` asks new projects to
+choose between App Store Expo Go compatibility and the current SDK, so this is
+a permanent fork in the road, not an outage to wait out.
+
+### The four wrong turns, because each is reusable
+
+**1. Checking npm to predict App Store availability.** `npm view expo
+dist-tags` reported `latest: 57.0.9`, from which the App Store client "must"
+support 57. Those channels are decoupled: npm ships when Expo ships, the App
+Store ships when Apple approves. Wrong registry entirely. Only Expo's changelog
+and `expo.dev/go` answer the question.
+
+**2. Treating the simulator as evidence.** The simulator ran Expo Go 57.0.5
+against this project happily, which looked like confirmation. **The simulator
+gets Expo Go from Expo CLI directly, never from the App Store.** A working
+simulator says nothing about a phone — the two clients ship through different
+channels, and the working one is the channel Apple doesn't gate.
+
+**3. Blaming the iOS 27 beta.** With the local-Xcode path chosen instead,
+`xcodebuild` rejected the device: *"iOS 26.5 is not installed."* The phone ran
+an iOS 27 beta and Xcode 26.6 ships the 26.5 SDK, so the obvious reading was a
+major-version mismatch needing the Xcode 27 beta. That was wrong, and the
+disproof was already in the same output: **`Any iOS Device` — a generic
+placeholder, not a device — was ineligible with the identical error.** A
+placeholder cannot fail for a device-OS reason. The real cause was exactly what
+the message said: in Xcode 26 the iOS *device platform* is a separate
+downloadable component from the SDK, and it had never been installed.
+`xcodebuild -downloadPlatform iOS` fixed it, and both phones became eligible.
+
+**4. Assuming beta access implies membership.** Running iOS betas does not mean
+enrollment in the Apple Developer Program — betas have been free since iOS 16.4.
+The tell is on-screen: Xcode showed a **"Personal Team"**, which is the free
+tier's label, and issued an `Apple Development` certificate rather than
+`Apple Distribution`.
+
+The shape of all four: a plausible mechanism, asserted from adjacent evidence,
+when the decisive check was cheap and available. Same failure as the mutation
+testing entry above — a wrong premise, not a wrong line.
+
+### What the local device path actually requires
+
+`expo prebuild --platform ios` generates `ios/` (gitignored, regenerable from
+`app.json`), then `expo run:ios --device <udid> --configuration Release`.
+Release, not Debug, so the JS is bundled into the binary and the app runs at the
+gym with the Mac asleep — a Debug build still needs Metro on the same Wi-Fi,
+which defeats the point.
+
+Four things gate it, each failing in its own misleading way:
+
+- **CocoaPods needs a UTF-8 locale.** With `LANG` unset, `pod install` dies with
+  `Unicode Normalization not appropriate for ASCII-8BIT`. `expo prebuild` runs
+  `pod install` for you and inherits the empty environment, so prebuild reports
+  a CocoaPods failure that has nothing to do with pods. The native directory
+  generates correctly; only the install step dies.
+- **The iOS device platform must be downloaded** — see wrong turn 3.
+- **A signing certificate must exist.** Adding an Apple ID to Xcode creates the
+  Personal Team but mints no certificate; Xcode does that lazily. Expo CLI will
+  create one, but by prompting for Apple ID credentials. Builds were run with
+  `CI=1` so a hidden prompt fails loudly instead of hanging a background process
+  invisibly — the certificate was created through Xcode's own UI
+  (Settings → Apple Accounts → Manage Certificates → `+`) so the credential
+  exchange stayed between the user and Apple.
+- **Developer Mode must be enabled on the device**, and the device paired. Both
+  are phone-side and need a restart.
+
+The signature expires after **7 days** — Apple's limit on free provisioning, not
+something the project can work around.
+
+### What this leaves open
+
+An EAS build sidesteps every device-side constraint here: an app compiled
+against the iOS 26.5 SDK installs and runs fine on iOS 27, because forward
+compatibility is normal — it is Xcode *directly installing and debugging* that
+needs matching device support. So the 7-day local build is a stopgap, and the
+durable answer remains a development build once the Apple Developer Program
+membership lands. Nothing done here is wasted: the prebuilt `ios/`, the pods,
+and `com.vola.fitness` are what EAS uses too.
+
+`docs/architecture/ios-testflight.md` was rewritten to lead with the Expo Go
+ceiling rather than bury it, since its previous first instruction — "install
+Expo Go from the App Store, scan the QR" — described a path that cannot work at
+SDK 57 and is what sent this session down the detour.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.
