@@ -1718,6 +1718,80 @@ Deferred, and flagged in `docs/architecture/ios-testflight.md`: no
 round trip. Adding it changes the release model enough to deserve its own
 decision rather than riding along with build configuration.
 
+## 2026-07-30 — The local schema migration bricked every fresh install
+
+Found the only way it could be found: by installing the app on a phone that had
+never had it. The first launch showed
+
+```
+SQLiteErrorException: duplicate column name: remote
+```
+
+and every offline feature was dead behind it — the activity outbox, local
+sessions, the workout cache, prefs. "Couldn't read local activities", "0 pending
+· 0 synced", a Start session button that did nothing.
+
+**The mechanism.** `lib/db.ts` keeps its `CREATE TABLE` statements at the
+*current* schema shape, and `migrate()` applies incremental `if (current < N)`
+branches. Those two facts are fine alone and fatal together: a device at version
+0 runs **every** branch. So `current < 2` creates `local_sessions` from DDL that
+already declares `remote`, and then `current < 5` runs
+`ALTER TABLE local_sessions ADD COLUMN remote` against it. SQLite rejects the
+duplicate, `migrate()` throws, `PRAGMA user_version` is never stamped, and
+`getDb()` rejects for the life of the install. The identical pair existed for
+`workout_cache.goal`, so fixing only `remote` would have moved the error down
+one line.
+
+Not a fresh-install-only bug, and **not new**: it shipped with v5 (`8c5c480`),
+which introduced both the `remote` column in `CREATE_SESSIONS` and the
+unguarded `ALTER` in the same commit. Any device below v2 took the same path. It
+survived this long because every device that had ever run the app already
+carried a stamped version and migrated forward through the steps — including
+every simulator used for testing. **The upgrade path was exercised constantly
+and the install path was never exercised at all.**
+
+**The fix**: an `addColumnIfMissing()` helper that checks `PRAGMA table_info`
+before issuing the `ALTER`, with both call sites routed through it.
+
+The alternative — freezing each `CREATE` at the shape of the version that
+introduced it, so `ALTER`s can stay unconditional — is the more canonical
+design, and it is what the backend's own golang-migrate setup does. It was
+rejected here for a specific reason rather than on taste: **it does not repair
+the devices that are already broken.** A bricked phone sits at `user_version =
+0` with current-shape tables, so an unconditional `ALTER ... ADD remote` crashes
+it again identically. The guard is needed for recovery regardless, at which
+point freezing adds git-archaeology risk without adding safety. Worth revisiting
+from v7 onward as an *addition*, not a replacement.
+
+The per-column guard also turns out to be the only thing that handles the state
+a v5-era brick is actually in — `local_sessions` **has** `remote`,
+`workout_cache` **lacks** `goal`, version 0. Nothing per-version could fix that
+mix. And it quietly closes a second latent brick: under the old code a device
+killed after a successful `ALTER` but before the stamp would re-run that `ALTER`
+next launch and be permanently broken. `migrate()` is still non-transactional,
+which is benign now that every step is idempotent, and noted as the next thing
+to tighten if a step ever isn't.
+
+**Recovery needs no reinstall.** An affected device never stamped its version,
+so the next launch re-runs the migration: the `CREATE ... IF NOT EXISTS`
+statements no-op, both guards skip what already exists, and the version finally
+stamps. No data loss.
+
+**The lesson worth keeping**, because it is not the one the code comment above
+`SCHEMA_VERSION` already taught: that comment records why a version counter
+replaced an earlier column-sniffing guard, and it was right. But a version
+counter tells you *which migrations to run*, not *whether they are safe to run
+against tables created at today's shape*. Those are different questions, and
+only the first one had an answer written down. The invariant — every version
+branch must be a no-op against a freshly-created current-shape table — is now
+stated where the next person adding v7 will read it, because nothing structural
+enforces it.
+
+The testing gap is the same shape as the mutation-testing entry above: the
+suite covered the path taken by devices that already worked. `docs/testing/
+functional-scenarios.md` gains fresh-install and upgrade-path scenarios, which
+is the coverage that would have caught this before a phone did.
+
 ## 2026-07-30 — Expo Go can't run this app on a phone, and four wrong turns finding out why
 
 Getting VOLA onto a real iPhone for the first time. The QR scanned, Expo Go
