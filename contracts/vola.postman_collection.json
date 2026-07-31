@@ -1,0 +1,1092 @@
+{
+  "info": {
+    "name": "VOLA API (v1)",
+    "description": "Generated from `contracts/public.openapi.yaml` by\n`scripts/build_postman_collection.py`. Re-run it after any contract change\nrather than editing this file \u2014 a hand-maintained collection drifts from the\nspec silently.\n\n## Setup\n\n1. Set `baseUrl` on the collection:\n   - local:   `http://localhost:8080/v1`\n   - staging: `https://apivola-fitness-platform-staging.up.railway.app/v1`\n2. Set `token` to a Clerk session JWT. Every route except `/healthz` returns\n   401 without one.\n\n### Getting a token\n\nThe API verifies Clerk-issued JWTs via JWKS, so there is no password grant to\ncall. Easiest path: sign in to the web app, open DevTools -> Application ->\nCookies and copy the `__session` value. It is short-lived, so expect to\nrefresh it.\n\n`GET /me` is the quickest check that a token works \u2014 it echoes back the\nsubject the API resolved you to.\n\n## Conventions\n\n- Every route is prefixed `/v1` (already in `baseUrl`).\n- Errors are `{\"error\": {\"code\": \"...\", \"message\": \"...\"}}`. Branch on\n  `code`; messages are not part of the contract.\n- JSON is snake_case; timestamps are RFC3339.\n- Weights are **always kilograms on the wire**. `unit_system` is display only.\n- Create is idempotent on a **client-supplied id** \u2014 that is what makes the\n  mobile client's offline sync retries safe. The bodies here use `{{$guid}}`\n  for a fresh row each send; swap in a fixed id and send twice to see the\n  idempotency.\n- Warm-up sets and sets with `completed: false` count toward no working-volume\n  measure. The `POST /sessions` body includes a warm-up on purpose.\n",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080/v1",
+      "description": "Local. Staging: https://apivola-fitness-platform-staging.up.railway.app/v1"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "description": "Clerk session JWT \u2014 see the collection description."
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const iso = (d) => d.toISOString().slice(0, 10);",
+          "const now = new Date();",
+          "pm.collectionVariables.set('today', iso(now));",
+          "pm.collectionVariables.set('sevenDaysAgo', iso(new Date(now - 7 * 864e5)));"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "Service",
+      "item": [
+        {
+          "name": "Liveness check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/healthz",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "healthz"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "List all server-controlled feature flags",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/flags",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "flags"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "Profile & auth",
+      "item": [
+        {
+          "name": "Return the authenticated caller's verified identity",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "me"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Get the authenticated caller's profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/profile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "profile"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Create the authenticated caller's profile (onboarding)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/profile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "profile"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"display_name\": \"Test Athlete\",\n  \"date_of_birth\": \"1992-04-18\",\n  \"sex\": \"female\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Partially update the authenticated caller's profile",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/profile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "profile"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"running_enabled\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "The caller's per-exercise unit overrides",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/profile/exercise-units",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "profile",
+                "exercise-units"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": "A map of exercise id to unit system. A **missing key means \"use the profile default\"** \u2014 there is deliberately no third state, so clearing an override removes the key rather than storing a sentinel.\nExists because a lifter who thinks in kilograms still faces a leg press marked in pounds, and converting in your head at the moment you're recording a number is exactly what this avoids."
+          }
+        },
+        {
+          "name": "Set or clear one exercise's unit override",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/profile/exercise-units/:exerciseID",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "profile",
+                "exercise-units",
+                ":exerciseID"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "exerciseID",
+                  "value": "back-squat",
+                  "description": "Path parameter: exerciseID"
+                }
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"unit_system\": \"imperial\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Catalog",
+      "item": [
+        {
+          "name": "List the global exercise catalog",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/exercises",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "exercises"
+              ],
+              "query": [
+                {
+                  "key": "sport",
+                  "value": "strength",
+                  "disabled": false,
+                  "description": "Exact-match filter, e.g. `strength` or `bjj`."
+                },
+                {
+                  "key": "q",
+                  "value": "",
+                  "disabled": true,
+                  "description": "Case-insensitive substring match on the name."
+                }
+              ],
+              "variable": []
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Get one catalog entry by its slug",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/exercises/:exerciseID",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "exercises",
+                ":exerciseID"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "exerciseID",
+                  "value": "back-squat",
+                  "description": "Path parameter: exerciseID"
+                }
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "List the BJJ technique library",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/techniques",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "techniques"
+              ],
+              "query": [
+                {
+                  "key": "position",
+                  "value": "",
+                  "disabled": true,
+                  "description": ""
+                },
+                {
+                  "key": "category",
+                  "value": "",
+                  "disabled": true,
+                  "description": ""
+                },
+                {
+                  "key": "gi",
+                  "value": "",
+                  "disabled": true,
+                  "description": "Asking for gi or no-gi also returns techniques marked `Both` \u2014 a filter that excluded them would hide most of the library."
+                },
+                {
+                  "key": "q",
+                  "value": "",
+                  "disabled": true,
+                  "description": "Case-insensitive substring of the name."
+                }
+              ],
+              "variable": []
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Get one technique",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/techniques/:techniqueID",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "techniques",
+                ":techniqueID"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "techniqueID",
+                  "value": "",
+                  "description": "Path parameter: techniqueID"
+                }
+              ]
+            },
+            "description": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "Workouts",
+      "item": [
+        {
+          "name": "List workouts visible to the caller",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/workouts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "workouts"
+              ],
+              "query": [
+                {
+                  "key": "scope",
+                  "value": "mine",
+                  "disabled": false,
+                  "description": "Omit for both. `shared` excludes the caller's own."
+                },
+                {
+                  "key": "sport",
+                  "value": "strength",
+                  "disabled": false,
+                  "description": ""
+                },
+                {
+                  "key": "goal",
+                  "value": "hypertrophy",
+                  "disabled": false,
+                  "description": ""
+                }
+              ],
+              "variable": []
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Create a workout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/workouts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "workouts"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{$guid}}\",\n  \"name\": \"Lower A\",\n  \"sport\": \"strength\",\n  \"goal\": \"hypertrophy\",\n  \"visibility\": \"private\",\n  \"notes\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get one workout",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/workouts/:workoutID",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "workouts",
+                ":workoutID"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "workoutID",
+                  "value": "",
+                  "description": "Path parameter: workoutID"
+                }
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Delete a workout (owner only)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/workouts/:workoutID",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "workouts",
+                ":workoutID"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "workoutID",
+                  "value": "",
+                  "description": "Path parameter: workoutID"
+                }
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Replace a workout's ordered contents (owner only)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/workouts/:workoutID/items",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "workouts",
+                ":workoutID",
+                "items"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "workoutID",
+                  "value": "",
+                  "description": "Path parameter: workoutID"
+                }
+              ]
+            },
+            "description": "Sends the whole list \u2014 the natural shape for both \"add an exercise\" and \"reorder\". Positions are reassigned from array order.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"exercise_id\": \"back-squat\",\n      \"position\": 0,\n      \"target_sets\": 3,\n      \"target_reps\": 8,\n      \"target_weight_kg\": 100,\n      \"target_seconds\": null,\n      \"target_distance_m\": null,\n      \"notes\": \"\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Sessions",
+      "item": [
+        {
+          "name": "List the caller's sessions, newest first",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sessions"
+              ],
+              "query": [
+                {
+                  "key": "sport",
+                  "value": "strength",
+                  "disabled": false,
+                  "description": ""
+                },
+                {
+                  "key": "exercise_id",
+                  "value": "",
+                  "disabled": true,
+                  "description": "Only sessions containing this exercise."
+                },
+                {
+                  "key": "from",
+                  "value": "{{sevenDaysAgo}}",
+                  "disabled": false,
+                  "description": "Only sessions started on or after this calendar day, resolved in `tz`. Lets the history page list exactly the period its totals describe."
+                },
+                {
+                  "key": "to",
+                  "value": "{{today}}",
+                  "disabled": false,
+                  "description": "Inclusive of the day named \u2014 a session at 19:00 on `to` is returned."
+                },
+                {
+                  "key": "tz",
+                  "value": "Europe/Berlin",
+                  "disabled": false,
+                  "description": "IANA name used to resolve `from`/`to` to instants. Defaults to UTC."
+                },
+                {
+                  "key": "q",
+                  "value": "",
+                  "disabled": true,
+                  "description": "Free text matched case-insensitively anywhere in the session's name. LIKE wildcards in the term are escaped, so `50%` searches for those characters rather than matching everything."
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "disabled": false,
+                  "description": ""
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "disabled": false,
+                  "description": "Rows to skip. Ordering is a total order (`started_at DESC, id`), so paging is deterministic against an unchanging set. It is not stable across writes: a session added while you page shifts every later row down one, so a row can repeat. Use the date filters to pin a range if that matters."
+                }
+              ],
+              "variable": []
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Start (or record) a session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sessions"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": "Sets may be supplied up front \u2014 starting from a template pre-fills them with the prescribed numbers \u2014 or left empty and added later via the sets endpoint.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{$guid}}\",\n  \"sport\": \"strength\",\n  \"name\": \"Lower A\",\n  \"started_at\": \"{{$isoTimestamp}}\",\n  \"sets\": [\n    {\n      \"exercise_id\": \"back-squat\",\n      \"position\": 0,\n      \"set_type\": \"warmup\",\n      \"reps\": 8,\n      \"weight_kg\": 60,\n      \"rir\": null,\n      \"rpe\": null,\n      \"completed\": true,\n      \"notes\": \"\"\n    },\n    {\n      \"exercise_id\": \"back-squat\",\n      \"position\": 1,\n      \"set_type\": \"working\",\n      \"reps\": 8,\n      \"weight_kg\": 100,\n      \"rir\": 2,\n      \"rpe\": null,\n      \"completed\": true,\n      \"notes\": \"\"\n    },\n    {\n      \"exercise_id\": \"back-squat\",\n      \"position\": 2,\n      \"set_type\": \"working\",\n      \"reps\": 8,\n      \"weight_kg\": 100,\n      \"rir\": 2,\n      \"rpe\": null,\n      \"completed\": true,\n      \"notes\": \"\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get one session with its volume summary",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/sessions/:sessionID",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sessions",
+                ":sessionID"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "sessionID",
+                  "value": "",
+                  "description": "Path parameter: sessionID"
+                }
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Delete a session",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/sessions/:sessionID",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sessions",
+                ":sessionID"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "sessionID",
+                  "value": "",
+                  "description": "Path parameter: sessionID"
+                }
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Replace a session's ordered sets",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/sessions/:sessionID/sets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sessions",
+                ":sessionID",
+                "sets"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "sessionID",
+                  "value": "",
+                  "description": "Path parameter: sessionID"
+                }
+              ]
+            },
+            "description": "Sends the whole list \u2014 the natural shape for \"log another set\" and \"fix a typo in set 2\" alike. Positions are reassigned from array order. Clients write through on every edit rather than offering a save button, so a session survives the app being killed mid-workout.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sets\": [\n    {\n      \"exercise_id\": \"back-squat\",\n      \"position\": 0,\n      \"set_type\": \"working\",\n      \"reps\": 8,\n      \"weight_kg\": 100,\n      \"rir\": 2,\n      \"rpe\": null,\n      \"completed\": true,\n      \"notes\": \"\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Mark a session finished",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/sessions/:sessionID/finish",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sessions",
+                ":sessionID",
+                "finish"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "sessionID",
+                  "value": "",
+                  "description": "Path parameter: sessionID"
+                }
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Progression",
+      "item": [
+        {
+          "name": "What to load today, per exercise, from the caller's own history",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/sessions/suggestions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sessions",
+                "suggestions"
+              ],
+              "query": [
+                {
+                  "key": "exercise_ids",
+                  "value": "back-squat,bench-press",
+                  "disabled": false,
+                  "description": "Comma-separated, max 100."
+                },
+                {
+                  "key": "goal",
+                  "value": "hypertrophy",
+                  "disabled": false,
+                  "description": "One of `general`, `powerlifting`, `hypertrophy`, `endurance`. Deliberately typed as a plain string rather than an enum, because an enum would make a request validator or generated client reject exactly the unrecognised values this endpoint promises to accept."
+                }
+              ],
+              "variable": []
+            },
+            "description": "One request for a whole workout rather than one per exercise. Each answer reads the **working sets of the last few sessions** containing that exercise \u2014 warm-ups excluded, since progressing off a warm-up would recommend a weight nobody worked at.\nWhole sessions rather than a single top set, because the rule gates on the weakest working set and on whether a load has repeated across sessions; neither question can be answered from one row.\nScoped to the caller: this endpoint reads training history and returns only their own."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Records",
+      "item": [
+        {
+          "name": "Personal records the caller holds",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/records",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "records"
+              ],
+              "query": [
+                {
+                  "key": "exercise_ids",
+                  "value": "back-squat,bench-press",
+                  "disabled": false,
+                  "description": "Comma-separated. Overrides `scope`. At most 100."
+                },
+                {
+                  "key": "scope",
+                  "value": "mine",
+                  "disabled": false,
+                  "description": "`all` returns every exercise the caller has actually trained, most-used first, capped at 200 \u2014 the desk view. Omitted, the API answers for their pinned shortlist, falling back to the exercises they train most so the view is never empty pending setup."
+                }
+              ],
+              "variable": []
+            },
+            "description": "Derived from the log on every read rather than stored. A kept record has to be *retracted* when the set behind it is corrected or its session deleted \u2014 and a stale one means congratulating someone for a lift they never made. Computed, a record is by construction exactly what the log says.\n\nWhich kinds an exercise can hold follows from its `load_type`, so a plank never reports a weight and a run never reports reps. Warm-ups and sets never marked done never count."
+          }
+        },
+        {
+          "name": "The exercises whose records show on the caller's profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/records/pinned",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "records",
+                "pinned"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Replace the shortlist",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/records/pinned",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "records",
+                "pinned"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": "Replaces the whole ordered list, like session sets \u2014 the client edits it as one thing, and reordering is most of the editing people do here. An empty list clears it and returns to the most-trained default.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"exercise_ids\": [\n    \"back-squat\",\n    \"bench-press\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "History",
+      "item": [
+        {
+          "name": "Training history rolled up per day, with period totals",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/sessions/history",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sessions",
+                "history"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "{{sevenDaysAgo}}",
+                  "disabled": false,
+                  "description": ""
+                },
+                {
+                  "key": "to",
+                  "value": "{{today}}",
+                  "disabled": false,
+                  "description": "Inclusive of the day named. Range must be five years or less."
+                },
+                {
+                  "key": "sport",
+                  "value": "strength",
+                  "disabled": false,
+                  "description": "Narrows the totals *and* the comparison window, so BJJ is measured against BJJ. `sports` is always unfiltered."
+                },
+                {
+                  "key": "tz",
+                  "value": "Europe/Berlin",
+                  "disabled": false,
+                  "description": "IANA name deciding which calendar day a session belongs to. Training at 19:00 in New York is 23:00 UTC, so bucketing in UTC would file a Tuesday session under Wednesday."
+                }
+              ],
+              "variable": []
+            },
+            "description": "The analytical surface behind the web history page: one entry per calendar day that had training, totals for the period, and the same totals for the window immediately before it so the numbers read as a direction rather than a quantity.\n\nAggregated server-side on purpose. The working-set rule (completed, non-warm-up) lives in one place, and a client summing a truncated listing would quietly report the wrong total once history outgrows the page size."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Activities",
+      "item": [
+        {
+          "name": "List the authenticated caller's own activities",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/activities",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "activities"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Create an activity for the authenticated caller. Idempotent on `id` \u2014 retrying a sync with the same id returns the original row, not an error.\n",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/activities",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "activities"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{$guid}}\",\n  \"kind\": \"bjj_session\",\n  \"occurred_at\": \"{{$isoTimestamp}}\",\n  \"notes\": \"Rolled 6 rounds\",\n  \"details\": {\n    \"rounds\": 6\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin",
+      "item": [
+        {
+          "name": "List every user who has completed onboarding (admin-only)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "users"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "List a specific user's activities (admin-only)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/users/:userID/activities",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "users",
+                ":userID",
+                "activities"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "userID",
+                  "value": "",
+                  "description": "Path parameter: userID"
+                }
+              ]
+            },
+            "description": ""
+          }
+        }
+      ]
+    }
+  ]
+}

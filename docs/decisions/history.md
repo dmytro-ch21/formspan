@@ -2041,6 +2041,82 @@ The unit test pins the property the whole change exists for — different
 version to a constant still compiles, still returns 200, and is silently
 useless, which is exactly the failure a reader would not spot.
 
+## 2026-07-31 — Today stops showing its own plumbing
+
+Today was still the first vertical slice with three layers of scaffolding on
+display: a **"Log a BJJ session"** form with `kind` hardcoded to
+`bjj_session`, a raw list printing that string at the athlete as a label, and a
+permanent **"0 pending · 0 synced"** readout with a Sync now button. None of it
+answered the question someone opens the tab to ask.
+
+**BJJ is off Today, temporarily and for a stated reason.** There is no BJJ
+module — 20 catalog entries against strength's 498, and nothing behind them —
+so a start button advertised a room with no floor. It made the screen look
+complete while doing nothing useful, which is worse than offering less. The
+constant carries the reason so it comes back when the module lands rather than
+being quietly forgotten. **Running is in the identical position** (6 entries, no
+module) and was left in place deliberately: the same argument applies, but it
+wasn't the thing asked about, and one of them shouldn't drag the other out by
+implication.
+
+**What the screen does now**, in priority order, because hierarchy was the real
+problem:
+
+- **An unfinished session dominates.** It is the only thing on the screen with a
+  clock running, and it used to sit inside a list wearing a small "in progress"
+  label — which made the one urgent thing look exactly like the four finished
+  ones. It is now a card with a live elapsed timer and a Continue button.
+- **Otherwise, starting one dominates.** One primary action; the secondary sport
+  is present but not competing.
+- **This week** — sessions, volume, distinct days. Computed from the *local*
+  store, not fetched: Today has to answer on a gym floor with no signal, and it
+  also cannot then disagree with the list directly beneath it, which a
+  separately-fetched rollup eventually would.
+- **Pending sync appears only when non-zero.** "0 pending · 0 synced" reassured
+  precisely when nobody needed reassuring, and trained the eye to skip the row
+  on the day it finally said something.
+
+The elapsed clock recomputes from `started_at` each tick rather than
+incrementing, so it cannot drift and returns correct after the screen has been
+backgrounded. It only ticks while a session is open, so an idle Today costs
+nothing.
+
+The empty state is gated on a completed local read, holding the invariant the
+profile and records screens adopted a day earlier: **an empty state may only
+claim "you have none" after a successful read.**
+
+### What this orphans, said plainly
+
+`lib/activities.ts` now has **no caller anywhere in the app**. The table, the
+outbox flag, `POST /v1/activities` and the admin console's activity view all
+still exist and still work — but nothing creates activities, so the admin list
+will only ever show historical rows.
+
+Kept rather than deleted: the machinery is proven end to end and is exactly what
+real BJJ logging will write through, so rebuilding it later would be strictly
+worse. The alternative — keeping a fake button so a demo surface stays
+populated — is the thing this entry is about removing. The module now says all
+of this in its own docstring, because "unused" and "deliberately dormant" look
+identical from the outside.
+
+### Also in this change
+
+`.gitignore` gained three entries, one of them overdue: **`secrets.txt` was
+never ignored.** It appears in the repo root periodically containing a live API
+key, and the standing instruction was to remember not to commit it — which is
+not a mechanism. A single `git add -A` would have published a credential to a
+public remote, and `git add -A` is precisely what "commit everything" reaches
+for. Also ignored: `*.bak` (an `.env.local.bak` does not match `.env.*.local`,
+so a backup taken before editing an env file sat in `git status` as an ordinary
+untracked file carrying whatever keys the original held) and
+`.claude/worktrees/` (whole checkouts; committing one nests the repo inside
+itself).
+
+And the Postman collection generated from the OpenAPI spec by
+`scripts/build_postman_collection.py` — generated rather than hand-written
+because a hand-maintained collection drifts from the contract silently, and you
+find out when a request 404s against a route renamed months ago.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

@@ -1,3 +1,24 @@
+/**
+ * The generic activity envelope — local write, outbox, idempotent push.
+ *
+ * **Nothing in the app calls this right now, and that is deliberate.** Its only
+ * caller was a "Log a BJJ session" form on Today with `kind` hardcoded to
+ * `bjj_session` — scaffolding from the first vertical slice, kept long after it
+ * stopped being a feature. There is no BJJ module, so the form logged rows
+ * nobody could read back and printed `bjj_session` at the athlete as a label.
+ * Today's redesign removed it.
+ *
+ * Kept rather than deleted because the machinery is sound and proven end to
+ * end: the table, the `synced` outbox flag, `POST /v1/activities`, and the
+ * admin console's activity view all still exist and still work. When BJJ
+ * logging is built for real this is what it writes through, and rebuilding it
+ * would be strictly worse than leaving it.
+ *
+ * The consequence to know: **no new activities are created anywhere**, so the
+ * admin activity list only shows historical rows. That is honest — it reflects
+ * that nothing logs activities yet — rather than a fake button existing to keep
+ * a demo surface populated.
+ */
 import { randomUUID } from 'expo-crypto';
 
 import { isPermanentStatus } from './apiError';
