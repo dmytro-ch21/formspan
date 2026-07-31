@@ -1,4 +1,4 @@
-import { ClerkProvider, useAuth } from '@clerk/clerk-expo';
+import { ClerkProvider, useAuth, useSignUp } from '@clerk/clerk-expo';
 import { useFonts } from 'expo-font';
 import { DarkTheme, Stack, ThemeProvider, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
@@ -71,8 +71,22 @@ export default function RootLayout() {
 
 function RootLayoutNav() {
   const { isLoaded, isSignedIn } = useAuth();
+  const { signUp } = useSignUp();
   const segments = useSegments();
   const router = useRouter();
+
+  // A sign-up that got as far as "account created, email not yet verified" and
+  // was then interrupted — a killed app, a lost connection. Clerk keeps it on
+  // the client, and `sign-up.tsx` knows how to resume it, but only if the user
+  // is actually sent there. Sending them to sign-in instead strands them: the
+  // password they chose can't sign in against an unverified account, and the
+  // error doesn't hint that sign-up is where the exit is.
+  //
+  // A boolean, not the resource, so the effect doesn't re-run on every
+  // identity change of a Clerk object it doesn't otherwise read.
+  const hasPendingSignUp =
+    signUp?.status === 'missing_requirements' &&
+    (signUp.unverifiedFields?.includes('email_address') ?? false);
 
   useEffect(() => {
     if (!isLoaded) return;
@@ -82,13 +96,16 @@ function RootLayoutNav() {
     // (tabs) — harmless while sign-in was the only such route, but it made
     // every pushed screen unreachable the moment one existed: tapping a
     // workout navigated and was instantly replaced back to the tab root.
-    const onSignIn = segments[0] === 'sign-in';
-    if (!isSignedIn && !onSignIn) {
-      router.replace('/sign-in');
-    } else if (isSignedIn && onSignIn) {
+    // A *set* of auth routes, not one route: sign-up sits outside the signed-in
+    // app just as sign-in does, and keying on sign-in alone would bounce a
+    // signed-out user straight back off the sign-up screen they just opened.
+    const onAuthScreen = segments[0] === 'sign-in' || segments[0] === 'sign-up';
+    if (!isSignedIn && !onAuthScreen) {
+      router.replace(hasPendingSignUp ? '/sign-up' : '/sign-in');
+    } else if (isSignedIn && onAuthScreen) {
       router.replace('/');
     }
-  }, [isLoaded, isSignedIn, segments, router]);
+  }, [isLoaded, isSignedIn, hasPendingSignUp, segments, router]);
 
   // Hold the UI until Clerk resolves, so the first frame isn't the wrong
   // screen followed by a visible redirect.
@@ -117,6 +134,7 @@ function RootLayoutNav() {
             next screen's back button says — without it that reads "(tabs)". */}
         <Stack.Screen name="(tabs)" options={{ headerShown: false, title: 'Today' }} />
         <Stack.Screen name="sign-in" options={{ title: 'Sign in' }} />
+        <Stack.Screen name="sign-up" options={{ title: 'Create account' }} />
         {/* Pushed over the tabs so the workout keeps a back button to the
             list it came from, rather than becoming a tab of its own. */}
         <Stack.Screen name="workout/[id]" options={{ title: 'Workout' }} />
