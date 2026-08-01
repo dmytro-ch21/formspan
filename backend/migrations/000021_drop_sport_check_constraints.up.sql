@@ -1,0 +1,30 @@
+-- Drop the two CHECK constraints that pinned the sport vocabulary in SQL.
+--
+-- 000020 introduced internal/platform/discipline as the single source of
+-- truth and claimed, in its own comments and in docs/decisions/history.md,
+-- that adding a discipline needs no migration. **That claim was false while
+-- these stood.** A fifth discipline would pass every Go validator and then
+-- fail every INSERT into sessions or workouts on a 23514, surfacing to the
+-- user as a misleading 400 — with no test anywhere that would have caught it,
+-- because the registry's tripwires never touch the database.
+--
+-- Caught in review, before it could be discovered by whoever added the fifth
+-- discipline.
+--
+-- WHY DROP RATHER THAN WIDEN: a CHECK listing the values IS the
+-- migration-per-discipline cost this work exists to remove. Widening it just
+-- moves the next migration one discipline further out.
+--
+-- What replaces it: every write path already validates against the registry
+-- before touching SQL — sessions (handler.go Create/List/History), workouts
+-- (Create/List), exercises (List, newly validated in 000020's commit) — and
+-- `sport` only ever arrives through those handlers. The integration test added
+-- alongside this migration writes a session and a workout for EVERY sport in
+-- the registry, so registry-versus-database divergence fails CI rather than
+-- failing a user.
+--
+-- The trade is real and worth stating: the database will now accept a sport
+-- string that no handler would produce. Direct SQL is the only way in, and the
+-- value would be inert — nothing enumerates sports from these tables.
+ALTER TABLE workouts DROP CONSTRAINT IF EXISTS workouts_sport_valid;
+ALTER TABLE sessions DROP CONSTRAINT IF EXISTS sessions_sport_valid;

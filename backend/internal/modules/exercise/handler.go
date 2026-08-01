@@ -1,6 +1,8 @@
 package exercise
 
 import (
+	"github.com/dmytro-ch21/vola/backend/internal/platform/discipline"
+
 	"errors"
 	"net/http"
 	"strconv"
@@ -95,8 +97,19 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validated, unlike before: an unknown ?sport= used to fall through to an
+	// unfiltered-by-that-value query and return 200 with an empty list, while
+	// the same value on /v1/sessions or /v1/workouts returned 400. Two answers
+	// to one question is worse than either answer.
+	sport := r.URL.Query().Get("sport")
+	if sport != "" && !discipline.ValidSport(sport) {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"sport must be one of: "+discipline.SportList())
+		return
+	}
+
 	exercises, err := h.repo.List(r.Context(), Filter{
-		Sport: r.URL.Query().Get("sport"),
+		Sport: sport,
 		Query: query,
 	})
 	if err != nil {

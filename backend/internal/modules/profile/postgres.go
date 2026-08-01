@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -24,7 +25,7 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 
 func (r *PostgresRepository) Get(ctx context.Context, userID string) (*Profile, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT user_id, display_name, date_of_birth, sex, bjj_enabled, strength_enabled, nutrition_enabled, running_enabled, unit_system, track_effort, created_at, updated_at
+		SELECT user_id, display_name, date_of_birth, sex, unit_system, track_effort, created_at, updated_at
 		FROM profiles WHERE user_id = $1`, userID)
 	return scanProfile(row)
 }
@@ -37,7 +38,7 @@ func (r *PostgresRepository) Create(ctx context.Context, userID string, in NewPr
 	row := r.pool.QueryRow(ctx, `
 		INSERT INTO profiles (user_id, display_name, date_of_birth, sex)
 		VALUES ($1, $2, $3, $4)
-		RETURNING user_id, display_name, date_of_birth, sex, bjj_enabled, strength_enabled, nutrition_enabled, running_enabled, unit_system, track_effort, created_at, updated_at
+		RETURNING user_id, display_name, date_of_birth, sex, unit_system, track_effort, created_at, updated_at
 	`, userID, in.DisplayName, dob, in.Sex)
 	p, err := scanProfile(row)
 	if err != nil {
@@ -56,16 +57,12 @@ func (r *PostgresRepository) Update(ctx context.Context, userID string, in Profi
 			display_name = COALESCE($2, display_name),
 			date_of_birth = COALESCE($3, date_of_birth),
 			sex = COALESCE($4, sex),
-			bjj_enabled = COALESCE($5, bjj_enabled),
-			strength_enabled = COALESCE($6, strength_enabled),
-			nutrition_enabled = COALESCE($7, nutrition_enabled),
-			running_enabled = COALESCE($8, running_enabled),
-			unit_system = COALESCE($9, unit_system),
-			track_effort = COALESCE($10, track_effort),
+			unit_system = COALESCE($5, unit_system),
+			track_effort = COALESCE($6, track_effort),
 			updated_at = now()
 		WHERE user_id = $1
-		RETURNING user_id, display_name, date_of_birth, sex, bjj_enabled, strength_enabled, nutrition_enabled, running_enabled, unit_system, track_effort, created_at, updated_at
-	`, userID, in.DisplayName, dob, in.Sex, in.BJJEnabled, in.StrengthEnabled, in.NutritionEnabled, in.RunningEnabled, in.UnitSystem, in.TrackEffort)
+		RETURNING user_id, display_name, date_of_birth, sex, unit_system, track_effort, created_at, updated_at
+	`, userID, in.DisplayName, dob, in.Sex, in.UnitSystem, in.TrackEffort)
 	p, err := scanProfile(row)
 	if err != nil {
 		return nil, translatePgError(err)
@@ -128,7 +125,6 @@ func scanProfile(row pgx.Row) (*Profile, error) {
 	var p Profile
 	var dob *time.Time
 	err := row.Scan(&p.UserID, &p.DisplayName, &dob, &p.Sex,
-		&p.BJJEnabled, &p.StrengthEnabled, &p.NutritionEnabled, &p.RunningEnabled,
 		&p.UnitSystem, &p.TrackEffort, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -179,8 +175,87 @@ func translatePgError(err error) error {
 			}
 			return fmt.Errorf("%w: a value is out of range", ErrInvalidInput)
 		case "23503": // foreign_key_violation
+			// Named by constraint, because this table isn't the only one with
+			// an FK any more. Toggling modules for a user who hasn't
+			// onboarded reported "unknown exercise" — a message written for
+			// exercise_unit_prefs, nonsensical here, and reachable by any
+			// signed-in user who never completed onboarding.
+			if strings.Contains(pgErr.ConstraintName, "profile_modules") {
+				return fmt.Errorf("%w: no profile yet — create one before setting modules", ErrInvalidInput)
+			}
 			return fmt.Errorf("%w: unknown exercise", ErrInvalidInput)
 		}
 	}
 	return err
+}
+
+// ListModules returns only what this user has explicitly stored.
+//
+// Deliberately does NOT fill in defaults: the default belongs to the registry
+// (internal/platform/discipline), and a repository that invented them would be
+// a second place to change when one moves.
+func (r *PostgresRepository) ListModules(ctx context.Context, userID string) (map[string]bool, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT module_key, enabled FROM profile_modules WHERE user_id = $1`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("profile: list modules: %w", err)
+	}
+	defer rows.Close()
+
+	out := map[string]bool{}
+	for rows.Next() {
+		var key string
+		var enabled bool
+		if err := rows.Scan(&key, &enabled); err != nil {
+			return nil, fmt.Errorf("profile: scan module: %w", err)
+		}
+		out[key] = enabled
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("profile: iterate modules: %w", err)
+	}
+	return out, nil
+}
+
+// SetModules upserts the given keys, leaving unmentioned ones untouched so a
+// client can send one toggle rather than the whole set.
+//
+// One batch, so a multi-key PATCH is atomic: pgx sends it inside an implicit
+// transaction, and a failure part-way leaves none of it applied rather than
+// half a user's preferences.
+func (r *PostgresRepository) SetModules(ctx context.Context, userID string, enabled map[string]bool) error {
+	if len(enabled) == 0 {
+		return nil
+	}
+	// Sorted, so the batch locks rows in a consistent order. Go randomises map
+	// iteration, and two concurrent multi-key PATCHes for the same user could
+	// otherwise take the same locks in opposite orders and deadlock (40P01,
+	// which surfaces as a 500). Cheap to prevent, tedious to diagnose.
+	keys := make([]string, 0, len(enabled))
+	for key := range enabled {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	batch := &pgx.Batch{}
+	for _, key := range keys {
+		on := enabled[key]
+		batch.Queue(`
+			INSERT INTO profile_modules (user_id, module_key, enabled)
+			VALUES ($1, $2, $3)
+			ON CONFLICT (user_id, module_key)
+			DO UPDATE SET enabled = EXCLUDED.enabled, updated_at = now()
+			WHERE profile_modules.enabled IS DISTINCT FROM EXCLUDED.enabled`,
+			userID, key, on)
+	}
+	br := r.pool.SendBatch(ctx, batch)
+	defer br.Close()
+	for range enabled {
+		if _, err := br.Exec(); err != nil {
+			// The FK to profiles is the only constraint here: toggling modules
+			// for a user with no profile row is the real error worth naming.
+			return translatePgError(fmt.Errorf("profile: set modules: %w", err))
+		}
+	}
+	return nil
 }

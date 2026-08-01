@@ -131,7 +131,7 @@ func TestBestOneRM(t *testing.T) {
 		t.Error("no sets should yield no estimate")
 	}
 	// Sets that carry no weight (BJJ, a plank) simply don't produce one.
-	timed := []Set{{ExerciseID: exBJJ, SetType: SetTypeWorking, Seconds: ptrInt(300), Completed: true}}
+	timed := []Set{{ExerciseID: exRun, SetType: SetTypeWorking, Seconds: ptrInt(300), Completed: true}}
 	if _, _, ok := BestOneRM(timed); ok {
 		t.Error("a timed set should not produce a 1RM")
 	}

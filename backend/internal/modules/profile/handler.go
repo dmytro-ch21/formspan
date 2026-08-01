@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/dmytro-ch21/vola/backend/internal/platform/discipline"
+
 	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/auth"
 )
@@ -65,6 +67,67 @@ func (h *Handler) ExerciseUnits(w http.ResponseWriter, r *http.Request) {
 	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"exercise_units": units})
 }
 
+// Modules returns the discipline registry merged with this user's choices.
+//
+// The registry AND the enablement in one response, on purpose: a client needs
+// both to render anything (labels and capabilities from the registry, on/off
+// from the user), and splitting them would mean two requests before the nav
+// bar can draw — which on mobile is a visible rearrangement after first paint.
+func (h *Handler) Modules(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.ClaimsFromContext(r.Context())
+	stored, err := h.repo.ListModules(r.Context(), claims.UserID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"modules": ModulesFor(stored)})
+}
+
+// setModulesRequest is a sparse map: {"bjj": false} toggles one module and
+// leaves the rest alone. Not a full replacement, so two clients editing
+// different toggles can't clobber each other.
+type setModulesRequest map[string]bool
+
+// SetModules toggles one or more modules for the caller.
+func (h *Handler) SetModules(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.ClaimsFromContext(r.Context())
+
+	var req setModulesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
+		return
+	}
+	if len(req) == 0 {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"at least one module is required")
+		return
+	}
+	// Validate against the registry, not the database. An unknown key stored
+	// here would be inert rather than harmful, but accepting it silently means
+	// a client typo looks like it worked and the toggle never appears.
+	for key := range req {
+		if !discipline.Valid(key) {
+			apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+				"unknown module: "+key)
+			return
+		}
+	}
+
+	if err := h.repo.SetModules(r.Context(), claims.UserID, req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+
+	// Return the full merged set, not just what changed: the client's next
+	// render needs every module anyway, and a 204 would force a second GET.
+	stored, err := h.repo.ListModules(r.Context(), claims.UserID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"modules": ModulesFor(stored)})
+}
+
 type setExerciseUnitRequest struct {
 	// Null or empty clears the override, falling back to the profile default.
 	UnitSystem *string `json:"unit_system"`
@@ -101,15 +164,11 @@ func (h *Handler) SetExerciseUnit(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateRequest struct {
-	DisplayName      *string `json:"display_name"`
-	DateOfBirth      *string `json:"date_of_birth"`
-	Sex              *string `json:"sex"`
-	BJJEnabled       *bool   `json:"bjj_enabled"`
-	StrengthEnabled  *bool   `json:"strength_enabled"`
-	NutritionEnabled *bool   `json:"nutrition_enabled"`
-	RunningEnabled   *bool   `json:"running_enabled"`
-	UnitSystem       *string `json:"unit_system"`
-	TrackEffort      *bool   `json:"track_effort"`
+	DisplayName *string `json:"display_name"`
+	DateOfBirth *string `json:"date_of_birth"`
+	Sex         *string `json:"sex"`
+	UnitSystem  *string `json:"unit_system"`
+	TrackEffort *bool   `json:"track_effort"`
 }
 
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
@@ -128,15 +187,11 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	p, err := h.repo.Update(r.Context(), claims.UserID, ProfileUpdate{
-		DisplayName:      req.DisplayName,
-		DateOfBirth:      req.DateOfBirth,
-		Sex:              req.Sex,
-		BJJEnabled:       req.BJJEnabled,
-		StrengthEnabled:  req.StrengthEnabled,
-		NutritionEnabled: req.NutritionEnabled,
-		RunningEnabled:   req.RunningEnabled,
-		UnitSystem:       req.UnitSystem,
-		TrackEffort:      req.TrackEffort,
+		DisplayName: req.DisplayName,
+		DateOfBirth: req.DateOfBirth,
+		Sex:         req.Sex,
+		UnitSystem:  req.UnitSystem,
+		TrackEffort: req.TrackEffort,
 	})
 	if err != nil {
 		writeError(w, r, err)

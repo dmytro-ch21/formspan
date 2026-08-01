@@ -1,4 +1,11 @@
 import { ClerkProvider, useAuth, useSignUp } from '@clerk/clerk-expo';
+import { useAuthToken } from '@/lib/useAuthToken';
+import { clearSessionToken } from '@/lib/session';
+
+import { ModulesProvider } from '@/lib/ModulesProvider';
+import { TrackEffortProvider } from '@/lib/TrackEffortProvider';
+import { setSyncIdentity, startSyncOrchestrator } from '@/lib/sync';
+import { UnitsProvider } from '@/lib/UnitsProvider';
 import { useFonts } from 'expo-font';
 import { DarkTheme, Stack, ThemeProvider, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
@@ -64,7 +71,15 @@ export default function RootLayout() {
 
   return (
     <ClerkProvider publishableKey={publishableKey} tokenCache={tokenCache}>
-      <RootLayoutNav />
+      {/* Inside ClerkProvider because it keys on userId, and above the
+          navigator because the tab bar is built from it. */}
+      <ModulesProvider>
+        <UnitsProvider>
+          <TrackEffortProvider>
+            <RootLayoutNav />
+          </TrackEffortProvider>
+        </UnitsProvider>
+      </ModulesProvider>
     </ClerkProvider>
   );
 }
@@ -77,8 +92,9 @@ export default function RootLayout() {
 const AUTH_ROUTES = ['sign-in', 'sign-up', 'forgot-password'];
 
 function RootLayoutNav() {
-  const { isLoaded, isSignedIn } = useAuth();
+  const { isLoaded, isSignedIn, userId } = useAuth();
   const { signUp } = useSignUp();
+  const getToken = useAuthToken();
   const segments = useSegments();
   const router = useRouter();
 
@@ -95,6 +111,17 @@ function RootLayoutNav() {
     signUp?.status === 'missing_requirements' &&
     (signUp.unverifiedFields?.includes('email_address') ?? false);
 
+  // The orchestrator owns timers and an AppState listener, so it is started
+  // once for the process rather than per screen — a listener per mounted
+  // screen is how one foreground transition becomes five syncs.
+  useEffect(() => startSyncOrchestrator(), []);
+
+  // Who to sync as. Cleared on sign-out so a queued retry can't fire against
+  // the previous athlete's rows.
+  useEffect(() => {
+    setSyncIdentity(isSignedIn ? (userId ?? null) : null, isSignedIn ? getToken : null);
+  }, [isSignedIn, userId, getToken]);
+
   useEffect(() => {
     if (!isLoaded) return;
 
@@ -109,6 +136,15 @@ function RootLayoutNav() {
     // silently, one frame after it rendered. Every new auth screen belongs in
     // AUTH_ROUTES; that is the whole reason it's a named constant next to the
     // routes themselves rather than an inline `||` chain that grows.
+    // Drop the brokered token the moment Clerk says there is no session —
+    // a remote sign-out, a revoked session, an expired one. The Settings
+    // button is NOT the only way out of a session, and the token is persisted
+    // in the keychain, so relying on that button alone left the next athlete
+    // on a shared device authenticating as the previous one until the token
+    // expired. Keyed on the transition, so it runs once rather than on every
+    // navigation while signed out.
+    if (!isSignedIn) void clearSessionToken();
+
     const onAuthScreen = AUTH_ROUTES.includes(segments[0] as string);
     if (!isSignedIn && !onAuthScreen) {
       router.replace(hasPendingSignUp ? '/sign-up' : '/sign-in');

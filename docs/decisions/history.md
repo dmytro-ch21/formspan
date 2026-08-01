@@ -3071,6 +3071,1359 @@ Redirecting to a log under `script -q /dev/null` makes progress visible within
 seconds, which is the difference between noticing a stall and being asked about
 it fifteen minutes later.
 
+
+## 2026-07-31 — The technique detail screen: "just a bunch of text"
+
+Accurate description of what shipped. Eight stacked sections in identical type,
+no visual anchor, and the execution instructions delivered as a single
+121-character sentence. Structurally correct, unreadable in a gym.
+
+### The fix was in the data, not the styling
+
+`description` is authored as ONE comma-separated sentence — "Control wrist and
+elbow, break posture, pivot across the shoulder, clamp the knees, and extend
+the hips through the elbow line." That is **five instructions wearing a
+paragraph**, and it is most of why the screen read as a wall.
+
+`executionSteps` splits it. Measured across all 466 *before* any UI was built:
+460 (99%) yield 2+ steps, clustered at 3–4, averaging 30 characters, none under
+10 or over 110. The remaining 6 fall back to prose, because a one-item numbered
+list looks like a bug.
+
+The split takes `;` as well as `,` — several descriptions join instruction
+pairs with a semicolon — and deliberately **avoids a lookbehind**. `(?<=\.)\s+`
+matched zero of 466 (trailing periods are stripped anyway), while on web
+`lib/api.ts` is imported by every dashboard page and Next/SWC does not
+transpile regex features: an unsupported construct is a parse-time
+`SyntaxError` that takes the whole dashboard down on Safari/iOS < 16.4. The
+review verified the pattern compiles under the app's own Hermes binary, so this
+was risk removal rather than a fix — but it was free.
+
+The fragment-folding rule needed a correction that only showed up on screen:
+the first version folded anything under three words and silently merged "Control
+wrist and elbow" with "break posture". **"Break posture" is a step, not a
+tail.** Length alone separates fragments from instructions on this corpus.
+
+### An idea that measurement killed
+
+The obvious companion was a timing panel — `when_to_use` reads "Use from Closed
+Guard **after** the elbow is isolated… Apply it **before** the opponent
+completes stack pass", which looks like an entry/exit window. Only **33%** of
+the library has both halves, and the actual samples don't fit the frame at all
+("Use as the default standing posture whenever neither athlete has dominant
+grips"). Building it would have misrepresented two-thirds of the library. It
+was not built.
+
+### The hero is a media slot, deliberately empty
+
+Images are coming; techniques have no image field yet. Rather than defer the
+layout or ship a grey rectangle that reads as a failed download on all 466, the
+hero is built as the slot and filled meanwhile with the category mark — an
+oversized, very low-contrast watermark plus the category eyebrow. `heroImage`
+is the one prop that turns it into a photo, with no layout change.
+
+The scrim over the lower two-thirds is not decoration: today it keeps the title
+clear of the watermark, and the moment real imagery lands it is what stops white
+text sitting on a white gi. Solid rather than a gradient, because
+`expo-linear-gradient` isn't a dependency and one overlay doesn't justify a
+native module.
+
+### Caught by looking, twice
+
+The first render put the category tile bottom-aligned against a tall text block,
+so it sat beside the *aliases* rather than the title, and the watermark ran
+straight through "Armbar from Closed". Neither is visible to a typechecker.
+Verifying meant a throwaway route rendering the **real** components against real
+library data, deep-linked into the Simulator — `/technique/[id]` needs auth, so
+it cannot be opened directly.
+
+### One bug the redesign introduced
+
+The new "Try again" button called `load()`, which cleared the error while
+`loading` stayed false and `technique` stayed null — so for the whole retry the
+screen rendered the fallback branch's **"Technique not found."**, the most
+alarming possible message, on exactly the slow connection the button exists
+for. Caught in review, not by any check.
+
+### Parity
+
+The web panel got the same split from an identical parser, verified
+comment-stripped-identical to the mobile one so the two screens can never
+disagree about where a step ends.
+
+## 2026-08-01 — Two pieces of feedback that both came down to "half-done reads worse than absent"
+
+### The graph links are gone; the graph is not
+
+The technique detail screen linked `setup_from`, `common_next_moves` and
+`common_counters` to other techniques. Verdict after using it: *"I don't really
+need the links… they kinda cool but its not full."*
+
+That is a coverage problem wearing a UI complaint. **~80%** of `setup_from`
+entries name a real library entry, but only **~29%** of next-moves and **~6%**
+of counters — the rest is prose like "establish grips or inside ties". So a
+typical screen showed one or two links surrounded by plain text, which reads as
+a feature that half-works rather than as a graph.
+
+The lists stay as reference text — knowing an armbar chains to a triangle is
+useful whether or not the app can navigate there. The navigation goes. That
+deleted `resolveEdge`, `indexByName`, `edgeKey` and `indexTechniques` outright,
+and with them a whole network fetch on the mobile detail screen: it no longer
+loads all 466 summaries just to decide what is tappable. Worth reconsidering if
+coverage ever approaches "nearly every entry resolves".
+
+### The 20 BJJ drills left the exercise catalog
+
+*"some older bjj in library with default images are still present."* Two things
+were true at once. The exercise catalog held 20 BJJ conditioning drills — Bear
+Crawl, Sprawl, Granby Roll — which predate the technique library, so filtering
+the Library to "BJJ" returned drills **and** 466 techniques: two different kinds
+of thing under one label. And all 20 have no media of their own, so the backend
+served each the per-sport placeholder from `defaultMedia`, rendering a block of
+identical stock photos.
+
+They are removed. "BJJ" in the Library now means the technique library.
+`Technical Stand-Up`, the one entry that existed on both sides, stops being a
+duplicate.
+
+**This is the first time `UpsertAll` never deleting has actually cost
+something.** Removing rows from `exercises.json` leaves them in every database
+already seeded, so it took migration `000019` — and that migration is
+deliberately conditional:
+
+```sql
+DELETE FROM exercises e
+WHERE e.sport = 'bjj'
+  AND NOT EXISTS (SELECT 1 FROM session_sets  s WHERE s.exercise_id = e.id)
+  AND NOT EXISTS (SELECT 1 FROM workout_items w WHERE w.exercise_id = e.id);
+```
+
+`session_sets` and `workout_items` reference `exercises` with **no** `ON DELETE`
+clause. An unconditional delete would fail the migration outright or, worse,
+tempt someone into adding `CASCADE` and silently destroying training history. A
+drill that survives because someone logged it stays visible in the library —
+the right failure direction. Checked against staging first: 20 rows, 0 referenced by `session_sets`,
+`workout_items` or `pinned_exercises` — and, after review pointed out the
+original claim of "0 referenced by anything" skipped it, 0 in
+`exercise_unit_prefs` too. That one and `pinned_exercises` CASCADE, so on
+another database they would be deleted silently along with the drill; both are
+trivially recreatable preferences rather than training history, which is why
+they are not in the guard.
+
+### The consequence worth stating plainly
+
+With no bjj entries in the catalog and the existing sport-equality rule, **a
+`sport='bjj'` session can no longer contain a single set, and a bjj workout
+template can no longer contain an item.** Every remaining catalog entry
+mismatches, and techniques are not loggable — there is no `technique_id` on
+`session_sets`.
+
+That is coherent with where BJJ is going, and `docs/testing/functional-scenarios.md`
+already called the old arrangement a stopgap ("BJJ workouts only work because
+two BJJ entries live in the exercise catalog; a real technique library is its
+own module"). But it is a capability that existed this morning and does not
+now, and the review is what forced it to be written down rather than discovered
+later. Making techniques loggable is the work that closes it.
+
+### What the test suite caught
+
+Four integration tests in `session` and `workout` broke — both packages pinned
+`exBJJ = "bear-crawl-forward"` as their non-strength fixture — plus
+`TestPostgresRepository_ListFilters`, which asserted "expected at least one bjj
+exercise". All five are the tests doing their job.
+
+**They were nearly missed.** A local `go test ./...` reported those two packages
+as `(cached)`, so the run looked green while four tests were broken; only
+`-count=1` surfaced them. The documented gotcha about integration tests
+skipping without `TEST_DATABASE_URL` has a sibling: they can also be *cached*
+past a data change they depend on. The fixtures now point at `run`, the one
+remaining non-strength catalog entry. It now filters on
+`running` for the positive case and asserts bjj is **empty**, with a comment
+saying why — so if the drills ever come back, something fails loudly rather
+than bear crawls quietly reappearing among the armbars.
+
+### Still true, and deliberately not changed
+
+`defaultMedia` still serves per-sport placeholders to the ~500 strength and
+running exercises with no artwork of their own. That was offered as part of this
+change and not taken; it remains the case that most catalog rows show a stock
+image rather than the movement.
+
+## 2026-08-01 — A discipline registry, because the toggles did nothing
+
+The profile has carried `bjj_enabled` / `strength_enabled` / `nutrition_enabled`
+/ `running_enabled` since migration 000001. They were read in **exactly one
+place** — mobile's "You" screen rendered them as a comma-separated string.
+Turning `running_enabled` off changed one line of text and nothing else, while
+`profile/edit.tsx` claimed "which sports you do decides what the app offers
+you".
+
+Meanwhile the same closed set was written down **four times in Go**: a map in
+`session/handler.go`, a second map in `exercise/seed.go`, a typed enum plus a
+switch in `workout/workout.go`, and a media map keyed by sport in
+`exercise/exercise.go` — plus 2 SQL CHECKs, 5 hardcoded prose error strings, 9
+OpenAPI enums, and **six mutually inconsistent lists in the mobile app alone**.
+Adding a discipline touched ~31 places, none of which the compiler connected.
+
+### Three vocabularies, and one of them had nothing behind it
+
+`sport` (`strength|running|bjj`), activity `kind` (free text, unvalidated), and
+`*_enabled` (bjj, strength, nutrition, **running**). Nothing mapped between
+them, and `nutrition` existed only in the third — no table, no route, no seed
+content. So "discipline" was really two concepts. `internal/platform/discipline`
+now says so explicitly: `IsSport` is a field, because nutrition is a module you
+can toggle and a session with `sport="nutrition"` is nonsense.
+
+### Toggles decide what you can reach; data decides what you can read
+
+The rule the registry is built around, and the reason `Capabilities` is a struct
+rather than one boolean. "Is BJJ on?" and "does BJJ have 1RM records?" are
+different questions — collapse them and a BJJ-only athlete gets a Records screen
+whose five record kinds are all lift- or run-shaped.
+
+What the registry deliberately does **not** decide is whether a *metric* shows.
+Web's `loadMetric()` already picks volume-vs-time from the data present, and the
+calendar falls back to session-count with a `Math.max(1, …)` floor so a
+lift-Monday/roll-Tuesday athlete's BJJ days don't render identical to rest days.
+Gating those on toggles would break the one part that was already right.
+
+### Columns became rows
+
+`profile_modules(user_id, module_key, enabled)`, backfilled from the four
+columns. Adding a discipline now needs **no migration**: a user with no row
+falls back to the registry's `DefaultOn`.
+
+Deliberately **no CHECK on `module_key`** — a CHECK is exactly the
+migration-per-discipline cost being removed. The registry validates on write,
+and an unknown row is inert because reads go registry-first.
+
+The four columns are **left in place and unread**. Dropping them in the same
+migration would make it unrecoverable — roll the api back and the old binary
+reads columns that don't exist. Standing, a rollback reads stale-but-present
+values: wrong, not a crash. Consequence written down rather than discovered:
+between now and the follow-up that drops them, columns and rows can diverge,
+because only the rows are written.
+
+The **down** migration pushes rows back into the columns before dropping the
+table, so a rollback keeps whatever the user chose while rows were
+authoritative. Verified with real data: a row edited `true`→`false` came back as
+`false` in the column, and untouched values survived.
+
+### Verification worth naming
+
+The backfill was tested against a **simulated legacy database** — migrate to 19,
+insert three profiles with deliberately varied toggles including a non-default
+combination, then migrate. 12 rows, **0 mismatches**, and the BJJ-only user came
+through with `bjj=true` and the rest false. A from-zero database lands
+identically.
+
+`defaultMedia` is the one discipline list that can't derive from the registry —
+its values are asset paths that have to exist in the bucket. It failed
+*silently*: a sport missing an entry made `DefaultMediaFor` return nil, the
+handler skip media, and every exercise in that discipline render imageless with
+nothing logged. It now has a coverage test, mutation-checked by deleting the
+`running` entry and watching it fail.
+
+### The claim was false, and review caught it
+
+`discipline.go`, the 000020 migration comment, this entry and
+functional-scenarios all asserted that adding a discipline needs no migration.
+**It didn't, while `workouts_sport_valid` and `sessions_sport_valid` stood** —
+two CHECK constraints pinning `sport IN ('strength','running','bjj')` in SQL. A
+fifth discipline would have passed every Go validator and then failed every
+INSERT on a 23514, surfacing as a misleading 400, with nothing in the suite to
+catch it: the registry's tripwires never touch the database.
+
+Migration `000021` drops them. Widening rather than dropping was considered and
+rejected — a CHECK listing the values *is* the migration-per-discipline cost
+this work exists to remove; widening moves the next migration one discipline
+out. The trade is stated in the migration: the database will now accept a sport
+no handler would produce, reachable only by direct SQL, and inert because
+nothing enumerates sports from those tables.
+
+What replaces it is a test that writes a session for **every** sport in the
+registry — the tripwire that was missing. Mutation-checked: re-adding a CHECK
+that excludes BJJ fails it on the BJJ subtest.
+
+### Other things review caught
+
+- The FK violation from toggling modules for a user with no profile reported
+  **"unknown exercise"** — a message written for `exercise_unit_prefs`, reachable
+  by any signed-in user who hadn't onboarded.
+- `SetModules` queued its batch in Go's randomised map order, so two concurrent
+  multi-key PATCHes for one user could deadlock. Sorted now.
+- The tracked Postman collection still PATCHed `/profile` with
+  `running_enabled` — which after this change returns **200 and does nothing**,
+  since unknown fields are ignored. The generator had it hardcoded; fixed at
+  source and regenerated.
+- On mobile, a modules-save failure after a successful profile save showed one
+  generic banner, so a user whose profile (and, on first run, whose profile
+  *row*) had just been created was told nothing saved. The comment claiming
+  sequencing prevented this was wrong — sequencing alone distinguishes nothing.
+- The "You" screen fetched modules on mount while fetching the profile on focus,
+  so the Sports row went stale after exactly the flow it exists for. And its
+  `.catch(() => {})` asserted "None chosen yet" as fact on a network failure —
+  the same default-standing-in-for-unknown bug this file has fixed twice before.
+
+### Phase B, and what review caught in it
+
+The mobile half shipped four blocking defects, all one root cause: **the
+provider's lifecycle was write-only after mount.**
+
+1. **Toggling a discipline did nothing until the app was killed.** The profile
+   screen called the raw API helper and never touched the provider; `refresh`
+   was exposed on the context and called by *nothing*. The save persisted
+   server-side and the tab bar, start buttons and Library chips all kept the old
+   configuration for the rest of the process. **The entire feature failed on its
+   primary path.** `PATCH /modules` already returns the merged set, so the fix
+   costs no extra request.
+2. **`ready` was consumed by nothing**, so its docstring's central claim — "the
+   shell can hold a frame rather than show the wrong one" — was honoured by no
+   code. The tab bar rearranged on every cold start (the exact bug it was
+   written to prevent) and Today flashed its all-disciplines-off empty state at
+   every user.
+3. **The technique fetch was not gated.** The commit message and two code
+   comments asserted it was; `loadTechniques` had no reference to the
+   capability. A strength-only user still pulled ~65 kB of techniques on every
+   Library mount and every pull-to-refresh.
+4. **Sign-out leaked the previous athlete's configuration.** The provider sits
+   above the navigator and never remounts, so on a shared device the next user
+   saw A's tabs — and if B was offline and new to the device, indefinitely.
+
+Smaller, same review: a `sportTouched` flag that defended against nothing and
+preserved the one invalid state (a selection whose discipline had been
+disabled, still creating workouts in it); two stale-`modules` closures; a cached
+module set parsed with a bare cast rather than through the normaliser written
+for that boundary; and "Start bjj" — the first consumer of the label the
+registry carries specifically to keep BJJ capitalised, lowercasing it.
+
+None of this was reachable by typechecking, and I could not run the gated flows
+myself: they need a signed-in session. The review read what I could not execute.
+
+### Open
+
+Phase A is backend only — the toggles still gate nothing in the UI. Phases B and
+C wire the clients, at which point disabled disciplines lose their nav, their
+controls **and their network requests** (the Library currently fetches 466
+techniques for every user regardless).
+
+`activity.kind` remains a fourth, unvalidated vocabulary. The registry is where
+it should eventually be validated.
+
+## 2026-08-01 — Phase C: the web app catches up, and the admin console stops measuring a dead table
+
+Phase A gave the backend a discipline registry; Phase B made the phone obey it.
+This is the desk half, plus the thing that fell out of asking "what should
+admin actually track?"
+
+### Web now obeys the toggles
+
+`apps/web` had its own hardcoded `SPORTS` list and its own reimplementations of
+what the registry already knows — a `HAS_TECHNIQUES` set, a `usesPosition()`
+predicate. All gone. The modules are fetched **once, server-side, in
+`dashboard/layout.tsx`**, and handed to a client `ModulesProvider` as an initial
+value.
+
+Server-side and once, for two reasons. The layout is a Server Component, so the
+read is awaited before anything paints — a client fetch would render the full
+navigation for one frame and then remove items, a visible flash of destinations
+the user doesn't have. And this codebase has already paid for the other shape:
+`useUnits` fetches the profile per call site with no shared cache, costing *one
+`GET /v1/profile` per session rendered* — 200 identical requests for one
+account-level enum, documented in `sessions/page.tsx`. Module state is read by
+the sidebar *and* every page, so repeating that would have been worse.
+
+Nav items gained a `needs` predicate. **Records is gated on "any enabled module
+has record kinds"**, not on strength — it is marginally useful to a runner
+(`longest_time`, `furthest_distance`) and useless to a BJJ-only athlete, whose
+five available record kinds are all lift- or run-shaped. Library is gated on any
+enabled module having a catalog. When the fetch fails the nav falls back to
+ungated: a preference endpoint blinking must not hide the app.
+
+Settings gained a **"What you train"** section. This closes a real hole rather
+than adding a nicety — the toggles existed only on the phone, so a discipline
+switched off there could not be switched back on from a desk, while web
+cheerfully kept showing it everywhere because it ignored the toggles entirely.
+
+### The admin console was measuring a table with no writer
+
+Asked to "track the most important things", the first thing worth checking was
+what it already tracked. Against staging:
+
+```
+activities: 0   sessions: 2   session_sets: 36   workouts: 2   health_events: 0
+```
+
+`activities` has had **no writer** since the in-app logging form was removed.
+Its two columns — `activity_count` and `last_activity_at` — were the entirety of
+the user-lookup table, and `/users/[id]` rendered nothing else. Every row read 0
+and null while the account's real training sat in `sessions`. The detail page's
+own empty state admitted it couldn't tell a wrong id from an idle account:
+*"Either they haven't logged any yet, or the ID doesn't exist — the API returns
+an empty list for both."*
+
+So the fix was not "add tracking". It was **deriving from rows that already
+exist**:
+
+- `session_count`, `last_session_at`, `set_count` — aggregates over `sessions`
+  and `session_sets`. `set_count` earns its place by separating someone who
+  started two sessions and abandoned them from someone who trained twice.
+- `modules` — enabled disciplines, resolved through the registry so a user with
+  no stored row reads as the *default* rather than as "off".
+- A new `GET /v1/admin/users/{userID}`: summary + recent sessions, **two queries
+  in one round trip** via `pgx.Batch`. The detail page is two requests total
+  (that, plus the per-user health log, run concurrently) — no per-row fetches.
+
+Both queries share one `userSummaryCols` projection so the list and the detail
+cannot drift into reporting different numbers for the same account; a test
+asserts they agree. Aggregates are correlated subqueries, not joins: joining
+`sessions` to `session_sets` in one `GROUP BY` multiplies rows before collapsing
+them, which is how a count quietly becomes a product.
+
+**A test caught me reintroducing a bug it was written to prevent.** Rewriting
+`ListUsers`, I keyed it `FROM profiles` — and
+`TestPostgresRepository_ListUsers_IncludesProfilelessUsers` exists precisely
+because that hides users who signed up and trained but never onboarded (there is
+no FK from `sessions` to `profiles`, so it is a real state). Users are now
+enumerated from a `UNION` of every table holding a user id. Verified by
+mutation: reverting to `FROM profiles` fails both that test and the new one.
+`/users`' own copy claimed "N with a profile", which was already false; it now
+says "N known to the API" and explains what that excludes.
+
+### `health_events` grew forever
+
+Migration 000016 reasoned that "on a healthy system this table stays close to
+empty" — true right up to the moment it matters. A degraded database pushes
+ordinary requests past the 2s slow threshold, and every one of them then writes
+a row into the same struggling database. The queue and single writer bounded the
+*rate*; nothing bounded the *total*. There was no TTL, no partitioning, no
+cleanup job, no `DELETE` anywhere in the repo.
+
+Now 90 days, matched to the read path's own 30-day `MaxWindow` clamp — anything
+older was already unreachable through the API and was pure storage. Migration
+000022 clears the backlog once; `cmd/seed` keeps it bounded, since the predeploy
+seed is the only scheduled thing this project has. `pg_cron` would be tidier and
+is not worth an extension for one statement. Verified by inserting a 100-day-old
+and a 10-day-old row and running the seed: `health_events pruned: 1`, the recent
+one untouched.
+
+### What was deliberately NOT added
+
+**A `last_seen_at` write.** It is the only way to get DAU — every count here
+measures *logged training*, not *opened the app*, so a daily browser who never
+logs is indistinguishable from a churned account. It would cost one stamped-
+once-a-day write off the existing `/v1/modules` launch call. It is a genuine
+gap, but it is a new write path on every launch and the user asked for no
+bloat, so it is written down rather than built. Naming the field
+`last_session_at` instead of `last_seen_at` keeps the current numbers honest
+about which question they answer.
+
+The dead `listUserActivities` client and `Activity` type were deleted from
+`apps/admin` — nothing rendered them. The backend route survives as the only
+read path for rows predating the form's removal.
+
+### Open
+
+`apps/web` still doesn't follow the shared hi-fi design system that `apps/admin`
+uses — unchanged by this and still unstarted. `activity.kind` remains a fourth,
+unvalidated vocabulary.
+
+## 2026-08-01 — "Why am I being asked to sign in? I'm signed in" — one broker for Clerk
+
+Feedback from an actual gym session, not a test: *"When offline I would see a
+lot of sign in? why I'm on my phone signed in why should i again?"* Followed by
+the sharper architectural question: *"why do we make any calls outside of auth
+with clerk we need to make to clerk as small amout of calls as possible we need
+a better architecture."*
+
+Both were right, and they were the same problem.
+
+### What was actually happening
+
+Read out of the installed clerk-js rather than guessed:
+
+```js
+catch (t) {
+  if (this.shouldRethrowOfflineNetworkErrors()) throw ...
+  if (!isOnline()) return warn("Network request failed while offline, returning null"), null;
+```
+
+**Clerk returns `null` when it cannot be reached.** It does not throw. And
+nine modules read that null as:
+
+```js
+const token = await getToken();
+if (!token) throw new Error('Not signed in.');
+```
+
+So a dead spot made every screen in the app simultaneously tell a signed-in
+athlete that he was not signed in. He had never been signed out —
+`_updateClient(e){if(!e)return;…}` means a null response leaves the cached
+client alone, so `isSignedIn` stayed true and the route guard correctly never
+redirected. The word "sign in" he kept seeing was purely our own message,
+nine times over, and it was false.
+
+### The architecture underneath it
+
+12 direct `getToken()` calls plus 18 through `useAuthToken`, one per API
+request. Clerk's default session token lives about **60 seconds**, so the app
+depended on Clerk's servers being reachable roughly every minute — for work
+that is otherwise entirely local. That is the real answer to "why do we make
+calls to Clerk at all": we weren't calling it per request, but we were
+re-earning the right to function every 60 seconds.
+
+`lib/session.ts` is now the only module that talks to Clerk:
+
+- caches the token against its own `exp`, decoded from the JWT — no call is
+  made to find out whether a call is needed;
+- collapses concurrent misses into one refresh, so five screens mounting
+  together cost one Clerk call rather than five;
+- **keeps using a still-valid token when Clerk is unreachable.** Being unable
+  to *refresh* is not being unable to *authenticate*. This is the fix;
+- persists the last token in the keychain, so a cold start in a dead spot can
+  still reach our API until that token genuinely expires;
+- throws `OfflineError` when there is truly nothing usable — never a claim
+  about being signed out. `useAuthToken()` returns `Promise<string>`, not
+  `Promise<string | null>`, so the old reading cannot be reintroduced.
+
+The cheapest remaining win is configuration, not code:
+`EXPO_PUBLIC_CLERK_JWT_TEMPLATE` mints from a Clerk JWT template whose lifetime
+is set in the dashboard. The API verifies signature, issuer, expiry and `sub`
+only — no `azp`, no audience — so a longer-lived token needs no server change
+and multiplies the offline grace window directly.
+
+### The test that proved nothing
+
+Worth recording, because it nearly shipped. The first harness asserted "a valid
+token is still served while Clerk is unreachable" using a 300-second token —
+which the broker serves from cache without consulting Clerk at all. The offline
+getter was never even called. Deleting the entire offline-grace branch left all
+seven tests green.
+
+The token has to sit **inside the refresh skew but outside expiry** for that
+path to run at all. With a 10-second token against a 20-second skew, removing
+the branch fails two tests. A `reached === 1` assertion now guards the harness
+against going vacuous again.
+
+`apps/mobile` still has **no test runner**, so this ran as a standalone Node
+harness against `tsc` output. That is a real gap: this is the most
+consequential pure-logic module in the app and nothing in CI exercises it.
+
+### Not fixed here
+
+Reads still go to the network — a valid token does not make `GET /v1/sessions`
+work in a basement. Serving reads from the local store is the offline-first
+programme, still untouched. This change is what stops *authentication* from
+being the thing that breaks first.
+
+## 2026-08-01 — In-session fixes, from a phone actually taken to a gym
+
+Five items from one session on the mat and under a bar. Four are done here;
+two are deliberately not.
+
+### The add-exercise bug — and a wrong diagnosis I shipped first
+
+*"when adding exercise it stuck when in session I had to wipe down few times
+and apparently the exercise was added but would just load without my
+intervention."*
+
+**My first diagnosis was wrong, and the review caught it.** I claimed the
+session screen's 700ms debounce held a pre-picker snapshot that landed after
+the picker's write, and that `Swap` flushed before navigating while `+ Add
+exercise` did not. The second half is simply false: `git show origin/main`
+has `await flush()` on *both* buttons. I had grepped for `router.push` and
+never read the lines above the one I found. The "fix" was a behavioural no-op
+dressed as a root cause — the worst kind, because the next person would have
+trusted the comment.
+
+The real mechanism is a check-then-act in the sync **pull**, and it is still
+live on main:
+
+```
+run A: pullSessions()          -> snapshot WITHOUT the new exercise
+picker: writes it locally, dirty = 1
+run B: pushes it, sets dirty = 0
+run A: reads dirty = 0, upserts its stale snapshot -> exercise gone
+later: another pull brings it back
+```
+
+`syncSessions` is fired and forgotten from six places, and the add flow
+overlaps two of them by construction — the picker's own sync and the session
+screen's refocus sync. The **push** side already guards its version of this
+with a CAS on `updated_at` ("or we'd mark a newer edit as already sent"). The
+pull side had nothing.
+
+Two fixes: the pull now refuses to write a snapshot older than the local row,
+and `syncSessions` is serialised process-wide so overlapping runs cannot
+interleave at all. The wrong diagnosis is recorded in the code beside the
+right one, so it is not re-derived.
+
+`openPicker` stays, because putting the flush in one place instead of two is
+worth keeping — but its comment now says plainly that it is not the fix.
+
+### Prefill, and a bug its own doc comment described
+
+*"when we have predefined few sets, and we enter some data in first the next
+ones should pick up those numbers."*
+
+`+ Set` already carried numbers forward; sets that arrive from a template do
+not, so a 3×5 meant typing the same weight three times. `fillForward` now fills
+later *planned* sets when you tick one done — the moment the numbers are final,
+and a tap already being made. It never overwrites a value already typed (a top
+set with back-offs is a real plan), never touches a completed set, and never
+carries effort.
+
+The first implementation filtered on `exercise_id` without stopping at the
+group boundary, so squat / bench / squat filled the *second* squat block from
+the first — a different piece of work. Its own doc comment said "stopping at
+the next one". A test caught the contradiction.
+
+### Reorder and remove an exercise
+
+Buttons on the group header rather than drag handles: a long-press-drag is a
+poor bet one-handed with a bar to get back to, and it fights the scroll view.
+Removal is confirmed and says how many logged sets go with it; `Swap` remains
+the non-destructive neighbour for "wrong exercise".
+
+### The done-set highlight, computed rather than eyeballed
+
+*"make it the whole thing highlighted so it is visible that is done. But color
+should be nice and a bit transparent."*
+
+Lime at 15% over `surface`, solved per channel and stored opaque as
+`vola.setDone` — the convention this palette already uses. 15% because it was
+measured: the tint is 1.47:1 against an untouched row (visible at a glance),
+`text` 11.5:1, `textMuted` 4.67:1. 20% reads better as a band but drops
+`textMuted` to 3.98:1; 10% keeps every ink happy but the tint falls to 1.26:1
+and stops being obvious. `textDim` is 2.51:1 on the tint, so the set ordinal
+steps up to `textMuted` on done rows only.
+
+### Not done, and why
+
+- **Swipe-left to delete a set.** Needs `react-native-gesture-handler`, which
+  isn't a dependency — a new native module plus a root-view wrapper, and it
+  wants device verification rather than a typecheck. There is already a
+  "Remove set" button in the expanded row, so this is an ergonomics upgrade,
+  not a missing capability. Its own change.
+- **Volume shown in kg when the athlete wants lb — now reproduced and fixed.**
+  The account was already imperial, which ruled out the "never been online"
+  theory and pointed at the real cause: **`useUnits` was a hook, so each of six
+  screens held its own copy** of one account-level enum, its own
+  `useState('metric')`, and its own `GET /v1/profile`. Every screen therefore
+  began in metric and corrected itself a frame later — and a finished-session
+  summary renders at mount, which is exactly that frame. Six resolutions racing
+  six fetches also meant screens disagreed with each other, which is the "why
+  it is not consistent?" in the report.
+
+  Now one `UnitsProvider` above the navigator: one copy, one fetch (six down to
+  one), cache read before first paint, and `unitsReady` so a unit-bearing
+  number is never printed in a unit not yet established — a dash for one frame
+  beats tonnes to someone who thinks in pounds. The offline/`owed` logic was
+  already correct and is carried over unchanged; it was just being run six
+  times.
+
+  Same shape as the documented 200-request `useUnits` bug on web.
+
+- **`useTrackEffort` collapsed too — and it had a bug units did not.** Two call
+  sites, two copies, two profile fetches: the same shape, though a boolean
+  cannot render a wrong *number*, so it never produced a visible symptom.
+
+  The substantive half is that it had **no record of a local choice that hadn't
+  reached the account**. Turning effort off with no signal pushed to the server,
+  failed, and had the failure swallowed by a bare `.catch(() => {})` — then the
+  next successful profile read did `setOn(p.track_effort)` and overwrote the
+  cache with the server's stale `true`. The switch turned itself back on,
+  minutes later, silently. `useUnits` carries an `owed` flag precisely to
+  prevent that, and its comment describes this exact failure; `useTrackEffort`
+  was written from the same template and left the flag out. It now has
+  `PREF_TRACK_EFFORT_OWED`, the same server-wins guard, and Settings admits the
+  state rather than swallowing it.
+
+  Four profile fetch sites remain (`you.tsx`, `profile/edit.tsx` and the two
+  providers), all of which genuinely want the whole profile.
+
+### Testing
+
+The two new transforms went into `lib/sessions.ts` beside `swapExercise`
+rather than staying inline in the screen — pure array logic belongs there, and
+it is the only way to exercise it at all given `apps/mobile` still has no test
+runner. 13 assertions run from a standalone harness over `tsc` output; one of
+them is what found the group-boundary bug above.
+
+That runner gap is now the second entry in a row to mention it.
+
+## 2026-08-01 — Offline-first, PR2: something owns when sync happens
+
+First of the offline-first run (#115–#120). This one is about **writes getting
+off the phone**; it does not make reads work offline, and the entry says so
+because that distinction is the whole programme.
+
+### Nobody decided when to sync
+
+`syncSessions` was fired and forgotten from **seven** call sites — session
+focus, the exercise picker, finishing a session, starting one, Today's mount, a
+manual Retry. Each was an independent guess that *now* might be a good moment.
+Between them there was no timer, no connectivity trigger, and nothing that
+noticed the app had come back to the foreground.
+
+The shape an athlete meets: log a whole session in a basement gym, walk out
+into signal, pocket the phone. Nothing happens. The training sits there until
+you happen to open a screen whose mount fires a sync.
+
+`lib/sync.ts` now owns the question. Call sites say *"something changed"*
+(`request(reason)`); it decides whether to act. It coalesces — ten requests
+during a run cost two syncs, not eleven — backs off 5s/15s/60s/5min on failure,
+retries only when something is actually pending, and syncs on **foreground
+transition**, which is the trigger that was missing and the one that matches
+walking out of a basement.
+
+### Reachability, not radio state
+
+Deliberately **no `expo-network`/NetInfo dependency.** The OS answers "is wifi
+associated", and the case that started this entire thread — a phone on gym wifi
+with no upstream — answers that question *yes* while nothing works. So
+online/offline is inferred from whether requests actually succeed: an
+`OfflineError` means offline, a completed sync means online, and a 4xx means
+**online** (the server answered; it just refused). Adding the OS listener later
+is worth it only to shorten the wait after signal returns — an optimisation
+over the backoff, never the source of truth.
+
+It also avoids a native dependency, which on this project means a device
+rebuild before anything can be tested.
+
+### A bug found while wiring
+
+`schedule()` refuses to set a timer with nothing pending — sensible, but it was
+reading `state.pending` *before* the `finally` refreshed it. A session created
+moments earlier still reads as 0 until the recount, so the retry was skipped for
+exactly the rows that needed it. The recount now happens before the decision.
+Mutation-verified: reverting the order fails that test alone.
+
+### Not in this PR
+
+Reads. `GET /v1/sessions` still needs the network, so the Library, the workout
+list and history remain online-only — that is PR4a/PR4b/PR5. Background sync is
+also explicitly out: nothing runs while the app is suspended, and claiming
+otherwise in the UI would be worse than the honest "syncs when you open it".
+
+### Review, and a second vacuous test
+
+Three things worth fixing came out of review, and one of them fixed three
+problems at once.
+
+**Classification moved into the sync result.** The orchestrator was deciding
+online-vs-offline by matching `/reach VOLA/` against the error *message* — the
+exact thing `apiError.ts` warns against, and worse than the usual case because
+the string is our own gym-facing UI copy, so it breaks when someone reasonably
+reworders it, and breaks *inverted and silently*. `SessionSyncResult` now
+carries a typed `errorKind` (`offline` | `permanent` | `transient`), classified
+where the error object still exists. That one change also stopped
+permanently-refused rows retrying forever — a 4xx-refused session keeps
+`dirty = 1`, so `pending` never reaches 0, so the 5-minute tail re-armed for the
+life of the install — and fixed last-row-wins, where an offline failure followed
+by a validation error classified as online.
+
+**`syncNow` could be silently stolen.** If a request landed during a run,
+`run`'s `finally` re-fires and occupies `running` in the same microtask that
+resolves `syncNow`'s single `await running` — so the manual attempt hit the
+in-flight guard and returned having done nothing, reporting the *previous*
+run's error and stopping the spinner. Reachable on exactly the tap the button
+exists for. It loops now.
+
+**Today's badge never reflected the sync it triggered.** The screen kept its own
+`pendingSessions` copy, which was fresh only because it used to `await` the
+sync. Now that the orchestrator decides, that copy went stale immediately —
+"N waiting to sync" persisted through the successful sync that same focus had
+started. It reads `useSyncState()` instead, which until then had *zero
+consumers* — a smell in its own right.
+
+**And a second vacuous test.** The "permanent rejection schedules no retry"
+assertion passed with the guard deleted. `failures` is module state that only
+resets on success, so by that point in the file the backoff was 300s and the
+5-second wait proved nothing. Fixed by putting the ladder back to rung 0 first,
+and paired with a control asserting a *transient* failure at the same rung does
+retry — so the test can't pass just because nothing ever retries. That is twice
+now a test of mine has passed for the wrong reason; mutation is the only thing
+that has caught either.
+
+14 assertions from a standalone harness stubbing only the store and RN's
+AppState; four mutations checked. `apps/mobile` still has no test runner — third
+entry in a row to say so.
+
+## 2026-08-01 — apps/mobile gets a test runner, and the tests are mutation-checked
+
+Three history entries in a row had noted that this app had no test runner. The
+cost was not hypothetical: **twice in one day a test of mine passed for the
+wrong reason**, and both times the only thing that caught it was deleting the
+code under test to see whether anything went red.
+
+- The token broker's "a still-valid token is served when Clerk is unreachable"
+  used a 300-second token — which the broker answers from cache without ever
+  consulting Clerk. The offline getter was never called, and removing the whole
+  offline-grace branch left all seven assertions green.
+- The orchestrator's "a permanent rejection schedules no retry" ran when
+  `failures` had already climbed the ladder to 300 seconds, so waiting 5
+  seconds proved nothing. It passed with the guard deleted.
+
+Both lived in Node harnesses compiled with `tsc` and thrown away, so neither
+was repeatable and neither ran in CI.
+
+`jest-expo` rather than bare jest or vitest: it resolves React Native and the
+`expo-*` modules the way Metro does, so `lib/session.ts` (expo-secure-store)
+and `lib/sync.ts` (react-native's AppState) can be imported without
+hand-stubbing the module graph — which is what made the harnesses fragile.
+
+**30 assertions across three files**, all logic, no rendering. That is a
+deliberate aim: what has actually broken in this app is concurrency and state
+reconciliation — token refreshes racing sign-out, sync runs interleaving, set
+transforms crossing a group boundary. Component tests would be ceremony
+pointed away from the bugs.
+
+Fake timers throughout the orchestrator suite. The backoff starts at five
+seconds, and waiting that in real time both blew jest's default timeout and
+made the suite slow enough that nobody would run it. It now runs in 0.5s
+instead of 16.
+
+### The bar for this suite
+
+Every one of the seven guards these tests exist for was **mutation-checked**,
+and each mutation fails at least one test:
+
+| Mutation | Caught |
+|---|---|
+| `fillForward` drops the group boundary | 1 |
+| `fillForward` overwrites typed values | 2 |
+| broker drops the offline-grace branch | 2 |
+| broker drops the cross-user check | 1 |
+| orchestrator retries permanent rejections | 1 |
+| `syncNow` reverts to a single await | 1 |
+| `request()` loses its coalescing | 2 |
+
+CLAUDE.md now says the same thing as a rule: when adding a test here, delete
+the guard it covers and check it goes red. A green test proves nothing about
+code it never reaches.
+
+### Review: the bar held for the guards I named, and not for the rest
+
+The reviewer's substantive point was that "every guard is mutation-checked" was
+true of the seven guards I happened to test and silently untrue elsewhere.
+Four surviving mutations sat in **the broker's entire restore/persistence
+path** — which was *structurally* untestable, because the `clearSessionToken()`
+every test uses as its reset sets `restorePromise` to a resolved promise that
+nothing ever nulls, so `restore()`'s body never executed under any test. The
+mock even exposed the keychain for seeding and nothing used it.
+
+Fixed with `jest.resetModules()` cold-start cases. Two things learned doing it:
+a handle to a mock's internal state must live on `globalThis`, because
+`resetModules` re-runs the factory and leaves your captured reference pointing
+at an orphan; and `instanceof` is the wrong assertion across a registry reset,
+producing the memorable "Expected constructor: OfflineError / Received
+constructor: OfflineError".
+
+Also closed: the orchestrator's thrown-rejection path (the mock only ever
+*resolved*, so inverting `online: !isOffline(err)` survived a test literally
+titled "reports offline only when the sync could not reach the server"), the
+AppState foreground trigger — the module's own comment calls it "the trigger
+that matters most" and it had no test at all — and `fillForward`'s `i <= index`
+guard, which every fixture had made unreachable by always entering at index 0.
+
+**Writing the foreground test found a real bug**: `previous.match(/…/)` assumes
+`AppState.currentState` is a string, and it is documented as possibly null at
+startup. It throws inside a listener nobody awaits, so the trigger would have
+died silently. Now a comparison.
+
+Seven mutations, six caught. The seventh — `restore()`'s expired-token guard —
+survives and always will: `usableToken` refuses expired tokens on every path
+out of the module, so the check changes no observable behaviour. Kept as
+defence in depth and **documented as deliberately untested**, so the gap reads
+as a decision rather than an oversight.
+
+Wired into CI as `pnpm run test:mobile` in the Mobile job, so it runs on every
+PR rather than when someone remembers.
+
+## 2026-08-01 — Offline-first PR3: an offline delete stops undoing itself
+
+`deleteLocalSession` hard-deleted the row, and `DELETE /v1/sessions/{id}` went
+out fire-and-forget beside it. Offline that produced a delete which quietly
+reverted:
+
+- the row vanished locally, so the session disappeared from the list;
+- the server still held it, so the **next pull fetched it straight back**;
+- and with the row gone there was nothing left carrying *"this needs
+  deleting"*, so the intent was lost the moment the fire-and-forget call
+  failed — which, offline, it always does.
+
+The session came back some minutes later with nothing said. That is data being
+**wrong**, not merely absent, which is why this ranked above the
+reads-offline work.
+
+### Tombstones
+
+Schema v7 adds `deleted_at` to `local_sessions`. Deleting marks the row and
+leaves it dirty; the ordinary push path carries the delete out, and only then
+is the row hard-deleted for real. Reads (`listLocalSessions`,
+`readLocalSession`) filter tombstones, so it is invisible from the tap.
+
+Three decisions worth recording:
+
+- **Deleting always writes a tombstone; the push decides what the server
+  needs.** The first version short-circuited: `remote = 0` meant "never
+  pushed, nothing to tell the server", so the row was hard-deleted outright.
+  That read is racy — `pushRow` sets `remote = 1` partway through a first
+  push, so deleting in that window sees 0, hard-deletes locally, and then the
+  push it was racing **creates the session on the server**. Local row gone,
+  server row created, next pull brings it back: the exact resurrection this
+  feature exists to prevent, reintroduced by the optimisation meant to avoid a
+  pointless outbox entry. Moving the decision into `pushRow` — which runs
+  inside the serialised sync and can act on what is true *then* — removes
+  *that* window. **It does not remove every one:** if a create lands
+  server-side but the response is lost — a half-open connection, which is this
+  app's home environment — `remote` stays 0 until the next successful push, and
+  a delete in that gap still drops the row locally while the server keeps the
+  session. Self-healing (the pulled copy comes back `remote = 1`, so a second
+  delete works), and closing it would cost the clears-offline property, so it
+  is a trade rather than an oversight. Recorded because the first draft of this
+  entry claimed the window was gone. Safe to interleave because the tombstone
+  bumps `updated_at`, so a push already in flight finds its CAS no longer
+  matches and leaves the row dirty for the next pass.
+- **A 404 on the delete counts as success.** The server agreeing it isn't there
+  is exactly the state being asked for. Without that, deleting the same session
+  twice (or deleting it on the web first) leaves a tombstone that can never
+  clear.
+- **The pull skips tombstoned ids**, read once per run. Without it the pull
+  writes the server's copy straight back, which is the whole bug.
+- **A permanent refusal restores the session.** If the server will refuse the
+  delete identically forever, keeping the tombstone hides the row for the life
+  of the install while `pending` never reaches zero and every foreground
+  retries a doomed request — precisely the failure PR2 fixed for updates and
+  which had not been applied here. So the row is un-deleted and the error
+  surfaced: the session was *not* deleted, and continuing to hide it would be
+  a lie about what the server holds.
+- **`upsert` refuses to write over a tombstone** (`WHERE deleted_at IS NULL` on
+  the `DO UPDATE`). Its SET list clobbers `dirty` and omits `deleted_at`, so an
+  upsert onto a deleted row would leave the tombstone in place but mark it
+  clean — the delete silently never pushed. Both callers were guarded, but
+  that is two callers remembering; the clause makes the row immune instead.
+
+### The resurrection path I nearly missed
+
+`hydrateSession` exists for sessions this device has never seen — started on
+the web, say. But `readLocalSession` now filters tombstones, so a screen opened
+on a deleted id finds nothing locally and **falls through to hydrate**, which
+would fetch the server's copy and upsert it with `dirty = 0`. The row would
+stay hidden (reads filter it) while the tombstone quietly stopped being
+pushable. A delete that silently never happens is worse than one that visibly
+fails. Guarded, with a test asserting it never even asks the server.
+
+### Testing
+
+This is the first PR to land on the new runner, and it is the case that
+motivated asking for one: the whole bug is a delete racing a pull. Seven
+assertions, three mutations checked (revert to a hard delete → 4 fail;
+tombstone a never-synced session → 1; forget to mark it dirty → 4).
+
+**Named limit:** these run against an in-memory stand-in for the rows table,
+not real SQLite. They exercise the *decisions* — tombstone vs hard delete, what
+reads and pulls skip — and not the SQL. A schema or query mistake would slip
+through. Covering that needs a real SQLite fixture, which is the next thing
+this suite wants.
+
+## 2026-08-01 — Two design docs promoted from a product conversation
+
+A product-design conversation about what BJJ tracking should feel like as a
+whole system — and what the Today screen has to be for any of it to get used —
+produced two designs worth keeping. They started as session memory; the repo
+is the long-term home for design intent, so they're now
+[bjj-tracking-design.md](bjj-tracking-design.md) and
+[today-view-design.md](today-view-design.md), both **drafts for discussion**
+in the same spirit as [system-design.md](system-design.md), which they build
+on rather than revise.
+
+The BJJ doc's organizing claims: BJJ inverts the strength UX (zero phone
+during, everything at a sub-90-second reflection within ~20 minutes of the
+mat, layered *on top of* system-design's ≤3-tap floor rather than replacing
+it); proficiency should **emerge from an event stream** (drilled /
+attempted-live / hit-live) instead of ever asking "rate your triangle 1–5";
+and the athlete's game is an **evidence overlay on the technique graph that
+already exists** — the library's `setup_from`/counter edges — which makes gap
+detection ("no reliable exit from bottom half guard") deterministic graph
+analysis, and turns the deferred gameplan builder into curation over data
+rather than an aspirational whiteboard. Insights, focused work, and curricula
+fall out as one loop at three levels of guidance, sharing a single "current
+focus" mechanism.
+
+The Today doc's one rule: **if a number doesn't change what the athlete does
+today, it doesn't belong on Today.** Layout follows (plan-with-state,
+readiness *always paired with its consequence for the plan*, exactly one
+recommendation, calories/protein *remaining* rather than consumed, quick
+log), plus the one differentiating behavior — the lead card follows the
+clock: morning readiness, pre-class focus prompt, post-class "log it",
+evening macros-plus-tomorrow. A presentation rule over data the screen
+already has, not a feature.
+
+The near-term consequence that outlives both drafts: **session technique
+tags must carry position context and an outcome direction (hit vs. received,
+success vs. fail) from their first migration.** That is nearly free now and
+expensive to retrofit, and it is what keeps every deferred BJJ feature a
+pure read over data that will already have months of depth by the time it's
+built.
+
+Open questions live in the docs themselves — rounds granularity, anonymous
+partner attributes, prompt stacking with the sRPE ask, and whether the
+"daily message" survives Today's filter rule at all.
+## 2026-08-01 — A real SQLite fixture, and a fourth test that proved nothing
+
+Three commits in a row carried the same caveat: the mobile tests mocked
+`lib/db` with an in-memory array and matched SQL with regexes, so they covered
+the *decisions* and not the SQL. That caveat had already cost something
+concrete — two tombstone guards could only be pinned by asserting on query
+**text**, and the array mock once *supplied* the behaviour under test, setting
+`dirty = 1` unconditionally so an assertion passed with the production
+`dirty = 1` deleted.
+
+`expo-sqlite` cannot run under jest: jest-expo stubs the native module
+(`NativeDatabase is not a constructor`). But Node 22+ ships **`node:sqlite`** —
+the same engine, synchronous API, **no new dependency**. `support/sqlite.ts` is
+a thin async shim over it wearing expo-sqlite's interface, and
+`migratedFixture()` runs the app's own `migrate()`.
+
+That last part matters more than the SQL execution. `db.ts` carries a hard-won
+comment — the fresh-install path runs *every* branch from v0, which is why each
+`ADD COLUMN` is guarded, after a v5-shaped assumption produced an ALTER that
+failed on a fresh install. **Nothing had ever exercised that.** Now any test
+that opens a fixture does.
+
+### What it caught immediately
+
+Five mutations that the array mock let through, all now failing:
+
+| Mutation | Tests caught |
+|---|---|
+| upsert loses `WHERE deleted_at IS NULL` | 1 |
+| `listLocalSessions` stops filtering | 2 |
+| `readLocalSession` stops filtering | 2 |
+| delete drops `dirty = 1` (narrow form) | 4 |
+| schema v7 column never added (fresh path) | 7 |
+
+The narrow `dirty` mutation had gone from 1 failure to 4 — real SQL catches it
+in more places than the decision tests could.
+
+### Review found two of the new tests vacuous. Fifth and sixth.
+
+Both were the exact class this branch was written to end, which is the part
+worth sitting with — *building the tool that catches vacuous tests did not stop
+me writing two more in the same commit*:
+
+- **"running every branch twice is idempotent"** called `migratedFixture()`
+  twice, and each call constructs a **new** `:memory:` database. So it ran the
+  fresh path twice under a different name. It could not have failed:
+  `migrate()` short-circuits on `current >= SCHEMA_VERSION` before reaching a
+  branch, and the scenario it names — a crash between DDL and the version
+  stamp — is *same database, old `user_version`*. Now resets
+  `PRAGMA user_version` on the same db and re-runs.
+- **"deleting twice does not move updated_at"** compared two
+  `new Date().toISOString()` values taken microseconds apart. Measured on this
+  machine: **999/1000 share the millisecond**, so deleting
+  `AND deleted_at IS NULL` produced an identical string and the test passed.
+  It happened to fail on one mutation run, which is worse than failing
+  reliably — a guard that catches by coin-flip reads as coverage. Now
+  deterministic, by backdating the row between the two deletes.
+
+Two more gaps it named, both now closed: **the upgrade branches never
+executed** (every fixture starts at v0 with CREATEs at current shape, so
+`addColumnIfMissing`'s ALTER never fired — deleting the whole `if (current <
+7)` branch stayed green), and there was **no test that `upsert` still updates a
+live row**, so an over-broad `WHERE` that blocked *every* update — silently
+dropping pulled server changes in production — also passed.
+
+Shim fidelity was verified against expo's installed source rather than its
+docs, and holds: expo's binder does exactly `boolean → 1/0` and
+`value ?? null`, `getFirstAsync` returns `null`, multi-statement `execAsync`
+matches. Three deltas corrected: `BEGIN` moved inside the try to match expo's
+own ordering, `runAsync` now forwards `{ lastInsertRowId, changes }` instead of
+discarding it, and `PRAGMA foreign_keys = OFF` so the fixture matches device
+semantics (node:sqlite enables them by default; expo does not).
+
+**Six vacuous tests in one day.** Every one was caught by mutation and by
+nothing else. The pattern is not carelessness about any single test — it is
+that a test's *name* is a claim, and the only thing that checks the claim is
+deleting the code and watching.
+
+### And a fourth vacuous test, caught by the same discipline
+
+The first version of "the upsert genuinely refuses to write over a tombstone"
+**hand-wrote its own `INSERT ... ON CONFLICT`** with the WHERE clause inlined,
+instead of calling the app's `upsert`. It passed with the production clause
+deleted, because it was testing its own SQL. Found by mutating and watching
+nothing fail.
+
+Fixing it meant exporting `upsert`, which is a smell worth naming: by design
+no production path reaches it with a tombstoned id — the pull skips them and
+`hydrateSession` refuses — so the clause is a backstop for a *future* caller,
+and the only way to exercise a backstop is to be that caller. Exported with a
+comment saying exactly that.
+
+The text-assertion tests it supersedes were **deleted**, not kept alongside, so
+nobody reads regex-over-source as an accepted way to test SQL. CLAUDE.md now
+says so directly.
+
+Four vacuous tests in one day, each passing for a different reason: a token
+that never reached the branch, a backoff ladder already at its ceiling, a mock
+supplying the assertion, and a test exercising its own copy of the code.
+Mutation caught all four; nothing else would have.
+
+## 2026-08-01 — Offline-first PR4a: workouts readable offline, and the cache stops inventing ownership
+
+Two problems, and the second is the one worth the entry.
+
+### The Plan tab never read the cache it already had
+
+`app/(tabs)/workouts.tsx` called `listWorkouts` and nothing else, so with no
+signal it showed an error where the plan should be — **even though the
+workouts were already on the device**, cached for the offline session-start
+path since v2. Local first now, network refreshes.
+
+`mine` only. The shared tab browses other people's published templates, and
+there is no honest local answer to "what has everyone shared" — an empty list
+would read as "nobody has shared anything", which is a claim the device cannot
+make. Nor are shared templates written into this athlete's cache rows, or they
+would come back looking like theirs.
+
+### The cache invented ownership — but not the bug I first wrote down
+
+`cachedWorkouts` returned `owner_user_id: userID` and `visibility: 'private'`,
+both hardcoded. `app/workout/[id].tsx` computes
+
+```ts
+const canEdit = workout.owner_user_id !== null && workout.owner_user_id === userId;
+```
+
+from exactly that field, and the first version of this entry concluded that
+**offline every cached workout looked editable**, VOLA templates included, with
+a Save button for things the server refuses.
+
+**Review disproved that, using the backend's own scope semantics, and it is
+worth recording precisely because it was a good story.** `workout/postgres.go`
+implements `mine` as `owner_user_id = $1` — a NULL never matches, and another
+athlete's id never matches — and *both* `cacheWorkouts` call sites pass a
+`mine` list. So every row the cache could ever hold was genuinely owned by the
+reader: the hardcoded `userID` returned the **right answer for every row that
+exists**. And `workout/[id].tsx` never reads the cache at all (it calls
+`getWorkout` and errors offline), so no Save button could appear.
+
+What was *actually* broken was the other hardcode: `visibility: 'private'`
+meant your own **public** template lost its "Shared" badge whenever the Plan
+tab rendered it from cache.
+
+The ownership fix still earns its place — it is a landmine for PR4b, where
+cached shared templates genuinely will exist — but it was **latent**, not
+live, and the entry said otherwise. Same correction discipline as c8d647b.
+
+The v8 upgrade therefore **backfills** `owner_user_id = user_id` rather than
+leaving NULL. NULL is the cautious default in the abstract and simply wrong
+here: it is untrue for 100% of real rows, it would label every one of an
+upgrader's own workouts "VOLA template" until a refresh landed, and an
+ownerless private workout is a pair the server cannot produce.
+
+### The cache never pruned
+
+The blocking find. `cacheWorkouts` only ever upserted and nothing anywhere
+deleted from the table — so a workout deleted on this phone, or on the web,
+stayed cached **forever**. With the Plan tab now reading cache-first, the
+deleted template flashes back on every tab focus until the network answers,
+and offline it is simply listed as still existing and dead-ends on tap. Both
+callers pass the complete `mine` list, so reconciling inside the existing
+transaction is safe: drop this athlete's rows whose ids aren't in it.
+
+### Testing
+
+The first PR4 to land after the SQLite fixture, and it earned it immediately —
+the bug was in what the columns *hold*, which the old array mock could not have
+expressed.
+
+Review then found **three surviving mutations** in those tests, which is the
+adversarial pass paying for itself: dropping *only* the `owner_user_id` half of
+the ON CONFLICT refresh (the sole conflict test asserted visibility, so the
+clause the whole backfill story depends on was unpinned); breaking the
+per-athlete filter in the *sport-narrowed* branch (the isolation test used the
+other branch — and the sport branch is the one offline session-start calls);
+and never storing `items` at all (nothing asserted items or `goal` round-trip,
+though the Plan tab renders `items.length` from cache and carrying `goal`
+offline was the entire point of schema v6). All three now fail.
+
+Also caught by having schema tests at all: bumping `SCHEMA_VERSION` failed
+three existing assertions immediately, which is the intended friction — a
+version bump should be a conscious act.
+
+Two mistakes of mine while writing it, both recurrences, and **both now made
+structural rather than remembered**:
+
+- **Backticks inside a SQL comment** ended the JS template literal — second
+  time. TypeScript does catch it, but as a wall of unrelated syntax errors
+  twenty lines down, which reads like the code is broken rather than the
+  comment. `sqlComments.test.ts` now fails with the offending file and line
+  instead.
+- **A failing typecheck scrolled past and the commit happened anyway** —
+  second time, once on the test-runner PR and once here — because I ran the
+  checks as separate lines and a newline is not a dependency. There is now one
+  `pnpm run verify` that chains everything with `&&`; verified it halts, by
+  breaking a type and watching the later steps not run. CLAUDE.md points at
+  the single command and says why.
+
+(The third, unrelated: the first v6 upgrade fixture created only
+`local_sessions`, so a later `addColumnIfMissing` threw "no such table" for a
+reason that cannot happen on a device, which has every earlier table.)
+
+### Not in this PR
+
+Writing. Creating and editing templates still needs the network — that is PR4b,
+and it is the headline of the original request.
+
+## 2026-08-01 — Offline-first PR4b: workouts writable offline
+
+The headline of the original request. `workout_cache` gains the same outbox
+shape `local_sessions` has — dirty / remote / deleted_at / updated_at — and
+create, edit-items and delete all write locally first.
+
+Existing rows upgrade to `dirty = 0 / remote = 1`, which is the truth for them:
+everything cached so far arrived *from* the server, so none of it is owed a
+push. Defaulting the other way would fire every cached workout back at the
+server on first launch after the upgrade.
+
+### Conflicts: the CAS, not last-write-wins
+
+Decided by the user, and mirroring sessions. `pushWorkoutRow` clears `dirty`
+only `WHERE updated_at` matches what it read, so an edit landing mid-push
+leaves the row dirty for the next pass rather than being marked as sent. The
+server-refresh path carries the same idea structurally rather than by
+convention: its `ON CONFLICT` refuses to write over a row with `dirty = 1` or a
+tombstone, because anything arriving from the server is by definition older
+than what this device has not pushed.
+
+### Ordering: workouts before sessions, and *deferral*
+
+`sessions.workout_id` is a real FK, so a session referencing a workout the
+server has never seen is refused. "Workouts first" alone is not enough,
+though — **if the workout push fails, the session must be held back too.**
+Otherwise it hits the FK error, and since a 4xx classifies as `permanent`
+under PR2's rules, the orchestrator would stop retrying training that is
+perfectly fine and report it as doomed.
+
+So the sync pushes dirty workouts, collects the ids still not `remote`, and
+**defers** any session pointing at one — counted as `deferred`, never `failed`.
+Today's badge says so in words: *"waiting on a plan that hasn't synced yet"*.
+That distinction is the same one this whole programme keeps turning on —
+"we couldn't ask" versus "the answer is no".
+
+### A silent id bug
+
+`createWorkout` minted its own UUID internally. Pushing an offline-created
+workout would therefore have created it server-side under a **different id**,
+leaving any session started from it pointing at a workout that never arrives.
+The id is caller-supplied now, the contract sessions already had.
+
+### Two bugs my own tests caught
+
+`cachedWorkouts` did not filter tombstones, so a deleted workout stayed
+visible. And **PR4a's reconcile would have deleted never-pushed local
+creations** — "absent from the server list" is only evidence of deletion for
+rows the server knows about, and a workout created offline is absent because
+the server has never heard of it. That one would have destroyed a plan made in
+a gym.
+
+### The detail screen had to become readable too
+
+PR4a made the *list* offline; the plan's contents still needed the network, so
+it dead-ended. An editable plan you cannot open is no use, so `workout/[id]`
+now reads cache-first as well, with the exercise catalog following the same
+cache-then-refresh shape the session screen uses.
+
+### Testing
+
+Five mutations checked: drop the CAS on refresh (1 test), let the reconcile
+delete unpushed rows (1), stop filtering tombstones (2), re-stamp an existing
+tombstone (1), report deferred rows as failures (1).
+
+**Correction, from the review round below:** the last of those was unbacked as
+first written. `sync.test.ts` mocks `syncSessions` wholesale, so it covered the
+orchestrator *displaying* a deferred count, not `runSync` *producing* one —
+mutating `runSync` to count deferrals as failures left the suite green. The
+`pushWorkoutRow` tests added afterwards do cover it.
+
+### The review round, and what it found
+
+Six blocking findings, and the first two are the ones worth remembering.
+
+**`lib/workouts.ts` threw plain `Error`.** `lib/sessions.ts` had been migrated
+to `ApiError`; this module never was. `isNotFound` and `isPermanentRejection`
+both answer `false` for anything that is not an `ApiError` — on the sound
+reasoning that it never reached the server — so **every classification branch
+in the workout push path was dead code**. A 404 on delete never counted as
+success, meaning a tombstone for a plan deleted on the web would fail every
+sync run forever. A permanent refusal classified as `transient`, so the
+orchestrator would grind a doomed request for the life of the install: exactly
+the failure PR2 exists to prevent, revived in the new outbox.
+
+**And my own test hid it.** The `pushWorkoutRow` tests mock `../workouts`, and
+the mocks rejected with `ApiError` — supplying the contract the real module did
+not honour. The 404 and permanent-restore tests passed against branches
+unreachable in production. Eleven source mutations had been checked and all
+eleven were caught, because every one of them mutated `sessionStore.ts`; the
+defect was in the dependency, where no mutation was looking. **Mutation testing
+proves a test can fail, not that its fixtures are honest.** The fix is a
+`workoutsApi.test.ts` that never mocks `../workouts` and asserts the property
+the other file's mocks assume — so the two cannot drift apart again silently.
+
+The other four:
+
+- **A workout delete deterministically orphaned its sessions.** Workouts are
+  pushed first *by design*, so a tombstoned workout's row leaves the cache
+  before the session loop runs — the deferral could no longer see it, the
+  session went out referencing a workout the server had never heard of, was
+  refused 400, and classified permanent. Not a race; guaranteed. Fixed by
+  nulling `local_sessions.workout_id` at delete time, which is precisely what
+  the server's own `ON DELETE SET NULL` does, so both sides converge. The link
+  is metadata; the training is the data.
+- **`pushSession` bypassed the deferral entirely** — it lived only in the batch
+  loop, and `pushSession` is what runs on every debounced save from the session
+  screen. Ticking a set just after signal returned would show a fatal-looking
+  error and file a `sync_blocked` operator report, mid-workout, for a row that
+  heals itself moments later.
+- **Both screens rendered the server's stale copy over unpushed local state.**
+  The CAS protected SQLite and the UI then undid it on screen: reopen an
+  offline-edited plan online before its push landed and the edit visibly
+  vanished, Save went inactive, and editing on from what was displayed
+  overwrote the local row with stale items — the athlete losing their own work
+  with their unwitting help. The list screen had the same shape, rendering the
+  raw response instead of the reconciled cache. It now renders the cache, which
+  is also the honest answer: what is on screen is what is on disk.
+- **Dirty workouts were not in `pending`,** and `pending` is not a badge — it
+  gates the retry timer and the foreground trigger. An edited plan that failed
+  transiently got neither. The offline case survived only by accident, because
+  `!online` trips the foreground gate on its own.
+
+Twelve mutations checked across the fixes; all twelve caught. One was vacuous
+on the first pass (the zero-row save guard had no test at all) and is now
+covered.
+
+**Still untested: the two screen fixes.** `apps/mobile` has no component test
+runner, so the SQLite-level behaviour is covered and the render path is not.
+Worth having, not worth blocking this on — recorded here rather than left to be
+rediscovered.
+
+A note on the SQL-comment guard added earlier today: the backtick trap fired a
+**third** time here, and the guard did not help — `tsc` runs first and reports
+it as unrelated syntax errors twenty lines down, so the named failure never got
+a chance to speak. The guard is worth less than I claimed when I added it.
+
+### Not in this PR
+
+`replaceItems` is still a whole-list replace, so two devices editing the same
+plan is last-writer-wins *at the server* even though the CAS protects the local
+row. Renaming a template is still impossible on any client — there is no
+endpoint. Both are worth deciding on deliberately rather than discovering.
+
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

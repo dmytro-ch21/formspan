@@ -1,4 +1,5 @@
 import { useAuth } from '@clerk/clerk-expo';
+import { request as requestSync, syncNow, useSyncState } from '@/lib/sync';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, AppState, Pressable, ScrollView, StyleSheet } from 'react-native';
@@ -8,28 +9,12 @@ import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { formatElapsed } from '@/lib/rest';
 import type { LoggedSet, Session } from '@/lib/sessions';
-import { countPendingSessions, listLocalSessions, syncSessions } from '@/lib/sessionStore';
+import { listLocalSessions } from '@/lib/sessionStore';
 import { formatVolume } from '@/lib/units';
+import { enabledSports } from '@/lib/modules';
+import { useModules } from '@/lib/ModulesProvider';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
-
-/**
- * Sports offered on Today.
- *
- * **BJJ is absent, and temporarily so.** There is no BJJ module — 20 catalog
- * entries against strength's 498, and nothing behind them — so a start button
- * for it advertised a room with no floor. It made Today look complete while
- * doing nothing useful, which is worse than offering less. Put it back the day
- * the module lands; that is the only reason it is gone.
- *
- * Running is in the same position (6 entries, no module) and is left here
- * deliberately rather than removed alongside — worth deciding together, not by
- * one of them dragging the other.
- */
-const SPORTS: { key: string; label: string }[] = [
-  { key: 'strength', label: 'Strength' },
-  { key: 'running', label: 'Running' },
-];
 
 /** Past this, an open session reads as abandoned rather than in progress. */
 const STALE_SESSION_MS = 24 * 60 * 60 * 1000;
@@ -130,14 +115,26 @@ function describeSession(s: Session): string {
  * question someone opens this tab to ask.
  */
 export default function TodayScreen() {
+  const { modules } = useModules();
+  // is_sport filtered, not just enabled: nutrition is a module you can turn
+  // on, but "Start a nutrition session" is nonsense — there is no catalog,
+  // no session and no row behind it.
+  const startable = enabledSports(modules);
   const { userId } = useAuth();
   const getToken = useAuthToken();
   const router = useRouter();
-  const { units } = useUnits();
+  const { units, unitsReady } = useUnits();
 
   const [sessions, setSessions] = useState<Session[]>([]);
   const [sessionError, setSessionError] = useState<string | null>(null);
-  const [pendingSessions, setPendingSessions] = useState(0);
+  // From the orchestrator, not a local copy. This screen used to `await` the
+  // sync and then re-count — so the number was fresh. Now that the sync is
+  // fire-and-forget (the orchestrator decides), a local copy would show
+  // "N waiting to sync" straight through the successful sync this very focus
+  // triggered, and keep showing it until the next focus. The orchestrator
+  // already recounts after every run; `useSyncState` had no consumers until
+  // now, which is its own smell.
+  const { pending: pendingSessions, deferred, lastSyncAt } = useSyncState();
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -151,7 +148,6 @@ export default function TodayScreen() {
       // than 5 so the week summary has a whole week to work from; the list
       // below shows only the most recent handful.
       setSessions(await listLocalSessions(userId, 30));
-      setPendingSessions(await countPendingSessions(userId));
       setSessionError(null);
     } catch (err) {
       setSessionError(err instanceof Error ? err.message : String(err));
@@ -160,14 +156,33 @@ export default function TodayScreen() {
       // state below claim "nothing logged yet" without it being a guess.
       setLoaded(true);
     }
+    // Ask the orchestrator; it decides whether now is a moment worth a run
+    // (see lib/sync.ts). This screen no longer waits on the network to show
+    // the list — the local read above already did that.
+    requestSync('today-focus');
     try {
-      await syncSessions(userId, getToken);
       setSessions(await listLocalSessions(userId, 30));
-      setPendingSessions(await countPendingSessions(userId));
     } catch {
       // Offline is not an error state here — the local list already rendered.
     }
   }, [getToken, userId]);
+
+  // Re-read the local list whenever a sync finishes. Without this the list is
+  // only as fresh as the last focus, so a session logged on the web appeared
+  // one focus late — and the sync this screen triggers on focus never showed
+  // its own results.
+  useEffect(() => {
+    if (!userId || lastSyncAt === null) return;
+    let alive = true;
+    listLocalSessions(userId, 30)
+      .then((rows) => {
+        if (alive) setSessions(rows);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [lastSyncAt, userId]);
 
   // On focus rather than on mount: coming back from a session should show its
   // new numbers, not the list as it was when the tab first rendered.
@@ -244,10 +259,13 @@ export default function TodayScreen() {
       // session the server permanently refuses would sit at "1 waiting to
       // sync" with no way to find out why. "The count is the honest signal"
       // is only true of transient failures.
-      const result = await syncSessions(userId, getToken);
+      // syncNow, not request: a person pressed this, so it must always
+      // attempt rather than being told now is not the moment — and it
+      // resolves with the outcome so the button can report it instead of
+      // spinning and silently achieving nothing.
+      const result = await syncNow();
       setSessions(await listLocalSessions(userId, 30));
-      setPendingSessions(await countPendingSessions(userId));
-      if (result.failed > 0 && result.error) setSyncError(result.error);
+      if (result.lastError) setSyncError(result.lastError);
     } catch (err) {
       setSyncError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -325,7 +343,12 @@ export default function TodayScreen() {
           </Pressable>
         ) : (
           <View style={styles.startBlock}>
-            {SPORTS.map((s, i) => (
+            {/* From the registry, filtered to what this athlete actually
+                trains. This list used to be hardcoded to strength and running,
+                with a comment explaining that BJJ had been removed by hand —
+                three copies of the sport list existed elsewhere in this app,
+                all disagreeing. */}
+            {startable.map((s, i) => (
               <Pressable
                 key={s.key}
                 style={[styles.startButton, i > 0 && styles.startButtonSecondary]}
@@ -335,10 +358,26 @@ export default function TodayScreen() {
                 testID={`start-session-${s.key}`}
               >
                 <Text style={[styles.startText, i > 0 && styles.startTextSecondary]}>
-                  {i === 0 ? `Start ${s.label.toLowerCase()}` : s.label}
+                  {/* NOT lowercased: the registry carries the label precisely so BJJ
+                      stays "BJJ". Lowercasing it renders "Start bjj". */}
+                  {i === 0 ? `Start ${s.label}` : s.label}
                 </Text>
               </Pressable>
             ))}
+            {/* Every discipline off is a reachable state — nothing stops a
+                user turning them all off — and the block rendered nothing at
+                all, which reads as a broken screen rather than a choice. */}
+            {startable.length === 0 && (
+              <Pressable
+                style={styles.startButton}
+                onPress={() => router.push('/profile/edit')}
+                accessibilityRole="button"
+                accessibilityLabel="Choose what you train"
+                testID="start-session-none"
+              >
+                <Text style={styles.startText}>Choose what you train</Text>
+              </Pressable>
+            )}
           </View>
         )}
 
@@ -352,7 +391,14 @@ export default function TodayScreen() {
                 value={String(week.sessions)}
                 label={week.sessions === 1 ? 'session' : 'sessions'}
               />
-              <Stat value={formatVolume(week.volumeKg, units)} label="volume" />
+              {/* Dash until the unit is known, rather than a number in the wrong
+                  one: this used to render kilograms for a moment to an athlete
+                  set to pounds, and on a finished-session mount that moment is
+                  exactly when it is read. */}
+              <Stat
+                value={unitsReady ? formatVolume(week.volumeKg, units) : '—'}
+                label="volume"
+              />
               <Stat value={String(week.days)} label={week.days === 1 ? 'day' : 'days'} />
             </View>
           </View>
@@ -390,6 +436,9 @@ export default function TodayScreen() {
           <View style={styles.pendingRow} testID="sessions-pending">
             <Text style={styles.pendingText}>
               {pendingSessions} {pendingSessions === 1 ? 'session' : 'sessions'} waiting to sync
+              {deferred > 0
+                ? ` — ${deferred === 1 ? 'one is' : `${deferred} are`} waiting on a plan that hasn't synced yet`
+                : ''}
             </Text>
             <Pressable
               onPress={onRetrySync}

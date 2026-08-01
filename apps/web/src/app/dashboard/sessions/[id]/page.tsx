@@ -57,7 +57,11 @@ import { useUnits } from "@/lib/useUnits";
  * There is no Save button on either platform — every edit writes through,
  * coalesced so a three-digit weight is one request rather than three.
  */
-export default function SessionPage({ params }: { params: Promise<{ id: string }> }) {
+export default function SessionPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
   const { id } = use(params);
   const { getToken } = useAuth();
   const router = useRouter();
@@ -68,11 +72,15 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const [sets, setSets] = useState<LoggedSet[]>([]);
   const [volume, setVolume] = useState<Volume | null>(null);
   const [catalog, setCatalog] = useState<Map<string, Exercise>>(new Map());
-  const [suggestions, setSuggestions] = useState<Map<string, Suggestion>>(new Map());
+  const [suggestions, setSuggestions] = useState<Map<string, Suggestion>>(
+    new Map(),
+  );
   const { units } = useUnits();
   // Per-exercise overrides: a machine marked in pounds shouldn't force the
   // whole account into pounds.
-  const [exerciseUnits, setExerciseUnits] = useState<Record<string, UnitSystem>>({});
+  const [exerciseUnits, setExerciseUnits] = useState<
+    Record<string, UnitSystem>
+  >({});
   useEffect(() => {
     getExerciseUnits(getToken)
       .then(setExerciseUnits)
@@ -84,7 +92,10 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   );
   const toggleUnitFor = useCallback(
     (exerciseID: string) => {
-      const next: UnitSystem = (exerciseUnits[exerciseID] ?? units) === "metric" ? "imperial" : "metric";
+      const next: UnitSystem =
+        (exerciseUnits[exerciseID] ?? units) === "metric"
+          ? "imperial"
+          : "metric";
       // Cleared rather than stored when it matches the default, so the map
       // only ever holds genuine exceptions.
       const override = next === units ? null : next;
@@ -116,9 +127,17 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     const controller = new AbortController();
     abortRef.current = controller;
     try {
-      const { session: s, volume: v } = await getSession(getToken, id, controller.signal);
+      const { session: s, volume: v } = await getSession(
+        getToken,
+        id,
+        controller.signal,
+      );
       // One catalog request for the sport rather than one per exercise.
-      const list = await listExercises(getToken, { sport: s.sport }, controller.signal);
+      const list = await listExercises(
+        getToken,
+        { sport: s.sport },
+        controller.signal,
+      );
       if (controller.signal.aborted) return;
       setSession(s);
       setSets(s.sets);
@@ -348,7 +367,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     [commit, sets],
   );
 
-
   function addExercise(e: Exercise) {
     setCatalog((c) => (c.has(e.id) ? c : new Map(c).set(e.id, e)));
     const next = swapping
@@ -362,7 +380,9 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   }
 
   function removeSet(index: number) {
-    const next = sets.filter((_, i) => i !== index).map((s, i) => ({ ...s, position: i }));
+    const next = sets
+      .filter((_, i) => i !== index)
+      .map((s, i) => ({ ...s, position: i }));
     setSets(next);
     commit(next);
   }
@@ -385,10 +405,16 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   if (!session) {
     return (
       <div className="flex flex-col gap-4">
-        <p role="alert" className="rounded-card border border-danger/40 bg-danger/10 px-4 py-3 text-sm">
+        <p
+          role="alert"
+          className="rounded-card border border-danger/40 bg-danger/10 px-4 py-3 text-sm"
+        >
           {error ?? "Session not found."}
         </p>
-        <Link href="/dashboard/sessions" className="text-sm text-text-muted hover:text-text">
+        <Link
+          href="/dashboard/sessions"
+          className="text-sm text-text-muted hover:text-text"
+        >
           ← Back to sessions
         </Link>
       </div>
@@ -401,10 +427,15 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     <div className="flex flex-col gap-6">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
-          <Link href="/dashboard/sessions" className="eyebrow hover:text-text-muted">
+          <Link
+            href="/dashboard/sessions"
+            className="eyebrow hover:text-text-muted"
+          >
             ← Sessions
           </Link>
-          <h1 className="mt-1 font-display text-4xl font-bold">{session.name || "Session"}</h1>
+          <h1 className="mt-1 font-display text-4xl font-bold">
+            {session.name || "Session"}
+          </h1>
           <p className="mt-1 text-sm capitalize text-text-muted">
             {session.sport} ·{" "}
             <time dateTime={session.started_at}>
@@ -431,7 +462,10 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                 try {
                   // The last set typed must land before the session closes.
                   await flush();
-                  const { session: s, volume: v } = await finishSession(getToken, id);
+                  const { session: s, volume: v } = await finishSession(
+                    getToken,
+                    id,
+                  );
                   setSession(s);
                   setSets(s.sets);
                   setVolume(v);
@@ -451,32 +485,45 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         // Time, sets and reps while training; volume joins them on finish.
         // "Top RPE" is gone — it only repeated the effort just entered. Both
         // are still computed by the API for the trends screen.
-        <dl className={`grid gap-3 ${finished ? "grid-cols-4" : "grid-cols-3"}`}>
+        <dl
+          className={`grid gap-3 ${finished ? "grid-cols-4" : "grid-cols-3"}`}
+        >
           <Stat label="Working sets" value={String(volume.working_sets)} />
           <Stat label="Reps" value={String(volume.total_reps)} />
           {/* A result, not a readout — shown once the session is done. */}
           {finished && (
             <Stat
               label="Volume"
-              value={volume.tonnage_kg > 0 ? formatVolume(volume.tonnage_kg, units) : "—"}
+              value={
+                volume.tonnage_kg > 0
+                  ? formatVolume(volume.tonnage_kg, units)
+                  : "—"
+              }
             />
           )}
         </dl>
       )}
 
       {error && (
-        <p role="alert" className="rounded-card border border-danger/40 bg-danger/10 px-4 py-3 text-sm">
+        <p
+          role="alert"
+          className="rounded-card border border-danger/40 bg-danger/10 px-4 py-3 text-sm"
+        >
           {error}
         </p>
       )}
 
-      <div className={`grid gap-6 ${finished ? "" : "lg:grid-cols-[1fr_21rem]"}`}>
+      <div
+        className={`grid gap-6 ${finished ? "" : "lg:grid-cols-[1fr_21rem]"}`}
+      >
         <section className="flex min-w-0 flex-col gap-5">
           {groups.length === 0 ? (
             <div className="rounded-card border border-dashed border-line px-6 py-12 text-center">
               <p className="font-medium">Nothing logged yet</p>
               <p className="mt-1 text-sm text-text-muted">
-                {finished ? "This session is empty." : "Pick an exercise from the catalog."}
+                {finished
+                  ? "This session is empty."
+                  : "Pick an exercise from the catalog."}
               </p>
             </div>
           ) : (
@@ -504,7 +551,8 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           <button
             type="button"
             onClick={async () => {
-              if (!confirm("Delete this session? This can't be undone.")) return;
+              if (!confirm("Delete this session? This can't be undone."))
+                return;
               try {
                 await deleteSession(getToken, id);
                 router.push("/dashboard/sessions");
@@ -569,14 +617,20 @@ function ExerciseBlock({
   onSwap: (exerciseID: string) => void;
   swapping: boolean;
   suggestion: Suggestion | undefined;
-  onApplySuggestion: (indices: number[], weightKg: number | null, reps: number | null) => void;
+  onApplySuggestion: (
+    indices: number[],
+    weightKg: number | null,
+    reps: number | null,
+  ) => void;
   units: UnitSystem;
   onToggleUnit: (exerciseID: string) => void;
 }) {
   const image = exercise ? pickImage(exercise, "thumbnail") : null;
   // Data-driven from the catalog's load_type, so a plank asks for seconds
   // and a squat asks for weight without this component knowing either.
-  const measures: Measure[] = exercise ? measuresFor(exercise.load_type) : ["reps"];
+  const measures: Measure[] = exercise
+    ? measuresFor(exercise.load_type)
+    : ["reps"];
   // The sets a recommendation may write to: still to come, and not warm-ups.
   // A completed set is a record of what happened, not a slot to fill.
   const pending = indices.filter(
@@ -588,7 +642,11 @@ function ExerciseBlock({
       <div className="flex items-center gap-3">
         {image ? (
           // eslint-disable-next-line @next/next/no-img-element -- remote R2 host, not configured for next/image
-          <img src={image} alt="" className="h-10 w-10 shrink-0 rounded-lg bg-surface-raised object-cover" />
+          <img
+            src={image}
+            alt=""
+            className="h-10 w-10 shrink-0 rounded-lg bg-surface-raised object-cover"
+          />
         ) : (
           <div className="h-10 w-10 shrink-0 rounded-lg bg-surface-raised" />
         )}
@@ -597,7 +655,9 @@ function ExerciseBlock({
             {exercise?.name ?? exerciseID}
           </h2>
           {exercise?.is_unilateral && (
-            <p className="text-xs text-text-dim">Per side — 8 reps here means 8 each side.</p>
+            <p className="text-xs text-text-dim">
+              Per side — 8 reps here means 8 each side.
+            </p>
           )}
         </div>
         {editable && (
@@ -651,7 +711,9 @@ function ExerciseBlock({
             (suggestion.target_reps == null ||
               sets[pending[0]]?.reps === suggestion.target_reps)
           }
-          onApply={(weightKg, reps) => onApplySuggestion(pending, weightKg, reps)}
+          onApply={(weightKg, reps) =>
+            onApplySuggestion(pending, weightKg, reps)
+          }
         />
       )}
 
@@ -662,11 +724,18 @@ function ExerciseBlock({
               <th scope="col" className="px-4 py-2">
                 <span className="sr-only">Done</span>
               </th>
-              <th scope="col" className="eyebrow px-4 py-2 text-[0.625rem] font-medium">
+              <th
+                scope="col"
+                className="eyebrow px-4 py-2 text-[0.625rem] font-medium"
+              >
                 Set
               </th>
               {measures.map((m) => (
-                <th key={m} scope="col" className="eyebrow px-2 py-2 text-[0.625rem] font-medium">
+                <th
+                  key={m}
+                  scope="col"
+                  className="eyebrow px-2 py-2 text-[0.625rem] font-medium"
+                >
                   {m === "weight"
                     ? weightUnit(units)
                     : m === "distance"
@@ -674,13 +743,24 @@ function ExerciseBlock({
                       : MEASURE_LABEL[m]}
                 </th>
               ))}
-              <th scope="col" className="eyebrow px-2 py-2 text-[0.625rem] font-medium">
-                <abbr title="Reps in reserve — how many you could still have done">RIR</abbr>
+              <th
+                scope="col"
+                className="eyebrow px-2 py-2 text-[0.625rem] font-medium"
+              >
+                <abbr title="Reps in reserve — how many you could still have done">
+                  RIR
+                </abbr>
               </th>
-              <th scope="col" className="eyebrow px-2 py-2 text-[0.625rem] font-medium">
+              <th
+                scope="col"
+                className="eyebrow px-2 py-2 text-[0.625rem] font-medium"
+              >
                 <abbr title="Rate of perceived exertion, 1–10">RPE</abbr>
               </th>
-              <th scope="col" className="eyebrow px-2 py-2 text-[0.625rem] font-medium">
+              <th
+                scope="col"
+                className="eyebrow px-2 py-2 text-[0.625rem] font-medium"
+              >
                 Type
               </th>
               <th scope="col" className="px-2 py-2">
@@ -769,7 +849,9 @@ function SetRow({
       </td>
       <td className="px-4 py-1.5">
         <span className="stat text-text-dim">{ordinal}</span>
-        {short && <span className="ml-1 text-xs font-bold text-lime">{short}</span>}
+        {short && (
+          <span className="ml-1 text-xs font-bold text-lime">{short}</span>
+        )}
       </td>
 
       {measures.map((m) => {
@@ -794,7 +876,8 @@ function SetRow({
               label={`${unitLabel} for set ${ordinal} of ${exerciseName}`}
               value={shown}
               onChange={(raw) => {
-                const n = raw.trim() === "" ? null : Number(raw.replace(",", "."));
+                const n =
+                  raw.trim() === "" ? null : Number(raw.replace(",", "."));
                 if (n === null || !Number.isFinite(n)) {
                   onChange({ ...set, [MEASURE_KEY[m]]: null });
                   return;
@@ -844,7 +927,9 @@ function SetRow({
           value={set.set_type}
           disabled={!editable}
           aria-label={`Type of set ${ordinal} of ${exerciseName}`}
-          onChange={(e) => onChange({ ...set, set_type: e.target.value as SetType })}
+          onChange={(e) =>
+            onChange({ ...set, set_type: e.target.value as SetType })
+          }
           className="rounded-lg border border-line bg-bg px-2 py-1.5 text-sm outline-none focus:border-lime disabled:opacity-60"
         >
           {SET_TYPES.map((t) => (
@@ -1003,16 +1088,25 @@ function CatalogPane({
           <li className="eyebrow px-2 pb-1 pt-2 text-[0.625rem]">Similar</li>
         )}
         {suggestions.map((e) => (
-          <CatalogRow key={`suggested-${e.id}`} exercise={e} swapFor={swapFor} onAdd={onAdd} />
+          <CatalogRow
+            key={`suggested-${e.id}`}
+            exercise={e}
+            swapFor={swapFor}
+            onAdd={onAdd}
+          />
         ))}
         {suggestions.length > 0 && (
-          <li className="eyebrow px-2 pb-1 pt-3 text-[0.625rem]">All {sport}</li>
+          <li className="eyebrow px-2 pb-1 pt-3 text-[0.625rem]">
+            All {sport}
+          </li>
         )}
         {results.map((e) => (
           <CatalogRow key={e.id} exercise={e} swapFor={swapFor} onAdd={onAdd} />
         ))}
         {everLoaded && !error && results.length === 0 && (
-          <li className="px-2 py-4 text-sm text-text-muted">No matching {sport} exercises.</li>
+          <li className="px-2 py-4 text-sm text-text-muted">
+            No matching {sport} exercises.
+          </li>
         )}
       </ul>
     </aside>
@@ -1036,12 +1130,18 @@ function CatalogRow({
       <button
         type="button"
         onClick={() => onAdd(exercise)}
-        aria-label={swapFor ? `Swap for ${exercise.name}` : `Add ${exercise.name}`}
+        aria-label={
+          swapFor ? `Swap for ${exercise.name}` : `Add ${exercise.name}`
+        }
         className="flex w-full items-center gap-3 rounded-lg border border-transparent px-2 py-2 text-left transition hover:border-line hover:bg-surface-raised"
       >
         {image ? (
           // eslint-disable-next-line @next/next/no-img-element -- remote R2 host
-          <img src={image} alt="" className="h-9 w-9 shrink-0 rounded bg-surface-raised object-cover" />
+          <img
+            src={image}
+            alt=""
+            className="h-9 w-9 shrink-0 rounded bg-surface-raised object-cover"
+          />
         ) : (
           <div className="h-9 w-9 shrink-0 rounded bg-surface-raised" />
         )}

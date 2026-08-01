@@ -1,4 +1,5 @@
 import { useAuth } from '@clerk/clerk-expo';
+import { clearSessionToken } from '@/lib/session';
 import { Stack, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet } from 'react-native';
@@ -34,7 +35,7 @@ export default function SettingsScreen() {
     if (userId) readAutoRest(userId).then(setAutoRest).catch(() => {});
   }, [userId]);
 
-  const { trackEffort, setTrackEffort } = useTrackEffort();
+  const { trackEffort, setTrackEffort, unsynced: effortUnsynced } = useTrackEffort();
 
   return (
     <ScrollView contentContainerStyle={styles.scroll} testID="settings-screen">
@@ -49,7 +50,34 @@ export default function SettingsScreen() {
           onPress={() =>
             Alert.alert('Sign out?', 'Anything not yet synced stays on this device.', [
               { text: 'Cancel', style: 'cancel' },
-              { text: 'Sign out', style: 'destructive', onPress: () => signOut() },
+              {
+                text: 'Sign out',
+                style: 'destructive',
+                // Cleared on BOTH sides of signOut, deliberately.
+                //
+                // Before, so no request slips through with the old token while
+                // the session tears down. After, because until `signOut()`
+                // actually completes Clerk will still happily mint a fresh
+                // token — so an outbox drain running concurrently could
+                // re-populate the cache and the keychain in the gap. The
+                // second clear closes that window; the epoch counter in
+                // session.ts closes the in-flight variant of it.
+                //
+                // `signOut()` is awaited rather than fire-and-forget: rejecting
+                // it unhandled (it can, offline) was its own small bug.
+                onPress: () => {
+                  void (async () => {
+                    await clearSessionToken();
+                    try {
+                      await signOut();
+                    } catch {
+                      // Offline sign-out can fail. The local credential is
+                      // already gone, which is the part that matters here.
+                    }
+                    await clearSessionToken();
+                  })();
+                },
+              },
             ])
           }
           testID="settings-sign-out"
@@ -82,6 +110,18 @@ export default function SettingsScreen() {
           testID="settings-effort"
         />
       </Section>
+
+      {/* Same admission the units screen makes, for the same reason: this
+          preference is on the account, so "changed here only" is a different
+          outcome from "changed". It used to be neither surfaced nor even
+          recorded — the toggle would quietly flip back once the app next
+          reached the server. */}
+      {effortUnsynced && (
+        <Text style={styles.unsynced} accessibilityLiveRegion="polite" testID="effort-unsynced">
+          Effort tracking changed on this phone, but not yet on your account — the web app will
+          still use the old setting until you&apos;re back online.
+        </Text>
+      )}
 
       <Text style={styles.note}>
         More preferences will land here as the app grows — notifications, integrations, and
@@ -169,6 +209,7 @@ function Row({
 }
 
 const styles = StyleSheet.create({
+  unsynced: { color: vola.warn, fontSize: 13, lineHeight: 18, paddingHorizontal: 4 },
   scroll: { padding: 16, gap: 20, paddingBottom: 48 },
   section: { gap: 8 },
   sectionTitle: {

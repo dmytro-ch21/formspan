@@ -10,6 +10,7 @@ import { vola } from '@/constants/Colors';
 import { isNotFound } from '@/lib/apiError';
 import { getProfile, type Profile } from '@/lib/profile';
 import { UNIT_SYSTEMS } from '@/lib/units';
+import { useModules } from '@/lib/ModulesProvider';
 import { useAuthToken } from '@/lib/useAuthToken';
 
 /**
@@ -64,14 +65,15 @@ export default function YouScreen() {
     }, [getToken]),
   );
 
-  const modules = profile
-    ? [
-        profile.strength_enabled && 'Strength',
-        profile.bjj_enabled && 'BJJ',
-        profile.running_enabled && 'Running',
-        profile.nutrition_enabled && 'Nutrition',
-      ].filter(Boolean)
-    : [];
+  // From the provider, not a fetch of its own. Two reasons: this screen had
+  // the per-call-site pattern the provider exists to replace, and being
+  // mount-only it went stale after exactly the flow this row is for — edit
+  // your sports, come back, and see the list you just changed.
+  //
+  // The labels come with it, so "BJJ" stays "BJJ" rather than becoming "Bjj".
+  const { modules, ready: modulesReady } = useModules();
+  // null means "we don't know yet", which is NOT the same as "none chosen".
+  const enabledLabels = modulesReady ? modules.filter((m) => m.enabled).map((m) => m.label) : null;
 
   return (
     <ScrollView contentContainerStyle={styles.scroll} testID="you-screen">
@@ -130,7 +132,13 @@ export default function YouScreen() {
             <View style={styles.card}>
               <Row
                 label="Sports"
-                value={modules.length ? modules.join(' · ') : 'None chosen yet'}
+                value={
+                  enabledLabels === null
+                    ? '—'
+                    : enabledLabels.length
+                      ? enabledLabels.join(' · ')
+                      : 'None chosen yet'
+                }
               />
               <Row
                 label="Units"

@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
+import type { TokenGetter } from '@/lib/useAuthToken';
 import { ActivityIndicator, Pressable, StyleSheet, View as RNView } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 
@@ -38,7 +39,7 @@ export function TrainingSummary({
   getToken,
   units,
 }: {
-  getToken: () => Promise<string | null>;
+  getToken: TokenGetter;
   units: UnitSystem;
 }) {
   const [span, setSpan] = useState<SpanKey>('12w');

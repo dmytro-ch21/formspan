@@ -48,7 +48,11 @@ import { useUnits } from "@/lib/useUnits";
  * the same reason: a wide row has space for the inputs, so nothing needs
  * hiding.
  */
-export default function WorkoutEditorPage({ params }: { params: Promise<{ id: string }> }) {
+export default function WorkoutEditorPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
   const { id } = use(params);
   const { getToken, userId } = useAuth();
   const router = useRouter();
@@ -66,10 +70,14 @@ export default function WorkoutEditorPage({ params }: { params: Promise<{ id: st
   const abortRef = useRef<AbortController | null>(null);
 
   const canEdit =
-    workout !== null && workout.owner_user_id !== null && workout.owner_user_id === userId;
+    workout !== null &&
+    workout.owner_user_id !== null &&
+    workout.owner_user_id === userId;
 
   const dirty = useMemo(
-    () => workout !== null && JSON.stringify(items) !== JSON.stringify(workout.items),
+    () =>
+      workout !== null &&
+      JSON.stringify(items) !== JSON.stringify(workout.items),
     [items, workout],
   );
 
@@ -80,7 +88,11 @@ export default function WorkoutEditorPage({ params }: { params: Promise<{ id: st
     try {
       const w = await getWorkout(getToken, id, controller.signal);
       // One catalog request for the sport rather than one per item.
-      const list = await listExercises(getToken, { sport: w.sport }, controller.signal);
+      const list = await listExercises(
+        getToken,
+        { sport: w.sport },
+        controller.signal,
+      );
       if (controller.signal.aborted) return;
       setWorkout(w);
       setItems(w.items);
@@ -161,7 +173,11 @@ export default function WorkoutEditorPage({ params }: { params: Promise<{ id: st
         // general 5-8 range that the session screen then re-derives on 3-5.
         sets = applySuggestions(
           sets,
-          await fetchSuggestions(getToken, sets.map((x) => x.exercise_id), workout.goal),
+          await fetchSuggestions(
+            getToken,
+            sets.map((x) => x.exercise_id),
+            workout.goal,
+          ),
         );
       } catch {
         /* start anyway */
@@ -199,10 +215,16 @@ export default function WorkoutEditorPage({ params }: { params: Promise<{ id: st
   if (!workout) {
     return (
       <div className="flex flex-col gap-4">
-        <p role="alert" className="rounded-card border border-danger/40 bg-danger/10 px-4 py-3 text-sm">
+        <p
+          role="alert"
+          className="rounded-card border border-danger/40 bg-danger/10 px-4 py-3 text-sm"
+        >
           {error ?? "Workout not found."}
         </p>
-        <Link href="/dashboard/workouts" className="text-sm text-text-muted hover:text-text">
+        <Link
+          href="/dashboard/workouts"
+          className="text-sm text-text-muted hover:text-text"
+        >
           ← Back to workouts
         </Link>
       </div>
@@ -213,10 +235,15 @@ export default function WorkoutEditorPage({ params }: { params: Promise<{ id: st
     <div className="flex flex-col gap-6">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
-          <Link href="/dashboard/workouts" className="eyebrow hover:text-text-muted">
+          <Link
+            href="/dashboard/workouts"
+            className="eyebrow hover:text-text-muted"
+          >
             ← Workouts
           </Link>
-          <h1 className="mt-1 font-display text-4xl font-bold">{workout.name}</h1>
+          <h1 className="mt-1 font-display text-4xl font-bold">
+            {workout.name}
+          </h1>
           <p className="mt-1 text-sm capitalize text-text-muted">
             {workout.sport}
             {workout.goal ? ` · ${workout.goal}` : ""}
@@ -231,7 +258,13 @@ export default function WorkoutEditorPage({ params }: { params: Promise<{ id: st
               {/* A status line rather than a toast: it stays put, so it can be
                   read at a glance without having caught it appearing. */}
               <span aria-live="polite" className="text-sm text-text-muted">
-                {saving ? "Saving…" : dirty ? "Unsaved changes" : savedOnce ? "Saved" : ""}
+                {saving
+                  ? "Saving…"
+                  : dirty
+                    ? "Unsaved changes"
+                    : savedOnce
+                      ? "Saved"
+                      : ""}
               </span>
               <button
                 type="button"
@@ -266,19 +299,26 @@ export default function WorkoutEditorPage({ params }: { params: Promise<{ id: st
       )}
 
       {error && (
-        <p role="alert" className="rounded-card border border-danger/40 bg-danger/10 px-4 py-3 text-sm">
+        <p
+          role="alert"
+          className="rounded-card border border-danger/40 bg-danger/10 px-4 py-3 text-sm"
+        >
           {error}
         </p>
       )}
 
-      <div className={`grid gap-6 ${canEdit ? "lg:grid-cols-[1fr_21rem]" : ""}`}>
+      <div
+        className={`grid gap-6 ${canEdit ? "lg:grid-cols-[1fr_21rem]" : ""}`}
+      >
         <section className="flex min-w-0 flex-col gap-2">
           <h2 className="eyebrow">The session</h2>
           {items.length === 0 ? (
             <div className="rounded-card border border-dashed border-line px-6 py-12 text-center">
               <p className="font-medium">Nothing in this workout yet</p>
               <p className="mt-1 text-sm text-text-muted">
-                {canEdit ? "Pick exercises from the catalog on the right." : "This workout is empty."}
+                {canEdit
+                  ? "Pick exercises from the catalog on the right."
+                  : "This workout is empty."}
               </p>
             </div>
           ) : (
@@ -292,11 +332,17 @@ export default function WorkoutEditorPage({ params }: { params: Promise<{ id: st
                   exercise={catalog.get(item.exercise_id)}
                   editable={canEdit}
                   units={units}
-                  onChange={(next) => setItems(items.map((it, i) => (i === index ? next : it)))}
+                  onChange={(next) =>
+                    setItems(items.map((it, i) => (i === index ? next : it)))
+                  }
                   onMoveTo={(to) => move(index, to)}
                   onDropFrom={(from) => move(from, index)}
                   onRemove={() =>
-                    setItems(items.filter((_, i) => i !== index).map((it, i) => ({ ...it, position: i })))
+                    setItems(
+                      items
+                        .filter((_, i) => i !== index)
+                        .map((it, i) => ({ ...it, position: i })),
+                    )
                   }
                 />
               ))}
@@ -307,7 +353,8 @@ export default function WorkoutEditorPage({ params }: { params: Promise<{ id: st
             <button
               type="button"
               onClick={async () => {
-                if (!confirm(`Delete "${workout.name}"? This can't be undone.`)) return;
+                if (!confirm(`Delete "${workout.name}"? This can't be undone.`))
+                  return;
                 try {
                   await deleteWorkout(getToken, id);
                   router.push("/dashboard/workouts");
@@ -352,7 +399,9 @@ function ItemRow({
   onRemove: () => void;
 }) {
   const image = exercise ? pickImage(exercise, "thumbnail") : null;
-  const fields: TargetField[] = exercise ? targetFieldsFor(exercise.load_type) : [];
+  const fields: TargetField[] = exercise
+    ? targetFieldsFor(exercise.load_type)
+    : [];
 
   return (
     <li
@@ -372,17 +421,25 @@ function ItemRow({
       }}
       className="group flex items-center gap-4 rounded-card border border-line bg-surface px-4 py-3 transition hover:bg-surface-raised"
     >
-      <span className="stat w-6 shrink-0 text-center text-lg text-text-dim">{index + 1}</span>
+      <span className="stat w-6 shrink-0 text-center text-lg text-text-dim">
+        {index + 1}
+      </span>
 
       {image ? (
         // eslint-disable-next-line @next/next/no-img-element -- remote R2 host, not configured for next/image
-        <img src={image} alt="" className="h-14 w-14 shrink-0 rounded-lg bg-surface-raised object-cover" />
+        <img
+          src={image}
+          alt=""
+          className="h-14 w-14 shrink-0 rounded-lg bg-surface-raised object-cover"
+        />
       ) : (
         <div className="h-14 w-14 shrink-0 rounded-lg bg-surface-raised" />
       )}
 
       <div className="min-w-0 flex-1">
-        <p className="truncate font-medium">{exercise?.name ?? item.exercise_id}</p>
+        <p className="truncate font-medium">
+          {exercise?.name ?? item.exercise_id}
+        </p>
         <p className="truncate text-xs capitalize text-text-dim">
           {exercise?.movement_pattern.replace(/_/g, " ")}
           {exercise?.is_unilateral ? " · per side" : ""}
@@ -398,7 +455,11 @@ function ItemRow({
             // rule the session logger follows, so a template written in
             // pounds and performed in kilograms is still the same plan.
             const shown =
-              stored == null ? "" : f === "weight" ? toDisplayWeight(stored, units) : stored;
+              stored == null
+                ? ""
+                : f === "weight"
+                  ? toDisplayWeight(stored, units)
+                  : stored;
             return (
               <label key={f} className="flex flex-col gap-1">
                 <span className="eyebrow text-[0.625rem]">{label}</span>
@@ -418,7 +479,10 @@ function ItemRow({
                     }
                     onChange({
                       ...item,
-                      [FIELD_KEY[f]]: f === "weight" ? fromDisplayWeight(n, units) : Math.round(n),
+                      [FIELD_KEY[f]]:
+                        f === "weight"
+                          ? fromDisplayWeight(n, units)
+                          : Math.round(n),
                     });
                   }}
                   placeholder="—"
@@ -429,20 +493,34 @@ function ItemRow({
           })}
         </div>
       ) : (
-        <span className="stat shrink-0 text-sm text-text-muted">{targetSummary(item, units)}</span>
+        <span className="stat shrink-0 text-sm text-text-muted">
+          {targetSummary(item, units)}
+        </span>
       )}
 
       {editable && (
         // Revealed on hover so the row stays calm at rest, but never hidden
         // from keyboard users.
         <div className="flex shrink-0 gap-1 opacity-0 transition group-focus-within:opacity-100 group-hover:opacity-100">
-          <IconButton label="Move up" onClick={() => onMoveTo(index - 1)} disabled={index === 0}>
+          <IconButton
+            label="Move up"
+            onClick={() => onMoveTo(index - 1)}
+            disabled={index === 0}
+          >
             ↑
           </IconButton>
-          <IconButton label="Move down" onClick={() => onMoveTo(index + 1)} disabled={index === total - 1}>
+          <IconButton
+            label="Move down"
+            onClick={() => onMoveTo(index + 1)}
+            disabled={index === total - 1}
+          >
             ↓
           </IconButton>
-          <IconButton label={`Remove ${exercise?.name ?? "exercise"}`} onClick={onRemove} danger>
+          <IconButton
+            label={`Remove ${exercise?.name ?? "exercise"}`}
+            onClick={onRemove}
+            danger
+          >
             ✕
           </IconButton>
         </div>
@@ -453,7 +531,8 @@ function ItemRow({
 
 function targetSummary(i: WorkoutItem, units: UnitSystem): string {
   const p: string[] = [];
-  if (i.target_sets && i.target_reps) p.push(`${i.target_sets}×${i.target_reps}`);
+  if (i.target_sets && i.target_reps)
+    p.push(`${i.target_sets}×${i.target_reps}`);
   if (i.target_weight_kg) p.push(formatWeight(i.target_weight_kg, units));
   if (i.target_seconds) p.push(`${i.target_seconds}s`);
   if (i.target_distance_m) p.push(`${i.target_distance_m}m`);
@@ -494,7 +573,13 @@ function IconButton({
  * Search and results stay on screen while the template fills up, so adding
  * eight movements is eight clicks rather than eight modal round-trips.
  */
-function CatalogPane({ sport, onAdd }: { sport: string; onAdd: (e: Exercise) => void }) {
+function CatalogPane({
+  sport,
+  onAdd,
+}: {
+  sport: string;
+  onAdd: (e: Exercise) => void;
+}) {
   const { getToken } = useAuth();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Exercise[]>([]);
@@ -533,7 +618,8 @@ function CatalogPane({ sport, onAdd }: { sport: string; onAdd: (e: Exercise) => 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const el = document.activeElement;
-      const typing = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
+      const typing =
+        el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
       if (e.key === "/" && !typing) {
         e.preventDefault();
         inputRef.current?.focus();
@@ -547,7 +633,9 @@ function CatalogPane({ sport, onAdd }: { sport: string; onAdd: (e: Exercise) => 
     <aside className="flex h-fit flex-col gap-3 lg:sticky lg:top-10">
       <div className="flex items-baseline justify-between">
         <h2 className="eyebrow">Catalog · {sport}</h2>
-        <kbd className="rounded border border-line px-1.5 py-0.5 text-[0.625rem] text-text-dim">/</kbd>
+        <kbd className="rounded border border-line px-1.5 py-0.5 text-[0.625rem] text-text-dim">
+          /
+        </kbd>
       </div>
 
       <input
@@ -581,7 +669,11 @@ function CatalogPane({ sport, onAdd }: { sport: string; onAdd: (e: Exercise) => 
               >
                 {image ? (
                   // eslint-disable-next-line @next/next/no-img-element -- remote R2 host
-                  <img src={image} alt="" className="h-9 w-9 shrink-0 rounded bg-surface-raised object-cover" />
+                  <img
+                    src={image}
+                    alt=""
+                    className="h-9 w-9 shrink-0 rounded bg-surface-raised object-cover"
+                  />
                 ) : (
                   <div className="h-9 w-9 shrink-0 rounded bg-surface-raised" />
                 )}
@@ -596,7 +688,9 @@ function CatalogPane({ sport, onAdd }: { sport: string; onAdd: (e: Exercise) => 
           );
         })}
         {everLoaded && !error && results.length === 0 && (
-          <li className="px-2 py-4 text-sm text-text-muted">No matching {sport} exercises.</li>
+          <li className="px-2 py-4 text-sm text-text-muted">
+            No matching {sport} exercises.
+          </li>
         )}
       </ul>
     </aside>

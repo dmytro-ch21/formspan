@@ -1,4 +1,7 @@
 import { randomUUID } from 'expo-crypto';
+import { ApiError } from './apiError';
+import { netFetch } from './authedFetch';
+import type { TokenGetter } from './useAuthToken';
 
 import type { Exercise } from './exercises';
 import { formatWeight, type UnitSystem } from './units';
@@ -36,11 +39,10 @@ export type Workout = {
   updated_at: string;
 };
 
-export const SPORTS: { key: Sport; label: string }[] = [
-  { key: 'strength', label: 'Strength' },
-  { key: 'bjj', label: 'BJJ' },
-  { key: 'running', label: 'Running' },
-];
+// The LIST of sports is gone from here: it lives in the server's registry and
+// reaches the app through lib/modules. What stays is the `Sport` type above,
+// which types the wire format — three copies of the list existed in this app
+// and all three disagreed.
 
 // Only meaningful for strength — powerlifting, hypertrophy and endurance are
 // all things you do with the same barbell squat, so they're a property of
@@ -111,15 +113,14 @@ export function emptyItem(exerciseID: string, position: number): WorkoutItem {
 }
 
 async function request<T>(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   path: string,
   init: RequestInit = {},
   signal?: AbortSignal,
 ): Promise<T> {
   const token = await getToken();
-  if (!token) throw new Error('Not signed in.');
 
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await netFetch(`${API_BASE}${path}`, {
     ...init,
     signal,
     headers: {
@@ -133,17 +134,34 @@ async function request<T>(
   if (res.status === 204) return undefined as T;
   const body = await res.json().catch(() => null);
   if (!res.ok) {
+    // An `ApiError`, not a plain `Error` — and that distinction is load
+    // bearing, not tidiness. `isNotFound` and `isPermanentRejection` both
+    // return false for anything that isn't an `ApiError`, on the reasoning
+    // that it never reached the server. So while this module threw plain
+    // errors, EVERY classification branch in the workout push path was dead
+    // code: a 404 on delete never counted as success (the tombstone would
+    // survive forever, failing every run for a plan deleted exactly as
+    // intended), and a permanent refusal was classified `transient`, so the
+    // orchestrator would grind a doomed request for the life of the install
+    // — the precise failure PR2 exists to prevent, revived for the new
+    // outbox. `lib/sessions.ts` was migrated to `ApiError` and this module
+    // was not; the gap was invisible because a mocked test supplied the
+    // contract the real module didn't honour.
+    //
     // The API's error envelope carries a human-usable message for the cases
     // a user can act on (a sport mismatch names the offending exercise), so
     // prefer it over a bare status code.
-    const message = body?.error?.message;
-    throw new Error(message || `Request failed (${res.status}).`);
+    throw new ApiError(
+      body?.error?.message ?? `Request failed (${res.status}).`,
+      body?.error?.code ?? 'unknown',
+      res.status,
+    );
   }
   return body as T;
 }
 
 export async function listWorkouts(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   scope: 'mine' | 'shared',
   signal?: AbortSignal,
 ): Promise<Workout[]> {
@@ -157,7 +175,7 @@ export async function listWorkouts(
 }
 
 export async function getWorkout(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   id: string,
   signal?: AbortSignal,
 ): Promise<Workout> {
@@ -165,19 +183,37 @@ export async function getWorkout(
 }
 
 export async function createWorkout(
-  getToken: () => Promise<string | null>,
-  input: { name: string; sport: Sport; goal: Goal | null; visibility: Visibility },
+  getToken: TokenGetter,
+  input: {
+    name: string;
+    sport: Sport;
+    goal: Goal | null;
+    visibility: Visibility;
+    /**
+     * The id to create it under.
+     *
+     * Optional, and supplying it is what makes offline creation work: a
+     * workout created with no signal already exists locally under an id, and
+     * any session started from it references THAT id. Minting a fresh one at
+     * push time would create a second workout server-side and leave the
+     * session pointing at one that never arrives.
+     */
+    id?: string;
+  },
 ): Promise<Workout> {
+  const { id, ...rest } = input;
   // Client-generated ID, so creating a workout is idempotent on retry — the
-  // same contract as offline activity logging.
+  // same contract as offline activity logging. The server does
+  // ON CONFLICT (id) DO NOTHING, so re-pushing after a lost response is a
+  // no-op rather than a duplicate plan.
   return request<Workout>(getToken, '/workouts', {
     method: 'POST',
-    body: JSON.stringify({ id: randomUUID(), ...input, notes: '' }),
+    body: JSON.stringify({ id: id ?? randomUUID(), ...rest, notes: '' }),
   });
 }
 
 export async function replaceItems(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   id: string,
   items: WorkoutItem[],
 ): Promise<Workout> {
@@ -190,7 +226,7 @@ export async function replaceItems(
 }
 
 export async function deleteWorkout(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   id: string,
 ): Promise<void> {
   await request<void>(getToken, `/workouts/${encodeURIComponent(id)}`, { method: 'DELETE' });

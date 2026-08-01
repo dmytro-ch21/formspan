@@ -5,15 +5,10 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, TextInput } from 
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { isNotFound } from '@/lib/apiError';
+import { setModules } from '@/lib/modules';
+import { useModules } from '@/lib/ModulesProvider';
 import { getProfile, updateProfile, type ProfilePatch } from '@/lib/profile';
 import { useAuthToken } from '@/lib/useAuthToken';
-
-const SPORTS = [
-  { key: 'strength_enabled', label: 'Strength' },
-  { key: 'bjj_enabled', label: 'BJJ' },
-  { key: 'running_enabled', label: 'Running' },
-  { key: 'nutrition_enabled', label: 'Nutrition' },
-] as const;
 
 /**
  * Editing who you are — as distinct from how the app behaves, which is
@@ -29,6 +24,20 @@ export default function EditProfileScreen() {
   const router = useRouter();
 
   const [patch, setPatch] = useState<ProfilePatch>({});
+  /**
+   * The disciplines, from the server's registry rather than a list in this
+   * file. The list here used to be keyed on database column names, which is
+   * how it drifted from the three other copies in this app.
+   */
+
+  /** Only what the user actually changed, so a save is a sparse PATCH. */
+  const [moduleChanges, setModuleChanges] = useState<Record<string, boolean>>({});
+  /**
+   * Distinct from `error`, and from the profile's own `unavailable`. An empty
+   * card under a "What you train" heading reads as "there are no disciplines",
+   * which is a claim about the product rather than about the network.
+   */
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -43,17 +52,15 @@ export default function EditProfileScreen() {
           display_name: p.display_name,
           date_of_birth: p.date_of_birth,
           sex: p.sex,
-          strength_enabled: p.strength_enabled,
-          bjj_enabled: p.bjj_enabled,
-          running_enabled: p.running_enabled,
-          nutrition_enabled: p.nutrition_enabled,
         }),
       )
       .catch((err) => {
         // A 404 is the ordinary first-run case: there genuinely is no profile
         // yet, so an empty form is the truth and saving creates one.
         if (isNotFound(err)) {
-          setPatch({ strength_enabled: true });
+          // A genuinely new account: an empty form is the truth, and module
+          // defaults come from the registry rather than being guessed here.
+          setPatch({});
           return;
         }
         // Anything else — offline, 5xx, no token — means we don't know what
@@ -66,6 +73,12 @@ export default function EditProfileScreen() {
       })
       .finally(() => setLoading(false));
   }, [getToken]);
+
+  // Separate request, separate failure: the modules list failing must not
+  // withhold the name and date-of-birth form.
+  // From the provider, not a second fetch. Phase A gave this screen its own
+  // request — the per-call-site pattern the provider exists to replace.
+  const { modules, apply: applyModules, stale: modulesUnavailable } = useModules();
 
   async function save() {
     // Belt and braces: the form isn't rendered when `unavailable`, so this is
@@ -80,6 +93,40 @@ export default function EditProfileScreen() {
         // An empty box means "no name", not the empty string.
         display_name: patch.display_name?.trim() || null,
       });
+      // Only what actually differs from the server's state. Toggling something
+      // on and back off again would otherwise send a redundant key — which for
+      // a module with no stored row WRITES one, quietly opting that user out of
+      // future changes to the registry default.
+      const realChanges = Object.fromEntries(
+        Object.entries(moduleChanges).filter(
+          ([key, on]) => on !== modules.find((m) => m.key === key)?.enabled,
+        ),
+      );
+
+      if (Object.keys(realChanges).length > 0) {
+        // Its own try/catch, because sequencing alone does NOT stop a modules
+        // failure reading as a total failure. The profile half has already
+        // landed at this point — and for a first-run user it just CREATED the
+        // profile — so a single generic banner would tell the user nothing
+        // saved when in fact most of it did.
+        try {
+          // Straight into the provider. Without this the save persisted and
+          // NOTHING re-gated until the process was killed — the tab bar, the
+          // start buttons, the Library chips all kept the old configuration
+          // for the rest of the session, which is the entire feature failing
+          // on its primary path. `setModules` already returns the merged set,
+          // so this costs no extra request.
+          applyModules(await setModules(getToken, realChanges));
+        } catch (err) {
+          setError(
+            `Your details saved, but your sports didn't: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+          setSaving(false);
+          return;
+        }
+      }
       router.back();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -174,12 +221,17 @@ export default function EditProfileScreen() {
         <Text style={styles.sectionLabel}>What you train</Text>
         <Text style={styles.hint}>Decides what the app offers you. Change it any time.</Text>
         <View style={styles.card}>
-          {SPORTS.map((s) => {
-            const on = patch[s.key] === true;
+          {modulesUnavailable && (
+            <Text style={styles.hint} accessibilityLiveRegion="polite">
+              Couldn&apos;t load your sports just now. Your other details still save.
+            </Text>
+          )}
+          {modules.map((s) => {
+            const on = moduleChanges[s.key] ?? s.enabled;
             return (
               <Pressable
                 key={s.key}
-                onPress={() => setPatch((p) => ({ ...p, [s.key]: !on }))}
+                onPress={() => setModuleChanges((c) => ({ ...c, [s.key]: !on }))}
                 style={styles.toggleRow}
                 accessibilityRole="switch"
                 accessibilityState={{ checked: on }}

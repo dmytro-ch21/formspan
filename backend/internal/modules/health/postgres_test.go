@@ -225,3 +225,50 @@ func TestNewEventValidate(t *testing.T) {
 		})
 	}
 }
+
+// Prune must delete the tail and ONLY the tail.
+//
+// A sign flip in `time.Now().Add(-retention)` deletes everything instead —
+// silently, from the deploy path, with the row count in the log looking like
+// success. Nothing pinned "rows newer than the cutoff survive" until now.
+func TestPostgresRepository_Prune_KeepsRecentDropsOld(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	// Either side of the boundary by a day, so this doesn't hinge on clock
+	// precision. Written with raw SQL rather than Record() because the whole
+	// point is to place a row in the past, which Record deliberately can't.
+	now := time.Now()
+	if _, err := repo.pool.Exec(ctx, `
+		INSERT INTO health_events (occurred_at, source, kind, error_code, message, request_id, trace_id)
+		VALUES ($1, 'api', 'server_error', 'internal', 'old', 'r_old', 't'),
+		       ($2, 'api', 'server_error', 'internal', 'new', 'r_new', 't')`,
+		now.Add(-retention-24*time.Hour), now.Add(-retention+24*time.Hour)); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	n, err := repo.Prune(ctx)
+	if err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("expected exactly 1 row pruned, got %d", n)
+	}
+
+	var left []string
+	rows, err := repo.pool.Query(ctx, `SELECT request_id FROM health_events`)
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		left = append(left, id)
+	}
+	if len(left) != 1 || left[0] != "r_new" {
+		t.Fatalf("expected only the in-retention row to survive, got %v", left)
+	}
+}

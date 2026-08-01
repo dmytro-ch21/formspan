@@ -1,10 +1,17 @@
 import { ApiError, isNotFound } from './apiError';
+import { netFetch } from './authedFetch';
+import type { TokenGetter } from './useAuthToken';
 import { newTraceId, traceparent } from './trace';
 import type { UnitSystem } from './units';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
 const API_BASE = `${API_URL}/v1`;
 
+/**
+ * Module toggles are NOT here any more. They moved to `lib/modules.ts` and
+ * GET/PATCH /v1/modules, because four boolean columns meant a migration and a
+ * dozen unchecked edits per new discipline.
+ */
 export type Profile = {
   user_id: string;
   display_name: string | null;
@@ -12,10 +19,6 @@ export type Profile = {
   sex: string | null;
   unit_system: UnitSystem;
   track_effort: boolean;
-  bjj_enabled: boolean;
-  strength_enabled: boolean;
-  nutrition_enabled: boolean;
-  running_enabled: boolean;
 };
 
 /** The fields the edit screen can change. Omitted keys are left alone. */
@@ -24,10 +27,6 @@ export type ProfilePatch = Partial<{
   display_name: string | null;
   date_of_birth: string | null;
   sex: string | null;
-  bjj_enabled: boolean;
-  strength_enabled: boolean;
-  nutrition_enabled: boolean;
-  running_enabled: boolean;
 }>;
 
 /**
@@ -38,7 +37,7 @@ export type ProfilePatch = Partial<{
  * this screen without ever going through onboarding.
  */
 export async function updateProfile(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   patch: ProfilePatch,
 ): Promise<Profile> {
   const send = () =>
@@ -59,13 +58,12 @@ export async function updateProfile(
 }
 
 async function request<T>(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   path: string,
   init: RequestInit = {},
 ): Promise<T> {
   const token = await getToken();
-  if (!token) throw new Error('Not signed in.');
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await netFetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
       ...init.headers,
@@ -94,7 +92,7 @@ async function request<T>(
  * a sentinel.
  */
 export async function getExerciseUnits(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
 ): Promise<Record<string, UnitSystem>> {
   const b = await request<{ exercise_units: Record<string, UnitSystem> }>(
     getToken,
@@ -105,7 +103,7 @@ export async function getExerciseUnits(
 
 /** Pass null to clear the override and fall back to the profile default. */
 export async function setExerciseUnit(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   exerciseID: string,
   unit: UnitSystem | null,
 ): Promise<void> {
@@ -116,13 +114,13 @@ export async function setExerciseUnit(
 }
 
 export function setTrackEffort(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   on: boolean,
 ): Promise<Profile> {
   return updateProfile(getToken, { track_effort: on } as never);
 }
 
-export function getProfile(getToken: () => Promise<string | null>): Promise<Profile> {
+export function getProfile(getToken: TokenGetter): Promise<Profile> {
   return request<Profile>(getToken, '/profile');
 }
 
@@ -135,7 +133,7 @@ export function getProfile(getToken: () => Promise<string | null>): Promise<Prof
  * of a row that doesn't exist yet is a dead end with no explanation.
  */
 export async function updateUnitSystem(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   unit: UnitSystem,
 ): Promise<Profile> {
   const patch = () =>

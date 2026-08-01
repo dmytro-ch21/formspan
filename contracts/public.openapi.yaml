@@ -73,10 +73,6 @@ components:
         - display_name
         - date_of_birth
         - sex
-        - bjj_enabled
-        - strength_enabled
-        - nutrition_enabled
-        - running_enabled
         - unit_system
         - track_effort
         - created_at
@@ -93,14 +89,6 @@ components:
           nullable: true
         sex:
           $ref: "#/components/schemas/Sex"
-        bjj_enabled:
-          type: boolean
-        strength_enabled:
-          type: boolean
-        nutrition_enabled:
-          type: boolean
-        running_enabled:
-          type: boolean
         unit_system:
           type: string
           enum: [metric, imperial]
@@ -149,14 +137,6 @@ components:
           nullable: true
         sex:
           $ref: "#/components/schemas/Sex"
-        bjj_enabled:
-          type: boolean
-        strength_enabled:
-          type: boolean
-        nutrition_enabled:
-          type: boolean
-        running_enabled:
-          type: boolean
         unit_system:
           type: string
           enum: [metric, imperial]
@@ -191,6 +171,84 @@ components:
         updated_at:
           type: string
           format: date-time
+
+    ModuleList:
+      type: object
+      required: [modules]
+      properties:
+        modules:
+          type: array
+          items:
+            $ref: "#/components/schemas/Module"
+
+    Module:
+      type: object
+      required: [key, label, is_sport, default_on, enabled, capabilities]
+      properties:
+        key:
+          type: string
+          description: Stable identifier. Also the `sport` value when `is_sport` is true.
+          example: bjj
+        label:
+          type: string
+          description: >
+            Display name. Carries the acronym — deriving it by capitalising the
+            key yields "Bjj", which is why every client previously grew its own
+            special case for exactly one value.
+          example: BJJ
+        is_sport:
+          type: boolean
+          description: >
+            Whether this discipline can appear as a `sport` on an exercise,
+            workout or session. False for nutrition, which is a module with no
+            catalog, no session and no row — a toggle only.
+        default_on:
+          type: boolean
+          description: What a user gets before expressing any preference.
+        enabled:
+          type: boolean
+          description: This caller's setting, falling back to `default_on`.
+        capabilities:
+          $ref: "#/components/schemas/ModuleCapabilities"
+
+    ModuleCapabilities:
+      type: object
+      required: [catalog, record_kinds]
+      description: >
+        What a discipline supports. Separate from `enabled` on purpose: "is BJJ
+        on?" and "does BJJ have 1RM records?" are different questions, and
+        collapsing them gives a BJJ-only athlete a Records screen whose record
+        kinds are all lift- or run-shaped.
+
+
+        These do NOT decide whether a metric is shown. Clients choose
+        volume-vs-time from the data present, so an athlete who spent a month on
+        the mat sees time rather than a flat zero volume line even with strength
+        enabled.
+      properties:
+        catalog:
+          type: string
+          description: Content kind the Library shows — `exercises`, `techniques`, or empty.
+          example: techniques
+        facets:
+          type: array
+          nullable: true
+          items:
+            type: string
+          description: Extra filter axes beyond the catalog's own. BJJ has `position`.
+        has_goals:
+          type: boolean
+          description: Gates the powerlifting/hypertrophy/endurance picker. Strength only.
+        has_progression:
+          type: boolean
+          description: Gates the double-progression UI.
+        record_kinds:
+          type: array
+          items:
+            type: string
+          description: >
+            Personal-best kinds that mean anything here. Empty for BJJ — a
+            discipline with none should not be offered a Records screen.
 
     FlagList:
       type: object
@@ -1111,19 +1169,84 @@ components:
 
     AdminUserSummary:
       type: object
-      required: [user_id, display_name, activity_count, last_activity_at]
+      description: >
+        One account, as the admin console lists it. The counts come from
+        `sessions` and `session_sets` — rows that already exist, so no new
+        write path was added to produce them. Note "active" here means logged
+        training, not opened the app: no read leaves a trace, so a daily
+        browser who never logs is indistinguishable from a churned account.
+        The previous `activity_count`/`last_activity_at` were removed: they
+        read a table with no writer and were 0/null for every user.
+      required:
+        [user_id, display_name, session_count, last_session_at, set_count, modules, created_at]
       properties:
         user_id:
           type: string
         display_name:
           type: string
           nullable: true
-        activity_count:
+          description: Null when the user never completed onboarding.
+        session_count:
           type: integer
-        last_activity_at:
+          description: Sessions logged, all time.
+        last_session_at:
           type: string
           format: date-time
           nullable: true
+        set_count:
+          type: integer
+          description: >
+            Sets logged, all time — distinguishes someone who started two
+            sessions and abandoned them from someone who trained twice.
+        modules:
+          type: array
+          description: >
+            Labels of the disciplines this user has enabled, resolved through
+            the discipline registry: a user with no stored row for a module
+            reads as that module's default rather than as "off".
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    AdminSessionSummary:
+      type: object
+      description: >
+        One session as the admin console shows it — deliberately without its
+        sets. The question is "what did they do and did it finish", which
+        needs a count, not every weight.
+      required: [id, sport, name, started_at, ended_at, set_count]
+      properties:
+        id:
+          type: string
+        sport:
+          type: string
+        name:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Null means still in progress.
+        set_count:
+          type: integer
+
+    AdminUserDetail:
+      type: object
+      required: [user, recent_sessions]
+      properties:
+        user:
+          $ref: "#/components/schemas/AdminUserSummary"
+        recent_sessions:
+          type: array
+          description: Newest first, capped at 50.
+          items:
+            $ref: "#/components/schemas/AdminSessionSummary"
 
     ClientErrorReport:
       type: object
@@ -1414,6 +1537,60 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /modules:
+    get:
+      summary: The discipline registry, merged with the caller's own toggles
+      description: >
+        Every discipline VOLA supports, in display order, each with its
+        capabilities and whether this user has it enabled. The catalog and the
+        user's choices arrive together because a client needs both before it can
+        render navigation — splitting them would mean two requests before the
+        nav bar can draw.
+
+
+        A discipline the caller has never toggled reports its registry default,
+        so adding a discipline requires no backfill.
+      operationId: listModules
+      responses:
+        "200":
+          description: All modules with the caller's enablement.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModuleList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    patch:
+      summary: Toggle one or more modules for the caller
+      description: >
+        A sparse map — `{"bjj": false}` toggles one module and leaves the rest
+        untouched, so two clients editing different toggles cannot clobber each
+        other. Returns the full merged set, since the caller's next render needs
+        all of it anyway.
+      operationId: setModules
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties:
+                type: boolean
+              minProperties: 1
+              example:
+                bjj: false
+      responses:
+        "200":
+          description: The full module set after the change.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModuleList"
+        "400":
+          $ref: "#/components/responses/InvalidInput"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /flags:
     get:
       summary: List all server-controlled feature flags
@@ -1473,7 +1650,7 @@ paths:
           in: query
           required: false
           schema: { type: string }
-          description: Exact-match filter, e.g. `strength` or `bjj`.
+          description: Exact-match filter, e.g. `strength` or `running`.
         - name: q
           in: query
           required: false
@@ -1486,6 +1663,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ExerciseList"
+        "400":
+          $ref: "#/components/responses/InvalidInput"
         "401":
           $ref: "#/components/responses/Unauthorized"
 
@@ -1617,7 +1796,15 @@ paths:
               type: object
               required: [id, name, sport]
               properties:
-                id: { type: string }
+                id:
+                  type: string
+                  description: >
+                    Client-generated, and required. Offline clients create a
+                    workout locally and push it later, so the id must be the
+                    one already stored on the device — a session created from
+                    that workout references it, and a server-minted id would
+                    orphan it.
+
                 name: { type: string }
                 sport: { type: string, enum: [strength, running, bjj] }
                 goal: { type: string, enum: [general, powerlifting, hypertrophy, endurance] }
@@ -2228,7 +2415,13 @@ paths:
 
   /admin/users:
     get:
-      summary: List every user who has completed onboarding (admin-only)
+      summary: List every user the API knows about (admin-only)
+      description: >
+        Users are enumerated from every table that records a user id —
+        profiles, sessions and activities — not from `profiles` alone.
+        Someone who signed up and trained but never finished onboarding has
+        no profile row and would otherwise be invisible to support. Capped at
+        500, most-recently-trained first.
       operationId: adminListUsers
       responses:
         "200":
@@ -2242,10 +2435,42 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
+  /admin/users/{userID}:
+    get:
+      summary: One user's admin view — summary plus recent sessions (admin-only)
+      operationId: adminGetUser
+      description: >
+        Replaces the activities-only user detail. Returns 404 for an id that
+        appears in no table, so a mistyped id reads as wrong rather than as an
+        empty account.
+      parameters:
+        - name: userID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: That user's summary and recent sessions.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /admin/users/{userID}/activities:
     get:
-      summary: List a specific user's activities (admin-only)
+      summary: List a specific user's activities (admin-only, legacy)
       operationId: adminListUserActivities
+      description: >
+        No longer what the admin console renders — see GET /admin/users/{userID}.
+        Retained as the only read path for `activities` rows written before the
+        in-app logging form was removed; nothing writes that table now.
       parameters:
         - name: userID
           in: path

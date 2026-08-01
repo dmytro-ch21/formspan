@@ -4,20 +4,21 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@clerk/nextjs";
 
 import {
-  edgeKey,
+  executionSteps,
   getTechnique,
-  indexTechniques,
   listExercises,
   listRulesets,
   listTechniques,
   pickImage,
   searchTechniques,
-  SPORTS,
   type Exercise,
   type Ruleset,
   type Technique,
   type TechniqueSummary,
+  enabledSports,
+  type Module,
 } from "@/lib/api";
+import { useModules } from "@/lib/ModulesProvider";
 import {
   ACCENT_CLASS,
   categoryBadge,
@@ -45,13 +46,14 @@ const LOAD_LABEL: Record<Exercise["load_type"], string> = {
  * techniques lived somewhere else.
  *
  * What the wide screen adds, and the phone can't: the detail panel sits beside
- * the grid rather than replacing it, so **following a technique's graph costs
- * nothing.** Tapping "Armbar from Closed Guard" under Common next moves swaps
- * the panel and leaves your list, scroll position and search exactly where they
- * were. On a phone that same tap is a push-navigation you have to unwind. This
- * is the desk surface doing the thing a desk surface is for — reading around a
- * subject — which is why the full prose, the legality table and the graph all
- * live in the panel rather than being trimmed for width.
+ * the grid rather than replacing it, so selecting a technique never costs you
+ * your place in the list, your scroll position or your search. That is why the
+ * full prose and the legality table live here rather than being trimmed for
+ * width — reading around a subject is what a desk is for.
+ *
+ * The graph lists used to be buttons that swapped the panel. They are plain
+ * text now; see the `Edges` docstring for the coverage numbers that killed the
+ * links.
  *
  * Fetch shape: exercises are filtered server-side (debounced, cancellable);
  * techniques are fetched **once** (~65 KB for all 466) and filtered in memory.
@@ -59,7 +61,6 @@ const LOAD_LABEL: Record<Exercise["load_type"], string> = {
  */
 
 /** Sports whose content includes techniques. */
-const HAS_TECHNIQUES = new Set(["", "bjj"]);
 
 /**
  * Position is a BJJ-only axis, so its chips render only under the BJJ filter —
@@ -67,8 +68,11 @@ const HAS_TECHNIQUES = new Set(["", "bjj"]);
  * techniques were on screen (which includes "All") would leave a stale
  * selection narrowing the grid with its control nowhere in sight.
  */
-function usesPosition(sport: string): boolean {
-  return sport === "bjj";
+function usesPosition(sport: string, mods: Module[]): boolean {
+  const m = mods.find((x) => x.key === sport);
+  // Enabled as well as the facet: otherwise this answers "does BJJ have
+  // positions" rather than "should position chips be reachable".
+  return (m?.enabled && m.capabilities.facets.includes("position")) ?? false;
 }
 
 /**
@@ -86,6 +90,28 @@ type Selection =
   { kind: "exercise"; ex: Exercise } | { kind: "technique"; id: string };
 
 export default function LibraryPage() {
+  const { modules, known } = useModules();
+  /** Chips from the registry, All first. */
+  const sportChips = [{ key: "", label: "All" }, ...enabledSports(modules)];
+  /**
+   * The enabled discipline that carries techniques, if any. Gates the FETCH,
+   * not just the chips — the technique list is ~65 kB and was pulled on every
+   * Library visit regardless of whether this athlete does BJJ.
+   */
+  // When modules are UNKNOWN (the fetch failed), fetch anyway — same
+  // fail-open direction as the rail. Silently hiding the technique library
+  // because a preference endpoint blinked is the worse of the two outcomes.
+  // A boolean, not the module: nothing here needs the module itself, and a
+  // boolean keeps the useCallback dependency stable (an object identity would
+  // rebuild `loadTechniques` on every render).
+  //
+  // When modules are UNKNOWN — the fetch failed — this is true, the same
+  // fail-open direction as the rail. Silently hiding the technique library
+  // because a preference endpoint blinked is the worse of the two outcomes.
+  const techniqueKey = modules.find(
+    (m) => m.enabled && m.capabilities.catalog === "techniques",
+  )?.key;
+  const wantsTechniques = !known || techniqueKey !== undefined;
   const { getToken } = useAuth();
 
   const [sport, setSport] = useState("");
@@ -143,6 +169,12 @@ export default function LibraryPage() {
   const techniqueAbortRef = useRef<AbortController | null>(null);
 
   const loadTechniques = useCallback(async () => {
+    // Hiding a module must cut the request, not just the pixels.
+    if (!wantsTechniques) {
+      setTechniques([]);
+      setTechniquesFailed(false);
+      return;
+    }
     techniqueAbortRef.current?.abort();
     const ac = new AbortController();
     techniqueAbortRef.current = ac;
@@ -164,7 +196,7 @@ export default function LibraryPage() {
     } finally {
       clearTimeout(deadline);
     }
-  }, [getToken]);
+  }, [getToken, wantsTechniques]);
 
   useEffect(() => {
     // Matching the convention in sessions/page.tsx: the setState calls inside
@@ -190,7 +222,10 @@ export default function LibraryPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const showTechniques = HAS_TECHNIQUES.has(sport);
+  // With modules unknown there is no key to compare and no chip to pick, so
+  // `sport` is "" and the techniques show — fail open, as above.
+  const showTechniques =
+    wantsTechniques && (sport === "" || sport === techniqueKey);
 
   // Sorted once per source, not once per keystroke; filtering preserves order,
   // so the filtered halves stay sorted and merge linearly below.
@@ -217,7 +252,7 @@ export default function LibraryPage() {
     let tq: TechniqueSummary[] = [];
     if (showTechniques) {
       const scoped =
-        usesPosition(sport) && position
+        usesPosition(sport, modules) && position
           ? sortedTechniques.filter((t) =>
               inPositionFamily(t.position, position),
             )
@@ -241,6 +276,9 @@ export default function LibraryPage() {
       }
     }
     return out;
+    // `modules` is read via usesPosition; without it this captures the
+    // first-render list and keeps an invisible position filter applied when a
+    // facet changes.
   }, [
     sortedExercises,
     sortedTechniques,
@@ -248,9 +286,8 @@ export default function LibraryPage() {
     sport,
     position,
     query,
+    modules,
   ]);
-
-  const byName = useMemo(() => indexTechniques(techniques), [techniques]);
 
   /**
    * Below `lg` the panel stacks *after* the entire grid, so on a narrow window
@@ -264,6 +301,13 @@ export default function LibraryPage() {
       .getElementById("library-detail")
       ?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [selected]);
+  /** Only for the panel's loading title, so it never reads "Loading…". */
+  const nameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const t of techniques) m.set(t.id, t.name);
+    return m;
+  }, [techniques]);
+
   const isFiltered = query.trim() !== "" || sport !== "" || position !== "";
 
   return (
@@ -300,16 +344,7 @@ export default function LibraryPage() {
             </kbd>
           </div>
           <div className="flex gap-2">
-            <Chip
-              active={sport === ""}
-              onClick={() => {
-                setSport("");
-                setPosition("");
-              }}
-            >
-              All
-            </Chip>
-            {SPORTS.map((s) => (
+            {sportChips.map((s) => (
               <Chip
                 key={s.key}
                 active={sport === s.key}
@@ -317,7 +352,7 @@ export default function LibraryPage() {
                   setSport(s.key);
                   // Returning to BJJ should start unfiltered rather than
                   // resuming a selection last seen several screens ago.
-                  if (!usesPosition(s.key)) setPosition("");
+                  if (!usesPosition(s.key, modules)) setPosition("");
                 }}
               >
                 {s.label}
@@ -326,7 +361,7 @@ export default function LibraryPage() {
           </div>
         </div>
 
-        {usesPosition(sport) && (
+        {usesPosition(sport, modules) && (
           <div
             role="group"
             aria-label="Filter by position"
@@ -464,9 +499,7 @@ export default function LibraryPage() {
             // title while the new fetch is still in flight.
             key={selected.id}
             id={selected.id}
-            name={byName.get(selected.id)?.name ?? "Loading…"}
-            byName={byName}
-            onOpen={(id) => setSelected({ kind: "technique", id })}
+            name={nameById.get(selected.id) ?? "Loading…"}
             onClose={() => setSelected(null)}
           />
         )}
@@ -660,15 +693,11 @@ function ExercisePanel({
 function TechniquePanel({
   id,
   name,
-  byName,
-  onOpen,
   onClose,
 }: {
   /** Known from the card that opened this, so the shell never says "Loading…". */
   name: string;
   id: string;
-  byName: Map<string, TechniqueSummary>;
-  onOpen: (id: string) => void;
   onClose: () => void;
 }) {
   const { getToken } = useAuth();
@@ -711,6 +740,7 @@ function TechniquePanel({
   }
 
   const [code, accent] = categoryBadge(t.category);
+  const steps = executionSteps(t.description);
   const rs = t.ibjjf ?? null;
 
   return (
@@ -738,34 +768,47 @@ function TechniquePanel({
       </dl>
 
       {/* The mechanics and the decision are separate sections because they
-          answer separate questions. Merged, neither reads well. */}
-      {t.description && <Section title="How it works">{t.description}</Section>}
+          answer separate questions. Merged, neither reads well.
+
+          And the mechanics are a *sequence*, not a paragraph — the library just
+          authors them as one comma-separated sentence. Same split as the phone,
+          same 8-of-466 prose fallback, so the two screens never disagree about
+          where a step ends. */}
+      {steps.length > 0 ? (
+        <div className="flex flex-col gap-2 border-t border-line-soft pt-4">
+          <p className="eyebrow">How it works</p>
+          <ol className="flex flex-col gap-2">
+            {steps.map((s, i) => (
+              <li key={i} className="flex items-start gap-3">
+                <span
+                  aria-hidden="true"
+                  className={`mt-px flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[0.6875rem] font-bold ${ACCENT_CLASS[accent].tile} ${ACCENT_CLASS[accent].text}`}
+                >
+                  {i + 1}
+                </span>
+                <span className="text-sm leading-relaxed text-text-muted">
+                  {s}
+                </span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      ) : (
+        t.description && <Section title="How it works">{t.description}</Section>
+      )}
       {t.when_to_use && (
         <Section title="When to use it">{t.when_to_use}</Section>
       )}
 
       {rs && <Legality ruleset={rs} />}
 
-      {/* The reason this page beats the phone: following the graph costs
-          nothing, because the grid never moves. */}
-      <Edges
-        label="Set up from"
-        items={t.setup_from}
-        byName={byName}
-        onOpen={onOpen}
-      />
-      <Edges
-        label="Common next moves"
-        items={t.common_next_moves}
-        byName={byName}
-        onOpen={onOpen}
-      />
-      <Edges
-        label="Common counters"
-        items={t.common_counters}
-        byName={byName}
-        onOpen={onOpen}
-      />
+      {/* Reference text, not navigation — see the Edges docstring for why the
+          links were removed. The wide screen still earns its keep here: the
+          full prose and legality table fit beside the grid rather than
+          replacing it. */}
+      <Edges label="Set up from" items={t.setup_from} />
+      <Edges label="Common next moves" items={t.common_next_moves} />
+      <Edges label="Common counters" items={t.common_counters} />
 
       {/* Deliberately last and deliberately quiet. An observation about where
           this is usually taught, NOT a rule and NOT a prerequisite — the rule
@@ -850,53 +893,30 @@ function Division({
   );
 }
 
-function Edges({
-  label,
-  items,
-  byName,
-  onOpen,
-}: {
-  label: string;
-  items: string[];
-  byName: Map<string, TechniqueSummary>;
-  onOpen: (id: string) => void;
-}) {
+/**
+ * The graph, as reference text.
+ *
+ * These were buttons that swapped the panel until the coverage was looked at
+ * honestly: only ~80% of `setup_from` entries name a real library entry, and
+ * for `common_next_moves` it is ~29%, for `common_counters` ~6%. Most rows were
+ * plain text sitting beside a few links, which reads as a feature that
+ * half-works. The information stays; the navigation goes. Mirrors the phone.
+ */
+function Edges({ label, items }: { label: string; items: string[] }) {
   if (items.length === 0) return null;
   return (
     <div className="flex flex-col gap-2">
       <p className="eyebrow">{label}</p>
-      <div className="flex flex-wrap gap-2">
-        {items.map((raw) => {
-          const hit = byName.get(edgeKey(raw)) ?? null;
-          if (!hit) {
-            // Most of these name something that isn't a library entry — 71% of
-            // next-moves, 94% of counters are prose like "establish inside
-            // ties". Plain text, and it must LOOK like plain text: a dead link
-            // is worse than honest text.
-            return (
-              <span key={raw} className="text-xs text-text-muted">
-                {raw}
-              </span>
-            );
-          }
-          // Show what the author wrote, EXCEPT when they wrote an id — the only
-          // unreadable form. Substituting the target's canonical name on an
-          // alias match silently rewrites the content: "Straight Armbar" became
-          // "Armbar from Closed Guard", a different technique from a different
-          // position, presented as if the author had said it.
-          const display = edgeKey(raw) === hit.id ? hit.name : raw;
-          return (
-            <button
-              key={raw}
-              type="button"
-              onClick={() => onOpen(hit.id)}
-              className="rounded-pill border border-lime/40 px-2.5 py-1 text-xs font-medium text-lime-ink transition hover:bg-lime/10"
-            >
-              {display}
-            </button>
-          );
-        })}
-      </div>
+      <ul className="flex flex-col gap-1.5">
+        {items.map((raw) => (
+          <li
+            key={raw}
+            className="rounded-lg border border-line-soft bg-surface-hover px-3 py-2 text-xs leading-relaxed text-text-muted"
+          >
+            {raw}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

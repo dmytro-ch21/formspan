@@ -1,6 +1,7 @@
 // Package featureflag holds server-controlled, global on/off switches —
-// distinct from the profile module's bjj_enabled/strength_enabled/etc.
-// columns, which are per-user, self-service module toggles. These are
+// distinct from the per-user module toggles in profile_modules (see
+// internal/platform/discipline and GET/PATCH /v1/modules), which are
+// self-service. These are
 // operator-controlled (canary rollouts, killswitches, hiding an
 // in-development feature) and apply to every caller the same way.
 //

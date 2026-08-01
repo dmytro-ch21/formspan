@@ -1579,3 +1579,486 @@ than replacing it.
 - Techniques are global reference content — the module-level cache surviving a
   user switch is correct, not a leak. Assert `/v1/techniques` applies no user
   scoping.
+
+## Technique detail readability (mobile `/technique/[id]`, web detail panel)
+
+### Happy path
+
+- Opening a technique shows **numbered execution steps**, not a paragraph.
+  Regression guard: "Armbar from Closed Guard" renders 5 steps beginning
+  "Control wrist and elbow" and "Break posture" as *separate* steps — merging
+  those two was a real bug in the first implementation.
+- The hero shows the category eyebrow and name over the category watermark, and
+  the title is legible against it (the scrim exists for this).
+- Sections sit on distinct surfaces: How it works, When to use it, IBJJF, and
+  the three graph lists are visually separable at a glance.
+
+### Edge cases
+
+- A technique whose description does not split into 2+ steps (6 of 466) renders
+  the original prose under the same heading — **never** a one-item list.
+- `executionSteps` must produce zero steps under 10 characters across the whole
+  library; a stray "and" as its own numbered step is a failure.
+- The mobile and web parsers must stay logically identical — a step boundary
+  that differs between platforms is a content difference, not a styling one.
+- Sections with no content still do not render (`video_reference` is empty in
+  all 466).
+- **Retry must not flash "Technique not found."** Tapping Try again shows the
+  spinner for the duration of the request, never the not-found fallback.
+- The step splitter must contain no regex lookbehind: `lib/api.ts` is imported
+  by every dashboard page, and an untranspiled unsupported construct is a
+  parse-time failure for the whole dashboard on older Safari.
+
+### Media
+
+- `heroImage` is not populated yet. When it is, the hero must swap to the photo
+  with no layout shift, and the title must stay legible over a light image.
+
+## Library after the BJJ drill removal
+
+- Filtering the Library to **BJJ** returns techniques only — **no** Bear Crawl,
+  Sprawl, Granby Roll or other conditioning drills. `GET /v1/exercises?sport=bjj`
+  returns an empty list, and that is correct, not a failure.
+- No exercise row renders a stock placeholder *for BJJ*; strength and running
+  still do (unchanged, deliberately).
+- A BJJ drill that a user has genuinely logged against survives migration 000019
+  and remains visible — training history is never broken to tidy a catalog.
+- Technique detail: `Set up from`, `Common next moves` and `Common counters`
+  render as **plain text**. Nothing in those lists is tappable, and nothing in
+  them should look tappable.
+- Opening a technique makes **no** request for the full technique list — the
+  detail screen no longer needs an index to decide what links.
+- **A `sport='bjj'` session cannot contain a set, and a bjj workout cannot
+  contain an item** — there is no bjj catalog entry to reference and techniques
+  are not loggable yet. Any client that offers to add a set to a bjj session is
+  offering something the API will reject.
+
+## Discipline registry (`GET`/`PATCH /v1/modules`)
+
+Domain: the server owns which disciplines exist, their labels and their
+capabilities (`internal/platform/discipline`); per-user enablement lives in
+`profile_modules` rows. `/v1/profile` no longer carries module booleans.
+
+### Happy path
+
+- `GET /v1/modules` returns every module in display order with `label`,
+  `is_sport`, `default_on`, `enabled` and `capabilities`.
+- A user who has never toggled anything gets `enabled == default_on` for every
+  module, and **zero rows are stored** — defaults belong to the registry.
+- `PATCH /v1/modules` with `{"bjj": false}` changes only BJJ and returns the
+  full merged set.
+- Labels carry acronyms: BJJ is `"BJJ"`, never `"Bjj"`.
+
+### Edge cases & errors
+
+- `PATCH` with an unknown key → 400 `invalid_input`, naming the key. A typo must
+  not look like it worked.
+- `PATCH {}` → 400. An empty body is a mistake, not a no-op request.
+- `PATCH` for a user with no profile row → error (the FK is the guard).
+- `nutrition` is a valid **module** but not a valid **sport**: `POST /v1/sessions`
+  with `sport: "nutrition"` must be rejected.
+- `GET /v1/exercises?sport=cycling` → **400**, matching sessions and workouts.
+  It previously returned 200 with an empty list.
+
+### Invariants
+
+- Every registry sport has a `defaultMedia` entry — otherwise its exercises
+  render imageless with no error anywhere.
+- Adding a discipline requires no migration and no change to `profile_modules`.
+  **Guarded by a test that writes a session for every registry sport** — this
+  claim was false until migration 000021 dropped two SQL CHECK constraints, and
+  nothing would have caught it.
+- Toggling modules for a user with no profile returns a message that says so,
+  not "unknown exercise".
+- The four legacy `*_enabled` columns are unread; the down migration carries row
+  values back into them before dropping the table.
+
+## Module gating on mobile (Phase B)
+
+### The loop that has to work
+
+- Toggle a discipline in profile edit, save, go back: the tab bar, Today's start
+  buttons and the Library chips **all reflect it immediately**, with no app
+  restart. This failed completely in the first cut — the save never reached the
+  provider — so it is the first thing to check.
+
+### Cold start
+
+- The tab bar must **not** rearrange after first paint, and Today must not flash
+  "Choose what you train" before the real buttons. Both mean `ready` is being
+  honoured.
+- Offline, with a warm cache: everything gates from the cache; no spinner in
+  front of the app.
+
+### Network
+
+- With BJJ off, opening the Library fires **no `/v1/techniques` request** — check
+  the network log, not the pixels.
+
+### Edge cases
+
+- Every discipline off: Today offers "Choose what you train"; the new-workout
+  sheet says so rather than showing a Discipline heading over zero chips; no
+  workout can be created in a disabled discipline.
+- A stored library filter naming a now-disabled discipline is not restored, and
+  a filter whose discipline is disabled *mid-session* resets rather than
+  narrowing the list invisibly.
+- Sign out and sign in as a different user: the second user must never see the
+  first user's tabs, chips or start buttons — including when the second user is
+  offline and has never used the device.
+
+## Module gating on web (Phase C)
+
+Same registry, same rule as mobile — but the fetch is server-side, so the
+failure modes differ. `/dashboard/layout.tsx` reads modules before anything
+paints and hands them to `ModulesProvider`.
+
+### The loop that has to work
+
+- Turn BJJ **off** in `/dashboard/settings` → the Library nav item and every
+  BJJ chip disappear **without a reload**, because `PATCH /v1/modules` returns
+  the merged set and `apply` feeds it straight to the provider.
+- Turn it back **on** → they return, same request count.
+- The toggle survives a full page load (it is per-account, not per-browser).
+- A discipline switched off **on the phone** can be switched back on here.
+  That was the hole this closes: before it, web ignored the toggles entirely
+  and offered no way to change them.
+
+### Nav gating
+
+- **Records** is hidden only when *no* enabled module has `record_kinds`.
+  A BJJ-only athlete loses it; a runner keeps it (`longest_time`,
+  `furthest_distance`). Assert on the capability, not on `sport === "strength"`.
+- **Library** is hidden when no enabled module has a `catalog`.
+- With **every** discipline off, the nav keeps Today/History/Settings — there
+  must always be a way back to the toggles.
+
+### Requests, not just pixels
+
+- With BJJ off, loading `/dashboard/library` fires **no `/v1/techniques`
+  request**. Verify in the network panel, not by reading the code.
+- Toggling BJJ off *while on the Library page* clears the technique rows and
+  fires no further technique request.
+- Rendering N sessions must not fire N `/v1/profile` requests — the 200-request
+  bug this provider shape exists to avoid.
+
+### Failure
+
+- If `GET /v1/modules` fails during the server render, the nav renders
+  **ungated** rather than empty. A preference endpoint blinking must never hide
+  the app.
+- Settings with an unreachable API: the discipline section says so, and the
+  units control still works.
+
+## Today (`/dashboard`) reads real training
+
+It previously read `GET /v1/activities` — a table with no writer — so it showed
+0/0 and "Nothing logged yet" to athletes who had logged. Regression scenarios:
+
+- An account with sessions but zero `activities` rows shows **non-zero**
+  session and set counts. (This is the exact case that was broken; a test
+  fixture with only `activities` rows would pass the old code and prove
+  nothing.)
+- The third stat follows **the data**, not the toggles: a strength-enabled
+  athlete whose week was all BJJ sees *Mat time*, not `0 kg`.
+- Week-over-week deltas are absent, not `+100%`, when the previous window is 0.
+- Exactly three requests on load. Not one per session row.
+- Volume renders in the athlete's unit system.
+
+## Admin console on real training
+
+### User lookup (`/users`)
+
+- Columns are sessions / sets / disciplines / last session — all derived, no
+  new write path.
+- A user with a `sessions` row but **no `profiles` row** appears, with a blank
+  display name. This is the regression that has now been introduced twice;
+  it is the single most important scenario on this page.
+- The header count says "known to the API", and that is literally what it
+  counts — profiles ∪ sessions ∪ activities.
+- Ordering is most-recently-trained first, with never-trained users last.
+
+### User detail (`/users/{id}`)
+
+- Shows summary stats, enabled disciplines, recent sessions and that user's
+  health events — **two requests total**.
+- Counts here **equal** the same user's row in the lookup table. The two come
+  from different queries sharing one projection; a mismatch is a real bug.
+- An id that exists nowhere returns **404**, not an empty page. Distinguishing
+  "wrong id" from "idle account" is the point — the old page admitted it could
+  not.
+- A session with no `ended_at` renders as *In progress*.
+- If the health fetch fails, the page still renders with a note; if the detail
+  fetch fails with anything other than 404, it reaches the error boundary.
+- Non-allowlisted signed-in user: blocked. Signed-out: redirected. The backend
+  enforces this independently of the UI gate.
+
+### Health retention
+
+- Events older than 90 days are deleted when `cmd/seed` runs; newer ones
+  survive. Verified by inserting rows either side of the boundary.
+- A prune failure must not fail the deploy.
+
+## Offline is not signed out (mobile token broker)
+
+The scenario that produced this: an athlete at a gym, on a phone that had been
+signed in for days, met "Not signed in." on every screen.
+
+### The loop that has to work
+
+- Sign in, use the app, then **kill the network** (airplane mode) and keep
+  using it. Nothing may say "sign in" — not a screen, not a toast, not a
+  redirect. The tab bar stays; the session stays.
+- Wait past the token's lifetime (about a minute on Clerk's default, longer if
+  `EXPO_PUBLIC_CLERK_JWT_TEMPLATE` is set) and try again. Failures must read as
+  connectivity ("Can't reach VOLA. You're still signed in…"), never as auth.
+- Restore the network. Everything resumes with no sign-in step.
+
+### Cold start offline
+
+- Force-quit while offline, relaunch still offline. The app must open to the
+  signed-in shell, not the sign-in screen — the token is restored from the
+  keychain.
+- Same, but after the stored token has expired: still no sign-in screen, still
+  a connectivity message.
+
+### Clerk call volume
+
+- Loading several screens in quick succession must not produce several Clerk
+  token requests. A cold start followed by 40 API calls should cost **one**.
+- The activity outbox draining N rows costs one token acquisition, not N.
+
+### Auth that really is auth
+
+- Sign out. The keychain entry is cleared, and the next account on the same
+  device never authenticates as the previous one.
+- A genuinely revoked/expired session (signed out elsewhere) must still reach
+  the sign-in screen — offline tolerance must not become "never re-auth".
+
+### Regression guards for the test itself
+
+- Any test of "a valid token is still served while Clerk is unreachable" must
+  assert **that a refresh was actually attempted**. With a long-lived token the
+  broker answers from cache without consulting Clerk, so the test passes with
+  the entire feature deleted — this happened, and is why the harness counts
+  reaching the getter.
+
+## In-session editing (mobile)
+
+### Adding an exercise mid-session
+
+- Edit a set's weight, then **immediately** tap `+ Add exercise` (inside the
+  700ms debounce). Pick one, come back. **Both the edit and the new exercise
+  survive.** This is the regression: the screen's queued write used to land
+  after the picker's and silently revert the addition.
+- Same for `Swap`, which already flushed.
+- The new exercise appears without a pull-to-refresh.
+
+### Prefill
+
+- A session from a 3×5 template: fill set 1, tick it done → sets 2 and 3 take
+  the same weight and reps, and stay editable.
+- A value already typed into set 2 is **not** overwritten; its blank measures
+  still fill.
+- A completed set is never modified.
+- Effort (RIR/RPE) is never prefilled.
+- Squat / bench / squat: filling the first squat block does **not** reach the
+  second one.
+- Un-ticking a set fills nothing.
+
+### Reorder / remove an exercise
+
+- Move an exercise up: all of its sets travel with it, order survives a
+  reload (positions are renumbered, not just reordered on screen).
+- The up arrow is absent on the first exercise, the down arrow on the last.
+- Remove asks first, and says how many logged sets it will delete.
+- Neither control appears on a finished session.
+
+### Done-set highlight
+
+- Ticking a set tints the whole row, and the set number stays legible on it.
+- Un-ticking returns it.
+
+## Account preferences (units, effort tracking)
+
+Both are account-level, cached locally, and now held once each rather than per
+screen.
+
+### Consistency
+
+- With units set to imperial, **every** screen that shows a weight or volume
+  shows pounds — Today, the finished-session summary, exercise detail, the
+  workout editor. They previously resolved independently and could disagree.
+- No screen shows a figure in kilograms first and corrects itself.
+- A cold start makes **one** `GET /v1/profile` for units, not one per screen.
+
+### Offline changes must not revert
+
+- Turn effort tracking **off** with no signal. Leave Settings, come back: still
+  off. Regain signal, wait for a profile read: **still off**, and the account
+  now agrees. This used to flip back on by itself.
+- Same for units.
+- While the change is local-only, Settings says so.
+
+### Account switching
+
+- Sign out and in as someone else: neither preference carries over from the
+  previous athlete.
+
+## Sync orchestration (mobile, offline-first PR2)
+
+### The loop that has to work
+
+- Log a full session with the network off. Kill the app. Restore the network,
+  reopen it: the session syncs **without visiting any particular screen**.
+  Foreground alone is enough. This is the scenario the whole PR exists for.
+- Same, without killing the app: background it, restore signal, foreground it.
+- With the network still off, the pending count stays honest and the error
+  reads as connectivity, never as auth.
+
+### Coalescing
+
+- Editing many sets quickly must not produce a sync per edit. A burst during a
+  run costs the run in flight plus at most one follow-up.
+- Opening Today, a session, and the picker in quick succession does not
+  produce three concurrent syncs.
+
+### Backoff
+
+- With something pending and the network down, retries follow 5s / 15s / 60s /
+  5min and stop lengthening there.
+- With **nothing** pending, a failure schedules no retry at all — no waking up
+  forever on the chance the network improved.
+- A successful sync resets the schedule.
+
+### Online vs refused
+
+- An unreachable server marks the app offline.
+- A server that answers and **refuses** (4xx) does not — it is online, with a
+  problem worth showing.
+- Retry (the button) always attempts, even when the orchestrator would have
+  waited, and reports the outcome rather than spinning.
+
+### Account changes
+
+- Sign out with work pending: no queued retry fires against the previous
+  athlete's rows.
+- A signed-out app does not report "0 pending" as if everything were safely on
+  the server — that state is unknown, not clean.
+
+## Offline deletes (mobile, offline-first PR3)
+
+### The loop that has to work
+
+- Delete a synced session **with the network off**. It disappears immediately.
+  Restore the network. It stays deleted — on the phone *and* on the web.
+  Before tombstones it came back minutes later with nothing said.
+- Force-quit between the delete and regaining signal: still deleted, and the
+  delete still reaches the server.
+
+### Edge cases
+
+- Deleting a session the server has never seen (logged offline, never synced)
+  clears on the next sync tick without any network call — the decision is made
+  in the push, not at delete time, because reading it at delete time races a
+  first push that is mid-flight.
+- Deleting the same session twice, or deleting it on the web first, clears
+  cleanly: a 404 on the delete counts as success.
+- Opening a deleted session's screen by a stale link does **not** resurrect it
+  from the server, and does not quietly cancel the pending delete.
+- A pending delete counts toward "waiting to sync" — it is unsynced work.
+- Tombstones are per-athlete: one account's deletes never hide another's
+  sessions.
+
+## Workouts readable offline (mobile, offline-first PR4a)
+
+### The loop that has to work
+
+- Open Plan with the network on, then kill it and reopen the app. **Your
+  templates are there**, not an error. Before this the screen went straight to
+  the network despite the workouts already being cached.
+- The Shared tab still needs the network, and says so — an empty local list
+  would falsely claim nobody has shared anything.
+
+### Ownership and visibility survive the cache
+
+Only `mine` lists are cached, so a VOLA template or another athlete's workout
+cannot be in there today — scenarios about *those* belong to PR4b, when shared
+templates start being cached. What is testable now:
+
+- Your own **public** template keeps its "Shared" marking when the Plan tab
+  renders it from cache. It previously lost it — the cache hardcoded
+  `private` — which is the one genuinely user-visible half of that bug.
+- A template whose visibility changed server-side shows the new value after
+  the next successful refresh.
+- Upgrading a device that already had cached workouts leaves them owned by the
+  athlete they were filed under — **not** relabelled "VOLA template".
+
+### Deleted workouts must leave
+
+- Delete a workout, return to the Plan tab: it does **not** flash back. It
+  used to, on every focus, forever — nothing ever removed a cached row.
+- Delete one on the web, refresh on the phone: it disappears here too.
+- Offline, a workout deleted while online is not listed.
+
+### What is still online-only in PR4a
+
+- Opening a workout's **contents** needs the network — the detail screen has no
+  cached read, so offline it shows an error. Only the *list* is offline, plus
+  the session-start path that already had its own cache.
+
+## Workouts writable offline (mobile, offline-first PR4b)
+
+### The loop that has to work
+
+- With the network off: **create** a workout, **add exercises**, **save**. All
+  of it sticks. Force-quit and reopen — still there. Restore the network: it
+  appears on the web with the same contents.
+- Edit an existing plan offline; the edit survives a refresh that pulls the
+  server's older copy over it.
+- Delete offline: it goes, and stays gone once signal returns.
+
+### Ordering — the case that needs a gym
+
+- Offline: create a workout, then **start a session from it** and log sets.
+  Restore signal. The workout syncs first, then the session. Neither errors.
+- While the workout is still unsynced, the session is reported as **waiting on
+  a plan**, not as a failure — and the retry ladder keeps going. Calling it a
+  failure would be wrong twice over: it alarms, and a 4xx would classify as
+  permanent and stop the retries.
+- The same holds for a **single** save, not only a batch sync: tick one set
+  just after signal returns, while the workout is still unsynced. The debounced
+  per-save push must defer too — not show an error and file a `sync_blocked`
+  report mid-workout for a row that heals itself on the next run.
+- **Delete the workout while a session started from it is still unsynced.** The
+  session must still reach the server, with its plan link simply cut — the same
+  thing the server's own `ON DELETE SET NULL` does. This is the case where the
+  workouts-first ordering works *against* the session, and it fails
+  deterministically rather than as a race, so a passing run proves nothing
+  unless this exact sequence is the one exercised.
+- If a workout create is **permanently** refused, every session referencing it
+  defers forever — reported as waiting, indefinitely, with no repair path.
+  Known gap; low probability, permanent when hit.
+
+### Conflicts
+
+- Edit a plan on the phone while offline, and the same plan on the web. On
+  reconnect the phone's pending edit is not silently overwritten by the pull.
+- An edit made *during* a push is not marked as sent — it goes out next pass.
+
+### Never destroy local work
+
+- A workout created offline is **not** removed by a server refresh that
+  doesn't list it. The server has simply never heard of it.
+- The same for a pending edit or a pending delete.
+- **Check this on screen, not only in the store.** Reopen an offline-edited
+  plan while online, before its push lands: the edit must still be displayed.
+  Rendering the server's older copy undoes the edit visually while SQLite
+  still holds it — and if the athlete edits on from what is shown, the save
+  writes stale items over their own work. Same for the list: a
+  just-created, unpushed workout must not vanish when a stale list response
+  arrives.
+- A save or delete that matches **no local row** (deleted on the web and
+  reconciled away mid-edit) must report a failure, not navigate away as
+  though it had worked. Deleting the same workout twice, however, is not a
+  failure — a delete that isn't idempotent is the worse bug.

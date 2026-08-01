@@ -54,7 +54,9 @@ const (
 	exBench    = "bench-press"
 	exOverhead = "overhead-press"
 	exSquat    = "back-squat"
-	exBJJ      = "bear-crawl-forward" // a bjj-sport entry, for the mismatch test
+	// A non-strength entry, for the mismatch test. Was "bear-crawl-forward"
+	// until migration 000019 removed the BJJ drills from the catalog.
+	exRun = "run"
 )
 
 func strengthWorkout(id, owner string, vis Visibility) NewWorkout {
@@ -144,7 +146,7 @@ func TestCreate_RejectsSportMismatch(t *testing.T) {
 	cleanupWorkout(t, pool, "wk-mixed-1")
 
 	in := strengthWorkout("wk-mixed-1", "user_a", VisibilityPrivate)
-	in.Items = append(in.Items, Item{ExerciseID: exBJJ})
+	in.Items = append(in.Items, Item{ExerciseID: exRun})
 
 	if _, err := repo.Create(ctx, in); !errors.Is(err, ErrSportMismatch) {
 		t.Errorf("expected ErrSportMismatch, got %v", err)

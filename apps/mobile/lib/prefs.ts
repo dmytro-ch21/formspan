@@ -60,6 +60,26 @@ export const PREF_UNIT_SYSTEM_OWED = 'unit_system_owed';
  * really is the moment they rack the bar.
  */
 export const PREF_AUTO_REST = 'auto_rest';
+export const PREF_TRACK_EFFORT = 'track_effort';
+/**
+ * `'1'` while the local effort-tracking choice hasn't reached the account.
+ *
+ * Exactly the same debt `PREF_UNIT_SYSTEM_OWED` records, and added because
+ * `useTrackEffort` was missing it: turning effort off with no signal pushed
+ * to the server, failed, was swallowed — and then the next successful profile
+ * read set it straight back on and overwrote the cache. The switch reverted
+ * on its own, silently, some minutes later.
+ */
+export const PREF_TRACK_EFFORT_OWED = 'track_effort_owed';
 /** The Library tab's sport filter. Deliberately remembered; its search box
  *  deliberately isn't — see the Library screen for the reasoning. */
 export const PREF_LIBRARY_SPORT = 'library_sport';
+
+/**
+ * The whole module set, JSON, under one key.
+ *
+ * One key rather than one per module because this is read before the first
+ * paint — the tab bar is built from it — and N sequential reads is exactly the
+ * delay that makes the tabs rearrange after launch.
+ */
+export const PREF_MODULES = 'modules';

@@ -2,6 +2,7 @@ import { Tabs } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 
 import { vola } from '@/constants/Colors';
+import { useModules } from '@/lib/ModulesProvider';
 
 /**
  * The tab bar from the hi-fi design: flat, flush to the bottom, on the same
@@ -18,6 +19,28 @@ import { vola } from '@/constants/Colors';
  * without it the labels read as content when a list scrolls behind them.
  */
 export default function TabLayout() {
+  const { modules, ready } = useModules();
+
+  /**
+   * The Library is the only tab whose whole reason for existing can be turned
+   * off: with no discipline that has a catalog, it has nothing to list.
+   *
+   * `href: null` rather than omitting the <Tabs.Screen>. Omitting one does NOT
+   * hide it — expo-router auto-injects every route file in this folder whether
+   * declared or not, so the tab would come back with a filename-derived title.
+   * `href: null` hides the button and keeps the route resolvable, which matters
+   * for an in-flight router.push and for deep links.
+   */
+  const anyCatalog = modules.some((m) => m.enabled && m.capabilities.catalog !== '');
+
+  // Hold the frame until the cached module set has been read. This is the
+  // whole reason the cache exists: without it the first frames compute
+  // `anyCatalog` from an empty list, so the Library tab is ABSENT and then pops
+  // in — the tab bar visibly rearranging on every cold start, which is exactly
+  // what the provider's docstring says it prevents. `RootLayoutNav` already
+  // holds a frame this way for Clerk.
+  if (!ready) return null;
+
   return (
     <Tabs
       screenOptions={{
@@ -30,14 +53,15 @@ export default function TabLayout() {
         tabBarIconStyle: styles.iconSlot,
         // The dot *is* the icon slot — a marker above the label rather than
         // a glyph beside it.
-        tabBarIcon: ({ focused }) => (
-          <View style={[styles.dot, focused && styles.dotActive]} />
-        ),
+        tabBarIcon: ({ focused }) => <View style={[styles.dot, focused && styles.dotActive]} />,
       }}
     >
       <Tabs.Screen name="index" options={{ title: 'Today' }} />
       <Tabs.Screen name="workouts" options={{ title: 'Plan' }} />
-      <Tabs.Screen name="library" options={{ title: 'Library' }} />
+      <Tabs.Screen
+        name="library"
+        options={{ title: 'Library', href: anyCatalog ? undefined : null }}
+      />
       <Tabs.Screen name="you" options={{ title: 'You' }} />
     </Tabs>
   );

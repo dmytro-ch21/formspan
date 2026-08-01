@@ -48,6 +48,18 @@ const CREATE_SESSIONS = `
     -- can be dirty forever while still being remote, and that is the common
     -- case during a workout.
     remote INTEGER NOT NULL DEFAULT 0,
+    -- When the athlete deleted this, or NULL. A TOMBSTONE, not a hard delete.
+    --
+    -- Deleting the row outright is what made an offline delete undo itself:
+    -- the row vanished locally, the server still held it, and the next pull
+    -- fetched it straight back. Worse, with the row gone there was nothing
+    -- left carrying "this needs deleting", so the delete was lost the moment
+    -- the fire-and-forget DELETE failed — which offline it always does.
+    --
+    -- The row therefore stays, marked, until the server confirms. Then it is
+    -- hard-deleted for real. Reads filter it out, so it is invisible from the
+    -- moment the athlete taps Delete.
+    deleted_at TEXT,
     updated_at TEXT NOT NULL
   );
 `;
@@ -69,6 +81,39 @@ const CREATE_WORKOUT_CACHE = `
     name TEXT NOT NULL,
     goal TEXT,
     items_json TEXT NOT NULL DEFAULT '[]',
+    -- WHO OWNS IT, and whether it is shared -- as the server says, not as the
+    -- device assumes.
+    --
+    -- The cache used to return the reading athlete's own id and a hardcoded
+    -- "private". workout/[id].tsx derives canEdit from exactly that field, so
+    -- offline EVERY cached workout looked editable -- including VOLA's own
+    -- ownerless templates and other athletes' public ones. The Save button
+    -- appeared for things the server refuses, and the "VOLA template" label
+    -- vanished because nothing was ever null.
+    --
+    -- NB no backticks in this comment: the whole block is a JS template
+    -- literal, and one would end it. That has now cost two debugging rounds.
+    --
+    -- Nullable because a VOLA template genuinely has no owner. Distinct from
+    -- user_id above, which records whose device-cache row this is.
+    owner_user_id TEXT,
+    visibility TEXT NOT NULL DEFAULT 'private',
+    -- The outbox half, mirroring local_sessions exactly.
+    --
+    -- 0 = the server holds this; 1 = we owe it a push. 'remote' is 1 once the
+    -- server has acknowledged the workout EXISTS, which is separate from its
+    -- contents being current -- a plan can be dirty and remote at the same
+    -- time, which is the ordinary state while you edit one.
+    dirty INTEGER NOT NULL DEFAULT 0,
+    remote INTEGER NOT NULL DEFAULT 1,
+    -- Set when deleted here; the row survives until the server agrees. Same
+    -- tombstone rules as sessions, for the same reason: a hard delete leaves
+    -- nothing carrying the intent when the push fails.
+    deleted_at TEXT,
+    -- Bumped on every local write. The push CASes on it, so an edit landing
+    -- mid-push leaves the row dirty for the next pass instead of being
+    -- marked as already sent.
+    updated_at TEXT NOT NULL DEFAULT '',
     cached_at TEXT NOT NULL
   );
 `;
@@ -115,7 +160,7 @@ const CREATE_EXERCISE_CACHE = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 9;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -167,7 +212,12 @@ async function addColumnIfMissing(
   await db.execAsync(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition};`);
 }
 
-async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
+/**
+ * Exported for the SQLite test fixture, which runs the real migrations against
+ * a real database rather than asserting on query text. Not for app use —
+ * `getDb` is the only thing that should call this in production, exactly once.
+ */
+export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
   const row = await db.getFirstAsync<{ user_version: number }>(`PRAGMA user_version`);
   const current = row?.user_version ?? 0;
   if (current >= SCHEMA_VERSION) return;
@@ -266,6 +316,51 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     // CREATE_WORKOUT_CACHE already declared `goal`. `IF NOT EXISTS` is not
     // available for ADD COLUMN in this SQLite build, hence the explicit check.
     await addColumnIfMissing(db, 'workout_cache', 'goal', 'TEXT');
+  }
+
+  if (current < 7) {
+    // v6 -> v7: tombstones, so an offline delete stops resurrecting.
+    //
+    // Guarded rather than a bare ALTER, for the reason spelled out on the
+    // `goal` column above: the fresh-install path runs *every* branch from
+    // v0, and its CREATE_SESSIONS already declares `deleted_at`.
+    await addColumnIfMissing(db, 'local_sessions', 'deleted_at', 'TEXT');
+  }
+
+  if (current < 8) {
+    // v7 -> v8: the workout cache stops lying about ownership.
+    await addColumnIfMissing(db, 'workout_cache', 'owner_user_id', 'TEXT');
+    await addColumnIfMissing(
+      db,
+      'workout_cache',
+      'visibility',
+      "TEXT NOT NULL DEFAULT 'private'",
+    );
+    // Backfill rather than leave NULL.
+    //
+    // Only `mine` lists are ever cached, and the server's `mine` is strictly
+    // owner_user_id = $1 -- so every pre-v8 row is provably owned by the
+    // user_id it is filed under. NULL would be the cautious default in
+    // general, but here it is simply wrong for 100% of real rows, and it
+    // would label every one of an upgrader's own workouts "VOLA template"
+    // until a refresh succeeded. It is also a pair the server cannot
+    // produce: an ownerless private workout is visible to nobody.
+    await db.runAsync(
+      `UPDATE workout_cache SET owner_user_id = user_id WHERE owner_user_id IS NULL`,
+    );
+  }
+
+  if (current < 9) {
+    // v8 -> v9: workouts become writable offline.
+    //
+    // Existing rows default to dirty = 0 / remote = 1, which is the truth for
+    // them: everything cached so far arrived FROM the server, so none of it is
+    // owed a push. Defaulting the other way would push every cached workout
+    // back at the server on first launch after the upgrade.
+    await addColumnIfMissing(db, 'workout_cache', 'dirty', 'INTEGER NOT NULL DEFAULT 0');
+    await addColumnIfMissing(db, 'workout_cache', 'remote', 'INTEGER NOT NULL DEFAULT 1');
+    await addColumnIfMissing(db, 'workout_cache', 'deleted_at', 'TEXT');
+    await addColumnIfMissing(db, 'workout_cache', 'updated_at', "TEXT NOT NULL DEFAULT ''");
   }
 
   await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION};`);

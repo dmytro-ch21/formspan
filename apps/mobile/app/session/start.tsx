@@ -1,4 +1,5 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { request as requestSync } from '@/lib/sync';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet } from 'react-native';
 
@@ -6,11 +7,13 @@ import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAuth } from '@clerk/clerk-expo';
 
+import { labelFor } from '@/lib/modules';
+import { useModules } from '@/lib/ModulesProvider';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
 import { applySuggestions, fetchSuggestions, setsFromWorkout } from '@/lib/sessions';
-import { cachedWorkouts, cacheWorkouts, startLocalSession, syncSessions } from '@/lib/sessionStore';
-import { listWorkouts, SPORTS, summariseTargets, type Sport, type Workout } from '@/lib/workouts';
+import { cachedWorkouts, cacheWorkouts, startLocalSession } from '@/lib/sessionStore';
+import { listWorkouts, summariseTargets, type Sport, type Workout } from '@/lib/workouts';
 
 /**
  * Choosing what to train, before anything is created.
@@ -24,6 +27,7 @@ import { listWorkouts, SPORTS, summariseTargets, type Sport, type Workout } from
  * blank list.
  */
 export default function StartSessionScreen() {
+  const { modules } = useModules();
   const { sport } = useLocalSearchParams<{ sport: Sport }>();
   const getToken = useAuthToken();
   const { userId } = useAuth();
@@ -35,7 +39,7 @@ export default function StartSessionScreen() {
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
 
-  const label = SPORTS.find((s) => s.key === sport)?.label ?? 'Session';
+  const label = labelFor(modules, sport) || 'Session';
 
   const load = useCallback(async () => {
     if (!sport || !userId) return;
@@ -94,7 +98,7 @@ export default function StartSessionScreen() {
         workout_id: workout ? workout.id : null,
         sets,
       });
-      syncSessions(userId, getToken).catch(() => {});
+      requestSync('session-started');
       // replace, not push: finishing a session and pressing back should not
       // land on the chooser that created it.
       router.replace(`/session/${session.id}`);

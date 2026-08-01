@@ -9,6 +9,14 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "strict": true,
+    // jest's globals (`describe`/`it`/`expect`/`jest`) and node's `Buffer`,
+    // used only by lib/__tests__. Listed explicitly because setting `types`
+    // at all opts out of TypeScript's "include every @types package"
+    // default — so anything else needed here has to be named.
+    "types": [
+      "jest",
+      "node"
+    ],
     "paths": {
       "@/*": [
         "./*"

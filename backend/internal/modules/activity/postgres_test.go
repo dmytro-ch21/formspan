@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/database"
+	"github.com/dmytro-ch21/vola/backend/internal/platform/discipline"
 )
 
 // Requires a real Postgres with migrations already applied — set
@@ -133,8 +134,8 @@ func TestPostgresRepository_ListUsers_IncludesProfilelessUsers(t *testing.T) {
 
 	for _, u := range users {
 		if u.UserID == userID {
-			if u.ActivityCount != 1 {
-				t.Fatalf("expected activity_count 1 for profileless user, got %+v", u)
+			if u.SessionCount != 0 {
+				t.Fatalf("expected session_count 0 for activity-only user, got %+v", u)
 			}
 			if u.DisplayName != nil {
 				t.Fatalf("expected nil display_name for profileless user, got %+v", u)
@@ -197,5 +198,163 @@ func TestPostgresRepository_Create_RejectsAnotherUsersID(t *testing.T) {
 	}
 	if got != nil {
 		t.Fatalf("expected no activity returned on cross-user conflict, got %+v", got)
+	}
+}
+
+// The modern shape of the same rule: a user with SESSIONS but no profile row.
+// Since the in-app activity form was removed, `activities` takes no new rows,
+// so a never-onboarded user now shows up through `sessions` or not at all —
+// and the summary must report their real training, not zeroes.
+//
+// This is the test that fails if ListUsers goes back to `FROM profiles`, which
+// is exactly what a rewrite of it did.
+func TestPostgresRepository_ListUsers_CountsSessionsNotActivities(t *testing.T) {
+	databaseURL := os.Getenv("TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("TEST_DATABASE_URL not set, skipping Postgres integration test")
+	}
+
+	ctx := context.Background()
+	pool, err := database.NewPool(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { pool.Close() })
+
+	repo := NewPostgresRepository(pool)
+	userID := "test_user_sessions_only"
+	sessionID := "test_session_admin_summary"
+	t.Cleanup(func() {
+		if _, err := pool.Exec(ctx, `DELETE FROM sessions WHERE id = $1`, sessionID); err != nil {
+			t.Logf("cleanup: delete session: %v", err)
+		}
+	})
+
+	started := time.Now().Truncate(time.Second).UTC()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO sessions (id, user_id, sport, name, started_at)
+		VALUES ($1, $2, 'bjj', 'Open mat', $3)`, sessionID, userID, started); err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+
+	users, err := repo.ListUsers(ctx)
+	if err != nil {
+		t.Fatalf("list users: %v", err)
+	}
+	var found *UserSummary
+	for i := range users {
+		if users[i].UserID == userID {
+			found = &users[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("profileless user %q with a session missing from ListUsers (%d returned)", userID, len(users))
+	}
+	if found.SessionCount != 1 {
+		t.Fatalf("expected session_count 1, got %+v", *found)
+	}
+	if found.LastSessionAt == nil || !found.LastSessionAt.Equal(started) {
+		t.Fatalf("expected last_session_at %v, got %+v", started, *found)
+	}
+	// Registry defaults, not "off" — the user has no profile_modules rows at all.
+	if len(found.Modules) == 0 {
+		t.Fatalf("expected registry-default modules for a user with no rows, got %+v", *found)
+	}
+
+	// And the same numbers through the single-user read, which is a different
+	// query — the two are shared via userSummaryCols precisely so they cannot
+	// report different totals for one account.
+	detail, err := repo.GetUser(ctx, userID)
+	if err != nil {
+		t.Fatalf("get user: %v", err)
+	}
+	if detail.User.SessionCount != found.SessionCount || detail.User.SetCount != found.SetCount {
+		t.Fatalf("detail disagrees with list: %+v vs %+v", detail.User, *found)
+	}
+	if len(detail.RecentSessions) != 1 || detail.RecentSessions[0].ID != sessionID {
+		t.Fatalf("expected the session in recent_sessions, got %+v", detail.RecentSessions)
+	}
+	if detail.RecentSessions[0].Sport != "bjj" || detail.RecentSessions[0].EndedAt != nil {
+		t.Fatalf("session summary wrong: %+v", detail.RecentSessions[0])
+	}
+
+	// An id nobody has ever used must 404, not render a page of zeroes.
+	if _, err := repo.GetUser(ctx, "test_user_definitely_not_real"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for an unknown user, got %v", err)
+	}
+}
+
+// An explicitly stored toggle must beat the registry default, in both
+// directions.
+//
+// Without this, only the no-rows path was covered — so a regression in the
+// `key:bool` string parse (say `== "t"`, which is what Postgres would render
+// under a different cast) would leave every user's toggles reading as
+// defaults, and the suite would stay green while the admin console quietly
+// showed the wrong disciplines for everyone who had ever changed one.
+func TestPostgresRepository_ListUsers_StoredTogglesBeatDefaults(t *testing.T) {
+	databaseURL := os.Getenv("TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("TEST_DATABASE_URL not set, skipping Postgres integration test")
+	}
+
+	ctx := context.Background()
+	pool, err := database.NewPool(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { pool.Close() })
+
+	repo := NewPostgresRepository(pool)
+	userID := "test_user_toggles"
+	t.Cleanup(func() {
+		if _, err := pool.Exec(ctx, `DELETE FROM profiles WHERE user_id = $1`, userID); err != nil {
+			t.Logf("cleanup: delete profile: %v", err)
+		}
+	})
+
+	// profile_modules has an FK to profiles, so the row has to exist first.
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO profiles (user_id) VALUES ($1) ON CONFLICT DO NOTHING`, userID); err != nil {
+		t.Fatalf("insert profile: %v", err)
+	}
+
+	// Pick one default-on and one default-off sport straight from the
+	// registry, then invert both — hardcoding keys here would make the test
+	// wrong the moment a discipline's default changes.
+	var on, off string
+	var onLabel, offLabel string
+	for _, m := range discipline.All() {
+		if m.DefaultOn && on == "" {
+			on, onLabel = m.Key, m.Label
+		}
+		if !m.DefaultOn && off == "" {
+			off, offLabel = m.Key, m.Label
+		}
+	}
+	if on == "" || off == "" {
+		t.Skip("registry has no default-on/default-off pair to invert")
+	}
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO profile_modules (user_id, module_key, enabled)
+		VALUES ($1, $2, false), ($1, $3, true)`, userID, on, off); err != nil {
+		t.Fatalf("insert modules: %v", err)
+	}
+
+	detail, err := repo.GetUser(ctx, userID)
+	if err != nil {
+		t.Fatalf("get user: %v", err)
+	}
+	got := map[string]bool{}
+	for _, label := range detail.User.Modules {
+		got[label] = true
+	}
+	if got[onLabel] {
+		t.Fatalf("module %q was switched OFF but still reported enabled: %v", on, detail.User.Modules)
+	}
+	if !got[offLabel] {
+		t.Fatalf("module %q was switched ON but is missing: %v", off, detail.User.Modules)
 	}
 }

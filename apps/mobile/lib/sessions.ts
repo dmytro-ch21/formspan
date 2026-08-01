@@ -1,4 +1,6 @@
 import { randomUUID } from 'expo-crypto';
+import { netFetch } from './authedFetch';
+import type { TokenGetter } from './useAuthToken';
 
 import { ApiError } from './apiError';
 import type { Exercise } from './exercises';
@@ -141,6 +143,14 @@ export type Volume = {
  */
 export type Measure = 'reps' | 'weight' | 'seconds' | 'distance';
 
+/** Which LoggedSet field each measure writes. */
+const MEASURE_FIELD: Record<Measure, 'reps' | 'weight_kg' | 'seconds' | 'distance_m'> = {
+  reps: 'reps',
+  weight: 'weight_kg',
+  seconds: 'seconds',
+  distance: 'distance_m',
+};
+
 export function measuresFor(loadType: Exercise['load_type']): Measure[] {
   switch (loadType) {
     case 'weight_reps':
@@ -153,6 +163,12 @@ export function measuresFor(loadType: Exercise['load_type']): Measure[] {
       return ['distance'];
     case 'distance_time':
       return ['distance', 'seconds'];
+    default:
+      // A server can ship a load_type before the app that renders it does —
+      // the house rule for every lookup here. Without this the switch returns
+      // undefined and `measures.map` throws inside fillForward, which turns
+      // the done tick, the most-used control in the app, into a crash.
+      return ['reps'];
   }
 }
 
@@ -288,14 +304,13 @@ export function describeSet(s: LoggedSet, units: UnitSystem = 'metric'): string 
 }
 
 async function request<T>(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   path: string,
   init: RequestInit = {},
   signal?: AbortSignal,
 ): Promise<T> {
   const token = await getToken();
-  if (!token) throw new Error('Not signed in.');
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await netFetch(`${API_BASE}${path}`, {
     ...init,
     signal,
     headers: {
@@ -324,7 +339,7 @@ async function request<T>(
  * 5-8 range rather than failing.
  */
 export async function fetchSuggestions(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   exerciseIDs: string[],
   goal?: string | null,
   signal?: AbortSignal,
@@ -373,7 +388,7 @@ export function applySuggestions(
 }
 
 export async function listSessions(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   opts: { limit?: number } = {},
   signal?: AbortSignal,
 ): Promise<Session[]> {
@@ -385,7 +400,7 @@ export async function listSessions(
 }
 
 export async function getSession(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   id: string,
   signal?: AbortSignal,
 ): Promise<{ session: Session; volume: Volume }> {
@@ -393,7 +408,7 @@ export async function getSession(
 }
 
 export async function startSession(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   input: {
     sport: string;
     name: string;
@@ -418,7 +433,7 @@ export async function startSession(
 }
 
 export async function replaceSets(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   id: string,
   sets: LoggedSet[],
 ): Promise<{ session: Session; volume: Volume }> {
@@ -429,7 +444,7 @@ export async function replaceSets(
 }
 
 export async function finishSession(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   id: string,
   /** Supplied when pushing a session finished offline — the real end time,
    *  not the time the sync happened to run. */
@@ -442,8 +457,87 @@ export async function finishSession(
 }
 
 export async function deleteSession(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   id: string,
 ): Promise<void> {
   await request<void>(getToken, `/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+/**
+ * Fill the *planned* sets below `index` with what was just entered.
+ *
+ * "+ Set" has always carried the previous set's numbers forward, but sets that
+ * came from a template arrive already existing and empty — so a 3×5 plan meant
+ * typing the same weight three times. The request was exactly that: enter it
+ * once, adjust the rest as you go.
+ *
+ * The rules that keep it from being destructive:
+ *
+ *  - **Only later sets of the same exercise**, stopping at the next one.
+ *    Groups are adjacency-based, same as the display.
+ *  - **Only measures still blank.** A number already typed is never
+ *    overwritten — a top set followed by back-offs is a real plan, and
+ *    flattening it silently would be worse than the typing this saves.
+ *  - **Never a completed set.** That is a record of something that happened.
+ *  - **Never effort.** Same reason `emptySet` won't carry it: the third set at
+ *    one weight is not the third set's effort, and prefilling invites
+ *    recording a number nobody judged.
+ *
+ * Returns the same array identity when nothing changed, so callers can skip a
+ * write.
+ */
+export function fillForward(
+  sets: LoggedSet[],
+  index: number,
+  measures: Measure[],
+): LoggedSet[] {
+  const source = sets[index];
+  if (!source) return sets;
+  const keys = measures.map((m) => MEASURE_FIELD[m]);
+
+  // Where this group ends. Adjacency defines a group, so the FIRST row of a
+  // different exercise is the boundary — not "every row with a different id".
+  // Filtering on the id alone reaches a *later* block of the same exercise:
+  // squat / bench / squat would fill the second squat block from the first,
+  // which is a different piece of work with different numbers. Caught by a
+  // test; the original code contradicted this function's own doc comment.
+  let end = index + 1;
+  while (end < sets.length && sets[end].exercise_id === source.exercise_id) end++;
+
+  let changed = false;
+  const next = sets.map((s, i) => {
+    if (i <= index || i >= end || s.completed) return s;
+    const patch: Partial<LoggedSet> = {};
+    for (const k of keys) {
+      if (s[k] == null && source[k] != null) patch[k] = source[k] as never;
+    }
+    if (Object.keys(patch).length === 0) return s;
+    changed = true;
+    return { ...s, ...patch };
+  });
+  return changed ? next : sets;
+}
+
+/**
+ * Move a whole exercise up or down, taking its sets with it.
+ *
+ * `order` is the current grouping as arrays of indices into `sets` — passed in
+ * rather than recomputed so this can't disagree with what is on screen.
+ *
+ * Positions are renumbered because the server orders by them; leaving them
+ * stale makes a reorder that looks right locally and reverts on next load.
+ * Returns null when the move would go off either end, so the caller writes
+ * nothing.
+ */
+export function reorderGroups(
+  sets: LoggedSet[],
+  order: number[][],
+  groupIndex: number,
+  delta: -1 | 1,
+): LoggedSet[] | null {
+  const target = groupIndex + delta;
+  if (target < 0 || target >= order.length) return null;
+  const moved = order.map((g) => g.slice());
+  [moved[groupIndex], moved[target]] = [moved[target], moved[groupIndex]];
+  return moved.flat().map((i, position) => ({ ...sets[i], position }));
 }
