@@ -3203,6 +3203,91 @@ running exercises with no artwork of their own. That was offered as part of this
 change and not taken; it remains the case that most catalog rows show a stock
 image rather than the movement.
 
+## 2026-08-01 — A discipline registry, because the toggles did nothing
+
+The profile has carried `bjj_enabled` / `strength_enabled` / `nutrition_enabled`
+/ `running_enabled` since migration 000001. They were read in **exactly one
+place** — mobile's "You" screen rendered them as a comma-separated string.
+Turning `running_enabled` off changed one line of text and nothing else, while
+`profile/edit.tsx` claimed "which sports you do decides what the app offers
+you".
+
+Meanwhile the same closed set was written down **four times in Go**: a map in
+`session/handler.go`, a second map in `exercise/seed.go`, a typed enum plus a
+switch in `workout/workout.go`, and a media map keyed by sport in
+`exercise/exercise.go` — plus 2 SQL CHECKs, 5 hardcoded prose error strings, 9
+OpenAPI enums, and **six mutually inconsistent lists in the mobile app alone**.
+Adding a discipline touched ~31 places, none of which the compiler connected.
+
+### Three vocabularies, and one of them had nothing behind it
+
+`sport` (`strength|running|bjj`), activity `kind` (free text, unvalidated), and
+`*_enabled` (bjj, strength, nutrition, **running**). Nothing mapped between
+them, and `nutrition` existed only in the third — no table, no route, no seed
+content. So "discipline" was really two concepts. `internal/platform/discipline`
+now says so explicitly: `IsSport` is a field, because nutrition is a module you
+can toggle and a session with `sport="nutrition"` is nonsense.
+
+### Toggles decide what you can reach; data decides what you can read
+
+The rule the registry is built around, and the reason `Capabilities` is a struct
+rather than one boolean. "Is BJJ on?" and "does BJJ have 1RM records?" are
+different questions — collapse them and a BJJ-only athlete gets a Records screen
+whose five record kinds are all lift- or run-shaped.
+
+What the registry deliberately does **not** decide is whether a *metric* shows.
+Web's `loadMetric()` already picks volume-vs-time from the data present, and the
+calendar falls back to session-count with a `Math.max(1, …)` floor so a
+lift-Monday/roll-Tuesday athlete's BJJ days don't render identical to rest days.
+Gating those on toggles would break the one part that was already right.
+
+### Columns became rows
+
+`profile_modules(user_id, module_key, enabled)`, backfilled from the four
+columns. Adding a discipline now needs **no migration**: a user with no row
+falls back to the registry's `DefaultOn`.
+
+Deliberately **no CHECK on `module_key`** — a CHECK is exactly the
+migration-per-discipline cost being removed. The registry validates on write,
+and an unknown row is inert because reads go registry-first.
+
+The four columns are **left in place and unread**. Dropping them in the same
+migration would make it unrecoverable — roll the api back and the old binary
+reads columns that don't exist. Standing, a rollback reads stale-but-present
+values: wrong, not a crash. Consequence written down rather than discovered:
+between now and the follow-up that drops them, columns and rows can diverge,
+because only the rows are written.
+
+The **down** migration pushes rows back into the columns before dropping the
+table, so a rollback keeps whatever the user chose while rows were
+authoritative. Verified with real data: a row edited `true`→`false` came back as
+`false` in the column, and untouched values survived.
+
+### Verification worth naming
+
+The backfill was tested against a **simulated legacy database** — migrate to 19,
+insert three profiles with deliberately varied toggles including a non-default
+combination, then migrate. 12 rows, **0 mismatches**, and the BJJ-only user came
+through with `bjj=true` and the rest false. A from-zero database lands
+identically.
+
+`defaultMedia` is the one discipline list that can't derive from the registry —
+its values are asset paths that have to exist in the bucket. It failed
+*silently*: a sport missing an entry made `DefaultMediaFor` return nil, the
+handler skip media, and every exercise in that discipline render imageless with
+nothing logged. It now has a coverage test, mutation-checked by deleting the
+`running` entry and watching it fail.
+
+### Open
+
+Phase A is backend only — the toggles still gate nothing in the UI. Phases B and
+C wire the clients, at which point disabled disciplines lose their nav, their
+controls **and their network requests** (the Library currently fetches 466
+techniques for every user regardless).
+
+`activity.kind` remains a fourth, unvalidated vocabulary. The registry is where
+it should eventually be validated.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

@@ -1,5 +1,5 @@
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { Pressable, ScrollView, StyleSheet } from 'react-native';
 
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
@@ -10,6 +10,7 @@ import { vola } from '@/constants/Colors';
 import { isNotFound } from '@/lib/apiError';
 import { getProfile, type Profile } from '@/lib/profile';
 import { UNIT_SYSTEMS } from '@/lib/units';
+import { fetchModules, type Module } from '@/lib/modules';
 import { useAuthToken } from '@/lib/useAuthToken';
 
 /**
@@ -64,14 +65,15 @@ export default function YouScreen() {
     }, [getToken]),
   );
 
-  const modules = profile
-    ? [
-        profile.strength_enabled && 'Strength',
-        profile.bjj_enabled && 'BJJ',
-        profile.running_enabled && 'Running',
-        profile.nutrition_enabled && 'Nutrition',
-      ].filter(Boolean)
-    : [];
+  // From the registry, not a fifth hand-written copy of the list. The labels
+  // come with it, so "BJJ" stays "BJJ" rather than becoming "Bjj".
+  const [modules, setModulesState] = useState<Module[]>([]);
+  useEffect(() => {
+    fetchModules(getToken)
+      .then(setModulesState)
+      .catch(() => {});
+  }, [getToken]);
+  const enabledLabels = modules.filter((m) => m.enabled).map((m) => m.label);
 
   return (
     <ScrollView contentContainerStyle={styles.scroll} testID="you-screen">
@@ -130,7 +132,7 @@ export default function YouScreen() {
             <View style={styles.card}>
               <Row
                 label="Sports"
-                value={modules.length ? modules.join(' · ') : 'None chosen yet'}
+                value={enabledLabels.length ? enabledLabels.join(' · ') : 'None chosen yet'}
               />
               <Row
                 label="Units"

@@ -1,6 +1,8 @@
 package workout
 
 import (
+	"github.com/dmytro-ch21/vola/backend/internal/platform/discipline"
+
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -56,7 +58,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	if s := q.Get("sport"); s != "" && !ValidSport(Sport(s)) {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
-			"sport must be one of: strength, running, bjj")
+			"sport must be one of: "+discipline.SportList())
 		return
 	}
 	if g := q.Get("goal"); g != "" && !ValidGoal(Goal(g)) {
@@ -118,7 +120,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if !ValidSport(req.Sport) {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
-			"sport must be one of: strength, running, bjj")
+			"sport must be one of: "+discipline.SportList())
 		return
 	}
 	if req.Goal != nil && !ValidGoal(*req.Goal) {

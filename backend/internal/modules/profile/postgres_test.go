@@ -1,6 +1,8 @@
 package profile
 
 import (
+	"github.com/dmytro-ch21/vola/backend/internal/platform/discipline"
+
 	"context"
 	"errors"
 	"os"
@@ -67,9 +69,7 @@ func TestPostgresRepository_CreateGetUpdate(t *testing.T) {
 	if created.UserID != userID || *created.DisplayName != name {
 		t.Fatalf("unexpected created profile: %+v", created)
 	}
-	if !created.BJJEnabled || !created.StrengthEnabled || !created.NutritionEnabled || created.RunningEnabled {
-		t.Fatalf("unexpected default module toggles: %+v", created)
-	}
+	// Module toggles are no longer profile columns — see TestProfileModules.
 
 	if _, err := repo.Create(ctx, userID, NewProfile{}); !errors.Is(err, ErrAlreadyExists) {
 		t.Fatalf("expected ErrAlreadyExists on duplicate create, got %v", err)
@@ -83,13 +83,13 @@ func TestPostgresRepository_CreateGetUpdate(t *testing.T) {
 		t.Fatalf("unexpected fetched profile: %+v", fetched)
 	}
 
-	runningOn := true
-	updated, err := repo.Update(ctx, userID, ProfileUpdate{RunningEnabled: &runningOn})
+	imperial := "imperial"
+	updated, err := repo.Update(ctx, userID, ProfileUpdate{UnitSystem: &imperial})
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}
-	if !updated.RunningEnabled {
-		t.Fatalf("expected running_enabled true after update, got %+v", updated)
+	if updated.UnitSystem != imperial {
+		t.Fatalf("expected unit_system imperial after update, got %+v", updated)
 	}
 	if *updated.DisplayName != name {
 		t.Fatalf("update should leave untouched fields alone, got %+v", updated)
@@ -164,5 +164,94 @@ func TestExerciseUnits_RejectsUnknownExercise(t *testing.T) {
 	}
 	if !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("want ErrInvalidInput, got %v", err)
+	}
+}
+
+// TestProfileModules covers the behaviour that replaced four boolean columns.
+//
+// The properties worth protecting are not "a row round-trips" but the two that
+// make adding a discipline free: an absent row means the REGISTRY's default,
+// and a sparse PATCH leaves other modules alone.
+func TestProfileModules(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	userID := "user_modules_test"
+
+	cleanupProfile(t, pool, userID)
+	if _, err := repo.Create(ctx, userID, NewProfile{}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// A brand-new profile stores NOTHING. That is the point: defaults live in
+	// the registry, so a discipline added later needs no backfill.
+	stored, err := repo.ListModules(ctx, userID)
+	if err != nil {
+		t.Fatalf("list modules: %v", err)
+	}
+	if len(stored) != 0 {
+		t.Errorf("a new profile stored %d module rows; defaults belong to the registry, not the database", len(stored))
+	}
+
+	// ...and the merged view still answers for every module.
+	mods := ModulesFor(stored)
+	if len(mods) != len(discipline.All()) {
+		t.Fatalf("ModulesFor returned %d modules, registry has %d", len(mods), len(discipline.All()))
+	}
+	for _, m := range mods {
+		if m.Enabled != m.DefaultOn {
+			t.Errorf("%s: enabled=%v with nothing stored, want the registry default %v", m.Key, m.Enabled, m.DefaultOn)
+		}
+	}
+
+	// A sparse PATCH must not disturb anything it didn't name.
+	if err := repo.SetModules(ctx, userID, map[string]bool{"bjj": false}); err != nil {
+		t.Fatalf("set modules: %v", err)
+	}
+	stored, err = repo.ListModules(ctx, userID)
+	if err != nil {
+		t.Fatalf("list modules after set: %v", err)
+	}
+	if len(stored) != 1 || stored["bjj"] != false {
+		t.Fatalf("expected exactly one stored row bjj=false, got %+v", stored)
+	}
+	for _, m := range ModulesFor(stored) {
+		want := m.DefaultOn
+		if m.Key == "bjj" {
+			want = false
+		}
+		if m.Enabled != want {
+			t.Errorf("%s: enabled=%v, want %v (a one-key PATCH must leave the rest alone)", m.Key, m.Enabled, want)
+		}
+	}
+
+	// Toggling back is an update, not a second row.
+	if err := repo.SetModules(ctx, userID, map[string]bool{"bjj": true, "running": true}); err != nil {
+		t.Fatalf("set modules again: %v", err)
+	}
+	stored, _ = repo.ListModules(ctx, userID)
+	if len(stored) != 2 || !stored["bjj"] || !stored["running"] {
+		t.Fatalf("expected bjj and running true, got %+v", stored)
+	}
+
+	// An empty PATCH is a no-op rather than an error or a wipe.
+	if err := repo.SetModules(ctx, userID, map[string]bool{}); err != nil {
+		t.Errorf("empty set should be a no-op, got %v", err)
+	}
+	after, _ := repo.ListModules(ctx, userID)
+	if len(after) != 2 {
+		t.Errorf("empty set changed stored rows: %+v", after)
+	}
+
+	// A user with no profile row cannot have modules — the FK is the guard.
+	if err := repo.SetModules(ctx, "user_no_profile_xyz", map[string]bool{"bjj": true}); err == nil {
+		t.Error("expected an error setting modules for a user with no profile")
+	}
+}
+
+func cleanupProfile(t *testing.T, pool *pgxpool.Pool, userID string) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(),
+		`DELETE FROM profiles WHERE user_id = $1`, userID); err != nil {
+		t.Fatalf("cleanup: %v", err)
 	}
 }

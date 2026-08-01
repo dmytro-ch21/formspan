@@ -1,6 +1,8 @@
 package session
 
 import (
+	"github.com/dmytro-ch21/vola/backend/internal/platform/discipline"
+
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -20,8 +22,6 @@ func NewHandler(repo Repository) *Handler { return &Handler{repo: repo} }
 // larger is a mistake or an attempt to make the database work for nothing,
 // and each set is a statement in a batch.
 const maxSets = 500
-
-var validSports = map[string]bool{"strength": true, "running": true, "bjj": true}
 
 func writeErr(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
@@ -80,9 +80,9 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
 	q := r.URL.Query()
 
-	if s := q.Get("sport"); s != "" && !validSports[s] {
+	if s := q.Get("sport"); s != "" && !discipline.ValidSport(s) {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
-			"sport must be one of: strength, running, bjj")
+			"sport must be one of: "+discipline.SportList())
 		return
 	}
 	limit := 0
@@ -184,9 +184,9 @@ func (h *Handler) History(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
 	q := r.URL.Query()
 
-	if s := q.Get("sport"); s != "" && !validSports[s] {
+	if s := q.Get("sport"); s != "" && !discipline.ValidSport(s) {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
-			"sport must be one of: strength, running, bjj")
+			"sport must be one of: "+discipline.SportList())
 		return
 	}
 
@@ -394,9 +394,9 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "id is required")
 		return
 	}
-	if !validSports[req.Sport] {
+	if !discipline.ValidSport(req.Sport) {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
-			"sport must be one of: strength, running, bjj")
+			"sport must be one of: "+discipline.SportList())
 		return
 	}
 	if len(req.Sets) > maxSets {
