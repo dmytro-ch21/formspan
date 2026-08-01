@@ -18,6 +18,7 @@
     "lint:openapi": "redocly lint contracts/public.openapi.yaml --config .redocly.yaml",
     "dev:mobile": "pnpm --filter mobile start",
     "typecheck:mobile": "pnpm --filter mobile exec tsc --noEmit",
+    "test:mobile": "pnpm --filter mobile test",
     "dev:admin": "pnpm --filter admin dev",
     "lint:admin": "pnpm --filter admin lint",
     "typecheck:admin": "pnpm --filter admin exec tsc --noEmit",

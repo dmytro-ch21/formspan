@@ -168,6 +168,13 @@ function restore(forUser: string | null): Promise<void> {
       }
       // An expired stored token is worse than none: it would be sent, rejected
       // with a 401, and read as an auth problem rather than a stale cache.
+      //
+      // DEFENCE IN DEPTH, and deliberately untested — `usableToken` refuses an
+      // expired token on every path out of this module, so removing this check
+      // changes no observable behaviour and no test can distinguish it. Kept
+      // because loading a dead credential into memory at all is the kind of
+      // thing a later refactor turns into a real bug; documented so the next
+      // person doesn't read the coverage gap as an oversight.
       if (exp && exp > Date.now()) cached = { token: stored, exp, sub };
     } catch {
       // An unreadable keychain is not fatal — we just refresh from Clerk.
