@@ -1,13 +1,14 @@
+import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View as RNView } from 'react-native';
 
+import { categoryBadge } from '@/components/LibraryTile';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
-import { useAuthToken } from '@/lib/useAuthToken';
-import { LibraryTile, categoryBadge } from '@/components/LibraryTile';
 import {
   edgeKey,
+  executionSteps,
   fetchRulesets,
   fetchTechnique,
   fetchTechniques,
@@ -17,21 +18,33 @@ import {
   type Technique,
   type TechniqueSummary,
 } from '@/lib/techniques';
+import { useAuthToken } from '@/lib/useAuthToken';
 
 /**
- * One technique, with everything the library knows about it.
+ * One technique, built to be *read* rather than skimmed past.
  *
- * Two rules govern what this screen renders, both of them about not lying:
+ * The screen this replaced was structurally correct and unusable: eight stacked
+ * sections in identical type, no visual anchor, and the execution instructions
+ * delivered as a single 121-character sentence. It was described, accurately,
+ * as "just a bunch of text".
  *
- * 1. **A section that has no content does not appear.** `video_reference` is
- *    empty for every technique in the current library, so an always-present
- *    "Video" heading would imply a missing asset on all 466. Same for any edge
- *    array that came back empty.
- * 2. **An edge is only tappable if it resolves to a technique.** ~80% of
- *    `setup_from` entries name a real one; `common_next_moves` is ~29% and
- *    `common_counters` ~6% — the rest is prose like "establish grips or inside
- *    ties". Styling those as links would produce dead taps, so unresolved
- *    labels render as plain text and look like plain text.
+ * Three things fix that, in order of how much they matter:
+ *
+ * 1. **The description is a step list, so it renders as one.** The library
+ *    authors it as one comma-separated sentence; `executionSteps` splits it,
+ *    which works for 458 of 466 (the rest fall back to prose). This is the
+ *    difference between a paragraph you re-read and a sequence you can follow
+ *    between rounds.
+ * 2. **A hero that is a designed object, not a missing photo.** Techniques have
+ *    no image field yet and will get one; the hero is built as that slot, filled
+ *    meanwhile with the category mark. `heroImage` is the single prop that turns
+ *    it into a photo when the media lands — no layout change needed.
+ * 3. **Sections sit on surfaces.** Cards give the eye somewhere to stop, which
+ *    flat stacked text never did.
+ *
+ * Two rules from the previous version carry over unchanged, because both exist
+ * to stop the screen lying: a section with no content does not render at all,
+ * and an edge is only tappable if it resolves to a real technique.
  */
 export default function TechniqueScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -60,8 +73,8 @@ export default function TechniqueScreen() {
         }
         // Deliberately NOT awaited. The index only decides which edge labels
         // are tappable, so awaiting it held first paint hostage to a second
-        // request; edges simply upgrade from text to links when it lands.
-        // Cached after the first call, so this is usually free.
+        // request; edges upgrade from text to links when it lands. Cached
+        // after the first call, so this is usually free.
         void fetchTechniques(getToken, signal)
           .then((list) => setByName(indexByName(list)))
           .catch(() => {
@@ -99,78 +112,175 @@ export default function TechniqueScreen() {
         <Text style={styles.error} testID="technique-error">
           {error ?? 'Technique not found.'}
         </Text>
+        <Pressable onPress={() => void load()} hitSlop={10} accessibilityRole="button">
+          <Text style={styles.retry}>Try again</Text>
+        </Pressable>
       </View>
     );
   }
 
   const t = technique;
   const [code, accent] = categoryBadge(t.category);
+  const steps = executionSteps(t.description);
 
   return (
     <ScrollView contentContainerStyle={styles.scroll} testID="technique-detail">
-      <View style={styles.hero}>
-        {/* Same tile and code as the Library row this was opened from, so the
-            transition reads as the row expanding rather than a new screen. */}
-        <View style={styles.heroTop}>
-          <LibraryTile code={code} accent={accent} />
-          <View style={styles.heroText}>
-            <Text style={[styles.eyebrow, { color: accent }]}>{t.category.toUpperCase()}</Text>
-            <Text style={styles.title}>{t.name}</Text>
-          </View>
-        </View>
-        {t.aliases.length > 0 && (
-          <Text style={styles.aliases}>Also called {t.aliases.join(' · ')}</Text>
+      <Hero technique={t} code={code} accent={accent} />
+
+      <View style={styles.body}>
+        <RNView style={styles.chipRow}>
+          <Chip label={t.position} />
+          {!!t.position_detail && <Chip label={t.position_detail} />}
+          <Chip label={t.gi_no_gi} />
+        </RNView>
+
+        {/* The headline change: instructions as a sequence, not a sentence. */}
+        {steps.length > 0 ? (
+          <Card title="How it works" accent={accent}>
+            {steps.map((s, i) => (
+              <RNView key={s} style={styles.step}>
+                <RNView style={[styles.stepNum, { borderColor: accent }]}>
+                  <Text style={[styles.stepNumText, { color: accent }]}>{i + 1}</Text>
+                </RNView>
+                <Text style={styles.stepText}>{s}</Text>
+              </RNView>
+            ))}
+          </Card>
+        ) : (
+          // 8 of 466 don't split into a sequence. A one-item numbered list
+          // reads as a bug, so those keep their paragraph.
+          !!t.description && (
+            <Card title="How it works" accent={accent}>
+              <Text style={styles.prose}>{t.description}</Text>
+            </Card>
+          )
         )}
+
+        {!!t.when_to_use && (
+          <Card title="When to use it" accent={accent}>
+            <Text style={styles.prose}>{t.when_to_use}</Text>
+          </Card>
+        )}
+
+        {ruleset && <Legality ruleset={ruleset} />}
+
+        {/* The graph. Grouped rather than scattered, because "what leads here
+            and what follows" is one question, not three. */}
+        <Edges label="Set up from" items={t.setup_from} byName={byName} router={router} />
+        <Edges
+          label="Common next moves"
+          items={t.common_next_moves}
+          byName={byName}
+          router={router}
+        />
+        <Edges label="Common counters" items={t.common_counters} byName={byName} router={router} />
+
+        {/* Deliberately last and deliberately quiet. An observation about where
+            this is usually taught, NOT a rule and NOT a prerequisite — the rule
+            is the legality panel above. Two belt-shaped facts on one screen
+            need a clear hierarchy or they get confused for each other. */}
+        {!!t.typical_belt && (
+          <Text style={styles.footnote}>Commonly taught from {t.typical_belt} belt onwards.</Text>
+        )}
+        {!!t.source_notes && <Text style={styles.footnote}>{t.source_notes}</Text>}
       </View>
-
-      <View style={styles.chipRow}>
-        <Chip label={t.position} />
-        {!!t.position_detail && <Chip label={t.position_detail} />}
-        <Chip label={t.gi_no_gi} />
-      </View>
-
-      {/* The mechanics and the decision are separate sections because they
-          answer separate questions. Merged, neither reads well. */}
-      {!!t.description && <Section title="How it works" body={t.description} />}
-      {!!t.when_to_use && <Section title="When to use it" body={t.when_to_use} />}
-
-      {ruleset && <Legality ruleset={ruleset} />}
-
-      <Edges label="Set up from" items={t.setup_from} byName={byName} router={router} />
-      <Edges
-        label="Common next moves"
-        items={t.common_next_moves}
-        byName={byName}
-        router={router}
-      />
-      <Edges label="Common counters" items={t.common_counters} byName={byName} router={router} />
-
-      {/* Deliberately last and deliberately quiet. It is an observation about
-          where this is usually taught, NOT a rule and NOT a prerequisite — the
-          rule is the legality panel above. Two belt-shaped facts on one screen
-          need a clear hierarchy or they get confused for each other. */}
-      {!!t.typical_belt && (
-        <Text style={styles.footnote}>Commonly taught from {t.typical_belt} belt onwards.</Text>
-      )}
-      {!!t.source_notes && <Text style={styles.footnote}>{t.source_notes}</Text>}
     </ScrollView>
+  );
+}
+
+/**
+ * The hero — and the media slot.
+ *
+ * Techniques have no image field yet. Rather than leave a grey rectangle that
+ * reads as a failed download on all 466, the band carries the category mark:
+ * the tile, plus an oversized tinted watermark, as a deliberate graphic. When
+ * real imagery arrives, pass `heroImage` and it takes over the same space with
+ * no layout change — which is the point of building the slot now.
+ */
+function Hero({
+  technique,
+  code,
+  accent,
+  heroImage,
+}: {
+  technique: Technique;
+  code: string;
+  accent: string;
+  /** Not populated yet — the slot exists so imagery is a drop-in. */
+  heroImage?: string | null;
+}) {
+  return (
+    <RNView style={styles.hero}>
+      {heroImage ? (
+        <Image
+          source={{ uri: heroImage }}
+          style={StyleSheet.absoluteFill}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          transition={200}
+          alt=""
+          accessible={false}
+        />
+      ) : (
+        <RNView
+          style={[StyleSheet.absoluteFill, { backgroundColor: `${accent}14` }]}
+          accessible={false}
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+        >
+          {/* Oversized and very low contrast. Reads as texture, never as a
+              label competing with the title beside it. */}
+          <Text style={[styles.watermark, { color: `${accent}1F` }]} numberOfLines={1}>
+            {code}
+          </Text>
+        </RNView>
+      )}
+
+      {/* A scrim, not decoration. Today it keeps the title clear of the
+          watermark; the moment `heroImage` is real it is what stops white text
+          landing on a white gi. Solid rather than a gradient because
+          expo-linear-gradient isn't a dependency and one overlay doesn't
+          justify adding a native module. */}
+      <RNView style={styles.heroScrim} pointerEvents="none" />
+
+      <RNView style={styles.heroContent}>
+        <Text style={[styles.eyebrow, { color: accent }]}>{technique.category.toUpperCase()}</Text>
+        <Text style={styles.title}>{technique.name}</Text>
+        {technique.aliases.length > 0 && (
+          <Text style={styles.aliases} numberOfLines={2}>
+            Also called {technique.aliases.join(' · ')}
+          </Text>
+        )}
+      </RNView>
+    </RNView>
+  );
+}
+
+function Card({
+  title,
+  accent,
+  children,
+}: {
+  title: string;
+  accent: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <RNView style={styles.card}>
+      <RNView style={styles.cardHead}>
+        <RNView style={[styles.cardRule, { backgroundColor: accent }]} />
+        <Text style={styles.cardTitle}>{title.toUpperCase()}</Text>
+      </RNView>
+      {children}
+    </RNView>
   );
 }
 
 function Chip({ label }: { label: string }) {
   return (
-    <View style={styles.chip}>
+    <RNView style={styles.chip}>
       <Text style={styles.chipText}>{label}</Text>
-    </View>
-  );
-}
-
-function Section({ title, body }: { title: string; body: string }) {
-  return (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      <Text style={styles.body}>{body}</Text>
-    </View>
+    </RNView>
   );
 }
 
@@ -183,36 +293,41 @@ function Section({ title, body }: { title: string; body: string }) {
  * ~130 ordinary techniques as restricted when the real number is 20.
  */
 function Legality({ ruleset }: { ruleset: Ruleset }) {
+  const warn = ruleset.is_restricted;
   return (
-    <View style={[styles.section, styles.legality, ruleset.is_restricted && styles.legalityWarn]}>
-      <Text style={[styles.sectionTitle, ruleset.is_restricted && styles.legalityWarnTitle]}>
-        {ruleset.is_restricted ? 'Restricted in IBJJF competition' : 'IBJJF competition'}
-      </Text>
+    <RNView style={[styles.card, warn && styles.cardWarn]}>
+      <RNView style={styles.cardHead}>
+        <RNView style={[styles.cardRule, { backgroundColor: warn ? vola.warn : vola.textDim }]} />
+        <Text style={[styles.cardTitle, warn && { color: vola.warn }]}>
+          {warn ? 'RESTRICTED IN IBJJF COMPETITION' : 'IBJJF COMPETITION'}
+        </Text>
+      </RNView>
+
       <Text style={styles.ruleClass}>{ruleset.rule_class}</Text>
 
-      <View style={styles.divisionRow}>
+      <RNView style={styles.divisionRow}>
         <Division label="Gi" belts={ruleset.gi_allowed_belts} note={ruleset.gi_note} />
         <Division label="No-Gi" belts={ruleset.no_gi_allowed_belts} note={ruleset.no_gi_note} />
-      </View>
+      </RNView>
 
       {!!ruleset.notes && <Text style={styles.ruleNotes}>{ruleset.notes}</Text>}
-    </View>
+    </RNView>
   );
 }
 
 /**
- * An empty belt list means "this division does not apply" — a gi-only
- * technique has no no-gi belts — and must never render as "allowed at no
- * belt", which would read as prohibited. The note carries the real reason.
+ * An empty belt list means "this division does not apply" — a gi-only technique
+ * has no no-gi belts — and must never render as "allowed at no belt", which
+ * would read as prohibited. The note carries the real reason.
  */
 function Division({ label, belts, note }: { label: string; belts: string[]; note: string }) {
   return (
-    <View style={styles.division}>
-      <Text style={styles.divisionLabel}>{label}</Text>
+    <RNView style={styles.division}>
+      <Text style={styles.divisionLabel}>{label.toUpperCase()}</Text>
       <Text style={styles.divisionValue}>
         {belts.length > 0 ? belts.join(', ') : note || 'Not specified'}
       </Text>
-    </View>
+    </RNView>
   );
 }
 
@@ -229,57 +344,84 @@ function Edges({
 }) {
   if (items.length === 0) return null;
   return (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>{label}</Text>
-      <View style={styles.edgeWrap}>
+    <RNView style={styles.edgeBlock}>
+      <Text style={styles.edgeLabel}>{label.toUpperCase()}</Text>
+      <RNView style={styles.edgeWrap}>
         {items.map((raw) => {
           const hit = resolveEdge(raw, byName);
           if (!hit) {
-            // Most of these name something that isn't a library entry. Plain
-            // text, and it must LOOK like plain text.
+            // Most of these name something that isn't a library entry — 71% of
+            // next-moves, 94% of counters are prose like "establish inside
+            // ties". Plain text, and it must LOOK like plain text: a dead link
+            // is worse than honest text.
             return (
-              <Text key={raw} style={styles.edgeText}>
-                {raw}
-              </Text>
+              <RNView key={raw} style={styles.edgeFlat}>
+                <Text style={styles.edgeFlatText}>{raw}</Text>
+              </RNView>
             );
           }
-          // Show what the author wrote, EXCEPT when they wrote an id — the
-          // only form that is unreadable. Substituting the canonical name on
-          // an alias match silently rewrites the content: "Straight Armbar"
-          // became "Armbar from Closed Guard", and "Wrist control" became
-          // "Turtle Hand Fighting" — a different technique from a different
-          // position, presented as if the author had said it. 128 edges did
-          // this. The link still goes where the match points; only the label
-          // stays honest.
+          // Show what the author wrote, EXCEPT when they wrote an id — the only
+          // unreadable form. Substituting the target's canonical name on an
+          // alias match silently rewrites the content: "Straight Armbar" became
+          // "Armbar from Closed Guard", a different technique from a different
+          // position, presented as if the author had said it.
           const display = edgeKey(raw) === hit.id ? hit.name : raw;
           return (
             <Pressable
               key={raw}
               onPress={() => router.push(`/technique/${hit.id}`)}
-              style={styles.edgeHit}
+              style={styles.edgeLink}
               accessibilityRole="link"
               accessibilityLabel={`Open ${hit.name}`}
             >
-              <Text style={styles.edgeLink}>{display}</Text>
+              <Text style={styles.edgeLinkText}>{display}</Text>
+              <Text style={styles.edgeChevron}>›</Text>
             </Pressable>
           );
         })}
-      </View>
-    </View>
+      </RNView>
+    </RNView>
   );
 }
 
 const styles = StyleSheet.create({
-  scroll: { padding: 20, gap: 20, paddingBottom: 48 },
-  centre: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
+  scroll: { paddingBottom: 48 },
+  body: { padding: 20, gap: 16 },
+  centre: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 },
   error: { color: vola.danger, fontSize: 14, textAlign: 'center', lineHeight: 20 },
+  retry: { color: vola.lime, fontSize: 14, fontWeight: '600' },
 
-  hero: { gap: 4 },
-  heroTop: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  heroText: { flex: 1, gap: 3 },
-  eyebrow: { fontSize: 11, letterSpacing: 1.4, fontWeight: '700' },
-  title: { fontSize: 26, fontWeight: '700' },
-  aliases: { color: vola.textMuted, fontSize: 13, marginTop: 2 },
+  hero: {
+    minHeight: 168,
+    justifyContent: 'flex-end',
+    backgroundColor: vola.surface,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: vola.line,
+    overflow: 'hidden',
+  },
+  // Bled well off the right edge and sitting high, so it reads as texture in
+  // the corner rather than a word running through the title. At -30 it did
+  // exactly that: "SUB" crossed straight through "Armbar from Closed".
+  watermark: {
+    position: 'absolute',
+    right: -46,
+    top: -30,
+    fontSize: 132,
+    fontWeight: '900',
+    letterSpacing: -4,
+  },
+  heroScrim: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    top: '32%',
+    backgroundColor: 'rgba(8,11,18,0.55)',
+  },
+  heroContent: { padding: 20, paddingTop: 28, gap: 4 },
+  eyebrow: { fontSize: 11, letterSpacing: 1.4, fontWeight: '800' },
+  title: { fontSize: 25, fontWeight: '700', lineHeight: 30 },
+  aliases: { color: vola.textMuted, fontSize: 13, lineHeight: 18 },
 
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
@@ -292,32 +434,77 @@ const styles = StyleSheet.create({
   },
   chipText: { color: vola.textMuted, fontSize: 12, fontWeight: '600' },
 
-  section: { gap: 8 },
-  sectionTitle: { color: vola.textDim, fontSize: 11, letterSpacing: 1.2, fontWeight: '700' },
-  body: { fontSize: 15, lineHeight: 22 },
-
-  legality: {
+  card: {
     backgroundColor: vola.surface,
     borderWidth: 1,
     borderColor: vola.lineSoft,
     borderRadius: 14,
     padding: 16,
+    gap: 12,
   },
-  legalityWarn: { borderColor: vola.warn },
-  legalityWarnTitle: { color: vola.warn },
-  ruleClass: { fontSize: 15, fontWeight: '600' },
-  divisionRow: { flexDirection: 'row', gap: 16, marginTop: 4 },
-  division: { flex: 1, gap: 2 },
-  divisionLabel: { color: vola.textDim, fontSize: 11, fontWeight: '700' },
-  divisionValue: { color: vola.text, fontSize: 13 },
-  ruleNotes: { color: vola.textMuted, fontSize: 13, lineHeight: 19, marginTop: 6 },
+  cardWarn: { borderColor: `${vola.warn}66` },
+  cardHead: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  cardRule: { width: 3, height: 13, borderRadius: 2 },
+  cardTitle: { color: vola.textDim, fontSize: 11, letterSpacing: 1.2, fontWeight: '800' },
 
-  edgeWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  edgeText: { color: vola.textMuted, fontSize: 14, paddingVertical: 6 },
-  // paddingVertical rather than hitSlop: at 8px gaps, slop on both sides made
-  // adjacent links' touch regions abut, so a near-miss hit the wrong one.
-  edgeHit: { paddingVertical: 6 },
-  edgeLink: { color: vola.lime, fontSize: 14, fontWeight: '600' },
+  // Generous line height on purpose: this is read standing up, often between
+  // rounds, and cramped leading is the first thing to fail in that state.
+  prose: { fontSize: 15, lineHeight: 23, color: vola.text },
+
+  step: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  stepNum: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 1,
+  },
+  stepNumText: { fontSize: 12, fontWeight: '800' },
+  stepText: { flex: 1, fontSize: 15, lineHeight: 22, color: vola.text },
+
+  ruleClass: { fontSize: 15, fontWeight: '600' },
+  divisionRow: { flexDirection: 'row', gap: 14 },
+  division: {
+    flex: 1,
+    gap: 3,
+    backgroundColor: vola.surfaceRaised,
+    borderRadius: 10,
+    padding: 11,
+  },
+  divisionLabel: { color: vola.textDim, fontSize: 10, fontWeight: '800', letterSpacing: 0.8 },
+  divisionValue: { color: vola.text, fontSize: 13, lineHeight: 18 },
+  ruleNotes: { color: vola.textMuted, fontSize: 13, lineHeight: 19 },
+
+  edgeBlock: { gap: 9 },
+  edgeLabel: { color: vola.textDim, fontSize: 11, letterSpacing: 1.2, fontWeight: '800' },
+  edgeWrap: { gap: 7 },
+  // Full-width rows rather than wrapped pills: technique names are long, pills
+  // truncated them, and a 44pt row is a far easier target than an inline word.
+  edgeLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    backgroundColor: vola.surface,
+    borderWidth: 1,
+    borderColor: `${vola.lime}3D`,
+    borderRadius: 10,
+    paddingHorizontal: 13,
+    paddingVertical: 11,
+  },
+  edgeLinkText: { flex: 1, color: vola.lime, fontSize: 14, fontWeight: '600' },
+  edgeChevron: { color: vola.lime, fontSize: 17, marginTop: -2 },
+  edgeFlat: {
+    backgroundColor: vola.surface,
+    borderWidth: 1,
+    borderColor: vola.lineSoft,
+    borderRadius: 10,
+    paddingHorizontal: 13,
+    paddingVertical: 11,
+  },
+  edgeFlatText: { color: vola.textMuted, fontSize: 14, lineHeight: 19 },
 
   footnote: { color: vola.textDim, fontSize: 12, lineHeight: 18 },
 });

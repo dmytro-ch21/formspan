@@ -9,7 +9,8 @@ const API_BASE = `${API_URL}/v1`;
 export type Sport = "strength" | "running" | "bjj";
 export type Goal = "general" | "powerlifting" | "hypertrophy" | "endurance";
 export type Visibility = "private" | "public";
-export type LoadType = "weight_reps" | "reps" | "time" | "distance" | "distance_time";
+export type LoadType =
+  "weight_reps" | "reps" | "time" | "distance" | "distance_time";
 
 export type Media = {
   kind: string;
@@ -115,9 +116,13 @@ export const FIELD_KEY: Record<TargetField, keyof WorkoutItem> = {
   distance: "target_distance_m",
 };
 
-export function summariseTargets(i: WorkoutItem, units: UnitSystem = "metric"): string {
+export function summariseTargets(
+  i: WorkoutItem,
+  units: UnitSystem = "metric",
+): string {
   const parts: string[] = [];
-  if (i.target_sets && i.target_reps) parts.push(`${i.target_sets} × ${i.target_reps}`);
+  if (i.target_sets && i.target_reps)
+    parts.push(`${i.target_sets} × ${i.target_reps}`);
   else if (i.target_sets) parts.push(`${i.target_sets} sets`);
   else if (i.target_reps) parts.push(`${i.target_reps} reps`);
   if (i.target_weight_kg) parts.push(formatWeight(i.target_weight_kg, units));
@@ -149,8 +154,14 @@ export function emptyItem(exerciseID: string, position: number): WorkoutItem {
   };
 }
 
-export function pickImage(e: Exercise, prefer: "thumbnail" | "demo"): string | null {
-  const order = prefer === "thumbnail" ? ["thumbnail", "demo", "start"] : ["demo", "start", "thumbnail"];
+export function pickImage(
+  e: Exercise,
+  prefer: "thumbnail" | "demo",
+): string | null {
+  const order =
+    prefer === "thumbnail"
+      ? ["thumbnail", "demo", "start"]
+      : ["demo", "start", "thumbnail"];
   for (const kind of order) {
     const hit = e.media.find((m) => m.kind === kind && m.url);
     if (hit) return hit.url;
@@ -158,7 +169,8 @@ export function pickImage(e: Exercise, prefer: "thumbnail" | "demo"): string | n
   return null;
 }
 
-export type SetType = "warmup" | "working" | "backoff" | "drop" | "amrap" | "failure";
+export type SetType =
+  "warmup" | "working" | "backoff" | "drop" | "amrap" | "failure";
 
 export const SET_TYPES: { key: SetType; label: string; short: string }[] = [
   { key: "warmup", label: "Warm-up", short: "W" },
@@ -203,7 +215,6 @@ export type Session = {
   created_at: string;
   updated_at: string;
 };
-
 
 /**
  * The outcomes of the progression rule.
@@ -317,7 +328,11 @@ export const MEASURE_KEY: Record<Measure, keyof LoggedSet> = {
   distance: "distance_m",
 };
 
-export function emptySet(exerciseID: string, position: number, from?: LoggedSet): LoggedSet {
+export function emptySet(
+  exerciseID: string,
+  position: number,
+  from?: LoggedSet,
+): LoggedSet {
   return {
     exercise_id: exerciseID,
     position,
@@ -427,7 +442,8 @@ export function similarTo(base: Exercise, all: Exercise[]): Exercise[] {
 
 export function describeSet(s: LoggedSet): string {
   const parts: string[] = [];
-  if (s.reps != null && s.weight_kg != null) parts.push(`${s.reps} × ${s.weight_kg}kg`);
+  if (s.reps != null && s.weight_kg != null)
+    parts.push(`${s.reps} × ${s.weight_kg}kg`);
   else if (s.reps != null) parts.push(`${s.reps} reps`);
   else if (s.weight_kg != null) parts.push(`${s.weight_kg}kg`);
   if (s.seconds != null) parts.push(`${s.seconds}s`);
@@ -511,17 +527,36 @@ export async function listWorkouts(
   scope: "mine" | "shared",
   signal?: AbortSignal,
 ): Promise<Workout[]> {
-  const b = await request<{ workouts: Workout[] }>(getToken, `/workouts?scope=${scope}`, {}, signal);
+  const b = await request<{ workouts: Workout[] }>(
+    getToken,
+    `/workouts?scope=${scope}`,
+    {},
+    signal,
+  );
   return b.workouts ?? [];
 }
 
-export async function getWorkout(getToken: Token, id: string, signal?: AbortSignal): Promise<Workout> {
-  return request<Workout>(getToken, `/workouts/${encodeURIComponent(id)}`, {}, signal);
+export async function getWorkout(
+  getToken: Token,
+  id: string,
+  signal?: AbortSignal,
+): Promise<Workout> {
+  return request<Workout>(
+    getToken,
+    `/workouts/${encodeURIComponent(id)}`,
+    {},
+    signal,
+  );
 }
 
 export async function createWorkout(
   getToken: Token,
-  input: { name: string; sport: Sport; goal: Goal | null; visibility: Visibility },
+  input: {
+    name: string;
+    sport: Sport;
+    goal: Goal | null;
+    visibility: Visibility;
+  },
 ): Promise<Workout> {
   // Client-generated ID keeps create idempotent on retry, matching the
   // contract the offline mobile client relies on.
@@ -536,14 +571,23 @@ export async function replaceItems(
   id: string,
   items: WorkoutItem[],
 ): Promise<Workout> {
-  return request<Workout>(getToken, `/workouts/${encodeURIComponent(id)}/items`, {
-    method: "PUT",
-    body: JSON.stringify({ items }),
-  });
+  return request<Workout>(
+    getToken,
+    `/workouts/${encodeURIComponent(id)}/items`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ items }),
+    },
+  );
 }
 
-export async function deleteWorkout(getToken: Token, id: string): Promise<void> {
-  await request<void>(getToken, `/workouts/${encodeURIComponent(id)}`, { method: "DELETE" });
+export async function deleteWorkout(
+  getToken: Token,
+  id: string,
+): Promise<void> {
+  await request<void>(getToken, `/workouts/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
 }
 
 /**
@@ -622,13 +666,20 @@ export async function setExerciseUnit(
   exerciseID: string,
   unit: UnitSystemPref | null,
 ): Promise<void> {
-  await request<void>(getToken, `/profile/exercise-units/${encodeURIComponent(exerciseID)}`, {
-    method: "PUT",
-    body: JSON.stringify({ unit_system: unit }),
-  });
+  await request<void>(
+    getToken,
+    `/profile/exercise-units/${encodeURIComponent(exerciseID)}`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ unit_system: unit }),
+    },
+  );
 }
 
-export function getProfile(getToken: Token, signal?: AbortSignal): Promise<Profile> {
+export function getProfile(
+  getToken: Token,
+  signal?: AbortSignal,
+): Promise<Profile> {
   return request<Profile>(getToken, "/profile", {}, signal);
 }
 
@@ -650,7 +701,10 @@ export async function updateUnitSystem(
     return await patch();
   } catch (err) {
     if (!(err instanceof ApiError) || err.status !== 404) throw err;
-    await request<Profile>(getToken, "/profile", { method: "POST", body: JSON.stringify({}) });
+    await request<Profile>(getToken, "/profile", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
     return patch();
   }
 }
@@ -695,10 +749,19 @@ export async function listSessionsPage(
   opts: SessionQuery = {},
   signal?: AbortSignal,
 ): Promise<SessionPage> {
-  const b = await request<SessionPage>(getToken, `/sessions${sessionQS(opts)}`, {}, signal);
-  return { sessions: b.sessions ?? [], total: b.total ?? 0, limit: b.limit ?? 0, offset: b.offset ?? 0 };
+  const b = await request<SessionPage>(
+    getToken,
+    `/sessions${sessionQS(opts)}`,
+    {},
+    signal,
+  );
+  return {
+    sessions: b.sessions ?? [],
+    total: b.total ?? 0,
+    limit: b.limit ?? 0,
+    offset: b.offset ?? 0,
+  };
 }
-
 
 export type HistoryTotals = {
   sessions: number;
@@ -760,7 +823,12 @@ export async function getSession(
 
 export async function startSession(
   getToken: Token,
-  input: { sport: Sport; name: string; workout_id?: string | null; sets?: LoggedSet[] },
+  input: {
+    sport: Sport;
+    name: string;
+    workout_id?: string | null;
+    sets?: LoggedSet[];
+  },
 ): Promise<{ session: Session; volume: Volume }> {
   // Client-generated ID, so starting a session is idempotent on retry —
   // the same contract the offline mobile client relies on.
@@ -795,8 +863,13 @@ export async function finishSession(
   });
 }
 
-export async function deleteSession(getToken: Token, id: string): Promise<void> {
-  await request<void>(getToken, `/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
+export async function deleteSession(
+  getToken: Token,
+  id: string,
+): Promise<void> {
+  await request<void>(getToken, `/sessions/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
 }
 
 export async function listExercises(
@@ -1005,6 +1078,45 @@ export function edgeKey(label: string): string {
   return label.trim().toLowerCase().replace(/_/g, "-");
 }
 
+/**
+ * Split a technique's description into execution steps.
+ *
+ * The library authors `description` as ONE sentence containing a
+ * comma-separated sequence — "Control wrist and elbow, break posture, pivot
+ * across the shoulder, clamp the knees, and extend the hips through the elbow
+ * line." That is five instructions wearing a paragraph.
+ *
+ * Measured across all 466 before being built on: 458 (98%) split into 2+ steps,
+ * clustered at 3–4, averaging 30 characters each. The remaining 8 return `[]`
+ * and the caller renders the original prose — a one-item numbered list looks
+ * like a bug.
+ *
+ * Kept byte-identical to the mobile implementation in
+ * `apps/mobile/lib/techniques.ts`; the two screens must not disagree about
+ * where a step ends.
+ */
+export function executionSteps(description: string): string[] {
+  const raw = (description || "").trim();
+  if (!raw) return [];
+
+  const parts = raw
+    .split(/,\s*(?:and\s+)?|(?<=\.)\s+/)
+    .map((p) => p.trim().replace(/\.$/, ""))
+    .filter(Boolean);
+
+  // Length-only folding. An earlier version also folded anything under three
+  // words and swallowed real instructions: "break posture" is a step, not a
+  // tail.
+  const merged: string[] = [];
+  for (const p of parts) {
+    if (merged.length && p.length < 10) merged[merged.length - 1] += `, ${p}`;
+    else merged.push(p);
+  }
+
+  if (merged.length < 2) return [];
+  return merged.map((p) => p.charAt(0).toUpperCase() + p.slice(1));
+}
+
 export type RecordKind =
   | "heaviest_weight"
   | "estimated_1rm"
@@ -1027,7 +1139,10 @@ export type PersonalRecord = {
   is_recent: boolean;
 };
 
-export type ExerciseRecords = { exercise_id: string; records: PersonalRecord[] };
+export type ExerciseRecords = {
+  exercise_id: string;
+  records: PersonalRecord[];
+};
 
 export const RECORD_LABEL: Record<RecordKind, string> = {
   heaviest_weight: "Heaviest",
@@ -1051,7 +1166,8 @@ export async function fetchRecords(
 ): Promise<ExerciseRecords[]> {
   const p = new URLSearchParams();
   if (opts.scope) p.set("scope", opts.scope);
-  if (opts.exerciseIDs?.length) p.set("exercise_ids", opts.exerciseIDs.join(","));
+  if (opts.exerciseIDs?.length)
+    p.set("exercise_ids", opts.exerciseIDs.join(","));
   const query = p.toString();
   const b = await request<{ records: ExerciseRecords[] }>(
     getToken,
@@ -1066,7 +1182,12 @@ export async function fetchPinnedExercises(
   getToken: Token,
   signal?: AbortSignal,
 ): Promise<string[]> {
-  const b = await request<{ exercise_ids: string[] }>(getToken, "/records/pinned", {}, signal);
+  const b = await request<{ exercise_ids: string[] }>(
+    getToken,
+    "/records/pinned",
+    {},
+    signal,
+  );
   return b.exercise_ids ?? [];
 }
 
@@ -1074,9 +1195,13 @@ export async function setPinnedExercises(
   getToken: Token,
   exerciseIDs: string[],
 ): Promise<string[]> {
-  const b = await request<{ exercise_ids: string[] }>(getToken, "/records/pinned", {
-    method: "PUT",
-    body: JSON.stringify({ exercise_ids: exerciseIDs }),
-  });
+  const b = await request<{ exercise_ids: string[] }>(
+    getToken,
+    "/records/pinned",
+    {
+      method: "PUT",
+      body: JSON.stringify({ exercise_ids: exerciseIDs }),
+    },
+  );
   return b.exercise_ids ?? [];
 }

@@ -5,6 +5,7 @@ import { useAuth } from "@clerk/nextjs";
 
 import {
   edgeKey,
+  executionSteps,
   getTechnique,
   indexTechniques,
   listExercises,
@@ -711,6 +712,7 @@ function TechniquePanel({
   }
 
   const [code, accent] = categoryBadge(t.category);
+  const steps = executionSteps(t.description);
   const rs = t.ibjjf ?? null;
 
   return (
@@ -738,8 +740,34 @@ function TechniquePanel({
       </dl>
 
       {/* The mechanics and the decision are separate sections because they
-          answer separate questions. Merged, neither reads well. */}
-      {t.description && <Section title="How it works">{t.description}</Section>}
+          answer separate questions. Merged, neither reads well.
+
+          And the mechanics are a *sequence*, not a paragraph — the library just
+          authors them as one comma-separated sentence. Same split as the phone,
+          same 8-of-466 prose fallback, so the two screens never disagree about
+          where a step ends. */}
+      {steps.length > 0 ? (
+        <div className="flex flex-col gap-2 border-t border-line-soft pt-4">
+          <p className="eyebrow">How it works</p>
+          <ol className="flex flex-col gap-2">
+            {steps.map((s, i) => (
+              <li key={s} className="flex items-start gap-3">
+                <span
+                  aria-hidden="true"
+                  className={`mt-px flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[0.6875rem] font-bold ${ACCENT_CLASS[accent].tile} ${ACCENT_CLASS[accent].text}`}
+                >
+                  {i + 1}
+                </span>
+                <span className="text-sm leading-relaxed text-text-muted">
+                  {s}
+                </span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      ) : (
+        t.description && <Section title="How it works">{t.description}</Section>
+      )}
       {t.when_to_use && (
         <Section title="When to use it">{t.when_to_use}</Section>
       )}

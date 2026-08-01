@@ -3026,6 +3026,68 @@ data, and staging needs a sign-in. The technique summaries are cached for the
 tab's lifetime with no invalidation, which is right for reference content and
 wrong the moment techniques become editable.
 
+## 2026-07-31 — The technique detail screen: "just a bunch of text"
+
+Accurate description of what shipped. Eight stacked sections in identical type,
+no visual anchor, and the execution instructions delivered as a single
+121-character sentence. Structurally correct, unreadable in a gym.
+
+### The fix was in the data, not the styling
+
+`description` is authored as ONE comma-separated sentence — "Control wrist and
+elbow, break posture, pivot across the shoulder, clamp the knees, and extend
+the hips through the elbow line." That is **five instructions wearing a
+paragraph**, and it is most of why the screen read as a wall.
+
+`executionSteps` splits it. Measured across all 466 *before* any UI was built:
+458 (98%) yield 2+ steps, clustered at 3–4, averaging 30 characters, none under
+10 or over 110. The remaining 8 fall back to prose, because a one-item numbered
+list looks like a bug.
+
+The fragment-folding rule needed a correction that only showed up on screen:
+the first version folded anything under three words and silently merged "Control
+wrist and elbow" with "break posture". **"Break posture" is a step, not a
+tail.** Length alone separates fragments from instructions on this corpus.
+
+### An idea that measurement killed
+
+The obvious companion was a timing panel — `when_to_use` reads "Use from Closed
+Guard **after** the elbow is isolated… Apply it **before** the opponent
+completes stack pass", which looks like an entry/exit window. Only **33%** of
+the library has both halves, and the actual samples don't fit the frame at all
+("Use as the default standing posture whenever neither athlete has dominant
+grips"). Building it would have misrepresented two-thirds of the library. It
+was not built.
+
+### The hero is a media slot, deliberately empty
+
+Images are coming; techniques have no image field yet. Rather than defer the
+layout or ship a grey rectangle that reads as a failed download on all 466, the
+hero is built as the slot and filled meanwhile with the category mark — an
+oversized, very low-contrast watermark plus the category eyebrow. `heroImage`
+is the one prop that turns it into a photo, with no layout change.
+
+The scrim over the lower two-thirds is not decoration: today it keeps the title
+clear of the watermark, and the moment real imagery lands it is what stops white
+text sitting on a white gi. Solid rather than a gradient, because
+`expo-linear-gradient` isn't a dependency and one overlay doesn't justify a
+native module.
+
+### Caught by looking, twice
+
+The first render put the category tile bottom-aligned against a tall text block,
+so it sat beside the *aliases* rather than the title, and the watermark ran
+straight through "Armbar from Closed". Neither is visible to a typechecker.
+Verifying meant a throwaway route rendering the **real** components against real
+library data, deep-linked into the Simulator — `/technique/[id]` needs auth, so
+it cannot be opened directly.
+
+### Parity
+
+The web panel got the same split from an identical parser, verified
+comment-stripped-identical to the mobile one so the two screens can never
+disagree about where a step ends.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

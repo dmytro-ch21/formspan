@@ -1579,3 +1579,32 @@ than replacing it.
 - Techniques are global reference content — the module-level cache surviving a
   user switch is correct, not a leak. Assert `/v1/techniques` applies no user
   scoping.
+
+## Technique detail readability (mobile `/technique/[id]`, web detail panel)
+
+### Happy path
+
+- Opening a technique shows **numbered execution steps**, not a paragraph.
+  Regression guard: "Armbar from Closed Guard" renders 5 steps beginning
+  "Control wrist and elbow" and "Break posture" as *separate* steps — merging
+  those two was a real bug in the first implementation.
+- The hero shows the category eyebrow and name over the category watermark, and
+  the title is legible against it (the scrim exists for this).
+- Sections sit on distinct surfaces: How it works, When to use it, IBJJF, and
+  the three graph lists are visually separable at a glance.
+
+### Edge cases
+
+- A technique whose description does not split into 2+ steps (8 of 466) renders
+  the original prose under the same heading — **never** a one-item list.
+- `executionSteps` must produce zero steps under 10 characters across the whole
+  library; a stray "and" as its own numbered step is a failure.
+- The mobile and web parsers must stay logically identical — a step boundary
+  that differs between platforms is a content difference, not a styling one.
+- Sections with no content still do not render (`video_reference` is empty in
+  all 466).
+
+### Media
+
+- `heroImage` is not populated yet. When it is, the hero must swap to the photo
+  with no layout shift, and the title must stay legible over a light image.
