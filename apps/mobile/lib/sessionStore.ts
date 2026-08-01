@@ -2,13 +2,14 @@ import { randomUUID } from 'expo-crypto';
 import type { TokenGetter } from './useAuthToken';
 import type * as SQLite from 'expo-sqlite';
 
-import { ApiError, isOffline, isPermanentRejection } from './apiError';
+import { ApiError, isNotFound, isOffline, isPermanentRejection } from './apiError';
 import { getDb } from './db';
 import type { Exercise } from './exercises';
 import type { Workout, WorkoutItem } from './workouts';
 import {
   finishSession as pushFinish,
   getSession as pullSession,
+  deleteSession,
   listSessions as pullSessions,
   replaceSets as pushSets,
   startSession as pushCreate,
@@ -58,6 +59,8 @@ type Row = {
   sets_json: string;
   dirty: number;
   remote: number;
+  /** Set once the athlete deleted it; the row survives until the server agrees. */
+  deleted_at: string | null;
   updated_at: string;
 };
 
@@ -175,7 +178,7 @@ export async function readLocalSession(
 ): Promise<LocalSession | null> {
   const db = await getDb();
   const row = await db.getFirstAsync<Row>(
-    `SELECT * FROM local_sessions WHERE id = ? AND user_id = ?`,
+    `SELECT * FROM local_sessions WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
     id,
     userID,
   );
@@ -185,7 +188,8 @@ export async function readLocalSession(
 export async function listLocalSessions(userID: string, limit = 20): Promise<LocalSession[]> {
   const db = await getDb();
   const rows = await db.getAllAsync<Row>(
-    `SELECT * FROM local_sessions WHERE user_id = ?
+    `SELECT * FROM local_sessions
+     WHERE user_id = ? AND deleted_at IS NULL
      ORDER BY started_at DESC LIMIT ?`,
     userID,
     limit,
@@ -222,9 +226,53 @@ export async function finishLocalSession(userID: string, id: string): Promise<vo
   );
 }
 
+/**
+ * Delete a session — as a tombstone, not a hard delete.
+ *
+ * Hard-deleting the row is what made an offline delete undo itself. The row
+ * vanished locally, the server still held it, and the next pull fetched it
+ * straight back. Worse: with the row gone there was nothing left carrying
+ * "this needs deleting", so the intent was lost the moment the fire-and-forget
+ * `DELETE /v1/sessions/{id}` failed — which, offline, it always does.
+ *
+ * So the row stays, marked and dirty, and the ordinary push path carries the
+ * delete out whenever the network allows. Reads filter tombstones, so it is
+ * invisible from the moment the athlete taps Delete.
+ *
+ * **A session the server has never seen is hard-deleted immediately.** There
+ * is nothing to tell the server about, and leaving a tombstone for it would
+ * mean an outbox entry that can never be satisfied.
+ */
 export async function deleteLocalSession(userID: string, id: string): Promise<void> {
   const db = await getDb();
-  await db.runAsync(`DELETE FROM local_sessions WHERE id = ? AND user_id = ?`, id, userID);
+  const row = await db.getFirstAsync<{ remote: number }>(
+    `SELECT remote FROM local_sessions WHERE id = ? AND user_id = ?`,
+    id,
+    userID,
+  );
+  if (!row) return;
+  if (row.remote === 0) {
+    await db.runAsync(`DELETE FROM local_sessions WHERE id = ? AND user_id = ?`, id, userID);
+    return;
+  }
+  await db.runAsync(
+    `UPDATE local_sessions SET deleted_at = ?, dirty = 1, updated_at = ?
+     WHERE id = ? AND user_id = ?`,
+    new Date().toISOString(),
+    new Date().toISOString(),
+    id,
+    userID,
+  );
+}
+
+/** Ids this device has deleted but the server hasn't been told about yet. */
+export async function tombstonedIDs(userID: string): Promise<Set<string>> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<{ id: string }>(
+    `SELECT id FROM local_sessions WHERE user_id = ? AND deleted_at IS NOT NULL`,
+    userID,
+  );
+  return new Set(rows.map((r) => r.id));
 }
 
 export async function countPendingSessions(userID: string): Promise<number> {
@@ -277,6 +325,23 @@ async function pushRow(
   userID: string,
   getToken: TokenGetter,
 ): Promise<void> {
+  // A tombstone is a delete, not an update — carry it out and drop the row.
+  //
+  // A 404 counts as success: the server agreeing it isn't there is precisely
+  // the state we were asking for. Without that, a session deleted twice (or
+  // deleted on the web first) would keep a tombstone forever, so `pending`
+  // never reached 0 and the retry ladder ground on for the life of the
+  // install.
+  if (row.deleted_at) {
+    try {
+      await deleteSession(getToken, row.id);
+    } catch (err) {
+      if (!isNotFound(err)) throw err;
+    }
+    await db.runAsync(`DELETE FROM local_sessions WHERE id = ? AND user_id = ?`, row.id, userID);
+    return;
+  }
+
   // Not `toSession`, which papers over a corrupt blob with an empty list.
   // `pushSets` *replaces* the server's list, so pushing that empty array
   // would turn a local read failure into permanent remote deletion.
@@ -466,7 +531,13 @@ async function runSync(
   // diagnosis is recorded here so it is not re-derived.
   try {
     const remote = await pullSessions(getToken, { limit: 20 });
+    // Ids this device has deleted but hasn't managed to tell the server about.
+    // The server still lists them, so without this the pull writes each one
+    // straight back — the exact resurrection tombstones exist to stop. Read
+    // once per run rather than per row.
+    const buried = await tombstonedIDs(userID);
     for (const r of remote) {
+      if (buried.has(r.id)) continue;
       const local = await db.getFirstAsync<{ dirty: number; updated_at: string }>(
         `SELECT dirty, updated_at FROM local_sessions WHERE id = ? AND user_id = ?`,
         r.id,
@@ -502,6 +573,23 @@ export async function hydrateSession(
   id: string,
   getToken: TokenGetter,
 ): Promise<LocalSession | null> {
+  // Never hydrate something this device has deleted.
+  //
+  // `readLocalSession` filters tombstones, so a screen opened on a deleted id
+  // finds nothing locally and falls through to here — which would fetch the
+  // server's copy and upsert it with `dirty = 0`. The row would stay hidden
+  // (reads filter it), but the tombstone would no longer be dirty, so the
+  // push would never carry the delete out. A delete that silently never
+  // happens is worse than one that visibly fails.
+  const db = await getDb();
+  const buried = await db.getFirstAsync<{ id: string }>(
+    `SELECT id FROM local_sessions
+     WHERE id = ? AND user_id = ? AND deleted_at IS NOT NULL`,
+    id,
+    userID,
+  );
+  if (buried) return null;
+
   try {
     const { session } = await pullSession(getToken, id);
     await upsert({ ...session, dirty: false }, userID, false, true);
