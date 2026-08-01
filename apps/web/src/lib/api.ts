@@ -817,6 +817,194 @@ export async function listExercises(
   return b.exercises ?? [];
 }
 
+/* ── BJJ technique library ─────────────────────────────────────────────── */
+
+export type Ruleset = {
+  id: string;
+  age_scope: string;
+  rule_class: string;
+  /** Empty means this division doesn't apply, NOT "allowed at no belt". */
+  gi_allowed_belts: string[];
+  gi_note: string;
+  no_gi_allowed_belts: string[];
+  no_gi_note: string;
+  /**
+   * A genuine restriction, as opposed to the shape of IBJJF's divisions.
+   * Trust this field — do NOT infer restriction by counting belts. Adult no-gi
+   * has no white belt division, so a no-gi list of Blue/Purple/Brown/Black is
+   * the baseline; counting marks ~130 ordinary techniques as restricted when
+   * only 20 are.
+   */
+  is_restricted: boolean;
+  notes: string;
+  sources: string[];
+};
+
+export type TechniqueSummary = {
+  id: string;
+  name: string;
+  aliases: string[];
+  category: string;
+  position: string;
+  position_detail: string;
+  gi_no_gi: string;
+  /** Commonly taught from — an observation, never a gate. */
+  typical_belt: string;
+  ibjjf_ruleset_id: string;
+};
+
+export type Technique = TechniqueSummary & {
+  /** The mechanics. */
+  description: string;
+  /** The decision: when the mechanics apply. */
+  when_to_use: string;
+  setup_from: string[];
+  common_next_moves: string[];
+  common_counters: string[];
+  /** Empty for every technique in the current library. */
+  video_reference: string;
+  source_notes: string;
+  ibjjf?: Ruleset | null;
+};
+
+/**
+ * The whole library, unfiltered and cached for the tab's lifetime.
+ *
+ * 466 summaries are ~65 KB; full rows would be ~274 KB and carry prose no grid
+ * can show. Fetching once makes search and filtering local, which is what lets
+ * the desktop grid update as you type without a request per keystroke.
+ *
+ * Failures are not cached — a null cache retries, an empty array would look
+ * like a library with nothing in it.
+ */
+let techniqueCache: TechniqueSummary[] | null = null;
+let rulesetCache: Map<string, Ruleset> | null = null;
+
+export async function listTechniques(
+  getToken: Token,
+  signal?: AbortSignal,
+): Promise<TechniqueSummary[]> {
+  if (techniqueCache) return techniqueCache;
+  const b = await request<{ techniques: TechniqueSummary[] }>(
+    getToken,
+    "/techniques",
+    {},
+    signal,
+  );
+  // Normalised at the parse boundary: a server predating the enrichment omits
+  // these, and `undefined.length` in a render is a blank page rather than a
+  // degraded one. That is exactly the shape of a staged rollout.
+  techniqueCache = (b.techniques ?? []).map((t) => ({
+    ...t,
+    aliases: t.aliases ?? [],
+    position_detail: t.position_detail ?? "",
+    typical_belt: t.typical_belt ?? "",
+    ibjjf_ruleset_id: t.ibjjf_ruleset_id ?? "",
+  }));
+  return techniqueCache;
+}
+
+export async function getTechnique(
+  getToken: Token,
+  id: string,
+  signal?: AbortSignal,
+): Promise<Technique> {
+  const t = await request<Technique>(
+    getToken,
+    `/techniques/${encodeURIComponent(id)}`,
+    {},
+    signal,
+  );
+  return {
+    ...t,
+    aliases: t.aliases ?? [],
+    setup_from: t.setup_from ?? [],
+    common_next_moves: t.common_next_moves ?? [],
+    common_counters: t.common_counters ?? [],
+    description: t.description ?? "",
+    when_to_use: t.when_to_use ?? "",
+    video_reference: t.video_reference ?? "",
+    source_notes: t.source_notes ?? "",
+    typical_belt: t.typical_belt ?? "",
+    position_detail: t.position_detail ?? "",
+    ibjjf_ruleset_id: t.ibjjf_ruleset_id ?? "",
+  };
+}
+
+/**
+ * Rulesets, fetched at most once. A missing legality badge must never stop a
+ * technique being read, so a failure yields an empty map rather than throwing.
+ */
+export async function listRulesets(
+  getToken: Token,
+  signal?: AbortSignal,
+): Promise<Map<string, Ruleset>> {
+  if (rulesetCache) return rulesetCache;
+  try {
+    const b = await request<{ rulesets: Ruleset[] }>(
+      getToken,
+      "/techniques/rulesets",
+      {},
+      signal,
+    );
+    rulesetCache = new Map((b.rulesets ?? []).map((r) => [r.id, r]));
+    return rulesetCache;
+  } catch {
+    return new Map();
+  }
+}
+
+/**
+ * Local search across name, aliases and position.
+ *
+ * Aliases matter more than they look: half this library is known by two names,
+ * and someone searching "scarf hold" will never find "Kesa-Gatame Escape"
+ * without them.
+ */
+export function searchTechniques(
+  list: TechniqueSummary[],
+  query: string,
+): TechniqueSummary[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return list;
+  return list.filter(
+    (t) =>
+      t.name.toLowerCase().includes(q) ||
+      t.aliases.some((a) => a.toLowerCase().includes(q)) ||
+      t.position.toLowerCase().includes(q),
+  );
+}
+
+/**
+ * Index every handle a graph edge might be written with: id, name, alias.
+ *
+ * The id keys are a back-compat shim and still load-bearing: `setup_from` used
+ * to store ids (`grappling_stance_motion`), and a server that has not been
+ * re-seeded still serves that shape. Ids are stored hyphenated and were written
+ * underscored, hence `edgeKey`'s swap.
+ *
+ * Insertion order is deliberate — ids, then names, then aliases, with aliases
+ * never overwriting. A name is a better answer than someone else's alias.
+ */
+export function indexTechniques(
+  list: TechniqueSummary[],
+): Map<string, TechniqueSummary> {
+  const m = new Map<string, TechniqueSummary>();
+  for (const t of list) m.set(t.id.toLowerCase(), t);
+  for (const t of list) m.set(t.name.toLowerCase(), t);
+  for (const t of list) {
+    for (const a of t.aliases) {
+      if (!m.has(a.toLowerCase())) m.set(a.toLowerCase(), t);
+    }
+  }
+  return m;
+}
+
+/** Normalise an edge label to the form the index is keyed on. */
+export function edgeKey(label: string): string {
+  return label.trim().toLowerCase().replace(/_/g, "-");
+}
+
 export type RecordKind =
   | "heaviest_weight"
   | "estimated_1rm"

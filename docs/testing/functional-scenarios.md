@@ -1534,3 +1534,48 @@ guard against regressing to.
 - Techniques are global reference content, identical for every user — the
   module-level summary cache surviving a user switch is correct, not a leak.
   Assert the API applies no user scoping to `/v1/techniques`.
+
+## Unified Library on web (`apps/web`, `/dashboard/library`)
+
+Domain: the same one library as the phone — exercise catalog plus the 466 BJJ
+techniques in a single alphabetical grid, one search box, one set of sport
+chips. The wide-screen difference is the detail panel beside the grid rather
+than replacing it.
+
+### Happy path
+
+- The grid shows both kinds. "armbar" returns techniques, "bench" returns
+  exercises, from one box.
+- Every card draws a tile: photo when present, otherwise a three-letter code.
+  No card is text-only, in **either** theme — regression guard for the
+  achromatic tile that was invisible on white.
+- The **BJJ** chip returns techniques *and* the BJJ drills, never drills alone.
+- Under BJJ, position chips appear; **Mount** returns Mount-Top and
+  Mount-Bottom (family match). Leaving BJJ hides the chips *and* clears the
+  filter.
+- Selecting a technique opens the panel with description, when-to-use, the
+  gi/no-gi legality table and all three edge lists.
+- **Clicking a resolved edge swaps the panel and leaves the grid, its scroll
+  position and the search untouched.** This is the whole reason the web layout
+  differs from the phone's; assert the search box still holds its query.
+- `/` focuses search; `Escape` closes the panel.
+
+### Edge cases & errors
+
+- Techniques fail, exercises succeed → exercise cards still render, with a
+  separate "BJJ techniques couldn't load" message carrying a **working** retry.
+- Neither loaded → no "Nothing here yet"; an empty state may only claim
+  emptiness after a successful read.
+- A 10s timeout on the technique fetch surfaces the retry rather than leaving
+  that half silently absent.
+- Selecting a technique whose detail fetch fails shows an honest panel error,
+  not a blank one.
+- Rapidly selecting several techniques must not paint an earlier one's body
+  under a later one's title (the panel is keyed on id and remounts).
+
+### Auth / security
+
+- Signed out, `/dashboard/library` redirects to Clerk sign-in (`proxy.ts`).
+- Techniques are global reference content — the module-level cache surviving a
+  user switch is correct, not a leak. Assert `/v1/techniques` applies no user
+  scoping.

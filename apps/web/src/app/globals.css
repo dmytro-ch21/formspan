@@ -57,6 +57,13 @@
   --c-warn: #b06a00;
   --c-danger: #c0392b;
 
+  /* The third categorical hue, for Library tiles. Stepped per mode rather than
+     shared: validated against THIS surface (#ffffff) alongside danger and lime
+     — all six checks pass, worst adjacent pair ΔE 8.7 CVD / 27.1 normal. The
+     CVD figure sits in the band that is only legal with secondary encoding,
+     which the tile's three-letter code provides. */
+  --c-info: #1f6feb;
+
   color-scheme: light;
 }
 
@@ -86,6 +93,11 @@
   --c-warn: #ffb020;
   --c-danger: #ff6b6b;
 
+  /* Dark step of the same hue; validated against #10151f with this mode's
+     danger and lime — worst adjacent pair ΔE 21.7 CVD / 35.6 normal. Not the
+     light value: a mid-blue that reads on white disappears on #10151f. */
+  --c-info: #6bb6ff;
+
   color-scheme: dark;
 }
 
@@ -112,6 +124,7 @@
   --color-navy: var(--c-navy);
   --color-warn: var(--c-warn);
   --color-danger: var(--c-danger);
+  --color-info: var(--c-info);
 
   --font-display: var(--font-barlow-condensed), var(--font-barlow), system-ui;
   --font-body: var(--font-barlow), system-ui;
