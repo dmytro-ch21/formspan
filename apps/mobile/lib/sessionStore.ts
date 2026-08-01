@@ -542,6 +542,104 @@ function classify(err: unknown): SyncErrorKind {
 }
 
 /**
+ * Record — or clear — why one row could not sync.
+ *
+ * Only PERMANENT rejections are stored. A transient failure is the ordinary
+ * state of a phone in a basement, and writing "Network request failed" onto
+ * every row would turn a repair list into a list of everything you have ever
+ * logged offline. What belongs here is the row the server will refuse
+ * forever, which is the only kind a person can act on.
+ *
+ * Cleared on success, so a row that was refused and later accepted (the
+ * server was fixed, the workout it referenced finally landed) stops being
+ * reported as broken.
+ */
+async function noteRowError(
+  db: SQLite.SQLiteDatabase,
+  table: 'local_sessions' | 'workout_cache',
+  id: string,
+  userID: string,
+  err: unknown,
+): Promise<void> {
+  if (err !== null && !isPermanentRejection(err)) return;
+  const message = err === null ? null : err instanceof Error ? err.message : String(err);
+  // The table name is interpolated, never the values: it comes from this
+  // function's own literal union, so there is no path from user input to it.
+  await db.runAsync(
+    `UPDATE ${table} SET last_error = ? WHERE id = ? AND user_id = ?`,
+    message,
+    id,
+    userID,
+  );
+}
+
+/** A row the server has refused, with what it said. */
+export type BlockedRow = {
+  kind: 'session' | 'workout';
+  id: string;
+  name: string;
+  lastError: string;
+};
+
+/**
+ * Everything that cannot sync and needs a person.
+ *
+ * Deliberately not merged into `pending`: these are rows that will never
+ * clear on their own, so counting them as "waiting" would be a lie that
+ * never resolves.
+ */
+export async function blockedRows(userID: string): Promise<BlockedRow[]> {
+  const db = await getDb();
+  const sessions = await db.getAllAsync<{ id: string; name: string; last_error: string }>(
+    `SELECT id, name, last_error FROM local_sessions
+      WHERE user_id = ? AND last_error IS NOT NULL AND dirty = 1
+      ORDER BY started_at DESC`,
+    userID,
+  );
+  const workouts = await db.getAllAsync<{ id: string; name: string; last_error: string }>(
+    `SELECT id, name, last_error FROM workout_cache
+      WHERE user_id = ? AND last_error IS NOT NULL AND dirty = 1
+      ORDER BY name`,
+    userID,
+  );
+  return [
+    ...sessions.map((r) => ({
+      kind: 'session' as const, id: r.id, name: r.name, lastError: r.last_error,
+    })),
+    ...workouts.map((r) => ({
+      kind: 'workout' as const, id: r.id, name: r.name, lastError: r.last_error,
+    })),
+  ];
+}
+
+/**
+ * Try one blocked row again.
+ *
+ * Clears the recorded error FIRST. Otherwise a row that now succeeds would
+ * keep its old message until a full sync happened to touch it, and the repair
+ * screen would report a fixed row as still broken.
+ */
+export async function retryBlockedRow(
+  userID: string,
+  row: BlockedRow,
+  getToken: TokenGetter,
+): Promise<void> {
+  const db = await getDb();
+  const table = row.kind === 'session' ? 'local_sessions' : 'workout_cache';
+  await noteRowError(db, table, row.id, userID, null);
+  if (row.kind === 'session') {
+    await pushSession(userID, row.id, getToken);
+    return;
+  }
+  const w = await db.getFirstAsync<WorkoutRow>(
+    `SELECT * FROM workout_cache WHERE id = ? AND user_id = ?`,
+    row.id,
+    userID,
+  );
+  if (w) await pushWorkoutRow(db, w, userID, getToken);
+}
+
+/**
  * Reconciles local and remote.
  *
  * Push first, then pull. The order is not incidental: pulling first would
@@ -608,10 +706,12 @@ async function runSync(
     try {
       await pushWorkoutRow(db, w, userID, getToken);
       result.pushed++;
+      await noteRowError(db, 'workout_cache', w.id, userID, null);
     } catch (err) {
       result.failed++;
       result.error = err instanceof Error ? err.message : String(err);
       result.errorKind = worseKind(result.errorKind, classify(err));
+      await noteRowError(db, 'workout_cache', w.id, userID, err);
     }
   }
 
@@ -631,10 +731,12 @@ async function runSync(
     try {
       await pushRow(db, row, userID, getToken);
       result.pushed++;
+      await noteRowError(db, 'local_sessions', row.id, userID, null);
     } catch (err) {
       result.failed++;
       result.error = err instanceof Error ? err.message : String(err);
       result.errorKind = worseKind(result.errorKind, classify(err));
+      await noteRowError(db, 'local_sessions', row.id, userID, err);
     }
   }
 

@@ -2141,3 +2141,21 @@ layer is correct in both cases and the screen is what goes wrong.
   the second value is the one that ends up on the account.
 - Sign in as a second athlete on the same device: their first run seeds
   independently, and neither one's owed preferences leak to the other.
+
+## Sync status and repair (mobile)
+
+- With everything synced and online, **no chip is shown**. Its presence is the
+  signal; a permanent badge trains people to stop reading that corner.
+- Go offline with unsynced training: the chip says Offline and the count, not
+  a failure. Restore signal and it clears on its own.
+- Start a session from a workout that hasn't synced: the chip says *waiting on
+  a plan*, not a number of failures. It resolves without intervention.
+- Force a permanent refusal (log a set on a session the server considers
+  finished). The chip turns to a failure, tapping it opens the repair screen,
+  and the row is listed **by name with the server's own message**. Fix the
+  cause, tap Try again, and the row leaves the list.
+- Kill and relaunch the app: the blocked row is still listed. The message is
+  on the row, not in memory — that is when people actually go looking.
+- A transient failure (airplane mode) must NOT appear on the repair screen.
+  It resolves itself and needs no one.
+- Sign in as another athlete: their repair list is their own.

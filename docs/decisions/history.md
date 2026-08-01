@@ -4721,6 +4721,77 @@ number deliberately), and the mutation harness read those pre-existing
 failures as the mutants being caught. A mutation result only means anything
 against a green baseline — checked, fixed, and re-run.
 
+## 2026-08-01 — Offline-first PR6: the sync state finally says something
+
+`SyncState` has carried `pending`, `deferred`, `online` and `lastError` since
+PR2, and the only place any of it surfaced was a Retry button on one screen.
+So the honest answer to the question an athlete has after a basement workout —
+*did that make it off my phone* — was to open the right screen and infer it.
+
+### The chip, and what it deliberately does not say
+
+It lives in `ScreenHeader`, so every tab gets it and a screen added later gets
+it for free rather than being the one place that quietly doesn't report.
+
+**It is silent when everything is synced.** A permanent "Synced ✓" badge is
+furniture: it trains you to stop reading that corner, which is exactly where
+you need to look on the day it says something else. The chip appearing *is*
+the signal.
+
+The priority order is the design, and each step of it is a claim:
+
+- **Offline outranks the pending count**, because it explains it. "3 waiting"
+  beside a phone with no signal invites a pointless retry; "Offline · 3
+  waiting" says the app is behaving correctly.
+- **Offline also outranks the error.** The last run failing because there was
+  no signal is not a fault, and calling it one teaches people to distrust the
+  indicator.
+- **Deferred outranks the plain count**, and gets its own wording. Those rows
+  are waiting on a workout that hasn't landed and resolve themselves; they are
+  counted inside `pending`, so checking `pending` first would describe them as
+  an ordinary backlog.
+- **An error outranks "Syncing…"**, because a retry is usually already
+  underway when someone looks, and hiding the failure behind progress makes it
+  invisible exactly when it is being looked for.
+
+### A permanent rejection had nowhere to live
+
+It surfaced as one screen-level message for the whole run and vanished on the
+next attempt — so a session the server will refuse forever looked identical to
+one that simply hadn't been tried. No way to see which row, what the server
+said, or to retry just that one after fixing it.
+
+Schema v11 puts `last_error` on `local_sessions` and `workout_cache`, and
+`app/sync.tsx` is where it is answerable: what is stuck, the server's own
+words, and a button per row.
+
+**Only permanent refusals are recorded.** A transient failure is the ordinary
+state of a phone in a basement; writing "Network request failed" onto every
+row would turn a repair list into a list of everything ever logged offline,
+none of which needs a person.
+
+### Two things this round taught, both about tests
+
+**A test that passed for the wrong reason, caught by mutation.** "Clears the
+error once the row goes through" asserted via `blockedRows` — but a successful
+push also clears `dirty`, and `blockedRows` filters on that, so the row left
+the list whether or not the message was cleared. It now asserts on the column.
+That is three times in this programme that a passing test was measuring a
+neighbour rather than the guard it named.
+
+**The migration fragility from PR5 was still there and bit again.** The v11
+`ALTER` on `local_sessions` failed against fixtures that never created it,
+same as v10's did for `exercise_cache`. All the `CREATE ... IF NOT EXISTS`
+statements now run unconditionally before any versioned `ALTER` — they are
+idempotent, an existing table keeps its shape, so the ALTERs are still what
+upgrades a real device and still what the tests exercise.
+
+**And a local-only false failure worth knowing about:** `.expo/types/router.d.ts`
+is generated and gitignored, so a new route fails `typecheck:mobile` locally
+against a stale copy while CI — which has no copy at all — is perfectly green.
+Verified by deleting it and re-running. Neither state is wrong; they just
+disagree, and the local one looks like a real error.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

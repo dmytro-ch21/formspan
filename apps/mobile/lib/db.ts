@@ -175,7 +175,7 @@ const CREATE_EXERCISE_CACHE = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 10;
+const SCHEMA_VERSION = 11;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -252,6 +252,7 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
   // reaching it that way. `IF NOT EXISTS` makes this a no-op on a real
   // device, and an existing table keeps its existing shape — so the ALTERs
   // below are still what upgrades it, and still what the tests exercise.
+  await db.execAsync(CREATE_SESSIONS);
   await db.execAsync(CREATE_EXERCISE_CACHE);
   await db.execAsync(CREATE_WORKOUT_CACHE);
   await db.execAsync(CREATE_PREFS);
@@ -405,6 +406,19 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     // the server or was pushed at the time. Defaulting to 1 would queue an
     // upgrader's entire preference set for a pointless replay.
     await addColumnIfMissing(db, 'prefs', 'dirty', 'INTEGER NOT NULL DEFAULT 0');
+  }
+
+  if (current < 11) {
+    // v10 -> v11: a row that cannot sync says why.
+    //
+    // Until now a permanent rejection surfaced as one screen-level message
+    // for the whole run, then vanished on the next attempt — so a session
+    // the server will refuse forever looked identical to one that just
+    // hadn't been tried yet, and there was nowhere to see WHICH row or WHAT
+    // the server said. Stored per row so the answer survives a relaunch,
+    // which is when someone actually goes looking.
+    await addColumnIfMissing(db, 'local_sessions', 'last_error', 'TEXT');
+    await addColumnIfMissing(db, 'workout_cache', 'last_error', 'TEXT');
   }
 
   await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION};`);
