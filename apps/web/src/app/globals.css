@@ -57,6 +57,28 @@
   --c-warn: #b06a00;
   --c-danger: #c0392b;
 
+  /* The third categorical hue, for Library tiles. Stepped per mode rather than
+     shared: validated against THIS surface (#ffffff) alongside danger and lime
+     — all six checks pass, worst adjacent pair ΔE 8.7 CVD / 27.1 normal. The
+     CVD figure sits in the band that is only legal with secondary encoding,
+     which the tile's three-letter code provides. */
+  --c-info: #1f6feb;
+
+  /* Ink steps, for the three-letter code *inside* a tile.
+     Split from the hues above on purpose, and the split is not cosmetic. The
+     code sits on a 10% wash of its own hue, where --c-lime measures 2.95:1 and
+     --c-info 4.07:1 — both under AA for 12px text, and the code is precisely
+     the secondary encoding a colour-blind reader depends on, so its legibility
+     is load-bearing. Darkening the *hues* to fix that is not an option: at
+     #4a6800 the lime/danger pair drops to ΔE 4.7 for a protanope, below the
+     separation floor. So hue stays in the fill and border where it does its
+     job, and the text gets its own darker step: 5.57:1 and 5.54:1.
+     These are deliberately NOT hue-validated — they carry no hue information,
+     only letters. */
+  --c-lime-ink: #4a6800;
+  --c-info-ink: #1558c7;
+  --c-danger-ink: #c0392b; /* already 4.69:1; kept as a token for symmetry */
+
   color-scheme: light;
 }
 
@@ -86,6 +108,17 @@
   --c-warn: #ffb020;
   --c-danger: #ff6b6b;
 
+  /* Dark step of the same hue; validated against #10151f with this mode's
+     danger and lime — worst adjacent pair ΔE 21.7 CVD / 35.6 normal. Not the
+     light value: a mid-blue that reads on white disappears on #10151f. */
+  --c-info: #6bb6ff;
+
+  /* On dark the hues already clear AA against their own wash (12.0:1, 5.8:1,
+     7.2:1), so ink and hue are the same value here. */
+  --c-lime-ink: #b8ff2c;
+  --c-info-ink: #6bb6ff;
+  --c-danger-ink: #ff6b6b;
+
   color-scheme: dark;
 }
 
@@ -112,6 +145,10 @@
   --color-navy: var(--c-navy);
   --color-warn: var(--c-warn);
   --color-danger: var(--c-danger);
+  --color-info: var(--c-info);
+  --color-lime-ink: var(--c-lime-ink);
+  --color-info-ink: var(--c-info-ink);
+  --color-danger-ink: var(--c-danger-ink);
 
   --font-display: var(--font-barlow-condensed), var(--font-barlow), system-ui;
   --font-body: var(--font-barlow), system-ui;

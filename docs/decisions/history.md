@@ -2961,6 +2961,71 @@ a trap for the next person who re-imports. `UpsertAll` still never deletes, so
 a technique removed from the sheet lingers forever and keeps its ruleset alive
 against the new orphan prune.
 
+## 2026-07-31 — The technique library on the web, and what the wide screen is actually for
+
+Same merge as the phone, one day later and one screen wider: `/dashboard/library`
+now lists the exercise catalog **and** the 466 techniques in one grid, behind
+one search box and the existing sport chips. No separate destination, for the
+same reason there isn't one on mobile — it would need a second search box, and
+the "BJJ" chip would keep returning bear-crawl drills while the techniques lived
+elsewhere.
+
+### The part that isn't a port
+
+The phone and the desk get the *same* library and a **different** reading
+experience, and this is the clearest case yet of the platform split in
+CLAUDE.md earning its keep.
+
+On mobile, opening a technique is a push-navigation: the list goes away, and
+following a graph edge means unwinding a stack to get back. On the web the
+detail panel sits *beside* the grid, so **following the graph costs nothing** —
+clicking "Triangle Choke from Closed Guard" under Common next moves swaps the
+panel and leaves the list, the scroll position and the search exactly where they
+were. Reading around a subject is what a desk is for, so the panel carries the
+full prose, the gi/no-gi legality table and all three edge lists rather than the
+trimmed set a phone can show.
+
+That is also why the edges are buttons here and links there: on the web an edge
+is a lateral move within one view; on the phone it is a journey.
+
+### Colour had to be re-derived, not reused
+
+The mobile tiles use `#FF6B6B / #B8FF2C / #6BB6FF` against `#10151F`. Web is
+light-by-default, so those values were re-stepped for a white surface and
+validated against it: `#c0392b / #6f9c00 / #1f6feb`, all six checks passing,
+worst adjacent pair ΔE 8.7 CVD / 27.1 normal. A shared hex would have been
+wrong in both directions — a mid-blue that reads on `#10151f` washes out on
+white, and the light lime (`#6f9c00`) disappears on black. `--c-info` is
+therefore a **per-mode token**, like every other colour in that file.
+
+The CVD figure of 8.7 sits in the band that is legal *only* with secondary
+encoding. The tile's three-letter code is that encoding, which is also what
+lets hue be scoped per domain: red means "lower body" on an exercise and
+"submission" on a technique, unambiguous because `PSH` is never a technique and
+`SUB` is never an exercise.
+
+### Caught by looking, not by checking
+
+`/dashboard` is Clerk-gated, so the page can't be opened without signing in —
+which I can't do on someone's behalf. Rather than ship unlooked-at (the exact
+mistake that produced the previous entry), the tiles and panel were rendered
+against fixed sample data on a throwaway public route, screenshotted in both
+themes, and the route deleted.
+
+It immediately caught one: **the achromatic tile was invisible in light mode.**
+`--c-surface-raised` is `#ffffff` there, identical to the card it sits on, so
+`PIN` and `ISO` rendered as empty outlines — the "nothing stands out" complaint
+reappearing for the one bucket with no hue to fall back on. `surface-hover`
+differs from the card in both modes. Type-checking, linting and a production
+build were all green with that bug in place.
+
+### Honest limits
+
+The page has never been rendered against the real API — the harness used sample
+data, and staging needs a sign-in. The technique summaries are cached for the
+tab's lifetime with no invalidation, which is right for reference content and
+wrong the moment techniques become editable.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.
