@@ -3982,6 +3982,50 @@ reads and pulls skip — and not the SQL. A schema or query mistake would slip
 through. Covering that needs a real SQLite fixture, which is the next thing
 this suite wants.
 
+## 2026-08-01 — Two design docs promoted from a product conversation
+
+A product-design conversation about what BJJ tracking should feel like as a
+whole system — and what the Today screen has to be for any of it to get used —
+produced two designs worth keeping. They started as session memory; the repo
+is the long-term home for design intent, so they're now
+[bjj-tracking-design.md](bjj-tracking-design.md) and
+[today-view-design.md](today-view-design.md), both **drafts for discussion**
+in the same spirit as [system-design.md](system-design.md), which they build
+on rather than revise.
+
+The BJJ doc's organizing claims: BJJ inverts the strength UX (zero phone
+during, everything at a sub-90-second reflection within ~20 minutes of the
+mat, layered *on top of* system-design's ≤3-tap floor rather than replacing
+it); proficiency should **emerge from an event stream** (drilled /
+attempted-live / hit-live) instead of ever asking "rate your triangle 1–5";
+and the athlete's game is an **evidence overlay on the technique graph that
+already exists** — the library's `setup_from`/counter edges — which makes gap
+detection ("no reliable exit from bottom half guard") deterministic graph
+analysis, and turns the deferred gameplan builder into curation over data
+rather than an aspirational whiteboard. Insights, focused work, and curricula
+fall out as one loop at three levels of guidance, sharing a single "current
+focus" mechanism.
+
+The Today doc's one rule: **if a number doesn't change what the athlete does
+today, it doesn't belong on Today.** Layout follows (plan-with-state,
+readiness *always paired with its consequence for the plan*, exactly one
+recommendation, calories/protein *remaining* rather than consumed, quick
+log), plus the one differentiating behavior — the lead card follows the
+clock: morning readiness, pre-class focus prompt, post-class "log it",
+evening macros-plus-tomorrow. A presentation rule over data the screen
+already has, not a feature.
+
+The near-term consequence that outlives both drafts: **session technique
+tags must carry position context and an outcome direction (hit vs. received,
+success vs. fail) from their first migration.** That is nearly free now and
+expensive to retrofit, and it is what keeps every deferred BJJ feature a
+pure read over data that will already have months of depth by the time it's
+built.
+
+Open questions live in the docs themselves — rounds granularity, anonymous
+partner attributes, prompt stacking with the sRPE ask, and whether the
+"daily message" survives Today's filter rule at all.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.
