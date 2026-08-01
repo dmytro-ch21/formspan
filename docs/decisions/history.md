@@ -4377,6 +4377,99 @@ plan is last-writer-wins *at the server* even though the CAS protects the local
 row. Renaming a template is still impossible on any client — there is no
 endpoint. Both are worth deciding on deliberately rather than discovering.
 
+## 2026-08-01 — Two gym complaints about the same thing: getting a number in
+
+Both items came from logging live, and both are about the seconds between
+sets rather than about data.
+
+### The keyboard was covering the inputs
+
+Reported as *"i had hard time with inputs that are lower and go bihind the
+keyboard from iphone, i think we need to push that block above the input block
+so it is always visible... and then slide it back"*.
+
+The interesting part is that the screen **already had
+`automaticallyAdjustKeyboardInsets`**, which is the prop everyone reaches for
+and which is named as though it solves this. It does not. It adjusts the
+scroll view's *content inset*, which makes the hidden field **reachable** — it
+does not scroll anything. So the keyboard comes up, the field you just tapped
+is behind it, and iOS's contribution is that you are now permitted to drag it
+into view yourself. Standing at a rack with twenty seconds of rest left, that
+is the complaint rather than the fix.
+
+So the prop stays (it is what slides the content back down afterwards, and
+what lets the last field scroll past the fold at all) and
+`components/KeyboardAwareScroll.tsx` adds the missing half: on focus, measure
+the field against the keyboard and scroll it exactly clear.
+
+Two details that would each have made it subtly wrong:
+
+- **Measured, not assumed.** The tempting version scrolls by a fixed amount or
+  by the keyboard's height. Set rows vary in height by the exercise's measures
+  (reps-only vs weight+reps vs distance+seconds) and by whether the row is
+  expanded, so any constant is wrong for most rows. `measureInWindow` asks
+  where the field actually is; the scroll is the overlap plus a margin.
+- **Both event orderings are real.** Tapping a field with no keyboard up fires
+  focus first and the keyboard frame after; moving to a second field with the
+  keyboard already up gives the frame first. Handling only the first is the
+  common bug — it works the once you test it and fails the moment you move
+  between fields, which is exactly what logging a set is.
+
+No new dependency. `react-native-keyboard-controller` does this and more, but
+it is native code, and this is about forty lines against an API RN already has.
+
+### Swipe left to remove a set
+
+Removing a set was already possible — tap the row open, scroll past every
+field and the set-type chips, tap "Remove set". That is a reasonable place for
+it when you are correcting a session at a desk, and a bad one when you have
+just added a set by mistake between two working sets.
+
+`components/SwipeToDelete.tsx` is **reveal-then-tap, deliberately not
+full-swipe-to-delete.** The other half of the iOS convention was left unwired
+on purpose: the thing being deleted is a set that was actually performed, the
+hand is mid-workout, and the row lives in a vertically scrolling list where a
+slightly diagonal flick is completely normal. One deliberate tap costs nothing
+at the speed this is used at; an accidental delete costs real training.
+
+`PanResponder` rather than `react-native-gesture-handler`, which is not a
+dependency — adding native code for one row interaction would mean a prebuild
+and a fresh device build for everyone.
+
+Two things that are less obvious than the animation:
+
+- **The gesture claim is the whole difficulty.** Claim too eagerly and the
+  list intermittently refuses to scroll, because a row decided a
+  mostly-vertical drag belonged to it. So a claim needs the drag to be past a
+  threshold *and* decisively horizontal — either test alone lets the wrong
+  gestures through.
+- **Rows are keyed by index, and now carry animation state.** `LoggedSet` has
+  no stable id, only a `position` that is reassigned on delete, so an instance
+  outlives the set it was showing: swipe set 3 open, remove set 1 by some
+  other route, and that instance now renders set 2 while still holding set 3's
+  open swipe — a Delete armed against a row nobody swiped. A `closeOn` prop
+  keyed on the set count closes open rows on any list mutation, which is what
+  iOS does for the same reason.
+
+### Testing, and what is honestly not tested
+
+`apps/mobile` has jest and a real SQLite fixture but **no component test
+runner**, so nothing here can assert that a row slides or that a field ends up
+on screen. Rather than write tests that render nothing and prove nothing, the
+two actual decisions were extracted into pure functions — `scrollTargetFor`,
+`shouldClaim`, `settleTarget` — and tested directly. Ten mutations, ten
+caught.
+
+One was vacuous first time round, and the mistake is worth recording because
+it is the same shape as the mocked-`ApiError` test earlier today: the
+zero-height-node case used `fieldY: 0, fieldHeight: 0`, which the *overlap*
+check already rejects on its own — so the test passed with the height guard
+deleted. It named one guard and exercised another. Fixed by measuring a
+zero-height node *below* the keyboard, which only the height guard rejects.
+
+**Still untested:** the render path, the gesture wiring, the context plumbing,
+and all on-device behaviour. Adding a component runner is tracked separately.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.
