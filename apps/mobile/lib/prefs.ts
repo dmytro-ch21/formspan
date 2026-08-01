@@ -63,3 +63,12 @@ export const PREF_AUTO_REST = 'auto_rest';
 /** The Library tab's sport filter. Deliberately remembered; its search box
  *  deliberately isn't — see the Library screen for the reasoning. */
 export const PREF_LIBRARY_SPORT = 'library_sport';
+
+/**
+ * The whole module set, JSON, under one key.
+ *
+ * One key rather than one per module because this is read before the first
+ * paint — the tab bar is built from it — and N sequential reads is exactly the
+ * delay that makes the tabs rearrange after launch.
+ */
+export const PREF_MODULES = 'modules';

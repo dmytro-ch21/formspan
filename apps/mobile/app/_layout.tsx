@@ -1,4 +1,6 @@
 import { ClerkProvider, useAuth, useSignUp } from '@clerk/clerk-expo';
+
+import { ModulesProvider } from '@/lib/ModulesProvider';
 import { useFonts } from 'expo-font';
 import { DarkTheme, Stack, ThemeProvider, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
@@ -64,7 +66,11 @@ export default function RootLayout() {
 
   return (
     <ClerkProvider publishableKey={publishableKey} tokenCache={tokenCache}>
-      <RootLayoutNav />
+      {/* Inside ClerkProvider because it keys on userId, and above the
+          navigator because the tab bar is built from it. */}
+      <ModulesProvider>
+        <RootLayoutNav />
+      </ModulesProvider>
     </ClerkProvider>
   );
 }

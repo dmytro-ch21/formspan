@@ -26,6 +26,8 @@ import {
   type Ruleset,
   type TechniqueSummary,
 } from '@/lib/techniques';
+import { useModules } from '@/lib/ModulesProvider';
+import { enabledSports, moduleFor, type Module } from '@/lib/modules';
 import { useAuthToken } from '@/lib/useAuthToken';
 
 /**
@@ -65,16 +67,6 @@ function describeError(err: unknown): string {
   return msg;
 }
 
-const SPORTS = [
-  { key: '', label: 'All' },
-  { key: 'strength', label: 'Strength' },
-  { key: 'bjj', label: 'BJJ' },
-  { key: 'running', label: 'Running' },
-] as const;
-
-/** Sports whose content includes techniques. */
-const HAS_TECHNIQUES = new Set(['', 'bjj']);
-
 /**
  * Position is a BJJ-only axis, so its chips render only under the BJJ filter —
  * which means the filter may only be *applied* there too. Applying it whenever
@@ -83,8 +75,8 @@ const HAS_TECHNIQUES = new Set(['', 'bjj']);
  * BJJ → Mount → All silently hid every non-Mount technique, so searching
  * "triangle" found nothing while Triangle from Guard sat in the database.
  */
-function usesPosition(sport: string): boolean {
-  return sport === 'bjj';
+function usesPosition(sport: string, mods: Module[]): boolean {
+  return moduleFor(mods, sport)?.capabilities.facets.includes('position') ?? false;
 }
 
 /**
@@ -142,6 +134,23 @@ type Row =
 
 export default function LibraryScreen() {
   const getToken = useAuthToken();
+  const { modules } = useModules();
+
+  /**
+   * Chips from the registry, with All first. This replaces a hardcoded list
+   * that disagreed with three others in this app.
+   */
+  const sportChips = [{ key: '', label: 'All' }, ...enabledSports(modules)];
+
+  /**
+   * Which content kinds are reachable, derived from capabilities rather than
+   * from a hardcoded set of sport keys.
+   *
+   * `showTechniques` gates the FETCH, not just the chips. Hiding a module
+   * should cut the request: the technique list is ~65 kB and was pulled on
+   * every Library visit regardless of whether the user does BJJ.
+   */
+  const techniqueSport = modules.find((m) => m.enabled && m.capabilities.catalog === 'techniques');
   const { userId } = useAuth();
   const router = useRouter();
 
@@ -165,9 +174,16 @@ export default function LibraryScreen() {
   useEffect(() => {
     if (!userId) return;
     readPref(userId, PREF_LIBRARY_SPORT)
-      .then((v) => v && setSportState(v))
+      .then((v) => {
+        // Guarded: a stored key whose discipline has since been turned off
+        // would filter the list to a chip that is no longer rendered — the
+        // exact bug this file documents above for positions, one level up.
+        if (v && enabledSports(modules).some((m) => m.key === v)) setSportState(v);
+      })
       .catch(() => {});
-  }, [userId]);
+    // `modules` is a dependency because the guard reads it: on a cold start
+    // the cache resolves first and this must re-check against it.
+  }, [userId, modules]);
 
   const setSport = useCallback(
     (next: string) => {
@@ -175,7 +191,7 @@ export default function LibraryScreen() {
       // Belt and braces alongside `usesPosition`: clearing it means returning
       // to BJJ starts unfiltered rather than resuming a selection the user
       // last saw several screens ago.
-      if (!usesPosition(next)) setPosition('');
+      if (!usesPosition(next, modules)) setPosition('');
       if (userId) writePref(userId, PREF_LIBRARY_SPORT, next).catch(() => {});
     },
     [userId],
@@ -317,7 +333,10 @@ export default function LibraryScreen() {
 
   useEffect(() => () => abortRef.current?.abort(SUPERSEDED), []);
 
-  const showTechniques = HAS_TECHNIQUES.has(sport);
+  // "All" shows techniques when the athlete does that discipline; a specific
+  // sport shows them when that sport is the one carrying them.
+  const showTechniques =
+    techniqueSport !== undefined && (sport === '' || sport === techniqueSport.key);
 
   // Sorted once per source, not once per keystroke. Filtering preserves order,
   // so the filtered halves stay sorted and merge linearly below.
@@ -353,7 +372,7 @@ export default function LibraryScreen() {
     let tq: TechniqueSummary[] = [];
     if (showTechniques) {
       const scoped =
-        usesPosition(sport) && position
+        usesPosition(sport, modules) && position
           ? sortedTechniques.filter((t) => inPositionFamily(t.position, position))
           : sortedTechniques;
       tq = searchTechniques(scoped, query);
@@ -400,7 +419,7 @@ export default function LibraryScreen() {
           testID="library-search"
         />
         <View style={styles.chips}>
-          {SPORTS.map((s) => {
+          {sportChips.map((s) => {
             const active = sport === s.key;
             return (
               <Pressable
@@ -422,7 +441,7 @@ export default function LibraryScreen() {
         {/* Position is a BJJ-only axis, so it appears only when BJJ content is
             on screen. A permanently-visible row of positions that does nothing
             to a strength catalog is worse than no row. */}
-        {usesPosition(sport) && (
+        {usesPosition(sport, modules) && (
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
