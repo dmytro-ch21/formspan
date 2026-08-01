@@ -1,4 +1,8 @@
-import { KEYBOARD_MARGIN, scrollTargetFor } from '../../components/KeyboardAwareScroll';
+import {
+  KEYBOARD_MARGIN,
+  keyboardEventNames,
+  scrollTargetFor,
+} from '../../components/KeyboardAwareScroll';
 import { shouldClaim, settleTarget } from '../../components/SwipeToDelete';
 
 /**
@@ -18,11 +22,14 @@ describe('lifting a field above the keyboard', () => {
   // Numbers chosen to read like a phone: an 812pt screen with the number pad
   // up puts the keyboard top around y=520.
   const kbTop = 520;
+  // An iPhone-sized window: the scroll view runs to the bottom of the screen
+  // and the keyboard sits over it, so the keyboard's edge is what binds.
+  const SCREEN = 812;
 
   it('scrolls by exactly the overlap plus the margin', () => {
     // The field's bottom is at 560 — 40pt behind the keyboard.
     const target = scrollTargetFor({
-      fieldY: 520, fieldHeight: 40, keyboardTop: kbTop, offset: 100,
+      fieldY: 520, fieldHeight: 40, keyboardTop: kbTop, containerBottom: SCREEN, offset: 100,
     });
     expect(target).toBe(100 + 40 + KEYBOARD_MARGIN);
   });
@@ -31,7 +38,7 @@ describe('lifting a field above the keyboard', () => {
     // Returning a target here would drag the list under the athlete's thumb
     // every time they moved between two fields that were both visible.
     expect(
-      scrollTargetFor({ fieldY: 100, fieldHeight: 40, keyboardTop: kbTop, offset: 0 }),
+      scrollTargetFor({ fieldY: 100, fieldHeight: 40, keyboardTop: kbTop, containerBottom: SCREEN, offset: 0 }),
     ).toBeNull();
   });
 
@@ -40,14 +47,14 @@ describe('lifting a field above the keyboard', () => {
     // margin. It should still lift, or the field sits flush against the
     // keyboard and reads as clipped.
     const target = scrollTargetFor({
-      fieldY: 470, fieldHeight: 40, keyboardTop: kbTop, offset: 0,
+      fieldY: 470, fieldHeight: 40, keyboardTop: kbTop, containerBottom: SCREEN, offset: 0,
     });
     expect(target).toBe(KEYBOARD_MARGIN - 10);
   });
 
   it('does nothing when the keyboard is down', () => {
     expect(
-      scrollTargetFor({ fieldY: 700, fieldHeight: 40, keyboardTop: null, offset: 0 }),
+      scrollTargetFor({ fieldY: 700, fieldHeight: 40, keyboardTop: null, containerBottom: SCREEN, offset: 0 }),
     ).toBeNull();
   });
 
@@ -59,15 +66,35 @@ describe('lifting a field above the keyboard', () => {
     // field further down the list is the case only the height guard catches,
     // and scrolling to reveal something with no height is meaningless.
     expect(
-      scrollTargetFor({ fieldY: 700, fieldHeight: 0, keyboardTop: kbTop, offset: 250 }),
+      scrollTargetFor({ fieldY: 700, fieldHeight: 0, keyboardTop: kbTop, containerBottom: SCREEN, offset: 250 }),
     ).toBeNull();
+  });
+
+  it('uses the SCROLL VIEW\'s bottom when that is the higher edge — the Android case', () => {
+    // Android's default `resize` mode shrinks the WINDOW instead of covering
+    // it, so the scroll view ends where the keyboard begins and the field is
+    // clipped rather than covered. Trusting `keyboardTop` alone would read
+    // the field as comfortably visible and scroll nothing.
+    const target = scrollTargetFor({
+      fieldY: 480, fieldHeight: 40, keyboardTop: 900, containerBottom: 500, offset: 0,
+    });
+    expect(target).toBe(480 + 40 + KEYBOARD_MARGIN - 500);
+  });
+
+  it('uses the keyboard when THAT is the higher edge — the iOS case', () => {
+    // Same field, same numbers, but now the window is full height and the
+    // keyboard overlaps it. The binding edge swaps.
+    const target = scrollTargetFor({
+      fieldY: 480, fieldHeight: 40, keyboardTop: 500, containerBottom: 900, offset: 0,
+    });
+    expect(target).toBe(480 + 40 + KEYBOARD_MARGIN - 500);
   });
 
   it('adds to the current offset rather than replacing it', () => {
     // scrollTo is absolute. Forgetting the offset scrolls a deep list back to
     // near the top, which on a long session is the whole screen jumping.
-    const a = scrollTargetFor({ fieldY: 600, fieldHeight: 40, keyboardTop: kbTop, offset: 0 });
-    const b = scrollTargetFor({ fieldY: 600, fieldHeight: 40, keyboardTop: kbTop, offset: 900 });
+    const a = scrollTargetFor({ fieldY: 600, fieldHeight: 40, keyboardTop: kbTop, containerBottom: SCREEN, offset: 0 });
+    const b = scrollTargetFor({ fieldY: 600, fieldHeight: 40, keyboardTop: kbTop, containerBottom: SCREEN, offset: 900 });
     expect(b! - a!).toBe(900);
   });
 });
@@ -123,5 +150,25 @@ describe('where the row settles', () => {
 
   it('closes an open row dragged most of the way back', () => {
     expect(settleTarget({ rest: OPEN, dx: 60, vx: 0 })).toBe(CLOSED);
+  });
+});
+
+describe('which keyboard events to listen for', () => {
+  it('uses Did* on Android, because Will* is never emitted there', () => {
+    // Not a nicety. Android emits no `keyboardWillShow` at all, so the iOS
+    // event names make the whole feature dead code on the platform — working
+    // perfectly in review and doing nothing on a phone.
+    const n = keyboardEventNames('android');
+    expect([n.show, n.hide]).toEqual(['keyboardDidShow', 'keyboardDidHide']);
+  });
+
+  it('uses Will* on iOS, so the scroll moves WITH the keyboard', () => {
+    const n = keyboardEventNames('ios');
+    expect([n.show, n.hide]).toEqual(['keyboardWillShow', 'keyboardWillHide']);
+  });
+
+  it('only subscribes to changeFrame on iOS, which is the only place it fires', () => {
+    expect(keyboardEventNames('ios').changeFrame).toBe('keyboardWillChangeFrame');
+    expect(keyboardEventNames('android').changeFrame).toBeNull();
   });
 });

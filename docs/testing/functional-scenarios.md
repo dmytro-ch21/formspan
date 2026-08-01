@@ -2082,7 +2082,12 @@ tested on a device with a real keyboard and a real thumb.
 - Repeat on a row with different measures (a distance/seconds exercise vs a
   weight/reps one) and on an expanded row — row heights differ, so any fix
   that assumed a constant height passes on one and fails on the others.
-- Repeat on Android. The keyboard events are not the same ones iOS fires.
+- **Repeat on Android, and treat it as a separate feature.** Two things differ,
+  either of which makes it do nothing: Android emits `keyboardDidShow`, never
+  `keyboardWillShow`; and its default `resize` mode shrinks the window instead
+  of covering it, so the field is clipped by the scroll view's bottom rather
+  than hidden behind the keyboard. A pass on iOS says nothing about Android
+  here. (No Android build of this app exists yet, so this is untested.)
 
 ### Swipe a set away
 

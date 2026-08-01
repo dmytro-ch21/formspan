@@ -4418,6 +4418,37 @@ Two details that would each have made it subtly wrong:
 No new dependency. `react-native-keyboard-controller` does this and more, but
 it is native code, and this is about forty lines against an API RN already has.
 
+### Android was silently getting nothing, for two separate reasons
+
+The first version was iOS-only without saying so, and both causes are the kind
+that review does not catch because the code looks right.
+
+**`keyboardWillShow` and `keyboardWillHide` are iOS-only events.** Android
+never emits them. So the listeners were not a degraded experience on Android —
+they were dead code, and the feature did nothing at all there while reading as
+complete. The event names are now chosen by platform, and because that is one
+line that decides whether a whole feature exists, it is a tested pure function
+rather than a comment.
+
+**The two platforms hide the field in different ways.** iOS leaves the window
+alone and puts the keyboard over it, so the keyboard's top edge is the
+boundary. Android's default `softwareKeyboardLayoutMode` is `resize`, so the
+*window shrinks*: the scroll view is now short, the keyboard is not over it at
+all, and the field is **clipped by the view's own bottom** rather than
+covered. Comparing against the keyboard alone would read that field as
+comfortably visible and scroll nothing.
+
+Rather than branch on `Platform` for the geometry, the scroll view is measured
+too and the boundary is the *higher* of the two edges. That describes both
+platforms with one rule, and it degrades sensibly if a third case shows up
+(a split keyboard, a floating window) — whichever edge is actually cutting the
+field off is the one used.
+
+**Not verified on an Android device.** There is still no Android build of this
+app — never prebuilt, never run. The platform logic is tested and reasoned;
+that is not the same as seen working, and it should not be recorded as if it
+were.
+
 ### Swipe left to remove a set
 
 Removing a set was already possible — tap the row open, scroll past every
