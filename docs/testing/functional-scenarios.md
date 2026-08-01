@@ -2122,3 +2122,22 @@ layer is correct in both cases and the screen is what goes wrong.
   together, so this is the ordinary path, not a rare interleaving.
 - The shared tab still renders the network list — only `mine` is cached, and
   the cache-first path must not swallow it.
+
+## First run, and the catalog offline (mobile)
+
+- **Install fresh, open once with signal, then go fully offline.** The
+  exercise picker, the Library and the plan list all have content. This is the
+  scenario the seed exists for and the one that used to fail: caches were
+  filled only as a side effect of opening the screen that reads them.
+- Kill the app mid-seed (or start it offline) and relaunch with signal: it
+  seeds again. A partial run must not be recorded as done.
+- **An exercise offline shows its muscles, equipment and instructions** — not
+  an empty shell. Before v10 the cache stored seven columns and reconstructed
+  the rest as blank, which looks like thin content rather than a cache.
+- Change units offline, leave Settings, come back online: the choice sticks
+  and reaches the account. Then do it on a device upgrading from an older
+  build with an outstanding change — the debt must survive the upgrade.
+- Change units twice in quick succession while the first push is in flight:
+  the second value is the one that ends up on the account.
+- Sign in as a second athlete on the same device: their first run seeds
+  independently, and neither one's owed preferences leak to the other.

@@ -4631,6 +4631,96 @@ file, with the note that the assertions under them are mutation-verified.
 This is a deliberate acceptance rather than an unnoticed mess — the reason to
 write it down is so the next person doesn't spend the same hour on it.
 
+## 2026-08-01 — Offline-first PR5: a fresh install fills itself, and the catalog stops lying
+
+Three related gaps, all versions of "the offline work protected what you had
+and never made sure you had anything".
+
+### The exercise cache was lossy, and it looked like a product decision
+
+`exercise_cache` stored seven typed columns and **reconstructed the rest as
+empty** — `primary_muscles: []`, `equipment: []`, `instructions: ''`. So
+offline, every exercise in the Library rendered with no muscles, no equipment
+and no explanation, which reads as an app with thin content rather than a
+cached copy of a full one.
+
+Schema v10 adds `payload_json`: the exercise exactly as the API sent it. The
+typed columns stay, because they are what SQL filters and sorts on — the blob
+is for fidelity, the columns are for queries, and storing only the blob would
+mean filtering the whole catalog in JS.
+
+`payload_json` is deliberately **nullable with no backfill**. There is nothing
+to backfill *from* — the dropped fields were never stored — so a default would
+be a fabricated exercise that reads as real and never gets refreshed, rather
+than a missing one the next fetch fills in. Pre-v10 rows fall back to the old
+reconstruction, which is worse but findable.
+
+**And the Library never read the cache it had been writing since v2.** It
+warmed the catalog on every visit and then went to the network anyway, so the
+one screen that feeds the mid-workout exercise picker was online-only in the
+room with the worst signal in the building.
+
+### Preferences get a real outbox
+
+The `*_OWED` companion keys worked but did not generalise: every new syncable
+preference needed its own flag, its own read and its own clear, and forgetting
+one meant a preference that silently reverted on the next profile fetch.
+
+v10 puts `dirty` on `prefs` itself. Two details are load-bearing:
+
+- **`dirty = max(prefs.dirty, excluded.dirty)` on conflict**, not
+  `excluded.dirty`. A write that says nothing about the debt must leave it
+  standing — clearing it would drop a change made offline seconds earlier,
+  which is the exact failure the OWED keys existed to prevent.
+- **`clearPrefOwed` is a compare-and-swap on the pushed value.** A change made
+  while the push was in flight stays owed instead of being marked as sent —
+  the same CAS the session and workout outboxes use.
+
+Existing OWED flags are *migrated*, not dropped: the flag means "the athlete
+changed this offline and the account still has not heard", so discarding it on
+upgrade reverts their choice.
+
+### The first-run seed
+
+Every cache in this app is filled as a side effect of opening a screen while
+online. Fine after a week of use; useless for the case that actually happens —
+install VOLA at home, open it, go to the gym, find the exercise picker empty
+because you never opened the Library.
+
+`lib/seed.ts` runs once per account per device, ordered by dependency rather
+than importance: profile (carries the unit system, and a weight in the wrong
+unit for one frame is the bug that started the units work) → exercises (a
+plan's items are exercise ids; a plan of raw UUIDs is not a plan) → workouts →
+sessions (same order as the push, for the same reason) → pinned.
+
+Two properties worth stating because both are easy to get backwards:
+
+- **A failed step does not abort the run.** Offline every step fails, so there
+  is nothing to abort early for, and a failed workouts fetch must not also
+  cost the athlete their sessions.
+- **A partial run is NOT recorded as seeded.** Marking it done would leave the
+  missing pieces missing until someone happened to open the right screen —
+  precisely the situation this exists to prevent.
+
+It does not block the UI. Screens already paint cache-first with honest empty
+states; blocking a first launch on five network calls would trade a rare bad
+gym session for a bad first impression on every single install.
+
+### Two process notes
+
+**The backtick-in-SQL-comment trap fired a fourth time**, in my own comment.
+The guard added for it *does* catch it — the earlier entry claiming "the guard
+did not help" was wrong about why. The real problem was ordering: `verify` ran
+`typecheck:mobile` before `test:mobile`, so a broken template literal surfaced
+as a pile of unrelated TS errors and the named guard never got to speak. The
+two are now swapped, which was verified by breaking it on purpose.
+
+**A mutation run reported CAUGHT for a file that was already failing.** Adding
+the v10 schema test broke three existing assertions (they pin the version
+number deliberately), and the mutation harness read those pre-existing
+failures as the mutants being caught. A mutation result only means anything
+against a green baseline — checked, fixed, and re-run.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

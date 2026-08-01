@@ -5,6 +5,9 @@ import { clearSessionToken } from '@/lib/session';
 import { ModulesProvider } from '@/lib/ModulesProvider';
 import { TrackEffortProvider } from '@/lib/TrackEffortProvider';
 import { setSyncIdentity, startSyncOrchestrator } from '@/lib/sync';
+import { seedIfNeeded } from '@/lib/seed';
+import { syncSessions } from '@/lib/sessionStore';
+
 import { UnitsProvider } from '@/lib/UnitsProvider';
 import { useFonts } from 'expo-font';
 import { DarkTheme, Stack, ThemeProvider, useRouter, useSegments } from 'expo-router';
@@ -120,6 +123,25 @@ function RootLayoutNav() {
   // the previous athlete's rows.
   useEffect(() => {
     setSyncIdentity(isSignedIn ? (userId ?? null) : null, isSignedIn ? getToken : null);
+  }, [isSignedIn, userId, getToken]);
+
+  // Fill the caches once, so the app is usable before it is ever offline.
+  //
+  // Deliberately NOT awaited and NOT gating render: every screen already
+  // paints cache-first with an honest empty state, and blocking a first
+  // launch on five network calls would trade a rare bad gym session for a bad
+  // first impression on every install. This just makes those caches non-empty
+  // sooner than "whenever you happen to open the right screen".
+  useEffect(() => {
+    if (!isSignedIn || !userId) return;
+    void seedIfNeeded(userId, getToken, {
+      sessions: async () => {
+        await syncSessions(userId, getToken);
+      },
+    }).catch(() => {
+      // Offline on first launch is the ordinary case, not an error: nothing
+      // is marked seeded, so the next launch tries again.
+    });
   }, [isSignedIn, userId, getToken]);
 
   useEffect(() => {

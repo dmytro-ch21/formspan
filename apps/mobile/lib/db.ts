@@ -69,6 +69,13 @@ const CREATE_PREFS = `
     user_id TEXT NOT NULL,
     key TEXT NOT NULL,
     value TEXT NOT NULL,
+    -- This device holds a value the account has not heard.
+    --
+    -- Replaces the bespoke per-key OWED companion keys, which worked but did not
+    -- generalise: every new syncable preference needed its own flag, its own
+    -- read, and its own clear, and forgetting one meant a preference that
+    -- silently reverted on the next profile fetch.
+    dirty INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (user_id, key)
   );
 `;
@@ -127,6 +134,14 @@ const CREATE_EXERCISE_CACHE = `
     load_type TEXT NOT NULL,
     is_unilateral INTEGER NOT NULL DEFAULT 0,
     thumbnail_url TEXT,
+    -- The whole exercise as the API sent it.
+    --
+    -- The typed columns above are what queries filter and sort on; this is
+    -- what makes the cached copy the SAME OBJECT the network returns. Without
+    -- it the cache was lossy in a way that only showed up offline: muscles,
+    -- equipment and instructions were reconstructed as empty, so the Library
+    -- rendered an exercise with no detail and no explanation of why.
+    payload_json TEXT,
     cached_at TEXT NOT NULL
   );
 `;
@@ -160,7 +175,7 @@ const CREATE_EXERCISE_CACHE = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 9;
+const SCHEMA_VERSION = 10;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -226,6 +241,20 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
   // the v1 shape but never had its version stamped (any build from before
   // this versioning existed).
   await db.execAsync(CREATE_TABLE);
+
+  // Every table, unconditionally, BEFORE any versioned ALTER runs.
+  //
+  // These are each also created inside the versioned block that introduced
+  // them, which is where the explanation of why they exist lives. Repeating
+  // them here is not redundancy: a later step that ALTERs one of these tables
+  // crashes outright if the database is already past the block that creates
+  // it, so every future migration would silently depend on nobody ever
+  // reaching it that way. `IF NOT EXISTS` makes this a no-op on a real
+  // device, and an existing table keeps its existing shape — so the ALTERs
+  // below are still what upgrades it, and still what the tests exercise.
+  await db.execAsync(CREATE_EXERCISE_CACHE);
+  await db.execAsync(CREATE_WORKOUT_CACHE);
+  await db.execAsync(CREATE_PREFS);
   await db.execAsync(
     `CREATE INDEX IF NOT EXISTS activities_user_id_idx ON activities (user_id);`,
   );
@@ -361,6 +390,21 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     await addColumnIfMissing(db, 'workout_cache', 'remote', 'INTEGER NOT NULL DEFAULT 1');
     await addColumnIfMissing(db, 'workout_cache', 'deleted_at', 'TEXT');
     await addColumnIfMissing(db, 'workout_cache', 'updated_at', "TEXT NOT NULL DEFAULT ''");
+  }
+
+  if (current < 10) {
+    // v9 -> v10: the catalog stops being lossy, and prefs get an outbox.
+    //
+    // `payload_json` is deliberately NULLABLE with no backfill. There is
+    // nothing to backfill FROM — the dropped fields were never stored — so a
+    // default would be a fabricated exercise rather than a missing one.
+    // `cachedExercises` treats NULL as "pre-v10 row, reconstruct what we can",
+    // and the next catalog fetch fills it in properly.
+    await addColumnIfMissing(db, 'exercise_cache', 'payload_json', 'TEXT');
+    // Existing prefs are NOT owed: everything written so far either came from
+    // the server or was pushed at the time. Defaulting to 1 would queue an
+    // upgrader's entire preference set for a pointless replay.
+    await addColumnIfMissing(db, 'prefs', 'dirty', 'INTEGER NOT NULL DEFAULT 0');
   }
 
   await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION};`);

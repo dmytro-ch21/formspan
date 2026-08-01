@@ -870,14 +870,16 @@ export async function cacheExercises(list: Exercise[]): Promise<void> {
     for (const e of list) {
       await db.runAsync(
         `INSERT INTO exercise_cache
-           (id, sport, name, movement_pattern, load_type, is_unilateral, thumbnail_url, cached_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           (id, sport, name, movement_pattern, load_type, is_unilateral, thumbnail_url,
+            payload_json, cached_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            sport = excluded.sport, name = excluded.name,
            movement_pattern = excluded.movement_pattern,
            load_type = excluded.load_type,
            is_unilateral = excluded.is_unilateral,
            thumbnail_url = excluded.thumbnail_url,
+           payload_json = excluded.payload_json,
            cached_at = excluded.cached_at`,
         e.id,
         e.sport,
@@ -886,6 +888,7 @@ export async function cacheExercises(list: Exercise[]): Promise<void> {
         e.load_type,
         e.is_unilateral ? 1 : 0,
         e.media.find((m) => m.kind === 'thumbnail' && m.url)?.url ?? null,
+        JSON.stringify(e),
         now,
       );
     }
@@ -909,6 +912,7 @@ export async function cachedExercises(sport?: string): Promise<Exercise[]> {
     load_type: string;
     is_unilateral: number;
     thumbnail_url: string | null;
+    payload_json: string | null;
   }>(
     sport
       ? `SELECT * FROM exercise_cache WHERE sport = ? ORDER BY name`
@@ -916,33 +920,51 @@ export async function cachedExercises(sport?: string): Promise<Exercise[]> {
     ...(sport ? [sport] : []),
   );
 
-  return rows.map((r) => ({
-    id: r.id,
-    name: r.name,
-    sport: r.sport,
-    movement_pattern: r.movement_pattern,
-    movement_pattern_detail: '',
-    primary_muscles: [],
-    secondary_muscles: [],
-    equipment: [],
-    load_type: r.load_type as Exercise['load_type'],
-    is_unilateral: r.is_unilateral === 1,
-    instructions: '',
-    media: r.thumbnail_url
-      ? [
-          {
-            kind: 'thumbnail' as const,
-            storage_key: '',
-            url: r.thumbnail_url,
-            content_type: '',
-            width: null,
-            height: null,
-            position: 0,
-            is_default: false,
-          },
-        ]
-      : [],
-  }));
+  return rows.map((r) => {
+    // The stored payload IS the exercise the API sent, so prefer it whole.
+    //
+    // The reconstruction below it is not an equivalent fallback — it fabricates
+    // empty muscles, empty equipment and empty instructions, which is why the
+    // Library used to look gutted offline rather than merely cached. It stays
+    // only for rows written before v10, which have no payload to read and
+    // nothing to backfill from; the next catalog fetch replaces them.
+    if (r.payload_json) {
+      try {
+        return JSON.parse(r.payload_json) as Exercise;
+      } catch {
+        // A corrupt blob falls through to the typed columns rather than
+        // dropping the exercise from the list entirely — a searchable name
+        // with no detail beats an exercise you cannot find.
+      }
+    }
+    return {
+      id: r.id,
+      name: r.name,
+      sport: r.sport,
+      movement_pattern: r.movement_pattern,
+      movement_pattern_detail: '',
+      primary_muscles: [],
+      secondary_muscles: [],
+      equipment: [],
+      load_type: r.load_type as Exercise['load_type'],
+      is_unilateral: r.is_unilateral === 1,
+      instructions: '',
+      media: r.thumbnail_url
+        ? [
+            {
+              kind: 'thumbnail' as const,
+              storage_key: '',
+              url: r.thumbnail_url,
+              content_type: '',
+              width: null,
+              height: null,
+              position: 0,
+              is_default: false,
+            },
+          ]
+        : [],
+    };
+  });
 }
 
 // --- workouts, writable offline ------------------------------------------

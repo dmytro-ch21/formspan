@@ -18,7 +18,7 @@ import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { fetchExercises, pickImage, type Exercise } from '@/lib/exercises';
 import { PREF_LIBRARY_SPORT, readPref, writePref } from '@/lib/prefs';
-import { cacheExercises } from '@/lib/sessionStore';
+import { cacheExercises, cachedExercises } from '@/lib/sessionStore';
 import {
   fetchRulesets,
   fetchTechniques,
@@ -306,6 +306,29 @@ export default function LibraryScreen() {
 
       if (!opts.silent) setLoading(true);
       setError(null);
+
+      // LOCAL FIRST. This screen wrote the cache and never read it, so the
+      // catalog was online-only — and the exercise picker it feeds is the one
+      // thing you reach for mid-workout, in the room with the worst signal in
+      // the building. Rendering the cache first also means the spinner is
+      // reserved for a genuinely empty device rather than shown over content
+      // we already hold.
+      let showedCache = false;
+      try {
+        const q = query.trim().toLowerCase();
+        const local = (await cachedExercises(sport || undefined)).filter(
+          (e) => !q || e.name.toLowerCase().includes(q),
+        );
+        if (!controller.signal.aborted && local.length > 0) {
+          setExercises(local);
+          setEverLoaded(true);
+          setLoading(false);
+          showedCache = true;
+        }
+      } catch {
+        // The network read below is still the real attempt.
+      }
+
       try {
         const list = await fetchExercises(
           getToken,
@@ -326,6 +349,9 @@ export default function LibraryScreen() {
         // so the two aborts have to be distinguishable rather than lumped
         // together under `signal.aborted`.
         if (controller.signal.reason === SUPERSEDED) return;
+        // With a cached catalog on screen, failing to refresh is an ordinary
+        // offline state, not an error worth covering it with.
+        if (showedCache) return;
         setError(
           controller.signal.reason === TIMED_OUT
             ? "Couldn't reach the server. Pull down to try again."
