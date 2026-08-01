@@ -115,3 +115,32 @@ it('an upgraded row is backfilled as owned by the athlete it is filed under', as
   const row = db.raw.prepare('SELECT owner_user_id, visibility FROM workout_cache').get();
   expect(row).toEqual({ owner_user_id: 'u1', visibility: 'private' });
 });
+
+it('an upgraded row is NOT owed to the server', async () => {
+  // The v9 ALTERs default `dirty = 0, remote = 1` — the rows came FROM the
+  // server, so they are already there. Getting this backwards is not a
+  // cosmetic mistake: every upgrading device would treat its whole cached
+  // plan list as an outbox and `replaceItems` its stale cached items over
+  // whatever the athlete has since edited on the web.
+  //
+  // This needs a v8-SHAPED database specifically. `migratedFixture()` builds
+  // a fresh one, where these columns come from CREATE TABLE and not from the
+  // ALTERs — so the fresh-install test cannot see a wrong ALTER default at
+  // all, and passed while this path was unguarded.
+  const db = openFixture();
+  db.raw.exec(`
+    CREATE TABLE workout_cache (
+      id TEXT PRIMARY KEY NOT NULL, user_id TEXT NOT NULL, sport TEXT NOT NULL,
+      name TEXT NOT NULL, goal TEXT, items_json TEXT NOT NULL DEFAULT '[]',
+      owner_user_id TEXT, visibility TEXT NOT NULL DEFAULT 'private',
+      cached_at TEXT NOT NULL);
+    INSERT INTO workout_cache VALUES
+      ('w1','u1','strength','Legs',NULL,'[]','u1','private','2026-08-01T00:00:00Z');
+    PRAGMA user_version = 8;
+  `);
+
+  await migrate(db as never);
+
+  const row = db.raw.prepare('SELECT dirty, remote, deleted_at FROM workout_cache').get();
+  expect(row).toEqual({ dirty: 0, remote: 1, deleted_at: null });
+});

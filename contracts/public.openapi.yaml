@@ -1796,7 +1796,15 @@ paths:
               type: object
               required: [id, name, sport]
               properties:
-                id: { type: string }
+                id:
+                  type: string
+                  description: >
+                    Client-generated, and required. Offline clients create a
+                    workout locally and push it later, so the id must be the
+                    one already stored on the device — a session created from
+                    that workout references it, and a server-minted id would
+                    orphan it.
+
                 name: { type: string }
                 sport: { type: string, enum: [strength, running, bjj] }
                 goal: { type: string, enum: [general, powerlifting, hypertrophy, endurance] }

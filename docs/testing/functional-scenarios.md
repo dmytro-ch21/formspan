@@ -2026,6 +2026,19 @@ templates start being cached. What is testable now:
   a plan**, not as a failure — and the retry ladder keeps going. Calling it a
   failure would be wrong twice over: it alarms, and a 4xx would classify as
   permanent and stop the retries.
+- The same holds for a **single** save, not only a batch sync: tick one set
+  just after signal returns, while the workout is still unsynced. The debounced
+  per-save push must defer too — not show an error and file a `sync_blocked`
+  report mid-workout for a row that heals itself on the next run.
+- **Delete the workout while a session started from it is still unsynced.** The
+  session must still reach the server, with its plan link simply cut — the same
+  thing the server's own `ON DELETE SET NULL` does. This is the case where the
+  workouts-first ordering works *against* the session, and it fails
+  deterministically rather than as a race, so a passing run proves nothing
+  unless this exact sequence is the one exercised.
+- If a workout create is **permanently** refused, every session referencing it
+  defers forever — reported as waiting, indefinitely, with no repair path.
+  Known gap; low probability, permanent when hit.
 
 ### Conflicts
 
@@ -2038,3 +2051,14 @@ templates start being cached. What is testable now:
 - A workout created offline is **not** removed by a server refresh that
   doesn't list it. The server has simply never heard of it.
 - The same for a pending edit or a pending delete.
+- **Check this on screen, not only in the store.** Reopen an offline-edited
+  plan while online, before its push lands: the edit must still be displayed.
+  Rendering the server's older copy undoes the edit visually while SQLite
+  still holds it — and if the athlete edits on from what is shown, the save
+  writes stale items over their own work. Same for the list: a
+  just-created, unpushed workout must not vanish when a stale list response
+  arrives.
+- A save or delete that matches **no local row** (deleted on the web and
+  reconciled away mid-edit) must report a failure, not navigate away as
+  though it had worked. Deleting the same workout twice, however, is not a
+  failure — a delete that isn't idempotent is the worse bug.

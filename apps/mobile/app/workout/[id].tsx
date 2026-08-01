@@ -33,6 +33,7 @@ import {
   cachedExercises,
   cachedWorkouts,
   deleteLocalWorkout,
+  dirtyWorkoutIDs,
   saveLocalWorkoutItems,
   startLocalSession,
 } from '@/lib/sessionStore';
@@ -88,10 +89,21 @@ export default function WorkoutDetailScreen() {
 
     try {
       const w = await getWorkout(getToken, id);
-      setWorkout(w);
-      setItems(w.items);
+      // The server's copy is only newer if ours isn't waiting to be pushed.
+      //
+      // Unconditionally adopting it undid the offline edit ON SCREEN while
+      // SQLite still held it: reopen an edited plan online before its push
+      // lands and the change visibly vanished, Save went inactive (it
+      // compares against this same copy), and editing on from what was shown
+      // then overwrote the local row with server-derived stale items — the
+      // athlete's own work, lost with their unwitting help.
+      const dirtyLocal = await dirtyWorkoutIDs(userId).catch(() => new Set<string>());
       sport = w.sport;
       setError(null);
+      if (!dirtyLocal.has(id)) {
+        setWorkout(w);
+        setItems(w.items);
+      }
     } catch (err) {
       // Only an error if we have nothing to show. With a cached copy on
       // screen, failing to refresh is an ordinary offline state.

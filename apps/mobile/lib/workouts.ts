@@ -1,4 +1,5 @@
 import { randomUUID } from 'expo-crypto';
+import { ApiError } from './apiError';
 import { netFetch } from './authedFetch';
 import type { TokenGetter } from './useAuthToken';
 
@@ -133,11 +134,28 @@ async function request<T>(
   if (res.status === 204) return undefined as T;
   const body = await res.json().catch(() => null);
   if (!res.ok) {
+    // An `ApiError`, not a plain `Error` — and that distinction is load
+    // bearing, not tidiness. `isNotFound` and `isPermanentRejection` both
+    // return false for anything that isn't an `ApiError`, on the reasoning
+    // that it never reached the server. So while this module threw plain
+    // errors, EVERY classification branch in the workout push path was dead
+    // code: a 404 on delete never counted as success (the tombstone would
+    // survive forever, failing every run for a plan deleted exactly as
+    // intended), and a permanent refusal was classified `transient`, so the
+    // orchestrator would grind a doomed request for the life of the install
+    // — the precise failure PR2 exists to prevent, revived for the new
+    // outbox. `lib/sessions.ts` was migrated to `ApiError` and this module
+    // was not; the gap was invisible because a mocked test supplied the
+    // contract the real module didn't honour.
+    //
     // The API's error envelope carries a human-usable message for the cases
     // a user can act on (a sport mismatch names the offending exercise), so
     // prefer it over a bare status code.
-    const message = body?.error?.message;
-    throw new Error(message || `Request failed (${res.status}).`);
+    throw new ApiError(
+      body?.error?.message ?? `Request failed (${res.status}).`,
+      body?.error?.code ?? 'unknown',
+      res.status,
+    );
   }
   return body as T;
 }

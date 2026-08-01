@@ -77,7 +77,6 @@ export default function WorkoutsScreen() {
     try {
       const list = await listWorkouts(getToken, scope, controller.signal);
       if (!controller.signal.aborted) {
-        setWorkouts(list);
         setEverLoaded(true);
         // Cleared on success, not at request start — an error wiped up
         // front leaves the screen looking fine throughout a retry.
@@ -85,7 +84,21 @@ export default function WorkoutsScreen() {
         // Refresh the cache for next time. `mine` only: caching other
         // people's shared templates under this athlete's cache rows would
         // make them reappear as if they were theirs.
-        if (scope === 'mine' && userId) await cacheWorkouts(userId, list);
+        if (scope === 'mine' && userId) {
+          await cacheWorkouts(userId, list);
+          // Render the RECONCILED cache, not the raw response.
+          //
+          // `cacheWorkouts` already keeps rows the server hasn't heard of and
+          // drops ones it has deleted; rendering `list` threw that away. A
+          // workout created offline vanished from the list the moment a stale
+          // `listWorkouts` response landed — reliably, not rarely, because
+          // creating one fires the sync request and this reload together —
+          // and came back on the next focus. Reading back through the cache
+          // makes what is on screen the same thing that is on disk.
+          setWorkouts(await cachedWorkouts(userId));
+        } else {
+          setWorkouts(list);
+        }
       }
     } catch (err) {
       if (controller.signal.aborted) return;

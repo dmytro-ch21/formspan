@@ -4298,6 +4298,73 @@ Five mutations checked: drop the CAS on refresh (1 test), let the reconcile
 delete unpushed rows (1), stop filtering tombstones (2), re-stamp an existing
 tombstone (1), report deferred rows as failures (1).
 
+**Correction, from the review round below:** the last of those was unbacked as
+first written. `sync.test.ts` mocks `syncSessions` wholesale, so it covered the
+orchestrator *displaying* a deferred count, not `runSync` *producing* one —
+mutating `runSync` to count deferrals as failures left the suite green. The
+`pushWorkoutRow` tests added afterwards do cover it.
+
+### The review round, and what it found
+
+Six blocking findings, and the first two are the ones worth remembering.
+
+**`lib/workouts.ts` threw plain `Error`.** `lib/sessions.ts` had been migrated
+to `ApiError`; this module never was. `isNotFound` and `isPermanentRejection`
+both answer `false` for anything that is not an `ApiError` — on the sound
+reasoning that it never reached the server — so **every classification branch
+in the workout push path was dead code**. A 404 on delete never counted as
+success, meaning a tombstone for a plan deleted on the web would fail every
+sync run forever. A permanent refusal classified as `transient`, so the
+orchestrator would grind a doomed request for the life of the install: exactly
+the failure PR2 exists to prevent, revived in the new outbox.
+
+**And my own test hid it.** The `pushWorkoutRow` tests mock `../workouts`, and
+the mocks rejected with `ApiError` — supplying the contract the real module did
+not honour. The 404 and permanent-restore tests passed against branches
+unreachable in production. Eleven source mutations had been checked and all
+eleven were caught, because every one of them mutated `sessionStore.ts`; the
+defect was in the dependency, where no mutation was looking. **Mutation testing
+proves a test can fail, not that its fixtures are honest.** The fix is a
+`workoutsApi.test.ts` that never mocks `../workouts` and asserts the property
+the other file's mocks assume — so the two cannot drift apart again silently.
+
+The other four:
+
+- **A workout delete deterministically orphaned its sessions.** Workouts are
+  pushed first *by design*, so a tombstoned workout's row leaves the cache
+  before the session loop runs — the deferral could no longer see it, the
+  session went out referencing a workout the server had never heard of, was
+  refused 400, and classified permanent. Not a race; guaranteed. Fixed by
+  nulling `local_sessions.workout_id` at delete time, which is precisely what
+  the server's own `ON DELETE SET NULL` does, so both sides converge. The link
+  is metadata; the training is the data.
+- **`pushSession` bypassed the deferral entirely** — it lived only in the batch
+  loop, and `pushSession` is what runs on every debounced save from the session
+  screen. Ticking a set just after signal returned would show a fatal-looking
+  error and file a `sync_blocked` operator report, mid-workout, for a row that
+  heals itself moments later.
+- **Both screens rendered the server's stale copy over unpushed local state.**
+  The CAS protected SQLite and the UI then undid it on screen: reopen an
+  offline-edited plan online before its push landed and the edit visibly
+  vanished, Save went inactive, and editing on from what was displayed
+  overwrote the local row with stale items — the athlete losing their own work
+  with their unwitting help. The list screen had the same shape, rendering the
+  raw response instead of the reconciled cache. It now renders the cache, which
+  is also the honest answer: what is on screen is what is on disk.
+- **Dirty workouts were not in `pending`,** and `pending` is not a badge — it
+  gates the retry timer and the foreground trigger. An edited plan that failed
+  transiently got neither. The offline case survived only by accident, because
+  `!online` trips the foreground gate on its own.
+
+Twelve mutations checked across the fixes; all twelve caught. One was vacuous
+on the first pass (the zero-row save guard had no test at all) and is now
+covered.
+
+**Still untested: the two screen fixes.** `apps/mobile` has no component test
+runner, so the SQLite-level behaviour is covered and the render path is not.
+Worth having, not worth blocking this on — recorded here rather than left to be
+rediscovered.
+
 A note on the SQL-comment guard added earlier today: the backtick trap fired a
 **third** time here, and the guard did not help — `tsc` runs first and reports
 it as unrelated syntax errors twenty lines down, so the named failure never got

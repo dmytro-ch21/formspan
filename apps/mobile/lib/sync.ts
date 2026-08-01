@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 
 import { isOffline } from './apiError';
-import { countPendingSessions, syncSessions } from './sessionStore';
+import { countPendingSessions, countPendingWorkouts, syncSessions } from './sessionStore';
 import type { SyncErrorKind } from './sessionStore';
 import type { TokenGetter } from './useAuthToken';
 
@@ -147,11 +147,26 @@ function cancelTimer(): void {
   }
 }
 
-/** Recount what's waiting, without syncing. Cheap: one indexed COUNT. */
+/**
+ * Recount what's waiting, without syncing. Cheap: two indexed COUNTs.
+ *
+ * Workouts are counted as well as sessions, and not for the badge's sake:
+ * `pending` gates the machinery. `schedule()` refuses to set a retry timer
+ * when it reads 0, and the foreground trigger declines to sync. So while this
+ * counted sessions only, an edited plan that failed transiently — a 5xx,
+ * which leaves `online: true` — got no backoff retry and no foreground retry,
+ * and could sit on the device indefinitely until some unrelated action
+ * happened to call `request()`. The offline case survived only by accident,
+ * because `!state.online` trips the foreground gate on its own.
+ */
 export async function refreshPending(): Promise<void> {
   if (!creds) return;
   try {
-    emit({ pending: await countPendingSessions(creds.userID) });
+    const [sessions, workouts] = await Promise.all([
+      countPendingSessions(creds.userID),
+      countPendingWorkouts(creds.userID),
+    ]);
+    emit({ pending: sessions + workouts });
   } catch {
     // A failed count must not break anything; the number is advisory.
   }
@@ -221,6 +236,9 @@ async function run(reason: string): Promise<void> {
       emit({
         lastError: err instanceof Error ? err.message : String(err),
         online: !isOffline(err),
+        // Cleared, not carried. The run threw before reporting a count, so
+        // the previous run's number describes nothing that is true now.
+        deferred: 0,
       });
       retry = true;
     } finally {

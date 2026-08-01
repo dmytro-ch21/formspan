@@ -1,8 +1,20 @@
 import { AppState } from 'react-native';
 
 import { OfflineError } from '../apiError';
-import { countPendingSessions, syncSessions, type SessionSyncResult } from '../sessionStore';
-import { request, setSyncIdentity, startSyncOrchestrator, syncNow, syncState } from '../sync';
+import {
+  countPendingSessions,
+  countPendingWorkouts,
+  syncSessions,
+  type SessionSyncResult,
+} from '../sessionStore';
+import {
+  refreshPending,
+  request,
+  setSyncIdentity,
+  startSyncOrchestrator,
+  syncNow,
+  syncState,
+} from '../sync';
 
 /**
  * The sync orchestrator.
@@ -18,6 +30,12 @@ import { request, setSyncIdentity, startSyncOrchestrator, syncNow, syncState } f
 jest.mock('../sessionStore', () => ({
   syncSessions: jest.fn(),
   countPendingSessions: jest.fn(),
+  // `pending` gates the retry timer and the foreground trigger, and it is the
+  // SUM of both outboxes. Omitting this made `refreshPending` throw into its
+  // own swallowing catch, leaving pending at 0 — so the ladder and the
+  // foreground sync silently stopped, which is what the two tests below
+  // caught when workouts joined the count.
+  countPendingWorkouts: jest.fn(async () => 0),
 }));
 
 const mockSync = syncSessions as jest.MockedFunction<typeof syncSessions>;
@@ -290,4 +308,31 @@ it('reports deferred rows without calling them a failure', async () => {
   expect(syncState().deferred).toBe(2);
   expect(syncState().lastError).toBeNull();
   expect(syncState().online).toBe(true);
+});
+
+describe('the pending count', () => {
+  it('includes dirty WORKOUTS, not just sessions', async () => {
+    // `pending` is not a badge number — it gates `schedule()` (which refuses
+    // to set a retry timer at 0) and the foreground trigger. Counting
+    // sessions only meant an edited plan that failed transiently got no
+    // backoff retry and no foreground retry, and could sit on the device
+    // indefinitely.
+    (countPendingSessions as jest.Mock).mockResolvedValue(0);
+    (countPendingWorkouts as jest.Mock).mockResolvedValue(3);
+
+    setSyncIdentity('u1', async () => 'tok');
+    await refreshPending();
+
+    expect(syncState().pending).toBe(3);
+  });
+
+  it('sums both outboxes', async () => {
+    (countPendingSessions as jest.Mock).mockResolvedValue(2);
+    (countPendingWorkouts as jest.Mock).mockResolvedValue(3);
+
+    setSyncIdentity('u1', async () => 'tok');
+    await refreshPending();
+
+    expect(syncState().pending).toBe(5);
+  });
 });

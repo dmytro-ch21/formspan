@@ -345,7 +345,21 @@ export async function pushSession(
     id,
     userID,
   );
-  if (row) await pushRow(db, row, userID, getToken);
+  if (!row) return;
+  // The same deferral `syncSessions` applies, and it has to be here too.
+  //
+  // This runs on every debounced save from the session screen, so it is the
+  // path an athlete actually hits: create a workout offline, start a session
+  // from it, walk into signal, tick a set before the orchestrator's run
+  // finishes. Without this the create goes out with a workout_id the server
+  // has never seen, is refused 400, classifies as PERMANENT — and the screen
+  // shows a fatal-looking error and files a `sync_blocked` operator report,
+  // mid-workout, for a row that would have healed itself on the next run.
+  if (row.workout_id) {
+    const unsynced = await unsyncedWorkoutIDs(userID);
+    if (unsynced.has(row.workout_id)) return;
+  }
+  await pushRow(db, row, userID, getToken);
 }
 
 /**
@@ -979,11 +993,16 @@ export async function saveLocalWorkoutItems(
 ): Promise<void> {
   const db = await getDb();
   const now = new Date().toISOString();
-  await db.runAsync(
+  const r = await db.runAsync(
     `UPDATE workout_cache SET items_json = ?, dirty = 1, updated_at = ?
      WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
     JSON.stringify(items), now, id, userID,
   );
+  // Zero rows means the workout is gone from under us — deleted on the web
+  // and reconciled away, most likely. Returning quietly would have the
+  // screen report a successful save of work that now exists nowhere; the
+  // caller already has an honest "Couldn't save on this device" path.
+  if (r.changes === 0) throw new Error('This workout no longer exists on this device.');
 }
 
 /**
@@ -996,11 +1015,63 @@ export async function saveLocalWorkoutItems(
 export async function deleteLocalWorkout(userID: string, id: string): Promise<void> {
   const db = await getDb();
   const now = new Date().toISOString();
-  await db.runAsync(
+  const r = await db.runAsync(
     `UPDATE workout_cache SET deleted_at = ?, dirty = 1, updated_at = ?
      WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
     now, now, id, userID,
   );
+  if (r.changes === 0) {
+    // Zero rows has two meanings and they need different answers. Already
+    // tombstoned: the caller is asking for a state that already holds, so
+    // succeed quietly — a delete that is not idempotent is a worse bug than
+    // this one. Genuinely absent (deleted on the web and reconciled away):
+    // say so, or the screen navigates back as though it had deleted
+    // something.
+    const still = await db.getFirstAsync<{ id: string }>(
+      `SELECT id FROM workout_cache WHERE id = ? AND user_id = ?`, id, userID,
+    );
+    if (!still) throw new Error('This workout no longer exists on this device.');
+    return;
+  }
+  // Cut the link the same way the server would, and for the same reason.
+  //
+  // sessions.workout_id is ON DELETE SET NULL server-side. Locally it was
+  // left pointing at the deleted plan, which stranded the session
+  // *deterministically* rather than as a race: the workout tombstone is
+  // pushed first by design, its row then leaves the cache, so
+  // `unsyncedWorkoutIDs` no longer lists it, the session is not deferred,
+  // and its create is refused with 400 "unknown workout" — a permanent
+  // rejection, so retries stop and the training is lost with no repair path.
+  //
+  // Nulling here mirrors what the server does, so both sides converge. The
+  // link is metadata; the training is the data, and only one of them is
+  // irreplaceable. `dirty` is deliberately NOT set: an already-synced session
+  // needs no push for this, because the server performs the same nulling
+  // itself when the delete lands.
+  await db.runAsync(
+    `UPDATE local_sessions SET workout_id = NULL WHERE workout_id = ? AND user_id = ?`,
+    id, userID,
+  );
+}
+
+/**
+ * Workout ids holding local edits the server hasn't got.
+ *
+ * Distinct from `unsyncedWorkoutIDs`, which asks whether the workout EXISTS
+ * server-side (`remote`). This asks whether our copy is newer (`dirty`), which
+ * is the question a screen needs before letting a network response overwrite
+ * what is on screen.
+ *
+ * Returned as ids rather than added to `Workout` because that type is the wire
+ * contract; local sync bookkeeping does not belong in it.
+ */
+export async function dirtyWorkoutIDs(userID: string): Promise<Set<string>> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<{ id: string }>(
+    `SELECT id FROM workout_cache WHERE user_id = ? AND dirty = 1`,
+    userID,
+  );
+  return new Set(rows.map((r) => r.id));
 }
 
 /** Workout ids this device holds that the server has not acknowledged. */
