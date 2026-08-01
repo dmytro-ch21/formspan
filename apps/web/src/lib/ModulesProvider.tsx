@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
 
-import type { Module } from "@/lib/api";
+import type { Module } from "@/lib/modules";
 
 /**
  * The athlete's enabled disciplines, for the whole dashboard.
@@ -27,11 +27,26 @@ import type { Module } from "@/lib/api";
 
 type ModulesState = {
   modules: Module[];
+  /**
+   * False when we have no answer at all — the fetch failed.
+   *
+   * Distinct from "answered, and the list is empty", and the distinction is
+   * load-bearing: consumers must fail OPEN on an unanswerable question rather
+   * than assert the athlete trains nothing. Reporting the second as the first
+   * has already cost a real session on mobile, where an unreachable server
+   * hid the Library tab and rendered the very toggles needed to fix it as an
+   * empty card.
+   */
+  known: boolean;
   /** Adopt a set the caller already has — what `PATCH /v1/modules` returns. */
   apply: (next: Module[]) => void;
 };
 
-const ModulesContext = createContext<ModulesState>({ modules: [], apply: () => {} });
+const ModulesContext = createContext<ModulesState>({
+  modules: [],
+  known: false,
+  apply: () => {},
+});
 
 export function ModulesProvider({
   initial,
@@ -42,7 +57,10 @@ export function ModulesProvider({
 }) {
   const [modules, setModules] = useState<Module[]>(initial);
   const apply = useCallback((next: Module[]) => setModules(next), []);
-  const value = useMemo(() => ({ modules, apply }), [modules, apply]);
+  const value = useMemo(
+    () => ({ modules, known: modules.length > 0, apply }),
+    [modules, apply],
+  );
   return <ModulesContext.Provider value={value}>{children}</ModulesContext.Provider>;
 }
 

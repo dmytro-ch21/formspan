@@ -212,7 +212,11 @@ function NewWorkoutDialog({
   const startable = enabledSports(modules);
   const { getToken } = useAuth();
   const [name, setName] = useState("");
-  const [sport, setSport] = useState<Sport>("strength");
+  // The athlete's first enabled discipline, not a hardcoded "strength".
+  // Hardcoded, a strength-disabled athlete got no active chip and silently
+  // created strength workouts anyway — the backend validates registry
+  // membership, not per-user enablement, so nothing caught it.
+  const [sport, setSport] = useState<Sport>(startable[0]?.key ?? "");
   const [goal, setGoal] = useState<Goal>("general");
   const [isPublic, setIsPublic] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -346,7 +350,7 @@ function NewWorkoutDialog({
           </button>
           <button
             type="submit"
-            disabled={busy || !name.trim()}
+            disabled={busy || !name.trim() || !sport}
             className="rounded-pill bg-accent-fill px-5 py-2 text-sm font-bold text-accent-on-fill transition disabled:cursor-not-allowed disabled:opacity-30"
           >
             {busy ? "Creating…" : "Create"}

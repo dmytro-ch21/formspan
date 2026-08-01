@@ -1100,87 +1100,19 @@ export function executionSteps(description: string): string[] {
 
 /* ── the discipline registry ───────────────────────────────────────────── */
 
-export type ModuleCapabilities = {
-  /** "exercises" | "techniques" | "" — what the Library shows for this. */
-  catalog: string;
-  /** Extra filter axes beyond the catalog's own. BJJ has "position". */
-  facets: string[];
-  has_goals: boolean;
-  has_progression: boolean;
-  /**
-   * Personal-best kinds that mean anything here. Empty for BJJ — which is why
-   * Records is gated on "any enabled module has record kinds" rather than on
-   * a sport name.
-   */
-  record_kinds: string[];
-};
-
-export type Module = {
-  key: string;
-  /** Carries the acronym: "BJJ", not the "Bjj" capitalising the key gives. */
-  label: string;
-  is_sport: boolean;
-  default_on: boolean;
-  enabled: boolean;
-  capabilities: ModuleCapabilities;
-};
-
-/** Normalise at the parse boundary — an older server may omit array fields. */
-function normaliseModule(m: Partial<Module> & { key: string }): Module {
-  const c = m.capabilities ?? ({} as Partial<ModuleCapabilities>);
-  return {
-    key: m.key,
-    label: m.label ?? m.key,
-    is_sport: m.is_sport ?? false,
-    default_on: m.default_on ?? false,
-    enabled: m.enabled ?? m.default_on ?? false,
-    capabilities: {
-      catalog: c.catalog ?? "",
-      facets: c.facets ?? [],
-      has_goals: c.has_goals ?? false,
-      has_progression: c.has_progression ?? false,
-      record_kinds: c.record_kinds ?? [],
-    },
-  };
-}
-
-export function normaliseModules(raw: unknown): Module[] {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .filter((m): m is Partial<Module> & { key: string } => typeof m?.key === "string" && m.key)
-    .map(normaliseModule);
-}
-
-export async function listModules(getToken: Token, signal?: AbortSignal): Promise<Module[]> {
-  const b = await request<{ modules: Module[] }>(getToken, "/modules", {}, signal);
-  return normaliseModules(b.modules);
-}
-
-/** Toggle modules. Sparse — send only what changed. */
-export async function setModules(
-  getToken: Token,
-  changes: Record<string, boolean>,
-): Promise<Module[]> {
-  const b = await request<{ modules: Module[] }>(getToken, "/modules", {
-    method: "PATCH",
-    body: JSON.stringify(changes),
-  });
-  return normaliseModules(b.modules);
-}
-
-/** The enabled modules that can actually be a session's sport. */
-export function enabledSports(modules: Module[]): Module[] {
-  return modules.filter((m) => m.enabled && m.is_sport);
-}
-
-export function moduleFor(modules: Module[], key: string): Module | undefined {
-  return modules.find((m) => m.key === key);
-}
-
-/** Label for a key, falling back to the key — never "Bjj". */
-export function labelForModule(modules: Module[], key: string): string {
-  return moduleFor(modules, key)?.label ?? key;
-}
+// Defined in `modules.ts`, which carries NO "use client" directive, because
+// `dashboard/layout.tsx` is a Server Component and cannot call a client
+// reference. Re-exported here so existing client call sites are unchanged.
+// See modules.ts for the failure this was found by.
+export type { Module, ModuleCapabilities } from "@/lib/modules";
+export {
+  normaliseModules,
+  listModules,
+  setModules,
+  enabledSports,
+  moduleFor,
+  labelForModule,
+} from "@/lib/modules";
 
 export type RecordKind =
   | "heaviest_weight"

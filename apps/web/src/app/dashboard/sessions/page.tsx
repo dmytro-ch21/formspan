@@ -20,6 +20,7 @@ import {
   type Workout,
   enabledSports,
 } from "@/lib/api";
+import { labelForModule } from "@/lib/modules";
 import { useModules } from "@/lib/ModulesProvider";
 import {
   delta,
@@ -28,7 +29,6 @@ import {
   localZone,
   PERIODS,
   periodRange,
-  sportLabel,
   type PeriodKey,
 } from "@/lib/history";
 import { formatVolume, type UnitSystem } from "@/lib/units";
@@ -518,6 +518,8 @@ function SportChips({
   value: Sport | null;
   onChange: (s: Sport | null) => void;
 }) {
+  // Before the early return, same rules-of-hooks reason as TrainingCalendar.
+  const { modules } = useModules();
   if (counts.length < 2) return null;
   const total = counts.reduce((n, c) => n + c.sessions, 0);
   return (
@@ -535,7 +537,7 @@ function SportChips({
           active={value === c.sport}
           onClick={() => onChange(c.sport)}
         >
-          {sportLabel(c.sport)}{" "}
+          {labelForModule(modules, c.sport)}{" "}
           <span className="text-text-dim">{c.sessions}</span>
         </Chip>
       ))}

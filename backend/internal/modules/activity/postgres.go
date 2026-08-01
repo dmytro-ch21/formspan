@@ -150,8 +150,12 @@ func (r *PostgresRepository) ListUsers(ctx context.Context) ([]UserSummary, erro
 		WITH ids AS (`+userIDs+`)
 		SELECT`+userSummaryCols+`
 		FROM ids u LEFT JOIN profiles p ON p.user_id = u.user_id
+		-- user_id last, and not decoratively: without a unique tiebreak two
+		-- profileless users with no sessions tie on (NULL, NULL), so once the
+		-- cap binds it is nondeterministic WHICH of them the admin never sees.
+		-- api-conventions.md says the same thing: never the timestamp alone.
 		ORDER BY (SELECT max(s.started_at) FROM sessions s WHERE s.user_id = u.user_id)
-			DESC NULLS LAST, p.created_at DESC NULLS LAST
+			DESC NULLS LAST, p.created_at DESC NULLS LAST, u.user_id
 		LIMIT $1`, maxAdminUsers)
 	if err != nil {
 		return nil, fmt.Errorf("activity: list users: %w", err)
@@ -175,14 +179,6 @@ func (r *PostgresRepository) ListUsers(ctx context.Context) ([]UserSummary, erro
 	return users, nil
 }
 
-// resolveEnabled turns stored "key:bool" pairs into the enabled discipline
-// labels, filling absent modules from the registry.
-//
-// This MUST go through the registry rather than being read straight from SQL.
-// A profile created after migration 000020 has no rows at all until the user
-// touches a toggle, so `SELECT ... WHERE enabled` undercounts every new user
-// and returns nothing for a discipline added later. Absence means "default",
-// not "off" — a distinction only the registry knows.
 // GetUser is the per-athlete admin read: summary + recent sessions.
 //
 // TWO queries in ONE round trip via pgx.Batch, not two Query calls. Both are
@@ -210,7 +206,7 @@ func (r *PostgresRepository) GetUser(ctx context.Context, userID string) (*UserD
 		       (SELECT count(*) FROM session_sets ss WHERE ss.session_id = s.id)
 		FROM sessions s
 		WHERE s.user_id = $1
-		ORDER BY s.started_at DESC
+		ORDER BY s.started_at DESC, s.id
 		LIMIT $2`, userID, maxDetailSessions)
 
 	br := r.pool.SendBatch(ctx, batch)
@@ -247,6 +243,14 @@ func (r *PostgresRepository) GetUser(ctx context.Context, userID string) (*UserD
 	return &d, nil
 }
 
+// resolveEnabled turns stored "key:bool" pairs into the enabled discipline
+// labels, filling absent modules from the registry.
+//
+// This MUST go through the registry rather than being read straight from SQL.
+// A profile created after migration 000020 has no rows at all until the user
+// touches a toggle, so `SELECT ... WHERE enabled` undercounts every new user
+// and returns nothing for a discipline added later. Absence means "default",
+// not "off" — a distinction only the registry knows.
 func resolveEnabled(stored []string) []string {
 	explicit := make(map[string]bool, len(stored))
 	for _, kv := range stored {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/database"
+	"github.com/dmytro-ch21/vola/backend/internal/platform/discipline"
 )
 
 // Requires a real Postgres with migrations already applied — set
@@ -281,5 +282,79 @@ func TestPostgresRepository_ListUsers_CountsSessionsNotActivities(t *testing.T) 
 	// An id nobody has ever used must 404, not render a page of zeroes.
 	if _, err := repo.GetUser(ctx, "test_user_definitely_not_real"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for an unknown user, got %v", err)
+	}
+}
+
+// An explicitly stored toggle must beat the registry default, in both
+// directions.
+//
+// Without this, only the no-rows path was covered — so a regression in the
+// `key:bool` string parse (say `== "t"`, which is what Postgres would render
+// under a different cast) would leave every user's toggles reading as
+// defaults, and the suite would stay green while the admin console quietly
+// showed the wrong disciplines for everyone who had ever changed one.
+func TestPostgresRepository_ListUsers_StoredTogglesBeatDefaults(t *testing.T) {
+	databaseURL := os.Getenv("TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("TEST_DATABASE_URL not set, skipping Postgres integration test")
+	}
+
+	ctx := context.Background()
+	pool, err := database.NewPool(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { pool.Close() })
+
+	repo := NewPostgresRepository(pool)
+	userID := "test_user_toggles"
+	t.Cleanup(func() {
+		if _, err := pool.Exec(ctx, `DELETE FROM profiles WHERE user_id = $1`, userID); err != nil {
+			t.Logf("cleanup: delete profile: %v", err)
+		}
+	})
+
+	// profile_modules has an FK to profiles, so the row has to exist first.
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO profiles (user_id) VALUES ($1) ON CONFLICT DO NOTHING`, userID); err != nil {
+		t.Fatalf("insert profile: %v", err)
+	}
+
+	// Pick one default-on and one default-off sport straight from the
+	// registry, then invert both — hardcoding keys here would make the test
+	// wrong the moment a discipline's default changes.
+	var on, off string
+	var onLabel, offLabel string
+	for _, m := range discipline.All() {
+		if m.DefaultOn && on == "" {
+			on, onLabel = m.Key, m.Label
+		}
+		if !m.DefaultOn && off == "" {
+			off, offLabel = m.Key, m.Label
+		}
+	}
+	if on == "" || off == "" {
+		t.Skip("registry has no default-on/default-off pair to invert")
+	}
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO profile_modules (user_id, module_key, enabled)
+		VALUES ($1, $2, false), ($1, $3, true)`, userID, on, off); err != nil {
+		t.Fatalf("insert modules: %v", err)
+	}
+
+	detail, err := repo.GetUser(ctx, userID)
+	if err != nil {
+		t.Fatalf("get user: %v", err)
+	}
+	got := map[string]bool{}
+	for _, label := range detail.User.Modules {
+		got[label] = true
+	}
+	if got[onLabel] {
+		t.Fatalf("module %q was switched OFF but still reported enabled: %v", on, detail.User.Modules)
+	}
+	if !got[offLabel] {
+		t.Fatalf("module %q was switched ON but is missing: %v", off, detail.User.Modules)
 	}
 }

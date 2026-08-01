@@ -60,10 +60,16 @@ export default function SettingsPage() {
                 type="button"
                 role="switch"
                 aria-checked={on}
-                aria-label={m.label}
-                disabled={saving !== null}
-                onClick={() => toggle(m.key, !on)}
-                className={`flex items-center gap-4 rounded-card border px-5 py-4 text-left transition disabled:opacity-60 ${
+                // No aria-label: it would REPLACE the button's content as the
+                // accessible name, dropping the description line below.
+                //
+                // aria-disabled, not `disabled`: a real disabled attribute on
+                // the button you just pressed drops keyboard focus to <body>
+                // after every toggle. aria-busy says what is happening.
+                aria-disabled={saving !== null}
+                aria-busy={saving === m.key}
+                onClick={() => saving === null && toggle(m.key, !on)}
+                className={`flex items-center gap-4 rounded-card border px-5 py-4 text-left transition aria-disabled:opacity-60 ${
                   on
                     ? "border-lime bg-surface-raised"
                     : "border-line bg-surface hover:bg-surface-raised"

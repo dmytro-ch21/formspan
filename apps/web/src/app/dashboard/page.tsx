@@ -104,7 +104,11 @@ export default function TodayPage() {
   const totals = history?.totals;
   const prev = history?.previous;
   const metric = history ? loadMetric(history.days) : "volume";
-  const dash = everLoaded ? "0" : "—";
+  // Always an em dash, never "0". `everLoaded` is true after a *failed* load
+  // too, so a "0" branch renders a fabricated zero precisely when the figure
+  // is unknown — on the screen whose own comment two lines down says it must
+  // never lie. A real zero comes from `totals`, which only exists on success.
+  const dash = "—";
 
   return (
     <div className="flex flex-col gap-10">
@@ -148,7 +152,7 @@ export default function TodayPage() {
           />
         ) : (
           <Stat
-            label="Mat time"
+            label="Time"
             value={totals ? formatDuration(totals.duration_seconds) : dash}
             change={
               totals && prev
@@ -186,16 +190,16 @@ export default function TodayPage() {
           ) : (
             <ul className="flex flex-col gap-2">
               {sessions.map((s) => (
-                // Deliberately NOT links. Neither /dashboard/sessions nor
-                // /dashboard/workouts reads an id from the URL, so a row that
-                // looked clickable would land you on an unfiltered list and
-                // quietly lose what you clicked. The section headers link to
-                // those lists honestly; per-item deep links need the target
-                // pages to support them first.
-                <li
-                  key={s.id}
-                  className="flex items-center justify-between gap-4 rounded-card border border-line bg-surface px-4 py-3"
-                >
+                // Deep-linked, matching History's own rows: /dashboard/
+                // sessions/[id] exists and sessions/page.tsx already links to
+                // it. An earlier comment here claimed no such target existed —
+                // it was wrong, and identical rows being clickable on one
+                // screen and inert on the next is felt immediately.
+                <li key={s.id}>
+                  <Link
+                    href={`/dashboard/sessions/${s.id}`}
+                    className="flex items-center justify-between gap-4 rounded-card border border-line bg-surface px-4 py-3 transition hover:bg-surface-raised"
+                  >
                     <span className="min-w-0">
                       <span className="block truncate font-medium">
                         {s.name || labelForModule(modules, s.sport)}
@@ -209,6 +213,7 @@ export default function TodayPage() {
                     <span className="stat shrink-0 text-sm text-text-muted">
                       {DAY.format(new Date(s.started_at))}
                     </span>
+                  </Link>
                 </li>
               ))}
             </ul>
@@ -238,14 +243,16 @@ export default function TodayPage() {
           ) : (
             <ul className="flex flex-col gap-2">
               {workouts.slice(0, 6).map((w) => (
-                <li
-                  key={w.id}
-                  className="flex items-center justify-between gap-3 rounded-card border border-line bg-surface px-4 py-3"
-                >
-                  <span className="min-w-0 truncate font-medium">{w.name}</span>
-                  <span className="shrink-0 text-sm text-text-muted">
-                    {labelForModule(modules, w.sport)}
-                  </span>
+                <li key={w.id}>
+                  <Link
+                    href={`/dashboard/workouts/${w.id}`}
+                    className="flex items-center justify-between gap-3 rounded-card border border-line bg-surface px-4 py-3 transition hover:bg-surface-raised"
+                  >
+                    <span className="min-w-0 truncate font-medium">{w.name}</span>
+                    <span className="shrink-0 text-sm text-text-muted">
+                      {labelForModule(modules, w.sport)}
+                    </span>
+                  </Link>
                 </li>
               ))}
             </ul>
@@ -289,8 +296,9 @@ function Stat({
       <p className="stat mt-1 text-5xl">{value}</p>
       {change != null && Math.abs(change) >= 1 && (
         <p className="mt-1 text-sm text-text-muted">
-          {change > 0 ? "↑" : "↓"} {Math.abs(Math.round(change))}% vs previous{" "}
-          {WINDOW_DAYS} days
+          <span aria-hidden="true">{change > 0 ? "↑" : "↓"} </span>
+          <span className="sr-only">{change > 0 ? "up " : "down "}</span>
+          {Math.abs(Math.round(change))}% vs previous {WINDOW_DAYS} days
         </p>
       )}
     </div>

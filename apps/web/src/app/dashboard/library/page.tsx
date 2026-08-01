@@ -90,7 +90,7 @@ type Selection =
   { kind: "exercise"; ex: Exercise } | { kind: "technique"; id: string };
 
 export default function LibraryPage() {
-  const { modules } = useModules();
+  const { modules, known } = useModules();
   /** Chips from the registry, All first. */
   const sportChips = [{ key: "", label: "All" }, ...enabledSports(modules)];
   /**
@@ -98,9 +98,20 @@ export default function LibraryPage() {
    * not just the chips — the technique list is ~65 kB and was pulled on every
    * Library visit regardless of whether this athlete does BJJ.
    */
-  const techniqueSport = modules.find(
+  // When modules are UNKNOWN (the fetch failed), fetch anyway — same
+  // fail-open direction as the rail. Silently hiding the technique library
+  // because a preference endpoint blinked is the worse of the two outcomes.
+  // A boolean, not the module: nothing here needs the module itself, and a
+  // boolean keeps the useCallback dependency stable (an object identity would
+  // rebuild `loadTechniques` on every render).
+  //
+  // When modules are UNKNOWN — the fetch failed — this is true, the same
+  // fail-open direction as the rail. Silently hiding the technique library
+  // because a preference endpoint blinked is the worse of the two outcomes.
+  const techniqueKey = modules.find(
     (m) => m.enabled && m.capabilities.catalog === "techniques",
-  );
+  )?.key;
+  const wantsTechniques = !known || techniqueKey !== undefined;
   const { getToken } = useAuth();
 
   const [sport, setSport] = useState("");
@@ -159,7 +170,7 @@ export default function LibraryPage() {
 
   const loadTechniques = useCallback(async () => {
     // Hiding a module must cut the request, not just the pixels.
-    if (!techniqueSport) {
+    if (!wantsTechniques) {
       setTechniques([]);
       setTechniquesFailed(false);
       return;
@@ -185,7 +196,7 @@ export default function LibraryPage() {
     } finally {
       clearTimeout(deadline);
     }
-  }, [getToken, techniqueSport]);
+  }, [getToken, wantsTechniques]);
 
   useEffect(() => {
     // Matching the convention in sessions/page.tsx: the setState calls inside
@@ -211,9 +222,10 @@ export default function LibraryPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // With modules unknown there is no key to compare and no chip to pick, so
+  // `sport` is "" and the techniques show — fail open, as above.
   const showTechniques =
-    techniqueSport !== undefined &&
-    (sport === "" || sport === techniqueSport.key);
+    wantsTechniques && (sport === "" || sport === techniqueKey);
 
   // Sorted once per source, not once per keystroke; filtering preserves order,
   // so the filtered halves stay sorted and merge linearly below.
@@ -332,15 +344,6 @@ export default function LibraryPage() {
             </kbd>
           </div>
           <div className="flex gap-2">
-            <Chip
-              active={sport === ""}
-              onClick={() => {
-                setSport("");
-                setPosition("");
-              }}
-            >
-              All
-            </Chip>
             {sportChips.map((s) => (
               <Chip
                 key={s.key}

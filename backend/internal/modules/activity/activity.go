@@ -117,11 +117,14 @@ type Repository interface {
 	Create(ctx context.Context, in NewActivity) (*Activity, error)
 	ListByUser(ctx context.Context, userID string) ([]Activity, error)
 	ListUsers(ctx context.Context) ([]UserSummary, error)
-	// GetUser is the per-athlete admin view. Returns ErrNotFound when no
-	// profile exists for the id — an operator pasting a wrong id must be told
-	// it is wrong, not shown a convincing page of zeroes.
+	// GetUser is the per-athlete admin view. Returns ErrNotFound only when NO
+	// TABLE knows the id — a user with sessions but no profile row resolves
+	// normally, same as in ListUsers. An operator pasting a wrong id must be
+	// told it is wrong rather than shown a convincing page of zeroes; an
+	// operator looking up a real athlete who never onboarded must not be.
 	GetUser(ctx context.Context, userID string) (*UserDetail, error)
 }
 
-// ErrNotFound means no profile exists for that user id.
+// ErrNotFound means no table knows that user id — not merely that they have
+// no profile row. Someone who trained without completing onboarding exists.
 var ErrNotFound = errors.New("activity: user not found")

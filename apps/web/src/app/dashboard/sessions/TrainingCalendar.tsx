@@ -3,7 +3,9 @@
 import { useMemo } from "react";
 
 import type { HistoryDay } from "@/lib/api";
-import { buildCalendar, formatDayLong, monthShort, sportLabel } from "@/lib/history";
+import { buildCalendar, formatDayLong, monthShort } from "@/lib/history";
+import { labelForModule } from "@/lib/modules";
+import { useModules } from "@/lib/ModulesProvider";
 
 /**
  * The consistency view: one cell per day, a year at a glance.
@@ -182,6 +184,10 @@ function DayCell({
   selected: boolean;
   onSelect: (date: string | null) => void;
 }) {
+  // Before the early return below: a hook after a conditional return is a
+  // rules-of-hooks violation.
+  const { modules } = useModules();
+
   // Padding that only exists to square off the grid. Rendered as a hole
   // rather than a rest day — it isn't one, it's outside the period.
   if (!inRange) return <span className="h-3 w-3" aria-hidden="true" />;
@@ -189,7 +195,7 @@ function DayCell({
   const summary = day
     ? `${day.sessions} ${day.sessions === 1 ? "session" : "sessions"}` +
       (measure === "sets" && day.working_sets > 0 ? `, ${day.working_sets} working sets` : "") +
-      ` · ${day.sports.map(sportLabel).join(", ")}`
+      ` · ${day.sports.map((sp) => labelForModule(modules, sp)).join(", ")}`
     : "no training";
   const label = `${formatDayLong(date)}: ${summary}`;
 

@@ -1,4 +1,4 @@
-import type { HistoryDay, Sport } from "./api";
+import type { HistoryDay } from "./api";
 
 /**
  * Calendar arithmetic for the history page.
@@ -189,9 +189,10 @@ export function delta(current: number, previous: number): number | null {
   return ((current - previous) / previous) * 100;
 }
 
-export function sportLabel(s: Sport): string {
-  return s === "bjj" ? "BJJ" : s[0].toUpperCase() + s.slice(1);
-}
+// `sportLabel()` lived here and hardcoded `"bjj" → "BJJ"`. Deleted, not kept
+// "just in case": the discipline registry carries each module's own label, so
+// this was a second source of truth that would render the next acronym
+// discipline as "Mma". Use `labelForModule(modules, key)` from `@/lib/modules`.
 
 /** "Mar", for the month strip above the calendar. */
 export function monthShort(key: string): string {

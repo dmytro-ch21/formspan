@@ -2,49 +2,15 @@ import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
 import { auth } from "@clerk/nextjs/server";
 
-import { listModules, type Module } from "@/lib/api";
+// Imported from `@/lib/modules`, NOT `@/lib/api`. api.ts is a "use client"
+// module, and re-exporting through it keeps these client references — a
+// Server Component calling one throws at runtime. Verified by running it:
+// importing the same names via api.ts still threw "Attempted to call
+// listModules() from the server".
+import { listModules, type Module } from "@/lib/modules";
 import { ModulesProvider } from "@/lib/ModulesProvider";
-import { NavLink } from "./NavLink";
+import { DashboardNav } from "./DashboardNav";
 import { ThemeToggle } from "../ThemeToggle";
-
-/**
- * Destinations, and what each needs to be worth showing.
- *
- * `needs` is a predicate over the athlete's enabled modules rather than a list
- * of discipline keys, because the interesting cases aren't "is BJJ on":
- *
- *  - **Library** needs some enabled discipline to actually have a catalog.
- *  - **Records** needs some enabled discipline to have record kinds — NOT
- *    "strength is on". Its five kinds are heaviest weight, estimated 1RM, most
- *    reps, longest time, furthest distance: two are lift-shaped, two are
- *    run-shaped, and BJJ has none. A BJJ-only athlete's Records screen can
- *    never populate, and its empty state ("log a few working sets") is written
- *    in a vocabulary they don't use.
- *
- * Everything else is universal: sessions, days and duration mean the same
- * thing whatever you train.
- */
-const navItems: {
-  href: string;
-  label: string;
-  needs?: (m: Module[]) => boolean;
-}[] = [
-  { href: "/dashboard", label: "Today" },
-  { href: "/dashboard/workouts", label: "Workouts" },
-  { href: "/dashboard/sessions", label: "History" },
-  {
-    href: "/dashboard/records",
-    label: "Records",
-    needs: (m) =>
-      m.some((x) => x.enabled && x.capabilities.record_kinds.length > 0),
-  },
-  {
-    href: "/dashboard/library",
-    label: "Library",
-    needs: (m) => m.some((x) => x.enabled && x.capabilities.catalog !== ""),
-  },
-  { href: "/dashboard/settings", label: "Settings" },
-];
 
 /**
  * The dark shell. A fixed rail rather than a top bar: the destinations are
@@ -73,11 +39,6 @@ export default async function DashboardLayout({
   } catch {
     /* nav falls back to ungated below */
   }
-  const known = modules.length > 0;
-  const visible = navItems.filter(
-    (i) => !known || !i.needs || i.needs(modules),
-  );
-
   return (
     <ModulesProvider initial={modules}>
       <div className="flex min-h-screen bg-bg">
@@ -92,11 +53,7 @@ export default async function DashboardLayout({
             </span>
           </Link>
 
-          <nav className="flex flex-col gap-0.5 px-3" aria-label="Main">
-            {visible.map((item) => (
-              <NavLink key={item.href} href={item.href} label={item.label} />
-            ))}
-          </nav>
+          <DashboardNav />
 
           <div className="mt-auto flex flex-col gap-1 border-t border-line-soft p-3">
             <ThemeToggle />
