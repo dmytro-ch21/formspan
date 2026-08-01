@@ -4177,12 +4177,24 @@ Also caught by having schema tests at all: bumping `SCHEMA_VERSION` failed
 three existing assertions immediately, which is the intended friction — a
 version bump should be a conscious act.
 
-Two mistakes of mine while writing it, both worth recording because they cost
-real time and are both recurrences: **backticks inside a SQL comment** ended
-the JS template literal (second time — the file now says so explicitly), and
-the first v6 upgrade fixture created only `local_sessions`, so a later
-`addColumnIfMissing` threw "no such table" for a reason that could never
-happen on a device, which has every earlier table.
+Two mistakes of mine while writing it, both recurrences, and **both now made
+structural rather than remembered**:
+
+- **Backticks inside a SQL comment** ended the JS template literal — second
+  time. TypeScript does catch it, but as a wall of unrelated syntax errors
+  twenty lines down, which reads like the code is broken rather than the
+  comment. `sqlComments.test.ts` now fails with the offending file and line
+  instead.
+- **A failing typecheck scrolled past and the commit happened anyway** —
+  second time, once on the test-runner PR and once here — because I ran the
+  checks as separate lines and a newline is not a dependency. There is now one
+  `pnpm run verify` that chains everything with `&&`; verified it halts, by
+  breaking a type and watching the later steps not run. CLAUDE.md points at
+  the single command and says why.
+
+(The third, unrelated: the first v6 upgrade fixture created only
+`local_sessions`, so a later `addColumnIfMissing` threw "no such table" for a
+reason that cannot happen on a device, which has every earlier table.)
 
 ### Not in this PR
 

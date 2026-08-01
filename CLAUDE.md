@@ -51,13 +51,23 @@ Full detail: [docs/architecture/api-conventions.md](docs/architecture/api-conven
 
 Every change goes on a feature branch — **never commit directly to `main`.** If the primary working directory has uncommitted changes that aren't yours to touch (check `git status` first), use an isolated `git worktree` branched from `origin/main` instead of disturbing them.
 
-Before every push, run the full local check suite (matches CI exactly):
+Before every push, run the full local check suite — **one command**:
 
 ```bash
-pnpm run fmt:api && pnpm run vet:api && pnpm run build:api && pnpm run test:api
-pnpm run lint:openapi
-pnpm run typecheck:mobile && pnpm run test:mobile
-pnpm run lint:web && pnpm run typecheck:web && pnpm run build:web
+pnpm run verify
+```
+
+It chains every check with `&&`, which is the point. Running them as separate
+lines has twice let a **failing typecheck scroll past and the commit happen
+anyway** — once on the test-runner PR, once on PR4a — because a newline is not
+a dependency. If you run individual checks while iterating, still run `verify`
+before pushing.
+
+Not included, run separately when relevant:
+
+```bash
+pnpm run test:api                            # needs TEST_DATABASE_URL
+pnpm run build:web                           # slow; CI covers it
 docker build -f backend/Dockerfile backend   # if Docker/Colima is available
 ```
 
