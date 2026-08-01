@@ -81,6 +81,23 @@ const CREATE_WORKOUT_CACHE = `
     name TEXT NOT NULL,
     goal TEXT,
     items_json TEXT NOT NULL DEFAULT '[]',
+    -- WHO OWNS IT, and whether it is shared -- as the server says, not as the
+    -- device assumes.
+    --
+    -- The cache used to return the reading athlete's own id and a hardcoded
+    -- "private". workout/[id].tsx derives canEdit from exactly that field, so
+    -- offline EVERY cached workout looked editable -- including VOLA's own
+    -- ownerless templates and other athletes' public ones. The Save button
+    -- appeared for things the server refuses, and the "VOLA template" label
+    -- vanished because nothing was ever null.
+    --
+    -- NB no backticks in this comment: the whole block is a JS template
+    -- literal, and one would end it. That has now cost two debugging rounds.
+    --
+    -- Nullable because a VOLA template genuinely has no owner. Distinct from
+    -- user_id above, which records whose device-cache row this is.
+    owner_user_id TEXT,
+    visibility TEXT NOT NULL DEFAULT 'private',
     cached_at TEXT NOT NULL
   );
 `;
@@ -127,7 +144,7 @@ const CREATE_EXERCISE_CACHE = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -292,6 +309,17 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     // `goal` column above: the fresh-install path runs *every* branch from
     // v0, and its CREATE_SESSIONS already declares `deleted_at`.
     await addColumnIfMissing(db, 'local_sessions', 'deleted_at', 'TEXT');
+  }
+
+  if (current < 8) {
+    // v7 -> v8: the workout cache stops lying about ownership.
+    await addColumnIfMissing(db, 'workout_cache', 'owner_user_id', 'TEXT');
+    await addColumnIfMissing(
+      db,
+      'workout_cache',
+      'visibility',
+      "TEXT NOT NULL DEFAULT 'private'",
+    );
   }
 
   await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION};`);

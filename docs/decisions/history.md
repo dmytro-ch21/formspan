@@ -4126,6 +4126,69 @@ that never reached the branch, a backoff ladder already at its ceiling, a mock
 supplying the assertion, and a test exercising its own copy of the code.
 Mutation caught all four; nothing else would have.
 
+## 2026-08-01 — Offline-first PR4a: workouts readable offline, and the cache stops inventing ownership
+
+Two problems, and the second is the one worth the entry.
+
+### The Plan tab never read the cache it already had
+
+`app/(tabs)/workouts.tsx` called `listWorkouts` and nothing else, so with no
+signal it showed an error where the plan should be — **even though the
+workouts were already on the device**, cached for the offline session-start
+path since v2. Local first now, network refreshes.
+
+`mine` only. The shared tab browses other people's published templates, and
+there is no honest local answer to "what has everyone shared" — an empty list
+would read as "nobody has shared anything", which is a claim the device cannot
+make. Nor are shared templates written into this athlete's cache rows, or they
+would come back looking like theirs.
+
+### The cache invented ownership
+
+`cachedWorkouts` returned `owner_user_id: userID` and `visibility: 'private'`,
+both hardcoded. `app/workout/[id].tsx` computes
+
+```ts
+const canEdit = workout.owner_user_id !== null && workout.owner_user_id === userId;
+```
+
+— from exactly that field. So **offline, every cached workout looked
+editable**: VOLA's own ownerless templates, and other athletes' public ones.
+The Save button appeared for things the server refuses, and the "VOLA
+template" label vanished because nothing was ever null.
+
+Schema v8 stores `owner_user_id` (nullable — a VOLA template genuinely has no
+owner) and `visibility`, as the server reports them. An **upgraded** row
+defaults to `owner_user_id = NULL` rather than to the reader: an existing
+cached row must not claim the reader owns it, and null reads as "VOLA
+template" until the next refresh tells the truth. Erring toward *fewer* edit
+affordances than reality is the safe direction; erring the other way is what
+was shipping.
+
+### Testing
+
+The first PR4 to land after the SQLite fixture, and it earned it immediately —
+the bug was in what the columns *hold*, which the old array mock could not have
+expressed. Five mutations, all caught: invent ownership again (2), hardcode
+private again (2), stop refreshing ownership on re-cache (1), drop the
+per-athlete filter (6), remove the v8 branch (2).
+
+Also caught by having schema tests at all: bumping `SCHEMA_VERSION` failed
+three existing assertions immediately, which is the intended friction — a
+version bump should be a conscious act.
+
+Two mistakes of mine while writing it, both worth recording because they cost
+real time and are both recurrences: **backticks inside a SQL comment** ended
+the JS template literal (second time — the file now says so explicitly), and
+the first v6 upgrade fixture created only `local_sessions`, so a later
+`addColumnIfMissing` threw "no such table" for a reason that could never
+happen on a device, which has every earlier table.
+
+### Not in this PR
+
+Writing. Creating and editing templates still needs the network — that is PR4b,
+and it is the headline of the original request.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

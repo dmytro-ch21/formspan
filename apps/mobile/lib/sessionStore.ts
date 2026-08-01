@@ -682,24 +682,37 @@ export async function cacheWorkouts(userID: string, list: Workout[]): Promise<vo
   await db.withTransactionAsync(async () => {
     for (const w of list) {
       await db.runAsync(
-        `INSERT INTO workout_cache (id, user_id, sport, name, goal, items_json, cached_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO workout_cache
+           (id, user_id, sport, name, goal, items_json, owner_user_id, visibility, cached_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            sport = excluded.sport, name = excluded.name, goal = excluded.goal,
-           items_json = excluded.items_json, cached_at = excluded.cached_at`,
+           items_json = excluded.items_json, cached_at = excluded.cached_at,
+           owner_user_id = excluded.owner_user_id, visibility = excluded.visibility`,
         w.id,
         userID,
         w.sport,
         w.name,
         w.goal,
         JSON.stringify(w.items ?? []),
+        // Stored as the server reports them. A VOLA template has no owner,
+        // and `canEdit` keys off exactly this — see the column comment.
+        w.owner_user_id,
+        w.visibility,
         now,
       );
     }
   });
 }
 
-export async function cachedWorkouts(userID: string, sport: string): Promise<Workout[]> {
+/**
+ * Cached workouts, optionally narrowed to one discipline.
+ *
+ * Omitting the sport returns everything cached for this athlete — what the
+ * Plan tab needs, since it lists across disciplines. Same shape as
+ * `cachedExercises`.
+ */
+export async function cachedWorkouts(userID: string, sport?: string): Promise<Workout[]> {
   const db = await getDb();
   const rows = await db.getAllAsync<{
     id: string;
@@ -707,7 +720,14 @@ export async function cachedWorkouts(userID: string, sport: string): Promise<Wor
     name: string;
     goal: string | null;
     items_json: string;
-  }>(`SELECT * FROM workout_cache WHERE user_id = ? AND sport = ? ORDER BY name`, userID, sport);
+    owner_user_id: string | null;
+    visibility: string;
+  }>(
+    sport
+      ? `SELECT * FROM workout_cache WHERE user_id = ? AND sport = ? ORDER BY name`
+      : `SELECT * FROM workout_cache WHERE user_id = ? ORDER BY name`,
+    ...(sport ? [userID, sport] : [userID]),
+  );
 
   return rows.map((r) => {
     let items: WorkoutItem[] = [];
@@ -718,7 +738,11 @@ export async function cachedWorkouts(userID: string, sport: string): Promise<Wor
     }
     return {
       id: r.id,
-      owner_user_id: userID,
+      // The truth, not `userID`. Hardcoding the reader's own id here made
+      // every cached workout look editable offline — including VOLA's
+      // ownerless templates and other athletes' public ones — because
+      // `workout/[id].tsx` derives `canEdit` from this field.
+      owner_user_id: r.owner_user_id,
       name: r.name,
       sport: r.sport as Workout['sport'],
       // Cached alongside the plan since schema v6. It decides the rep range
@@ -726,7 +750,7 @@ export async function cachedWorkouts(userID: string, sport: string): Promise<Wor
       // offline session on a different range than the session screen uses.
       goal: r.goal as Workout['goal'],
       notes: '',
-      visibility: 'private' as const,
+      visibility: r.visibility as Workout['visibility'],
       items,
       created_at: '',
       updated_at: '',

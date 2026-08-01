@@ -1969,3 +1969,25 @@ screen.
 - A pending delete counts toward "waiting to sync" — it is unsynced work.
 - Tombstones are per-athlete: one account's deletes never hide another's
   sessions.
+
+## Workouts readable offline (mobile, offline-first PR4a)
+
+### The loop that has to work
+
+- Open Plan with the network on, then kill it and reopen the app. **Your
+  templates are there**, not an error. Before this the screen went straight to
+  the network despite the workouts already being cached.
+- The Shared tab still needs the network, and says so — an empty local list
+  would falsely claim nobody has shared anything.
+
+### Ownership must survive the cache
+
+- Offline, a **VOLA template** shows its "VOLA template" label and offers **no**
+  edit or Save affordance.
+- Offline, **another athlete's public** template is likewise not editable.
+- Offline, **your own** template still is.
+- A template whose visibility changed server-side shows the new value after the
+  next successful refresh.
+- Upgrading a device that already had cached workouts leaves them **not**
+  owned by the reader until that refresh — fewer edit affordances than reality,
+  never more.

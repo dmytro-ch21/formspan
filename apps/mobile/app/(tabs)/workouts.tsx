@@ -1,4 +1,6 @@
 import { Link, useFocusEffect } from 'expo-router';
+import { useAuth } from '@clerk/clerk-expo';
+import { cachedWorkouts, cacheWorkouts } from '@/lib/sessionStore';
 import { useCallback, useRef, useState, useEffect } from 'react';
 import {
   ActivityIndicator,
@@ -35,6 +37,7 @@ export default function WorkoutsScreen() {
   // this renders "BJJ" rather than the "Bjj" that capitalising a key gives.
   const { modules } = useModules();
   const getToken = useAuthToken();
+  const { userId } = useAuth();
 
   const [scope, setScope] = useState<'mine' | 'shared'>('mine');
   const [workouts, setWorkouts] = useState<Workout[]>([]);
@@ -50,6 +53,27 @@ export default function WorkoutsScreen() {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
+    // LOCAL FIRST. The plan is the thing you walk into a gym holding, and
+    // until now this screen went straight to the network — so with no signal
+    // it showed an error where the workouts should be, even though they were
+    // already cached on the device for the offline session-start path.
+    //
+    // Only for `mine`: the shared tab is a browse surface over other people's
+    // templates, and there is no honest local answer for "what has everyone
+    // published" — an empty list would read as "nobody has shared anything".
+    if (scope === 'mine' && userId) {
+      try {
+        const cached = await cachedWorkouts(userId);
+        if (!controller.signal.aborted && cached.length > 0) {
+          setWorkouts(cached);
+          setEverLoaded(true);
+          setLoading(false);
+        }
+      } catch {
+        // The network read below is still the real attempt.
+      }
+    }
+
     try {
       const list = await listWorkouts(getToken, scope, controller.signal);
       if (!controller.signal.aborted) {
@@ -58,6 +82,10 @@ export default function WorkoutsScreen() {
         // Cleared on success, not at request start — an error wiped up
         // front leaves the screen looking fine throughout a retry.
         setError(null);
+        // Refresh the cache for next time. `mine` only: caching other
+        // people's shared templates under this athlete's cache rows would
+        // make them reappear as if they were theirs.
+        if (scope === 'mine' && userId) await cacheWorkouts(userId, list);
       }
     } catch (err) {
       if (controller.signal.aborted) return;
@@ -70,7 +98,7 @@ export default function WorkoutsScreen() {
         setRefreshing(false);
       }
     }
-  }, [getToken, scope]);
+  }, [getToken, scope, userId]);
 
   // Refetch on focus, so returning from the editor shows the edit rather
   // than a stale list.
