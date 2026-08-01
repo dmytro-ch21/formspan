@@ -19,7 +19,13 @@ import { vola } from '@/constants/Colors';
 import { fetchExercises, pickImage, type Exercise } from '@/lib/exercises';
 import { PREF_LIBRARY_SPORT, readPref, writePref } from '@/lib/prefs';
 import { cacheExercises } from '@/lib/sessionStore';
-import { fetchTechniques, searchTechniques, type TechniqueSummary } from '@/lib/techniques';
+import {
+  fetchRulesets,
+  fetchTechniques,
+  searchTechniques,
+  type Ruleset,
+  type TechniqueSummary,
+} from '@/lib/techniques';
 import { useAuthToken } from '@/lib/useAuthToken';
 
 /**
@@ -70,6 +76,29 @@ const SPORTS = [
 const HAS_TECHNIQUES = new Set(['', 'bjj']);
 
 /**
+ * Position is a BJJ-only axis, so its chips render only under the BJJ filter —
+ * which means the filter may only be *applied* there too. Applying it whenever
+ * techniques were on screen (which includes "All") left a selection from a
+ * previous visit narrowing the list with its control nowhere in sight:
+ * BJJ → Mount → All silently hid every non-Mount technique, so searching
+ * "triangle" found nothing while Triangle from Guard sat in the database.
+ */
+function usesPosition(sport: string): boolean {
+  return sport === 'bjj';
+}
+
+/**
+ * One collator, built once.
+ *
+ * `String.prototype.localeCompare` re-enters ICU per call; sorting ~990 merged
+ * rows on every keystroke is ~10k of those on the JS thread, which is felt as
+ * typing lag. Both sources are kept pre-sorted instead and merged linearly, so
+ * a keystroke costs ~990 comparisons through a reused collator rather than 10k
+ * through a fresh one.
+ */
+const collator = new Intl.Collator(undefined, { sensitivity: 'base' });
+
+/**
  * Position filters, keyed on the *family* rather than the exact position.
  *
  * Exact keys ("Mount - Top") reached 274 of 466 techniques and quietly
@@ -118,6 +147,7 @@ export default function LibraryScreen() {
 
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [techniques, setTechniques] = useState<TechniqueSummary[]>([]);
+  const [rulesets, setRulesets] = useState<Map<string, Ruleset>>(new Map());
   const [techniquesFailed, setTechniquesFailed] = useState(false);
   const [sport, setSportState] = useState<string>('');
   const [position, setPosition] = useState('');
@@ -142,18 +172,31 @@ export default function LibraryScreen() {
   const setSport = useCallback(
     (next: string) => {
       setSportState(next);
-      // A position filter left over from BJJ would silently narrow nothing
-      // visible once the chips are gone.
-      if (!HAS_TECHNIQUES.has(next)) setPosition('');
+      // Belt and braces alongside `usesPosition`: clearing it means returning
+      // to BJJ starts unfiltered rather than resuming a selection the user
+      // last saw several screens ago.
+      if (!usesPosition(next)) setPosition('');
       if (userId) writePref(userId, PREF_LIBRARY_SPORT, next).catch(() => {});
     },
     [userId],
   );
 
-  // Clear the search on the way out, so the next visit starts open.
+  /**
+   * Clear the search on the way out — but not when the way out is a result.
+   *
+   * The blur fires for pushing `/technique/[id]` too, so "search, open a
+   * result, come back" used to return an empty box and all ~990 rows. That
+   * breaks the one flow this screen exists for (compare three armbars), while
+   * the original reason for clearing — coming back next session to a short
+   * list for no visible reason — only applies to leaving via the tab bar.
+   */
+  const keepQueryRef = useRef(false);
   useFocusEffect(
     useCallback(() => {
-      return () => setQuery('');
+      keepQueryRef.current = false;
+      return () => {
+        if (!keepQueryRef.current) setQuery('');
+      };
     }, []),
   );
 
@@ -173,6 +216,8 @@ export default function LibraryScreen() {
   // the list shows results for a query the user already moved past.
   const abortRef = useRef<AbortController | null>(null);
 
+  const techniqueAbortRef = useRef<AbortController | null>(null);
+
   /**
    * Techniques load once, independently of the exercise query.
    *
@@ -180,19 +225,39 @@ export default function LibraryScreen() {
    * is then reused for every keystroke, so re-running it per query would undo
    * the reason for holding it. A failure here must not take the exercise list
    * down with it — the two halves of the library fail separately.
+   *
+   * It needs its own deadline for the same reason the exercise fetch has one:
+   * a captive portal accepts the connection and never answers, and iOS won't
+   * give up for ~60s. Without it the technique half is simply absent that whole
+   * time, with no spinner and no message to say so.
    */
-  useEffect(() => {
+  const loadTechniques = useCallback(async () => {
+    techniqueAbortRef.current?.abort();
     const ac = new AbortController();
-    fetchTechniques(getToken, ac.signal)
-      .then((list) => {
-        setTechniques(list);
-        setTechniquesFailed(false);
-      })
-      .catch((err) => {
-        if ((err as Error)?.name !== 'AbortError') setTechniquesFailed(true);
-      });
-    return () => ac.abort();
+    techniqueAbortRef.current = ac;
+    const deadline = setTimeout(() => ac.abort(), 10_000);
+    try {
+      const [list, rs] = await Promise.all([
+        fetchTechniques(getToken, ac.signal),
+        fetchRulesets(getToken, ac.signal),
+      ]);
+      setTechniques(list);
+      setRulesets(rs);
+      setTechniquesFailed(false);
+    } catch (err) {
+      // A supersede is not a failure; a timeout is. `fetchTechniques` rejects
+      // with AbortError for both, so the only way to tell them apart is
+      // whether this controller is still the current one.
+      if (techniqueAbortRef.current === ac) setTechniquesFailed(true);
+    } finally {
+      clearTimeout(deadline);
+    }
   }, [getToken]);
+
+  useEffect(() => {
+    void loadTechniques();
+    return () => techniqueAbortRef.current?.abort();
+  }, [loadTechniques]);
 
   const load = useCallback(
     async (opts: { silent?: boolean } = {}) => {
@@ -254,32 +319,63 @@ export default function LibraryScreen() {
 
   const showTechniques = HAS_TECHNIQUES.has(sport);
 
+  // Sorted once per source, not once per keystroke. Filtering preserves order,
+  // so the filtered halves stay sorted and merge linearly below.
+  const sortedExercises = useMemo(
+    () => [...exercises].sort((a, b) => collator.compare(a.name, b.name)),
+    [exercises],
+  );
+  const sortedTechniques = useMemo(
+    () => [...techniques].sort((a, b) => collator.compare(a.name, b.name)),
+    [techniques],
+  );
+
   /**
-   * The merged list, sorted by name.
+   * The merged list, alphabetical across both kinds.
    *
-   * Alphabetical across both kinds rather than exercises-then-techniques: a
-   * grouped order is a split wearing a different hat, and it makes the answer
-   * to "is "armbar" in here?" depend on knowing which group it belongs to.
+   * Alphabetical rather than exercises-then-techniques: a grouped order is a
+   * split wearing a different hat, and it makes the answer to "is armbar in
+   * here?" depend on knowing which group an armbar belongs to.
+   *
+   * Exercises are filtered locally *as well as* server-side. The server is the
+   * authority, but its answer is 250 ms + a round trip behind the keystroke,
+   * and without the local pass every technique match appeared interleaved
+   * through the full stale exercise catalog, which then vanished when the
+   * response landed. Two visible settling phases per keystroke reads as jank
+   * regardless of how fast it actually is.
    */
   const rows = useMemo<Row[]>(() => {
-    const out: Row[] = exercises.map((ex) => ({
-      kind: 'exercise',
-      key: `e:${ex.id}`,
-      name: ex.name,
-      ex,
-    }));
+    const q = query.trim().toLowerCase();
+    const ex = q
+      ? sortedExercises.filter((e) => e.name.toLowerCase().includes(q))
+      : sortedExercises;
 
+    let tq: TechniqueSummary[] = [];
     if (showTechniques) {
-      const byPosition = position
-        ? techniques.filter((t) => inPositionFamily(t.position, position))
-        : techniques;
-      for (const t of searchTechniques(byPosition, query)) {
+      const scoped =
+        usesPosition(sport) && position
+          ? sortedTechniques.filter((t) => inPositionFamily(t.position, position))
+          : sortedTechniques;
+      tq = searchTechniques(scoped, query);
+    }
+
+    // Linear merge of two sorted runs.
+    const out: Row[] = [];
+    let i = 0;
+    let j = 0;
+    while (i < ex.length || j < tq.length) {
+      const takeExercise =
+        j >= tq.length || (i < ex.length && collator.compare(ex[i].name, tq[j].name) <= 0);
+      if (takeExercise) {
+        const e = ex[i++];
+        out.push({ kind: 'exercise', key: `e:${e.id}`, name: e.name, ex: e });
+      } else {
+        const t = tq[j++];
         out.push({ kind: 'technique', key: `t:${t.id}`, name: t.name, t });
       }
     }
-
-    return out.sort((a, b) => a.name.localeCompare(b.name));
-  }, [exercises, techniques, showTechniques, position, query]);
+    return out;
+  }, [sortedExercises, sortedTechniques, showTechniques, sport, position, query]);
 
   const isFiltered = query.trim() !== '' || sport !== '' || position !== '';
 
@@ -290,7 +386,7 @@ export default function LibraryScreen() {
       <View style={styles.controls}>
         <TextInput
           style={styles.search}
-          placeholder="Search exercises and techniques"
+          placeholder={showTechniques ? 'Search exercises and techniques' : 'Search exercises'}
           placeholderTextColor={vola.textDim}
           accessibilityLabel="Search exercises and techniques by name"
           value={query}
@@ -311,6 +407,7 @@ export default function LibraryScreen() {
                 key={s.key || 'all'}
                 onPress={() => setSport(s.key)}
                 style={[styles.chip, active && styles.chipActive]}
+                hitSlop={8}
                 accessibilityRole="button"
                 accessibilityLabel={`Filter by ${s.label}`}
                 accessibilityState={{ selected: active }}
@@ -325,7 +422,7 @@ export default function LibraryScreen() {
         {/* Position is a BJJ-only axis, so it appears only when BJJ content is
             on screen. A permanently-visible row of positions that does nothing
             to a strength catalog is worse than no row. */}
-        {sport === 'bjj' && (
+        {usesPosition(sport) && (
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -338,6 +435,7 @@ export default function LibraryScreen() {
                   key={p.key || 'all'}
                   onPress={() => setPosition(p.key)}
                   style={[styles.posChip, active && styles.posChipActive]}
+                  hitSlop={8}
                   accessibilityRole="button"
                   accessibilityLabel={`Filter by ${p.label}`}
                   accessibilityState={{ selected: active }}
@@ -365,7 +463,7 @@ export default function LibraryScreen() {
           accessibilityLiveRegion="polite"
           testID="library-technique-error"
         >
-          Techniques couldn&apos;t load. Pull down to try again.
+          BJJ techniques couldn&apos;t load. Pull down to try again.
         </Text>
       )}
 
@@ -376,6 +474,9 @@ export default function LibraryScreen() {
           data={rows}
           keyExtractor={(r) => r.key}
           contentContainerStyle={styles.list}
+          // Without this the first tap on a result only dismisses the keyboard,
+          // so search-then-open — the main use of this screen — takes two taps.
+          keyboardShouldPersistTaps="handled"
           // Virtualised: the merged catalog is ~990 rows, and mounting that
           // many at once is a visible stall on a phone.
           initialNumToRender={12}
@@ -387,6 +488,10 @@ export default function LibraryScreen() {
               onRefresh={() => {
                 setRefreshing(true);
                 load({ silent: true });
+                // The technique half has its own request, so a refresh that
+                // only re-ran the exercise fetch made "Pull down to try again"
+                // a promise the screen could not keep.
+                void loadTechniques();
               }}
             />
           }
@@ -401,9 +506,22 @@ export default function LibraryScreen() {
           }
           renderItem={({ item }) =>
             item.kind === 'exercise' ? (
-              <ExerciseRow ex={item.ex} onPress={() => router.push(`/exercise/${item.ex.id}`)} />
+              <ExerciseRow
+                ex={item.ex}
+                onPress={() => {
+                  keepQueryRef.current = true;
+                  router.push(`/exercise/${item.ex.id}`);
+                }}
+              />
             ) : (
-              <TechniqueRow t={item.t} onPress={() => router.push(`/technique/${item.t.id}`)} />
+              <TechniqueRow
+                t={item.t}
+                restricted={rulesets.get(item.t.ibjjf_ruleset_id)?.is_restricted ?? false}
+                onPress={() => {
+                  keepQueryRef.current = true;
+                  router.push(`/technique/${item.t.id}`);
+                }}
+              />
             )
           }
         />
@@ -439,7 +557,15 @@ function ExerciseRow({ ex, onPress }: { ex: Exercise; onPress: () => void }) {
   );
 }
 
-function TechniqueRow({ t, onPress }: { t: TechniqueSummary; onPress: () => void }) {
+function TechniqueRow({
+  t,
+  restricted,
+  onPress,
+}: {
+  t: TechniqueSummary;
+  restricted: boolean;
+  onPress: () => void;
+}) {
   const [code, accent] = categoryBadge(t.category);
   return (
     <Pressable
@@ -448,7 +574,12 @@ function TechniqueRow({ t, onPress }: { t: TechniqueSummary; onPress: () => void
       accessibilityRole="button"
       // The tile's colour and code are decorative to a screen reader, so the
       // category has to be said here or it is not conveyed at all.
-      accessibilityLabel={`${t.name}, ${t.category} from ${t.position}. BJJ technique.`}
+      accessibilityLabel={
+        `${t.name}, ${t.category} from ${t.position}. BJJ technique.` +
+        // The badge is a bordered View with no text a screen reader reaches,
+        // so the restriction has to be said here or it isn't conveyed at all.
+        (restricted ? ' Restricted in IBJJF competition.' : '')
+      }
       testID={`technique-${t.id}`}
     >
       <LibraryTile code={code} accent={accent} />
@@ -464,6 +595,14 @@ function TechniqueRow({ t, onPress }: { t: TechniqueSummary; onPress: () => void
           </Text>
         )}
       </View>
+      {/* Straight from the API's is_restricted. Never inferred from belt
+          counts — adult no-gi has no white belt division, so counting flags
+          ~130 ordinary techniques instead of the real 20. */}
+      {restricted && (
+        <View style={styles.badge}>
+          <Text style={styles.badgeText}>IBJJF</Text>
+        </View>
+      )}
     </Pressable>
   );
 }
@@ -523,4 +662,13 @@ const styles = StyleSheet.create({
   name: { fontSize: 15, fontWeight: '600' },
   meta: { color: vola.textMuted, fontSize: 12 },
   muted: { color: vola.textDim, fontSize: 12 },
+
+  badge: {
+    borderWidth: 1,
+    borderColor: vola.warn,
+    borderRadius: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+  },
+  badgeText: { color: vola.warn, fontSize: 10, fontWeight: '700', letterSpacing: 0.6 },
 });

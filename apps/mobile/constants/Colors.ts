@@ -52,6 +52,15 @@ const palette = {
   green: '#42F58D',
   navy: '#0B1220',
 
+  /**
+   * The third categorical hue, for Library tiles. Lives here rather than in the
+   * component because a colour outside this file is a colour nobody re-validates.
+   * Validated against `surface` with the other two: worst adjacent pair ΔE 21.7
+   * (CVD) / 35.6 (normal). Adding a fourth needs `validate_palette.js` — violet
+   * measured ΔE 2.0 for a deuteranope against this blue.
+   */
+  info: '#6BB6FF',
+
   warn: '#FFB020',
   danger: '#FF6B6B',
 };

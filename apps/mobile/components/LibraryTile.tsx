@@ -29,7 +29,7 @@ import { vola } from '@/constants/Colors';
 /** What a technique is *for*. Colour groups by this; the code stays specific. */
 const ATTACK = vola.danger; //  finishing
 const ADVANCE = vola.lime; //   improving position
-const DEFEND = '#6BB6FF'; //    getting out / keeping guard
+const DEFEND = vola.info; //    getting out / keeping guard
 const HOLD = vola.textMuted; // staying put — deliberately achromatic
 
 /**
@@ -53,24 +53,53 @@ export function categoryBadge(category: string): readonly [string, string] {
 }
 
 /**
- * Exercises get the same treatment keyed on movement pattern, so a mixed list
- * reads as one library rather than two that share a screen. Achromatic on
- * purpose: strength work is the bulk of the catalog, and colouring 498 rows
- * would drown the technique accents that actually mean something.
+ * The same treatment for exercises, keyed on movement pattern.
+ *
+ * Explicit rather than derived. Truncating the pattern to three letters gave
+ * `horizontal_push` and `horizontal_pull` the same code (HOR, 78 exercises) and
+ * both vertical variants VER (51) — collapsing push against pull, which is the
+ * first distinction a lifter scans for. A table is four more lines and cannot
+ * collide silently.
+ *
+ * Hue is scoped to its own domain: red means "lower body" on an exercise and
+ * "submission" on a technique. That is safe **because the code is always
+ * present and names the domain** — PSH is never a technique, SUB is never an
+ * exercise. It is what lets both halves use one validated three-hue palette
+ * instead of a second one nobody measured.
  */
+const PATTERN: Record<string, readonly [string, string]> = {
+  horizontal_push: ['PSH', ADVANCE],
+  vertical_push: ['OHP', ADVANCE],
+  horizontal_pull: ['ROW', DEFEND],
+  vertical_pull: ['PUL', DEFEND],
+  squat: ['SQT', ATTACK],
+  hinge: ['HNG', ATTACK],
+  lunge: ['LNG', ATTACK],
+  olympic: ['OLY', ATTACK],
+  jump: ['JMP', ATTACK],
+  isolation: ['ISO', HOLD],
+  core: ['COR', HOLD],
+  carry: ['CRY', HOLD],
+  locomotion: ['LOC', HOLD],
+  mobility: ['MOB', HOLD],
+  rotation: ['ROT', HOLD],
+};
+
 export function patternBadge(pattern: string): readonly [string, string] {
-  const code = pattern
-    .replace(/[^a-z]/gi, '')
-    .slice(0, 3)
-    .toUpperCase();
-  return [code || 'EX', vola.textMuted];
+  return PATTERN[pattern] ?? ['EX', HOLD];
 }
 
 /**
  * Hex + alpha, as RN needs it. Kept explicit rather than using `opacity`,
  * which would fade the code text along with its backing.
+ *
+ * Only #RRGGBB concatenates correctly — `'red' + '1A'` and `'#F00' + '1A'` are
+ * both invalid colours that RN renders as transparent, i.e. a tile that silently
+ * disappears. Every accent flows through the two tables above, so this cannot
+ * fire today; it is here so the next accent added fails visibly instead.
  */
 function wash(hex: string, alpha: string): string {
+  if (!/^#[0-9a-f]{6}$/i.test(hex)) return `${vola.surfaceRaised}${alpha}`;
   return `${hex}${alpha}`;
 }
 
@@ -108,6 +137,10 @@ export function LibraryTile({
         { backgroundColor: wash(accent, '1A'), borderColor: wash(accent, '44') },
       ]}
       accessible={false}
+      // Both, deliberately: importantForAccessibility is Android-only, so on
+      // iOS VoiceOver would otherwise focus the tile and read "SUB" as an
+      // orphan word just before the heading says "SUBMISSION".
+      accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
     >
       <Text style={[styles.code, { color: accent }]}>{code}</Text>
