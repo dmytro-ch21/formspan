@@ -163,6 +163,12 @@ export function measuresFor(loadType: Exercise['load_type']): Measure[] {
       return ['distance'];
     case 'distance_time':
       return ['distance', 'seconds'];
+    default:
+      // A server can ship a load_type before the app that renders it does —
+      // the house rule for every lookup here. Without this the switch returns
+      // undefined and `measures.map` throws inside fillForward, which turns
+      // the done tick, the most-used control in the app, into a crash.
+      return ['reps'];
   }
 }
 

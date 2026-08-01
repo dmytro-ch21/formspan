@@ -3575,22 +3575,45 @@ being the thing that breaks first.
 Five items from one session on the mat and under a bar. Four are done here;
 two are deliberately not.
 
-### The add-exercise bug was a lost update, not a slow screen
+### The add-exercise bug — and a wrong diagnosis I shipped first
 
 *"when adding exercise it stuck when in session I had to wipe down few times
 and apparently the exercise was added but would just load without my
 intervention."*
 
-The session screen debounces set edits by 700ms into `queued.current`, and
-flushes on unmount. **Navigating to the exercise picker does not unmount it** —
-it is a push — so the flush never ran, and `queued.current` still held the set
-list *as it was before the picker*. The picker does its own read-modify-write
-against the same rows. Whichever landed second won, so the exercise was added
-and then silently un-added, with no error anywhere.
+**My first diagnosis was wrong, and the review caught it.** I claimed the
+session screen's 700ms debounce held a pre-picker snapshot that landed after
+the picker's write, and that `Swap` flushed before navigating while `+ Add
+exercise` did not. The second half is simply false: `git show origin/main`
+has `await flush()` on *both* buttons. I had grepped for `router.push` and
+never read the lines above the one I found. The "fix" was a behavioural no-op
+dressed as a root cause — the worst kind, because the next person would have
+trusted the comment.
 
-The `Swap` control already awaited `flush()` for exactly this reason, with a
-comment saying so. **`+ Add exercise` did not.** Both now go through
-`openPicker`, which flushes first.
+The real mechanism is a check-then-act in the sync **pull**, and it is still
+live on main:
+
+```
+run A: pullSessions()          -> snapshot WITHOUT the new exercise
+picker: writes it locally, dirty = 1
+run B: pushes it, sets dirty = 0
+run A: reads dirty = 0, upserts its stale snapshot -> exercise gone
+later: another pull brings it back
+```
+
+`syncSessions` is fired and forgotten from six places, and the add flow
+overlaps two of them by construction — the picker's own sync and the session
+screen's refocus sync. The **push** side already guards its version of this
+with a CAS on `updated_at` ("or we'd mark a newer edit as already sent"). The
+pull side had nothing.
+
+Two fixes: the pull now refuses to write a snapshot older than the local row,
+and `syncSessions` is serialised process-wide so overlapping runs cannot
+interleave at all. The wrong diagnosis is recorded in the code beside the
+right one, so it is not re-derived.
+
+`openPicker` stays, because putting the flush in one place instead of two is
+worth keeping — but its comment now says plainly that it is not the fix.
 
 ### Prefill, and a bug its own doc comment described
 

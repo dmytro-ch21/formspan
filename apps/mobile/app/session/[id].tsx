@@ -353,22 +353,18 @@ export default function SessionScreen() {
   useEffect(() => () => void flush(), [flush]);
 
   /**
-   * Open the exercise picker, but settle pending writes first.
+   * Open the exercise picker, having settled pending writes.
    *
-   * Navigating here does NOT unmount this screen, so the `useEffect` cleanup
-   * that normally flushes on exit never runs — and `queued.current` still
-   * holds a snapshot of the sets as they were *before* the picker ran. The
-   * picker does its own read-modify-write against the same rows, so a debounce
-   * that fires afterwards writes the pre-picker list straight over it: the
-   * exercise is added, then silently un-added, with no error anywhere.
+   * Both entry points already did this; `openPicker` only puts the flush in
+   * one place instead of two. **It is not the fix for the lost-add report** —
+   * an earlier version of this comment claimed it was, on the strength of a
+   * stale-debounce theory that `main` disproves: the Add button had `await
+   * flush()` too, so nothing about the ordering changed. The real mechanism
+   * was a check-then-act in the sync pull, and it is fixed in
+   * `lib/sessionStore.ts` with the wrong diagnosis recorded beside it.
    *
-   * The reported symptom was exactly that shape — "apparently the exercise was
-   * added but would just load without my intervention", after several
-   * pull-to-refreshes.
-   *
-   * Flushing first makes the two writers strictly ordered. It is awaited
-   * rather than fired and forgotten, because the point is that nothing of ours
-   * is still in flight when the picker starts reading.
+   * The flush still earns its place: the picker reads the session back out of
+   * SQLite, so an edit sitting in the debounce would be invisible to it.
    */
   async function openPicker(href: Parameters<typeof router.push>[0]) {
     await flush();
@@ -478,6 +474,8 @@ export default function SessionScreen() {
 
 
   /**
+   * REMOVE-GROUP DOC MOVED — see removeGroup below.
+   *
    * Remove an exercise and every set under it.
    *
    * Confirmed, unlike removing one set: this can discard several sets at once,
@@ -580,24 +578,28 @@ export default function SessionScreen() {
                     and a bar to get back to, and it fights the scroll view.
                     Hidden at the ends rather than disabled, so there is no
                     dead target to aim at between sets. */}
-                {!finished && gi > 0 && (
+                {!finished && (
                   <Pressable
+                    disabled={gi === 0}
                     onPress={() => moveGroup(gi, -1)}
                     hitSlop={10}
-                    style={styles.moveChip}
+                    style={[styles.moveChip, gi === 0 && styles.moveChipOff]}
                     accessibilityRole="button"
+                    accessibilityState={{ disabled: gi === 0 }}
                     accessibilityLabel={`Move ${exercise?.name ?? 'this exercise'} earlier`}
                     testID={`up-${g.exerciseID}`}
                   >
                     <Text style={styles.moveChipText}>↑</Text>
                   </Pressable>
                 )}
-                {!finished && gi < groups.length - 1 && (
+                {!finished && (
                   <Pressable
+                    disabled={gi === groups.length - 1}
                     onPress={() => moveGroup(gi, 1)}
                     hitSlop={10}
-                    style={styles.moveChip}
+                    style={[styles.moveChip, gi === groups.length - 1 && styles.moveChipOff]}
                     accessibilityRole="button"
+                    accessibilityState={{ disabled: gi === groups.length - 1 }}
                     accessibilityLabel={`Move ${exercise?.name ?? 'this exercise'} later`}
                     testID={`down-${g.exerciseID}`}
                   >
@@ -806,12 +808,9 @@ export default function SessionScreen() {
         {!finished && (
           <Pressable
             style={styles.primary}
-            onPress={async () => {
-              // Awaited: the picker reads the session back from the server,
-              // so an unsaved edit still in flight would be overwritten.
-              await flush();
-              void openPicker(`/session/${id}/add`);
-            }}
+            // openPicker flushes; the picker reads the session back out of
+            // SQLite (not the server, as this comment used to say).
+            onPress={() => void openPicker(`/session/${id}/add`)}
             accessibilityRole="button"
             testID="session-add-exercise"
           >
@@ -1111,7 +1110,11 @@ function SetRow({
             <Text style={[styles.tickMark, set.completed && styles.tickMarkDone]}>✓</Text>
           </Pressable>
         )}
-        {editable && <Text style={styles.disclosure}>{open ? '⌃' : '⌄'}</Text>}
+        {editable && (
+          <Text style={[styles.disclosure, set.completed && styles.disclosureDone]}>
+            {open ? '⌃' : '⌄'}
+          </Text>
+        )}
       </Pressable>
 
       {open && editable && (
@@ -1357,8 +1360,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: vola.surfaceRaised,
   },
+  // Dimmed rather than removed at the ends. Hiding it slid the other arrow
+  // into the spot just tapped, so the second tap of a two-step move undid the
+  // first — and it made the control vanish for screen readers instead of
+  // announcing itself as unavailable. It also keeps the header geometry the
+  // same down the whole screen.
+  moveChipOff: { opacity: 0.35 },
   moveChipText: { fontSize: 15, fontWeight: '700', color: vola.textMuted },
-  removeGroupText: { fontSize: 13, fontWeight: '600', color: vola.textDim },
+  // `danger`, not `textDim`: textDim measured 3.96:1 on the screen background
+  // at 13px (needs 4.5), and this control is destructive, so the colour should
+  // say so. Padded to a 44pt target rather than relying on hitSlop alone.
+  removeGroupText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: vola.danger,
+    paddingVertical: 12,
+    paddingHorizontal: 4,
+  },
   setRow: { backgroundColor: vola.surface, borderRadius: 12 },
   // The whole row, not just the tick: a column of rows is scanned by shape
   // and colour, and a 20px checkmark is not what the eye lands on.
@@ -1366,6 +1384,8 @@ const styles = StyleSheet.create({
   // textDim measures 2.51:1 on the done tint; textMuted is 4.67:1. See the
   // setDone note in constants/Colors.ts.
   setOrdinalDone: { color: vola.textMuted },
+  // Same 2.51:1 on the done tint that moved the ordinal.
+  disclosureDone: { color: vola.textMuted },
   setHead: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12 },
   setOrdinal: { width: 34, fontWeight: '700', color: vola.textDim },
   setBadge: { color: vola.lime, fontSize: 11, fontWeight: '700' },
