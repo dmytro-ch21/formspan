@@ -1,7 +1,7 @@
 import { useAuth } from '@clerk/clerk-expo';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
-import { fetchModules, normaliseModules, type Module } from './modules';
+import { fallbackModules, fetchModules, normaliseModules, type Module } from './modules';
 import { PREF_MODULES, readPref, writePref } from './prefs';
 import { useAuthToken } from './useAuthToken';
 
@@ -70,6 +70,13 @@ export function ModulesProvider({ children }: { children: React.ReactNode }) {
       // The cache stands. Deliberately not surfaced as an error: a disabled
       // discipline reappearing is confusing, but a whole app refusing to draw
       // because a preference endpoint blinked is worse.
+      //
+      // With NO cache either, fall back rather than staying empty. An empty
+      // list is not "no disciplines", it is "we couldn't ask" — and reporting
+      // the second as the first cost a real session: the app hid the Library
+      // tab, prompted to choose disciplines, and rendered the toggles for
+      // choosing them as an empty card. Unrecoverable from inside the app.
+      setModules((current) => (current.length === 0 ? fallbackModules() : current));
       setStale(true);
     }
   }, [getToken, userId]);

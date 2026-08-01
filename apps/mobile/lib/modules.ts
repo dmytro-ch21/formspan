@@ -117,6 +117,85 @@ function hasKey(m: Partial<Module>): m is Partial<Module> & { key: string } {
   return typeof m.key === 'string' && m.key.length > 0;
 }
 
+/**
+ * Last-resort defaults, for when the server cannot be asked at all.
+ *
+ * NOT a second source of truth — the server's answer always wins the moment
+ * there is one, and this is never merged with it. It exists because the
+ * alternative is worse: with no cache and no reachable endpoint, an empty list
+ * makes the app assert that you train *nothing*. That hides the Library tab,
+ * replaces Today's start buttons with a prompt, and — the way it was found —
+ * renders the very toggles you would use to fix it as an empty card. An
+ * unanswerable question was being reported as a definite answer.
+ *
+ * Mirrors the registry's DefaultOn values. If they drift, a first-run user on
+ * an unreachable server sees a slightly wrong default for one render, which is
+ * a far smaller failure than a dead app.
+ */
+const FALLBACK: Module[] = [
+  {
+    key: 'strength',
+    label: 'Strength',
+    is_sport: true,
+    default_on: true,
+    enabled: true,
+    capabilities: {
+      catalog: 'exercises',
+      facets: [],
+      has_goals: true,
+      has_progression: true,
+      record_kinds: ['heaviest_weight', 'estimated_1rm', 'most_reps'],
+    },
+  },
+  {
+    key: 'bjj',
+    label: 'BJJ',
+    is_sport: true,
+    default_on: true,
+    enabled: true,
+    capabilities: {
+      catalog: 'techniques',
+      facets: ['position'],
+      has_goals: false,
+      has_progression: false,
+      record_kinds: [],
+    },
+  },
+  {
+    key: 'running',
+    label: 'Running',
+    is_sport: true,
+    default_on: false,
+    enabled: false,
+    capabilities: {
+      catalog: 'exercises',
+      facets: [],
+      has_goals: false,
+      has_progression: false,
+      record_kinds: ['longest_time', 'furthest_distance'],
+    },
+  },
+  {
+    key: 'nutrition',
+    label: 'Nutrition',
+    is_sport: false,
+    default_on: true,
+    enabled: true,
+    capabilities: {
+      catalog: '',
+      facets: [],
+      has_goals: false,
+      has_progression: false,
+      record_kinds: [],
+    },
+  },
+];
+
+/** A copy, so a caller filtering or sorting can't corrupt the fallback. */
+export function fallbackModules(): Module[] {
+  return FALLBACK.map((m) => ({ ...m, capabilities: { ...m.capabilities } }));
+}
+
 /** The enabled modules that can actually be a session's sport. */
 export function enabledSports(modules: Module[]): Module[] {
   return modules.filter((m) => m.enabled && m.is_sport);
