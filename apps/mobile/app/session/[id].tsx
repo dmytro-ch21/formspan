@@ -2,7 +2,10 @@ import { useAuth } from '@clerk/clerk-expo';
 import { request as requestSync } from '@/lib/sync';
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, TextInput } from 'react-native';
+
+import { KeyboardAwareScrollView, useEnsureVisible } from '@/components/KeyboardAwareScroll';
+import { SwipeToDelete } from '@/components/SwipeToDelete';
 
 import { RestTimerBar, useRestTimer } from '@/components/RestTimer';
 import { Text, View } from '@/components/Themed';
@@ -525,9 +528,14 @@ export default function SessionScreen() {
         }}
       />
 
-      <ScrollView
+      <KeyboardAwareScrollView
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
+        // Kept alongside the focus-scrolling above it: this is what slides the
+        // content back down when the keyboard goes, and what lets the last
+        // field scroll past the fold at all. The two are complementary — see
+        // the note in KeyboardAwareScroll.tsx for why neither is sufficient
+        // alone.
         automaticallyAdjustKeyboardInsets
       >
         {/* Three numbers while you train — time, sets, reps — and volume
@@ -660,19 +668,38 @@ export default function SessionScreen() {
                 )}
               </View>
               {g.indices.map((i, n) => (
-                <SetRow
+                <SwipeToDelete
                   key={i}
-                  index={i}
-                  ordinal={n + 1}
-                  set={sets[i]}
-                  exercise={exercise}
-                  editable={!finished}
-                  onChange={(next) => update(i, next)}
-                  onRemove={() => removeSet(i)}
-                  onToggleDone={() => toggleDone(i, g.exerciseID)}
-                  showEffort={showEffort}
-                  units={unitFor(g.exerciseID)}
-                />
+                  // A finished session is a record, not a workspace — the
+                  // same reason every other control here gates on `finished`.
+                  enabled={!finished}
+                  onDelete={() => removeSet(i)}
+                  // Rows are keyed by index and a set has no stable id, so
+                  // any change to WHAT LIVES AT THIS INDEX must close an open
+                  // swipe — otherwise Delete stays armed against whichever
+                  // set shifted into the slot. Keyed on identity rather than
+                  // on `sets.length`: a count only catches add/remove, and a
+                  // reorder that preserves length would slip through. (Today
+                  // `moveGroup` happens to remount the subtree via its group
+                  // key, so a count would survive by luck — which is not a
+                  // thing to depend on.)
+                  closeOn={`${sets[i].exercise_id}:${sets[i].set_type}:${sets.length}`}
+                  accessibilityLabel={`set ${n + 1}`}
+                  testID={`set-${i}-swipe`}
+                >
+                  <SetRow
+                    index={i}
+                    ordinal={n + 1}
+                    set={sets[i]}
+                    exercise={exercise}
+                    editable={!finished}
+                    onChange={(next) => update(i, next)}
+                    onRemove={() => removeSet(i)}
+                    onToggleDone={() => toggleDone(i, g.exerciseID)}
+                    showEffort={showEffort}
+                    units={unitFor(g.exerciseID)}
+                  />
+                </SwipeToDelete>
               ))}
               {(() => {
                 const hint = suggestions.get(g.exerciseID);
@@ -874,7 +901,7 @@ export default function SessionScreen() {
         >
           <Text style={styles.deleteText}>Delete session</Text>
         </Pressable>
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       {timerState.rest && (
         <RestTimerBar
@@ -1257,6 +1284,8 @@ function Field({
 }) {
   const [text, setText] = useState(() => value?.toString() ?? '');
   const lastSeen = useRef(value);
+  const inputRef = useRef<TextInput>(null);
+  const ensureVisible = useEnsureVisible();
 
   if (value !== lastSeen.current) {
     lastSeen.current = value;
@@ -1273,6 +1302,11 @@ function Field({
         {hint ? <Text style={styles.fieldHint}> {hint}</Text> : null}
       </Text>
       <TextInput
+        ref={inputRef}
+        // Lifts this field above the keyboard. Measured on focus rather than
+        // computed from a row index, because rows differ in height by
+        // exercise and by whether they are expanded.
+        onFocus={() => ensureVisible(inputRef.current)}
         style={styles.fieldInput}
         // decimal-pad rather than numeric: reps are whole, weight isn't, and
         // the keypad should offer the point where it's meaningful.

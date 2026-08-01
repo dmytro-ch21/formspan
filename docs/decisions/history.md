@@ -4377,6 +4377,198 @@ plan is last-writer-wins *at the server* even though the CAS protects the local
 row. Renaming a template is still impossible on any client — there is no
 endpoint. Both are worth deciding on deliberately rather than discovering.
 
+## 2026-08-01 — Two gym complaints about the same thing: getting a number in
+
+Both items came from logging live, and both are about the seconds between
+sets rather than about data.
+
+### The keyboard was covering the inputs
+
+Reported as *"i had hard time with inputs that are lower and go bihind the
+keyboard from iphone, i think we need to push that block above the input block
+so it is always visible... and then slide it back"*.
+
+The screen **already had `automaticallyAdjustKeyboardInsets`**, so the first
+question was why that wasn't enough.
+
+**I answered it wrong, confidently, and shipped the wrong answer in a doc
+comment.** I wrote that the prop "adjusts the inset but never scrolls" — that
+iOS merely makes the hidden field *reachable* and leaves you to drag it into
+view. The reviewer checked it against the actual RN 0.86 source and it is
+false. In `RCTScrollViewComponentView.mm`'s `_keyboardWillChangeFrame:`, RN
+asks the first responder for its focus rect and, when the field's bottom is
+below the keyboard, sets `contentDiff = keyboardEndFrame.origin.y - focusEnd`
+and scrolls by it, on the keyboard's own animation curve.
+`RCTTextInputComponentView.mm` even adds a 15pt margin. iOS lifts the field on
+every keyboard appearance, and does it better than we can.
+
+**The real gap is narrower and more specific: the native adjustment only runs
+when the keyboard's FRAME CHANGES.** Every field on this screen is a
+`number-pad` or `decimal-pad`, and those are the same height. So moving focus
+Weight → Reps → RIR → RPE — or expanding a lower row while the keyboard is
+already up and tapping into it — posts no keyboard notification at all. No
+notification, no native scroll, field stays hidden. That is exactly the
+reported experience, and it is the only case
+`components/KeyboardAwareScroll.tsx` needs to handle.
+
+**The wrong explanation was not harmless, which is the point.** Believing the
+platform did nothing, I had the keyboard listeners scroll as well as the
+`onFocus` path — so on every keyboard appearance two mechanisms raced for one
+scroll position. `offset.current` lags (it updates from throttled `onScroll`
+events), so a JS scroll computed after the native one landed used a stale
+offset and dragged the list *back down*, hiding the field again —
+intermittently, depending which won. A plausible mechanism, unverified,
+produced a real bug that the feature working most of the time would have
+hidden.
+
+The listeners now only record where the keyboard is; `onFocus` alone scrolls,
+and only when the keyboard is already up. That also dissolves the "two event
+orderings" problem the first version was carefully managing: there is one
+path now.
+
+**The lesson is the one this log already records once** — the Nixpacks entry
+that had to be corrected because the recorded mechanism was disproven by our
+own code. A mechanism you have not read is a guess, however well it predicts
+the symptom, and writing it down as fact is how it gets built on.
+
+Two details that would each have made it subtly wrong:
+
+- **Measured, not assumed.** The tempting version scrolls by a fixed amount or
+  by the keyboard's height. Set rows vary in height by the exercise's measures
+  (reps-only vs weight+reps vs distance+seconds) and by whether the row is
+  expanded, so any constant is wrong for most rows. `measureInWindow` asks
+  where the field actually is; the scroll is the overlap plus a margin.
+- **Both event orderings are real.** Tapping a field with no keyboard up fires
+  focus first and the keyboard frame after; moving to a second field with the
+  keyboard already up gives the frame first. Handling only the first is the
+  common bug — it works the once you test it and fails the moment you move
+  between fields, which is exactly what logging a set is.
+
+No new dependency. `react-native-keyboard-controller` does this and more, but
+it is native code, and this is about forty lines against an API RN already has.
+
+### Android was silently getting nothing, for two separate reasons
+
+The first version was iOS-only without saying so, and both causes are the kind
+that review does not catch because the code looks right.
+
+**`keyboardWillShow` and `keyboardWillHide` are iOS-only events.** Android
+never emits them. So the listeners were not a degraded experience on Android —
+they were dead code, and the feature did nothing at all there while reading as
+complete. The event names are now chosen by platform, and because that is one
+line that decides whether a whole feature exists, it is a tested pure function
+rather than a comment.
+
+**The two platforms hide the field in different ways.** iOS leaves the window
+alone and puts the keyboard over it, so the keyboard's top edge is the
+boundary. Android's default `softwareKeyboardLayoutMode` is `resize`, so the
+*window shrinks*: the scroll view is now short, the keyboard is not over it at
+all, and the field is **clipped by the view's own bottom** rather than
+covered. Comparing against the keyboard alone would read that field as
+comfortably visible and scroll nothing.
+
+Rather than branch on `Platform` for the geometry, the scroll view is measured
+too and the boundary is the *higher* of the two edges. That describes both
+platforms with one rule, and it degrades sensibly if a third case shows up
+(a split keyboard, a floating window) — whichever edge is actually cutting the
+field off is the one used.
+
+**Not verified on an Android device.** There is still no Android build of this
+app — never prebuilt, never run. The platform logic is tested and reasoned;
+that is not the same as seen working, and it should not be recorded as if it
+were.
+
+### Swipe left to remove a set
+
+Removing a set was already possible — tap the row open, scroll past every
+field and the set-type chips, tap "Remove set". That is a reasonable place for
+it when you are correcting a session at a desk, and a bad one when you have
+just added a set by mistake between two working sets.
+
+`components/SwipeToDelete.tsx` is **reveal-then-tap, deliberately not
+full-swipe-to-delete.** The other half of the iOS convention was left unwired
+on purpose: the thing being deleted is a set that was actually performed, the
+hand is mid-workout, and the row lives in a vertically scrolling list where a
+slightly diagonal flick is completely normal. One deliberate tap costs nothing
+at the speed this is used at; an accidental delete costs real training.
+
+`PanResponder` rather than `react-native-gesture-handler`, which is not a
+dependency — adding native code for one row interaction would mean a prebuild
+and a fresh device build for everyone.
+
+Two things that are less obvious than the animation:
+
+- **The gesture claim is the whole difficulty.** Claim too eagerly and the
+  list intermittently refuses to scroll, because a row decided a
+  mostly-vertical drag belonged to it. So a claim needs the drag to be past a
+  threshold *and* decisively horizontal — either test alone lets the wrong
+  gestures through.
+- **Rows are keyed by index, and now carry animation state.** `LoggedSet` has
+  no stable id, only a `position` that is reassigned on delete, so an instance
+  outlives the set it was showing: swipe set 3 open, remove set 1 by some
+  other route, and that instance now renders set 2 while still holding set 3's
+  open swipe — a Delete armed against a row nobody swiped. A `closeOn` prop
+  keyed on the set count closes open rows on any list mutation, which is what
+  iOS does for the same reason.
+
+### Testing, and what is honestly not tested
+
+`apps/mobile` has jest and a real SQLite fixture but **no component test
+runner**, so nothing here can assert that a row slides or that a field ends up
+on screen. Rather than write tests that render nothing and prove nothing, the
+two actual decisions were extracted into pure functions — `scrollTargetFor`,
+`shouldClaim`, `settleTarget` — and tested directly. Ten mutations, ten
+caught.
+
+One was vacuous first time round, and the mistake is worth recording because
+it is the same shape as the mocked-`ApiError` test earlier today: the
+zero-height-node case used `fieldY: 0, fieldHeight: 0`, which the *overlap*
+check already rejects on its own — so the test passed with the height guard
+deleted. It named one guard and exercised another. Fixed by measuring a
+zero-height node *below* the keyboard, which only the height guard rejects.
+
+**Still untested:** the render path, the gesture wiring, the context plumbing,
+and all on-device behaviour. Adding a component runner is tracked separately.
+
+### What else the review caught
+
+- **`pointerEvents` is not an accessibility gate.** It maps to
+  `userInteractionEnabled`, which governs hit testing; the accessibility tree
+  is walked independently. So VoiceOver was reading "Delete set 1, button"
+  before every closed row — double the elements, a destructive action
+  announced on rows nobody had swiped, including on finished sessions. On
+  Android it is worse than noise: TalkBack activation goes through
+  `performClick()`, which `pointerEvents` does not gate, so it could plausibly
+  have fired. Now hidden from assistive tech as well as from touch.
+- **The Delete label failed the project's own contrast bar.** White on
+  `danger` measures 2.78:1 — under AA's 4.5 and under even the 3:1 large-text
+  floor — on a destructive control read in gym daylight. `navy` on the same
+  red is 6.75:1. Notably it was also the only colour in the app without a
+  measured ratio recorded next to it, which is exactly the one that turned out
+  to be wrong.
+- **`enabled` gated the swipe claim but not the open state**, so finishing a
+  session with a row already swiped left a live Delete on a read-only record.
+  It now force-closes, and the guard moved *inside* `shouldClaim` so the one
+  thing here that can destroy a logged set is covered by tests at all.
+- **Global keyboard listeners fire for other screens.** The session screen
+  stays mounted under the exercise picker, so focusing the picker's search
+  field scrolled the invisible list underneath. Gated on screen focus.
+- **`closeOn={sets.length}` was right by luck.** A count catches add/remove but
+  not a reorder that preserves length; the reorder case survived only because
+  the group key happens to remount the subtree. Now keyed on identity.
+- **My PanResponder rationale was inverted for iOS.** `blockNativeResponder`
+  is Android-only and `RCTSurfaceTouchHandler` refuses to be prevented from
+  inside the surface, so on iOS an over-eager claim cannot freeze the list —
+  it causes a diagonal drag to swipe and scroll at once. The frozen-list
+  failure I wrote the guard against is the *Android* one. The guard is right;
+  the stated reason was not.
+- **A test that could not fail for its own reason.** The margin test imported
+  `KEYBOARD_MARGIN` on both sides of its assertion, so changing the margin's
+  *value* could not break it — coverage existed, but in a different test than
+  the name implied. Pinned to a literal now. Same shape as the mocked-`ApiError`
+  problem earlier in the day, one degree milder, and the second time in one
+  session that a test agreed with its own fixture.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.
