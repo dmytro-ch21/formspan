@@ -91,8 +91,48 @@ export async function fetchTechniques(
   // Fetched unfiltered on purpose. The whole library is ~65 KB as summaries,
   // and holding all of it makes filtering and search local — a per-keystroke
   // request would be slower and would fail offline.
+  if (summaryCache) return summaryCache;
   const body = await authed<{ techniques: TechniqueSummary[] }>('/techniques', getToken, signal);
-  return body.techniques ?? [];
+  // Same reasoning as normalise(): an older server omits aliases and the
+  // ruleset id, and local search maps over aliases on every keystroke.
+  summaryCache = (body.techniques ?? []).map((t) => ({
+    ...t,
+    aliases: t.aliases ?? [],
+    position_detail: t.position_detail ?? '',
+    typical_belt: t.typical_belt ?? '',
+    ibjjf_ruleset_id: t.ibjjf_ruleset_id ?? '',
+  }));
+  return summaryCache;
+}
+
+/**
+ * Normalise the array fields at the parse boundary.
+ *
+ * Not defensive programming for its own sake — a server that predates this
+ * enrichment omits `common_next_moves`, `when_to_use` and `ibjjf_ruleset_id`
+ * entirely, and `undefined.length` in a render is a white screen rather than a
+ * degraded one. That is exactly the shape of a staged rollout: the app updates
+ * before the API does, or points at an older environment.
+ *
+ * Doing it here rather than in each component means a new consumer cannot
+ * forget. The screen's job is to render what it is given; guaranteeing the
+ * shape is this module's.
+ */
+function normalise(t: Partial<Technique> & { id: string; name: string }): Technique {
+  return {
+    ...(t as Technique),
+    aliases: t.aliases ?? [],
+    setup_from: t.setup_from ?? [],
+    common_next_moves: t.common_next_moves ?? [],
+    common_counters: t.common_counters ?? [],
+    description: t.description ?? '',
+    when_to_use: t.when_to_use ?? '',
+    video_reference: t.video_reference ?? '',
+    source_notes: t.source_notes ?? '',
+    typical_belt: t.typical_belt ?? '',
+    position_detail: t.position_detail ?? '',
+    ibjjf_ruleset_id: t.ibjjf_ruleset_id ?? '',
+  };
 }
 
 export async function fetchTechnique(
@@ -100,8 +140,22 @@ export async function fetchTechnique(
   getToken: () => Promise<string | null>,
   signal?: AbortSignal,
 ): Promise<Technique> {
-  return authed<Technique>(`/techniques/${encodeURIComponent(id)}`, getToken, signal);
+  const raw = await authed<Technique>(`/techniques/${encodeURIComponent(id)}`, getToken, signal);
+  return normalise(raw);
 }
+
+/**
+ * The summaries, cached for the app's lifetime.
+ *
+ * Without this the detail screen refetched all 466 (~65 KB) on every open,
+ * serially and before first paint, purely to decide which edges are tappable —
+ * browsing ten techniques cost ~650 KB and ten round trips. The list screen
+ * warms it, so opens from the list are free and a cold deep link pays once.
+ *
+ * Failures are not cached: a null cache retries, an empty array would look
+ * like a library with nothing in it.
+ */
+let summaryCache: TechniqueSummary[] | null = null;
 
 let rulesetCache: Map<string, Ruleset> | null = null;
 
@@ -157,14 +211,38 @@ export function resolveEdge(
   label: string,
   byName: Map<string, TechniqueSummary>,
 ): TechniqueSummary | null {
-  return byName.get(label.trim().toLowerCase()) ?? null;
+  return byName.get(edgeKey(label)) ?? null;
 }
 
+/**
+ * Index every handle a graph edge might be written with: id, name, alias.
+ *
+ * The id keys are a **back-compat shim, and still load-bearing.** `setup_from`
+ * used to store ids (`grappling_stance_motion`) rather than names; the importer
+ * now resolves them, but a server that has not been re-seeded still serves the
+ * old shape — staging included, at the time of writing. Indexing names alone
+ * against that data resolved 13 of 541 setup edges (2%) instead of 417 (77%),
+ * so 368 of 466 detail screens showed raw snake_case at the user.
+ *
+ * Safe to keep against new data: no technique name or alias contains an
+ * underscore, so `edgeKey`'s `_`→`-` swap is a no-op on resolved names. Delete
+ * the id pass only once every deployment is re-seeded.
+ *
+ * Insertion order is deliberate: ids first, then names, then aliases, with
+ * aliases never overwriting. A name is a better answer than someone else's
+ * alias when both match.
+ */
 export function indexByName(list: TechniqueSummary[]): Map<string, TechniqueSummary> {
   const m = new Map<string, TechniqueSummary>();
+  for (const t of list) m.set(t.id.toLowerCase(), t);
+  for (const t of list) m.set(t.name.toLowerCase(), t);
   for (const t of list) {
-    m.set(t.name.toLowerCase(), t);
     for (const a of t.aliases) if (!m.has(a.toLowerCase())) m.set(a.toLowerCase(), t);
   }
   return m;
+}
+
+/** Normalise an edge label to the form the index is keyed on. */
+export function edgeKey(label: string): string {
+  return label.trim().toLowerCase().replace(/_/g, '-');
 }

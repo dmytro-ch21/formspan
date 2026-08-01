@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/database"
@@ -185,14 +186,25 @@ func TestTechniqueEnrichment(t *testing.T) {
 	// "lists fewer than five belts". Adult no-gi has no white belt division,
 	// so a no-gi ruleset of Blue/Purple/Brown/Black is the baseline. Getting
 	// this wrong marks ~130 ordinary techniques as restricted.
+	// EXACT counts, not a range. The regression this column exists to prevent —
+	// deriving restriction by comparing belt lists, which reads adult no-gi's
+	// missing white belt division as a restriction — flags roughly 17 of 25
+	// rulesets and ~130 techniques. A "0 < n < all" assertion passes that
+	// happily, which makes it worse than no test. These move only when the
+	// IBJJF rulebook or the library changes, and both are version-controlled.
+	const (
+		wantRestrictedRulesets   = 8
+		wantRestrictedTechniques = 20
+	)
 	restricted := 0
 	for _, rs := range rulesets {
 		if rs.IsRestricted {
 			restricted++
 		}
 	}
-	if restricted == 0 || restricted == len(rulesets) {
-		t.Errorf("is_restricted looks wrong: %d of %d flagged", restricted, len(rulesets))
+	if restricted != wantRestrictedRulesets {
+		t.Errorf("restricted rulesets = %d, want %d (belt-count derivation would give ~17)",
+			restricted, wantRestrictedRulesets)
 	}
 
 	all, err := repo.List(ctx, Filter{})
@@ -210,6 +222,61 @@ func TestTechniqueEnrichment(t *testing.T) {
 		if s.IBJJFRulesetID != "" && !known[s.IBJJFRulesetID] {
 			t.Fatalf("technique %q references unknown ruleset %q", s.ID, s.IBJJFRulesetID)
 		}
+	}
+
+	restrictedByID := make(map[string]bool, len(rulesets))
+	for _, rs := range rulesets {
+		restrictedByID[rs.ID] = rs.IsRestricted
+	}
+	nRestricted := 0
+	for _, s := range all {
+		if restrictedByID[s.IBJJFRulesetID] {
+			nRestricted++
+		}
+	}
+	if nRestricted != wantRestrictedTechniques {
+		t.Errorf("techniques under a restricted ruleset = %d, want %d",
+			nRestricted, wantRestrictedTechniques)
+	}
+
+	// setup_from must name techniques, not carry raw ids. The sheet writes ids;
+	// the importer resolves them. Regressing that put snake_case identifiers on
+	// 368 of 466 detail screens.
+	// One query over ALL 466 rather than repo.Get in a loop over a sample. A
+	// sample proves nothing about the rows it skipped, and the property here is
+	// meant to be total: NO entry may be a raw id.
+	var rawRows int
+	if err := repo.pool.QueryRow(ctx, `
+		SELECT count(*) FROM techniques
+		WHERE EXISTS (SELECT 1 FROM unnest(setup_from) e WHERE e LIKE '%\_%')`,
+	).Scan(&rawRows); err != nil {
+		t.Fatalf("count raw setup_from: %v", err)
+	}
+	if rawRows > 0 {
+		t.Errorf("%d techniques still carry raw snake_case ids in setup_from; the importer must resolve them", rawRows)
+	}
+
+	// Resolution rate stays a sample — it is a data-quality signal, not an
+	// invariant, and ~80% is the authored reality rather than a target.
+	byName := make(map[string]bool, len(all))
+	for _, s := range all {
+		byName[strings.ToLower(s.Name)] = true
+	}
+	resolved, total := 0, 0
+	for _, s := range all[:min(80, len(all))] {
+		f, err := repo.Get(ctx, s.ID)
+		if err != nil {
+			t.Fatalf("get %q: %v", s.ID, err)
+		}
+		for _, e := range f.SetupFrom {
+			total++
+			if byName[strings.ToLower(e)] {
+				resolved++
+			}
+		}
+	}
+	if total > 0 && resolved*100/total < 50 {
+		t.Errorf("only %d/%d setup_from entries name a technique — the graph is broken", resolved, total)
 	}
 
 	// Get resolves the ruleset so a detail view is one request, and carries

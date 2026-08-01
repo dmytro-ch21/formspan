@@ -142,4 +142,8 @@ type Repository interface {
 	// FK to them, so the reverse order fails on the constraint.
 	UpsertRulesets(ctx context.Context, rulesets []Ruleset) error
 	UpsertAll(ctx context.Context, techniques []Technique) error
+
+	// Called after UpsertAll — rulesets are content-addressed, so editing a
+	// rule mints a new id and leaves the old row unreferenced.
+	DeleteOrphanRulesets(ctx context.Context) error
 }

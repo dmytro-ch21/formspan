@@ -1,0 +1,17 @@
+-- Drop an index that EXPLAIN ANALYZE proves is never used.
+--
+-- 000017 added `techniques_name_trgm_idx` with a comment claiming it was "for
+-- aliases". It was on `name`, so it could never serve aliases — and it doesn't
+-- serve name either: the search predicate is
+--
+--   name ILIKE $1 OR EXISTS (SELECT 1 FROM unnest(aliases) a WHERE a ILIKE $1)
+--
+-- and the non-indexable EXISTS arm disqualifies the whole OR from an index
+-- scan. Measured plan: Seq Scan, ~1.5 ms over 466 rows.
+--
+-- Dropped rather than reshaped because at this size a sequential scan is the
+-- right plan. An index that is never chosen is not free: it costs write
+-- amplification on every seed and, worse, reads as reassurance that search is
+-- indexed when it isn't. Revisit if the library grows an order of magnitude,
+-- and index an aliases expression at the same time.
+DROP INDEX IF EXISTS techniques_name_trgm_idx;

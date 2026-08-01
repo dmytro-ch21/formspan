@@ -1,22 +1,55 @@
-import { Image } from 'expo-image';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
   Pressable,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   TextInput,
 } from 'react-native';
 
 import { useAuth } from '@clerk/clerk-expo';
 
+import { LibraryTile, categoryBadge, patternBadge } from '@/components/LibraryTile';
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
 import { Text, View } from '@/components/Themed';
+import { vola } from '@/constants/Colors';
+import { fetchExercises, pickImage, type Exercise } from '@/lib/exercises';
 import { PREF_LIBRARY_SPORT, readPref, writePref } from '@/lib/prefs';
 import { cacheExercises } from '@/lib/sessionStore';
+import {
+  fetchRulesets,
+  fetchTechniques,
+  searchTechniques,
+  type Ruleset,
+  type TechniqueSummary,
+} from '@/lib/techniques';
 import { useAuthToken } from '@/lib/useAuthToken';
+
+/**
+ * The Library — **one** library.
+ *
+ * Exercises and BJJ techniques live in the same list, behind the same search
+ * box, filtered by the same chips. An earlier version put techniques behind a
+ * "BJJ Techniques" link row that pushed a separate screen with its own search
+ * and its own visual language, and it was wrong twice over: it split a thing
+ * the product treats as one, and tapping the existing "BJJ" chip gave you
+ * twenty bear-crawl drills while the 466 actual techniques sat somewhere else
+ * entirely. If the word "library" means anything it means one place to look.
+ *
+ * What differs between the two kinds is what a row *says*, not where it lives:
+ * an exercise shows its movement pattern and load type, a technique shows its
+ * position and category. Both get a tile (see components/LibraryTile), which
+ * is what stops a 990-row list reading as a wall of text.
+ *
+ * Performance shape: exercises are filtered server-side (the catalog is
+ * paginated and the query is cheap there), techniques are fetched **once** and
+ * filtered in memory — 466 summaries are ~65 KB, so holding them makes typing
+ * free and works with no signal. Different mechanisms, deliberately; the same
+ * search box drives both.
+ */
 
 // Abort reasons, so a superseded request (silent) and a timeout (a real
 // error the user must see) don't both collapse into `signal.aborted`.
@@ -31,8 +64,6 @@ function describeError(err: unknown): string {
   if (/\(401\)/.test(msg)) return 'Your session expired. Sign in again.';
   return msg;
 }
-import { fetchExercises, pickImage, type Exercise } from '@/lib/exercises';
-import { vola } from '@/constants/Colors';
 
 const SPORTS = [
   { key: '', label: 'All' },
@@ -40,6 +71,60 @@ const SPORTS = [
   { key: 'bjj', label: 'BJJ' },
   { key: 'running', label: 'Running' },
 ] as const;
+
+/** Sports whose content includes techniques. */
+const HAS_TECHNIQUES = new Set(['', 'bjj']);
+
+/**
+ * Position is a BJJ-only axis, so its chips render only under the BJJ filter —
+ * which means the filter may only be *applied* there too. Applying it whenever
+ * techniques were on screen (which includes "All") left a selection from a
+ * previous visit narrowing the list with its control nowhere in sight:
+ * BJJ → Mount → All silently hid every non-Mount technique, so searching
+ * "triangle" found nothing while Triangle from Guard sat in the database.
+ */
+function usesPosition(sport: string): boolean {
+  return sport === 'bjj';
+}
+
+/**
+ * One collator, built once.
+ *
+ * `String.prototype.localeCompare` re-enters ICU per call; sorting ~990 merged
+ * rows on every keystroke is ~10k of those on the JS thread, which is felt as
+ * typing lag. Both sources are kept pre-sorted instead and merged linearly, so
+ * a keystroke costs ~990 comparisons through a reused collator rather than 10k
+ * through a fresh one.
+ */
+const collator = new Intl.Collator(undefined, { sensitivity: 'base' });
+
+/**
+ * Position filters, keyed on the *family* rather than the exact position.
+ *
+ * Exact keys ("Mount - Top") reached 274 of 466 techniques and quietly
+ * excluded every bottom and escape position — half the library, and the half a
+ * white belt needs most. Worse, a chip labelled "Mount" that returns only
+ * Mount-Top is a label making a promise the filter doesn't keep. Matching the
+ * family covers 458 of 466.
+ *
+ * "Half Guard" is listed separately and before nothing else depends on it:
+ * `startsWith('Guard - ')` cannot match "Half Guard - Bottom", so the two
+ * never overlap.
+ */
+const POSITIONS = [
+  { key: '', label: 'All positions' },
+  { key: 'Guard', label: 'Guard' },
+  { key: 'Half Guard', label: 'Half guard' },
+  { key: 'Standing', label: 'Standing' },
+  { key: 'Mount', label: 'Mount' },
+  { key: 'Side Control', label: 'Side control' },
+  { key: 'Back', label: 'Back' },
+  { key: 'Turtle', label: 'Turtle' },
+] as const;
+
+function inPositionFamily(position: string, family: string): boolean {
+  return position === family || position.startsWith(`${family} - `);
+}
 
 /** Human labels for the load types the catalog uses. */
 const LOAD_LABEL: Record<Exercise['load_type'], string> = {
@@ -50,13 +135,22 @@ const LOAD_LABEL: Record<Exercise['load_type'], string> = {
   distance_time: 'Distance & time',
 };
 
+/** One list, two kinds of row. */
+type Row =
+  | { kind: 'exercise'; key: string; name: string; ex: Exercise }
+  | { kind: 'technique'; key: string; name: string; t: TechniqueSummary };
+
 export default function LibraryScreen() {
   const getToken = useAuthToken();
-
-  const [exercises, setExercises] = useState<Exercise[]>([]);
   const { userId } = useAuth();
   const router = useRouter();
+
+  const [exercises, setExercises] = useState<Exercise[]>([]);
+  const [techniques, setTechniques] = useState<TechniqueSummary[]>([]);
+  const [rulesets, setRulesets] = useState<Map<string, Ruleset>>(new Map());
+  const [techniquesFailed, setTechniquesFailed] = useState(false);
   const [sport, setSportState] = useState<string>('');
+  const [position, setPosition] = useState('');
   const [query, setQuery] = useState('');
 
   /**
@@ -78,17 +172,34 @@ export default function LibraryScreen() {
   const setSport = useCallback(
     (next: string) => {
       setSportState(next);
+      // Belt and braces alongside `usesPosition`: clearing it means returning
+      // to BJJ starts unfiltered rather than resuming a selection the user
+      // last saw several screens ago.
+      if (!usesPosition(next)) setPosition('');
       if (userId) writePref(userId, PREF_LIBRARY_SPORT, next).catch(() => {});
     },
     [userId],
   );
 
-  // Clear the search on the way out, so the next visit starts open.
+  /**
+   * Clear the search on the way out — but not when the way out is a result.
+   *
+   * The blur fires for pushing `/technique/[id]` too, so "search, open a
+   * result, come back" used to return an empty box and all ~990 rows. That
+   * breaks the one flow this screen exists for (compare three armbars), while
+   * the original reason for clearing — coming back next session to a short
+   * list for no visible reason — only applies to leaving via the tab bar.
+   */
+  const keepQueryRef = useRef(false);
   useFocusEffect(
     useCallback(() => {
-      return () => setQuery('');
+      keepQueryRef.current = false;
+      return () => {
+        if (!keepQueryRef.current) setQuery('');
+      };
     }, []),
   );
+
   const [loading, setLoading] = useState(true);
   // "Have we ever successfully loaded?" — distinct from "are we loading now".
   // Without it, a retry after a failure renders "No exercises yet" while the
@@ -104,6 +215,49 @@ export default function LibraryScreen() {
   // lands — without this a slow early response can overwrite a newer one and
   // the list shows results for a query the user already moved past.
   const abortRef = useRef<AbortController | null>(null);
+
+  const techniqueAbortRef = useRef<AbortController | null>(null);
+
+  /**
+   * Techniques load once, independently of the exercise query.
+   *
+   * Not folded into `load()` on purpose: it is a single unfiltered fetch that
+   * is then reused for every keystroke, so re-running it per query would undo
+   * the reason for holding it. A failure here must not take the exercise list
+   * down with it — the two halves of the library fail separately.
+   *
+   * It needs its own deadline for the same reason the exercise fetch has one:
+   * a captive portal accepts the connection and never answers, and iOS won't
+   * give up for ~60s. Without it the technique half is simply absent that whole
+   * time, with no spinner and no message to say so.
+   */
+  const loadTechniques = useCallback(async () => {
+    techniqueAbortRef.current?.abort();
+    const ac = new AbortController();
+    techniqueAbortRef.current = ac;
+    const deadline = setTimeout(() => ac.abort(), 10_000);
+    try {
+      const [list, rs] = await Promise.all([
+        fetchTechniques(getToken, ac.signal),
+        fetchRulesets(getToken, ac.signal),
+      ]);
+      setTechniques(list);
+      setRulesets(rs);
+      setTechniquesFailed(false);
+    } catch (err) {
+      // A supersede is not a failure; a timeout is. `fetchTechniques` rejects
+      // with AbortError for both, so the only way to tell them apart is
+      // whether this controller is still the current one.
+      if (techniqueAbortRef.current === ac) setTechniquesFailed(true);
+    } finally {
+      clearTimeout(deadline);
+    }
+  }, [getToken]);
+
+  useEffect(() => {
+    void loadTechniques();
+    return () => techniqueAbortRef.current?.abort();
+  }, [loadTechniques]);
 
   const load = useCallback(
     async (opts: { silent?: boolean } = {}) => {
@@ -163,38 +317,78 @@ export default function LibraryScreen() {
 
   useEffect(() => () => abortRef.current?.abort(SUPERSEDED), []);
 
-  const isFiltered = query.trim() !== '' || sport !== '';
+  const showTechniques = HAS_TECHNIQUES.has(sport);
+
+  // Sorted once per source, not once per keystroke. Filtering preserves order,
+  // so the filtered halves stay sorted and merge linearly below.
+  const sortedExercises = useMemo(
+    () => [...exercises].sort((a, b) => collator.compare(a.name, b.name)),
+    [exercises],
+  );
+  const sortedTechniques = useMemo(
+    () => [...techniques].sort((a, b) => collator.compare(a.name, b.name)),
+    [techniques],
+  );
+
+  /**
+   * The merged list, alphabetical across both kinds.
+   *
+   * Alphabetical rather than exercises-then-techniques: a grouped order is a
+   * split wearing a different hat, and it makes the answer to "is armbar in
+   * here?" depend on knowing which group an armbar belongs to.
+   *
+   * Exercises are filtered locally *as well as* server-side. The server is the
+   * authority, but its answer is 250 ms + a round trip behind the keystroke,
+   * and without the local pass every technique match appeared interleaved
+   * through the full stale exercise catalog, which then vanished when the
+   * response landed. Two visible settling phases per keystroke reads as jank
+   * regardless of how fast it actually is.
+   */
+  const rows = useMemo<Row[]>(() => {
+    const q = query.trim().toLowerCase();
+    const ex = q
+      ? sortedExercises.filter((e) => e.name.toLowerCase().includes(q))
+      : sortedExercises;
+
+    let tq: TechniqueSummary[] = [];
+    if (showTechniques) {
+      const scoped =
+        usesPosition(sport) && position
+          ? sortedTechniques.filter((t) => inPositionFamily(t.position, position))
+          : sortedTechniques;
+      tq = searchTechniques(scoped, query);
+    }
+
+    // Linear merge of two sorted runs.
+    const out: Row[] = [];
+    let i = 0;
+    let j = 0;
+    while (i < ex.length || j < tq.length) {
+      const takeExercise =
+        j >= tq.length || (i < ex.length && collator.compare(ex[i].name, tq[j].name) <= 0);
+      if (takeExercise) {
+        const e = ex[i++];
+        out.push({ kind: 'exercise', key: `e:${e.id}`, name: e.name, ex: e });
+      } else {
+        const t = tq[j++];
+        out.push({ kind: 'technique', key: `t:${t.id}`, name: t.name, t });
+      }
+    }
+    return out;
+  }, [sortedExercises, sortedTechniques, showTechniques, sport, position, query]);
+
+  const isFiltered = query.trim() !== '' || sport !== '' || position !== '';
 
   return (
     <View style={styles.container} testID="library-screen">
       <ScreenHeader title="Library" />
 
-      {/* The BJJ library is a separate screen rather than a segment of this
-          one. They share the word "library" and nothing else: an exercise is a
-          loggable unit with images and a load type, a technique is reference
-          knowledge positioned in a graph. Cramming both behind one toggle
-          would mean one search box and one filter row serving two different
-          vocabularies. */}
-      <Pressable
-        style={styles.bjjLink}
-        onPress={() => router.push('/techniques')}
-        accessibilityRole="button"
-        accessibilityLabel="Open the BJJ technique library"
-        testID="library-to-techniques"
-      >
-        <View style={styles.bjjMain}>
-          <Text style={styles.bjjTitle}>BJJ Techniques</Text>
-          <Text style={styles.bjjMeta}>Positions, submissions and IBJJF legality</Text>
-        </View>
-        <Text style={styles.bjjChevron}>›</Text>
-      </Pressable>
-
       <View style={styles.controls}>
         <TextInput
           style={styles.search}
-          placeholder="Search exercises"
-          placeholderTextColor="#767676"
-          accessibilityLabel="Search exercises by name"
+          placeholder={showTechniques ? 'Search exercises and techniques' : 'Search exercises'}
+          placeholderTextColor={vola.textDim}
+          accessibilityLabel="Search exercises and techniques by name"
           value={query}
           onChangeText={setQuery}
           autoCapitalize="none"
@@ -213,6 +407,7 @@ export default function LibraryScreen() {
                 key={s.key || 'all'}
                 onPress={() => setSport(s.key)}
                 style={[styles.chip, active && styles.chipActive]}
+                hitSlop={8}
                 accessibilityRole="button"
                 accessibilityLabel={`Filter by ${s.label}`}
                 accessibilityState={{ selected: active }}
@@ -223,6 +418,35 @@ export default function LibraryScreen() {
             );
           })}
         </View>
+
+        {/* Position is a BJJ-only axis, so it appears only when BJJ content is
+            on screen. A permanently-visible row of positions that does nothing
+            to a strength catalog is worse than no row. */}
+        {usesPosition(sport) && (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.positionRow}
+          >
+            {POSITIONS.map((p) => {
+              const active = position === p.key;
+              return (
+                <Pressable
+                  key={p.key || 'all'}
+                  onPress={() => setPosition(p.key)}
+                  style={[styles.posChip, active && styles.posChipActive]}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Filter by ${p.label}`}
+                  accessibilityState={{ selected: active }}
+                  testID={`library-position-${p.key || 'all'}`}
+                >
+                  <Text style={[styles.posText, active && styles.posTextActive]}>{p.label}</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        )}
       </View>
 
       {error && (
@@ -230,22 +454,44 @@ export default function LibraryScreen() {
           {error}
         </Text>
       )}
+      {/* Named separately from the exercise error: the two halves fail
+          independently, and "techniques couldn't load" is not the same claim
+          as "the library is down". */}
+      {techniquesFailed && showTechniques && !error && (
+        <Text
+          style={styles.error}
+          accessibilityLiveRegion="polite"
+          testID="library-technique-error"
+        >
+          BJJ techniques couldn&apos;t load. Pull down to try again.
+        </Text>
+      )}
 
-      {loading && !everLoaded && exercises.length === 0 ? (
+      {loading && !everLoaded && rows.length === 0 ? (
         <ActivityIndicator style={styles.loader} testID="library-loading" />
       ) : (
         <FlatList
-          data={exercises}
-          keyExtractor={(e) => e.id}
+          data={rows}
+          keyExtractor={(r) => r.key}
           contentContainerStyle={styles.list}
-          // Virtualised rather than a ScrollView: the catalog is a dozen rows
-          // today and headed for several hundred.
+          // Without this the first tap on a result only dismisses the keyboard,
+          // so search-then-open — the main use of this screen — takes two taps.
+          keyboardShouldPersistTaps="handled"
+          // Virtualised: the merged catalog is ~990 rows, and mounting that
+          // many at once is a visible stall on a phone.
+          initialNumToRender={12}
+          windowSize={9}
+          removeClippedSubviews
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
               onRefresh={() => {
                 setRefreshing(true);
                 load({ silent: true });
+                // The technique half has its own request, so a refresh that
+                // only re-ran the exercise fetch made "Pull down to try again"
+                // a promise the screen could not keep.
+                void loadTechniques();
               }}
             />
           }
@@ -254,115 +500,175 @@ export default function LibraryScreen() {
             // successful response. Before that, silence beats a wrong answer.
             error || !everLoaded ? null : (
               <Text style={styles.muted} testID="library-empty">
-                {isFiltered ? 'No exercises match this filter.' : 'No exercises yet.'}
+                {isFiltered ? 'Nothing matches this filter.' : 'Nothing here yet.'}
               </Text>
             )
           }
-          renderItem={({ item }) => {
-            const uri = pickImage(item, 'thumbnail');
-            return (
-              <Pressable
-                style={styles.row}
-                onPress={() => router.push(`/exercise/${item.id}`)}
-                accessibilityRole="button"
-                accessibilityLabel={`${item.name}, ${item.sport}. See your last session.`}
-                testID={`exercise-${item.id}`}
-              >
-                {uri ? (
-                  <Image
-                    source={{ uri }}
-                    style={styles.thumb}
-                    contentFit="cover"
-                    // Immutable keys, so caching hard is free and correct.
-                    cachePolicy="memory-disk"
-                    transition={150}
-                    // Decorative on web too: expo-image's web renderer maps
-                    // accessibilityLabel to alt and ignores `accessible`, so
-                    // without this the <img> ships with no alt at all and
-                    // screen readers read out the URL filename.
-                    alt=""
-                    // Decorative here — the name beside it already conveys
-                    // the exercise, so announcing it twice adds noise.
-                    accessible={false}
-                  />
-                ) : (
-                  <View style={[styles.thumb, styles.thumbEmpty]}>
-                    <Text style={styles.thumbEmptyText}>—</Text>
-                  </View>
-                )}
-
-                <View style={styles.rowBody}>
-                  <Text style={styles.name}>{item.name}</Text>
-                  <Text style={styles.meta}>
-                    {item.movement_pattern.replace(/_/g, ' ')} · {LOAD_LABEL[item.load_type]}
-                    {item.is_unilateral ? ' · per side' : ''}
-                  </Text>
-                  {item.primary_muscles.length > 0 && (
-                    <Text style={styles.muted} numberOfLines={1}>
-                      {item.primary_muscles.map((m) => m.replace(/_/g, ' ')).join(', ')}
-                    </Text>
-                  )}
-                </View>
-              </Pressable>
-            );
-          }}
+          renderItem={({ item }) =>
+            item.kind === 'exercise' ? (
+              <ExerciseRow
+                ex={item.ex}
+                onPress={() => {
+                  keepQueryRef.current = true;
+                  router.push(`/exercise/${item.ex.id}`);
+                }}
+              />
+            ) : (
+              <TechniqueRow
+                t={item.t}
+                restricted={rulesets.get(item.t.ibjjf_ruleset_id)?.is_restricted ?? false}
+                onPress={() => {
+                  keepQueryRef.current = true;
+                  router.push(`/technique/${item.t.id}`);
+                }}
+              />
+            )
+          }
         />
       )}
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  bjjLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginHorizontal: 20,
-    marginBottom: 4,
-    padding: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: vola.line,
-    backgroundColor: vola.surface,
-  },
-  bjjMain: { flex: 1, gap: 2 },
-  bjjTitle: { fontSize: 15, fontWeight: '700' },
-  bjjMeta: { color: vola.textDim, fontSize: 12 },
-  bjjChevron: { color: vola.textDim, fontSize: 22 },
+function ExerciseRow({ ex, onPress }: { ex: Exercise; onPress: () => void }) {
+  const [code, accent] = patternBadge(ex.movement_pattern);
+  return (
+    <Pressable
+      style={styles.row}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${ex.name}, ${ex.sport} exercise. See your last session.`}
+      testID={`exercise-${ex.id}`}
+    >
+      <LibraryTile uri={pickImage(ex, 'thumbnail')} code={code} accent={accent} />
+      <View style={styles.rowBody}>
+        <Text style={styles.name}>{ex.name}</Text>
+        <Text style={styles.meta} numberOfLines={1}>
+          {ex.movement_pattern.replace(/_/g, ' ')} · {LOAD_LABEL[ex.load_type]}
+          {ex.is_unilateral ? ' · per side' : ''}
+        </Text>
+        {ex.primary_muscles.length > 0 && (
+          <Text style={styles.muted} numberOfLines={1}>
+            {ex.primary_muscles.map((m) => m.replace(/_/g, ' ')).join(', ')}
+          </Text>
+        )}
+      </View>
+    </Pressable>
+  );
+}
 
+function TechniqueRow({
+  t,
+  restricted,
+  onPress,
+}: {
+  t: TechniqueSummary;
+  restricted: boolean;
+  onPress: () => void;
+}) {
+  const [code, accent] = categoryBadge(t.category);
+  return (
+    <Pressable
+      style={styles.row}
+      onPress={onPress}
+      accessibilityRole="button"
+      // The tile's colour and code are decorative to a screen reader, so the
+      // category has to be said here or it is not conveyed at all.
+      accessibilityLabel={
+        `${t.name}, ${t.category} from ${t.position}. BJJ technique.` +
+        // The badge is a bordered View with no text a screen reader reaches,
+        // so the restriction has to be said here or it isn't conveyed at all.
+        (restricted ? ' Restricted in IBJJF competition.' : '')
+      }
+      testID={`technique-${t.id}`}
+    >
+      <LibraryTile code={code} accent={accent} />
+      <View style={styles.rowBody}>
+        <Text style={styles.name}>{t.name}</Text>
+        <Text style={styles.meta} numberOfLines={1}>
+          {t.position}
+          {t.position_detail ? ` · ${t.position_detail}` : ''}
+        </Text>
+        {t.aliases.length > 0 && (
+          <Text style={styles.muted} numberOfLines={1}>
+            {t.aliases.join(', ')}
+          </Text>
+        )}
+      </View>
+      {/* Straight from the API's is_restricted. Never inferred from belt
+          counts — adult no-gi has no white belt division, so counting flags
+          ~130 ordinary techniques instead of the real 20. */}
+      {restricted && (
+        <View style={styles.badge}>
+          <Text style={styles.badgeText}>IBJJF</Text>
+        </View>
+      )}
+    </Pressable>
+  );
+}
+
+const styles = StyleSheet.create({
   container: { flex: 1 },
-  controls: { paddingHorizontal: 16, paddingTop: 12, gap: 10 },
+  controls: { paddingHorizontal: 20, gap: 12 },
+
   search: {
     borderWidth: 1,
     borderColor: vola.line,
+    backgroundColor: vola.surface,
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 11,
-    fontSize: 16,
+    fontSize: 15,
     color: vola.text,
-    backgroundColor: vola.surface,
   },
-  chips: { flexDirection: 'row', gap: 8 },
+
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
     borderWidth: 1,
     borderColor: vola.line,
     borderRadius: 999,
-    paddingVertical: 7,
     paddingHorizontal: 14,
+    paddingVertical: 7,
   },
   chipActive: { backgroundColor: vola.lime, borderColor: vola.lime },
-  chipText: { fontSize: 14, fontWeight: '600' },
+  chipText: { color: vola.textMuted, fontSize: 13, fontWeight: '600' },
   chipTextActive: { color: vola.navy },
+
+  positionRow: { gap: 8, paddingRight: 20 },
+  posChip: {
+    borderWidth: 1,
+    borderColor: vola.lineSoft,
+    borderRadius: 8,
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+  },
+  posChipActive: { borderColor: vola.textMuted, backgroundColor: vola.surfaceRaised },
+  posText: { color: vola.textDim, fontSize: 12, fontWeight: '600' },
+  posTextActive: { color: vola.text },
+
+  error: { color: vola.danger, fontSize: 13, paddingHorizontal: 20, paddingTop: 10 },
   loader: { marginTop: 32 },
-  list: { padding: 16, gap: 14, paddingBottom: TAB_BAR_CLEARANCE },
-  row: { flexDirection: 'row', gap: 14, alignItems: 'center' },
-  thumb: { width: 72, height: 72, borderRadius: 12, backgroundColor: vola.surfaceRaised },
-  thumbEmpty: { alignItems: 'center', justifyContent: 'center' },
-  thumbEmptyText: { color: vola.textDim, fontSize: 20 },
+
+  list: { paddingHorizontal: 20, paddingTop: 14, paddingBottom: TAB_BAR_CLEARANCE },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingVertical: 11,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: vola.lineSoft,
+  },
   rowBody: { flex: 1, gap: 3 },
-  name: { fontSize: 16, fontWeight: '600' },
-  meta: { fontSize: 13, color: vola.textMuted, textTransform: 'capitalize' },
-  // #8a9099 was ~3.2:1 on white — below WCAG AA's 4.5:1 for 13pt text.
-  muted: { color: vola.textMuted, fontSize: 13 },
-  error: { color: vola.danger, fontSize: 14, paddingHorizontal: 16, paddingTop: 10 },
+  name: { fontSize: 15, fontWeight: '600' },
+  meta: { color: vola.textMuted, fontSize: 12 },
+  muted: { color: vola.textDim, fontSize: 12 },
+
+  badge: {
+    borderWidth: 1,
+    borderColor: vola.warn,
+    borderRadius: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+  },
+  badgeText: { color: vola.warn, fontSize: 10, fontWeight: '700', letterSpacing: 0.6 },
 });

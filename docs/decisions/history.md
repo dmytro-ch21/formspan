@@ -2857,9 +2857,109 @@ resolves to a real technique only ~29% of the time and `common_counters` ~6%,
 so those render as plain text unless they resolve — a dead link is worse than
 honest text. Only `setup_from` (~80%) is a navigable graph.
 
-**Nothing here is device-verified yet.** The screens typecheck and the backend
-is tested against a real Postgres, but no one has looked at the library on a
-phone.
+**Nothing here was device-verified when this entry was written**, and the first
+look at it on a phone is what produced the entry below: the split library and
+the wall-of-text rows were both invisible to typecheck, to a green test suite,
+and to me.
+
+## 2026-07-31 — The library was split, and shouldn't have been
+
+The technique library shipped behind a "BJJ Techniques" link row at the top of
+the Library tab, pushing a separate screen with its own search box, its own
+filter chips, and its own visual language. I wrote a comment in `library.tsx`
+justifying it: an exercise is a loggable unit, a technique is reference
+knowledge, one toggle would make one search box serve two vocabularies.
+
+That was wrong, and it had been decided already. **There is one library.**
+
+The split's real cost was visible the moment it reached a phone. Tapping the
+Library's existing **"BJJ" chip returned twenty bear-crawl drills** — the BJJ
+entries in the *exercise* catalog — while the 466 actual techniques sat behind
+a link somewhere above it. A user filtering to their sport got the least
+relevant possible answer, and nothing on that screen suggested where the rest
+was. Two search boxes, and neither one searched the library.
+
+### What replaced it
+
+One `FlatList` over a merged, alphabetically sorted list. One search box. The
+same sport chips. Grouping exercises-then-techniques was considered and
+rejected — it is the same split wearing a different hat, and it makes "is
+armbar in here?" depend on knowing which group an armbar belongs to.
+
+The two halves keep different fetch mechanisms, deliberately: exercises are
+filtered server-side (debounced, cancellable), techniques are fetched **once**
+(~65 KB for all 466) and filtered in memory, so typing is free and works with
+no signal. Same search box, different plumbing underneath.
+
+Position filtering moved into a second chip row that appears only under BJJ,
+and was fixed while moving: the old chips keyed on exact positions
+(`Mount - Top`) and reached **274 of 466**, silently excluding every bottom and
+escape position — the half a white belt needs most. Worse, a chip labelled
+"Mount" that returns only Mount-Top is a label making a promise the filter
+doesn't keep. Matching the position *family* covers 458 of 466.
+
+### The rows were a wall of text, and that was structural
+
+The second complaint was that it looked like nothing: plain text, no images.
+True, and not fixable by adding images — **only 4 of 524 exercises have
+artwork** and techniques have none, so "render the image when there is one" is
+a list that is blank 99% of the time.
+
+So every row now draws a tile unconditionally: the photo when one exists, and
+otherwise a coloured code derived from what the item *is* (`SUB`, `ESC`, `SWP`
+for techniques; the movement pattern for exercises).
+
+**Colour never carries meaning alone** — every tile also carries its code. That
+turned out to matter concretely. The obvious scheme, one hue per technique
+category, failed `validate_palette.js`: violet against blue measured **ΔE 2.0
+for a deuteranope and 12.9 with full colour vision**, i.e. two categories that
+look identical to *everyone*, not just to the colour-blind. Three hues plus an
+achromatic step clear every check (worst adjacent pair ΔE 21.7 CVD / 35.6
+normal), so the nine categories map onto four *intents* for colour while the
+code stays specific. Guessing would have shipped the failing palette; the
+validator took thirty seconds.
+
+### Fixed at the source, not at the client
+
+Separately, the enrichment work had left `setup_from` storing technique **ids**
+in a field the UI has to render, with the mobile client compensating. That put
+the workaround in every future client. The importer now resolves ids to names,
+so the data is what it claims to be:
+
+- **Ruleset ids are content-derived** (`sha256` of the ruleset tuple) rather
+  than positional counters. Under the old scheme, reordering rows in the source
+  spreadsheet silently repointed techniques at a *different ruleset's* legality
+  — wrong competition rules shown to a competitor, with nothing to notice.
+- **`techniques_name_trgm_idx` is dropped.** `EXPLAIN ANALYZE` proves it was
+  never chosen: the predicate is `name ILIKE $1 OR EXISTS (… aliases …)` and
+  the non-indexable `EXISTS` arm disqualifies the whole `OR`. With
+  `enable_seqscan=off` the planner *still* can't use it — "cannot", not merely
+  "prefers not to". The migration comment claiming it was "for aliases" was
+  doubly wrong: it was on `name`, and it served nothing.
+- **The tests now assert exact counts** (8 restricted rulesets, 20 restricted
+  techniques). The `0 < n < all` range they replace would have passed the
+  ~130-technique belt-count regression it exists to catch, which makes it worse
+  than no test. The raw-id check runs as one query over all 466 rather than a
+  sample of 80 — verified to bite: 0 on real data, 464 on the same query over
+  underscored ids.
+
+### What the reviewers caught that I had shipped
+
+`{hit.name}` on a graph edge rewrote **128 alias-matched edges into a different
+technique's name**: "Straight Armbar" rendered as "Armbar from Closed Guard",
+"Wrist control" as "Turtle Hand Fighting" — a different technique from a
+different position, presented as though the author had written it. The label
+now shows what the author wrote unless they wrote an id, which is the only
+unreadable form.
+
+### Honest limits
+
+The 16 machine-drafted techniques still want a black belt's review. The
+importer writes `*.generated.json` while the binaries embed `*.json`, with no
+step in the repo connecting them — a manual rename nobody has documented, and
+a trap for the next person who re-imports. `UpsertAll` still never deletes, so
+a technique removed from the sheet lingers forever and keeps its ruleset alive
+against the new orphan prune.
 
 ## Open items / known gaps as of this entry
 

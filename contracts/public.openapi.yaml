@@ -1533,7 +1533,7 @@ paths:
         - name: q
           in: query
           schema: { type: string, maxLength: 100 }
-          description: Case-insensitive substring of the name.
+          description: Case-insensitive substring of the name **or any alias** — "scarf hold" finds "Kesa-Gatame Escape".
       responses:
         "200":
           description: Matching techniques, ordered by position then category then name.

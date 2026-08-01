@@ -153,7 +153,6 @@ function RootLayoutNav() {
         <Stack.Screen name="settings/units" options={{ title: 'Units' }} />
         <Stack.Screen name="profile/edit" options={{ title: 'Edit profile' }} />
         <Stack.Screen name="exercise/[id]" options={{ title: 'Exercise' }} />
-        <Stack.Screen name="techniques" options={{ title: 'BJJ Techniques' }} />
         <Stack.Screen name="technique/[id]" options={{ title: 'Technique' }} />
         <Stack.Screen name="session/start" options={{ title: 'Start' }} />
         <Stack.Screen name="session/[id]" options={{ title: 'Session' }} />
