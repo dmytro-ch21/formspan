@@ -3482,6 +3482,94 @@ read path for rows predating the form's removal.
 uses — unchanged by this and still unstarted. `activity.kind` remains a fourth,
 unvalidated vocabulary.
 
+## 2026-08-01 — "Why am I being asked to sign in? I'm signed in" — one broker for Clerk
+
+Feedback from an actual gym session, not a test: *"When offline I would see a
+lot of sign in? why I'm on my phone signed in why should i again?"* Followed by
+the sharper architectural question: *"why do we make any calls outside of auth
+with clerk we need to make to clerk as small amout of calls as possible we need
+a better architecture."*
+
+Both were right, and they were the same problem.
+
+### What was actually happening
+
+Read out of the installed clerk-js rather than guessed:
+
+```js
+catch (t) {
+  if (this.shouldRethrowOfflineNetworkErrors()) throw ...
+  if (!isOnline()) return warn("Network request failed while offline, returning null"), null;
+```
+
+**Clerk returns `null` when it cannot be reached.** It does not throw. And
+nine modules read that null as:
+
+```js
+const token = await getToken();
+if (!token) throw new Error('Not signed in.');
+```
+
+So a dead spot made every screen in the app simultaneously tell a signed-in
+athlete that he was not signed in. He had never been signed out —
+`_updateClient(e){if(!e)return;…}` means a null response leaves the cached
+client alone, so `isSignedIn` stayed true and the route guard correctly never
+redirected. The word "sign in" he kept seeing was purely our own message,
+nine times over, and it was false.
+
+### The architecture underneath it
+
+12 direct `getToken()` calls plus 18 through `useAuthToken`, one per API
+request. Clerk's default session token lives about **60 seconds**, so the app
+depended on Clerk's servers being reachable roughly every minute — for work
+that is otherwise entirely local. That is the real answer to "why do we make
+calls to Clerk at all": we weren't calling it per request, but we were
+re-earning the right to function every 60 seconds.
+
+`lib/session.ts` is now the only module that talks to Clerk:
+
+- caches the token against its own `exp`, decoded from the JWT — no call is
+  made to find out whether a call is needed;
+- collapses concurrent misses into one refresh, so five screens mounting
+  together cost one Clerk call rather than five;
+- **keeps using a still-valid token when Clerk is unreachable.** Being unable
+  to *refresh* is not being unable to *authenticate*. This is the fix;
+- persists the last token in the keychain, so a cold start in a dead spot can
+  still reach our API until that token genuinely expires;
+- throws `OfflineError` when there is truly nothing usable — never a claim
+  about being signed out. `useAuthToken()` returns `Promise<string>`, not
+  `Promise<string | null>`, so the old reading cannot be reintroduced.
+
+The cheapest remaining win is configuration, not code:
+`EXPO_PUBLIC_CLERK_JWT_TEMPLATE` mints from a Clerk JWT template whose lifetime
+is set in the dashboard. The API verifies signature, issuer, expiry and `sub`
+only — no `azp`, no audience — so a longer-lived token needs no server change
+and multiplies the offline grace window directly.
+
+### The test that proved nothing
+
+Worth recording, because it nearly shipped. The first harness asserted "a valid
+token is still served while Clerk is unreachable" using a 300-second token —
+which the broker serves from cache without consulting Clerk at all. The offline
+getter was never even called. Deleting the entire offline-grace branch left all
+seven tests green.
+
+The token has to sit **inside the refresh skew but outside expiry** for that
+path to run at all. With a 10-second token against a 20-second skew, removing
+the branch fails two tests. A `reached === 1` assertion now guards the harness
+against going vacuous again.
+
+`apps/mobile` still has **no test runner**, so this ran as a standalone Node
+harness against `tsc` output. That is a real gap: this is the most
+consequential pure-logic module in the app and nothing in CI exercises it.
+
+### Not fixed here
+
+Reads still go to the network — a valid token does not make `GET /v1/sessions`
+work in a basement. Serving reads from the local store is the offline-first
+programme, still untouched. This change is what stops *authentication* from
+being the thing that breaks first.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

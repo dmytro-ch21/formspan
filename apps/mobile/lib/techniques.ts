@@ -1,4 +1,6 @@
 import { newTraceId, traceparent } from './trace';
+import { netFetch } from './authedFetch';
+import type { TokenGetter } from './useAuthToken';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
 const API_BASE = `${API_URL}/v1`;
@@ -70,13 +72,12 @@ export type Technique = TechniqueSummary & {
 
 async function authed<T>(
   path: string,
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   signal?: AbortSignal,
 ): Promise<T> {
   const token = await getToken();
-  if (!token) throw new Error('Not signed in.');
 
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await netFetch(`${API_BASE}${path}`, {
     headers: { Authorization: `Bearer ${token}`, traceparent: traceparent(newTraceId()) },
     signal,
   });
@@ -85,7 +86,7 @@ async function authed<T>(
 }
 
 export async function fetchTechniques(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   signal?: AbortSignal,
 ): Promise<TechniqueSummary[]> {
   // Fetched unfiltered on purpose. The whole library is ~65 KB as summaries,
@@ -137,7 +138,7 @@ function normalise(t: Partial<Technique> & { id: string; name: string }): Techni
 
 export async function fetchTechnique(
   id: string,
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   signal?: AbortSignal,
 ): Promise<Technique> {
   const raw = await authed<Technique>(`/techniques/${encodeURIComponent(id)}`, getToken, signal);
@@ -169,7 +170,7 @@ let rulesetCache: Map<string, Ruleset> | null = null;
  * as "we don't know" rather than "unrestricted".
  */
 export async function fetchRulesets(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   signal?: AbortSignal,
 ): Promise<Map<string, Ruleset>> {
   if (rulesetCache) return rulesetCache;

@@ -33,6 +33,30 @@ export class ApiError extends Error {
 }
 
 /**
+ * We could not reach VOLA — no token, or no route to the API.
+ *
+ * Deliberately NOT an `ApiError`: nothing was ever answered, so there is no
+ * status and no code to classify. That distinction is the whole point. The
+ * old code threw `new Error('Not signed in.')` when Clerk returned a null
+ * token, which offline is simply untrue and is what drove an athlete to try
+ * signing in again mid-workout.
+ *
+ * The message is written to be read on a phone in a gym: it says what
+ * happened, says the session is intact, and says what to expect next.
+ */
+export class OfflineError extends Error {
+  constructor() {
+    super("Can't reach VOLA. You're still signed in — this'll load when the connection is back.");
+    this.name = 'OfflineError';
+  }
+}
+
+/** "I couldn't ask", as opposed to any answer the server gave. */
+export function isOffline(err: unknown): boolean {
+  return err instanceof OfflineError;
+}
+
+/**
  * 4xx statuses that are nonetheless worth retrying.
  *
  * - **401** because Clerk session tokens are short-lived and `getToken()`

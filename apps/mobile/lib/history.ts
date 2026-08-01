@@ -1,4 +1,6 @@
 import { newTraceId, traceparent } from './trace';
+import { netFetch } from './authedFetch';
+import type { TokenGetter } from './useAuthToken';
 
 /**
  * Training history, phone-sized.
@@ -47,14 +49,13 @@ export type History = {
 };
 
 export async function fetchHistory(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   opts: { from: string; to: string; tz: string },
   signal?: AbortSignal,
 ): Promise<History> {
   const token = await getToken();
-  if (!token) throw new Error('Not signed in.');
   const q = new URLSearchParams({ from: opts.from, to: opts.to, tz: opts.tz });
-  const res = await fetch(`${API_BASE}/sessions/history?${q}`, {
+  const res = await netFetch(`${API_BASE}/sessions/history?${q}`, {
     signal,
     headers: {
       Authorization: `Bearer ${token}`,

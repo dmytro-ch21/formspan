@@ -1798,3 +1798,47 @@ It previously read `GET /v1/activities` — a table with no writer — so it sho
 - Events older than 90 days are deleted when `cmd/seed` runs; newer ones
   survive. Verified by inserting rows either side of the boundary.
 - A prune failure must not fail the deploy.
+
+## Offline is not signed out (mobile token broker)
+
+The scenario that produced this: an athlete at a gym, on a phone that had been
+signed in for days, met "Not signed in." on every screen.
+
+### The loop that has to work
+
+- Sign in, use the app, then **kill the network** (airplane mode) and keep
+  using it. Nothing may say "sign in" — not a screen, not a toast, not a
+  redirect. The tab bar stays; the session stays.
+- Wait past the token's lifetime (about a minute on Clerk's default, longer if
+  `EXPO_PUBLIC_CLERK_JWT_TEMPLATE` is set) and try again. Failures must read as
+  connectivity ("Can't reach VOLA. You're still signed in…"), never as auth.
+- Restore the network. Everything resumes with no sign-in step.
+
+### Cold start offline
+
+- Force-quit while offline, relaunch still offline. The app must open to the
+  signed-in shell, not the sign-in screen — the token is restored from the
+  keychain.
+- Same, but after the stored token has expired: still no sign-in screen, still
+  a connectivity message.
+
+### Clerk call volume
+
+- Loading several screens in quick succession must not produce several Clerk
+  token requests. A cold start followed by 40 API calls should cost **one**.
+- The activity outbox draining N rows costs one token acquisition, not N.
+
+### Auth that really is auth
+
+- Sign out. The keychain entry is cleared, and the next account on the same
+  device never authenticates as the previous one.
+- A genuinely revoked/expired session (signed out elsewhere) must still reach
+  the sign-in screen — offline tolerance must not become "never re-auth".
+
+### Regression guards for the test itself
+
+- Any test of "a valid token is still served while Clerk is unreachable" must
+  assert **that a refresh was actually attempted**. With a long-lived token the
+  broker answers from cache without consulting Clerk, so the test passes with
+  the entire feature deleted — this happened, and is why the harness counts
+  reaching the getter.

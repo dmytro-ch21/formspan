@@ -1,4 +1,6 @@
 import { newTraceId, traceparent } from './trace';
+import { netFetch } from './authedFetch';
+import type { TokenGetter } from './useAuthToken';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
 const API_BASE = `${API_URL}/v1`;
@@ -60,19 +62,18 @@ export function pickImage(e: Exercise, prefer: MediaKind): string | null {
 }
 
 export async function fetchExercises(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   filter: ExerciseFilter = {},
   signal?: AbortSignal,
 ): Promise<Exercise[]> {
   const token = await getToken();
-  if (!token) throw new Error('Not signed in.');
 
   const params = new URLSearchParams();
   if (filter.sport) params.set('sport', filter.sport);
   if (filter.q) params.set('q', filter.q);
   const qs = params.toString();
 
-  const res = await fetch(`${API_BASE}/exercises${qs ? `?${qs}` : ''}`, {
+  const res = await netFetch(`${API_BASE}/exercises${qs ? `?${qs}` : ''}`, {
     headers: {
       Authorization: `Bearer ${token}`,
       traceparent: traceparent(newTraceId()),
