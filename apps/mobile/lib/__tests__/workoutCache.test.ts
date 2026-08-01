@@ -1,4 +1,5 @@
 import { cacheWorkouts, cachedWorkouts } from '../sessionStore';
+import type { Workout } from '../workouts';
 import { migratedFixture, type FixtureDb } from './support/sqlite';
 
 /**
@@ -22,12 +23,12 @@ jest.mock('../db', () => {
   return { ...real, getDb: async () => mockFixture };
 });
 
-const workout = (over: Record<string, unknown> = {}) => ({
+const workout = (over: Partial<Workout> = {}): Workout => ({
   id: 'w1',
   owner_user_id: 'u1',
   name: 'Legs',
   sport: 'strength',
-  goal: 'strength' as const,
+  goal: 'hypertrophy' as const,
   notes: '',
   visibility: 'private' as const,
   items: [],
