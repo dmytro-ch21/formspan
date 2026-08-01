@@ -36,17 +36,25 @@ import { getSessionToken } from './session';
  * whole point.
  */
 export function useAuthToken(): TokenGetter {
-  const { getToken } = useAuth();
+  const { getToken, userId } = useAuth();
   const ref = useRef(getToken);
+  // The account this getter is for. Held in a ref so the returned callback
+  // stays identity-stable (the whole reason this hook exists) while still
+  // seeing the current user.
+  const userRef = useRef(userId);
 
   // Updated in an effect rather than during render — the ref is only ever
   // read from callbacks, never while rendering, so it's never stale by the
   // time it matters.
   useEffect(() => {
     ref.current = getToken;
-  }, [getToken]);
+    userRef.current = userId;
+  }, [getToken, userId]);
 
-  return useCallback(() => getSessionToken((opts) => ref.current(opts)), []);
+  return useCallback(
+    () => getSessionToken((opts) => ref.current(opts), userRef.current ?? null),
+    [],
+  );
 }
 
 /**

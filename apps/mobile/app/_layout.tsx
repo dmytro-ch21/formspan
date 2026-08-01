@@ -1,4 +1,5 @@
 import { ClerkProvider, useAuth, useSignUp } from '@clerk/clerk-expo';
+import { clearSessionToken } from '@/lib/session';
 
 import { ModulesProvider } from '@/lib/ModulesProvider';
 import { useFonts } from 'expo-font';
@@ -115,6 +116,15 @@ function RootLayoutNav() {
     // silently, one frame after it rendered. Every new auth screen belongs in
     // AUTH_ROUTES; that is the whole reason it's a named constant next to the
     // routes themselves rather than an inline `||` chain that grows.
+    // Drop the brokered token the moment Clerk says there is no session —
+    // a remote sign-out, a revoked session, an expired one. The Settings
+    // button is NOT the only way out of a session, and the token is persisted
+    // in the keychain, so relying on that button alone left the next athlete
+    // on a shared device authenticating as the previous one until the token
+    // expired. Keyed on the transition, so it runs once rather than on every
+    // navigation while signed out.
+    if (!isSignedIn) void clearSessionToken();
+
     const onAuthScreen = AUTH_ROUTES.includes(segments[0] as string);
     if (!isSignedIn && !onAuthScreen) {
       router.replace(hasPendingSignUp ? '/sign-up' : '/sign-in');

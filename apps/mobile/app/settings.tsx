@@ -53,14 +53,29 @@ export default function SettingsScreen() {
               {
                 text: 'Sign out',
                 style: 'destructive',
-                // Clear the brokered token too. It is persisted in the
-                // keychain, so without this the next account on a shared
-                // device inherits the previous athlete's credential until it
-                // expires — the same leak the modules provider was caught
-                // with. Cleared BEFORE signOut so no request can slip through
-                // with the old token as the session tears down.
+                // Cleared on BOTH sides of signOut, deliberately.
+                //
+                // Before, so no request slips through with the old token while
+                // the session tears down. After, because until `signOut()`
+                // actually completes Clerk will still happily mint a fresh
+                // token — so an outbox drain running concurrently could
+                // re-populate the cache and the keychain in the gap. The
+                // second clear closes that window; the epoch counter in
+                // session.ts closes the in-flight variant of it.
+                //
+                // `signOut()` is awaited rather than fire-and-forget: rejecting
+                // it unhandled (it can, offline) was its own small bug.
                 onPress: () => {
-                  void clearSessionToken().finally(() => signOut());
+                  void (async () => {
+                    await clearSessionToken();
+                    try {
+                      await signOut();
+                    } catch {
+                      // Offline sign-out can fail. The local credential is
+                      // already gone, which is the part that matters here.
+                    }
+                    await clearSessionToken();
+                  })();
                 },
               },
             ])

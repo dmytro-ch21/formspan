@@ -1,5 +1,5 @@
 import { useAuth } from '@clerk/clerk-expo';
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 import { fallbackModules, fetchModules, normaliseModules, type Module } from './modules';
 import { PREF_MODULES, readPref, writePref } from './prefs';
@@ -49,6 +49,16 @@ const ModulesContext = createContext<ModulesState>({
 export function ModulesProvider({ children }: { children: React.ReactNode }) {
   const { userId } = useAuth();
   const getToken = useAuthToken();
+  // The CURRENT account, readable from inside an in-flight callback.
+  // `useCallback` closes over `userId`, so comparing a captured copy against
+  // the closed-over `userId` compares a value with itself and can never fire —
+  // which is exactly what the stale-account guard below used to do. A ref is
+  // the only thing in scope that changes underneath a running promise.
+  const currentUser = useRef(userId);
+  useEffect(() => {
+    currentUser.current = userId;
+  }, [userId]);
+
   const [modules, setModules] = useState<Module[]>([]);
   const [ready, setReady] = useState(false);
   const [stale, setStale] = useState(false);
@@ -60,7 +70,8 @@ export function ModulesProvider({ children }: { children: React.ReactNode }) {
       const fresh = await fetchModules(getToken);
       // The account may have changed while this was in flight. Without this,
       // A's server truth lands on B's screen after a fast sign-out/sign-in.
-      if (forUser !== userId) return;
+      // Against the REF, not the closed-over `userId` — see currentUser above.
+      if (forUser !== currentUser.current) return;
       setModules(fresh);
       setStale(false);
       // Whole set in one key. Per-module keys would mean N reads before the

@@ -75,32 +75,63 @@ const ASSUMED_TTL_MS = 30_000;
 
 const STORE_KEY = 'vola.session.token';
 
-type Cached = { token: string; exp: number };
+type Cached = { token: string; exp: number; sub: string | null };
 
 let cached: Cached | null = null;
 let inflight: Promise<Cached> | null = null;
-/** Set once we've tried the keychain, so a cold start reads it exactly once. */
-let restored = false;
 
 /**
- * Seconds-since-epoch `exp` from a JWT, in milliseconds — or null.
+ * Memoised keychain read, so a cold start reads it exactly once.
+ *
+ * A promise rather than a boolean latch: a boolean answers "has someone
+ * started", but callers need "has it finished". With the latch, the three
+ * components the Home screen mounts together all skipped the *unfinished*
+ * restore and each started a Clerk refresh — one wasted call online, and
+ * offline every caller but the first threw `OfflineError` while a perfectly
+ * good token was milliseconds from being read.
+ */
+let restorePromise: Promise<void> | null = null;
+
+/**
+ * Bumped whenever the session is torn down.
+ *
+ * A refresh that started before sign-out can settle after it and write the old
+ * athlete's token straight back into the cache and keychain. Comparing the
+ * epoch captured at the start of a refresh against the current one makes that
+ * write a no-op instead.
+ */
+let epoch = 0;
+
+/**
+ * `sub` and `exp` from a JWT, read locally.
  *
  * Read from the token we already hold rather than asked of Clerk: the whole
  * point is to not make a network call to find out whether we need one.
+ *
+ * **`sub` is read for safety, not convenience.** A cache keyed only on expiry
+ * belongs to no one, and this one is persisted — so on a shared device the
+ * next athlete's requests would carry the previous athlete's credential until
+ * it expired. Nothing about a keychain read tells you whose token it is
+ * except the token itself. This is NOT a verification (no signature check
+ * here — that is the API's job); it is an identity *match*, which is all that
+ * is needed to refuse a token belonging to someone else.
  */
-function expiryOf(jwt: string): number | null {
+function claimsOf(jwt: string): { sub: string | null; exp: number | null } {
   const parts = jwt.split('.');
-  if (parts.length !== 3) return null;
+  if (parts.length !== 3) return { sub: null, exp: null };
   try {
     // base64url → base64, then pad. `atob` exists on Hermes; if a runtime
     // lacks it we fall back to the assumed TTL rather than crashing on a
     // hot path.
     const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
     const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
-    const json = JSON.parse(globalThis.atob(padded)) as { exp?: number };
-    return typeof json.exp === 'number' ? json.exp * 1000 : null;
+    const json = JSON.parse(globalThis.atob(padded)) as { sub?: string; exp?: number };
+    return {
+      sub: typeof json.sub === 'string' ? json.sub : null,
+      exp: typeof json.exp === 'number' ? json.exp * 1000 : null,
+    };
   } catch {
-    return null;
+    return { sub: null, exp: null };
   }
 }
 
@@ -112,24 +143,37 @@ function expiryOf(jwt: string): number | null {
  * `never` after the early return above — it cannot see that the async refresh
  * reassigns it. This shape is also just clearer at the call sites.
  */
-function usableToken(skewMs: number): string | null {
+function usableToken(skewMs: number, forUser: string | null): string | null {
   const c = cached;
-  return c !== null && c.exp - skewMs > Date.now() ? c.token : null;
+  if (c === null) return null;
+  // Someone else's token is not a usable token, however fresh it is.
+  if (forUser && c.sub && c.sub !== forUser) return null;
+  return c.exp - skewMs > Date.now() ? c.token : null;
 }
 
-async function restore(): Promise<void> {
-  if (restored) return;
-  restored = true;
-  try {
-    const stored = await SecureStore.getItemAsync(STORE_KEY);
-    if (!stored) return;
-    const exp = expiryOf(stored);
-    // An expired stored token is worse than none: it would be sent, rejected
-    // with a 401, and read as an auth problem rather than a stale cache.
-    if (exp && exp > Date.now()) cached = { token: stored, exp };
-  } catch {
-    // An unreadable keychain is not fatal — we just refresh from Clerk.
-  }
+function restore(forUser: string | null): Promise<void> {
+  restorePromise ??= (async () => {
+    const started = epoch;
+    try {
+      const stored = await SecureStore.getItemAsync(STORE_KEY);
+      if (!stored) return;
+      const { sub, exp } = claimsOf(stored);
+      // Torn down while we were reading — do not resurrect it.
+      if (started !== epoch) return;
+      // Someone else's token, left on a shared device. Drop it rather than
+      // letting the next athlete authenticate as the previous one.
+      if (forUser && sub && sub !== forUser) {
+        await SecureStore.deleteItemAsync(STORE_KEY).catch(() => {});
+        return;
+      }
+      // An expired stored token is worse than none: it would be sent, rejected
+      // with a 401, and read as an auth problem rather than a stale cache.
+      if (exp && exp > Date.now()) cached = { token: stored, exp, sub };
+    } catch {
+      // An unreadable keychain is not fatal — we just refresh from Clerk.
+    }
+  })();
+  return restorePromise;
 }
 
 async function persist(token: string): Promise<void> {
@@ -153,12 +197,20 @@ async function persist(token: string): Promise<void> {
  */
 export async function getSessionToken(
   clerkGetToken: (opts?: { template?: string }) => Promise<string | null>,
+  forUser: string | null,
 ): Promise<string> {
-  await restore();
+  // Captured BEFORE the first await, not next to the refresh that uses it.
+  // `restore()` yields, so a sign-out landing during it would otherwise be
+  // invisible: the epoch read afterwards would already be the post-clear
+  // value, the guard would compare equal, and the departed athlete's token
+  // would be written straight back. A test caught exactly that.
+  const started = epoch;
+
+  await restore(forUser);
 
   // The common case, and the one worth making free: a token we already hold,
-  // comfortably inside its life.
-  const fresh = usableToken(REFRESH_SKEW_MS);
+  // comfortably inside its life — and belonging to the athlete asking.
+  const fresh = usableToken(REFRESH_SKEW_MS, forUser);
   if (fresh) return fresh;
 
   // A refresh is already running — join it rather than starting a second.
@@ -168,7 +220,7 @@ export async function getSessionToken(
     } catch {
       // Fall through: that attempt failed, but our own cache may still carry
       // a token that is expiring-soon yet not yet expired.
-      const stillValid = usableToken(0);
+      const stillValid = usableToken(0, forUser);
       if (stillValid) return stillValid;
       throw new OfflineError();
     }
@@ -177,7 +229,13 @@ export async function getSessionToken(
   inflight = (async (): Promise<Cached> => {
     const token = await clerkGetToken(TEMPLATE ? { template: TEMPLATE } : undefined);
     if (!token) throw new OfflineError();
-    const next = { token, exp: expiryOf(token) ?? Date.now() + ASSUMED_TTL_MS };
+    const { sub, exp } = claimsOf(token);
+    const next = { token, exp: exp ?? Date.now() + ASSUMED_TTL_MS, sub };
+    // Signed out while this was in flight. Publishing it now would put the
+    // departed athlete's credential back into memory AND the keychain, right
+    // after it was deliberately cleared — the exact resurrection the epoch
+    // exists to prevent. Return it to this caller and store nothing.
+    if (started !== epoch) return next;
     cached = next;
     await persist(token);
     return next;
@@ -190,7 +248,7 @@ export async function getSessionToken(
     // is still a perfectly valid credential — being unable to renew is not
     // being unable to authenticate. This is the branch that keeps a workout
     // usable in a dead spot.
-    const stillValid = usableToken(0);
+    const stillValid = usableToken(0, forUser);
     if (stillValid) return stillValid;
     throw new OfflineError();
   } finally {
@@ -206,9 +264,15 @@ export async function getSessionToken(
  * provider was caught with.
  */
 export async function clearSessionToken(): Promise<void> {
+  // Bump FIRST. Anything already in flight now fails its epoch check and
+  // publishes nothing, so a refresh that started a moment ago cannot write the
+  // old token back after this returns.
+  epoch++;
   cached = null;
   inflight = null;
-  restored = true;
+  // A resolved promise, not null: a later caller must not re-read the keychain
+  // we are about to empty and resurrect what we just cleared.
+  restorePromise = Promise.resolve();
   try {
     await SecureStore.deleteItemAsync(STORE_KEY);
   } catch {

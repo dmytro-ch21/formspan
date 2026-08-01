@@ -154,7 +154,7 @@ export async function syncPendingActivities(
     } catch (err) {
       // Offline, DNS failure, etc. — leave the row pending and move on.
       failed++;
-      firstError ??= String(err);
+      firstError ??= err instanceof Error ? err.message : String(err);
     }
   }
 
