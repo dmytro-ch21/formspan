@@ -29,7 +29,7 @@ import { migrate } from '../../db';
 /** The subset of expo-sqlite's surface this app actually uses. */
 export type FixtureDb = {
   execAsync(sql: string): Promise<void>;
-  runAsync(sql: string, ...params: unknown[]): Promise<void>;
+  runAsync(sql: string, ...params: unknown[]): Promise<{ lastInsertRowId: number; changes: number }>;
   getFirstAsync<T>(sql: string, ...params: unknown[]): Promise<T | null>;
   getAllAsync<T>(sql: string, ...params: unknown[]): Promise<T[]>;
   withTransactionAsync(fn: () => Promise<void>): Promise<void>;
@@ -67,12 +67,23 @@ export async function migratedFixture(): Promise<FixtureDb> {
 
 export function openFixture(): FixtureDb {
   const db = new DatabaseSync(':memory:');
+  // node:sqlite enables foreign-key enforcement by default; expo-sqlite leaves
+  // SQLite's default (OFF) and sets no pragma anywhere. No FK exists in this
+  // schema today, but the day one is added the fixture would otherwise enforce
+  // a constraint the device does not — a test failing on behaviour that ships
+  // fine, or worse, passing on an ordering the device tolerates.
+  db.exec('PRAGMA foreign_keys = OFF');
   return {
     async execAsync(sql) {
       db.exec(sql);
     },
     async runAsync(sql, ...params) {
-      db.prepare(sql).run(...(bind(params) as never[]));
+      // Forwarded, not discarded: expo returns { lastInsertRowId, changes },
+      // and node spells the first `lastInsertRowid`. No caller reads it today,
+      // but a future one — detecting a blocked upsert via `changes === 0` is
+      // the obvious case — would otherwise see undefined only in tests.
+      const r = db.prepare(sql).run(...(bind(params) as never[]));
+      return { lastInsertRowId: Number(r.lastInsertRowid), changes: Number(r.changes) };
     },
     async getFirstAsync<T>(sql: string, ...params: unknown[]) {
       return (db.prepare(sql).get(...(bind(params) as never[])) as T) ?? null;
@@ -81,8 +92,12 @@ export function openFixture(): FixtureDb {
       return db.prepare(sql).all(...(bind(params) as never[])) as T[];
     },
     async withTransactionAsync(fn) {
-      db.exec('BEGIN');
+      // BEGIN inside the try, matching expo (SQLiteDatabase.ts): it diverges
+      // only when BEGIN itself throws — a nested or concurrent transaction —
+      // where expo attempts a ROLLBACK of the outer one. The app never nests
+      // today; matched anyway so the shim isn't subtly its own thing.
       try {
+        db.exec('BEGIN');
         await fn();
         db.exec('COMMIT');
       } catch (err) {

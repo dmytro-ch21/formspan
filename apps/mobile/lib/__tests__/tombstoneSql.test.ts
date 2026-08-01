@@ -118,16 +118,52 @@ it('countPendingSessions really counts a pending delete', async () => {
   expect(await countPendingSessions('u1')).toBe(1);
 });
 
-it('deleting twice does not move updated_at', async () => {
-  // The CAS a push in flight relies on keys off updated_at.
+it('deleting twice does not re-stamp the row', async () => {
+  // Deterministic by backdating. The first version compared two
+  // `new Date().toISOString()` values taken microseconds apart — measured at
+  // 999/1000 sharing the millisecond — so removing `AND deleted_at IS NULL`
+  // produced an identical string and the test passed. A guard that catches a
+  // bug by coin-flip is not a guard.
   await seedSession({ remote: 1 });
   await deleteLocalSession('u1', 's1');
-  const first = await db.getFirstAsync<{ updated_at: string }>(
-    `SELECT updated_at FROM local_sessions WHERE id = 's1'`,
+
+  const OLD = '2026-07-01T00:00:00.000Z';
+  await db.runAsync(
+    `UPDATE local_sessions SET deleted_at = ?, updated_at = ? WHERE id = 's1'`,
+    OLD,
+    OLD,
   );
+
   await deleteLocalSession('u1', 's1');
-  const second = await db.getFirstAsync<{ updated_at: string }>(
-    `SELECT updated_at FROM local_sessions WHERE id = 's1'`,
+
+  // Unchanged — the second delete must find nothing to do. The CAS that a
+  // push in flight relies on keys off updated_at, so re-stamping it here
+  // would silently strand that push's completion.
+  const row = await db.getFirstAsync<{ deleted_at: string; updated_at: string }>(
+    `SELECT deleted_at, updated_at FROM local_sessions WHERE id = 's1'`,
   );
-  expect(second?.updated_at).toBe(first?.updated_at);
+  expect(row?.updated_at).toBe(OLD);
+  expect(row?.deleted_at).toBe(OLD);
+});
+
+it('upsert still updates a LIVE row', async () => {
+  // Companion to the tombstone test above, whose expected outcome is
+  // "nothing happened" — indistinguishable from an upsert that no longer
+  // works at all, or an over-broad WHERE that blocks every update. In
+  // production that would mean pulled server changes silently never landing.
+  await seedSession({ remote: 1, dirty: 0 });
+  await upsert(
+    {
+      id: 's1', user_id: 'u1', workout_id: null, sport: 'strength',
+      name: 'Renamed', started_at: '2026-08-01T10:00:00Z', ended_at: null,
+      notes: '', sets: [], created_at: '2026-08-01T10:00:00Z',
+      updated_at: '2026-08-09T00:00:00Z', dirty: false,
+    },
+    'u1', false, true,
+  );
+
+  const row = await db.getFirstAsync<{ name: string }>(
+    `SELECT name FROM local_sessions WHERE id = 's1'`,
+  );
+  expect(row?.name).toBe('Renamed');
 });

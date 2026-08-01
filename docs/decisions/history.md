@@ -4057,10 +4057,51 @@ Five mutations that the array mock let through, all now failing:
 | `listLocalSessions` stops filtering | 2 |
 | `readLocalSession` stops filtering | 2 |
 | delete drops `dirty = 1` (narrow form) | 4 |
-| schema v7 column never added | 7 |
+| schema v7 column never added (fresh path) | 7 |
 
 The narrow `dirty` mutation had gone from 1 failure to 4 — real SQL catches it
 in more places than the decision tests could.
+
+### Review found two of the new tests vacuous. Fifth and sixth.
+
+Both were the exact class this branch was written to end, which is the part
+worth sitting with — *building the tool that catches vacuous tests did not stop
+me writing two more in the same commit*:
+
+- **"running every branch twice is idempotent"** called `migratedFixture()`
+  twice, and each call constructs a **new** `:memory:` database. So it ran the
+  fresh path twice under a different name. It could not have failed:
+  `migrate()` short-circuits on `current >= SCHEMA_VERSION` before reaching a
+  branch, and the scenario it names — a crash between DDL and the version
+  stamp — is *same database, old `user_version`*. Now resets
+  `PRAGMA user_version` on the same db and re-runs.
+- **"deleting twice does not move updated_at"** compared two
+  `new Date().toISOString()` values taken microseconds apart. Measured on this
+  machine: **999/1000 share the millisecond**, so deleting
+  `AND deleted_at IS NULL` produced an identical string and the test passed.
+  It happened to fail on one mutation run, which is worse than failing
+  reliably — a guard that catches by coin-flip reads as coverage. Now
+  deterministic, by backdating the row between the two deletes.
+
+Two more gaps it named, both now closed: **the upgrade branches never
+executed** (every fixture starts at v0 with CREATEs at current shape, so
+`addColumnIfMissing`'s ALTER never fired — deleting the whole `if (current <
+7)` branch stayed green), and there was **no test that `upsert` still updates a
+live row**, so an over-broad `WHERE` that blocked *every* update — silently
+dropping pulled server changes in production — also passed.
+
+Shim fidelity was verified against expo's installed source rather than its
+docs, and holds: expo's binder does exactly `boolean → 1/0` and
+`value ?? null`, `getFirstAsync` returns `null`, multi-statement `execAsync`
+matches. Three deltas corrected: `BEGIN` moved inside the try to match expo's
+own ordering, `runAsync` now forwards `{ lastInsertRowId, changes }` instead of
+discarding it, and `PRAGMA foreign_keys = OFF` so the fixture matches device
+semantics (node:sqlite enables them by default; expo does not).
+
+**Six vacuous tests in one day.** Every one was caught by mutation and by
+nothing else. The pattern is not carelessness about any single test — it is
+that a test's *name* is a claim, and the only thing that checks the claim is
+deleting the code and watching.
 
 ### And a fourth vacuous test, caught by the same discipline
 

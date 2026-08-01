@@ -3,7 +3,7 @@
   "private": true,
   "packageManager": "pnpm@11.17.0",
   "engines": {
-    "node": "22"
+    "node": ">=22.13"
   },
   "scripts": {
     "dev:api": "cd backend && set -a && . ./.env && set +a && go run ./cmd/api",
