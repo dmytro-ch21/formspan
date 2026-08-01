@@ -198,9 +198,41 @@ const upsertRulesetSQL = `
 		is_restricted       = EXCLUDED.is_restricted,
 		notes               = EXCLUDED.notes,
 		sources             = EXCLUDED.sources,
-		updated_at          = now()`
+		updated_at          = now()
+	WHERE (
+		ibjjf_rulesets.age_scope, ibjjf_rulesets.rule_class,
+		ibjjf_rulesets.gi_allowed_belts, ibjjf_rulesets.gi_note,
+		ibjjf_rulesets.no_gi_allowed_belts, ibjjf_rulesets.no_gi_note,
+		ibjjf_rulesets.is_restricted, ibjjf_rulesets.notes,
+		ibjjf_rulesets.sources
+	) IS DISTINCT FROM (
+		EXCLUDED.age_scope, EXCLUDED.rule_class,
+		EXCLUDED.gi_allowed_belts, EXCLUDED.gi_note,
+		EXCLUDED.no_gi_allowed_belts, EXCLUDED.no_gi_note,
+		EXCLUDED.is_restricted, EXCLUDED.notes,
+		EXCLUDED.sources
+	)`
 
-// UpsertRulesets must run before UpsertAll — techniques carry an FK to these,
+// DeleteOrphanRulesets removes rulesets nothing references. Safe only after
+// techniques have been upserted — see Seed.
+func (r *PostgresRepository) DeleteOrphanRulesets(ctx context.Context) error {
+	_, err := r.pool.Exec(ctx, `
+		DELETE FROM ibjjf_rulesets rs
+		WHERE NOT EXISTS (
+			SELECT 1 FROM techniques t WHERE t.ibjjf_ruleset_id = rs.id
+		)`)
+	if err != nil {
+		return fmt.Errorf("technique: prune rulesets: %w", err)
+	}
+	return nil
+}
+
+// UpsertRulesets must run before UpsertAll.
+//
+// Atomicity comes from pgx's SendBatch, which runs the whole batch in an
+// implicit transaction — stated explicitly because it is invisible at the call
+// site, and a refactor to per-row Exec would silently lose it.
+// — techniques carry an FK to these,
 // so seeding in the other order fails on the constraint.
 func (r *PostgresRepository) UpsertRulesets(ctx context.Context, rulesets []Ruleset) error {
 	batch := &pgx.Batch{}

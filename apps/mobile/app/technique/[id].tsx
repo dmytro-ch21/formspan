@@ -56,14 +56,15 @@ export default function TechniqueScreen() {
           const all = await fetchRulesets(getToken, signal);
           setRuleset(all.get(t.ibjjf_ruleset_id) ?? null);
         }
-        // The index is only for deciding which edge labels are tappable. It
-        // failing must not stop the technique rendering, so it is caught
-        // separately and simply leaves every edge as plain text.
-        try {
-          setByName(indexByName(await fetchTechniques(getToken, signal)));
-        } catch {
-          /* edges stay plain text */
-        }
+        // Deliberately NOT awaited. The index only decides which edge labels
+        // are tappable, so awaiting it held first paint hostage to a second
+        // request; edges simply upgrade from text to links when it lands.
+        // Cached after the first call, so this is usually free.
+        void fetchTechniques(getToken, signal)
+          .then((list) => setByName(indexByName(list)))
+          .catch(() => {
+            /* edges stay plain text — never fatal */
+          });
       } catch (err) {
         if ((err as Error)?.name === 'AbortError') return;
         setError('Could not load this technique. Check your connection and try again.');

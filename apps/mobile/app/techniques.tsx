@@ -57,7 +57,14 @@ export default function TechniquesScreen() {
     abortRef.current?.abort();
     const ac = new AbortController();
     abortRef.current = ac;
+    // Without this a retry rendered the list branch with an empty list and no
+    // spinner — "Library unavailable" with nothing happening, which reads as a
+    // dead end rather than a request in flight.
+    setLoading(true);
     setError(null);
+    // A captive portal accepts the connection and never answers, so an
+    // un-deadlined fetch spins until RN's ~60s default with no way back.
+    const deadline = setTimeout(() => ac.abort(), 10_000);
     try {
       const [list, rs] = await Promise.all([
         fetchTechniques(getToken, ac.signal),
@@ -67,10 +74,15 @@ export default function TechniquesScreen() {
       setRulesets(rs);
       setEverLoaded(true);
     } catch (err) {
-      if ((err as Error)?.name === 'AbortError') return;
+      if ((err as Error)?.name === 'AbortError') {
+        // A superseded request must not clear the spinner the newer one owns.
+        if (abortRef.current === ac) setLoading(false);
+        return;
+      }
       setError('Could not load the technique library.');
     } finally {
-      setLoading(false);
+      clearTimeout(deadline);
+      if (abortRef.current === ac) setLoading(false);
     }
   }, [getToken]);
 

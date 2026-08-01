@@ -248,9 +248,19 @@ def convert_ibjjf_rulesets(path: Path) -> tuple[list[dict], dict[tuple, str]]:
         if t not in tuples:
             tuples.append(t)
 
-    # Sorted so ids are deterministic run-to-run rather than row-order
-    # dependent. Several tuples share a rule_class and differ only in allowed
-    # belts, hence the suffix.
+    # Ids are derived from the tuple's CONTENT, not its position.
+    #
+    # They used to be `slug(rule_class)` plus a numeric suffix assigned in sort
+    # order. That is deterministic for identical input but NOT stable across
+    # sheet edits: the sort key includes the raw notes text, so fixing a typo
+    # in a rule note — the exact maintenance this normalisation exists to make
+    # cheap — could renumber which tuple is `-2`. Anything pinning that id
+    # would silently repoint to a different, existing ruleset and pass every
+    # check, with the failure being wrong competition legality.
+    #
+    # A short content hash cannot drift: the id changes only when the ruling
+    # it names changes, which is exactly when it should.
+    import hashlib
     tuples.sort()
     GI_BASELINE = {"White", "Blue", "Purple", "Brown", "Black"}
     NOGI_BASELINE = {"Blue", "Purple", "Brown", "Black"}
@@ -258,8 +268,8 @@ def convert_ibjjf_rulesets(path: Path) -> tuple[list[dict], dict[tuple, str]]:
     for t in tuples:
         age, cls, gi_belts, nogi_belts, notes, source = t
         base = slug(cls) or "ruleset"
-        used[base] = used.get(base, 0) + 1
-        rid = base if used[base] == 1 else f"{base}-{used[base]}"
+        digest = hashlib.sha256("\u0000".join(t).encode()).hexdigest()[:6]
+        rid = f"{base}-{digest}"
         lookup[t] = rid
         gi_list = _split(gi_belts) if not gi_belts.startswith("N/A") and gi_belts != "Not legal" else []
         nogi_list = _split(nogi_belts) if not nogi_belts.startswith("N/A") and nogi_belts != "Not legal" else []
@@ -294,6 +304,21 @@ def convert_ibjjf_rulesets(path: Path) -> tuple[list[dict], dict[tuple, str]]:
 
 def convert_techniques(path: Path) -> tuple[list[dict], list[dict]]:
     rulesets, ruleset_of = convert_ibjjf_rulesets(path)
+
+    # The sheet writes `setup_from` as technique IDS (`grappling_stance_motion`)
+    # while `common_next_moves`/`common_counters` are prose names. Emitting the
+    # ids verbatim put raw snake_case identifiers on 368 of 466 detail screens
+    # and left the graph 2% resolvable instead of 80%.
+    #
+    # Resolved HERE rather than in each client: the OpenAPI description already
+    # promises these name a technique, and a client-side workaround leaves the
+    # data wrong for every other consumer.
+    rows = list(read_sheet(path, "Techniques", "technique_id"))
+    name_of_id = {slug(r.get("technique_id")): str(r.get("name") or "").strip() for r in rows}
+
+    def resolve(label: str) -> str:
+        return name_of_id.get(slug(label), label)
+
     COLS = ("ibjjf_age_scope", "ibjjf_rule_class", "ibjjf_adult_gi_allowed_belts",
             "ibjjf_adult_no_gi_allowed_belts", "ibjjf_rule_notes", "ibjjf_rule_source")
     out = []
@@ -313,7 +338,9 @@ def convert_techniques(path: Path) -> tuple[list[dict], list[dict]]:
             "description": str(r.get("description") or "").strip(),
             "when_to_use": str(r.get("when_to_use") or "").strip(),
             # The graph edges: what this comes from, what follows, what beats it.
-            "setup_from": _split(r.get("setup_from")),
+            # Ids become names; anything that isn't an id passes through as
+            # the prose it already is.
+            "setup_from": [resolve(x) for x in _split(r.get("setup_from"))],
             "common_next_moves": _split(r.get("common_next_moves")),
             "common_counters": _split(r.get("common_counters")),
             "video_reference": str(r.get("video_reference") or "").strip(),

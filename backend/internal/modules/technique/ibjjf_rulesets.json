@@ -1,6 +1,6 @@
 [
   {
-    "id": "adult-brown-black-no-gi-only",
+    "id": "adult-brown-black-no-gi-only-9c224d",
     "age_scope": "Adult (18+) — Gi and No-Gi separated",
     "rule_class": "Adult Brown/Black No-Gi only",
     "gi_allowed_belts": [],
@@ -19,7 +19,7 @@
     "is_restricted": true
   },
   {
-    "id": "adult-brown-black-no-gi-only-2",
+    "id": "adult-brown-black-no-gi-only-bb6551",
     "age_scope": "Adult (18+) — Gi and No-Gi separated",
     "rule_class": "Adult Brown/Black No-Gi only",
     "gi_allowed_belts": [],
@@ -38,7 +38,7 @@
     "is_restricted": true
   },
   {
-    "id": "adult-brown-black-no-gi-only-3",
+    "id": "adult-brown-black-no-gi-only-460bff",
     "age_scope": "Adult (18+) — Gi and No-Gi separated",
     "rule_class": "Adult Brown/Black No-Gi only",
     "gi_allowed_belts": [],
@@ -57,7 +57,7 @@
     "is_restricted": true
   },
   {
-    "id": "blue-only-adult",
+    "id": "blue-only-adult-28ec8e",
     "age_scope": "Adult (18+) — Gi and No-Gi separated",
     "rule_class": "Blue+ only — Adult",
     "gi_allowed_belts": [
@@ -82,7 +82,7 @@
     "is_restricted": true
   },
   {
-    "id": "brown-black-only-adult",
+    "id": "brown-black-only-adult-aac510",
     "age_scope": "Adult (18+) — Gi and No-Gi separated",
     "rule_class": "Brown/Black only — Adult",
     "gi_allowed_belts": [
@@ -103,7 +103,7 @@
     "is_restricted": true
   },
   {
-    "id": "brown-black-only-adult-2",
+    "id": "brown-black-only-adult-dbbe90",
     "age_scope": "Adult (18+) — Gi and No-Gi separated",
     "rule_class": "Brown/Black only — Adult",
     "gi_allowed_belts": [
@@ -124,7 +124,7 @@
     "is_restricted": true
   },
   {
-    "id": "brown-black-only-adult-3",
+    "id": "brown-black-only-adult-c23188",
     "age_scope": "Adult (18+) — Gi and No-Gi separated",
     "rule_class": "Brown/Black only — Adult",
     "gi_allowed_belts": [],
@@ -142,7 +142,7 @@
     "is_restricted": true
   },
   {
-    "id": "choke-control-legal-no-spinal-crank",
+    "id": "choke-control-legal-no-spinal-crank-832277",
     "age_scope": "Adult (18+) — Gi and No-Gi separated",
     "rule_class": "Choke/control legal; no spinal crank",
     "gi_allowed_belts": [],
@@ -162,7 +162,7 @@
     "is_restricted": false
   },
   {
-    "id": "choke-control-legal-no-spinal-crank-2",
+    "id": "choke-control-legal-no-spinal-crank-53e7fc",
     "age_scope": "Adult (18+) — Gi and No-Gi separated",
     "rule_class": "Choke/control legal; no spinal crank",
     "gi_allowed_belts": [
@@ -188,7 +188,7 @@
     "is_restricted": false
   },
   {
-    "id": "compression-legal-no-hand-smother",
+    "id": "compression-legal-no-hand-smother-a2623f",
     "age_scope": "Adult (18+) — Gi and No-Gi separated",
     "rule_class": "Compression legal; no hand smother",
     "gi_allowed_belts": [],
@@ -208,7 +208,7 @@
     "is_restricted": false
   },
   {
-    "id": "generally-legal-adult",
+    "id": "generally-legal-adult-e41252",
     "age_scope": "Adult (18+) — Gi and No-Gi separated",
     "rule_class": "Generally legal — Adult",
     "gi_allowed_belts": [],
@@ -228,7 +228,7 @@
     "is_restricted": false
   },
   {
-    "id": "generally-legal-adult-2",
+    "id": "generally-legal-adult-6a0242",
     "age_scope": "Adult (18+) — Gi and No-Gi separated",
     "rule_class": "Generally legal — Adult",
     "gi_allowed_belts": [
@@ -254,7 +254,7 @@
     "is_restricted": false
   },
   {
-    "id": "generally-legal-adult-3",
+    "id": "generally-legal-adult-e496f2",
     "age_scope": "Adult (18+) — Gi and No-Gi separated",
     "rule_class": "Generally legal — Adult",
     "gi_allowed_belts": [
@@ -275,7 +275,7 @@
     "is_restricted": false
   },
   {
-    "id": "generally-legal-controlled-landing",
+    "id": "generally-legal-controlled-landing-c8b153",
     "age_scope": "Adult (18+) — Gi and No-Gi separated",
     "rule_class": "Generally legal — controlled landing",
     "gi_allowed_belts": [],
@@ -295,7 +295,7 @@
     "is_restricted": false
   },
   {
-    "id": "generally-legal-controlled-landing-2",
+    "id": "generally-legal-controlled-landing-9cfc26",
     "age_scope": "Adult (18+) — Gi and No-Gi separated",
     "rule_class": "Generally legal — controlled landing",
     "gi_allowed_belts": [
@@ -321,7 +321,7 @@
     "is_restricted": false
   },
   {
-    "id": "generally-legal-controlled-landing-3",
+    "id": "generally-legal-controlled-landing-09097c",
     "age_scope": "Adult (18+) — Gi and No-Gi separated",
     "rule_class": "Generally legal — controlled landing",
     "gi_allowed_belts": [
@@ -342,7 +342,7 @@
     "is_restricted": false
   },
   {
-    "id": "generally-legal-grip-timing-requirements",
+    "id": "generally-legal-grip-timing-requirements-a1c170",
     "age_scope": "Adult (18+) — Gi and No-Gi separated",
     "rule_class": "Generally legal — grip/timing requirements",
     "gi_allowed_belts": [
@@ -368,7 +368,7 @@
     "is_restricted": false
   },
   {
-    "id": "generally-legal-grip-timing-requirements-2",
+    "id": "generally-legal-grip-timing-requirements-75e52f",
     "age_scope": "Adult (18+) — Gi and No-Gi separated",
     "rule_class": "Generally legal — grip/timing requirements",
     "gi_allowed_belts": [
@@ -389,7 +389,7 @@
     "is_restricted": false
   },
   {
-    "id": "position-legal-execution-restricted",
+    "id": "position-legal-execution-restricted-302042",
     "age_scope": "Adult (18+) — Gi and No-Gi separated",
     "rule_class": "Position legal; execution restricted",
     "gi_allowed_belts": [],
@@ -409,7 +409,7 @@
     "is_restricted": false
   },
   {
-    "id": "position-legal-execution-restricted-2",
+    "id": "position-legal-execution-restricted-c7b5cd",
     "age_scope": "Adult (18+) — Gi and No-Gi separated",
     "rule_class": "Position legal; execution restricted",
     "gi_allowed_belts": [],
@@ -429,7 +429,7 @@
     "is_restricted": false
   },
   {
-    "id": "position-legal-execution-restricted-3",
+    "id": "position-legal-execution-restricted-373e0d",
     "age_scope": "Adult (18+) — Gi and No-Gi separated",
     "rule_class": "Position legal; execution restricted",
     "gi_allowed_belts": [
@@ -455,7 +455,7 @@
     "is_restricted": false
   },
   {
-    "id": "position-sweep-legal-submission-pressure-restricted",
+    "id": "position-sweep-legal-submission-pressure-restricted-1ff0f4",
     "age_scope": "Adult (18+) — Gi and No-Gi separated",
     "rule_class": "Position/sweep legal; submission pressure restricted",
     "gi_allowed_belts": [],
@@ -475,7 +475,7 @@
     "is_restricted": false
   },
   {
-    "id": "prohibited",
+    "id": "prohibited-44b11e",
     "age_scope": "Adult (18+) — Gi and No-Gi separated",
     "rule_class": "Prohibited",
     "gi_allowed_belts": [],
@@ -490,7 +490,7 @@
     "is_restricted": true
   },
   {
-    "id": "straight-ankle-lock-adult",
+    "id": "straight-ankle-lock-adult-601f80",
     "age_scope": "Adult (18+) — Gi and No-Gi separated",
     "rule_class": "Straight ankle lock — Adult",
     "gi_allowed_belts": [],
@@ -510,7 +510,7 @@
     "is_restricted": false
   },
   {
-    "id": "straight-ankle-lock-adult-2",
+    "id": "straight-ankle-lock-adult-fd46ef",
     "age_scope": "Adult (18+) — Gi and No-Gi separated",
     "rule_class": "Straight ankle lock — Adult",
     "gi_allowed_belts": [

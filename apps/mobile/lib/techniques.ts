@@ -91,16 +91,18 @@ export async function fetchTechniques(
   // Fetched unfiltered on purpose. The whole library is ~65 KB as summaries,
   // and holding all of it makes filtering and search local — a per-keystroke
   // request would be slower and would fail offline.
+  if (summaryCache) return summaryCache;
   const body = await authed<{ techniques: TechniqueSummary[] }>('/techniques', getToken, signal);
   // Same reasoning as normalise(): an older server omits aliases and the
   // ruleset id, and local search maps over aliases on every keystroke.
-  return (body.techniques ?? []).map((t) => ({
+  summaryCache = (body.techniques ?? []).map((t) => ({
     ...t,
     aliases: t.aliases ?? [],
     position_detail: t.position_detail ?? '',
     typical_belt: t.typical_belt ?? '',
     ibjjf_ruleset_id: t.ibjjf_ruleset_id ?? '',
   }));
+  return summaryCache;
 }
 
 /**
@@ -141,6 +143,19 @@ export async function fetchTechnique(
   const raw = await authed<Technique>(`/techniques/${encodeURIComponent(id)}`, getToken, signal);
   return normalise(raw);
 }
+
+/**
+ * The summaries, cached for the app's lifetime.
+ *
+ * Without this the detail screen refetched all 466 (~65 KB) on every open,
+ * serially and before first paint, purely to decide which edges are tappable —
+ * browsing ten techniques cost ~650 KB and ten round trips. The list screen
+ * warms it, so opens from the list are free and a cold deep link pays once.
+ *
+ * Failures are not cached: a null cache retries, an empty array would look
+ * like a library with nothing in it.
+ */
+let summaryCache: TechniqueSummary[] | null = null;
 
 let rulesetCache: Map<string, Ruleset> | null = null;
 

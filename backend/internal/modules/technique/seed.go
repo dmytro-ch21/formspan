@@ -83,6 +83,14 @@ func Seed(ctx context.Context, repo Repository) (int, error) {
 	if err := repo.UpsertAll(ctx, techniques); err != nil {
 		return 0, err
 	}
+	// Rulesets are keyed by a hash of their content, so editing a rule mints a
+	// new id and strands the old row. Pruning AFTER the technique upsert is
+	// what makes it safe: by then every technique points at a current ruleset,
+	// so anything unreferenced is genuinely dead. Left in place they would keep
+	// appearing in /v1/techniques/rulesets forever.
+	if err := repo.DeleteOrphanRulesets(ctx); err != nil {
+		return 0, err
+	}
 	return len(techniques), nil
 }
 
