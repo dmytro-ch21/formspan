@@ -1969,3 +1969,40 @@ screen.
 - A pending delete counts toward "waiting to sync" — it is unsynced work.
 - Tombstones are per-athlete: one account's deletes never hide another's
   sessions.
+
+## Workouts readable offline (mobile, offline-first PR4a)
+
+### The loop that has to work
+
+- Open Plan with the network on, then kill it and reopen the app. **Your
+  templates are there**, not an error. Before this the screen went straight to
+  the network despite the workouts already being cached.
+- The Shared tab still needs the network, and says so — an empty local list
+  would falsely claim nobody has shared anything.
+
+### Ownership and visibility survive the cache
+
+Only `mine` lists are cached, so a VOLA template or another athlete's workout
+cannot be in there today — scenarios about *those* belong to PR4b, when shared
+templates start being cached. What is testable now:
+
+- Your own **public** template keeps its "Shared" marking when the Plan tab
+  renders it from cache. It previously lost it — the cache hardcoded
+  `private` — which is the one genuinely user-visible half of that bug.
+- A template whose visibility changed server-side shows the new value after
+  the next successful refresh.
+- Upgrading a device that already had cached workouts leaves them owned by the
+  athlete they were filed under — **not** relabelled "VOLA template".
+
+### Deleted workouts must leave
+
+- Delete a workout, return to the Plan tab: it does **not** flash back. It
+  used to, on every focus, forever — nothing ever removed a cached row.
+- Delete one on the web, refresh on the phone: it disappears here too.
+- Offline, a workout deleted while online is not listed.
+
+### What is still online-only in PR4a
+
+- Opening a workout's **contents** needs the network — the detail screen has no
+  cached read, so offline it shows an error. Only the *list* is offline, plus
+  the session-start path that already had its own cache.

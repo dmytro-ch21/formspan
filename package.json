@@ -11,7 +11,7 @@
     "lint:web": "pnpm --filter web lint",
     "typecheck:web": "pnpm --filter web exec tsc --noEmit",
     "build:web": "pnpm --filter web build",
-    "fmt:api": "cd backend && gofmt -l .",
+    "fmt:api": "cd backend && test -z \"$(gofmt -l .)\" || { gofmt -l .; exit 1; }",
     "vet:api": "cd backend && go vet ./...",
     "build:api": "cd backend && go build -o bin/ ./cmd/...",
     "test:api": "cd backend && go test ./...",
@@ -22,7 +22,8 @@
     "dev:admin": "pnpm --filter admin dev",
     "lint:admin": "pnpm --filter admin lint",
     "typecheck:admin": "pnpm --filter admin exec tsc --noEmit",
-    "build:admin": "pnpm --filter admin build"
+    "build:admin": "pnpm --filter admin build",
+    "verify": "pnpm run fmt:api && pnpm run vet:api && pnpm run build:api && pnpm run lint:openapi && pnpm run typecheck:mobile && pnpm run test:mobile && pnpm run lint:web && pnpm run typecheck:web && pnpm run lint:admin && pnpm run typecheck:admin"
   },
   "devDependencies": {
     "@redocly/cli": "^2.41.0"

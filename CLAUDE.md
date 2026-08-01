@@ -51,15 +51,32 @@ Full detail: [docs/architecture/api-conventions.md](docs/architecture/api-conven
 
 Every change goes on a feature branch — **never commit directly to `main`.** If the primary working directory has uncommitted changes that aren't yours to touch (check `git status` first), use an isolated `git worktree` branched from `origin/main` instead of disturbing them.
 
-Before every push, run the full local check suite (matches CI exactly):
+Before every push, run the full local check suite — **one command**:
 
 ```bash
-pnpm run fmt:api && pnpm run vet:api && pnpm run build:api && pnpm run test:api
-pnpm run lint:openapi
-pnpm run typecheck:mobile && pnpm run test:mobile
-pnpm run lint:web && pnpm run typecheck:web && pnpm run build:web
+pnpm run verify
+```
+
+It chains every check with `&&`, which is the point. Running them as separate
+lines has twice let a **failing typecheck scroll past and the commit happen
+anyway** — once on the test-runner PR, once on PR4a — because a newline is not
+a dependency. If you run individual checks while iterating, still run `verify`
+before pushing.
+
+Deliberately not included — each is slow or needs setup, and CI covers them:
+
+```bash
+pnpm run test:api                            # needs TEST_DATABASE_URL
+pnpm run build:web && pnpm run build:admin   # slow; CI runs both
 docker build -f backend/Dockerfile backend   # if Docker/Colima is available
 ```
+
+**If you add a check to CI, add it to `verify` too.** It already missed
+`typecheck:admin` once — an admin type error passed locally and failed in CI,
+which is the same "failing typecheck scrolled past" it exists to prevent, just
+relocated to a third app. And note `fmt:api` has to *test* gofmt's output:
+`gofmt -l` prints offenders and still exits 0, so as the chain's first link it
+could never fail.
 
 Then: `git push -u origin <branch>`, `gh pr create`, watch CI with `gh run watch <run-id> --exit-status`.
 

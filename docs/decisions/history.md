@@ -4126,6 +4126,113 @@ that never reached the branch, a backoff ladder already at its ceiling, a mock
 supplying the assertion, and a test exercising its own copy of the code.
 Mutation caught all four; nothing else would have.
 
+## 2026-08-01 — Offline-first PR4a: workouts readable offline, and the cache stops inventing ownership
+
+Two problems, and the second is the one worth the entry.
+
+### The Plan tab never read the cache it already had
+
+`app/(tabs)/workouts.tsx` called `listWorkouts` and nothing else, so with no
+signal it showed an error where the plan should be — **even though the
+workouts were already on the device**, cached for the offline session-start
+path since v2. Local first now, network refreshes.
+
+`mine` only. The shared tab browses other people's published templates, and
+there is no honest local answer to "what has everyone shared" — an empty list
+would read as "nobody has shared anything", which is a claim the device cannot
+make. Nor are shared templates written into this athlete's cache rows, or they
+would come back looking like theirs.
+
+### The cache invented ownership — but not the bug I first wrote down
+
+`cachedWorkouts` returned `owner_user_id: userID` and `visibility: 'private'`,
+both hardcoded. `app/workout/[id].tsx` computes
+
+```ts
+const canEdit = workout.owner_user_id !== null && workout.owner_user_id === userId;
+```
+
+from exactly that field, and the first version of this entry concluded that
+**offline every cached workout looked editable**, VOLA templates included, with
+a Save button for things the server refuses.
+
+**Review disproved that, using the backend's own scope semantics, and it is
+worth recording precisely because it was a good story.** `workout/postgres.go`
+implements `mine` as `owner_user_id = $1` — a NULL never matches, and another
+athlete's id never matches — and *both* `cacheWorkouts` call sites pass a
+`mine` list. So every row the cache could ever hold was genuinely owned by the
+reader: the hardcoded `userID` returned the **right answer for every row that
+exists**. And `workout/[id].tsx` never reads the cache at all (it calls
+`getWorkout` and errors offline), so no Save button could appear.
+
+What was *actually* broken was the other hardcode: `visibility: 'private'`
+meant your own **public** template lost its "Shared" badge whenever the Plan
+tab rendered it from cache.
+
+The ownership fix still earns its place — it is a landmine for PR4b, where
+cached shared templates genuinely will exist — but it was **latent**, not
+live, and the entry said otherwise. Same correction discipline as c8d647b.
+
+The v8 upgrade therefore **backfills** `owner_user_id = user_id` rather than
+leaving NULL. NULL is the cautious default in the abstract and simply wrong
+here: it is untrue for 100% of real rows, it would label every one of an
+upgrader's own workouts "VOLA template" until a refresh landed, and an
+ownerless private workout is a pair the server cannot produce.
+
+### The cache never pruned
+
+The blocking find. `cacheWorkouts` only ever upserted and nothing anywhere
+deleted from the table — so a workout deleted on this phone, or on the web,
+stayed cached **forever**. With the Plan tab now reading cache-first, the
+deleted template flashes back on every tab focus until the network answers,
+and offline it is simply listed as still existing and dead-ends on tap. Both
+callers pass the complete `mine` list, so reconciling inside the existing
+transaction is safe: drop this athlete's rows whose ids aren't in it.
+
+### Testing
+
+The first PR4 to land after the SQLite fixture, and it earned it immediately —
+the bug was in what the columns *hold*, which the old array mock could not have
+expressed.
+
+Review then found **three surviving mutations** in those tests, which is the
+adversarial pass paying for itself: dropping *only* the `owner_user_id` half of
+the ON CONFLICT refresh (the sole conflict test asserted visibility, so the
+clause the whole backfill story depends on was unpinned); breaking the
+per-athlete filter in the *sport-narrowed* branch (the isolation test used the
+other branch — and the sport branch is the one offline session-start calls);
+and never storing `items` at all (nothing asserted items or `goal` round-trip,
+though the Plan tab renders `items.length` from cache and carrying `goal`
+offline was the entire point of schema v6). All three now fail.
+
+Also caught by having schema tests at all: bumping `SCHEMA_VERSION` failed
+three existing assertions immediately, which is the intended friction — a
+version bump should be a conscious act.
+
+Two mistakes of mine while writing it, both recurrences, and **both now made
+structural rather than remembered**:
+
+- **Backticks inside a SQL comment** ended the JS template literal — second
+  time. TypeScript does catch it, but as a wall of unrelated syntax errors
+  twenty lines down, which reads like the code is broken rather than the
+  comment. `sqlComments.test.ts` now fails with the offending file and line
+  instead.
+- **A failing typecheck scrolled past and the commit happened anyway** —
+  second time, once on the test-runner PR and once here — because I ran the
+  checks as separate lines and a newline is not a dependency. There is now one
+  `pnpm run verify` that chains everything with `&&`; verified it halts, by
+  breaking a type and watching the later steps not run. CLAUDE.md points at
+  the single command and says why.
+
+(The third, unrelated: the first v6 upgrade fixture created only
+`local_sessions`, so a later `addColumnIfMissing` threw "no such table" for a
+reason that cannot happen on a device, which has every earlier table.)
+
+### Not in this PR
+
+Writing. Creating and editing templates still needs the network — that is PR4b,
+and it is the headline of the original request.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.
