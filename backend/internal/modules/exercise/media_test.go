@@ -1,6 +1,8 @@
 package exercise
 
 import (
+	"github.com/dmytro-ch21/vola/backend/internal/platform/discipline"
+
 	"strings"
 	"testing"
 	"time"
@@ -224,5 +226,33 @@ func TestSeedRejectsStorageKeysThatWouldBreakTheURL(t *testing.T) {
 	e.Media = []Media{{Kind: MediaKindThumbnail, StorageKey: "exercises/_defaults/strength-thumbnail.webp"}}
 	if err := validate([]Exercise{e}); err != nil {
 		t.Errorf("validate() rejected a legitimate key: %v", err)
+	}
+}
+
+// TestDefaultMediaCoversEverySport closes the one remaining place where adding
+// a discipline fails SILENTLY.
+//
+// defaultMedia is keyed by sport string. A new sport added to the registry but
+// not here makes DefaultMediaFor return nil, the handler skip media entirely,
+// and every exercise in that discipline render with no image and no error —
+// nothing logs, nothing 500s, and the gap is invisible until someone opens the
+// app. Every other discipline list is now derived from the registry; this one
+// can't be (the values are asset paths that have to exist in the bucket), so
+// it gets a test instead.
+func TestDefaultMediaCoversEverySport(t *testing.T) {
+	for _, m := range discipline.Sports() {
+		if got := DefaultMediaFor(m.Key); len(got) == 0 {
+			t.Errorf("sport %q is in the registry but has no defaultMedia entry — "+
+				"its exercises would render with no image and no error. Add "+
+				"_defaults/%s.webp to the bucket and an entry to defaultMedia.",
+				m.Key, m.Key)
+		}
+	}
+	// The reverse: an entry for a sport nobody knows is dead weight, and more
+	// importantly a sign the registry and this map have drifted.
+	for key := range defaultMedia {
+		if !discipline.ValidSport(key) {
+			t.Errorf("defaultMedia has %q, which is not a registry sport", key)
+		}
 	}
 }

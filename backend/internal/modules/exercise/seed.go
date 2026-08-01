@@ -1,6 +1,8 @@
 package exercise
 
 import (
+	"github.com/dmytro-ch21/vola/backend/internal/platform/discipline"
+
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -40,9 +42,6 @@ func SeedData() ([]Exercise, error) {
 // is worse: it's the field the cross-sport rules reason over, so it would
 // quietly break a future rule rather than anything visible today.
 var (
-	validSports = map[string]bool{
-		"strength": true, "bjj": true, "running": true,
-	}
 	// The COARSE vocabulary — the level cross-sport rules are written
 	// against. The source catalog's own 75 patterns are preserved per row in
 	// MovementPatternDetail; this list stays deliberately small, because a
@@ -77,7 +76,7 @@ func validate(exercises []Exercise) error {
 			return fmt.Errorf("exercise: duplicate seed id %q", e.ID)
 		case e.Name == "":
 			return fmt.Errorf("exercise: seed %q has no name", e.ID)
-		case !validSports[e.Sport]:
+		case !discipline.ValidSport(e.Sport):
 			return fmt.Errorf("exercise: seed %q has unknown sport %q", e.ID, e.Sport)
 		case !validMovementPatterns[e.MovementPattern]:
 			return fmt.Errorf("exercise: seed %q has unknown movement_pattern %q", e.ID, e.MovementPattern)

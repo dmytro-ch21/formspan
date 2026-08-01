@@ -460,10 +460,6 @@ export type Profile = {
   display_name: string | null;
   unit_system: UnitSystemPref;
   track_effort: boolean;
-  bjj_enabled: boolean;
-  strength_enabled: boolean;
-  nutrition_enabled: boolean;
-  running_enabled: boolean;
 };
 
 export type Token = () => Promise<string | null>;
@@ -1047,8 +1043,6 @@ export function searchTechniques(
       t.position.toLowerCase().includes(q),
   );
 }
-
-
 
 /**
  * Split a technique's description into execution steps.

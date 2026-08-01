@@ -8,6 +8,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/dmytro-ch21/vola/backend/internal/platform/discipline"
 )
 
 var (
@@ -16,15 +18,15 @@ var (
 	ErrInvalidInput  = errors.New("profile: invalid input")
 )
 
+// Profile no longer carries module toggles. They moved to profile_modules
+// rows behind GET/PATCH /v1/modules — see migration 000020 and the
+// internal/platform/discipline registry. Four boolean columns meant a
+// migration and ~13 unchecked edit sites per new discipline; rows mean none.
 type Profile struct {
-	UserID           string  `json:"user_id"`
-	DisplayName      *string `json:"display_name"`
-	DateOfBirth      *string `json:"date_of_birth"` // "YYYY-MM-DD"
-	Sex              *string `json:"sex"`           // "male" | "female" | null
-	BJJEnabled       bool    `json:"bjj_enabled"`
-	StrengthEnabled  bool    `json:"strength_enabled"`
-	NutritionEnabled bool    `json:"nutrition_enabled"`
-	RunningEnabled   bool    `json:"running_enabled"`
+	UserID      string  `json:"user_id"`
+	DisplayName *string `json:"display_name"`
+	DateOfBirth *string `json:"date_of_birth"` // "YYYY-MM-DD"
+	Sex         *string `json:"sex"`           // "male" | "female" | null
 	// UnitSystem is display only — "metric" | "imperial". Training data is
 	// stored in kilograms and metres regardless, so changing it can never
 	// alter a recorded number, only how it's shown and entered.
@@ -38,9 +40,9 @@ type Profile struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
-// NewProfile is the input for onboarding. Module toggles aren't set here —
-// they take their DB defaults (BJJ/strength/nutrition on, running off) and
-// get changed afterward via Update, matching the J1 onboarding flow.
+// NewProfile is the input for onboarding. Module enablement isn't set here —
+// a user with no profile_modules row falls back to the registry's DefaultOn,
+// which is what makes adding a discipline need no backfill.
 type NewProfile struct {
 	DisplayName *string
 	DateOfBirth *string
@@ -49,15 +51,35 @@ type NewProfile struct {
 
 // ProfileUpdate is a partial update — nil fields are left unchanged.
 type ProfileUpdate struct {
-	DisplayName      *string
-	DateOfBirth      *string
-	Sex              *string
-	BJJEnabled       *bool
-	StrengthEnabled  *bool
-	NutritionEnabled *bool
-	RunningEnabled   *bool
-	UnitSystem       *string
-	TrackEffort      *bool
+	DisplayName *string
+	DateOfBirth *string
+	Sex         *string
+	UnitSystem  *string
+	TrackEffort *bool
+}
+
+// Module is one discipline as a client sees it: the registry's definition
+// plus whether THIS user has it on. Served together so a client needs one
+// request to render nav, chips and capabilities.
+type Module struct {
+	discipline.Module
+	Enabled bool `json:"enabled"`
+}
+
+// ModulesFor merges the registry with a user's stored choices. A module with
+// no stored row falls back to its registry default — the property that lets a
+// new discipline ship without touching anyone's data.
+func ModulesFor(stored map[string]bool) []Module {
+	all := discipline.All()
+	out := make([]Module, 0, len(all))
+	for _, m := range all {
+		enabled, ok := stored[m.Key]
+		if !ok {
+			enabled = m.DefaultOn
+		}
+		out = append(out, Module{Module: m, Enabled: enabled})
+	}
+	return out
 }
 
 // ValidUnitSystem guards the only two the clients can render.
@@ -73,4 +95,11 @@ type Repository interface {
 	SetExerciseUnit(ctx context.Context, userID, exerciseID, unit string) error
 	Create(ctx context.Context, userID string, in NewProfile) (*Profile, error)
 	Update(ctx context.Context, userID string, in ProfileUpdate) (*Profile, error)
+	// ListModules returns only the choices this user has actually stored.
+	// Absent keys are the caller's business — see ModulesFor — because the
+	// default lives in the registry, not the database.
+	ListModules(ctx context.Context, userID string) (map[string]bool, error)
+	// SetModules upserts the given keys. Keys the caller doesn't mention are
+	// left alone, so a client can PATCH one toggle without sending the rest.
+	SetModules(ctx context.Context, userID string, enabled map[string]bool) error
 }

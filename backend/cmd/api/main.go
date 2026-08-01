@@ -75,6 +75,10 @@ func main() {
 	mux.Handle("GET /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Get)))
 	mux.Handle("POST /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Create)))
 	mux.Handle("PATCH /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Update)))
+	// The discipline registry merged with this user's toggles. Everything
+	// discipline-shaped in both clients renders from this one response.
+	mux.Handle("GET /v1/modules", verifier.RequireAuth(http.HandlerFunc(profileHandler.Modules)))
+	mux.Handle("PATCH /v1/modules", verifier.RequireAuth(http.HandlerFunc(profileHandler.SetModules)))
 	mux.Handle("GET /v1/flags", verifier.RequireAuth(http.HandlerFunc(featureFlagHandler.List)))
 	mux.Handle("POST /v1/activities", verifier.RequireAuth(http.HandlerFunc(activityHandler.Create)))
 	mux.Handle("GET /v1/activities", verifier.RequireAuth(http.HandlerFunc(activityHandler.List)))

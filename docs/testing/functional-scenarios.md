@@ -1632,3 +1632,43 @@ than replacing it.
   contain an item** — there is no bjj catalog entry to reference and techniques
   are not loggable yet. Any client that offers to add a set to a bjj session is
   offering something the API will reject.
+
+## Discipline registry (`GET`/`PATCH /v1/modules`)
+
+Domain: the server owns which disciplines exist, their labels and their
+capabilities (`internal/platform/discipline`); per-user enablement lives in
+`profile_modules` rows. `/v1/profile` no longer carries module booleans.
+
+### Happy path
+
+- `GET /v1/modules` returns every module in display order with `label`,
+  `is_sport`, `default_on`, `enabled` and `capabilities`.
+- A user who has never toggled anything gets `enabled == default_on` for every
+  module, and **zero rows are stored** — defaults belong to the registry.
+- `PATCH /v1/modules` with `{"bjj": false}` changes only BJJ and returns the
+  full merged set.
+- Labels carry acronyms: BJJ is `"BJJ"`, never `"Bjj"`.
+
+### Edge cases & errors
+
+- `PATCH` with an unknown key → 400 `invalid_input`, naming the key. A typo must
+  not look like it worked.
+- `PATCH {}` → 400. An empty body is a mistake, not a no-op request.
+- `PATCH` for a user with no profile row → error (the FK is the guard).
+- `nutrition` is a valid **module** but not a valid **sport**: `POST /v1/sessions`
+  with `sport: "nutrition"` must be rejected.
+- `GET /v1/exercises?sport=cycling` → **400**, matching sessions and workouts.
+  It previously returned 200 with an empty list.
+
+### Invariants
+
+- Every registry sport has a `defaultMedia` entry — otherwise its exercises
+  render imageless with no error anywhere.
+- Adding a discipline requires no migration and no change to `profile_modules`.
+  **Guarded by a test that writes a session for every registry sport** — this
+  claim was false until migration 000021 dropped two SQL CHECK constraints, and
+  nothing would have caught it.
+- Toggling modules for a user with no profile returns a message that says so,
+  not "unknown exercise".
+- The four legacy `*_enabled` columns are unread; the down migration carries row
+  values back into them before dropping the table.

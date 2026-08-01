@@ -5,6 +5,11 @@ import type { UnitSystem } from './units';
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
 const API_BASE = `${API_URL}/v1`;
 
+/**
+ * Module toggles are NOT here any more. They moved to `lib/modules.ts` and
+ * GET/PATCH /v1/modules, because four boolean columns meant a migration and a
+ * dozen unchecked edits per new discipline.
+ */
 export type Profile = {
   user_id: string;
   display_name: string | null;
@@ -12,10 +17,6 @@ export type Profile = {
   sex: string | null;
   unit_system: UnitSystem;
   track_effort: boolean;
-  bjj_enabled: boolean;
-  strength_enabled: boolean;
-  nutrition_enabled: boolean;
-  running_enabled: boolean;
 };
 
 /** The fields the edit screen can change. Omitted keys are left alone. */
@@ -24,10 +25,6 @@ export type ProfilePatch = Partial<{
   display_name: string | null;
   date_of_birth: string | null;
   sex: string | null;
-  bjj_enabled: boolean;
-  strength_enabled: boolean;
-  nutrition_enabled: boolean;
-  running_enabled: boolean;
 }>;
 
 /**

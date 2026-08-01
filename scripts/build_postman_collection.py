@@ -85,7 +85,11 @@ BODIES = {
         "date_of_birth": "1992-04-18",
         "sex": "female",
     },
-    "PATCH /profile": {"running_enabled": True},
+    # Module toggles moved out of /profile to PATCH /modules (migration 000020).
+    # An old-shaped body here is worse than none: unknown fields are ignored, so
+    # it would return 200 and change nothing.
+    "PATCH /profile": {"unit_system": "imperial"},
+    "PATCH /modules": {"bjj": False},
     "POST /activities": {
         "id": "{{$guid}}",
         "kind": "bjj_session",

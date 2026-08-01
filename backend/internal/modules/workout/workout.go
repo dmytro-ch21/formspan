@@ -23,6 +23,8 @@
 package workout
 
 import (
+	"github.com/dmytro-ch21/vola/backend/internal/platform/discipline"
+
 	"context"
 	"errors"
 	"time"
@@ -30,6 +32,10 @@ import (
 
 type Sport string
 
+// Convenience constants for call sites that name a specific sport. These are
+// NOT the membership list — see ValidSport. A discipline added to the registry
+// without a constant here is fully supported; a constant here that the
+// registry doesn't know fails ValidSport, which is the safe direction.
 const (
 	SportStrength Sport = "strength"
 	SportRunning  Sport = "running"
@@ -148,10 +154,11 @@ func ValidGoal(g Goal) bool {
 }
 
 // ValidSport reports whether s is a known sport.
+//
+// Delegates to the discipline registry rather than switching. The switch it
+// replaced was one of four independent copies of the same closed set; a new
+// discipline added to three of them and not this one compiled cleanly and
+// returned 400 on write.
 func ValidSport(s Sport) bool {
-	switch s {
-	case SportStrength, SportRunning, SportBJJ:
-		return true
-	}
-	return false
+	return discipline.ValidSport(string(s))
 }
