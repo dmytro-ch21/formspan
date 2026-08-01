@@ -38,7 +38,6 @@ import {
 } from '@/lib/sessionStore';
 import { ApiError, isPermanentRejection } from '@/lib/apiError';
 import { report } from '@/lib/report';
-import { deleteSession } from '@/lib/sessions';
 import {
   describeSet,
   emptySet,
@@ -854,10 +853,14 @@ export default function SessionScreen() {
                 style: 'destructive',
                 onPress: async () => {
                   try {
+                    // Writes a tombstone (or hard-deletes a session the
+                    // server never saw). The delete travels out through the
+                    // ordinary push path, so there is no fire-and-forget
+                    // DELETE here any more — that one both raced the push and
+                    // was silently lost whenever it failed, which offline was
+                    // always.
                     await deleteLocalSession(userId!, id!);
-                    // Best-effort: gone locally either way, and a delete
-                    // that only lands when signal returns is still a delete.
-                    deleteSession(getToken, id!).catch(() => {});
+                    requestSync('session-deleted');
                     router.back();
                   } catch (err) {
                     setError(err instanceof Error ? err.message : String(err));

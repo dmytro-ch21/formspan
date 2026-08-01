@@ -3895,6 +3895,93 @@ as a decision rather than an oversight.
 Wired into CI as `pnpm run test:mobile` in the Mobile job, so it runs on every
 PR rather than when someone remembers.
 
+## 2026-08-01 — Offline-first PR3: an offline delete stops undoing itself
+
+`deleteLocalSession` hard-deleted the row, and `DELETE /v1/sessions/{id}` went
+out fire-and-forget beside it. Offline that produced a delete which quietly
+reverted:
+
+- the row vanished locally, so the session disappeared from the list;
+- the server still held it, so the **next pull fetched it straight back**;
+- and with the row gone there was nothing left carrying *"this needs
+  deleting"*, so the intent was lost the moment the fire-and-forget call
+  failed — which, offline, it always does.
+
+The session came back some minutes later with nothing said. That is data being
+**wrong**, not merely absent, which is why this ranked above the
+reads-offline work.
+
+### Tombstones
+
+Schema v7 adds `deleted_at` to `local_sessions`. Deleting marks the row and
+leaves it dirty; the ordinary push path carries the delete out, and only then
+is the row hard-deleted for real. Reads (`listLocalSessions`,
+`readLocalSession`) filter tombstones, so it is invisible from the tap.
+
+Three decisions worth recording:
+
+- **Deleting always writes a tombstone; the push decides what the server
+  needs.** The first version short-circuited: `remote = 0` meant "never
+  pushed, nothing to tell the server", so the row was hard-deleted outright.
+  That read is racy — `pushRow` sets `remote = 1` partway through a first
+  push, so deleting in that window sees 0, hard-deletes locally, and then the
+  push it was racing **creates the session on the server**. Local row gone,
+  server row created, next pull brings it back: the exact resurrection this
+  feature exists to prevent, reintroduced by the optimisation meant to avoid a
+  pointless outbox entry. Moving the decision into `pushRow` — which runs
+  inside the serialised sync and can act on what is true *then* — removes
+  *that* window. **It does not remove every one:** if a create lands
+  server-side but the response is lost — a half-open connection, which is this
+  app's home environment — `remote` stays 0 until the next successful push, and
+  a delete in that gap still drops the row locally while the server keeps the
+  session. Self-healing (the pulled copy comes back `remote = 1`, so a second
+  delete works), and closing it would cost the clears-offline property, so it
+  is a trade rather than an oversight. Recorded because the first draft of this
+  entry claimed the window was gone. Safe to interleave because the tombstone
+  bumps `updated_at`, so a push already in flight finds its CAS no longer
+  matches and leaves the row dirty for the next pass.
+- **A 404 on the delete counts as success.** The server agreeing it isn't there
+  is exactly the state being asked for. Without that, deleting the same session
+  twice (or deleting it on the web first) leaves a tombstone that can never
+  clear.
+- **The pull skips tombstoned ids**, read once per run. Without it the pull
+  writes the server's copy straight back, which is the whole bug.
+- **A permanent refusal restores the session.** If the server will refuse the
+  delete identically forever, keeping the tombstone hides the row for the life
+  of the install while `pending` never reaches zero and every foreground
+  retries a doomed request — precisely the failure PR2 fixed for updates and
+  which had not been applied here. So the row is un-deleted and the error
+  surfaced: the session was *not* deleted, and continuing to hide it would be
+  a lie about what the server holds.
+- **`upsert` refuses to write over a tombstone** (`WHERE deleted_at IS NULL` on
+  the `DO UPDATE`). Its SET list clobbers `dirty` and omits `deleted_at`, so an
+  upsert onto a deleted row would leave the tombstone in place but mark it
+  clean — the delete silently never pushed. Both callers were guarded, but
+  that is two callers remembering; the clause makes the row immune instead.
+
+### The resurrection path I nearly missed
+
+`hydrateSession` exists for sessions this device has never seen — started on
+the web, say. But `readLocalSession` now filters tombstones, so a screen opened
+on a deleted id finds nothing locally and **falls through to hydrate**, which
+would fetch the server's copy and upsert it with `dirty = 0`. The row would
+stay hidden (reads filter it) while the tombstone quietly stopped being
+pushable. A delete that silently never happens is worse than one that visibly
+fails. Guarded, with a test asserting it never even asks the server.
+
+### Testing
+
+This is the first PR to land on the new runner, and it is the case that
+motivated asking for one: the whole bug is a delete racing a pull. Seven
+assertions, three mutations checked (revert to a hard delete → 4 fail;
+tombstone a never-synced session → 1; forget to mark it dirty → 4).
+
+**Named limit:** these run against an in-memory stand-in for the rows table,
+not real SQLite. They exercise the *decisions* — tombstone vs hard delete, what
+reads and pulls skip — and not the SQL. A schema or query mistake would slip
+through. Covering that needs a real SQLite fixture, which is the next thing
+this suite wants.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

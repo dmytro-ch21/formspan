@@ -48,6 +48,18 @@ const CREATE_SESSIONS = `
     -- can be dirty forever while still being remote, and that is the common
     -- case during a workout.
     remote INTEGER NOT NULL DEFAULT 0,
+    -- When the athlete deleted this, or NULL. A TOMBSTONE, not a hard delete.
+    --
+    -- Deleting the row outright is what made an offline delete undo itself:
+    -- the row vanished locally, the server still held it, and the next pull
+    -- fetched it straight back. Worse, with the row gone there was nothing
+    -- left carrying "this needs deleting", so the delete was lost the moment
+    -- the fire-and-forget DELETE failed — which offline it always does.
+    --
+    -- The row therefore stays, marked, until the server confirms. Then it is
+    -- hard-deleted for real. Reads filter it out, so it is invisible from the
+    -- moment the athlete taps Delete.
+    deleted_at TEXT,
     updated_at TEXT NOT NULL
   );
 `;
@@ -115,7 +127,7 @@ const CREATE_EXERCISE_CACHE = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -266,6 +278,15 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     // CREATE_WORKOUT_CACHE already declared `goal`. `IF NOT EXISTS` is not
     // available for ADD COLUMN in this SQLite build, hence the explicit check.
     await addColumnIfMissing(db, 'workout_cache', 'goal', 'TEXT');
+  }
+
+  if (current < 7) {
+    // v6 -> v7: tombstones, so an offline delete stops resurrecting.
+    //
+    // Guarded rather than a bare ALTER, for the reason spelled out on the
+    // `goal` column above: the fresh-install path runs *every* branch from
+    // v0, and its CREATE_SESSIONS already declares `deleted_at`.
+    await addColumnIfMissing(db, 'local_sessions', 'deleted_at', 'TEXT');
   }
 
   await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION};`);

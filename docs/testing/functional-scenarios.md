@@ -1945,3 +1945,27 @@ screen.
   athlete's rows.
 - A signed-out app does not report "0 pending" as if everything were safely on
   the server — that state is unknown, not clean.
+
+## Offline deletes (mobile, offline-first PR3)
+
+### The loop that has to work
+
+- Delete a synced session **with the network off**. It disappears immediately.
+  Restore the network. It stays deleted — on the phone *and* on the web.
+  Before tombstones it came back minutes later with nothing said.
+- Force-quit between the delete and regaining signal: still deleted, and the
+  delete still reaches the server.
+
+### Edge cases
+
+- Deleting a session the server has never seen (logged offline, never synced)
+  clears on the next sync tick without any network call — the decision is made
+  in the push, not at delete time, because reading it at delete time races a
+  first push that is mid-flight.
+- Deleting the same session twice, or deleting it on the web first, clears
+  cleanly: a 404 on the delete counts as success.
+- Opening a deleted session's screen by a stale link does **not** resurrect it
+  from the server, and does not quietly cancel the pending delete.
+- A pending delete counts toward "waiting to sync" — it is unsynced work.
+- Tombstones are per-athlete: one account's deletes never hide another's
+  sessions.
