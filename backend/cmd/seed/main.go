@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/dmytro-ch21/vola/backend/internal/modules/exercise"
+	"github.com/dmytro-ch21/vola/backend/internal/modules/health"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/technique"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/database"
 )
@@ -53,4 +54,14 @@ func main() {
 		log.Fatalf("seed: techniques: %v", err)
 	}
 	log.Printf("seed: techniques: %d upserted", tn)
+
+	// Bound health_events while we're here. The seed is the only thing this
+	// project runs on a schedule (predeploy, every deploy), and the table had
+	// no retention at all — it grew forever. Failure is logged, never fatal:
+	// tidying observability must not block a deploy.
+	if n, err := health.NewPostgresRepository(pool).Prune(ctx); err != nil {
+		log.Printf("seed: health prune failed (non-fatal): %v", err)
+	} else if n > 0 {
+		log.Printf("seed: health_events pruned: %d", n)
+	}
 }

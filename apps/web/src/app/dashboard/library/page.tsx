@@ -11,12 +11,14 @@ import {
   listTechniques,
   pickImage,
   searchTechniques,
-  SPORTS,
   type Exercise,
   type Ruleset,
   type Technique,
   type TechniqueSummary,
+  enabledSports,
+  type Module,
 } from "@/lib/api";
+import { useModules } from "@/lib/ModulesProvider";
 import {
   ACCENT_CLASS,
   categoryBadge,
@@ -59,7 +61,6 @@ const LOAD_LABEL: Record<Exercise["load_type"], string> = {
  */
 
 /** Sports whose content includes techniques. */
-const HAS_TECHNIQUES = new Set(["", "bjj"]);
 
 /**
  * Position is a BJJ-only axis, so its chips render only under the BJJ filter —
@@ -67,8 +68,11 @@ const HAS_TECHNIQUES = new Set(["", "bjj"]);
  * techniques were on screen (which includes "All") would leave a stale
  * selection narrowing the grid with its control nowhere in sight.
  */
-function usesPosition(sport: string): boolean {
-  return sport === "bjj";
+function usesPosition(sport: string, mods: Module[]): boolean {
+  const m = mods.find((x) => x.key === sport);
+  // Enabled as well as the facet: otherwise this answers "does BJJ have
+  // positions" rather than "should position chips be reachable".
+  return (m?.enabled && m.capabilities.facets.includes("position")) ?? false;
 }
 
 /**
@@ -86,6 +90,28 @@ type Selection =
   { kind: "exercise"; ex: Exercise } | { kind: "technique"; id: string };
 
 export default function LibraryPage() {
+  const { modules, known } = useModules();
+  /** Chips from the registry, All first. */
+  const sportChips = [{ key: "", label: "All" }, ...enabledSports(modules)];
+  /**
+   * The enabled discipline that carries techniques, if any. Gates the FETCH,
+   * not just the chips — the technique list is ~65 kB and was pulled on every
+   * Library visit regardless of whether this athlete does BJJ.
+   */
+  // When modules are UNKNOWN (the fetch failed), fetch anyway — same
+  // fail-open direction as the rail. Silently hiding the technique library
+  // because a preference endpoint blinked is the worse of the two outcomes.
+  // A boolean, not the module: nothing here needs the module itself, and a
+  // boolean keeps the useCallback dependency stable (an object identity would
+  // rebuild `loadTechniques` on every render).
+  //
+  // When modules are UNKNOWN — the fetch failed — this is true, the same
+  // fail-open direction as the rail. Silently hiding the technique library
+  // because a preference endpoint blinked is the worse of the two outcomes.
+  const techniqueKey = modules.find(
+    (m) => m.enabled && m.capabilities.catalog === "techniques",
+  )?.key;
+  const wantsTechniques = !known || techniqueKey !== undefined;
   const { getToken } = useAuth();
 
   const [sport, setSport] = useState("");
@@ -143,6 +169,12 @@ export default function LibraryPage() {
   const techniqueAbortRef = useRef<AbortController | null>(null);
 
   const loadTechniques = useCallback(async () => {
+    // Hiding a module must cut the request, not just the pixels.
+    if (!wantsTechniques) {
+      setTechniques([]);
+      setTechniquesFailed(false);
+      return;
+    }
     techniqueAbortRef.current?.abort();
     const ac = new AbortController();
     techniqueAbortRef.current = ac;
@@ -164,7 +196,7 @@ export default function LibraryPage() {
     } finally {
       clearTimeout(deadline);
     }
-  }, [getToken]);
+  }, [getToken, wantsTechniques]);
 
   useEffect(() => {
     // Matching the convention in sessions/page.tsx: the setState calls inside
@@ -190,7 +222,10 @@ export default function LibraryPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const showTechniques = HAS_TECHNIQUES.has(sport);
+  // With modules unknown there is no key to compare and no chip to pick, so
+  // `sport` is "" and the techniques show — fail open, as above.
+  const showTechniques =
+    wantsTechniques && (sport === "" || sport === techniqueKey);
 
   // Sorted once per source, not once per keystroke; filtering preserves order,
   // so the filtered halves stay sorted and merge linearly below.
@@ -217,7 +252,7 @@ export default function LibraryPage() {
     let tq: TechniqueSummary[] = [];
     if (showTechniques) {
       const scoped =
-        usesPosition(sport) && position
+        usesPosition(sport, modules) && position
           ? sortedTechniques.filter((t) =>
               inPositionFamily(t.position, position),
             )
@@ -241,6 +276,9 @@ export default function LibraryPage() {
       }
     }
     return out;
+    // `modules` is read via usesPosition; without it this captures the
+    // first-render list and keeps an invisible position filter applied when a
+    // facet changes.
   }, [
     sortedExercises,
     sortedTechniques,
@@ -248,6 +286,7 @@ export default function LibraryPage() {
     sport,
     position,
     query,
+    modules,
   ]);
 
   /**
@@ -305,16 +344,7 @@ export default function LibraryPage() {
             </kbd>
           </div>
           <div className="flex gap-2">
-            <Chip
-              active={sport === ""}
-              onClick={() => {
-                setSport("");
-                setPosition("");
-              }}
-            >
-              All
-            </Chip>
-            {SPORTS.map((s) => (
+            {sportChips.map((s) => (
               <Chip
                 key={s.key}
                 active={sport === s.key}
@@ -322,7 +352,7 @@ export default function LibraryPage() {
                   setSport(s.key);
                   // Returning to BJJ should start unfiltered rather than
                   // resuming a selection last seen several screens ago.
-                  if (!usesPosition(s.key)) setPosition("");
+                  if (!usesPosition(s.key, modules)) setPosition("");
                 }}
               >
                 {s.label}
@@ -331,7 +361,7 @@ export default function LibraryPage() {
           </div>
         </div>
 
-        {usesPosition(sport) && (
+        {usesPosition(sport, modules) && (
           <div
             role="group"
             aria-label="Filter by position"

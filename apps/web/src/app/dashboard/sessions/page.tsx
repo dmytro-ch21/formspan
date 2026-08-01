@@ -12,14 +12,16 @@ import {
   listSessionsPage,
   listWorkouts,
   setsFromWorkout,
-  SPORTS,
   startSession,
   type History,
   type Session,
   type SessionPage,
   type Sport,
   type Workout,
+  enabledSports,
 } from "@/lib/api";
+import { labelForModule } from "@/lib/modules";
+import { useModules } from "@/lib/ModulesProvider";
 import {
   delta,
   formatDayLong,
@@ -27,7 +29,6 @@ import {
   localZone,
   PERIODS,
   periodRange,
-  sportLabel,
   type PeriodKey,
 } from "@/lib/history";
 import { formatVolume, type UnitSystem } from "@/lib/units";
@@ -151,8 +152,15 @@ export default function HistoryPage() {
     setListLoading(true);
     listSessionsPage(
       getToken,
-      { from, to, tz: localZone(), sport: sport ?? undefined, q: query || undefined,
-        limit: PAGE_SIZE, offset },
+      {
+        from,
+        to,
+        tz: localZone(),
+        sport: sport ?? undefined,
+        q: query || undefined,
+        limit: PAGE_SIZE,
+        offset,
+      },
       c.signal,
     )
       .then((p) => {
@@ -223,7 +231,8 @@ export default function HistoryPage() {
   // Lifted into their own section only on the unfiltered first page, where
   // "what's still open" is a useful thing to put at the top.
   const live = useMemo(
-    () => (offset === 0 && !query ? rows.filter((s) => s.ended_at === null) : []),
+    () =>
+      offset === 0 && !query ? rows.filter((s) => s.ended_at === null) : [],
     [rows, offset, query],
   );
   // Anywhere else they stay in the list rather than being filtered out of it.
@@ -248,7 +257,11 @@ export default function HistoryPage() {
           <p className="eyebrow">Training</p>
           <h1 className="font-display text-4xl font-bold">History</h1>
         </div>
-        <NewSessionMenu workouts={workouts} disabled={starting} onStart={start} />
+        <NewSessionMenu
+          workouts={workouts}
+          disabled={starting}
+          onStart={start}
+        />
       </header>
 
       <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
@@ -258,7 +271,11 @@ export default function HistoryPage() {
           value={period}
           onChange={(k) => setPeriod(k as PeriodKey)}
         />
-        <SportChips counts={history?.sports ?? []} value={sport} onChange={setSport} />
+        <SportChips
+          counts={history?.sports ?? []}
+          value={sport}
+          onChange={setSport}
+        />
       </div>
 
       {error && (
@@ -310,12 +327,18 @@ export default function HistoryPage() {
               />
               <Stat
                 label="Volume"
-                value={t!.tonnage_kg > 0 ? formatVolume(t!.tonnage_kg, units) : "—"}
+                value={
+                  t!.tonnage_kg > 0 ? formatVolume(t!.tonnage_kg, units) : "—"
+                }
                 change={delta(t!.tonnage_kg, p!.tonnage_kg)}
               />
               <Stat
                 label="Time"
-                value={t!.duration_seconds > 0 ? formatDuration(t!.duration_seconds) : "—"}
+                value={
+                  t!.duration_seconds > 0
+                    ? formatDuration(t!.duration_seconds)
+                    : "—"
+                }
                 change={delta(t!.duration_seconds, p!.duration_seconds)}
               />
             </dl>
@@ -332,7 +355,11 @@ export default function HistoryPage() {
             onSelect={setDay}
           />
 
-          <VolumeTrend from={history.from} to={history.to} days={history.days} />
+          <VolumeTrend
+            from={history.from}
+            to={history.to}
+            days={history.days}
+          />
 
           {live.length > 0 && (
             <section className="flex flex-col gap-3">
@@ -491,16 +518,27 @@ function SportChips({
   value: Sport | null;
   onChange: (s: Sport | null) => void;
 }) {
+  // Before the early return, same rules-of-hooks reason as TrainingCalendar.
+  const { modules } = useModules();
   if (counts.length < 2) return null;
   const total = counts.reduce((n, c) => n + c.sessions, 0);
   return (
-    <div role="group" aria-label="Sport" className="flex flex-wrap items-center gap-1.5">
+    <div
+      role="group"
+      aria-label="Sport"
+      className="flex flex-wrap items-center gap-1.5"
+    >
       <Chip active={value === null} onClick={() => onChange(null)}>
         All <span className="text-text-dim">{total}</span>
       </Chip>
       {counts.map((c) => (
-        <Chip key={c.sport} active={value === c.sport} onClick={() => onChange(c.sport)}>
-          {sportLabel(c.sport)} <span className="text-text-dim">{c.sessions}</span>
+        <Chip
+          key={c.sport}
+          active={value === c.sport}
+          onClick={() => onChange(c.sport)}
+        >
+          {labelForModule(modules, c.sport)}{" "}
+          <span className="text-text-dim">{c.sessions}</span>
         </Chip>
       ))}
     </div>
@@ -560,7 +598,8 @@ function Stat({
       <dd className="stat mt-0.5 text-2xl">{value}</dd>
       {absent ? null : rounded !== null && rounded !== 0 ? (
         <p className="mt-1 text-xs text-text-muted">
-          <span aria-hidden="true">{rounded > 0 ? "↑" : "↓"}</span> {Math.abs(rounded)}%{" "}
+          <span aria-hidden="true">{rounded > 0 ? "↑" : "↓"}</span>{" "}
+          {Math.abs(rounded)}%{" "}
           <span className="text-text-dim">{rounded > 0 ? "more" : "less"}</span>
         </p>
       ) : (
@@ -581,6 +620,7 @@ function NewSessionMenu({
   disabled: boolean;
   onStart: (sport: Sport, label: string, workout?: Workout) => void;
 }) {
+  const { modules } = useModules();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -590,7 +630,8 @@ function NewSessionMenu({
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node))
+        setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
@@ -626,12 +667,12 @@ function NewSessionMenu({
           swallowed by a widget that doesn't implement the keys it advertised.
           A plain list of buttons is fully operable today with nothing added. */}
       {open && (
-        <div
-          className="absolute right-0 z-20 mt-2 w-72 overflow-hidden rounded-card border border-line bg-surface shadow-lg"
-        >
+        <div className="absolute right-0 z-20 mt-2 w-72 overflow-hidden rounded-card border border-line bg-surface shadow-lg">
           {workouts.length > 0 && (
             <>
-              <p className="eyebrow px-4 pt-3 pb-1 text-[0.625rem]">From a workout</p>
+              <p className="eyebrow px-4 pt-3 pb-1 text-[0.625rem]">
+                From a workout
+              </p>
               <ul className="max-h-64 overflow-y-auto">
                 {workouts.map((w) => (
                   <li key={w.id}>
@@ -643,7 +684,9 @@ function NewSessionMenu({
                       }}
                       className="w-full px-4 py-2 text-left transition hover:bg-surface-hover"
                     >
-                      <span className="block truncate text-sm font-medium">{w.name}</span>
+                      <span className="block truncate text-sm font-medium">
+                        {w.name}
+                      </span>
                       <span className="block truncate text-xs capitalize text-text-dim">
                         {w.sport} · {w.items.length}{" "}
                         {w.items.length === 1 ? "exercise" : "exercises"}
@@ -658,7 +701,7 @@ function NewSessionMenu({
             Empty session
           </p>
           <ul className="pb-2">
-            {SPORTS.map((s) => (
+            {enabledSports(modules).map((s) => (
               <li key={s.key}>
                 <button
                   type="button"
@@ -684,13 +727,24 @@ function NewSessionMenu({
 // one GET /v1/profile *per session rendered* — 200 identical requests for one
 // account-level enum the page already holds. Exactly the amplification this
 // codebase just finished removing from the mobile save path.
-function SessionRow({ session, units }: { session: Session; units: UnitSystem }) {
+function SessionRow({
+  session,
+  units,
+}: {
+  session: Session;
+  units: UnitSystem;
+}) {
   // Completed, non-warm-up sets — the backend's own working-volume rule. The
   // `completed` half was missed when progressive volume landed, so this row
   // showed a session's full volume while the detail page showed zero for
   // the same session.
-  const working = session.sets.filter((s) => s.completed && s.set_type !== "warmup");
-  const volume = working.reduce((sum, s) => sum + (s.reps ?? 0) * (s.weight_kg ?? 0), 0);
+  const working = session.sets.filter(
+    (s) => s.completed && s.set_type !== "warmup",
+  );
+  const volume = working.reduce(
+    (sum, s) => sum + (s.reps ?? 0) * (s.weight_kg ?? 0),
+    0,
+  );
   const exercises = new Set(session.sets.map((s) => s.exercise_id)).size;
 
   return (
@@ -714,7 +768,9 @@ function SessionRow({ session, units }: { session: Session; units: UnitSystem })
                 month: "short",
               })}
             </time>
-            {session.ended_at === null && <span className="text-warn"> · in progress</span>}
+            {session.ended_at === null && (
+              <span className="text-warn"> · in progress</span>
+            )}
           </p>
         </div>
 
@@ -732,7 +788,10 @@ function SessionRow({ session, units }: { session: Session; units: UnitSystem })
         />
         <Metric label="Exercises" value={String(exercises)} />
         <Metric label="Working sets" value={String(working.length)} />
-        <Metric label="Volume" value={volume > 0 ? formatVolume(volume, units) : "—"} />
+        <Metric
+          label="Volume"
+          value={volume > 0 ? formatVolume(volume, units) : "—"}
+        />
       </Link>
     </li>
   );
@@ -801,7 +860,11 @@ function Metric({ label, value }: { label: string; value: string }) {
 /** Shaped like the real thing, so the layout doesn't jump when data lands. */
 function Skeleton() {
   return (
-    <div className="flex flex-col gap-8" aria-busy="true" aria-label="Loading history">
+    <div
+      className="flex flex-col gap-8"
+      aria-busy="true"
+      aria-label="Loading history"
+    >
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {Array.from({ length: 5 }, (_, i) => (
           <div

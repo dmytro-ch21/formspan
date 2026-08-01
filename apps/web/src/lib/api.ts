@@ -6,7 +6,13 @@ import { formatWeight, type UnitSystem } from "@/lib/units";
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 const API_BASE = `${API_URL}/v1`;
 
-export type Sport = "strength" | "running" | "bjj";
+/**
+ * A discipline key. Deliberately NOT a hand-written union any more: the list
+ * lives in the server's registry (`GET /v1/modules`), and a union here was a
+ * second copy that drifted from it — this file's own SPORTS array listed them
+ * in a different order than the type did.
+ */
+export type Sport = string;
 export type Goal = "general" | "powerlifting" | "hypertrophy" | "endurance";
 export type Visibility = "private" | "public";
 export type LoadType =
@@ -59,11 +65,10 @@ export type Workout = {
   updated_at: string;
 };
 
-export const SPORTS: { key: Sport; label: string }[] = [
-  { key: "strength", label: "Strength" },
-  { key: "bjj", label: "BJJ" },
-  { key: "running", label: "Running" },
-];
+// SPORTS is gone. The list comes from GET /v1/modules — see `Module` below and
+// `ModulesProvider` in the dashboard layout. Eight places in this app hardcoded
+// disciplines; two of them reimplemented registry *capabilities* rather than
+// just the list.
 
 // Only meaningful for strength: powerlifting, hypertrophy and endurance are
 // all done with the same barbell squat, so they belong to the workout.
@@ -1092,6 +1097,22 @@ export function executionSteps(description: string): string[] {
   if (merged.length < 2) return [];
   return merged.map((p) => p.charAt(0).toUpperCase() + p.slice(1));
 }
+
+/* ── the discipline registry ───────────────────────────────────────────── */
+
+// Defined in `modules.ts`, which carries NO "use client" directive, because
+// `dashboard/layout.tsx` is a Server Component and cannot call a client
+// reference. Re-exported here so existing client call sites are unchanged.
+// See modules.ts for the failure this was found by.
+export type { Module, ModuleCapabilities } from "@/lib/modules";
+export {
+  normaliseModules,
+  listModules,
+  setModules,
+  enabledSports,
+  moduleFor,
+  labelForModule,
+} from "@/lib/modules";
 
 export type RecordKind =
   | "heaviest_weight"

@@ -1169,19 +1169,84 @@ components:
 
     AdminUserSummary:
       type: object
-      required: [user_id, display_name, activity_count, last_activity_at]
+      description: >
+        One account, as the admin console lists it. The counts come from
+        `sessions` and `session_sets` — rows that already exist, so no new
+        write path was added to produce them. Note "active" here means logged
+        training, not opened the app: no read leaves a trace, so a daily
+        browser who never logs is indistinguishable from a churned account.
+        The previous `activity_count`/`last_activity_at` were removed: they
+        read a table with no writer and were 0/null for every user.
+      required:
+        [user_id, display_name, session_count, last_session_at, set_count, modules, created_at]
       properties:
         user_id:
           type: string
         display_name:
           type: string
           nullable: true
-        activity_count:
+          description: Null when the user never completed onboarding.
+        session_count:
           type: integer
-        last_activity_at:
+          description: Sessions logged, all time.
+        last_session_at:
           type: string
           format: date-time
           nullable: true
+        set_count:
+          type: integer
+          description: >
+            Sets logged, all time — distinguishes someone who started two
+            sessions and abandoned them from someone who trained twice.
+        modules:
+          type: array
+          description: >
+            Labels of the disciplines this user has enabled, resolved through
+            the discipline registry: a user with no stored row for a module
+            reads as that module's default rather than as "off".
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    AdminSessionSummary:
+      type: object
+      description: >
+        One session as the admin console shows it — deliberately without its
+        sets. The question is "what did they do and did it finish", which
+        needs a count, not every weight.
+      required: [id, sport, name, started_at, ended_at, set_count]
+      properties:
+        id:
+          type: string
+        sport:
+          type: string
+        name:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Null means still in progress.
+        set_count:
+          type: integer
+
+    AdminUserDetail:
+      type: object
+      required: [user, recent_sessions]
+      properties:
+        user:
+          $ref: "#/components/schemas/AdminUserSummary"
+        recent_sessions:
+          type: array
+          description: Newest first, capped at 50.
+          items:
+            $ref: "#/components/schemas/AdminSessionSummary"
 
     ClientErrorReport:
       type: object
@@ -2342,7 +2407,13 @@ paths:
 
   /admin/users:
     get:
-      summary: List every user who has completed onboarding (admin-only)
+      summary: List every user the API knows about (admin-only)
+      description: >
+        Users are enumerated from every table that records a user id —
+        profiles, sessions and activities — not from `profiles` alone.
+        Someone who signed up and trained but never finished onboarding has
+        no profile row and would otherwise be invisible to support. Capped at
+        500, most-recently-trained first.
       operationId: adminListUsers
       responses:
         "200":
@@ -2356,10 +2427,42 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
+  /admin/users/{userID}:
+    get:
+      summary: One user's admin view — summary plus recent sessions (admin-only)
+      operationId: adminGetUser
+      description: >
+        Replaces the activities-only user detail. Returns 404 for an id that
+        appears in no table, so a mistyped id reads as wrong rather than as an
+        empty account.
+      parameters:
+        - name: userID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: That user's summary and recent sessions.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /admin/users/{userID}/activities:
     get:
-      summary: List a specific user's activities (admin-only)
+      summary: List a specific user's activities (admin-only, legacy)
       operationId: adminListUserActivities
+      description: >
+        No longer what the admin console renders — see GET /admin/users/{userID}.
+        Retained as the only read path for `activities` rows written before the
+        in-app logging form was removed; nothing writes that table now.
       parameters:
         - name: userID
           in: path

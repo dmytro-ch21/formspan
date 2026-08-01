@@ -9,20 +9,15 @@ const API_BASE = `${API_URL}/v1`;
 export type AdminUserSummary = {
   user_id: string;
   display_name: string | null;
-  activity_count: number;
-  last_activity_at: string | null;
-};
-
-export type Activity = {
-  id: string;
-  user_id: string;
-  kind: string;
-  occurred_at: string;
-  notes: string | null;
-  details?: Record<string, unknown> | null;
-  request_id: string;
-  trace_id: string;
-  created_at: string;
+  /** Sessions logged, all time. Was `activity_count`, from a table nothing writes. */
+  session_count: number;
+  /** Most recent session start — the best liveness signal that exists. */
+  last_session_at: string | null;
+  /** Sets logged. Separates "started two sessions" from "trained twice". */
+  set_count: number;
+  /** Enabled disciplines, resolved server-side through the registry. */
+  modules: string[];
+  created_at: string | null;
 };
 
 /** Carries the HTTP status so the error boundary can tell 403 from 5xx. */
@@ -75,12 +70,39 @@ export async function listUsers(): Promise<AdminUserSummary[]> {
   return data.users;
 }
 
-export async function listUserActivities(userID: string): Promise<Activity[]> {
-  const data = await adminFetch<{ activities: Activity[] }>(
-    `/admin/users/${encodeURIComponent(userID)}/activities`,
-  );
-  return data.activities;
+export type AdminSessionSummary = {
+  id: string;
+  sport: string;
+  name: string;
+  started_at: string;
+  /** Null means still in progress — at a week old, that is itself a finding. */
+  ended_at: string | null;
+  set_count: number;
+};
+
+export type AdminUserDetail = {
+  user: AdminUserSummary;
+  recent_sessions: AdminSessionSummary[];
+};
+
+/**
+ * One athlete: the summary row plus the sessions behind it.
+ *
+ * A single request — the summary and the session list are batched into one
+ * round trip server-side rather than fetched as two calls from here.
+ *
+ * Throws ApiError(404) for an id nobody has ever used, which the page turns
+ * into a real not-found. The old activities-only page could not tell a wrong
+ * id from an empty account and said so in its own copy.
+ */
+export async function getUserDetail(userID: string): Promise<AdminUserDetail> {
+  return adminFetch<AdminUserDetail>(`/admin/users/${encodeURIComponent(userID)}`);
 }
+
+// `listUserActivities` and the `Activity` type lived here. Both are gone:
+// nothing rendered them once the detail page moved to sessions, and the table
+// they read has had no writer since the in-app logging form was removed. The
+// backend route survives as the only read path for the rows that predate that.
 
 export type HealthEventKind = "server_error" | "slow_request" | "client_error" | "sync_blocked";
 
@@ -123,8 +145,7 @@ export type HealthReport = { summary: HealthSummary; events: HealthEvent[] };
  *
  * `userID` narrows to one athlete — the question "is this specific person
  * having trouble?", which had no answer at all before this because the logs
- * carried no user id. Not yet called with one: the user-detail page is the
- * obvious consumer and is left for when that screen is next touched.
+ * carried no user id. The user-detail page is now that consumer.
  */
 export async function fetchHealth(opts: { hours?: number; userID?: string } = {}) {
   const params = new URLSearchParams();

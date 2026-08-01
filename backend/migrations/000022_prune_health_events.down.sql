@@ -1,0 +1,2 @@
+-- Deliberately empty: deleted observability rows are not recoverable, and
+-- nothing downstream depends on their absence.

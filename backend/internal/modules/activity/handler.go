@@ -91,6 +91,31 @@ func (h *Handler) AdminListUsers(w http.ResponseWriter, r *http.Request) {
 	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"users": users})
 }
 
+// AdminGetUser is the per-athlete admin view — summary plus recent sessions.
+//
+// Replaces AdminListUserActivities as the user-detail page's source. That one
+// reads `activities`, which has had no writer since the in-app logging form
+// was removed, so the page was permanently empty while the account's real
+// training sat unread in `sessions`.
+func (h *Handler) AdminGetUser(w http.ResponseWriter, r *http.Request) {
+	detail, err := h.repo.GetUser(r.Context(), r.PathValue("userID"))
+	if errors.Is(err, ErrNotFound) {
+		// A wrong id must read as wrong. Returning an empty summary instead
+		// is what made the old page unfalsifiable: "no data" and "no such
+		// user" rendered identically.
+		apihttp.WriteError(w, http.StatusNotFound, apihttp.CodeNotFound, "user not found")
+		return
+	}
+	if err != nil {
+		apihttp.WriteInternal(w, r, "activity", err)
+		return
+	}
+	apihttp.WriteJSON(w, http.StatusOK, detail)
+}
+
+// AdminListUserActivities is no longer what the admin console renders — see
+// AdminGetUser. It stays because it is the only read path for the `activities`
+// rows that predate the logging form's removal; deleting it would strand them.
 func (h *Handler) AdminListUserActivities(w http.ResponseWriter, r *http.Request) {
 	userID := r.PathValue("userID")
 	activities, err := h.repo.ListByUser(r.Context(), userID)

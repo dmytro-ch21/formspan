@@ -1706,3 +1706,95 @@ capabilities (`internal/platform/discipline`); per-user enablement lives in
 - Sign out and sign in as a different user: the second user must never see the
   first user's tabs, chips or start buttons — including when the second user is
   offline and has never used the device.
+
+## Module gating on web (Phase C)
+
+Same registry, same rule as mobile — but the fetch is server-side, so the
+failure modes differ. `/dashboard/layout.tsx` reads modules before anything
+paints and hands them to `ModulesProvider`.
+
+### The loop that has to work
+
+- Turn BJJ **off** in `/dashboard/settings` → the Library nav item and every
+  BJJ chip disappear **without a reload**, because `PATCH /v1/modules` returns
+  the merged set and `apply` feeds it straight to the provider.
+- Turn it back **on** → they return, same request count.
+- The toggle survives a full page load (it is per-account, not per-browser).
+- A discipline switched off **on the phone** can be switched back on here.
+  That was the hole this closes: before it, web ignored the toggles entirely
+  and offered no way to change them.
+
+### Nav gating
+
+- **Records** is hidden only when *no* enabled module has `record_kinds`.
+  A BJJ-only athlete loses it; a runner keeps it (`longest_time`,
+  `furthest_distance`). Assert on the capability, not on `sport === "strength"`.
+- **Library** is hidden when no enabled module has a `catalog`.
+- With **every** discipline off, the nav keeps Today/History/Settings — there
+  must always be a way back to the toggles.
+
+### Requests, not just pixels
+
+- With BJJ off, loading `/dashboard/library` fires **no `/v1/techniques`
+  request**. Verify in the network panel, not by reading the code.
+- Toggling BJJ off *while on the Library page* clears the technique rows and
+  fires no further technique request.
+- Rendering N sessions must not fire N `/v1/profile` requests — the 200-request
+  bug this provider shape exists to avoid.
+
+### Failure
+
+- If `GET /v1/modules` fails during the server render, the nav renders
+  **ungated** rather than empty. A preference endpoint blinking must never hide
+  the app.
+- Settings with an unreachable API: the discipline section says so, and the
+  units control still works.
+
+## Today (`/dashboard`) reads real training
+
+It previously read `GET /v1/activities` — a table with no writer — so it showed
+0/0 and "Nothing logged yet" to athletes who had logged. Regression scenarios:
+
+- An account with sessions but zero `activities` rows shows **non-zero**
+  session and set counts. (This is the exact case that was broken; a test
+  fixture with only `activities` rows would pass the old code and prove
+  nothing.)
+- The third stat follows **the data**, not the toggles: a strength-enabled
+  athlete whose week was all BJJ sees *Mat time*, not `0 kg`.
+- Week-over-week deltas are absent, not `+100%`, when the previous window is 0.
+- Exactly three requests on load. Not one per session row.
+- Volume renders in the athlete's unit system.
+
+## Admin console on real training
+
+### User lookup (`/users`)
+
+- Columns are sessions / sets / disciplines / last session — all derived, no
+  new write path.
+- A user with a `sessions` row but **no `profiles` row** appears, with a blank
+  display name. This is the regression that has now been introduced twice;
+  it is the single most important scenario on this page.
+- The header count says "known to the API", and that is literally what it
+  counts — profiles ∪ sessions ∪ activities.
+- Ordering is most-recently-trained first, with never-trained users last.
+
+### User detail (`/users/{id}`)
+
+- Shows summary stats, enabled disciplines, recent sessions and that user's
+  health events — **two requests total**.
+- Counts here **equal** the same user's row in the lookup table. The two come
+  from different queries sharing one projection; a mismatch is a real bug.
+- An id that exists nowhere returns **404**, not an empty page. Distinguishing
+  "wrong id" from "idle account" is the point — the old page admitted it could
+  not.
+- A session with no `ended_at` renders as *In progress*.
+- If the health fetch fails, the page still renders with a note; if the detail
+  fetch fails with anything other than 404, it reaches the error boundary.
+- Non-allowlisted signed-in user: blocked. Signed-out: redirected. The backend
+  enforces this independently of the UI gate.
+
+### Health retention
+
+- Events older than 90 days are deleted when `cmd/seed` runs; newer ones
+  survive. Verified by inserting rows either side of the boundary.
+- A prune failure must not fail the deploy.

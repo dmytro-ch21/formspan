@@ -163,3 +163,28 @@ func nullTime(t time.Time) *time.Time {
 	}
 	return &t
 }
+
+// retention is how far back health_events is kept.
+//
+// Matched to the read path's own limit: the handler clamps `?hours=` to a
+// 30-day window, so anything older is already unreachable through the API.
+// 90 days leaves generous headroom for widening that window later without
+// another migration.
+const retention = 90 * 24 * time.Hour
+
+// Prune drops health events past the retention window.
+//
+// Called from cmd/seed, which runs on every deploy — the only scheduled thing
+// this project has. A pg_cron job would be tidier; it is not worth adding an
+// extension for one DELETE.
+//
+// Returns the number of rows removed so the deploy log says what happened
+// rather than being silent about deleting data.
+func (r *PostgresRepository) Prune(ctx context.Context) (int64, error) {
+	tag, err := r.pool.Exec(ctx,
+		`DELETE FROM health_events WHERE occurred_at < $1`, time.Now().Add(-retention))
+	if err != nil {
+		return 0, fmt.Errorf("health: prune: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}

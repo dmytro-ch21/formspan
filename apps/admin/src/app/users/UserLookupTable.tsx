@@ -31,11 +31,13 @@ export function UserLookupTable({ users }: { users: AdminUserSummary[] }) {
         className="w-full rounded-[10px] border border-border-strong bg-card px-4 py-3 text-sm text-text placeholder:text-text-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-dark"
       />
 
-      <div className="grid grid-cols-[2fr_1.5fr_1fr_1.5fr] px-3 pt-6 pb-2 font-barlow-condensed text-[9px] font-bold tracking-[0.16em] text-text-muted uppercase">
+      <div className="grid grid-cols-[1.6fr_1.2fr_0.6fr_0.6fr_1.3fr_1.2fr] px-3 pt-6 pb-2 font-barlow-condensed text-[9px] font-bold tracking-[0.16em] text-text-muted uppercase">
         <span>User ID</span>
         <span>Display name</span>
-        <span>Activities</span>
-        <span className="justify-self-end">Last activity</span>
+        <span>Sessions</span>
+        <span>Sets</span>
+        <span>Trains</span>
+        <span className="justify-self-end">Last session</span>
       </div>
 
       <div className="flex flex-col">
@@ -43,15 +45,19 @@ export function UserLookupTable({ users }: { users: AdminUserSummary[] }) {
           <Link
             key={u.user_id}
             href={`/users/${u.user_id}`}
-            className={`grid grid-cols-[2fr_1.5fr_1fr_1.5fr] items-center rounded-lg px-3 py-4 text-[13.5px] ${
+            className={`grid grid-cols-[1.6fr_1.2fr_0.6fr_0.6fr_1.3fr_1.2fr] items-center rounded-lg px-3 py-4 text-[13.5px] ${
               i % 2 === 0 ? "bg-card" : ""
             }`}
           >
             <span className="font-mono text-[12px] font-semibold">{u.user_id}</span>
             <span className="text-text-secondary">{u.display_name ?? "—"}</span>
-            <span className="text-text-secondary">{u.activity_count}</span>
+            <span className="text-text-secondary">{u.session_count}</span>
+            <span className="text-text-secondary">{u.set_count}</span>
+            <span className="truncate text-text-secondary" title={u.modules.join(", ")}>
+              {u.modules.length > 0 ? u.modules.join(", ") : "—"}
+            </span>
             <span className="justify-self-end text-text-secondary">
-              {formatUTC(u.last_activity_at)}
+              {formatUTC(u.last_session_at)}
             </span>
           </Link>
         ))}
