@@ -1,4 +1,6 @@
 import { randomUUID } from 'expo-crypto';
+import { netFetch } from './authedFetch';
+import type { TokenGetter } from './useAuthToken';
 
 import { ApiError } from './apiError';
 import type { Exercise } from './exercises';
@@ -288,14 +290,13 @@ export function describeSet(s: LoggedSet, units: UnitSystem = 'metric'): string 
 }
 
 async function request<T>(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   path: string,
   init: RequestInit = {},
   signal?: AbortSignal,
 ): Promise<T> {
   const token = await getToken();
-  if (!token) throw new Error('Not signed in.');
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await netFetch(`${API_BASE}${path}`, {
     ...init,
     signal,
     headers: {
@@ -324,7 +325,7 @@ async function request<T>(
  * 5-8 range rather than failing.
  */
 export async function fetchSuggestions(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   exerciseIDs: string[],
   goal?: string | null,
   signal?: AbortSignal,
@@ -373,7 +374,7 @@ export function applySuggestions(
 }
 
 export async function listSessions(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   opts: { limit?: number } = {},
   signal?: AbortSignal,
 ): Promise<Session[]> {
@@ -385,7 +386,7 @@ export async function listSessions(
 }
 
 export async function getSession(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   id: string,
   signal?: AbortSignal,
 ): Promise<{ session: Session; volume: Volume }> {
@@ -393,7 +394,7 @@ export async function getSession(
 }
 
 export async function startSession(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   input: {
     sport: string;
     name: string;
@@ -418,7 +419,7 @@ export async function startSession(
 }
 
 export async function replaceSets(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   id: string,
   sets: LoggedSet[],
 ): Promise<{ session: Session; volume: Volume }> {
@@ -429,7 +430,7 @@ export async function replaceSets(
 }
 
 export async function finishSession(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   id: string,
   /** Supplied when pushing a session finished offline — the real end time,
    *  not the time the sync happened to run. */
@@ -442,7 +443,7 @@ export async function finishSession(
 }
 
 export async function deleteSession(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   id: string,
 ): Promise<void> {
   await request<void>(getToken, `/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' });

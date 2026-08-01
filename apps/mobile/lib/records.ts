@@ -1,4 +1,6 @@
 import { newTraceId, traceparent } from './trace';
+import { netFetch } from './authedFetch';
+import type { TokenGetter } from './useAuthToken';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
 const API_BASE = `${API_URL}/v1`;
@@ -38,14 +40,13 @@ export const RECORD_LABEL: Record<RecordKind, string> = {
 };
 
 async function call<T>(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   path: string,
   init: RequestInit = {},
   signal?: AbortSignal,
 ): Promise<T> {
   const token = await getToken();
-  if (!token) throw new Error('Not signed in.');
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await netFetch(`${API_BASE}${path}`, {
     ...init,
     signal,
     headers: {
@@ -67,7 +68,7 @@ async function call<T>(
  * something useful before anyone has configured anything.
  */
 export async function fetchRecords(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   exerciseIDs?: string[],
   signal?: AbortSignal,
 ): Promise<ExerciseRecords[]> {
@@ -77,7 +78,7 @@ export async function fetchRecords(
 }
 
 export async function fetchPinned(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   signal?: AbortSignal,
 ): Promise<string[]> {
   const b = await call<{ exercise_ids: string[] }>(getToken, '/records/pinned', {}, signal);
@@ -85,7 +86,7 @@ export async function fetchPinned(
 }
 
 export async function setPinned(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   exerciseIDs: string[],
 ): Promise<string[]> {
   const b = await call<{ exercise_ids: string[] }>(getToken, '/records/pinned', {

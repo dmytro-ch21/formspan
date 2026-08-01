@@ -1,4 +1,5 @@
 import { randomUUID } from 'expo-crypto';
+import type { TokenGetter } from './useAuthToken';
 import type * as SQLite from 'expo-sqlite';
 
 import { ApiError } from './apiError';
@@ -252,7 +253,7 @@ export async function countPendingSessions(userID: string): Promise<number> {
 export async function pushSession(
   userID: string,
   id: string,
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
 ): Promise<void> {
   const db = await getDb();
   const row = await db.getFirstAsync<Row>(
@@ -274,7 +275,7 @@ async function pushRow(
   db: SQLite.SQLiteDatabase,
   row: Row,
   userID: string,
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
 ): Promise<void> {
   // Not `toSession`, which papers over a corrupt blob with an empty list.
   // `pushSets` *replaces* the server's list, so pushing that empty array
@@ -345,7 +346,7 @@ export type SessionSyncResult = { pushed: number; pulled: number; failed: number
  */
 export async function syncSessions(
   userID: string,
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
 ): Promise<SessionSyncResult> {
   const db = await getDb();
   const result: SessionSyncResult = { pushed: 0, pulled: 0, failed: 0 };
@@ -396,7 +397,7 @@ export async function syncSessions(
 export async function hydrateSession(
   userID: string,
   id: string,
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
 ): Promise<LocalSession | null> {
   try {
     const { session } = await pullSession(getToken, id);

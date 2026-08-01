@@ -1,4 +1,5 @@
 import { useAuth } from '@clerk/clerk-expo';
+import { clearSessionToken } from '@/lib/session';
 import { Stack, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet } from 'react-native';
@@ -49,7 +50,19 @@ export default function SettingsScreen() {
           onPress={() =>
             Alert.alert('Sign out?', 'Anything not yet synced stays on this device.', [
               { text: 'Cancel', style: 'cancel' },
-              { text: 'Sign out', style: 'destructive', onPress: () => signOut() },
+              {
+                text: 'Sign out',
+                style: 'destructive',
+                // Clear the brokered token too. It is persisted in the
+                // keychain, so without this the next account on a shared
+                // device inherits the previous athlete's credential until it
+                // expires — the same leak the modules provider was caught
+                // with. Cleared BEFORE signOut so no request can slip through
+                // with the old token as the session tears down.
+                onPress: () => {
+                  void clearSessionToken().finally(() => signOut());
+                },
+              },
             ])
           }
           testID="settings-sign-out"

@@ -1,4 +1,5 @@
 import { apiRequest } from './apiRequest';
+import type { TokenGetter } from './useAuthToken';
 
 /**
  * The discipline registry, as the phone sees it.
@@ -84,7 +85,7 @@ export function normaliseModules(raw: unknown): Module[] {
   return raw.filter(hasKey).map(normalise);
 }
 
-export async function fetchModules(getToken: () => Promise<string | null>): Promise<Module[]> {
+export async function fetchModules(getToken: TokenGetter): Promise<Module[]> {
   const body = await apiRequest<{ modules: Module[] }>(getToken, '/modules');
   return normaliseModules(body.modules);
 }
@@ -98,7 +99,7 @@ export async function fetchModules(getToken: () => Promise<string | null>): Prom
  * caller (onboarding, a quick-toggle in Settings) has to do the same.
  */
 export async function setModules(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   changes: Record<string, boolean>,
 ): Promise<Module[]> {
   const body = await apiRequest<{ modules: Module[] }>(getToken, '/modules', {

@@ -1,4 +1,6 @@
 import { ApiError } from './apiError';
+import { netFetch } from './authedFetch';
+import type { TokenGetter } from './useAuthToken';
 import { newTraceId, traceparent } from './trace';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
@@ -19,14 +21,13 @@ const API_BASE = `${API_URL}/v1`;
  * are contract, messages are not.
  */
 export async function apiRequest<T>(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   path: string,
   init: RequestInit = {},
 ): Promise<T> {
   const token = await getToken();
-  if (!token) throw new Error('Not signed in.');
 
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await netFetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
       ...init.headers,

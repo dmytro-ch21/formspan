@@ -1,4 +1,6 @@
 import { randomUUID } from 'expo-crypto';
+import { netFetch } from './authedFetch';
+import type { TokenGetter } from './useAuthToken';
 
 import type { Exercise } from './exercises';
 import { formatWeight, type UnitSystem } from './units';
@@ -110,15 +112,14 @@ export function emptyItem(exerciseID: string, position: number): WorkoutItem {
 }
 
 async function request<T>(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   path: string,
   init: RequestInit = {},
   signal?: AbortSignal,
 ): Promise<T> {
   const token = await getToken();
-  if (!token) throw new Error('Not signed in.');
 
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await netFetch(`${API_BASE}${path}`, {
     ...init,
     signal,
     headers: {
@@ -142,7 +143,7 @@ async function request<T>(
 }
 
 export async function listWorkouts(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   scope: 'mine' | 'shared',
   signal?: AbortSignal,
 ): Promise<Workout[]> {
@@ -156,7 +157,7 @@ export async function listWorkouts(
 }
 
 export async function getWorkout(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   id: string,
   signal?: AbortSignal,
 ): Promise<Workout> {
@@ -164,7 +165,7 @@ export async function getWorkout(
 }
 
 export async function createWorkout(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   input: { name: string; sport: Sport; goal: Goal | null; visibility: Visibility },
 ): Promise<Workout> {
   // Client-generated ID, so creating a workout is idempotent on retry — the
@@ -176,7 +177,7 @@ export async function createWorkout(
 }
 
 export async function replaceItems(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   id: string,
   items: WorkoutItem[],
 ): Promise<Workout> {
@@ -189,7 +190,7 @@ export async function replaceItems(
 }
 
 export async function deleteWorkout(
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
   id: string,
 ): Promise<void> {
   await request<void>(getToken, `/workouts/${encodeURIComponent(id)}`, { method: 'DELETE' });

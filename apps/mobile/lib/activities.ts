@@ -20,6 +20,8 @@
  * a demo surface populated.
  */
 import { randomUUID } from 'expo-crypto';
+import { netFetch } from './authedFetch';
+import type { TokenGetter } from './useAuthToken';
 
 import { isPermanentStatus } from './apiError';
 import { getDb } from './db';
@@ -87,7 +89,7 @@ export type SyncResult = { synced: number; failed: number; error?: string };
  */
 export async function syncPendingActivities(
   userId: string,
-  getToken: () => Promise<string | null>,
+  getToken: TokenGetter,
 ): Promise<SyncResult> {
   const db = await getDb();
   const pending = await db.getAllAsync<LocalActivity>(
@@ -106,17 +108,19 @@ export async function syncPendingActivities(
 
   for (const row of pending) {
     try {
-      // Fetched per row, not once per run: Clerk session tokens are
-      // short-lived and getToken() refreshes internally, so a long backlog
-      // over a slow link would otherwise start failing 401 partway through.
+      // Asked per row rather than once per run, because a long backlog over
+      // a slow link can outlive one token. This is now nearly free: the
+      // broker in `session.ts` serves a cached token until it is close to
+      // expiry, so a 40-row drain costs one Clerk call, not forty.
+      //
+      // Throws OfflineError rather than returning null, and that propagates
+      // to the catch below — where an unreachable network is already the
+      // ordinary, quiet, retry-later case. The old code reported it as
+      // "Not signed in.", which is both false and alarming for a sync that
+      // was always going to be retried.
       const token = await getToken();
-      if (!token) {
-        failed++;
-        firstError ??= 'Not signed in.';
-        continue;
-      }
 
-      const res = await fetch(`${API_BASE}/activities`, {
+      const res = await netFetch(`${API_BASE}/activities`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
