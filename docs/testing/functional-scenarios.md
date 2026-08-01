@@ -2062,3 +2062,45 @@ templates start being cached. What is testable now:
   reconciled away mid-edit) must report a failure, not navigate away as
   though it had worked. Deleting the same workout twice, however, is not a
   failure — a delete that isn't idempotent is the worse bug.
+
+## In-session input ergonomics (mobile)
+
+Both of these are about logging while standing up, so they only mean anything
+tested on a device with a real keyboard and a real thumb.
+
+### The keyboard must not cover the field
+
+- Tap a set field near the BOTTOM of a long session. The field lifts clear of
+  the keyboard with a margin under it — not merely "becomes scrollable to".
+  Testing this on a short session proves nothing; the content has to be long
+  enough that the field is genuinely behind the keyboard.
+- Move from one field straight to another while the keyboard is already up.
+  The second field lifts too. This is a *different* event ordering from the
+  first tap and has its own failure mode — it is the one that breaks when
+  only the focus event is handled.
+- Dismiss the keyboard: the content slides back down.
+- Repeat on a row with different measures (a distance/seconds exercise vs a
+  weight/reps one) and on an expanded row — row heights differ, so any fix
+  that assumed a constant height passes on one and fails on the others.
+- **Repeat on Android, and treat it as a separate feature.** Two things differ,
+  either of which makes it do nothing: Android emits `keyboardDidShow`, never
+  `keyboardWillShow`; and its default `resize` mode shrinks the window instead
+  of covering it, so the field is clipped by the scroll view's bottom rather
+  than hidden behind the keyboard. A pass on iOS says nothing about Android
+  here. (No Android build of this app exists yet, so this is untested.)
+
+### Swipe a set away
+
+- Swipe a set row left: a Delete button is revealed. Tap it; the set goes.
+- **Scroll the list vertically, repeatedly, with slightly diagonal flicks.**
+  It must scroll every time. A row claiming a mostly-vertical drag is the
+  expected failure, and it is intermittent — one clean scroll proves nothing.
+- Swipe a row open, then remove a *different* set using the row's own "Remove
+  set" button. No row is left showing an armed Delete for a set that shifted
+  into its place.
+- Tap the done tick and the row's expand toggle while the swipe exists — both
+  must still work, since the gesture must not claim on touch-down.
+- Swipe on a FINISHED session: nothing happens. A finished session is a
+  record, not a workspace.
+- Delete the set that is currently being edited, and confirm the right one
+  goes — rows are keyed by index, so this is where an off-by-one would show.
