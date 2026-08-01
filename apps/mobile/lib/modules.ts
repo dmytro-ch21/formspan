@@ -72,9 +72,21 @@ function normalise(m: Partial<Module> & { key: string }): Module {
   };
 }
 
+/**
+ * Normalise a list from any source — the wire, or the local cache.
+ *
+ * Exported because the cache is a parse boundary too: a cached array from a
+ * build whose shape differed would otherwise crash in render rather than
+ * degrade.
+ */
+export function normaliseModules(raw: unknown): Module[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(hasKey).map(normalise);
+}
+
 export async function fetchModules(getToken: () => Promise<string | null>): Promise<Module[]> {
   const body = await apiRequest<{ modules: Module[] }>(getToken, '/modules');
-  return (body.modules ?? []).filter(hasKey).map(normalise);
+  return normaliseModules(body.modules);
 }
 
 /**
@@ -93,11 +105,11 @@ export async function setModules(
     method: 'PATCH',
     body: JSON.stringify(changes),
   });
-  return (body.modules ?? []).filter(hasKey).map(normalise);
+  return normaliseModules(body.modules);
 }
 
 /**
- * A entry with no usable key would render a blank row whose toggle PATCHes
+ * An entry with no usable key would render a blank row whose toggle PATCHes
  * `{"undefined": true}`. `normalise` exists to defend this boundary, so the
  * filter belongs beside it rather than in every caller.
  */

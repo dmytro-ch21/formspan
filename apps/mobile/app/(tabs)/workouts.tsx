@@ -210,14 +210,20 @@ function NewWorkoutSheet({
   const { modules } = useModules();
   const startable = enabledSports(modules);
   const [sport, setSport] = useState<Sport>((startable[0]?.key ?? 'strength') as Sport);
-  // The registry resolves from cache a beat after first render, so the default
-  // has to correct itself once — but only while the user hasn't chosen.
-  const [sportTouched, setSportTouched] = useState(false);
+  // Corrects itself when the registry resolves, and again if the selected
+  // discipline is ever turned off.
+  //
+  // There was a `sportTouched` flag here to stop a late registry overwriting a
+  // user's choice. It couldn't: a tap can only select a chip that is rendered,
+  // and a rendered chip is by definition enabled, so the condition below is
+  // already false for anything the user picked. All the flag actually did was
+  // PRESERVE the one invalid state — a selection whose discipline was since
+  // disabled, showing no active chip while still creating workouts in it.
   useEffect(() => {
-    if (!sportTouched && startable.length > 0 && !startable.some((m) => m.key === sport)) {
+    if (startable.length > 0 && !startable.some((m) => m.key === sport)) {
       setSport(startable[0].key as Sport);
     }
-  }, [startable, sport, sportTouched]);
+  }, [startable, sport]);
   const [goal, setGoal] = useState<Goal>('general');
   const [isPublic, setIsPublic] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -291,13 +297,18 @@ function NewWorkoutSheet({
 
         <Text style={styles.label}>Discipline</Text>
         <View style={styles.chips}>
+          {startable.length === 0 && (
+            <Text style={styles.muted}>
+              You haven&apos;t turned on any disciplines yet — choose what you train in your profile
+              first.
+            </Text>
+          )}
           {startable.map((s) => (
             <Chip
               key={s.key}
               label={s.label}
               active={sport === s.key}
               onPress={() => {
-                setSportTouched(true);
                 setSport(s.key as Sport);
               }}
               testID={`new-workout-sport-${s.key}`}

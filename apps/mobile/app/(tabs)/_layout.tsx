@@ -19,7 +19,7 @@ import { useModules } from '@/lib/ModulesProvider';
  * without it the labels read as content when a list scrolls behind them.
  */
 export default function TabLayout() {
-  const { modules } = useModules();
+  const { modules, ready } = useModules();
 
   /**
    * The Library is the only tab whose whole reason for existing can be turned
@@ -32,6 +32,14 @@ export default function TabLayout() {
    * for an in-flight router.push and for deep links.
    */
   const anyCatalog = modules.some((m) => m.enabled && m.capabilities.catalog !== '');
+
+  // Hold the frame until the cached module set has been read. This is the
+  // whole reason the cache exists: without it the first frames compute
+  // `anyCatalog` from an empty list, so the Library tab is ABSENT and then pops
+  // in — the tab bar visibly rearranging on every cold start, which is exactly
+  // what the provider's docstring says it prevents. `RootLayoutNav` already
+  // holds a frame this way for Clerk.
+  if (!ready) return null;
 
   return (
     <Tabs

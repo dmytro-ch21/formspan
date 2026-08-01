@@ -329,7 +329,9 @@ export default function TodayScreen() {
                 testID={`start-session-${s.key}`}
               >
                 <Text style={[styles.startText, i > 0 && styles.startTextSecondary]}>
-                  {i === 0 ? `Start ${s.label.toLowerCase()}` : s.label}
+                  {/* NOT lowercased: the registry carries the label precisely so BJJ
+                      stays "BJJ". Lowercasing it renders "Start bjj". */}
+                  {i === 0 ? `Start ${s.label}` : s.label}
                 </Text>
               </Pressable>
             ))}

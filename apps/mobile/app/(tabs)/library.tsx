@@ -194,7 +194,9 @@ export default function LibraryScreen() {
       if (!usesPosition(next, modules)) setPosition('');
       if (userId) writePref(userId, PREF_LIBRARY_SPORT, next).catch(() => {});
     },
-    [userId],
+    // `modules` is read via usesPosition; without it this captures the
+    // first-render empty list forever and over-clears the position filter.
+    [userId, modules],
   );
 
   /**
@@ -248,6 +250,16 @@ export default function LibraryScreen() {
    * time, with no spinner and no message to say so.
    */
   const loadTechniques = useCallback(async () => {
+    // The gate the commit message CLAIMED existed and didn't. Without this the
+    // technique list plus rulesets (~65 kB) were pulled on every Library mount
+    // and every pull-to-refresh, for every user, regardless of whether they do
+    // the discipline. Hiding a module has to cut the request, not just the
+    // pixels — otherwise "hidden" costs exactly as much as shown.
+    if (!techniqueSport) {
+      setTechniques([]);
+      setTechniquesFailed(false);
+      return;
+    }
     techniqueAbortRef.current?.abort();
     const ac = new AbortController();
     techniqueAbortRef.current = ac;
@@ -268,7 +280,7 @@ export default function LibraryScreen() {
     } finally {
       clearTimeout(deadline);
     }
-  }, [getToken]);
+  }, [getToken, techniqueSport]);
 
   useEffect(() => {
     void loadTechniques();
@@ -332,6 +344,17 @@ export default function LibraryScreen() {
   }, [load]);
 
   useEffect(() => () => abortRef.current?.abort(SUPERSEDED), []);
+
+  // Symmetric to the stored-filter guard on load: if the discipline currently
+  // filtering the list gets turned off while the user is standing here, the
+  // chip disappears and the filter would keep applying with no visible
+  // control — the invisible-filter bug this file documents for positions.
+  useEffect(() => {
+    if (sport && !enabledSports(modules).some((m) => m.key === sport)) {
+      setSportState('');
+      setPosition('');
+    }
+  }, [modules, sport]);
 
   // "All" shows techniques when the athlete does that discipline; a specific
   // sport shows them when that sport is the one carrying them.

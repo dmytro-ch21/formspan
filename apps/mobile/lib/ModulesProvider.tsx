@@ -1,7 +1,7 @@
 import { useAuth } from '@clerk/clerk-expo';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
-import { fetchModules, type Module } from './modules';
+import { fetchModules, normaliseModules, type Module } from './modules';
 import { PREF_MODULES, readPref, writePref } from './prefs';
 import { useAuthToken } from './useAuthToken';
 
@@ -31,14 +31,19 @@ type ModulesState = {
   ready: boolean;
   /** True when the last server refresh failed and we're serving the cache. */
   stale: boolean;
-  refresh: () => Promise<void>;
+  /**
+   * Adopt a set the caller already has — specifically the one PATCH /modules
+   * returns. Without this, saving a toggle persisted server-side and nothing
+   * in the app re-gated until the process restarted.
+   */
+  apply: (next: Module[]) => Promise<void>;
 };
 
 const ModulesContext = createContext<ModulesState>({
   modules: [],
   ready: false,
   stale: false,
-  refresh: async () => {},
+  apply: async () => {},
 });
 
 export function ModulesProvider({ children }: { children: React.ReactNode }) {
@@ -50,8 +55,12 @@ export function ModulesProvider({ children }: { children: React.ReactNode }) {
 
   const refresh = useCallback(async () => {
     if (!userId) return;
+    const forUser = userId;
     try {
       const fresh = await fetchModules(getToken);
+      // The account may have changed while this was in flight. Without this,
+      // A's server truth lands on B's screen after a fast sign-out/sign-in.
+      if (forUser !== userId) return;
       setModules(fresh);
       setStale(false);
       // Whole set in one key. Per-module keys would mean N reads before the
@@ -65,19 +74,42 @@ export function ModulesProvider({ children }: { children: React.ReactNode }) {
     }
   }, [getToken, userId]);
 
+  const apply = useCallback(
+    async (next: Module[]) => {
+      setModules(next);
+      setStale(false);
+      if (userId) await writePref(userId, PREF_MODULES, JSON.stringify(next));
+    },
+    [userId],
+  );
+
   useEffect(() => {
     let alive = true;
     (async () => {
       if (!userId) {
-        // Signed out. Not "no modules" — `ready` stays false so nothing
-        // renders a tab bar built from an empty list.
-        if (alive) setReady(false);
+        // Signed out. Clear, don't just un-ready: the provider sits above the
+        // navigator and never remounts, so a retained list is the PREVIOUS
+        // athlete's configuration. On a shared device the next user would see
+        // A's tabs, start buttons and chips — and if B is offline and has never
+        // used this device, indefinitely, because the cache read finds nothing
+        // and the refresh fails.
+        if (alive) {
+          setModules([]);
+          setStale(false);
+          setReady(false);
+        }
         return;
       }
+      // Same reason, for a switch rather than a sign-out.
+      if (alive) setModules([]);
       const cached = await readPref(userId, PREF_MODULES);
       if (alive && cached) {
         try {
-          setModules(JSON.parse(cached) as Module[]);
+          // Through `normaliseModules`, not a bare cast. The cache is a parse
+          // boundary like the wire is: a cache written by a build whose shape
+          // differed would otherwise parse cleanly and then crash in render on
+          // `m.capabilities.catalog`, on every launch, until it was overwritten.
+          setModules(normaliseModules(JSON.parse(cached)));
         } catch {
           // A corrupt cache is not worth blocking on; the refresh below
           // replaces it.
@@ -94,10 +126,7 @@ export function ModulesProvider({ children }: { children: React.ReactNode }) {
     };
   }, [userId, refresh]);
 
-  const value = useMemo(
-    () => ({ modules, ready, stale, refresh }),
-    [modules, ready, stale, refresh],
-  );
+  const value = useMemo(() => ({ modules, ready, stale, apply }), [modules, ready, stale, apply]);
   return <ModulesContext.Provider value={value}>{children}</ModulesContext.Provider>;
 }
 
@@ -105,16 +134,8 @@ export function useModules(): ModulesState {
   return useContext(ModulesContext);
 }
 
-/**
- * Whether a discipline is on.
- *
- * Unknown keys return **false**, deliberately. This is the guard for a
- * persisted filter naming a discipline that has since been turned off, and for
- * a build that predates a discipline the server knows about — in both cases
- * hiding is the safe answer, because showing would mean rendering a chip whose
- * content can't load.
- */
-export function useModuleEnabled(key: string): boolean {
-  const { modules } = useModules();
-  return modules.some((m) => m.key === key && m.enabled);
-}
+// `refresh` and a `useModuleEnabled` helper were exported here and consumed by
+// nothing — the review's point that an unused export is a promise no code
+// keeps. `refresh` stays internal (the mount effect uses it); the save path
+// goes through `apply`, which needs no extra request because PATCH /modules
+// already returns the merged set.
