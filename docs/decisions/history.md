@@ -3653,8 +3653,25 @@ steps up to `textMuted` on done rows only.
   already correct and is carried over unchanged; it was just being run six
   times.
 
-  Same shape as the documented 200-request `useUnits` bug on web. **`useTrackEffort`
-  still has this shape** and is the next one to collapse.
+  Same shape as the documented 200-request `useUnits` bug on web.
+
+- **`useTrackEffort` collapsed too — and it had a bug units did not.** Two call
+  sites, two copies, two profile fetches: the same shape, though a boolean
+  cannot render a wrong *number*, so it never produced a visible symptom.
+
+  The substantive half is that it had **no record of a local choice that hadn't
+  reached the account**. Turning effort off with no signal pushed to the server,
+  failed, and had the failure swallowed by a bare `.catch(() => {})` — then the
+  next successful profile read did `setOn(p.track_effort)` and overwrote the
+  cache with the server's stale `true`. The switch turned itself back on,
+  minutes later, silently. `useUnits` carries an `owed` flag precisely to
+  prevent that, and its comment describes this exact failure; `useTrackEffort`
+  was written from the same template and left the flag out. It now has
+  `PREF_TRACK_EFFORT_OWED`, the same server-wins guard, and Settings admits the
+  state rather than swallowing it.
+
+  Four profile fetch sites remain (`you.tsx`, `profile/edit.tsx` and the two
+  providers), all of which genuinely want the whole profile.
 
 ### Testing
 

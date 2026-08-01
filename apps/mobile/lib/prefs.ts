@@ -60,6 +60,17 @@ export const PREF_UNIT_SYSTEM_OWED = 'unit_system_owed';
  * really is the moment they rack the bar.
  */
 export const PREF_AUTO_REST = 'auto_rest';
+export const PREF_TRACK_EFFORT = 'track_effort';
+/**
+ * `'1'` while the local effort-tracking choice hasn't reached the account.
+ *
+ * Exactly the same debt `PREF_UNIT_SYSTEM_OWED` records, and added because
+ * `useTrackEffort` was missing it: turning effort off with no signal pushed
+ * to the server, failed, was swallowed — and then the next successful profile
+ * read set it straight back on and overwrote the cache. The switch reverted
+ * on its own, silently, some minutes later.
+ */
+export const PREF_TRACK_EFFORT_OWED = 'track_effort_owed';
 /** The Library tab's sport filter. Deliberately remembered; its search box
  *  deliberately isn't — see the Library screen for the reasoning. */
 export const PREF_LIBRARY_SPORT = 'library_sport';

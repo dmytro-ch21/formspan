@@ -1878,3 +1878,29 @@ signed in for days, met "Not signed in." on every screen.
 
 - Ticking a set tints the whole row, and the set number stays legible on it.
 - Un-ticking returns it.
+
+## Account preferences (units, effort tracking)
+
+Both are account-level, cached locally, and now held once each rather than per
+screen.
+
+### Consistency
+
+- With units set to imperial, **every** screen that shows a weight or volume
+  shows pounds — Today, the finished-session summary, exercise detail, the
+  workout editor. They previously resolved independently and could disagree.
+- No screen shows a figure in kilograms first and corrects itself.
+- A cold start makes **one** `GET /v1/profile` for units, not one per screen.
+
+### Offline changes must not revert
+
+- Turn effort tracking **off** with no signal. Leave Settings, come back: still
+  off. Regain signal, wait for a profile read: **still off**, and the account
+  now agrees. This used to flip back on by itself.
+- Same for units.
+- While the change is local-only, Settings says so.
+
+### Account switching
+
+- Sign out and in as someone else: neither preference carries over from the
+  previous athlete.

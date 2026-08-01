@@ -2,6 +2,7 @@ import { ClerkProvider, useAuth, useSignUp } from '@clerk/clerk-expo';
 import { clearSessionToken } from '@/lib/session';
 
 import { ModulesProvider } from '@/lib/ModulesProvider';
+import { TrackEffortProvider } from '@/lib/TrackEffortProvider';
 import { UnitsProvider } from '@/lib/UnitsProvider';
 import { useFonts } from 'expo-font';
 import { DarkTheme, Stack, ThemeProvider, useRouter, useSegments } from 'expo-router';
@@ -72,7 +73,9 @@ export default function RootLayout() {
           navigator because the tab bar is built from it. */}
       <ModulesProvider>
         <UnitsProvider>
-          <RootLayoutNav />
+          <TrackEffortProvider>
+            <RootLayoutNav />
+          </TrackEffortProvider>
         </UnitsProvider>
       </ModulesProvider>
     </ClerkProvider>
