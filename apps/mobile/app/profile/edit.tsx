@@ -31,6 +31,12 @@ export default function EditProfileScreen() {
   const [modules, setModulesState] = useState<Module[]>([]);
   /** Only what the user actually changed, so a save is a sparse PATCH. */
   const [moduleChanges, setModuleChanges] = useState<Record<string, boolean>>({});
+  /**
+   * Distinct from `error`, and from the profile's own `unavailable`. An empty
+   * card under a "What you train" heading reads as "there are no disciplines",
+   * which is a claim about the product rather than about the network.
+   */
+  const [modulesUnavailable, setModulesUnavailable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,8 +77,11 @@ export default function EditProfileScreen() {
   // withhold the name and date-of-birth form.
   useEffect(() => {
     fetchModules(getToken)
-      .then(setModulesState)
-      .catch(() => {});
+      .then((m) => {
+        setModulesState(m);
+        setModulesUnavailable(false);
+      })
+      .catch(() => setModulesUnavailable(true));
   }, [getToken]);
 
   async function save() {
@@ -88,11 +97,33 @@ export default function EditProfileScreen() {
         // An empty box means "no name", not the empty string.
         display_name: patch.display_name?.trim() || null,
       });
-      // Two endpoints now, and deliberately sequential: a module toggle that
-      // fails must not leave the user thinking the whole save failed when the
-      // profile half already landed.
-      if (Object.keys(moduleChanges).length > 0) {
-        await setModules(getToken, moduleChanges);
+      // Only what actually differs from the server's state. Toggling something
+      // on and back off again would otherwise send a redundant key — which for
+      // a module with no stored row WRITES one, quietly opting that user out of
+      // future changes to the registry default.
+      const realChanges = Object.fromEntries(
+        Object.entries(moduleChanges).filter(
+          ([key, on]) => on !== modules.find((m) => m.key === key)?.enabled,
+        ),
+      );
+
+      if (Object.keys(realChanges).length > 0) {
+        // Its own try/catch, because sequencing alone does NOT stop a modules
+        // failure reading as a total failure. The profile half has already
+        // landed at this point — and for a first-run user it just CREATED the
+        // profile — so a single generic banner would tell the user nothing
+        // saved when in fact most of it did.
+        try {
+          await setModules(getToken, realChanges);
+        } catch (err) {
+          setError(
+            `Your details saved, but your sports didn't: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+          setSaving(false);
+          return;
+        }
       }
       router.back();
     } catch (err) {
@@ -188,6 +219,11 @@ export default function EditProfileScreen() {
         <Text style={styles.sectionLabel}>What you train</Text>
         <Text style={styles.hint}>Decides what the app offers you. Change it any time.</Text>
         <View style={styles.card}>
+          {modulesUnavailable && (
+            <Text style={styles.hint} accessibilityLiveRegion="polite">
+              Couldn&apos;t load your sports just now. Your other details still save.
+            </Text>
+          )}
           {modules.map((s) => {
             const on = moduleChanges[s.key] ?? s.enabled;
             return (

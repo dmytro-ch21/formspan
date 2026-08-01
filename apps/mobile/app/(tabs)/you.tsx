@@ -132,7 +132,13 @@ export default function YouScreen() {
             <View style={styles.card}>
               <Row
                 label="Sports"
-                value={enabledLabels.length ? enabledLabels.join(' · ') : 'None chosen yet'}
+                value={
+                  enabledLabels === null
+                    ? '—'
+                    : enabledLabels.length
+                      ? enabledLabels.join(' · ')
+                      : 'None chosen yet'
+                }
               />
               <Row
                 label="Units"

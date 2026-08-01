@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -174,6 +175,14 @@ func translatePgError(err error) error {
 			}
 			return fmt.Errorf("%w: a value is out of range", ErrInvalidInput)
 		case "23503": // foreign_key_violation
+			// Named by constraint, because this table isn't the only one with
+			// an FK any more. Toggling modules for a user who hasn't
+			// onboarded reported "unknown exercise" — a message written for
+			// exercise_unit_prefs, nonsensical here, and reachable by any
+			// signed-in user who never completed onboarding.
+			if strings.Contains(pgErr.ConstraintName, "profile_modules") {
+				return fmt.Errorf("%w: no profile yet — create one before setting modules", ErrInvalidInput)
+			}
 			return fmt.Errorf("%w: unknown exercise", ErrInvalidInput)
 		}
 	}
@@ -218,8 +227,19 @@ func (r *PostgresRepository) SetModules(ctx context.Context, userID string, enab
 	if len(enabled) == 0 {
 		return nil
 	}
+	// Sorted, so the batch locks rows in a consistent order. Go randomises map
+	// iteration, and two concurrent multi-key PATCHes for the same user could
+	// otherwise take the same locks in opposite orders and deadlock (40P01,
+	// which surfaces as a 500). Cheap to prevent, tedious to diagnose.
+	keys := make([]string, 0, len(enabled))
+	for key := range enabled {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
 	batch := &pgx.Batch{}
-	for key, on := range enabled {
+	for _, key := range keys {
+		on := enabled[key]
 		batch.Queue(`
 			INSERT INTO profile_modules (user_id, module_key, enabled)
 			VALUES ($1, $2, $3)

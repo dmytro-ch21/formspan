@@ -1665,5 +1665,10 @@ capabilities (`internal/platform/discipline`); per-user enablement lives in
 - Every registry sport has a `defaultMedia` entry — otherwise its exercises
   render imageless with no error anywhere.
 - Adding a discipline requires no migration and no change to `profile_modules`.
+  **Guarded by a test that writes a session for every registry sport** — this
+  claim was false until migration 000021 dropped two SQL CHECK constraints, and
+  nothing would have caught it.
+- Toggling modules for a user with no profile returns a message that says so,
+  not "unknown exercise".
 - The four legacy `*_enabled` columns are unread; the down migration carries row
   values back into them before dropping the table.

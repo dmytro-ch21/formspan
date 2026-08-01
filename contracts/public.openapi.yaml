@@ -1598,6 +1598,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ExerciseList"
+        "400":
+          $ref: "#/components/responses/InvalidInput"
         "401":
           $ref: "#/components/responses/Unauthorized"
 

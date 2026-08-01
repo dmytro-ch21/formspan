@@ -3278,6 +3278,47 @@ handler skip media, and every exercise in that discipline render imageless with
 nothing logged. It now has a coverage test, mutation-checked by deleting the
 `running` entry and watching it fail.
 
+### The claim was false, and review caught it
+
+`discipline.go`, the 000020 migration comment, this entry and
+functional-scenarios all asserted that adding a discipline needs no migration.
+**It didn't, while `workouts_sport_valid` and `sessions_sport_valid` stood** —
+two CHECK constraints pinning `sport IN ('strength','running','bjj')` in SQL. A
+fifth discipline would have passed every Go validator and then failed every
+INSERT on a 23514, surfacing as a misleading 400, with nothing in the suite to
+catch it: the registry's tripwires never touch the database.
+
+Migration `000021` drops them. Widening rather than dropping was considered and
+rejected — a CHECK listing the values *is* the migration-per-discipline cost
+this work exists to remove; widening moves the next migration one discipline
+out. The trade is stated in the migration: the database will now accept a sport
+no handler would produce, reachable only by direct SQL, and inert because
+nothing enumerates sports from those tables.
+
+What replaces it is a test that writes a session for **every** sport in the
+registry — the tripwire that was missing. Mutation-checked: re-adding a CHECK
+that excludes BJJ fails it on the BJJ subtest.
+
+### Other things review caught
+
+- The FK violation from toggling modules for a user with no profile reported
+  **"unknown exercise"** — a message written for `exercise_unit_prefs`, reachable
+  by any signed-in user who hadn't onboarded.
+- `SetModules` queued its batch in Go's randomised map order, so two concurrent
+  multi-key PATCHes for one user could deadlock. Sorted now.
+- The tracked Postman collection still PATCHed `/profile` with
+  `running_enabled` — which after this change returns **200 and does nothing**,
+  since unknown fields are ignored. The generator had it hardcoded; fixed at
+  source and regenerated.
+- On mobile, a modules-save failure after a successful profile save showed one
+  generic banner, so a user whose profile (and, on first run, whose profile
+  *row*) had just been created was told nothing saved. The comment claiming
+  sequencing prevented this was wrong — sequencing alone distinguishes nothing.
+- The "You" screen fetched modules on mount while fetching the profile on focus,
+  so the Sports row went stale after exactly the flow it exists for. And its
+  `.catch(() => {})` asserted "None chosen yet" as fact on a network failure —
+  the same default-standing-in-for-unknown bug this file has fixed twice before.
+
 ### Open
 
 Phase A is backend only — the toggles still gate nothing in the UI. Phases B and

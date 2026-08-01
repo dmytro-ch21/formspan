@@ -1,7 +1,4 @@
-import { newTraceId, traceparent } from './trace';
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
-const API_BASE = `${API_URL}/v1`;
+import { apiRequest } from './apiRequest';
 
 /**
  * The discipline registry, as the phone sees it.
@@ -75,45 +72,37 @@ function normalise(m: Partial<Module> & { key: string }): Module {
   };
 }
 
-async function authed<T>(
-  path: string,
-  getToken: () => Promise<string | null>,
-  init?: RequestInit,
-): Promise<T> {
-  const token = await getToken();
-  if (!token) throw new Error('Not signed in.');
-
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      traceparent: traceparent(newTraceId()),
-      ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
-    },
-  });
-  if (!res.ok) throw new Error(`Request failed (${res.status}).`);
-  return (await res.json()) as T;
-}
-
 export async function fetchModules(getToken: () => Promise<string | null>): Promise<Module[]> {
-  const body = await authed<{ modules: Module[] }>('/modules', getToken);
-  return (body.modules ?? []).map(normalise);
+  const body = await apiRequest<{ modules: Module[] }>(getToken, '/modules');
+  return (body.modules ?? []).filter(hasKey).map(normalise);
 }
 
 /**
  * Toggle one or more modules. Sparse: send only what changed.
  *
- * Returns the full merged set, so a caller never has to follow up with a GET.
+ * PRECONDITION: the user must already have a profile row — `profile_modules`
+ * has an FK to `profiles`, so calling this before onboarding fails with a 400.
+ * Today's only caller saves the profile first, which creates the row; any new
+ * caller (onboarding, a quick-toggle in Settings) has to do the same.
  */
 export async function setModules(
   getToken: () => Promise<string | null>,
   changes: Record<string, boolean>,
 ): Promise<Module[]> {
-  const body = await authed<{ modules: Module[] }>('/modules', getToken, {
+  const body = await apiRequest<{ modules: Module[] }>(getToken, '/modules', {
     method: 'PATCH',
     body: JSON.stringify(changes),
   });
-  return (body.modules ?? []).map(normalise);
+  return (body.modules ?? []).filter(hasKey).map(normalise);
+}
+
+/**
+ * A entry with no usable key would render a blank row whose toggle PATCHes
+ * `{"undefined": true}`. `normalise` exists to defend this boundary, so the
+ * filter belongs beside it rather than in every caller.
+ */
+function hasKey(m: Partial<Module>): m is Partial<Module> & { key: string } {
+  return typeof m.key === 'string' && m.key.length > 0;
 }
 
 /** The enabled modules that can actually be a session's sport. */

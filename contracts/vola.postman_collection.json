@@ -67,6 +67,58 @@
           }
         },
         {
+          "name": "The discipline registry, merged with the caller's own toggles",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/modules",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "modules"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": "Every discipline VOLA supports, in display order, each with its capabilities and whether this user has it enabled. The catalog and the user's choices arrive together because a client needs both before it can render navigation \u2014 splitting them would mean two requests before the nav bar can draw.\n\nA discipline the caller has never toggled reports its registry default, so adding a discipline requires no backfill."
+          }
+        },
+        {
+          "name": "Toggle one or more modules for the caller",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/modules",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "modules"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": "A sparse map \u2014 `{\"bjj\": false}` toggles one module and leaves the rest untouched, so two clients editing different toggles cannot clobber each other. Returns the full merged set, since the caller's next render needs all of it anyway.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bjj\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
           "name": "List all server-controlled feature flags",
           "request": {
             "method": "GET",
@@ -83,6 +135,25 @@
               "variable": []
             },
             "description": ""
+          }
+        },
+        {
+          "name": "Report a problem the client hit that the server cannot observe",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/client-errors",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "client-errors"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": "For failures the API has no way to see: a push the device has given up retrying, a local write that failed. This is the class of problem that loses training data silently \u2014 the athlete's session sits on their phone, every server-side metric looks healthy, and nobody finds out.\n\nThe user is taken from the verified token, never the body. `kind` is restricted to `client_error` and `sync_blocked`: a client cannot claim `server_error` or `slow_request`, because the value of the health record is that an operator can tell what was *measured* from what was *claimed*. Returns `202` \u2014 the report is accepted, not stored as a resource anyone reads back."
           }
         }
       ]
@@ -185,7 +256,7 @@
             "description": "",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"running_enabled\": true\n}",
+              "raw": "{\n  \"unit_system\": \"imperial\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -278,7 +349,7 @@
                   "key": "sport",
                   "value": "strength",
                   "disabled": false,
-                  "description": "Exact-match filter, e.g. `strength` or `bjj`."
+                  "description": "Exact-match filter, e.g. `strength` or `running`."
                 },
                 {
                   "key": "q",
@@ -354,12 +425,32 @@
                   "key": "q",
                   "value": "",
                   "disabled": true,
-                  "description": "Case-insensitive substring of the name."
+                  "description": "Case-insensitive substring of the name **or any alias** \u2014 \"scarf hold\" finds \"Kesa-Gatame Escape\"."
                 }
               ],
               "variable": []
             },
             "description": ""
+          }
+        },
+        {
+          "name": "List IBJJF rulesets",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/techniques/rulesets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "techniques",
+                "rulesets"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": "All 25 IBJJF rulesets. Fetch once and cache: this is what turns a TechniqueSummary's `ibjjf_ruleset_id` into a legality badge without a request per row. They change with the IBJJF rulebook, not with the library."
           }
         },
         {
@@ -1038,6 +1129,51 @@
     {
       "name": "Admin",
       "item": [
+        {
+          "name": "Recent operational problems, with a summary (admin-only)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "health"
+              ],
+              "query": [
+                {
+                  "key": "hours",
+                  "value": "",
+                  "disabled": true,
+                  "description": "Window to look back over. Defaults to 24, capped at 720."
+                },
+                {
+                  "key": "kind",
+                  "value": "",
+                  "disabled": true,
+                  "description": ""
+                },
+                {
+                  "key": "user_id",
+                  "value": "",
+                  "disabled": true,
+                  "description": "Narrow to one athlete \u2014 \"is this person having trouble?\""
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "disabled": false,
+                  "description": ""
+                }
+              ],
+              "variable": []
+            },
+            "description": "Answers \"is anything wrong, and for whom?\" without reading logs. The structured logs carry every request but go to stdout, so they are not queryable from the admin console and they expire; only notable events are persisted, and this is how they are read back.\n\nSummary and events come together in one response deliberately: the summary alone invites \"12 errors\" with no way to see them, and the list alone makes an operator count."
+          }
+        },
         {
           "name": "List every user who has completed onboarding (admin-only)",
           "request": {
