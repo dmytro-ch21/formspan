@@ -76,7 +76,13 @@ function describeError(err: unknown): string {
  * "triangle" found nothing while Triangle from Guard sat in the database.
  */
 function usesPosition(sport: string, mods: Module[]): boolean {
-  return moduleFor(mods, sport)?.capabilities.facets.includes('position') ?? false;
+  const m = moduleFor(mods, sport);
+  // `enabled` as well as the facet. Without it this answers "does BJJ have
+  // positions" rather than "should position chips be reachable" — true even
+  // with BJJ off. Unreachable today because `sport` can only hold a rendered
+  // (therefore enabled) chip, but that is a property of two other guards
+  // rather than of this function, and the next caller won't know that.
+  return (m?.enabled && m.capabilities.facets.includes('position')) ?? false;
 }
 
 /**
