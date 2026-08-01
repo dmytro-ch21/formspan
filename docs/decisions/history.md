@@ -3570,6 +3570,90 @@ work in a basement. Serving reads from the local store is the offline-first
 programme, still untouched. This change is what stops *authentication* from
 being the thing that breaks first.
 
+## 2026-08-01 — In-session fixes, from a phone actually taken to a gym
+
+Five items from one session on the mat and under a bar. Four are done here;
+two are deliberately not.
+
+### The add-exercise bug was a lost update, not a slow screen
+
+*"when adding exercise it stuck when in session I had to wipe down few times
+and apparently the exercise was added but would just load without my
+intervention."*
+
+The session screen debounces set edits by 700ms into `queued.current`, and
+flushes on unmount. **Navigating to the exercise picker does not unmount it** —
+it is a push — so the flush never ran, and `queued.current` still held the set
+list *as it was before the picker*. The picker does its own read-modify-write
+against the same rows. Whichever landed second won, so the exercise was added
+and then silently un-added, with no error anywhere.
+
+The `Swap` control already awaited `flush()` for exactly this reason, with a
+comment saying so. **`+ Add exercise` did not.** Both now go through
+`openPicker`, which flushes first.
+
+### Prefill, and a bug its own doc comment described
+
+*"when we have predefined few sets, and we enter some data in first the next
+ones should pick up those numbers."*
+
+`+ Set` already carried numbers forward; sets that arrive from a template do
+not, so a 3×5 meant typing the same weight three times. `fillForward` now fills
+later *planned* sets when you tick one done — the moment the numbers are final,
+and a tap already being made. It never overwrites a value already typed (a top
+set with back-offs is a real plan), never touches a completed set, and never
+carries effort.
+
+The first implementation filtered on `exercise_id` without stopping at the
+group boundary, so squat / bench / squat filled the *second* squat block from
+the first — a different piece of work. Its own doc comment said "stopping at
+the next one". A test caught the contradiction.
+
+### Reorder and remove an exercise
+
+Buttons on the group header rather than drag handles: a long-press-drag is a
+poor bet one-handed with a bar to get back to, and it fights the scroll view.
+Removal is confirmed and says how many logged sets go with it; `Swap` remains
+the non-destructive neighbour for "wrong exercise".
+
+### The done-set highlight, computed rather than eyeballed
+
+*"make it the whole thing highlighted so it is visible that is done. But color
+should be nice and a bit transparent."*
+
+Lime at 15% over `surface`, solved per channel and stored opaque as
+`vola.setDone` — the convention this palette already uses. 15% because it was
+measured: the tint is 1.47:1 against an untouched row (visible at a glance),
+`text` 11.5:1, `textMuted` 4.67:1. 20% reads better as a band but drops
+`textMuted` to 3.98:1; 10% keeps every ink happy but the tint falls to 1.26:1
+and stops being obvious. `textDim` is 2.51:1 on the tint, so the set ordinal
+steps up to `textMuted` on done rows only.
+
+### Not done, and why
+
+- **Swipe-left to delete a set.** Needs `react-native-gesture-handler`, which
+  isn't a dependency — a new native module plus a root-view wrapper, and it
+  wants device verification rather than a typecheck. There is already a
+  "Remove set" button in the expanded row, so this is an ergonomics upgrade,
+  not a missing capability. Its own change.
+- **Volume shown in kg when the athlete wants lb.** Not reproduced, so not
+  "fixed". `formatVolume` handles imperial correctly and `useUnits` is
+  cache-first, but it initialises to `metric` and only writes the cache after a
+  *successful* profile read — so a device that has never been online while
+  signed in shows kg. That is a real lead and matches an offline gym. It is
+  equally possible the account is simply set to metric. Guessing between those
+  and shipping a change would be worse than asking.
+
+### Testing
+
+The two new transforms went into `lib/sessions.ts` beside `swapExercise`
+rather than staying inline in the screen — pure array logic belongs there, and
+it is the only way to exercise it at all given `apps/mobile` still has no test
+runner. 13 assertions run from a standalone harness over `tsc` output; one of
+them is what found the group-boundary bug above.
+
+That runner gap is now the second entry in a row to mention it.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

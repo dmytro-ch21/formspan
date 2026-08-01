@@ -43,7 +43,9 @@ import {
   describeSet,
   emptySet,
   fetchSuggestions,
+  fillForward,
   measuresFor,
+  reorderGroups,
   SET_TYPES,
   type LoggedSet,
   type Measure,
@@ -350,11 +352,35 @@ export default function SessionScreen() {
   // Leaving the screen must not drop the last edit.
   useEffect(() => () => void flush(), [flush]);
 
+  /**
+   * Open the exercise picker, but settle pending writes first.
+   *
+   * Navigating here does NOT unmount this screen, so the `useEffect` cleanup
+   * that normally flushes on exit never runs — and `queued.current` still
+   * holds a snapshot of the sets as they were *before* the picker ran. The
+   * picker does its own read-modify-write against the same rows, so a debounce
+   * that fires afterwards writes the pre-picker list straight over it: the
+   * exercise is added, then silently un-added, with no error anywhere.
+   *
+   * The reported symptom was exactly that shape — "apparently the exercise was
+   * added but would just load without my intervention", after several
+   * pull-to-refreshes.
+   *
+   * Flushing first makes the two writers strictly ordered. It is awaited
+   * rather than fired and forgotten, because the point is that nothing of ours
+   * is still in flight when the picker starts reading.
+   */
+  async function openPicker(href: Parameters<typeof router.push>[0]) {
+    await flush();
+    router.push(href);
+  }
+
   function update(index: number, next: LoggedSet) {
     const updated = sets.map((s, i) => (i === index ? next : s));
     setSets(updated);
     persistSoon(updated);
   }
+
 
   // Inserted directly after the group it belongs to, not appended to the end
   // of the session. Groups are formed by adjacency, so appending put the new
@@ -394,7 +420,17 @@ export default function SessionScreen() {
    */
   function toggleDone(index: number, exerciseID: string) {
     const now = !sets[index].completed;
-    commit(sets.map((s, i) => (i === index ? { ...s, completed: now } : s)));
+    const marked = sets.map((s, i) => (i === index ? { ...s, completed: now } : s));
+    // Marking done is the moment the numbers are final — and it is a tap the
+    // athlete already makes, so prefill costs no new interaction. Un-ticking
+    // fills nothing: that is a correction, not a confirmation.
+    //
+    // One commit, not two: a second setState here would compute from the
+    // pre-toggle `sets` and drop the tick.
+    const next = now
+      ? fillForward(marked, index, measuresFor(catalog.get(exerciseID)?.load_type ?? 'reps'))
+      : marked;
+    commit(next);
     if (now && autoRest) startRest(exerciseID);
   }
 
@@ -439,6 +475,46 @@ export default function SessionScreen() {
     if (last && last.exerciseID === s.exercise_id) last.indices.push(i);
     else groups.push({ exerciseID: s.exercise_id, indices: [i] });
   });
+
+
+  /**
+   * Remove an exercise and every set under it.
+   *
+   * Confirmed, unlike removing one set: this can discard several sets at once,
+   * including completed ones, and an accidental tap on a header would
+   * otherwise silently delete a chunk of the workout. `Swap` is the
+   * non-destructive neighbour for "wrong exercise" — this is for "I'm not
+   * doing this at all".
+   */
+  function moveGroup(groupIndex: number, delta: -1 | 1) {
+    const next = reorderGroups(sets, groups.map((g) => g.indices), groupIndex, delta);
+    if (next) commit(next);
+  }
+
+  function removeGroup(groupIndex: number) {
+    const g = groups[groupIndex];
+    const name = catalog.get(g.exerciseID)?.name ?? 'this exercise';
+    const logged = g.indices.filter((i) => sets[i].completed).length;
+    Alert.alert(
+      `Remove ${name}?`,
+      logged > 0
+        ? `${logged} logged ${logged === 1 ? 'set' : 'sets'} will be deleted too.`
+        : 'Its sets will be removed from this session.',
+      [
+        { text: 'Keep', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: () => {
+            const drop = new Set(g.indices);
+            commit(
+              sets.filter((_, i) => !drop.has(i)).map((x, position) => ({ ...x, position })),
+            );
+          },
+        },
+      ],
+    );
+  }
 
   const finished = session.ended_at !== null;
 
@@ -487,12 +563,43 @@ export default function SessionScreen() {
           </Text>
         )}
 
-        {groups.map((g) => {
+        {groups.map((g, gi) => {
           const exercise = catalog.get(g.exerciseID);
           return (
             <View key={g.exerciseID + g.indices[0]} style={styles.group}>
               <View style={styles.groupHead}>
                 <Text style={styles.groupName}>{exercise?.name ?? g.exerciseID}</Text>
+                {/* Order and removal live on the exercise, not on a set:
+                    "the rack is taken, do legs first" moves a movement and
+                    everything logged under it. Buttons rather than a drag
+                    handle — a long-press-and-drag is a poor bet with one hand
+                    and a bar to get back to, and it fights the scroll view.
+                    Hidden at the ends rather than disabled, so there is no
+                    dead target to aim at between sets. */}
+                {!finished && gi > 0 && (
+                  <Pressable
+                    onPress={() => moveGroup(gi, -1)}
+                    hitSlop={10}
+                    style={styles.moveChip}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Move ${exercise?.name ?? 'this exercise'} earlier`}
+                    testID={`up-${g.exerciseID}`}
+                  >
+                    <Text style={styles.moveChipText}>↑</Text>
+                  </Pressable>
+                )}
+                {!finished && gi < groups.length - 1 && (
+                  <Pressable
+                    onPress={() => moveGroup(gi, 1)}
+                    hitSlop={10}
+                    style={styles.moveChip}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Move ${exercise?.name ?? 'this exercise'} later`}
+                    testID={`down-${g.exerciseID}`}
+                  >
+                    <Text style={styles.moveChipText}>↓</Text>
+                  </Pressable>
+                )}
                 {!finished && (
                   <Pressable
                     onPress={() => startRest(g.exerciseID)}
@@ -521,18 +628,29 @@ export default function SessionScreen() {
                 )}
                 {!finished && (
                   <Pressable
-                    onPress={async () => {
-                      // Awaited: the swap screen reads the session back, so an
-                      // unsaved edit still in flight would be overwritten.
-                      await flush();
-                      router.push(`/session/${id}/add?swap=${encodeURIComponent(g.exerciseID)}`);
-                    }}
+                    // openPicker flushes first — the swap screen reads the
+                    // session back, so an unsaved edit still in flight would
+                    // be overwritten.
+                    onPress={() =>
+                      void openPicker(`/session/${id}/add?swap=${encodeURIComponent(g.exerciseID)}`)
+                    }
                     hitSlop={10}
                     accessibilityRole="button"
                     accessibilityLabel={`Swap ${exercise?.name ?? 'this exercise'} for another`}
                     testID={`swap-${g.exerciseID}`}
                   >
                     <Text style={styles.swapText}>Swap</Text>
+                  </Pressable>
+                )}
+                {!finished && (
+                  <Pressable
+                    onPress={() => removeGroup(gi)}
+                    hitSlop={10}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Remove ${exercise?.name ?? 'this exercise'} from this session`}
+                    testID={`remove-group-${g.exerciseID}`}
+                  >
+                    <Text style={styles.removeGroupText}>Remove</Text>
                   </Pressable>
                 )}
               </View>
@@ -688,7 +806,7 @@ export default function SessionScreen() {
               // Awaited: the picker reads the session back from the server,
               // so an unsaved edit still in flight would be overwritten.
               await flush();
-              router.push(`/session/${id}/add`);
+              void openPicker(`/session/${id}/add`);
             }}
             accessibilityRole="button"
             testID="session-add-exercise"
@@ -961,7 +1079,7 @@ function SetRow({
   };
 
   return (
-    <View style={styles.setRow}>
+    <View style={[styles.setRow, set.completed && styles.setRowDone]}>
       <Pressable
         style={styles.setHead}
         onPress={() => editable && setOpen((v) => !v)}
@@ -970,7 +1088,7 @@ function SetRow({
         accessibilityState={{ expanded: open }}
         testID={`set-${index}`}
       >
-        <Text style={styles.setOrdinal}>
+        <Text style={[styles.setOrdinal, set.completed && styles.setOrdinalDone]}>
           {ordinal}
           {typeShort ? <Text style={styles.setBadge}> {typeShort}</Text> : null}
         </Text>
@@ -1193,8 +1311,21 @@ const styles = StyleSheet.create({
   statValue: { fontSize: 22, fontWeight: '700' },
   statLabel: { fontSize: 11, color: vola.textDim, textAlign: 'center' },
   group: { gap: 8 },
-  groupHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
-  groupName: { flex: 1, fontSize: 16, fontWeight: '700' },
+  // Wraps rather than overflows: the header now carries up to six controls
+  // (move up/down, rest, unit, swap, remove) beside a name that can be long
+  // ("Barbell Bulgarian Split Squat"). On a narrow phone they drop to a
+  // second line instead of squeezing the name to an ellipsis or pushing the
+  // last control off-screen. `groupName` keeps flex:1 so it still takes the
+  // slack on a wide screen.
+  groupHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    rowGap: 8,
+    columnGap: 10,
+  },
+  groupName: { flex: 1, minWidth: 140, fontSize: 16, fontWeight: '700' },
   swapText: { color: vola.lime, fontWeight: '600', fontSize: 14 },
   restChip: {
     borderWidth: 1,
@@ -1214,7 +1345,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   unitChipText: { fontSize: 12, fontWeight: '700', color: vola.textMuted },
+  moveChip: {
+    minWidth: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: vola.surfaceRaised,
+  },
+  moveChipText: { fontSize: 15, fontWeight: '700', color: vola.textMuted },
+  removeGroupText: { fontSize: 13, fontWeight: '600', color: vola.textDim },
   setRow: { backgroundColor: vola.surface, borderRadius: 12 },
+  // The whole row, not just the tick: a column of rows is scanned by shape
+  // and colour, and a 20px checkmark is not what the eye lands on.
+  setRowDone: { backgroundColor: vola.setDone },
+  // textDim measures 2.51:1 on the done tint; textMuted is 4.67:1. See the
+  // setDone note in constants/Colors.ts.
+  setOrdinalDone: { color: vola.textMuted },
   setHead: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12 },
   setOrdinal: { width: 34, fontWeight: '700', color: vola.textDim },
   setBadge: { color: vola.lime, fontSize: 11, fontWeight: '700' },

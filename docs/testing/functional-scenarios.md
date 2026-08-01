@@ -1842,3 +1842,39 @@ signed in for days, met "Not signed in." on every screen.
   broker answers from cache without consulting Clerk, so the test passes with
   the entire feature deleted — this happened, and is why the harness counts
   reaching the getter.
+
+## In-session editing (mobile)
+
+### Adding an exercise mid-session
+
+- Edit a set's weight, then **immediately** tap `+ Add exercise` (inside the
+  700ms debounce). Pick one, come back. **Both the edit and the new exercise
+  survive.** This is the regression: the screen's queued write used to land
+  after the picker's and silently revert the addition.
+- Same for `Swap`, which already flushed.
+- The new exercise appears without a pull-to-refresh.
+
+### Prefill
+
+- A session from a 3×5 template: fill set 1, tick it done → sets 2 and 3 take
+  the same weight and reps, and stay editable.
+- A value already typed into set 2 is **not** overwritten; its blank measures
+  still fill.
+- A completed set is never modified.
+- Effort (RIR/RPE) is never prefilled.
+- Squat / bench / squat: filling the first squat block does **not** reach the
+  second one.
+- Un-ticking a set fills nothing.
+
+### Reorder / remove an exercise
+
+- Move an exercise up: all of its sets travel with it, order survives a
+  reload (positions are renumbered, not just reordered on screen).
+- The up arrow is absent on the first exercise, the down arrow on the last.
+- Remove asks first, and says how many logged sets it will delete.
+- Neither control appears on a finished session.
+
+### Done-set highlight
+
+- Ticking a set tints the whole row, and the set number stays legible on it.
+- Un-ticking returns it.

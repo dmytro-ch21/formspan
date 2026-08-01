@@ -47,6 +47,26 @@ const palette = {
    *
    * **If `surface` changes, re-run the validator.** Nothing else will catch it.
    */
+  /**
+   * A logged set's row. Lime at 15% over `surface`, solved per channel and
+   * stored opaque — the house convention in this file, so the row does not
+   * composite differently depending on what is behind it.
+   *
+   * 15% specifically. Measured against `surface` (#10151F) and the inks that
+   * sit on it: the tint is 1.47:1 against the untouched row, which is what
+   * makes "this one is done" readable at a glance across a column of them,
+   * and `text` stays at 11.5:1 with `textMuted` at 4.67:1 — still clear of
+   * 4.5 for body text. Going to 20% reads better as a band but drops
+   * `textMuted` to 3.98:1, which fails; going to 10% keeps every ink happy
+   * but the tint falls to 1.26:1 and stops being obvious in daylight, which
+   * is the whole point of the request.
+   *
+   * `textDim` measures 2.51:1 here and is therefore NOT used on a done row —
+   * the set ordinal steps up to `textMuted`. Same rule as everywhere else in
+   * this file: if `surface` changes, recompute.
+   */
+  setDone: '#293821',
+
   gridRest: '#2A3446',
   gridLevels: ['#567826', '#87BC28', '#B8FF2C'] as const,
   green: '#42F58D',
