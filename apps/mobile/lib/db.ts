@@ -179,7 +179,12 @@ async function addColumnIfMissing(
   await db.execAsync(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition};`);
 }
 
-async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
+/**
+ * Exported for the SQLite test fixture, which runs the real migrations against
+ * a real database rather than asserting on query text. Not for app use —
+ * `getDb` is the only thing that should call this in production, exactly once.
+ */
+export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
   const row = await db.getFirstAsync<{ user_version: number }>(`PRAGMA user_version`);
   const current = row?.user_version ?? 0;
   if (current >= SCHEMA_VERSION) return;

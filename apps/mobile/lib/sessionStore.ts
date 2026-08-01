@@ -110,7 +110,16 @@ function toSession(r: Row): LocalSession {
  * something the server already holds. The one path that clears it is a 404
  * on push, in `pushRow`.
  */
-async function upsert(
+/**
+ * Exported ONLY so the SQLite fixture can test the tombstone backstop.
+ *
+ * By design no production path reaches this with a tombstoned id — the pull
+ * skips them and `hydrateSession` refuses outright. That layering is what
+ * makes the `WHERE deleted_at IS NULL` clause a backstop for a *future*
+ * caller, and the only way to exercise a backstop is to be that caller.
+ * Nothing outside the tests should import this; use the functions above.
+ */
+export async function upsert(
   s: LocalSession,
   userID: string,
   dirty: boolean,
