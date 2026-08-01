@@ -10,26 +10,10 @@ import { formatElapsed } from '@/lib/rest';
 import type { LoggedSet, Session } from '@/lib/sessions';
 import { countPendingSessions, listLocalSessions, syncSessions } from '@/lib/sessionStore';
 import { formatVolume } from '@/lib/units';
+import { enabledSports } from '@/lib/modules';
+import { useModules } from '@/lib/ModulesProvider';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
-
-/**
- * Sports offered on Today.
- *
- * **BJJ is absent, and temporarily so.** There is no BJJ module — 20 catalog
- * entries against strength's 498, and nothing behind them — so a start button
- * for it advertised a room with no floor. It made Today look complete while
- * doing nothing useful, which is worse than offering less. Put it back the day
- * the module lands; that is the only reason it is gone.
- *
- * Running is in the same position (6 entries, no module) and is left here
- * deliberately rather than removed alongside — worth deciding together, not by
- * one of them dragging the other.
- */
-const SPORTS: { key: string; label: string }[] = [
-  { key: 'strength', label: 'Strength' },
-  { key: 'running', label: 'Running' },
-];
 
 /** Past this, an open session reads as abandoned rather than in progress. */
 const STALE_SESSION_MS = 24 * 60 * 60 * 1000;
@@ -130,6 +114,11 @@ function describeSession(s: Session): string {
  * question someone opens this tab to ask.
  */
 export default function TodayScreen() {
+  const { modules } = useModules();
+  // is_sport filtered, not just enabled: nutrition is a module you can turn
+  // on, but "Start a nutrition session" is nonsense — there is no catalog,
+  // no session and no row behind it.
+  const startable = enabledSports(modules);
   const { userId } = useAuth();
   const getToken = useAuthToken();
   const router = useRouter();
@@ -325,7 +314,12 @@ export default function TodayScreen() {
           </Pressable>
         ) : (
           <View style={styles.startBlock}>
-            {SPORTS.map((s, i) => (
+            {/* From the registry, filtered to what this athlete actually
+                trains. This list used to be hardcoded to strength and running,
+                with a comment explaining that BJJ had been removed by hand —
+                three copies of the sport list existed elsewhere in this app,
+                all disagreeing. */}
+            {startable.map((s, i) => (
               <Pressable
                 key={s.key}
                 style={[styles.startButton, i > 0 && styles.startButtonSecondary]}
@@ -335,10 +329,26 @@ export default function TodayScreen() {
                 testID={`start-session-${s.key}`}
               >
                 <Text style={[styles.startText, i > 0 && styles.startTextSecondary]}>
-                  {i === 0 ? `Start ${s.label.toLowerCase()}` : s.label}
+                  {/* NOT lowercased: the registry carries the label precisely so BJJ
+                      stays "BJJ". Lowercasing it renders "Start bjj". */}
+                  {i === 0 ? `Start ${s.label}` : s.label}
                 </Text>
               </Pressable>
             ))}
+            {/* Every discipline off is a reachable state — nothing stops a
+                user turning them all off — and the block rendered nothing at
+                all, which reads as a broken screen rather than a choice. */}
+            {startable.length === 0 && (
+              <Pressable
+                style={styles.startButton}
+                onPress={() => router.push('/profile/edit')}
+                accessibilityRole="button"
+                accessibilityLabel="Choose what you train"
+                testID="start-session-none"
+              >
+                <Text style={styles.startText}>Choose what you train</Text>
+              </Pressable>
+            )}
           </View>
         )}
 

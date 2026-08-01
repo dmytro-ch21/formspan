@@ -5,7 +5,8 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, TextInput } from 
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { isNotFound } from '@/lib/apiError';
-import { fetchModules, setModules, type Module } from '@/lib/modules';
+import { setModules } from '@/lib/modules';
+import { useModules } from '@/lib/ModulesProvider';
 import { getProfile, updateProfile, type ProfilePatch } from '@/lib/profile';
 import { useAuthToken } from '@/lib/useAuthToken';
 
@@ -28,7 +29,7 @@ export default function EditProfileScreen() {
    * file. The list here used to be keyed on database column names, which is
    * how it drifted from the three other copies in this app.
    */
-  const [modules, setModulesState] = useState<Module[]>([]);
+
   /** Only what the user actually changed, so a save is a sparse PATCH. */
   const [moduleChanges, setModuleChanges] = useState<Record<string, boolean>>({});
   /**
@@ -36,7 +37,7 @@ export default function EditProfileScreen() {
    * card under a "What you train" heading reads as "there are no disciplines",
    * which is a claim about the product rather than about the network.
    */
-  const [modulesUnavailable, setModulesUnavailable] = useState(false);
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -75,14 +76,9 @@ export default function EditProfileScreen() {
 
   // Separate request, separate failure: the modules list failing must not
   // withhold the name and date-of-birth form.
-  useEffect(() => {
-    fetchModules(getToken)
-      .then((m) => {
-        setModulesState(m);
-        setModulesUnavailable(false);
-      })
-      .catch(() => setModulesUnavailable(true));
-  }, [getToken]);
+  // From the provider, not a second fetch. Phase A gave this screen its own
+  // request — the per-call-site pattern the provider exists to replace.
+  const { modules, apply: applyModules, stale: modulesUnavailable } = useModules();
 
   async function save() {
     // Belt and braces: the form isn't rendered when `unavailable`, so this is
@@ -114,7 +110,13 @@ export default function EditProfileScreen() {
         // profile — so a single generic banner would tell the user nothing
         // saved when in fact most of it did.
         try {
-          await setModules(getToken, realChanges);
+          // Straight into the provider. Without this the save persisted and
+          // NOTHING re-gated until the process was killed — the tab bar, the
+          // start buttons, the Library chips all kept the old configuration
+          // for the rest of the session, which is the entire feature failing
+          // on its primary path. `setModules` already returns the merged set,
+          // so this costs no extra request.
+          applyModules(await setModules(getToken, realChanges));
         } catch (err) {
           setError(
             `Your details saved, but your sports didn't: ${

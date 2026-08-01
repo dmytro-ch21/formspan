@@ -1,5 +1,5 @@
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useState, useEffect } from 'react';
+import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet } from 'react-native';
 
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
@@ -10,7 +10,7 @@ import { vola } from '@/constants/Colors';
 import { isNotFound } from '@/lib/apiError';
 import { getProfile, type Profile } from '@/lib/profile';
 import { UNIT_SYSTEMS } from '@/lib/units';
-import { fetchModules, type Module } from '@/lib/modules';
+import { useModules } from '@/lib/ModulesProvider';
 import { useAuthToken } from '@/lib/useAuthToken';
 
 /**
@@ -65,15 +65,15 @@ export default function YouScreen() {
     }, [getToken]),
   );
 
-  // From the registry, not a fifth hand-written copy of the list. The labels
-  // come with it, so "BJJ" stays "BJJ" rather than becoming "Bjj".
-  const [modules, setModulesState] = useState<Module[]>([]);
-  useEffect(() => {
-    fetchModules(getToken)
-      .then(setModulesState)
-      .catch(() => {});
-  }, [getToken]);
-  const enabledLabels = modules.filter((m) => m.enabled).map((m) => m.label);
+  // From the provider, not a fetch of its own. Two reasons: this screen had
+  // the per-call-site pattern the provider exists to replace, and being
+  // mount-only it went stale after exactly the flow this row is for — edit
+  // your sports, come back, and see the list you just changed.
+  //
+  // The labels come with it, so "BJJ" stays "BJJ" rather than becoming "Bjj".
+  const { modules, ready: modulesReady } = useModules();
+  // null means "we don't know yet", which is NOT the same as "none chosen".
+  const enabledLabels = modulesReady ? modules.filter((m) => m.enabled).map((m) => m.label) : null;
 
   return (
     <ScrollView contentContainerStyle={styles.scroll} testID="you-screen">

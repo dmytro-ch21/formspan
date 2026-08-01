@@ -1,5 +1,5 @@
 import { Link, useFocusEffect } from 'expo-router';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useRef, useState, useEffect } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -12,12 +12,13 @@ import {
 
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
 import { Text, View } from '@/components/Themed';
+import { enabledSports, labelFor, moduleFor } from '@/lib/modules';
+import { useModules } from '@/lib/ModulesProvider';
 import { useAuthToken } from '@/lib/useAuthToken';
 import {
   createWorkout,
   listWorkouts,
   GOALS,
-  SPORTS,
   type Goal,
   type Sport,
   type Workout,
@@ -30,6 +31,9 @@ const SCOPES = [
 ] as const;
 
 export default function WorkoutsScreen() {
+  // For the sport label on each card — the registry carries the acronym, so
+  // this renders "BJJ" rather than the "Bjj" that capitalising a key gives.
+  const { modules } = useModules();
   const getToken = useAuthToken();
 
   const [scope, setScope] = useState<'mine' | 'shared'>('mine');
@@ -154,13 +158,11 @@ export default function WorkoutsScreen() {
                   )}
                 </View>
                 <Text style={styles.cardMeta}>
-                  {SPORTS.find((s) => s.key === item.sport)?.label ?? item.sport}
+                  {labelFor(modules, item.sport)}
                   {item.goal ? ` · ${GOALS.find((g) => g.key === item.goal)?.label}` : ''}
                   {` · ${item.items.length} ${item.items.length === 1 ? 'exercise' : 'exercises'}`}
                 </Text>
-                {item.owner_user_id === null && (
-                  <Text style={styles.muted}>VOLA template</Text>
-                )}
+                {item.owner_user_id === null && <Text style={styles.muted}>VOLA template</Text>}
               </Pressable>
             </Link>
           )}
@@ -202,7 +204,26 @@ function NewWorkoutSheet({
 }) {
   const getToken = useAuthToken();
   const [name, setName] = useState('');
-  const [sport, setSport] = useState<Sport>('strength');
+  // The first sport this athlete actually trains, not a hardcoded 'strength'.
+  // A strength-disabled athlete would otherwise silently create strength
+  // workouts every time.
+  const { modules } = useModules();
+  const startable = enabledSports(modules);
+  const [sport, setSport] = useState<Sport>((startable[0]?.key ?? 'strength') as Sport);
+  // Corrects itself when the registry resolves, and again if the selected
+  // discipline is ever turned off.
+  //
+  // There was a `sportTouched` flag here to stop a late registry overwriting a
+  // user's choice. It couldn't: a tap can only select a chip that is rendered,
+  // and a rendered chip is by definition enabled, so the condition below is
+  // already false for anything the user picked. All the flag actually did was
+  // PRESERVE the one invalid state — a selection whose discipline was since
+  // disabled, showing no active chip while still creating workouts in it.
+  useEffect(() => {
+    if (startable.length > 0 && !startable.some((m) => m.key === sport)) {
+      setSport(startable[0].key as Sport);
+    }
+  }, [startable, sport]);
   const [goal, setGoal] = useState<Goal>('general');
   const [isPublic, setIsPublic] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -218,7 +239,9 @@ function NewWorkoutSheet({
         sport,
         // Goal only applies to strength — sending one for a run would be
         // noise, and the API would rightly ignore it.
-        goal: sport === 'strength' ? goal : null,
+        // Capability, not a sport name: a future discipline with goals needs
+        // no change here.
+        goal: moduleFor(modules, sport)?.capabilities.has_goals ? goal : null,
         visibility: isPublic ? 'public' : 'private',
       });
       setName('');
@@ -232,7 +255,12 @@ function NewWorkoutSheet({
   }
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={onClose}
+    >
       <View style={styles.sheet}>
         <View style={styles.sheetHead}>
           <Pressable onPress={onClose} accessibilityRole="button" hitSlop={12}>
@@ -269,22 +297,30 @@ function NewWorkoutSheet({
 
         <Text style={styles.label}>Discipline</Text>
         <View style={styles.chips}>
-          {SPORTS.map((s) => (
+          {startable.length === 0 && (
+            <Text style={styles.muted}>
+              You haven&apos;t turned on any disciplines yet — choose what you train in your profile
+              first.
+            </Text>
+          )}
+          {startable.map((s) => (
             <Chip
               key={s.key}
               label={s.label}
               active={sport === s.key}
-              onPress={() => setSport(s.key)}
+              onPress={() => {
+                setSport(s.key as Sport);
+              }}
               testID={`new-workout-sport-${s.key}`}
             />
           ))}
         </View>
         <Text style={styles.hint}>
-          A workout is one discipline — that&apos;s what lets the exercise picker show only
-          what fits.
+          A workout is one discipline — that&apos;s what lets the exercise picker show only what
+          fits.
         </Text>
 
-        {sport === 'strength' && (
+        {moduleFor(modules, sport)?.capabilities.has_goals && (
           <>
             <Text style={styles.label}>Goal</Text>
             <View style={styles.chips}>

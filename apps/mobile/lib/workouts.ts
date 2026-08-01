@@ -36,11 +36,10 @@ export type Workout = {
   updated_at: string;
 };
 
-export const SPORTS: { key: Sport; label: string }[] = [
-  { key: 'strength', label: 'Strength' },
-  { key: 'bjj', label: 'BJJ' },
-  { key: 'running', label: 'Running' },
-];
+// The LIST of sports is gone from here: it lives in the server's registry and
+// reaches the app through lib/modules. What stays is the `Sport` type above,
+// which types the wire format — three copies of the list existed in this app
+// and all three disagreed.
 
 // Only meaningful for strength — powerlifting, hypertrophy and endurance are
 // all things you do with the same barbell squat, so they're a property of

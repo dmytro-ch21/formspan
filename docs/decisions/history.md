@@ -3319,6 +3319,41 @@ that excludes BJJ fails it on the BJJ subtest.
   `.catch(() => {})` asserted "None chosen yet" as fact on a network failure —
   the same default-standing-in-for-unknown bug this file has fixed twice before.
 
+### Phase B, and what review caught in it
+
+The mobile half shipped four blocking defects, all one root cause: **the
+provider's lifecycle was write-only after mount.**
+
+1. **Toggling a discipline did nothing until the app was killed.** The profile
+   screen called the raw API helper and never touched the provider; `refresh`
+   was exposed on the context and called by *nothing*. The save persisted
+   server-side and the tab bar, start buttons and Library chips all kept the old
+   configuration for the rest of the process. **The entire feature failed on its
+   primary path.** `PATCH /modules` already returns the merged set, so the fix
+   costs no extra request.
+2. **`ready` was consumed by nothing**, so its docstring's central claim — "the
+   shell can hold a frame rather than show the wrong one" — was honoured by no
+   code. The tab bar rearranged on every cold start (the exact bug it was
+   written to prevent) and Today flashed its all-disciplines-off empty state at
+   every user.
+3. **The technique fetch was not gated.** The commit message and two code
+   comments asserted it was; `loadTechniques` had no reference to the
+   capability. A strength-only user still pulled ~65 kB of techniques on every
+   Library mount and every pull-to-refresh.
+4. **Sign-out leaked the previous athlete's configuration.** The provider sits
+   above the navigator and never remounts, so on a shared device the next user
+   saw A's tabs — and if B was offline and new to the device, indefinitely.
+
+Smaller, same review: a `sportTouched` flag that defended against nothing and
+preserved the one invalid state (a selection whose discipline had been
+disabled, still creating workouts in it); two stale-`modules` closures; a cached
+module set parsed with a bare cast rather than through the normaliser written
+for that boundary; and "Start bjj" — the first consumer of the label the
+registry carries specifically to keep BJJ capitalised, lowercasing it.
+
+None of this was reachable by typechecking, and I could not run the gated flows
+myself: they need a signed-in session. The review read what I could not execute.
+
 ### Open
 
 Phase A is backend only — the toggles still gate nothing in the UI. Phases B and

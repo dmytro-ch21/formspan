@@ -1672,3 +1672,37 @@ capabilities (`internal/platform/discipline`); per-user enablement lives in
   not "unknown exercise".
 - The four legacy `*_enabled` columns are unread; the down migration carries row
   values back into them before dropping the table.
+
+## Module gating on mobile (Phase B)
+
+### The loop that has to work
+
+- Toggle a discipline in profile edit, save, go back: the tab bar, Today's start
+  buttons and the Library chips **all reflect it immediately**, with no app
+  restart. This failed completely in the first cut — the save never reached the
+  provider — so it is the first thing to check.
+
+### Cold start
+
+- The tab bar must **not** rearrange after first paint, and Today must not flash
+  "Choose what you train" before the real buttons. Both mean `ready` is being
+  honoured.
+- Offline, with a warm cache: everything gates from the cache; no spinner in
+  front of the app.
+
+### Network
+
+- With BJJ off, opening the Library fires **no `/v1/techniques` request** — check
+  the network log, not the pixels.
+
+### Edge cases
+
+- Every discipline off: Today offers "Choose what you train"; the new-workout
+  sheet says so rather than showing a Discipline heading over zero chips; no
+  workout can be created in a disabled discipline.
+- A stored library filter naming a now-disabled discipline is not restored, and
+  a filter whose discipline is disabled *mid-session* resets rather than
+  narrowing the list invisibly.
+- Sign out and sign in as a different user: the second user must never see the
+  first user's tabs, chips or start buttons — including when the second user is
+  offline and has never used the device.
