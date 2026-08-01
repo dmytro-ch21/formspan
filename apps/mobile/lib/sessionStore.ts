@@ -252,27 +252,36 @@ export async function finishLocalSession(userID: string, id: string): Promise<vo
  * delete out whenever the network allows. Reads filter tombstones, so it is
  * invisible from the moment the athlete taps Delete.
  *
- * **A session the server has never seen is hard-deleted immediately.** There
- * is nothing to tell the server about, and leaving a tombstone for it would
- * mean an outbox entry that can never be satisfied.
+ * **Always a tombstone — this does not decide whether the server knows.**
+ *
+ * It used to: `remote = 0` meant "never pushed, nothing to tell the server",
+ * so the row was hard-deleted outright. That read is racy. A first push sets
+ * `remote = 1` partway through `pushRow`, so deleting during that window sees
+ * `remote = 0`, hard-deletes locally — and then the push it was racing
+ * *creates the session on the server*. Local row gone, server row created,
+ * next pull brings it back. The exact resurrection this whole feature exists
+ * to prevent, reintroduced by the optimisation meant to avoid a pointless
+ * outbox entry.
+ *
+ * So the decision moves to `pushRow`, which reads the row inside the
+ * serialised sync and can act on what is true *then*. A never-pushed
+ * tombstone costs one sync cycle and needs no network, so it clears on the
+ * next attempt whether online or not.
+ *
+ * The interleaving is safe because the tombstone bumps `updated_at`: a push
+ * already in flight finds its CAS
+ * (`UPDATE ... SET dirty = 0 ... AND updated_at = ?`) no longer matches, so
+ * the row stays dirty and the *next* pass sees the tombstone with `remote`
+ * now correctly 1.
  */
 export async function deleteLocalSession(userID: string, id: string): Promise<void> {
   const db = await getDb();
-  const row = await db.getFirstAsync<{ remote: number }>(
-    `SELECT remote FROM local_sessions WHERE id = ? AND user_id = ?`,
-    id,
-    userID,
-  );
-  if (!row) return;
-  if (row.remote === 0) {
-    await db.runAsync(`DELETE FROM local_sessions WHERE id = ? AND user_id = ?`, id, userID);
-    return;
-  }
+  const now = new Date().toISOString();
   await db.runAsync(
     `UPDATE local_sessions SET deleted_at = ?, dirty = 1, updated_at = ?
-     WHERE id = ? AND user_id = ?`,
-    new Date().toISOString(),
-    new Date().toISOString(),
+     WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+    now,
+    now,
     id,
     userID,
   );
@@ -346,10 +355,42 @@ async function pushRow(
   // never reached 0 and the retry ladder ground on for the life of the
   // install.
   if (row.deleted_at) {
+    // Never reached the server, so there is nothing to tell it. Decided HERE
+    // rather than at delete time because `remote` is only trustworthy inside
+    // the serialised sync — see deleteLocalSession.
+    if (row.remote === 0) {
+      await db.runAsync(`DELETE FROM local_sessions WHERE id = ? AND user_id = ?`, row.id, userID);
+      return;
+    }
+
     try {
       await deleteSession(getToken, row.id);
     } catch (err) {
-      if (!isNotFound(err)) throw err;
+      // A 404 is success: the server agreeing it isn't there is the state
+      // being asked for. Without this, deleting twice — or deleting on the
+      // web first — leaves a tombstone that can never clear.
+      if (isNotFound(err)) {
+        // fall through to the local delete
+      } else if (isPermanentRejection(err)) {
+        // The server will refuse this identically forever. Leaving the
+        // tombstone would hide the session for the life of the install while
+        // `pending` stayed above zero and every foreground retried a doomed
+        // request — the failure PR2 fixed for updates and did not apply here.
+        //
+        // So restore the row. The session was NOT deleted, and continuing to
+        // hide it would be a lie about what the server holds. Rethrown so the
+        // sync reports it rather than swallowing a delete that silently
+        // didn't happen.
+        await db.runAsync(
+          `UPDATE local_sessions SET deleted_at = NULL, dirty = 0 WHERE id = ? AND user_id = ?`,
+          row.id,
+          userID,
+        );
+        throw err;
+      } else {
+        // Transient — the row stays dirty and goes out with the next sync.
+        throw err;
+      }
     }
     await db.runAsync(`DELETE FROM local_sessions WHERE id = ? AND user_id = ?`, row.id, userID);
     return;

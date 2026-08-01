@@ -50,9 +50,10 @@ jest.mock('../db', () => ({
         if (i >= 0) rows.splice(i, 1);
         return;
       }
-      if (/SET deleted_at/.test(sql)) {
+      if (/SET deleted_at = \?/.test(sql)) {
         const [deletedAt, , id, user] = args as string[];
-        const row = rows.find((r) => r.id === id && r.user_id === user);
+        // Mirrors the query's own `AND deleted_at IS NULL`.
+        const row = rows.find((r) => r.id === id && r.user_id === user && r.deleted_at === null);
         if (row) {
           row.deleted_at = deletedAt;
           row.dirty = 1;
@@ -82,12 +83,26 @@ it('marks the tombstone dirty so the ordinary push path carries it out', async (
   expect(rows[0].dirty).toBe(1);
 });
 
-it('hard-deletes a session the server has never seen', async () => {
-  // Nothing to tell the server about; a tombstone here would be an outbox
-  // entry that can never be satisfied, so `pending` would never reach 0.
+it('tombstones a never-pushed session too, rather than deciding here', async () => {
+  // It used to hard-delete when `remote === 0`. That read is racy: a first
+  // push sets remote = 1 partway through, so deleting in that window
+  // hard-deletes locally while the push it raced CREATES the session on the
+  // server — and the next pull brings it straight back. The decision belongs
+  // in the push, which runs inside the serialised sync.
   seed({ remote: 0 });
   await deleteLocalSession('u1', 's1');
-  expect(rows).toHaveLength(0);
+  expect(rows).toHaveLength(1);
+  expect(rows[0].deleted_at).toEqual(expect.any(String));
+});
+
+it('does not re-stamp a session already tombstoned', async () => {
+  // Deleting twice must not move updated_at, which would defeat the CAS a
+  // push in flight relies on.
+  seed({ remote: 1 });
+  await deleteLocalSession('u1', 's1');
+  const first = rows[0].deleted_at;
+  await deleteLocalSession('u1', 's1');
+  expect(rows[0].deleted_at).toBe(first);
 });
 
 it('reports the tombstone so the pull can skip it', async () => {

@@ -3920,16 +3920,37 @@ is the row hard-deleted for real. Reads (`listLocalSessions`,
 
 Three decisions worth recording:
 
-- **A session the server has never seen is hard-deleted immediately.** There is
-  nothing to tell the server, and a tombstone for it would be an outbox entry
-  that can never be satisfied — `pending` would never reach 0 and the retry
-  ladder would grind forever.
+- **Deleting always writes a tombstone; the push decides what the server
+  needs.** The first version short-circuited: `remote = 0` meant "never
+  pushed, nothing to tell the server", so the row was hard-deleted outright.
+  That read is racy — `pushRow` sets `remote = 1` partway through a first
+  push, so deleting in that window sees 0, hard-deletes locally, and then the
+  push it was racing **creates the session on the server**. Local row gone,
+  server row created, next pull brings it back: the exact resurrection this
+  feature exists to prevent, reintroduced by the optimisation meant to avoid a
+  pointless outbox entry. Moving the decision into `pushRow` — which runs
+  inside the serialised sync and can act on what is true *then* — removes the
+  window instead of guarding it. Safe to interleave because the tombstone
+  bumps `updated_at`, so a push already in flight finds its CAS no longer
+  matches and leaves the row dirty for the next pass.
 - **A 404 on the delete counts as success.** The server agreeing it isn't there
   is exactly the state being asked for. Without that, deleting the same session
   twice (or deleting it on the web first) leaves a tombstone that can never
   clear.
 - **The pull skips tombstoned ids**, read once per run. Without it the pull
   writes the server's copy straight back, which is the whole bug.
+- **A permanent refusal restores the session.** If the server will refuse the
+  delete identically forever, keeping the tombstone hides the row for the life
+  of the install while `pending` never reaches zero and every foreground
+  retries a doomed request — precisely the failure PR2 fixed for updates and
+  which had not been applied here. So the row is un-deleted and the error
+  surfaced: the session was *not* deleted, and continuing to hide it would be
+  a lie about what the server holds.
+- **`upsert` refuses to write over a tombstone** (`WHERE deleted_at IS NULL` on
+  the `DO UPDATE`). Its SET list clobbers `dirty` and omits `deleted_at`, so an
+  upsert onto a deleted row would leave the tombstone in place but mark it
+  clean — the delete silently never pushed. Both callers were guarded, but
+  that is two callers remembering; the clause makes the row immune instead.
 
 ### The resurrection path I nearly missed
 
