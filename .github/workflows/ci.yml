@@ -136,3 +136,6 @@ jobs:
 
       - name: Typecheck
         run: pnpm run typecheck:mobile
+
+      - name: Test
+        run: pnpm run test:mobile

@@ -3804,6 +3804,62 @@ that has caught either.
 AppState; four mutations checked. `apps/mobile` still has no test runner — third
 entry in a row to say so.
 
+## 2026-08-01 — apps/mobile gets a test runner, and the tests are mutation-checked
+
+Three history entries in a row had noted that this app had no test runner. The
+cost was not hypothetical: **twice in one day a test of mine passed for the
+wrong reason**, and both times the only thing that caught it was deleting the
+code under test to see whether anything went red.
+
+- The token broker's "a still-valid token is served when Clerk is unreachable"
+  used a 300-second token — which the broker answers from cache without ever
+  consulting Clerk. The offline getter was never called, and removing the whole
+  offline-grace branch left all seven assertions green.
+- The orchestrator's "a permanent rejection schedules no retry" ran when
+  `failures` had already climbed the ladder to 300 seconds, so waiting 5
+  seconds proved nothing. It passed with the guard deleted.
+
+Both lived in Node harnesses compiled with `tsc` and thrown away, so neither
+was repeatable and neither ran in CI.
+
+`jest-expo` rather than bare jest or vitest: it resolves React Native and the
+`expo-*` modules the way Metro does, so `lib/session.ts` (expo-secure-store)
+and `lib/sync.ts` (react-native's AppState) can be imported without
+hand-stubbing the module graph — which is what made the harnesses fragile.
+
+**30 assertions across three files**, all logic, no rendering. That is a
+deliberate aim: what has actually broken in this app is concurrency and state
+reconciliation — token refreshes racing sign-out, sync runs interleaving, set
+transforms crossing a group boundary. Component tests would be ceremony
+pointed away from the bugs.
+
+Fake timers throughout the orchestrator suite. The backoff starts at five
+seconds, and waiting that in real time both blew jest's default timeout and
+made the suite slow enough that nobody would run it. It now runs in 0.5s
+instead of 16.
+
+### The bar for this suite
+
+Every one of the seven guards these tests exist for was **mutation-checked**,
+and each mutation fails at least one test:
+
+| Mutation | Caught |
+|---|---|
+| `fillForward` drops the group boundary | 1 |
+| `fillForward` overwrites typed values | 2 |
+| broker drops the offline-grace branch | 2 |
+| broker drops the cross-user check | 1 |
+| orchestrator retries permanent rejections | 1 |
+| `syncNow` reverts to a single await | 1 |
+| `request()` loses its coalescing | 2 |
+
+CLAUDE.md now says the same thing as a rule: when adding a test here, delete
+the guard it covers and check it goes red. A green test proves nothing about
+code it never reaches.
+
+Wired into CI as `pnpm run test:mobile` in the Mobile job, so it runs on every
+PR rather than when someone remembers.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

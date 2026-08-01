@@ -1,0 +1,122 @@
+import * as SecureStore from 'expo-secure-store';
+
+import { OfflineError } from '../apiError';
+import { clearSessionToken, getSessionToken } from '../session';
+
+/**
+ * The Clerk token broker.
+ *
+ * The property that matters most — "a still-valid token keeps working when
+ * Clerk is unreachable" — is easy to test *vacuously*. The first version of
+ * this used a 300-second token, which the broker answers from cache without
+ * ever consulting Clerk, so the offline path never ran and deleting the whole
+ * feature left the suite green. Every test below that claims to exercise a
+ * refresh asserts the getter was actually reached.
+ */
+
+jest.mock('expo-secure-store', () => {
+  const mem = new Map<string, string>();
+  return {
+    getItemAsync: jest.fn(async (k: string) => mem.get(k) ?? null),
+    setItemAsync: jest.fn(async (k: string, v: string) => void mem.set(k, v)),
+    deleteItemAsync: jest.fn(async (k: string) => void mem.delete(k)),
+    __mem: mem,
+  };
+});
+
+const b64url = (o: unknown) =>
+  Buffer.from(JSON.stringify(o)).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+/** A structurally real JWT for `sub`, expiring in `secs`. */
+const jwt = (sub: string, secs: number) =>
+  `eyJhbGciOiJSUzI1NiJ9.${b64url({ sub, exp: Math.floor(Date.now() / 1000) + secs })}.sig`;
+
+/**
+ * REFRESH_SKEW_MS is 20s, so a 10s token is inside the skew (a refresh is
+ * attempted) but not yet expired (the old one is still a valid credential).
+ * That window is the only place the offline-grace branch runs.
+ */
+const EXPIRING = 10;
+const FRESH = 300;
+
+beforeEach(async () => {
+  await clearSessionToken();
+  (SecureStore.getItemAsync as jest.Mock).mockClear();
+});
+
+it('costs one Clerk call for many requests', async () => {
+  const clerk = jest.fn(async () => jwt('user_1', FRESH));
+  for (let i = 0; i < 40; i++) await getSessionToken(clerk, 'user_1');
+  expect(clerk).toHaveBeenCalledTimes(1);
+});
+
+it('collapses concurrent cold requests into one refresh', async () => {
+  const clerk = jest.fn(async () => {
+    await new Promise((r) => setTimeout(r, 10));
+    return jwt('user_1', FRESH);
+  });
+  await Promise.all(Array.from({ length: 8 }, () => getSessionToken(clerk, 'user_1')));
+  expect(clerk).toHaveBeenCalledTimes(1);
+});
+
+describe('when Clerk is unreachable', () => {
+  it('keeps serving a token that is expiring but still valid', async () => {
+    const acquired = await getSessionToken(async () => jwt('user_1', EXPIRING), 'user_1');
+    // Clerk RETURNS NULL offline rather than throwing — verified in clerk-js.
+    const offline = jest.fn(async () => null);
+
+    const served = await getSessionToken(offline, 'user_1');
+
+    // Guards against the vacuous version of this test.
+    expect(offline).toHaveBeenCalledTimes(1);
+    expect(served).toBe(acquired);
+  });
+
+  it('also survives Clerk throwing rather than returning null', async () => {
+    const acquired = await getSessionToken(async () => jwt('user_1', EXPIRING), 'user_1');
+    const offline = jest.fn(async () => {
+      throw new Error('Network request failed');
+    });
+    expect(await getSessionToken(offline, 'user_1')).toBe(acquired);
+    expect(offline).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports OfflineError when there is no usable token at all', async () => {
+    await expect(getSessionToken(async () => null, 'user_1')).rejects.toBeInstanceOf(OfflineError);
+  });
+
+  it('never claims the athlete is signed out', async () => {
+    await expect(getSessionToken(async () => null, 'user_1')).rejects.toThrow(
+      expect.objectContaining({ message: expect.not.stringMatching(/not signed in/i) }),
+    );
+  });
+
+  it('refuses an expired token rather than sending one that will 401', async () => {
+    await getSessionToken(async () => jwt('user_1', -10), 'user_1').catch(() => {});
+    await expect(getSessionToken(async () => null, 'user_1')).rejects.toBeInstanceOf(OfflineError);
+  });
+});
+
+describe('shared device', () => {
+  it("refuses athlete A's cached token for athlete B", async () => {
+    await getSessionToken(async () => jwt('user_A', FRESH), 'user_A');
+    await expect(getSessionToken(async () => null, 'user_B')).rejects.toBeInstanceOf(OfflineError);
+  });
+
+  it('does not let a refresh straddling sign-out repopulate the cache', async () => {
+    let release!: () => void;
+    const slow = new Promise<void>((r) => {
+      release = r;
+    });
+    const inFlight = getSessionToken(async () => {
+      await slow;
+      return jwt('user_A', FRESH);
+    }, 'user_A');
+
+    await clearSessionToken(); // sign-out lands mid-refresh
+    release();
+    await inFlight.catch(() => {});
+
+    await expect(getSessionToken(async () => null, 'user_A')).rejects.toBeInstanceOf(OfflineError);
+  });
+});
