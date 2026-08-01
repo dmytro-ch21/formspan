@@ -83,8 +83,7 @@ type Row =
   | { kind: "technique"; key: string; name: string; t: TechniqueSummary };
 
 type Selection =
-  | { kind: "exercise"; ex: Exercise }
-  | { kind: "technique"; id: string };
+  { kind: "exercise"; ex: Exercise } | { kind: "technique"; id: string };
 
 export default function LibraryPage() {
   const { getToken } = useAuth();
@@ -101,6 +100,8 @@ export default function LibraryPage() {
   const [selected, setSelected] = useState<Selection | null>(null);
   const [everLoaded, setEverLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Bumped by the retry button to re-run the debounced exercise effect. */
+  const [retryTick, setRetryTick] = useState(0);
 
   const abortRef = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -111,6 +112,10 @@ export default function LibraryPage() {
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
+      // Same reason the technique loader has one: a captive portal accepts the
+      // connection and never answers, and without a deadline `everLoaded` stays
+      // false forever — blank grid, blank count, no error, no spinner.
+      const deadline = setTimeout(() => controller.abort(), 10_000);
       try {
         const list = await listExercises(
           getToken,
@@ -125,10 +130,12 @@ export default function LibraryPage() {
         if (controller.signal.aborted) return;
         setError(err instanceof Error ? err.message : String(err));
         setEverLoaded(true);
+      } finally {
+        clearTimeout(deadline);
       }
     }, 200);
     return () => clearTimeout(t);
-  }, [getToken, sport, query]);
+  }, [getToken, sport, query, retryTick]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
@@ -211,7 +218,9 @@ export default function LibraryPage() {
     if (showTechniques) {
       const scoped =
         usesPosition(sport) && position
-          ? sortedTechniques.filter((t) => inPositionFamily(t.position, position))
+          ? sortedTechniques.filter((t) =>
+              inPositionFamily(t.position, position),
+            )
           : sortedTechniques;
       tq = searchTechniques(scoped, query);
     }
@@ -232,9 +241,29 @@ export default function LibraryPage() {
       }
     }
     return out;
-  }, [sortedExercises, sortedTechniques, showTechniques, sport, position, query]);
+  }, [
+    sortedExercises,
+    sortedTechniques,
+    showTechniques,
+    sport,
+    position,
+    query,
+  ]);
 
   const byName = useMemo(() => indexTechniques(techniques), [techniques]);
+
+  /**
+   * Below `lg` the panel stacks *after* the entire grid, so on a narrow window
+   * clicking a card appeared to do nothing — the detail landed hundreds of rows
+   * down. Above `lg` it is already beside the grid and must not move.
+   */
+  useEffect(() => {
+    if (!selected) return;
+    if (window.matchMedia("(min-width: 1024px)").matches) return;
+    document
+      .getElementById("library-detail")
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [selected]);
   const isFiltered = query.trim() !== "" || sport !== "" || position !== "";
 
   return (
@@ -298,7 +327,11 @@ export default function LibraryPage() {
         </div>
 
         {usesPosition(sport) && (
-          <div className="flex flex-wrap gap-2" aria-label="Filter by position">
+          <div
+            role="group"
+            aria-label="Filter by position"
+            className="flex flex-wrap gap-2"
+          >
             <SmallChip active={position === ""} onClick={() => setPosition("")}>
               All positions
             </SmallChip>
@@ -318,15 +351,28 @@ export default function LibraryPage() {
       {error && (
         <p
           role="alert"
-          className="rounded-card border border-danger/40 bg-danger/10 px-4 py-3 text-sm"
+          className="flex flex-wrap items-center gap-3 rounded-card border border-danger/40 bg-danger/10 px-4 py-3 text-sm"
         >
           {error}
+          {/* The exercise fetch is driven by a debounced effect on
+              [getToken, sport, query], so there was no way to re-run it without
+              editing the query — and when BOTH halves failed the technique
+              banner was suppressed too, leaving no retry anywhere on screen. */}
+          <button
+            type="button"
+            onClick={() => setRetryTick((n) => n + 1)}
+            className="font-medium text-lime-ink underline underline-offset-2"
+          >
+            Try again
+          </button>
         </p>
       )}
       {/* Named separately from the exercise error: the halves fail
           independently, and "techniques couldn't load" is not the same claim as
           "the library is down". */}
-      {techniquesFailed && showTechniques && !error && (
+      {/* Deliberately NOT gated on `!error` any more: both halves can fail at
+          once, and hiding this one then hid its retry along with it. */}
+      {techniquesFailed && showTechniques && (
         <p
           role="alert"
           className="flex flex-wrap items-center gap-3 rounded-card border border-warn/40 bg-warn/10 px-4 py-3 text-sm"
@@ -335,7 +381,7 @@ export default function LibraryPage() {
           <button
             type="button"
             onClick={() => void loadTechniques()}
-            className="font-medium text-lime underline underline-offset-2"
+            className="font-medium text-lime-ink underline underline-offset-2"
           >
             Try again
           </button>
@@ -357,10 +403,14 @@ export default function LibraryPage() {
                     meta={`${r.ex.movement_pattern.replace(/_/g, " ")} · ${LOAD_LABEL[r.ex.load_type]}`}
                     badge={patternBadge(r.ex.movement_pattern)}
                     image={pickImage(r.ex, "thumbnail")}
-                    active={selected?.kind === "exercise" && selected.ex.id === r.ex.id}
+                    active={
+                      selected?.kind === "exercise" &&
+                      selected.ex.id === r.ex.id
+                    }
                     onClick={() =>
                       setSelected(
-                        selected?.kind === "exercise" && selected.ex.id === r.ex.id
+                        selected?.kind === "exercise" &&
+                          selected.ex.id === r.ex.id
                           ? null
                           : { kind: "exercise", ex: r.ex },
                       )
@@ -376,10 +426,16 @@ export default function LibraryPage() {
                       (r.t.position_detail ? ` · ${r.t.position_detail}` : "")
                     }
                     badge={categoryBadge(r.t.category)}
+                    // The tile is aria-hidden, so the category reaches a screen
+                    // reader only if it is said here — the same standard the
+                    // mobile row already holds itself to.
+                    srSuffix={`${r.t.category}. BJJ technique.`}
                     restricted={
                       rulesets.get(r.t.ibjjf_ruleset_id)?.is_restricted ?? false
                     }
-                    active={selected?.kind === "technique" && selected.id === r.t.id}
+                    active={
+                      selected?.kind === "technique" && selected.id === r.t.id
+                    }
                     onClick={() =>
                       setSelected(
                         selected?.kind === "technique" && selected.id === r.t.id
@@ -395,7 +451,10 @@ export default function LibraryPage() {
         )}
 
         {selected?.kind === "exercise" && (
-          <ExercisePanel exercise={selected.ex} onClose={() => setSelected(null)} />
+          <ExercisePanel
+            exercise={selected.ex}
+            onClose={() => setSelected(null)}
+          />
         )}
         {selected?.kind === "technique" && (
           <TechniquePanel
@@ -405,6 +464,7 @@ export default function LibraryPage() {
             // title while the new fetch is still in flight.
             key={selected.id}
             id={selected.id}
+            name={byName.get(selected.id)?.name ?? "Loading…"}
             byName={byName}
             onOpen={(id) => setSelected({ kind: "technique", id })}
             onClose={() => setSelected(null)}
@@ -422,6 +482,7 @@ function Card({
   meta,
   badge,
   image,
+  srSuffix,
   restricted = false,
   active,
   onClick,
@@ -430,6 +491,7 @@ function Card({
   meta: string;
   badge: readonly [string, Accent];
   image?: string | null;
+  srSuffix?: string;
   restricted?: boolean;
   active: boolean;
   onClick: () => void;
@@ -444,7 +506,9 @@ function Card({
       className={`flex w-full items-center gap-3 rounded-card border p-3 text-left transition ${
         active
           ? "border-lime bg-surface-raised"
-          : "border-line bg-surface hover:bg-surface-raised"
+          : // surface-hover, not surface-raised: the latter is #ffffff in light
+            // mode, identical to the card, so the hover state did nothing at all.
+            "border-line bg-surface hover:bg-surface-hover"
       }`}
     >
       {image ? (
@@ -476,6 +540,7 @@ function Card({
           IBJJF
         </span>
       )}
+      {srSuffix && <span className="sr-only">{srSuffix}</span>}
     </button>
   );
 }
@@ -494,7 +559,13 @@ function PanelShell({
   children: React.ReactNode;
 }) {
   return (
-    <aside className="flex h-fit flex-col gap-4 rounded-card border border-line bg-surface p-5 lg:sticky lg:top-10">
+    <aside
+      id="library-detail"
+      // Sticky without a height bound pins a long panel — full prose, legality
+      // table and three edge lists routinely exceed the viewport — and its
+      // bottom then can't be reached at all.
+      className="flex h-fit max-h-none flex-col gap-4 overflow-y-auto rounded-card border border-line bg-surface p-5 lg:sticky lg:top-10 lg:max-h-[calc(100vh-5rem)]"
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           {eyebrow}
@@ -588,10 +659,13 @@ function ExercisePanel({
  */
 function TechniquePanel({
   id,
+  name,
   byName,
   onOpen,
   onClose,
 }: {
+  /** Known from the card that opened this, so the shell never says "Loading…". */
+  name: string;
   id: string;
   byName: Map<string, TechniqueSummary>;
   onOpen: (id: string) => void;
@@ -624,8 +698,14 @@ function TechniquePanel({
 
   if (!t) {
     return (
-      <PanelShell title="Loading…" onClose={onClose}>
-        <div className="h-24 animate-pulse rounded-lg bg-surface-raised" />
+      <PanelShell title={name} onClose={onClose}>
+        {/* Same reason as the hover state: surface-raised is invisible on a
+            light surface, so the skeleton was blank white space. */}
+        <div
+          className="h-24 animate-pulse rounded-lg bg-surface-hover"
+          role="status"
+          aria-label="Loading technique details"
+        />
       </PanelShell>
     );
   }
@@ -659,16 +739,21 @@ function TechniquePanel({
 
       {/* The mechanics and the decision are separate sections because they
           answer separate questions. Merged, neither reads well. */}
-      {t.description && (
-        <Section title="How it works">{t.description}</Section>
+      {t.description && <Section title="How it works">{t.description}</Section>}
+      {t.when_to_use && (
+        <Section title="When to use it">{t.when_to_use}</Section>
       )}
-      {t.when_to_use && <Section title="When to use it">{t.when_to_use}</Section>}
 
       {rs && <Legality ruleset={rs} />}
 
       {/* The reason this page beats the phone: following the graph costs
           nothing, because the grid never moves. */}
-      <Edges label="Set up from" items={t.setup_from} byName={byName} onOpen={onOpen} />
+      <Edges
+        label="Set up from"
+        items={t.setup_from}
+        byName={byName}
+        onOpen={onOpen}
+      />
       <Edges
         label="Common next moves"
         items={t.common_next_moves}
@@ -690,7 +775,9 @@ function TechniquePanel({
           Commonly taught from {t.typical_belt} belt onwards.
         </p>
       )}
-      {t.source_notes && <p className="text-xs text-text-dim">{t.source_notes}</p>}
+      {t.source_notes && (
+        <p className="text-xs text-text-dim">{t.source_notes}</p>
+      )}
     </PanelShell>
   );
 }
@@ -803,7 +890,7 @@ function Edges({
               key={raw}
               type="button"
               onClick={() => onOpen(hit.id)}
-              className="rounded-pill border border-lime/40 px-2.5 py-1 text-xs font-medium text-lime transition hover:bg-lime/10"
+              className="rounded-pill border border-lime/40 px-2.5 py-1 text-xs font-medium text-lime-ink transition hover:bg-lime/10"
             >
               {display}
             </button>
@@ -831,7 +918,13 @@ function Section({
   );
 }
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+function Row({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="flex justify-between gap-4">
       <dt className="eyebrow">{label}</dt>

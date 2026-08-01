@@ -20,9 +20,12 @@
 export type Accent = "attack" | "advance" | "defend" | "hold";
 
 export const ACCENT_CLASS: Record<Accent, { tile: string; text: string }> = {
-  attack: { tile: "border-danger/40 bg-danger/10", text: "text-danger" },
-  advance: { tile: "border-lime/40 bg-lime/10", text: "text-lime" },
-  defend: { tile: "border-info/40 bg-info/10", text: "text-info" },
+  // Fill and border carry the hue (validated for separation); the text uses a
+  // darker ink step that carries only legibility. See globals.css — darkening
+  // the hue itself to fix contrast costs the CVD separation the hue exists for.
+  attack: { tile: "border-danger/40 bg-danger/10", text: "text-danger-ink" },
+  advance: { tile: "border-lime/40 bg-lime/10", text: "text-lime-ink" },
+  defend: { tile: "border-info/40 bg-info/10", text: "text-info-ink" },
   // NOT surface-raised: in light mode that token is #ffffff, identical to the
   // card it sits on, so the achromatic tile rendered as an empty outline — the
   // "nothing stands out" complaint, reappearing for the one bucket with no hue
