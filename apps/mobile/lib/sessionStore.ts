@@ -680,6 +680,25 @@ export async function cacheWorkouts(userID: string, list: Workout[]): Promise<vo
   const db = await getDb();
   const now = new Date().toISOString();
   await db.withTransactionAsync(async () => {
+    // RECONCILE, don't just accumulate.
+    //
+    // This only ever upserted, and nothing anywhere deleted from the table —
+    // so a workout deleted on this phone or on the web stayed cached forever.
+    // With the Plan tab now reading the cache first, that means the deleted
+    // template flashes back on every tab focus until the network answers, and
+    // offline it is simply listed as still existing, dead-ending on tap.
+    //
+    // Safe because both callers pass the COMPLETE `mine` list: anything of
+    // this athlete's not in it no longer exists.
+    const keep = list.map((w) => w.id);
+    await db.runAsync(
+      `DELETE FROM workout_cache
+       WHERE user_id = ?
+         AND id NOT IN (${keep.map(() => '?').join(',') || "''"})`,
+      userID,
+      ...keep,
+    );
+
     for (const w of list) {
       await db.runAsync(
         `INSERT INTO workout_cache

@@ -4143,7 +4143,7 @@ would read as "nobody has shared anything", which is a claim the device cannot
 make. Nor are shared templates written into this athlete's cache rows, or they
 would come back looking like theirs.
 
-### The cache invented ownership
+### The cache invented ownership — but not the bug I first wrote down
 
 `cachedWorkouts` returned `owner_user_id: userID` and `visibility: 'private'`,
 both hardcoded. `app/workout/[id].tsx` computes
@@ -4152,26 +4152,58 @@ both hardcoded. `app/workout/[id].tsx` computes
 const canEdit = workout.owner_user_id !== null && workout.owner_user_id === userId;
 ```
 
-— from exactly that field. So **offline, every cached workout looked
-editable**: VOLA's own ownerless templates, and other athletes' public ones.
-The Save button appeared for things the server refuses, and the "VOLA
-template" label vanished because nothing was ever null.
+from exactly that field, and the first version of this entry concluded that
+**offline every cached workout looked editable**, VOLA templates included, with
+a Save button for things the server refuses.
 
-Schema v8 stores `owner_user_id` (nullable — a VOLA template genuinely has no
-owner) and `visibility`, as the server reports them. An **upgraded** row
-defaults to `owner_user_id = NULL` rather than to the reader: an existing
-cached row must not claim the reader owns it, and null reads as "VOLA
-template" until the next refresh tells the truth. Erring toward *fewer* edit
-affordances than reality is the safe direction; erring the other way is what
-was shipping.
+**Review disproved that, using the backend's own scope semantics, and it is
+worth recording precisely because it was a good story.** `workout/postgres.go`
+implements `mine` as `owner_user_id = $1` — a NULL never matches, and another
+athlete's id never matches — and *both* `cacheWorkouts` call sites pass a
+`mine` list. So every row the cache could ever hold was genuinely owned by the
+reader: the hardcoded `userID` returned the **right answer for every row that
+exists**. And `workout/[id].tsx` never reads the cache at all (it calls
+`getWorkout` and errors offline), so no Save button could appear.
+
+What was *actually* broken was the other hardcode: `visibility: 'private'`
+meant your own **public** template lost its "Shared" badge whenever the Plan
+tab rendered it from cache.
+
+The ownership fix still earns its place — it is a landmine for PR4b, where
+cached shared templates genuinely will exist — but it was **latent**, not
+live, and the entry said otherwise. Same correction discipline as c8d647b.
+
+The v8 upgrade therefore **backfills** `owner_user_id = user_id` rather than
+leaving NULL. NULL is the cautious default in the abstract and simply wrong
+here: it is untrue for 100% of real rows, it would label every one of an
+upgrader's own workouts "VOLA template" until a refresh landed, and an
+ownerless private workout is a pair the server cannot produce.
+
+### The cache never pruned
+
+The blocking find. `cacheWorkouts` only ever upserted and nothing anywhere
+deleted from the table — so a workout deleted on this phone, or on the web,
+stayed cached **forever**. With the Plan tab now reading cache-first, the
+deleted template flashes back on every tab focus until the network answers,
+and offline it is simply listed as still existing and dead-ends on tap. Both
+callers pass the complete `mine` list, so reconciling inside the existing
+transaction is safe: drop this athlete's rows whose ids aren't in it.
 
 ### Testing
 
 The first PR4 to land after the SQLite fixture, and it earned it immediately —
 the bug was in what the columns *hold*, which the old array mock could not have
-expressed. Five mutations, all caught: invent ownership again (2), hardcode
-private again (2), stop refreshing ownership on re-cache (1), drop the
-per-athlete filter (6), remove the v8 branch (2).
+expressed.
+
+Review then found **three surviving mutations** in those tests, which is the
+adversarial pass paying for itself: dropping *only* the `owner_user_id` half of
+the ON CONFLICT refresh (the sole conflict test asserted visibility, so the
+clause the whole backfill story depends on was unpinned); breaking the
+per-athlete filter in the *sport-narrowed* branch (the isolation test used the
+other branch — and the sport branch is the one offline session-start calls);
+and never storing `items` at all (nothing asserted items or `goal` round-trip,
+though the Plan tab renders `items.length` from cache and carrying `goal`
+offline was the entire point of schema v6). All three now fail.
 
 Also caught by having schema tests at all: bumping `SCHEMA_VERSION` failed
 three existing assertions immediately, which is the intended friction — a

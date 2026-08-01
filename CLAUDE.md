@@ -63,13 +63,20 @@ anyway** — once on the test-runner PR, once on PR4a — because a newline is n
 a dependency. If you run individual checks while iterating, still run `verify`
 before pushing.
 
-Not included, run separately when relevant:
+Deliberately not included — each is slow or needs setup, and CI covers them:
 
 ```bash
 pnpm run test:api                            # needs TEST_DATABASE_URL
-pnpm run build:web                           # slow; CI covers it
+pnpm run build:web && pnpm run build:admin   # slow; CI runs both
 docker build -f backend/Dockerfile backend   # if Docker/Colima is available
 ```
+
+**If you add a check to CI, add it to `verify` too.** It already missed
+`typecheck:admin` once — an admin type error passed locally and failed in CI,
+which is the same "failing typecheck scrolled past" it exists to prevent, just
+relocated to a third app. And note `fmt:api` has to *test* gofmt's output:
+`gofmt -l` prints offenders and still exits 0, so as the chain's first link it
+could never fail.
 
 Then: `git push -u origin <branch>`, `gh pr create`, watch CI with `gh run watch <run-id> --exit-status`.
 

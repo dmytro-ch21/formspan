@@ -320,6 +320,18 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
       'visibility',
       "TEXT NOT NULL DEFAULT 'private'",
     );
+    // Backfill rather than leave NULL.
+    //
+    // Only `mine` lists are ever cached, and the server's `mine` is strictly
+    // owner_user_id = $1 -- so every pre-v8 row is provably owned by the
+    // user_id it is filed under. NULL would be the cautious default in
+    // general, but here it is simply wrong for 100% of real rows, and it
+    // would label every one of an upgrader's own workouts "VOLA template"
+    // until a refresh succeeded. It is also a pair the server cannot
+    // produce: an ownerless private workout is visible to nobody.
+    await db.runAsync(
+      `UPDATE workout_cache SET owner_user_id = user_id WHERE owner_user_id IS NULL`,
+    );
   }
 
   await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION};`);

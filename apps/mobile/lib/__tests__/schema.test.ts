@@ -93,10 +93,13 @@ it('upgrades a v7-shaped database by adding the ownership columns', async () => 
   expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 8 });
 });
 
-it('an upgraded row defaults to NOT owned by the reader', async () => {
-  // The failure mode this whole column exists for: an existing cached row
-  // must not silently claim the reader owns it. NULL is the honest default —
-  // it reads as "VOLA template" until the next refresh tells the truth.
+it('an upgraded row is backfilled as owned by the athlete it is filed under', async () => {
+  // NOT null. Only `mine` lists are ever cached, and the server's `mine` is
+  // strictly owner_user_id = $1 — so every pre-v8 row is provably owned by
+  // its user_id. NULL would be cautious in general and simply wrong here: it
+  // would label every one of an upgrader's own workouts "VOLA template"
+  // until a refresh landed, and an ownerless private workout is a pair the
+  // server cannot even produce.
   const db = openFixture();
   db.raw.exec(`
     CREATE TABLE workout_cache (
@@ -110,5 +113,5 @@ it('an upgraded row defaults to NOT owned by the reader', async () => {
   await migrate(db as never);
 
   const row = db.raw.prepare('SELECT owner_user_id, visibility FROM workout_cache').get();
-  expect(row).toEqual({ owner_user_id: null, visibility: 'private' });
+  expect(row).toEqual({ owner_user_id: 'u1', visibility: 'private' });
 });
