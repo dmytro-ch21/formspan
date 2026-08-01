@@ -1,3 +1,6 @@
+import { readFileSync } from 'fs';
+import { join } from 'path';
+
 import { deleteLocalSession, hydrateSession, tombstonedIDs } from '../sessionStore';
 
 /**
@@ -121,4 +124,18 @@ it('refuses to hydrate a session this device deleted', async () => {
   expect(await hydrateSession('u1', 's1', pull as never)).toBeNull();
   // The point is that it never even asks the server.
   expect(pull).not.toHaveBeenCalled();
+});
+
+it('the upsert SQL refuses to write over a tombstone', async () => {
+  // Asserted on the query text rather than behaviour, because this mock does
+  // not execute SQL — a real SQLite fixture is what would test the effect.
+  // Still worth pinning: the SET list clobbers `dirty`, so without this
+  // clause any upsert onto a deleted row leaves the tombstone in place but
+  // marks it clean, and the delete silently never happens. Two callers
+  // currently guard against reaching it; this makes the row immune regardless.
+  const src = readFileSync(join(__dirname, '..', 'sessionStore.ts'), 'utf8');
+  const upsertSql = src.slice(src.indexOf('INSERT INTO local_sessions'));
+  expect(upsertSql.slice(0, upsertSql.indexOf('`'))).toMatch(
+    /WHERE local_sessions\.deleted_at IS NULL/,
+  );
 });

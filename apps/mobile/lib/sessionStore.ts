@@ -132,7 +132,20 @@ async function upsert(
        sets_json  = excluded.sets_json,
        dirty      = excluded.dirty,
        remote     = max(local_sessions.remote, excluded.remote),
-       updated_at = excluded.updated_at`,
+       updated_at = excluded.updated_at
+     -- Never write over a tombstone.
+     --
+     -- Not defensive padding: this clause IS the invariant. The SET list
+     -- above clobbers dirty, and deleted_at is deliberately absent from it,
+     -- so an upsert onto a deleted row would leave the tombstone in place
+     -- but mark it clean -- and the delete would silently never be pushed.
+     -- The pull and hydrateSession each guard against reaching here with a
+     -- tombstoned id, but that is two callers remembering; a third would
+     -- reintroduce the bug with nothing to catch it.
+     --
+     -- With this, a tombstoned row is immune to upserts until the delete
+     -- completes and the row is gone for real.
+     WHERE local_sessions.deleted_at IS NULL`,
     s.id,
     userID,
     s.workout_id,
