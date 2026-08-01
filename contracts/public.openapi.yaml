@@ -1473,7 +1473,7 @@ paths:
           in: query
           required: false
           schema: { type: string }
-          description: Exact-match filter, e.g. `strength` or `bjj`.
+          description: Exact-match filter, e.g. `strength` or `running`.
         - name: q
           in: query
           required: false

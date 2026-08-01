@@ -147,10 +147,11 @@ export async function fetchTechnique(
 /**
  * The summaries, cached for the app's lifetime.
  *
- * Without this the detail screen refetched all 466 (~65 KB) on every open,
- * serially and before first paint, purely to decide which edges are tappable —
- * browsing ten techniques cost ~650 KB and ten round trips. The list screen
- * warms it, so opens from the list are free and a cold deep link pays once.
+ * Originally this existed because the detail screen refetched all 466 (~65 KB)
+ * on every open just to decide which edges were tappable. Those links are gone,
+ * and so is that fetch — but the cache still earns its keep: the Library holds
+ * the whole list to search locally, so returning to the tab is free rather than
+ * another ~65 KB, and typing never touches the network.
  *
  * Failures are not cached: a null cache retries, an empty array would look
  * like a library with nothing in it.
@@ -197,54 +198,6 @@ export function searchTechniques(list: TechniqueSummary[], query: string): Techn
       t.aliases.some((a) => a.toLowerCase().includes(q)) ||
       t.position.toLowerCase().includes(q),
   );
-}
-
-/**
- * Resolve a graph edge to a technique, if it names one at all.
- *
- * Only ~80% of `setup_from` entries name a real technique; for
- * `common_next_moves` it is ~29% and for `common_counters` ~6% — the rest is
- * prose like "establish grips or inside ties". Callers must render a `null`
- * result as plain text: a dead link is worse than honest text.
- */
-export function resolveEdge(
-  label: string,
-  byName: Map<string, TechniqueSummary>,
-): TechniqueSummary | null {
-  return byName.get(edgeKey(label)) ?? null;
-}
-
-/**
- * Index every handle a graph edge might be written with: id, name, alias.
- *
- * The id keys are a **back-compat shim, and still load-bearing.** `setup_from`
- * used to store ids (`grappling_stance_motion`) rather than names; the importer
- * now resolves them, but a server that has not been re-seeded still serves the
- * old shape — staging included, at the time of writing. Indexing names alone
- * against that data resolved 13 of 541 setup edges (2%) instead of 417 (77%),
- * so 368 of 466 detail screens showed raw snake_case at the user.
- *
- * Safe to keep against new data: no technique name or alias contains an
- * underscore, so `edgeKey`'s `_`→`-` swap is a no-op on resolved names. Delete
- * the id pass only once every deployment is re-seeded.
- *
- * Insertion order is deliberate: ids first, then names, then aliases, with
- * aliases never overwriting. A name is a better answer than someone else's
- * alias when both match.
- */
-export function indexByName(list: TechniqueSummary[]): Map<string, TechniqueSummary> {
-  const m = new Map<string, TechniqueSummary>();
-  for (const t of list) m.set(t.id.toLowerCase(), t);
-  for (const t of list) m.set(t.name.toLowerCase(), t);
-  for (const t of list) {
-    for (const a of t.aliases) if (!m.has(a.toLowerCase())) m.set(a.toLowerCase(), t);
-  }
-  return m;
-}
-
-/** Normalise an edge label to the form the index is keyed on. */
-export function edgeKey(label: string): string {
-  return label.trim().toLowerCase().replace(/_/g, '-');
 }
 
 /**

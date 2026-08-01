@@ -182,17 +182,34 @@ func TestPostgresRepository_ListFilters(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	bjj, err := repo.List(ctx, Filter{Sport: "bjj"})
+	// Filter on a sport the catalog actually has. This used to assert on "bjj",
+	// which had 20 conditioning drills in it until migration 000019 removed
+	// them — see below.
+	running, err := repo.List(ctx, Filter{Sport: "running"})
 	if err != nil {
 		t.Fatalf("list by sport: %v", err)
 	}
-	if len(bjj) == 0 {
-		t.Fatal("expected at least one bjj exercise")
+	if len(running) == 0 {
+		t.Fatal("expected at least one running exercise")
 	}
-	for _, e := range bjj {
-		if e.Sport != "bjj" {
+	for _, e := range running {
+		if e.Sport != "running" {
 			t.Errorf("sport filter leaked %q (%s)", e.Sport, e.ID)
 		}
+	}
+
+	// The catalog holds NO bjj entries, deliberately. BJJ content is the
+	// technique library (`internal/modules/technique`, 466 entries); the 20
+	// drills that used to live here made "BJJ" in the Library mean two
+	// different things at once. If this ever comes back non-empty, either the
+	// seed regained them or migration 000019 did not run — both of which put
+	// bear crawls back among the armbars.
+	bjj, err := repo.List(ctx, Filter{Sport: "bjj"})
+	if err != nil {
+		t.Fatalf("list bjj: %v", err)
+	}
+	if len(bjj) != 0 {
+		t.Errorf("expected no bjj exercises, got %d (first: %s) — BJJ belongs to the technique library", len(bjj), bjj[0].ID)
 	}
 
 	// Case-insensitive substring — a catalog search that only matched exact

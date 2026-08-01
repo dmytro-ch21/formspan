@@ -1613,3 +1613,22 @@ than replacing it.
 
 - `heroImage` is not populated yet. When it is, the hero must swap to the photo
   with no layout shift, and the title must stay legible over a light image.
+
+## Library after the BJJ drill removal
+
+- Filtering the Library to **BJJ** returns techniques only — **no** Bear Crawl,
+  Sprawl, Granby Roll or other conditioning drills. `GET /v1/exercises?sport=bjj`
+  returns an empty list, and that is correct, not a failure.
+- No exercise row renders a stock placeholder *for BJJ*; strength and running
+  still do (unchanged, deliberately).
+- A BJJ drill that a user has genuinely logged against survives migration 000019
+  and remains visible — training history is never broken to tidy a catalog.
+- Technique detail: `Set up from`, `Common next moves` and `Common counters`
+  render as **plain text**. Nothing in those lists is tappable, and nothing in
+  them should look tappable.
+- Opening a technique makes **no** request for the full technique list — the
+  detail screen no longer needs an index to decide what links.
+- **A `sport='bjj'` session cannot contain a set, and a bjj workout cannot
+  contain an item** — there is no bjj catalog entry to reference and techniques
+  are not loggable yet. Any client that offers to add a set to a bjj session is
+  offering something the API will reject.

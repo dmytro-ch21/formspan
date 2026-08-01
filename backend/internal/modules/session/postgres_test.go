@@ -19,8 +19,14 @@ import (
 const (
 	exBench = "bench-press"
 	exSquat = "back-squat"
-	exBJJ   = "bear-crawl-forward"
-	exOHP   = "overhead-press"
+	// A non-strength exercise, for the sport-mismatch and cross-sport-filter
+	// tests. This was "bear-crawl-forward" until migration 000019 removed the
+	// 20 BJJ drills from the catalog: BJJ content is the technique library now,
+	// and techniques are not yet loggable as sets, so there is NO bjj exercise
+	// to pair with a bjj session. Running is the remaining non-strength sport
+	// with real catalog entries.
+	exRun = "run"
+	exOHP = "overhead-press"
 )
 
 func newTestRepo(t *testing.T) (*PostgresRepository, *pgxpool.Pool) {
@@ -185,7 +191,7 @@ func TestCreate_RejectsSportMismatch(t *testing.T) {
 	cleanup(t, pool, "ses-mixed")
 
 	_, err := repo.Create(ctx, strengthSession("ses-mixed", "user_a", []Set{
-		{ExerciseID: exBJJ, Reps: ptrInt(5), Completed: true},
+		{ExerciseID: exRun, Reps: ptrInt(5), Completed: true},
 	}))
 	if !errors.Is(err, ErrSportMismatch) {
 		t.Errorf("expected ErrSportMismatch, got %v", err)
@@ -420,7 +426,7 @@ func TestList_IsUserScopedAndFiltered(t *testing.T) {
 	ctx := context.Background()
 	cleanup(t, pool, "ses-list-mine")
 	cleanup(t, pool, "ses-list-theirs")
-	cleanup(t, pool, "ses-list-bjj")
+	cleanup(t, pool, "ses-list-run")
 
 	mine := strengthSession("ses-list-mine", "user_list_a", []Set{{ExerciseID: exSquat, Reps: ptrInt(5), Completed: true}})
 	if _, err := repo.Create(ctx, mine); err != nil {
@@ -430,13 +436,13 @@ func TestList_IsUserScopedAndFiltered(t *testing.T) {
 	if _, err := repo.Create(ctx, theirs); err != nil {
 		t.Fatalf("create theirs: %v", err)
 	}
-	bjj := NewSession{
-		ID: "ses-list-bjj", UserID: "user_list_a", Sport: "bjj", Name: "Rolling",
+	run := NewSession{
+		ID: "ses-list-run", UserID: "user_list_a", Sport: "running", Name: "Easy run",
 		StartedAt: time.Now().UTC().Add(-2 * time.Hour),
-		Sets:      []Set{{ExerciseID: exBJJ, Seconds: ptrInt(300), Completed: true}},
+		Sets:      []Set{{ExerciseID: exRun, Seconds: ptrInt(300), Completed: true}},
 	}
-	if _, err := repo.Create(ctx, bjj); err != nil {
-		t.Fatalf("create bjj: %v", err)
+	if _, err := repo.Create(ctx, run); err != nil {
+		t.Fatalf("create running: %v", err)
 	}
 
 	page, err := repo.List(ctx, "user_list_a", Filter{})
@@ -464,11 +470,11 @@ func TestList_IsUserScopedAndFiltered(t *testing.T) {
 		t.Errorf("sets not attached in list: %d", len(all[0].Sets))
 	}
 
-	bySport, err := repo.List(ctx, "user_list_a", Filter{Sport: "bjj"})
+	bySport, err := repo.List(ctx, "user_list_a", Filter{Sport: "running"})
 	if err != nil {
 		t.Fatalf("list by sport: %v", err)
 	}
-	if len(bySport.Sessions) != 1 || bySport.Sessions[0].ID != "ses-list-bjj" {
+	if len(bySport.Sessions) != 1 || bySport.Sessions[0].ID != "ses-list-run" {
 		t.Fatalf("sport filter wrong: %+v", bySport.Sessions)
 	}
 	// The count has to describe the *filtered* set, not everything.
@@ -491,15 +497,15 @@ func TestList_IsUserScopedAndFiltered(t *testing.T) {
 	}
 
 	// Name search, which is how anyone actually finds an old session.
-	byName, err := repo.List(ctx, "user_list_a", Filter{Query: "roll"})
+	byName, err := repo.List(ctx, "user_list_a", Filter{Query: "easy"})
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
-	if len(byName.Sessions) != 1 || byName.Sessions[0].ID != "ses-list-bjj" {
+	if len(byName.Sessions) != 1 || byName.Sessions[0].ID != "ses-list-run" {
 		t.Fatalf("search wrong: %+v", byName.Sessions)
 	}
 	// Case-insensitive, and a wildcard is a literal rather than "match all".
-	upper, _ := repo.List(ctx, "user_list_a", Filter{Query: "ROLL"})
+	upper, _ := repo.List(ctx, "user_list_a", Filter{Query: "EASY"})
 	if len(upper.Sessions) != 1 {
 		t.Errorf("search should be case-insensitive: %d", len(upper.Sessions))
 	}
@@ -777,8 +783,8 @@ func TestHistory_IsUserScopedAndComparesLikeForLike(t *testing.T) {
 			{ExerciseID: exBench, SetType: SetTypeWorking, Reps: ptrInt(99), WeightKg: ptrF(999), Completed: true},
 		}),
 		// Same window, different sport. Must vanish under a sport filter.
-		histAt("ses-hist-roll", mine, "bjj", time.Date(2024, 3, 12, 12, 0, 0, 0, time.UTC), time.Hour, []Set{
-			{ExerciseID: exBJJ, SetType: SetTypeWorking, Seconds: ptrInt(300), Completed: true},
+		histAt("ses-hist-run", mine, "running", time.Date(2024, 3, 12, 12, 0, 0, 0, time.UTC), time.Hour, []Set{
+			{ExerciseID: exRun, SetType: SetTypeWorking, Seconds: ptrInt(300), Completed: true},
 		}),
 	}
 	for _, f := range fixtures {
@@ -817,18 +823,18 @@ func TestHistory_IsUserScopedAndComparesLikeForLike(t *testing.T) {
 	}
 
 	filtered, err := repo.History(ctx, mine, HistoryFilter{
-		Sport: "bjj", From: march.From, To: march.To, TZ: "UTC",
+		Sport: "running", From: march.From, To: march.To, TZ: "UTC",
 	})
 	if err != nil {
 		t.Fatalf("history filtered: %v", err)
 	}
 	if filtered.Totals.Sessions != 1 || filtered.Totals.TonnageKg != 0 {
-		t.Errorf("bjj filter: %+v", filtered.Totals)
+		t.Errorf("running filter: %+v", filtered.Totals)
 	}
-	// A sport filter must narrow the comparison too, or BJJ gets measured
+	// A sport filter must narrow the comparison too, or a run gets measured
 	// against last month's squats.
 	if filtered.Previous.Sessions != 0 {
-		t.Errorf("filtered previous should be BJJ-only: %+v", filtered.Previous)
+		t.Errorf("filtered previous should be running-only: %+v", filtered.Previous)
 	}
 	assertDaysSumToTotals(t, got)
 	assertDaysSumToTotals(t, filtered)
@@ -1003,7 +1009,7 @@ func TestRecords_DerivesBestsAndIgnoresWhatDoesNotCount(t *testing.T) {
 		}
 	}
 
-	got, err := repo.Records(ctx, mine, []string{exSquat, exBJJ})
+	got, err := repo.Records(ctx, mine, []string{exSquat, exRun})
 	if err != nil {
 		t.Fatalf("records: %v", err)
 	}

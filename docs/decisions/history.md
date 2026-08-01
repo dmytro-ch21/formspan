@@ -3105,6 +3105,104 @@ The web panel got the same split from an identical parser, verified
 comment-stripped-identical to the mobile one so the two screens can never
 disagree about where a step ends.
 
+## 2026-08-01 — Two pieces of feedback that both came down to "half-done reads worse than absent"
+
+### The graph links are gone; the graph is not
+
+The technique detail screen linked `setup_from`, `common_next_moves` and
+`common_counters` to other techniques. Verdict after using it: *"I don't really
+need the links… they kinda cool but its not full."*
+
+That is a coverage problem wearing a UI complaint. **~80%** of `setup_from`
+entries name a real library entry, but only **~29%** of next-moves and **~6%**
+of counters — the rest is prose like "establish grips or inside ties". So a
+typical screen showed one or two links surrounded by plain text, which reads as
+a feature that half-works rather than as a graph.
+
+The lists stay as reference text — knowing an armbar chains to a triangle is
+useful whether or not the app can navigate there. The navigation goes. That
+deleted `resolveEdge`, `indexByName`, `edgeKey` and `indexTechniques` outright,
+and with them a whole network fetch on the mobile detail screen: it no longer
+loads all 466 summaries just to decide what is tappable. Worth reconsidering if
+coverage ever approaches "nearly every entry resolves".
+
+### The 20 BJJ drills left the exercise catalog
+
+*"some older bjj in library with default images are still present."* Two things
+were true at once. The exercise catalog held 20 BJJ conditioning drills — Bear
+Crawl, Sprawl, Granby Roll — which predate the technique library, so filtering
+the Library to "BJJ" returned drills **and** 466 techniques: two different kinds
+of thing under one label. And all 20 have no media of their own, so the backend
+served each the per-sport placeholder from `defaultMedia`, rendering a block of
+identical stock photos.
+
+They are removed. "BJJ" in the Library now means the technique library.
+`Technical Stand-Up`, the one entry that existed on both sides, stops being a
+duplicate.
+
+**This is the first time `UpsertAll` never deleting has actually cost
+something.** Removing rows from `exercises.json` leaves them in every database
+already seeded, so it took migration `000019` — and that migration is
+deliberately conditional:
+
+```sql
+DELETE FROM exercises e
+WHERE e.sport = 'bjj'
+  AND NOT EXISTS (SELECT 1 FROM session_sets  s WHERE s.exercise_id = e.id)
+  AND NOT EXISTS (SELECT 1 FROM workout_items w WHERE w.exercise_id = e.id);
+```
+
+`session_sets` and `workout_items` reference `exercises` with **no** `ON DELETE`
+clause. An unconditional delete would fail the migration outright or, worse,
+tempt someone into adding `CASCADE` and silently destroying training history. A
+drill that survives because someone logged it stays visible in the library —
+the right failure direction. Checked against staging first: 20 rows, 0 referenced by `session_sets`,
+`workout_items` or `pinned_exercises` — and, after review pointed out the
+original claim of "0 referenced by anything" skipped it, 0 in
+`exercise_unit_prefs` too. That one and `pinned_exercises` CASCADE, so on
+another database they would be deleted silently along with the drill; both are
+trivially recreatable preferences rather than training history, which is why
+they are not in the guard.
+
+### The consequence worth stating plainly
+
+With no bjj entries in the catalog and the existing sport-equality rule, **a
+`sport='bjj'` session can no longer contain a single set, and a bjj workout
+template can no longer contain an item.** Every remaining catalog entry
+mismatches, and techniques are not loggable — there is no `technique_id` on
+`session_sets`.
+
+That is coherent with where BJJ is going, and `docs/testing/functional-scenarios.md`
+already called the old arrangement a stopgap ("BJJ workouts only work because
+two BJJ entries live in the exercise catalog; a real technique library is its
+own module"). But it is a capability that existed this morning and does not
+now, and the review is what forced it to be written down rather than discovered
+later. Making techniques loggable is the work that closes it.
+
+### What the test suite caught
+
+Four integration tests in `session` and `workout` broke — both packages pinned
+`exBJJ = "bear-crawl-forward"` as their non-strength fixture — plus
+`TestPostgresRepository_ListFilters`, which asserted "expected at least one bjj
+exercise". All five are the tests doing their job.
+
+**They were nearly missed.** A local `go test ./...` reported those two packages
+as `(cached)`, so the run looked green while four tests were broken; only
+`-count=1` surfaced them. The documented gotcha about integration tests
+skipping without `TEST_DATABASE_URL` has a sibling: they can also be *cached*
+past a data change they depend on. The fixtures now point at `run`, the one
+remaining non-strength catalog entry. It now filters on
+`running` for the positive case and asserts bjj is **empty**, with a comment
+saying why — so if the drills ever come back, something fails loudly rather
+than bear crawls quietly reappearing among the armbars.
+
+### Still true, and deliberately not changed
+
+`defaultMedia` still serves per-sport placeholders to the ~500 strength and
+running exercises with no artwork of their own. That was offered as part of this
+change and not taken; it remains the case that most catalog rows show a stock
+image rather than the movement.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.
