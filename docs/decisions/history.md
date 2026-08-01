@@ -3026,6 +3026,51 @@ data, and staging needs a sign-in. The technique summaries are cached for the
 tab's lifetime with no invalidation, which is right for reference content and
 wrong the moment techniques become editable.
 
+## 2026-07-31 — A green build log is not a working app on a phone
+
+Three separate failures in one install session, none of which any check in this
+repo would have caught, and all three of which reported success.
+
+**1. `expo run:ios` hangs silently when the phone isn't reachable.** No error,
+no timeout, no `xcodebuild` process — sixteen minutes at 0.4% CPU with nothing
+written to the build directory. Diagnosing it produced a correction worth
+keeping: `xcrun xctrace list devices` files a perfectly usable wired phone under
+`== Devices Offline ==`, and `xcrun devicectl list devices` shows an **unplugged**
+phone as `available (paired)` because it counts the Wi-Fi pairing. Neither
+listing is a readiness check. `tunnelState: connected` + `transportType: wired`
+from `devicectl device info details`, plus `ioreg -p IOUSB` finding the device,
+are the signals that mean anything.
+
+**2. A Debug build installs, reports zero errors, and cannot run.** `expo run:ios`
+without `--configuration Release` produces an app with no `main.jsbundle`; it
+loads JS from Metro, which the same command stops on exit. The build log is
+identical to a working one. `docs/architecture/ios-testflight.md` already said
+to use Release and already explained why — the failure was not reading it.
+
+**3. A correct build is still not a correct install.** The Release rebuild's log
+read `Installing .../Release-iphoneos/VOLA.app`, and the phone kept running the
+Debug build from two minutes earlier, failing with `No script URL provided …
+unsanitizedScriptURLString = (null)`. Both builds carry `CFBundleVersion: 1` and
+version `1.0.0`, which is the plausible reason the replacement was skipped —
+**not proven**, and worth revisiting if it recurs. An explicit
+`devicectl device install app` fixed it. Uninstall-then-install would also have
+worked and is the wrong instinct: it destroys unsynced offline data in the app's
+SQLite store.
+
+### Why this is a docs entry and not just a bad afternoon
+
+Each failure was invisible to `tsc`, to lint, to a production build, and to CI.
+The only thing that caught any of them was looking at the artifact instead of
+the log — `find` for the `.jsbundle`, and launching with `--console` to watch
+the bridge actually evaluate it. That check is now written down next to the
+build command, along with the device-readiness probes.
+
+A related habit, from the same session: a background command's output is
+buffered until it exits, so a hung build looks identical to a working one.
+Redirecting to a log under `script -q /dev/null` makes progress visible within
+seconds, which is the difference between noticing a stall and being asked about
+it fifteen minutes later.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.
