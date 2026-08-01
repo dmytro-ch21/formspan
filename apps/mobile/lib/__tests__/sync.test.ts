@@ -1,5 +1,8 @@
+import { AppState } from 'react-native';
+
+import { OfflineError } from '../apiError';
 import { countPendingSessions, syncSessions, type SessionSyncResult } from '../sessionStore';
-import { request, setSyncIdentity, syncNow, syncState } from '../sync';
+import { request, setSyncIdentity, startSyncOrchestrator, syncNow, syncState } from '../sync';
 
 /**
  * The sync orchestrator.
@@ -185,3 +188,90 @@ describe('after sign-out', () => {
 });
 
 afterAll(() => jest.useRealTimers());
+
+describe('when the sync THROWS rather than reporting a failure count', () => {
+  // The mock always resolved before, so this whole catch — including the
+  // online classification — was uncovered, and inverting it survived the
+  // suite despite a test titled "reports offline only when the sync could not
+  // reach the server".
+  it('classifies an OfflineError as offline', async () => {
+    mockCount.mockResolvedValue(1);
+    mockSync.mockRejectedValue(new OfflineError());
+    setSyncIdentity('user_1', token);
+    await settle(20);
+    expect(syncState().online).toBe(false);
+    expect(syncState().lastError).toEqual(expect.any(String));
+  });
+
+  it('does not claim offline for a thrown error that is not one', async () => {
+    mockCount.mockResolvedValue(1);
+    mockSync.mockRejectedValue(new Error('something else broke'));
+    setSyncIdentity('user_1', token);
+    await settle(20);
+    expect(syncState().online).toBe(true);
+  });
+
+  it('leaves syncing false rather than stuck on', async () => {
+    mockSync.mockRejectedValue(new OfflineError());
+    setSyncIdentity('user_1', token);
+    await settle(20);
+    expect(syncState().syncing).toBe(false);
+  });
+});
+
+describe('the foreground trigger', () => {
+  // The module's own comment calls this "the trigger that matters most" — it
+  // is what makes "walk out of a basement and open the app" sync — and it had
+  // no test at all. Importable AppState was half the reason for jest-expo.
+  /**
+   * Capture the handler the orchestrator registers, by spying on AppState
+   * rather than mocking the whole of react-native — mocking the module wholesale
+   * breaks Expo's global installation and takes the other suites down with it.
+   */
+  let handler: ((s: string) => void) | undefined;
+  let spy: jest.SpyInstance;
+
+  beforeEach(() => {
+    handler = undefined;
+    spy = jest.spyOn(AppState, 'addEventListener').mockImplementation(((
+      _: string,
+      fn: (s: string) => void,
+    ) => {
+      handler = fn;
+      return { remove: () => void (handler = undefined) };
+    }) as never);
+  });
+
+  afterEach(() => spy.mockRestore());
+
+  const fire = () => handler!;
+
+  it('syncs when the app returns to the foreground with work pending', async () => {
+    mockCount.mockResolvedValue(2);
+    setSyncIdentity('user_1', token);
+    await settle(20);
+    const stop = startSyncOrchestrator();
+
+    const before = mockSync.mock.calls.length;
+    fire()('background');
+    fire()('active');
+    await settle(20);
+
+    expect(mockSync.mock.calls.length).toBeGreaterThan(before);
+    stop();
+  });
+
+  it('does not sync on a transition that is not a return', async () => {
+    mockCount.mockResolvedValue(2);
+    setSyncIdentity('user_1', token);
+    await settle(20);
+    const stop = startSyncOrchestrator();
+
+    const before = mockSync.mock.calls.length;
+    fire()('inactive'); // active -> inactive is leaving, not returning
+    await settle(20);
+
+    expect(mockSync.mock.calls.length).toBe(before);
+    stop();
+  });
+});

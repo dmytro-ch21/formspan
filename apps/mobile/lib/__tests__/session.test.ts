@@ -14,15 +14,64 @@ import { clearSessionToken, getSessionToken } from '../session';
  * refresh asserts the getter was actually reached.
  */
 
+/**
+ * The stand-in keychain, held on `globalThis`.
+ *
+ * NOT inside the mock factory: `jest.resetModules()` re-runs that factory, so
+ * a handle captured at import time would point at a Map the module under test
+ * no longer uses — which is what made the first version of the cold-start
+ * tests fail confusingly. `globalThis` survives the registry reset.
+ */
+const keychain: Map<string, string> = ((globalThis as Record<string, unknown>).__keychain ??=
+  new Map<string, string>()) as Map<string, string>;
+
 jest.mock('expo-secure-store', () => {
-  const mem = new Map<string, string>();
+  const mem = (globalThis as Record<string, unknown>).__keychain as Map<string, string>;
   return {
     getItemAsync: jest.fn(async (k: string) => mem.get(k) ?? null),
     setItemAsync: jest.fn(async (k: string, v: string) => void mem.set(k, v)),
     deleteItemAsync: jest.fn(async (k: string) => void mem.delete(k)),
-    __mem: mem,
   };
 });
+
+const STORE_KEY = 'vola.session.token';
+
+/**
+ * A genuinely cold module, with the keychain pre-seeded.
+ *
+ * `clearSessionToken()` — which every other test uses to reset — sets
+ * `restorePromise` to a resolved promise and nothing ever nulls it. That is
+ * correct for the app (it stops a later caller re-reading a keychain we just
+ * emptied) but it means `restore()`'s body never runs under the normal reset,
+ * so the whole persistence half of the broker was **structurally untestable**
+ * and four mutations survived: the keychain cross-user check, the
+ * expired-stored-token guard, `persist()`, and `clearSessionToken`'s own
+ * keychain delete.
+ *
+ * Resetting the module registry is the only way to get a real cold start.
+ */
+/**
+ * `instanceof` is the wrong check across a module reset.
+ *
+ * `jest.resetModules()` gives the freshly-required `session` module its own
+ * `apiError` too, so the `OfflineError` it throws is a *different class
+ * object* from the one this file imported — producing the memorable
+ * "Expected constructor: OfflineError / Received constructor: OfflineError".
+ * The name is the stable identity across registries.
+ */
+async function expectOffline(p: Promise<unknown>) {
+  await expect(p).rejects.toMatchObject({ name: 'OfflineError' });
+}
+
+function coldStart(stored?: string): typeof import('../session') {
+  keychain.clear();
+  if (stored) keychain.set(STORE_KEY, stored);
+  jest.resetModules();
+  // `require`, not a dynamic `import()`: jest transforms to CJS, and a real
+  // dynamic import needs --experimental-vm-modules.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require('../session') as typeof import('../session');
+}
 
 const b64url = (o: unknown) =>
   Buffer.from(JSON.stringify(o)).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -118,5 +167,48 @@ describe('shared device', () => {
     await inFlight.catch(() => {});
 
     await expect(getSessionToken(async () => null, 'user_A')).rejects.toBeInstanceOf(OfflineError);
+  });
+});
+
+describe('cold start from the keychain', () => {
+  it('uses a stored token without asking Clerk at all', async () => {
+    // The point of persisting: a relaunch in a dead spot can still reach our
+    // API until that token genuinely expires.
+    const stored = jwt('user_1', FRESH);
+    const { getSessionToken: fresh } = coldStart(stored);
+    const clerk = jest.fn(async () => null);
+
+    expect(await fresh(clerk, 'user_1')).toBe(stored);
+    expect(clerk).not.toHaveBeenCalled();
+  });
+
+  it('ignores a stored token that has already expired', async () => {
+    // Sending it would earn a 401 that reads as an auth problem rather than
+    // a stale cache.
+    const { getSessionToken: fresh } = coldStart(jwt('user_1', -10));
+    await expectOffline(fresh(async () => null, 'user_1'));
+  });
+
+  it("discards a stored token belonging to a different athlete", async () => {
+    const { getSessionToken: fresh } = coldStart(jwt('user_A', FRESH));
+    await expectOffline(fresh(async () => null, 'user_B'));
+    // And removes it, so it can't be offered again.
+    expect(keychain.get(STORE_KEY)).toBeUndefined();
+  });
+
+  it('persists a freshly minted token for the next cold start', async () => {
+    const { getSessionToken: fresh } = coldStart();
+    const minted = jwt('user_1', FRESH);
+    await fresh(async () => minted, 'user_1');
+    expect(keychain.get(STORE_KEY)).toBe(minted);
+  });
+
+  it('clears the keychain on sign-out', async () => {
+    const { getSessionToken: fresh, clearSessionToken: clear } = coldStart();
+    await fresh(async () => jwt('user_1', FRESH), 'user_1');
+    expect(keychain.get(STORE_KEY)).toBeDefined();
+
+    await clear();
+    expect(keychain.get(STORE_KEY)).toBeUndefined();
   });
 });

@@ -3857,6 +3857,41 @@ CLAUDE.md now says the same thing as a rule: when adding a test here, delete
 the guard it covers and check it goes red. A green test proves nothing about
 code it never reaches.
 
+### Review: the bar held for the guards I named, and not for the rest
+
+The reviewer's substantive point was that "every guard is mutation-checked" was
+true of the seven guards I happened to test and silently untrue elsewhere.
+Four surviving mutations sat in **the broker's entire restore/persistence
+path** — which was *structurally* untestable, because the `clearSessionToken()`
+every test uses as its reset sets `restorePromise` to a resolved promise that
+nothing ever nulls, so `restore()`'s body never executed under any test. The
+mock even exposed the keychain for seeding and nothing used it.
+
+Fixed with `jest.resetModules()` cold-start cases. Two things learned doing it:
+a handle to a mock's internal state must live on `globalThis`, because
+`resetModules` re-runs the factory and leaves your captured reference pointing
+at an orphan; and `instanceof` is the wrong assertion across a registry reset,
+producing the memorable "Expected constructor: OfflineError / Received
+constructor: OfflineError".
+
+Also closed: the orchestrator's thrown-rejection path (the mock only ever
+*resolved*, so inverting `online: !isOffline(err)` survived a test literally
+titled "reports offline only when the sync could not reach the server"), the
+AppState foreground trigger — the module's own comment calls it "the trigger
+that matters most" and it had no test at all — and `fillForward`'s `i <= index`
+guard, which every fixture had made unreachable by always entering at index 0.
+
+**Writing the foreground test found a real bug**: `previous.match(/…/)` assumes
+`AppState.currentState` is a string, and it is documented as possibly null at
+startup. It throws inside a listener nobody awaits, so the trigger would have
+died silently. Now a comparison.
+
+Seven mutations, six caught. The seventh — `restore()`'s expired-token guard —
+survives and always will: `usableToken` refuses expired tokens on every path
+out of the module, so the check changes no observable behaviour. Kept as
+defence in depth and **documented as deliberately untested**, so the gap reads
+as a decision rather than an oversight.
+
 Wired into CI as `pnpm run test:mobile` in the Mobile job, so it runs on every
 PR rather than when someone remembers.
 

@@ -280,7 +280,13 @@ export function startSyncOrchestrator(): () => void {
   appStateSub?.remove();
   let previous: AppStateStatus = AppState.currentState;
   appStateSub = AppState.addEventListener('change', (next) => {
-    const returned = previous.match(/inactive|background/) && next === 'active';
+    // Compared, not regex-matched. `AppState.currentState` is documented as
+    // possibly null at startup (and is not a string under jest), so calling
+    // `.match` on it throws — taking the foreground trigger down with it, and
+    // silently, since this runs inside a listener nobody awaits. A test found
+    // this before a device did.
+    const wasAway = previous === 'background' || previous === 'inactive';
+    const returned = wasAway && next === 'active';
     previous = next;
     if (!returned) return;
     // A resume is also the moment to re-check what is waiting: the app may

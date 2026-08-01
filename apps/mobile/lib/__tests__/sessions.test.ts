@@ -73,6 +73,15 @@ describe('fillForward', () => {
     expect(out[1]).toMatchObject({ rir: null, rpe: null });
   });
 
+  it('never fills a set ABOVE the one entered', () => {
+    // Every other case here starts at index 0, so no fixture had a row above
+    // the source — meaning `i <= index` could be deleted and nothing noticed.
+    const sets = [set('squat'), set('squat', { reps: 5, weight_kg: 100 }), set('squat')];
+    const out = fillForward(sets, 1, REPS_AND_WEIGHT);
+    expect(out[0]).toMatchObject({ reps: null, weight_kg: null });
+    expect(out[2]).toMatchObject({ reps: 5, weight_kg: 100 });
+  });
+
   it('returns the same array when nothing changed, so callers can skip a write', () => {
     const sets = [set('squat', { reps: 5 }), set('squat', { reps: 3 })];
     expect(fillForward(sets, 0, ['reps'])).toBe(sets);
