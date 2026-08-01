@@ -168,6 +168,27 @@ export default function LibraryScreen() {
   return (
     <View style={styles.container} testID="library-screen">
       <ScreenHeader title="Library" />
+
+      {/* The BJJ library is a separate screen rather than a segment of this
+          one. They share the word "library" and nothing else: an exercise is a
+          loggable unit with images and a load type, a technique is reference
+          knowledge positioned in a graph. Cramming both behind one toggle
+          would mean one search box and one filter row serving two different
+          vocabularies. */}
+      <Pressable
+        style={styles.bjjLink}
+        onPress={() => router.push('/techniques')}
+        accessibilityRole="button"
+        accessibilityLabel="Open the BJJ technique library"
+        testID="library-to-techniques"
+      >
+        <View style={styles.bjjMain}>
+          <Text style={styles.bjjTitle}>BJJ Techniques</Text>
+          <Text style={styles.bjjMeta}>Positions, submissions and IBJJF legality</Text>
+        </View>
+        <Text style={styles.bjjChevron}>›</Text>
+      </Pressable>
+
       <View style={styles.controls}>
         <TextInput
           style={styles.search}
@@ -292,6 +313,23 @@ export default function LibraryScreen() {
 }
 
 const styles = StyleSheet.create({
+  bjjLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginHorizontal: 20,
+    marginBottom: 4,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: vola.line,
+    backgroundColor: vola.surface,
+  },
+  bjjMain: { flex: 1, gap: 2 },
+  bjjTitle: { fontSize: 15, fontWeight: '700' },
+  bjjMeta: { color: vola.textDim, fontSize: 12 },
+  bjjChevron: { color: vola.textDim, fontSize: 22 },
+
   container: { flex: 1 },
   controls: { paddingHorizontal: 16, paddingTop: 12, gap: 10 },
   search: {

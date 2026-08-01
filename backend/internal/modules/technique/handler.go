@@ -43,6 +43,19 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"techniques": techniques})
 }
 
+// Rulesets is its own endpoint rather than being embedded in every list
+// response. There are 25 and they change with the IBJJF rulebook, not with the
+// library — so a client fetches them once, caches them, and turns each
+// summary's ibjjf_ruleset_id into a legality badge locally.
+func (h *Handler) Rulesets(w http.ResponseWriter, r *http.Request) {
+	rulesets, err := h.repo.Rulesets(r.Context())
+	if err != nil {
+		apihttp.WriteInternal(w, r, "technique: rulesets", err)
+		return
+	}
+	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"rulesets": rulesets})
+}
+
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	t, err := h.repo.Get(r.Context(), r.PathValue("techniqueID"))
 	if err != nil {

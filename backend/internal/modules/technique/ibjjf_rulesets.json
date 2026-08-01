@@ -1,0 +1,538 @@
+[
+  {
+    "id": "adult-brown-black-no-gi-only",
+    "age_scope": "Adult (18+) — Gi and No-Gi separated",
+    "rule_class": "Adult Brown/Black No-Gi only",
+    "gi_allowed_belts": [],
+    "gi_note": "N/A — no-gi-specific",
+    "no_gi_allowed_belts": [
+      "Brown",
+      "Black"
+    ],
+    "no_gi_note": "",
+    "notes": "Conservative IBJJF classification: the Aoki lock can create heel-hook/internal knee-rotation mechanics. Treat it as Adult Brown/Black No-Gi only; the referee judges the actual mechanics used. Under-18 divisions use a stricter age-specific illegal-moves chart.",
+    "sources": [
+      "https://ibjjf.com/books-videos",
+      "https://ibjjf.com/news/new-rules-updates",
+      "https://ibjjf.com/events/pan-ibjjf-jiu-jitsu-no-gi-championship-2026"
+    ],
+    "is_restricted": true
+  },
+  {
+    "id": "adult-brown-black-no-gi-only-2",
+    "age_scope": "Adult (18+) — Gi and No-Gi separated",
+    "rule_class": "Adult Brown/Black No-Gi only",
+    "gi_allowed_belts": [],
+    "gi_note": "N/A — no-gi-specific",
+    "no_gi_allowed_belts": [
+      "Brown",
+      "Black"
+    ],
+    "no_gi_note": "",
+    "notes": "Heel hooks are legal only in Adult Brown and Black Belt No-Gi divisions; they are illegal in Gi, lower-belt, Juvenile, and Master divisions. Under-18 divisions use a stricter age-specific illegal-moves chart.",
+    "sources": [
+      "https://ibjjf.com/books-videos",
+      "https://ibjjf.com/news/new-rules-updates",
+      "https://ibjjf.com/events/pan-ibjjf-jiu-jitsu-no-gi-championship-2026"
+    ],
+    "is_restricted": true
+  },
+  {
+    "id": "adult-brown-black-no-gi-only-3",
+    "age_scope": "Adult (18+) — Gi and No-Gi separated",
+    "rule_class": "Adult Brown/Black No-Gi only",
+    "gi_allowed_belts": [],
+    "gi_note": "N/A — no-gi-specific",
+    "no_gi_allowed_belts": [
+      "Brown",
+      "Black"
+    ],
+    "no_gi_note": "",
+    "notes": "This saddle/cross-ashi configuration normally constitutes knee reaping. Knee reaping is legal only in Adult Brown and Black Belt No-Gi divisions. Under-18 divisions use a stricter age-specific illegal-moves chart.",
+    "sources": [
+      "https://ibjjf.com/books-videos",
+      "https://ibjjf.com/news/new-rules-updates",
+      "https://ibjjf.com/events/pan-ibjjf-jiu-jitsu-no-gi-championship-2026"
+    ],
+    "is_restricted": true
+  },
+  {
+    "id": "blue-only-adult",
+    "age_scope": "Adult (18+) — Gi and No-Gi separated",
+    "rule_class": "Blue+ only — Adult",
+    "gi_allowed_belts": [
+      "Blue",
+      "Purple",
+      "Brown",
+      "Black"
+    ],
+    "gi_note": "",
+    "no_gi_allowed_belts": [
+      "Blue",
+      "Purple",
+      "Brown",
+      "Black"
+    ],
+    "no_gi_note": "",
+    "notes": "Wrist locks are legal for Adult Blue, Purple, Brown, and Black Belts; they are illegal for Adult White Belt and youth divisions. Under-18 divisions use a stricter age-specific illegal-moves chart.",
+    "sources": [
+      "https://ibjjf.com/books-videos",
+      "https://ibjjf.com/events/pan-ibjjf-jiu-jitsu-no-gi-championship-2026"
+    ],
+    "is_restricted": true
+  },
+  {
+    "id": "brown-black-only-adult",
+    "age_scope": "Adult (18+) — Gi and No-Gi separated",
+    "rule_class": "Brown/Black only — Adult",
+    "gi_allowed_belts": [
+      "Brown",
+      "Black"
+    ],
+    "gi_note": "",
+    "no_gi_allowed_belts": [
+      "Brown",
+      "Black"
+    ],
+    "no_gi_note": "",
+    "notes": "Kneebars, toe holds, and biceps/calf slicers are legal for Adult Brown and Black Belts; they are illegal for Adult White, Blue, and Purple Belts. Under-18 divisions use a stricter age-specific illegal-moves chart.",
+    "sources": [
+      "https://ibjjf.com/books-videos",
+      "https://ibjjf.com/events/pan-ibjjf-jiu-jitsu-no-gi-championship-2026"
+    ],
+    "is_restricted": true
+  },
+  {
+    "id": "brown-black-only-adult-2",
+    "age_scope": "Adult (18+) — Gi and No-Gi separated",
+    "rule_class": "Brown/Black only — Adult",
+    "gi_allowed_belts": [
+      "Brown",
+      "Black"
+    ],
+    "gi_note": "",
+    "no_gi_allowed_belts": [
+      "Brown",
+      "Black"
+    ],
+    "no_gi_note": "",
+    "notes": "Not named separately in the poster; conservatively classify Estima-lock mechanics with toe holds/rotational foot locks: Adult Brown and Black only. Referee classification depends on execution. Under-18 divisions use a stricter age-specific illegal-moves chart.",
+    "sources": [
+      "https://ibjjf.com/books-videos",
+      "https://ibjjf.com/events/pan-ibjjf-jiu-jitsu-no-gi-championship-2026"
+    ],
+    "is_restricted": true
+  },
+  {
+    "id": "brown-black-only-adult-3",
+    "age_scope": "Adult (18+) — Gi and No-Gi separated",
+    "rule_class": "Brown/Black only — Adult",
+    "gi_allowed_belts": [],
+    "gi_note": "N/A — no-gi-specific",
+    "no_gi_allowed_belts": [
+      "Brown",
+      "Black"
+    ],
+    "no_gi_note": "",
+    "notes": "Kneebars, toe holds, and biceps/calf slicers are legal for Adult Brown and Black Belts; they are illegal for Adult White, Blue, and Purple Belts. Under-18 divisions use a stricter age-specific illegal-moves chart.",
+    "sources": [
+      "https://ibjjf.com/books-videos",
+      "https://ibjjf.com/events/pan-ibjjf-jiu-jitsu-no-gi-championship-2026"
+    ],
+    "is_restricted": true
+  },
+  {
+    "id": "choke-control-legal-no-spinal-crank",
+    "age_scope": "Adult (18+) — Gi and No-Gi separated",
+    "rule_class": "Choke/control legal; no spinal crank",
+    "gi_allowed_belts": [],
+    "gi_note": "N/A — no-gi-specific",
+    "no_gi_allowed_belts": [
+      "Blue",
+      "Purple",
+      "Brown",
+      "Black"
+    ],
+    "no_gi_note": "",
+    "notes": "Legal as a choke or control at the listed Adult belts; it must not be applied as a spinal/neck lock without a choke. Under-18 divisions use a stricter age-specific illegal-moves chart.",
+    "sources": [
+      "https://ibjjf.com/books-videos",
+      "https://ibjjf.com/events/pan-ibjjf-jiu-jitsu-no-gi-championship-2026"
+    ],
+    "is_restricted": false
+  },
+  {
+    "id": "choke-control-legal-no-spinal-crank-2",
+    "age_scope": "Adult (18+) — Gi and No-Gi separated",
+    "rule_class": "Choke/control legal; no spinal crank",
+    "gi_allowed_belts": [
+      "White",
+      "Blue",
+      "Purple",
+      "Brown",
+      "Black"
+    ],
+    "gi_note": "",
+    "no_gi_allowed_belts": [
+      "Blue",
+      "Purple",
+      "Brown",
+      "Black"
+    ],
+    "no_gi_note": "",
+    "notes": "Legal as a choke or control at the listed Adult belts; it must not be applied as a spinal/neck lock without a choke. Under-18 divisions use a stricter age-specific illegal-moves chart.",
+    "sources": [
+      "https://ibjjf.com/books-videos",
+      "https://ibjjf.com/events/pan-ibjjf-jiu-jitsu-no-gi-championship-2026"
+    ],
+    "is_restricted": false
+  },
+  {
+    "id": "compression-legal-no-hand-smother",
+    "age_scope": "Adult (18+) — Gi and No-Gi separated",
+    "rule_class": "Compression legal; no hand smother",
+    "gi_allowed_belts": [],
+    "gi_note": "N/A — no-gi-specific",
+    "no_gi_allowed_belts": [
+      "Blue",
+      "Purple",
+      "Brown",
+      "Black"
+    ],
+    "no_gi_note": "",
+    "notes": "Generally legal as body/chest compression at the listed Adult belts. Do not obstruct the nose or mouth with the hands or add a prohibited neck/spinal crank. Under-18 divisions use a stricter age-specific illegal-moves chart.",
+    "sources": [
+      "https://ibjjf.com/books-videos",
+      "https://ibjjf.com/events/pan-ibjjf-jiu-jitsu-no-gi-championship-2026"
+    ],
+    "is_restricted": false
+  },
+  {
+    "id": "generally-legal-adult",
+    "age_scope": "Adult (18+) — Gi and No-Gi separated",
+    "rule_class": "Generally legal — Adult",
+    "gi_allowed_belts": [],
+    "gi_note": "N/A — no-gi-specific",
+    "no_gi_allowed_belts": [
+      "Blue",
+      "Purple",
+      "Brown",
+      "Black"
+    ],
+    "no_gi_note": "",
+    "notes": "Generally legal in Adult competition at the listed belts when performed without a separately prohibited action or variation. Under-18 divisions use a stricter age-specific illegal-moves chart.",
+    "sources": [
+      "https://ibjjf.com/books-videos",
+      "https://ibjjf.com/events/pan-ibjjf-jiu-jitsu-no-gi-championship-2026"
+    ],
+    "is_restricted": false
+  },
+  {
+    "id": "generally-legal-adult-2",
+    "age_scope": "Adult (18+) — Gi and No-Gi separated",
+    "rule_class": "Generally legal — Adult",
+    "gi_allowed_belts": [
+      "White",
+      "Blue",
+      "Purple",
+      "Brown",
+      "Black"
+    ],
+    "gi_note": "",
+    "no_gi_allowed_belts": [
+      "Blue",
+      "Purple",
+      "Brown",
+      "Black"
+    ],
+    "no_gi_note": "",
+    "notes": "Generally legal in Adult competition at the listed belts when performed without a separately prohibited action or variation. Under-18 divisions use a stricter age-specific illegal-moves chart.",
+    "sources": [
+      "https://ibjjf.com/books-videos",
+      "https://ibjjf.com/events/pan-ibjjf-jiu-jitsu-no-gi-championship-2026"
+    ],
+    "is_restricted": false
+  },
+  {
+    "id": "generally-legal-adult-3",
+    "age_scope": "Adult (18+) — Gi and No-Gi separated",
+    "rule_class": "Generally legal — Adult",
+    "gi_allowed_belts": [
+      "White",
+      "Blue",
+      "Purple",
+      "Brown",
+      "Black"
+    ],
+    "gi_note": "",
+    "no_gi_allowed_belts": [],
+    "no_gi_note": "N/A — gi-specific",
+    "notes": "Generally legal in Adult competition at the listed belts when performed without a separately prohibited action or variation. Under-18 divisions use a stricter age-specific illegal-moves chart.",
+    "sources": [
+      "https://ibjjf.com/books-videos",
+      "https://ibjjf.com/events/pan-ibjjf-jiu-jitsu-no-gi-championship-2026"
+    ],
+    "is_restricted": false
+  },
+  {
+    "id": "generally-legal-controlled-landing",
+    "age_scope": "Adult (18+) — Gi and No-Gi separated",
+    "rule_class": "Generally legal — controlled landing",
+    "gi_allowed_belts": [],
+    "gi_note": "N/A — no-gi-specific",
+    "no_gi_allowed_belts": [
+      "Blue",
+      "Purple",
+      "Brown",
+      "Black"
+    ],
+    "no_gi_note": "",
+    "notes": "The takedown is generally legal for Adults at the listed belts. Finish with control: slams, head spikes, and illegal scissor-style actions remain prohibited. Under-18 divisions use a stricter age-specific illegal-moves chart.",
+    "sources": [
+      "https://ibjjf.com/books-videos",
+      "https://ibjjf.com/events/pan-ibjjf-jiu-jitsu-no-gi-championship-2026"
+    ],
+    "is_restricted": false
+  },
+  {
+    "id": "generally-legal-controlled-landing-2",
+    "age_scope": "Adult (18+) — Gi and No-Gi separated",
+    "rule_class": "Generally legal — controlled landing",
+    "gi_allowed_belts": [
+      "White",
+      "Blue",
+      "Purple",
+      "Brown",
+      "Black"
+    ],
+    "gi_note": "",
+    "no_gi_allowed_belts": [
+      "Blue",
+      "Purple",
+      "Brown",
+      "Black"
+    ],
+    "no_gi_note": "",
+    "notes": "The takedown is generally legal for Adults at the listed belts. Finish with control: slams, head spikes, and illegal scissor-style actions remain prohibited. Under-18 divisions use a stricter age-specific illegal-moves chart.",
+    "sources": [
+      "https://ibjjf.com/books-videos",
+      "https://ibjjf.com/events/pan-ibjjf-jiu-jitsu-no-gi-championship-2026"
+    ],
+    "is_restricted": false
+  },
+  {
+    "id": "generally-legal-controlled-landing-3",
+    "age_scope": "Adult (18+) — Gi and No-Gi separated",
+    "rule_class": "Generally legal — controlled landing",
+    "gi_allowed_belts": [
+      "White",
+      "Blue",
+      "Purple",
+      "Brown",
+      "Black"
+    ],
+    "gi_note": "",
+    "no_gi_allowed_belts": [],
+    "no_gi_note": "N/A — gi-specific",
+    "notes": "The takedown is generally legal for Adults at the listed belts. Finish with control: slams, head spikes, and illegal scissor-style actions remain prohibited. Under-18 divisions use a stricter age-specific illegal-moves chart.",
+    "sources": [
+      "https://ibjjf.com/books-videos",
+      "https://ibjjf.com/events/pan-ibjjf-jiu-jitsu-no-gi-championship-2026"
+    ],
+    "is_restricted": false
+  },
+  {
+    "id": "generally-legal-grip-timing-requirements",
+    "age_scope": "Adult (18+) — Gi and No-Gi separated",
+    "rule_class": "Generally legal — grip/timing requirements",
+    "gi_allowed_belts": [
+      "White",
+      "Blue",
+      "Purple",
+      "Brown",
+      "Black"
+    ],
+    "gi_note": "",
+    "no_gi_allowed_belts": [
+      "Blue",
+      "Purple",
+      "Brown",
+      "Black"
+    ],
+    "no_gi_note": "",
+    "notes": "Guard pulling is generally legal at the listed Adult belts, subject to current contact, timing, and scoring requirements; jumping actions and unsafe landings can be penalized. Under-18 divisions use a stricter age-specific illegal-moves chart.",
+    "sources": [
+      "https://ibjjf.com/books-videos",
+      "https://ibjjf.com/events/pan-ibjjf-jiu-jitsu-no-gi-championship-2026"
+    ],
+    "is_restricted": false
+  },
+  {
+    "id": "generally-legal-grip-timing-requirements-2",
+    "age_scope": "Adult (18+) — Gi and No-Gi separated",
+    "rule_class": "Generally legal — grip/timing requirements",
+    "gi_allowed_belts": [
+      "White",
+      "Blue",
+      "Purple",
+      "Brown",
+      "Black"
+    ],
+    "gi_note": "",
+    "no_gi_allowed_belts": [],
+    "no_gi_note": "N/A — gi-specific",
+    "notes": "Guard pulling is generally legal at the listed Adult belts, subject to current contact, timing, and scoring requirements; jumping actions and unsafe landings can be penalized. Under-18 divisions use a stricter age-specific illegal-moves chart.",
+    "sources": [
+      "https://ibjjf.com/books-videos",
+      "https://ibjjf.com/events/pan-ibjjf-jiu-jitsu-no-gi-championship-2026"
+    ],
+    "is_restricted": false
+  },
+  {
+    "id": "position-legal-execution-restricted",
+    "age_scope": "Adult (18+) — Gi and No-Gi separated",
+    "rule_class": "Position legal; execution restricted",
+    "gi_allowed_belts": [],
+    "gi_note": "N/A — no-gi-specific",
+    "no_gi_allowed_belts": [
+      "Blue",
+      "Purple",
+      "Brown",
+      "Black"
+    ],
+    "no_gi_note": "",
+    "notes": "Legal only while it remains a false reap. If the outside leg crosses the hip line and traps/forces the knee inward, it becomes knee reaping and is restricted to Adult Brown/Black No-Gi. Under-18 divisions use a stricter age-specific illegal-moves chart.",
+    "sources": [
+      "https://ibjjf.com/books-videos",
+      "https://ibjjf.com/events/pan-ibjjf-jiu-jitsu-no-gi-championship-2026"
+    ],
+    "is_restricted": false
+  },
+  {
+    "id": "position-legal-execution-restricted-2",
+    "age_scope": "Adult (18+) — Gi and No-Gi separated",
+    "rule_class": "Position legal; execution restricted",
+    "gi_allowed_belts": [],
+    "gi_note": "N/A — no-gi-specific",
+    "no_gi_allowed_belts": [
+      "Blue",
+      "Purple",
+      "Brown",
+      "Black"
+    ],
+    "no_gi_note": "",
+    "notes": "The position is generally legal, but lower belts and Gi divisions must avoid knee reaping, heel-hook mechanics, and other prohibited rotational pressure. Under-18 divisions use a stricter age-specific illegal-moves chart.",
+    "sources": [
+      "https://ibjjf.com/books-videos",
+      "https://ibjjf.com/events/pan-ibjjf-jiu-jitsu-no-gi-championship-2026"
+    ],
+    "is_restricted": false
+  },
+  {
+    "id": "position-legal-execution-restricted-3",
+    "age_scope": "Adult (18+) — Gi and No-Gi separated",
+    "rule_class": "Position legal; execution restricted",
+    "gi_allowed_belts": [
+      "White",
+      "Blue",
+      "Purple",
+      "Brown",
+      "Black"
+    ],
+    "gi_note": "",
+    "no_gi_allowed_belts": [
+      "Blue",
+      "Purple",
+      "Brown",
+      "Black"
+    ],
+    "no_gi_note": "",
+    "notes": "The position is generally legal, but lower belts and Gi divisions must avoid knee reaping, heel-hook mechanics, and other prohibited rotational pressure. Under-18 divisions use a stricter age-specific illegal-moves chart.",
+    "sources": [
+      "https://ibjjf.com/books-videos",
+      "https://ibjjf.com/events/pan-ibjjf-jiu-jitsu-no-gi-championship-2026"
+    ],
+    "is_restricted": false
+  },
+  {
+    "id": "position-sweep-legal-submission-pressure-restricted",
+    "age_scope": "Adult (18+) — Gi and No-Gi separated",
+    "rule_class": "Position/sweep legal; submission pressure restricted",
+    "gi_allowed_belts": [],
+    "gi_note": "N/A — no-gi-specific",
+    "no_gi_allowed_belts": [
+      "Blue",
+      "Purple",
+      "Brown",
+      "Black"
+    ],
+    "no_gi_note": "",
+    "notes": "The lockdown/electric-chair position or sweep is generally legal for Adults, but it must not become a prohibited leg-splitting submission, knee twist, or spinal lock. Under-18 divisions use a stricter age-specific illegal-moves chart.",
+    "sources": [
+      "https://ibjjf.com/books-videos",
+      "https://ibjjf.com/events/pan-ibjjf-jiu-jitsu-no-gi-championship-2026"
+    ],
+    "is_restricted": false
+  },
+  {
+    "id": "prohibited",
+    "age_scope": "Adult (18+) — Gi and No-Gi separated",
+    "rule_class": "Prohibited",
+    "gi_allowed_belts": [],
+    "gi_note": "N/A — no-gi-specific",
+    "no_gi_allowed_belts": [],
+    "no_gi_note": "Not legal",
+    "notes": "A twister is a spinal lock without a choke and is prohibited in IBJJF competition. Under-18 divisions use a stricter age-specific illegal-moves chart.",
+    "sources": [
+      "https://ibjjf.com/books-videos",
+      "https://ibjjf.com/events/pan-ibjjf-jiu-jitsu-no-gi-championship-2026"
+    ],
+    "is_restricted": true
+  },
+  {
+    "id": "straight-ankle-lock-adult",
+    "age_scope": "Adult (18+) — Gi and No-Gi separated",
+    "rule_class": "Straight ankle lock — Adult",
+    "gi_allowed_belts": [],
+    "gi_note": "N/A — no-gi-specific",
+    "no_gi_allowed_belts": [
+      "Blue",
+      "Purple",
+      "Brown",
+      "Black"
+    ],
+    "no_gi_note": "",
+    "notes": "Legal at the listed Adult belts only when it remains a straight ankle lock. Do not add a heel hook, knee reap, twisting-knee pressure, or prohibited outward foot rotation. Under-18 divisions use a stricter age-specific illegal-moves chart.",
+    "sources": [
+      "https://ibjjf.com/books-videos",
+      "https://ibjjf.com/events/pan-ibjjf-jiu-jitsu-no-gi-championship-2026"
+    ],
+    "is_restricted": false
+  },
+  {
+    "id": "straight-ankle-lock-adult-2",
+    "age_scope": "Adult (18+) — Gi and No-Gi separated",
+    "rule_class": "Straight ankle lock — Adult",
+    "gi_allowed_belts": [
+      "White",
+      "Blue",
+      "Purple",
+      "Brown",
+      "Black"
+    ],
+    "gi_note": "",
+    "no_gi_allowed_belts": [
+      "Blue",
+      "Purple",
+      "Brown",
+      "Black"
+    ],
+    "no_gi_note": "",
+    "notes": "Legal at the listed Adult belts only when it remains a straight ankle lock. Do not add a heel hook, knee reap, twisting-knee pressure, or prohibited outward foot rotation. Under-18 divisions use a stricter age-specific illegal-moves chart.",
+    "sources": [
+      "https://ibjjf.com/books-videos",
+      "https://ibjjf.com/events/pan-ibjjf-jiu-jitsu-no-gi-championship-2026"
+    ],
+    "is_restricted": false
+  }
+]

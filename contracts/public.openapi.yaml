@@ -210,8 +210,9 @@ components:
         counters. Reference content, identical for every user.
       required:
         [id, name, aliases, category, position, position_detail, gi_no_gi,
-         typical_belt, description, setup_from, common_counters,
-         created_at, updated_at]
+         typical_belt, description, when_to_use, setup_from,
+         common_next_moves, common_counters, video_reference, source_notes,
+         ibjjf_ruleset_id, created_at, updated_at]
       properties:
         id: { type: string, example: armbar-from-closed-guard }
         name: { type: string }
@@ -230,18 +231,131 @@ components:
         gi_no_gi:
           type: string
           enum: [Both, "Gi Only", "No-Gi Only"]
-        typical_belt: { type: string, example: White }
-        description: { type: string }
+        typical_belt:
+          type: string
+          example: White
+          description: >
+            The belt this is commonly taught from — an observation, NOT a
+            recommendation and NOT a rule. It sits beside IBJJF legality and
+            the two answer different questions: you may drill a technique long
+            before you are allowed to compete it. Present it subordinate to
+            `ibjjf`, never as a gate.
+        description:
+          type: string
+          description: The mechanics — how the technique is performed.
+        when_to_use:
+          type: string
+          description: >
+            The decision — when the mechanics apply, and what has to be true
+            first. Distinct from `description` on purpose; merging them
+            produces a paragraph that answers neither question well.
         setup_from:
           type: array
-          description: Graph edge — positions or techniques this is set up from.
+          description: >
+            Graph edge — positions or techniques this is set up from. About 80%
+            of entries name a real technique in the library.
+          items: { type: string }
+        common_next_moves:
+          type: array
+          description: >
+            Graph edge — what commonly follows. Only ~29% of entries name a
+            technique in the library; the rest is prose like "establish grips
+            or inside ties". A client may link the ones that resolve but MUST
+            render the others as plain text — a dead link is worse than text.
           items: { type: string }
         common_counters:
           type: array
-          description: Graph edge — what answers this technique.
+          description: >
+            Graph edge — what answers this technique. Only ~6% resolve to a
+            library entry; treat as prose.
           items: { type: string }
+        video_reference:
+          type: string
+          description: >
+            Empty for every technique in the current library. Render nothing
+            when blank rather than an empty section implying a missing video.
+        source_notes: { type: string }
+        ibjjf_ruleset_id:
+          type: string
+          description: >
+            References an IBJJFRuleset. Empty if the technique predates the
+            rulesets; treat that as "legality unknown", not "legal".
+        ibjjf:
+          allOf: [{ $ref: "#/components/schemas/IBJJFRuleset" }]
+          description: >
+            Resolved on the detail endpoint only, so a technique detail is one
+            request. Absent from list responses — fetch /techniques/rulesets
+            once and resolve `ibjjf_ruleset_id` locally.
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+
+    TechniqueSummary:
+      type: object
+      description: >
+        The list row. Carries what is needed to render, filter and search the
+        library and nothing else — the prose fields are most of the library's
+        bytes and a list needs none of them. Full rows would ship ~550 KB to
+        draw a scrolling list of 466; this is ~70 KB.
+
+        Aliases ARE included: the client searches locally, and "kesa gatame"
+        must find "Scarf Hold".
+      required:
+        [id, name, aliases, category, position, position_detail, gi_no_gi,
+         typical_belt, ibjjf_ruleset_id]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        aliases:
+          type: array
+          items: { type: string }
+        category: { type: string }
+        position: { type: string }
+        position_detail: { type: string }
+        gi_no_gi:
+          type: string
+          enum: [Both, "Gi Only", "No-Gi Only"]
+        typical_belt: { type: string }
+        ibjjf_ruleset_id: { type: string }
+
+    IBJJFRuleset:
+      type: object
+      description: >
+        One IBJJF competition ruling, shared by every technique it applies to.
+        25 of these cover all 466 techniques — normalised because `age_scope`
+        has one distinct value library-wide and the most common `notes` string
+        repeats 359 times at ~200 characters.
+      required:
+        [id, age_scope, rule_class, gi_allowed_belts, gi_note,
+         no_gi_allowed_belts, no_gi_note, is_restricted, notes, sources]
+      properties:
+        id: { type: string, example: brown-black-only-adult }
+        age_scope: { type: string, example: "Adult (18+) — Gi and No-Gi separated" }
+        rule_class: { type: string, example: "Brown/Black only — Adult" }
+        gi_allowed_belts:
+          type: array
+          description: >
+            EMPTY MEANS "this division does not apply" — a no-gi-only technique
+            has no gi belts — NOT "allowed at no belt". The reason is in
+            `gi_note`.
+          items: { type: string }
+        gi_note: { type: string, example: "N/A — no-gi-specific" }
+        no_gi_allowed_belts:
+          type: array
+          items: { type: string }
+        no_gi_note: { type: string }
+        is_restricted:
+          type: boolean
+          description: >
+            Whether this is a GENUINE restriction rather than the shape of
+            IBJJF's divisions. Adult no-gi has no white belt division, so a
+            no-gi list of "Blue, Purple, Brown, Black" is the BASELINE.
+            Do NOT re-derive this by comparing belt lists — that marks ~130
+            ordinary techniques (pummelling, sit-outs) as restricted when the
+            true number is 20. Use this field; it is computed at import.
+        notes: { type: string }
+        sources:
+          type: array
+          items: { type: string, format: uri }
 
     TechniqueList:
       type: object
@@ -249,7 +363,15 @@ components:
       properties:
         techniques:
           type: array
-          items: { $ref: "#/components/schemas/Technique" }
+          items: { $ref: "#/components/schemas/TechniqueSummary" }
+
+    IBJJFRulesetList:
+      type: object
+      required: [rulesets]
+      properties:
+        rulesets:
+          type: array
+          items: { $ref: "#/components/schemas/IBJJFRuleset" }
 
     WorkoutItem:
       type: object
@@ -1423,6 +1545,25 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /techniques/rulesets:
+    get:
+      summary: List IBJJF rulesets
+      operationId: listIBJJFRulesets
+      description: >
+        All 25 IBJJF rulesets. Fetch once and cache: this is what turns a
+        TechniqueSummary's `ibjjf_ruleset_id` into a legality badge without a
+        request per row. They change with the IBJJF rulebook, not with the
+        library.
+      tags: [Techniques]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Every ruleset, ordered by id.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IBJJFRulesetList" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /techniques/{techniqueID}:
