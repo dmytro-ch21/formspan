@@ -134,7 +134,7 @@ export default function TodayScreen() {
   // triggered, and keep showing it until the next focus. The orchestrator
   // already recounts after every run; `useSyncState` had no consumers until
   // now, which is its own smell.
-  const { pending: pendingSessions, lastSyncAt } = useSyncState();
+  const { pending: pendingSessions, deferred, lastSyncAt } = useSyncState();
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -436,6 +436,9 @@ export default function TodayScreen() {
           <View style={styles.pendingRow} testID="sessions-pending">
             <Text style={styles.pendingText}>
               {pendingSessions} {pendingSessions === 1 ? 'session' : 'sessions'} waiting to sync
+              {deferred > 0
+                ? ` — ${deferred === 1 ? 'one is' : `${deferred} are`} waiting on a plan that hasn't synced yet`
+                : ''}
             </Text>
             <Pressable
               onPress={onRetrySync}

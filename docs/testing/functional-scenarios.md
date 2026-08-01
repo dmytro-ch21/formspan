@@ -2006,3 +2006,59 @@ templates start being cached. What is testable now:
 - Opening a workout's **contents** needs the network — the detail screen has no
   cached read, so offline it shows an error. Only the *list* is offline, plus
   the session-start path that already had its own cache.
+
+## Workouts writable offline (mobile, offline-first PR4b)
+
+### The loop that has to work
+
+- With the network off: **create** a workout, **add exercises**, **save**. All
+  of it sticks. Force-quit and reopen — still there. Restore the network: it
+  appears on the web with the same contents.
+- Edit an existing plan offline; the edit survives a refresh that pulls the
+  server's older copy over it.
+- Delete offline: it goes, and stays gone once signal returns.
+
+### Ordering — the case that needs a gym
+
+- Offline: create a workout, then **start a session from it** and log sets.
+  Restore signal. The workout syncs first, then the session. Neither errors.
+- While the workout is still unsynced, the session is reported as **waiting on
+  a plan**, not as a failure — and the retry ladder keeps going. Calling it a
+  failure would be wrong twice over: it alarms, and a 4xx would classify as
+  permanent and stop the retries.
+- The same holds for a **single** save, not only a batch sync: tick one set
+  just after signal returns, while the workout is still unsynced. The debounced
+  per-save push must defer too — not show an error and file a `sync_blocked`
+  report mid-workout for a row that heals itself on the next run.
+- **Delete the workout while a session started from it is still unsynced.** The
+  session must still reach the server, with its plan link simply cut — the same
+  thing the server's own `ON DELETE SET NULL` does. This is the case where the
+  workouts-first ordering works *against* the session, and it fails
+  deterministically rather than as a race, so a passing run proves nothing
+  unless this exact sequence is the one exercised.
+- If a workout create is **permanently** refused, every session referencing it
+  defers forever — reported as waiting, indefinitely, with no repair path.
+  Known gap; low probability, permanent when hit.
+
+### Conflicts
+
+- Edit a plan on the phone while offline, and the same plan on the web. On
+  reconnect the phone's pending edit is not silently overwritten by the pull.
+- An edit made *during* a push is not marked as sent — it goes out next pass.
+
+### Never destroy local work
+
+- A workout created offline is **not** removed by a server refresh that
+  doesn't list it. The server has simply never heard of it.
+- The same for a pending edit or a pending delete.
+- **Check this on screen, not only in the store.** Reopen an offline-edited
+  plan while online, before its push lands: the edit must still be displayed.
+  Rendering the server's older copy undoes the edit visually while SQLite
+  still holds it — and if the athlete edits on from what is shown, the save
+  writes stale items over their own work. Same for the list: a
+  just-created, unpushed workout must not vanish when a stale list response
+  arrives.
+- A save or delete that matches **no local row** (deleted on the web and
+  reconciled away mid-edit) must report a failure, not navigate away as
+  though it had worked. Deleting the same workout twice, however, is not a
+  failure — a delete that isn't idempotent is the worse bug.

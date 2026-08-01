@@ -4233,6 +4233,150 @@ reason that cannot happen on a device, which has every earlier table.)
 Writing. Creating and editing templates still needs the network — that is PR4b,
 and it is the headline of the original request.
 
+## 2026-08-01 — Offline-first PR4b: workouts writable offline
+
+The headline of the original request. `workout_cache` gains the same outbox
+shape `local_sessions` has — dirty / remote / deleted_at / updated_at — and
+create, edit-items and delete all write locally first.
+
+Existing rows upgrade to `dirty = 0 / remote = 1`, which is the truth for them:
+everything cached so far arrived *from* the server, so none of it is owed a
+push. Defaulting the other way would fire every cached workout back at the
+server on first launch after the upgrade.
+
+### Conflicts: the CAS, not last-write-wins
+
+Decided by the user, and mirroring sessions. `pushWorkoutRow` clears `dirty`
+only `WHERE updated_at` matches what it read, so an edit landing mid-push
+leaves the row dirty for the next pass rather than being marked as sent. The
+server-refresh path carries the same idea structurally rather than by
+convention: its `ON CONFLICT` refuses to write over a row with `dirty = 1` or a
+tombstone, because anything arriving from the server is by definition older
+than what this device has not pushed.
+
+### Ordering: workouts before sessions, and *deferral*
+
+`sessions.workout_id` is a real FK, so a session referencing a workout the
+server has never seen is refused. "Workouts first" alone is not enough,
+though — **if the workout push fails, the session must be held back too.**
+Otherwise it hits the FK error, and since a 4xx classifies as `permanent`
+under PR2's rules, the orchestrator would stop retrying training that is
+perfectly fine and report it as doomed.
+
+So the sync pushes dirty workouts, collects the ids still not `remote`, and
+**defers** any session pointing at one — counted as `deferred`, never `failed`.
+Today's badge says so in words: *"waiting on a plan that hasn't synced yet"*.
+That distinction is the same one this whole programme keeps turning on —
+"we couldn't ask" versus "the answer is no".
+
+### A silent id bug
+
+`createWorkout` minted its own UUID internally. Pushing an offline-created
+workout would therefore have created it server-side under a **different id**,
+leaving any session started from it pointing at a workout that never arrives.
+The id is caller-supplied now, the contract sessions already had.
+
+### Two bugs my own tests caught
+
+`cachedWorkouts` did not filter tombstones, so a deleted workout stayed
+visible. And **PR4a's reconcile would have deleted never-pushed local
+creations** — "absent from the server list" is only evidence of deletion for
+rows the server knows about, and a workout created offline is absent because
+the server has never heard of it. That one would have destroyed a plan made in
+a gym.
+
+### The detail screen had to become readable too
+
+PR4a made the *list* offline; the plan's contents still needed the network, so
+it dead-ended. An editable plan you cannot open is no use, so `workout/[id]`
+now reads cache-first as well, with the exercise catalog following the same
+cache-then-refresh shape the session screen uses.
+
+### Testing
+
+Five mutations checked: drop the CAS on refresh (1 test), let the reconcile
+delete unpushed rows (1), stop filtering tombstones (2), re-stamp an existing
+tombstone (1), report deferred rows as failures (1).
+
+**Correction, from the review round below:** the last of those was unbacked as
+first written. `sync.test.ts` mocks `syncSessions` wholesale, so it covered the
+orchestrator *displaying* a deferred count, not `runSync` *producing* one —
+mutating `runSync` to count deferrals as failures left the suite green. The
+`pushWorkoutRow` tests added afterwards do cover it.
+
+### The review round, and what it found
+
+Six blocking findings, and the first two are the ones worth remembering.
+
+**`lib/workouts.ts` threw plain `Error`.** `lib/sessions.ts` had been migrated
+to `ApiError`; this module never was. `isNotFound` and `isPermanentRejection`
+both answer `false` for anything that is not an `ApiError` — on the sound
+reasoning that it never reached the server — so **every classification branch
+in the workout push path was dead code**. A 404 on delete never counted as
+success, meaning a tombstone for a plan deleted on the web would fail every
+sync run forever. A permanent refusal classified as `transient`, so the
+orchestrator would grind a doomed request for the life of the install: exactly
+the failure PR2 exists to prevent, revived in the new outbox.
+
+**And my own test hid it.** The `pushWorkoutRow` tests mock `../workouts`, and
+the mocks rejected with `ApiError` — supplying the contract the real module did
+not honour. The 404 and permanent-restore tests passed against branches
+unreachable in production. Eleven source mutations had been checked and all
+eleven were caught, because every one of them mutated `sessionStore.ts`; the
+defect was in the dependency, where no mutation was looking. **Mutation testing
+proves a test can fail, not that its fixtures are honest.** The fix is a
+`workoutsApi.test.ts` that never mocks `../workouts` and asserts the property
+the other file's mocks assume — so the two cannot drift apart again silently.
+
+The other four:
+
+- **A workout delete deterministically orphaned its sessions.** Workouts are
+  pushed first *by design*, so a tombstoned workout's row leaves the cache
+  before the session loop runs — the deferral could no longer see it, the
+  session went out referencing a workout the server had never heard of, was
+  refused 400, and classified permanent. Not a race; guaranteed. Fixed by
+  nulling `local_sessions.workout_id` at delete time, which is precisely what
+  the server's own `ON DELETE SET NULL` does, so both sides converge. The link
+  is metadata; the training is the data.
+- **`pushSession` bypassed the deferral entirely** — it lived only in the batch
+  loop, and `pushSession` is what runs on every debounced save from the session
+  screen. Ticking a set just after signal returned would show a fatal-looking
+  error and file a `sync_blocked` operator report, mid-workout, for a row that
+  heals itself moments later.
+- **Both screens rendered the server's stale copy over unpushed local state.**
+  The CAS protected SQLite and the UI then undid it on screen: reopen an
+  offline-edited plan online before its push landed and the edit visibly
+  vanished, Save went inactive, and editing on from what was displayed
+  overwrote the local row with stale items — the athlete losing their own work
+  with their unwitting help. The list screen had the same shape, rendering the
+  raw response instead of the reconciled cache. It now renders the cache, which
+  is also the honest answer: what is on screen is what is on disk.
+- **Dirty workouts were not in `pending`,** and `pending` is not a badge — it
+  gates the retry timer and the foreground trigger. An edited plan that failed
+  transiently got neither. The offline case survived only by accident, because
+  `!online` trips the foreground gate on its own.
+
+Twelve mutations checked across the fixes; all twelve caught. One was vacuous
+on the first pass (the zero-row save guard had no test at all) and is now
+covered.
+
+**Still untested: the two screen fixes.** `apps/mobile` has no component test
+runner, so the SQLite-level behaviour is covered and the render path is not.
+Worth having, not worth blocking this on — recorded here rather than left to be
+rediscovered.
+
+A note on the SQL-comment guard added earlier today: the backtick trap fired a
+**third** time here, and the guard did not help — `tsc` runs first and reports
+it as unrelated syntax errors twenty lines down, so the named failure never got
+a chance to speak. The guard is worth less than I claimed when I added it.
+
+### Not in this PR
+
+`replaceItems` is still a whole-list replace, so two devices editing the same
+plan is last-writer-wins *at the server* even though the CAS protects the local
+row. Renaming a template is still impossible on any client — there is no
+endpoint. Both are worth deciding on deliberately rather than discovering.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

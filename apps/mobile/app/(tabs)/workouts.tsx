@@ -1,6 +1,7 @@
 import { Link, useFocusEffect } from 'expo-router';
 import { useAuth } from '@clerk/clerk-expo';
-import { cachedWorkouts, cacheWorkouts } from '@/lib/sessionStore';
+import { cachedWorkouts, cacheWorkouts, createLocalWorkout } from '@/lib/sessionStore';
+import { request as requestSync } from '@/lib/sync';
 import { useCallback, useRef, useState, useEffect } from 'react';
 import {
   ActivityIndicator,
@@ -18,7 +19,6 @@ import { enabledSports, labelFor, moduleFor } from '@/lib/modules';
 import { useModules } from '@/lib/ModulesProvider';
 import { useAuthToken } from '@/lib/useAuthToken';
 import {
-  createWorkout,
   listWorkouts,
   GOALS,
   type Goal,
@@ -77,7 +77,6 @@ export default function WorkoutsScreen() {
     try {
       const list = await listWorkouts(getToken, scope, controller.signal);
       if (!controller.signal.aborted) {
-        setWorkouts(list);
         setEverLoaded(true);
         // Cleared on success, not at request start — an error wiped up
         // front leaves the screen looking fine throughout a retry.
@@ -85,7 +84,21 @@ export default function WorkoutsScreen() {
         // Refresh the cache for next time. `mine` only: caching other
         // people's shared templates under this athlete's cache rows would
         // make them reappear as if they were theirs.
-        if (scope === 'mine' && userId) await cacheWorkouts(userId, list);
+        if (scope === 'mine' && userId) {
+          await cacheWorkouts(userId, list);
+          // Render the RECONCILED cache, not the raw response.
+          //
+          // `cacheWorkouts` already keeps rows the server hasn't heard of and
+          // drops ones it has deleted; rendering `list` threw that away. A
+          // workout created offline vanished from the list the moment a stale
+          // `listWorkouts` response landed — reliably, not rarely, because
+          // creating one fires the sync request and this reload together —
+          // and came back on the next focus. Reading back through the cache
+          // makes what is on screen the same thing that is on disk.
+          setWorkouts(await cachedWorkouts(userId));
+        } else {
+          setWorkouts(list);
+        }
       }
     } catch (err) {
       if (controller.signal.aborted) return;
@@ -230,12 +243,12 @@ function NewWorkoutSheet({
   onClose: () => void;
   onCreated: (w: Workout) => void;
 }) {
-  const getToken = useAuthToken();
   const [name, setName] = useState('');
   // The first sport this athlete actually trains, not a hardcoded 'strength'.
   // A strength-disabled athlete would otherwise silently create strength
   // workouts every time.
   const { modules } = useModules();
+  const { userId } = useAuth();
   const startable = enabledSports(modules);
   const [sport, setSport] = useState<Sport>((startable[0]?.key ?? 'strength') as Sport);
   // Corrects itself when the registry resolves, and again if the selected
@@ -262,7 +275,11 @@ function NewWorkoutSheet({
     setBusy(true);
     setError(null);
     try {
-      const w = await createWorkout(getToken, {
+      // Created LOCALLY, then pushed. A plan you build with no signal is a
+      // plan, not a failed request — and the id is generated here, so the
+      // push is idempotent and any session started from it references the
+      // same workout the server eventually receives.
+      const w = await createLocalWorkout(userId!, {
         name: name.trim(),
         sport,
         // Goal only applies to strength — sending one for a run would be
@@ -272,6 +289,7 @@ function NewWorkoutSheet({
         goal: moduleFor(modules, sport)?.capabilities.has_goals ? goal : null,
         visibility: isPublic ? 'public' : 'private',
       });
+      requestSync('workout-created');
       setName('');
       setIsPublic(false);
       onCreated(w);

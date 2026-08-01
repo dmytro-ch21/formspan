@@ -1,8 +1,20 @@
 import { AppState } from 'react-native';
 
 import { OfflineError } from '../apiError';
-import { countPendingSessions, syncSessions, type SessionSyncResult } from '../sessionStore';
-import { request, setSyncIdentity, startSyncOrchestrator, syncNow, syncState } from '../sync';
+import {
+  countPendingSessions,
+  countPendingWorkouts,
+  syncSessions,
+  type SessionSyncResult,
+} from '../sessionStore';
+import {
+  refreshPending,
+  request,
+  setSyncIdentity,
+  startSyncOrchestrator,
+  syncNow,
+  syncState,
+} from '../sync';
 
 /**
  * The sync orchestrator.
@@ -18,16 +30,23 @@ import { request, setSyncIdentity, startSyncOrchestrator, syncNow, syncState } f
 jest.mock('../sessionStore', () => ({
   syncSessions: jest.fn(),
   countPendingSessions: jest.fn(),
+  // `pending` gates the retry timer and the foreground trigger, and it is the
+  // SUM of both outboxes. Omitting this made `refreshPending` throw into its
+  // own swallowing catch, leaving pending at 0 — so the ladder and the
+  // foreground sync silently stopped, which is what the two tests below
+  // caught when workouts joined the count.
+  countPendingWorkouts: jest.fn(async () => 0),
 }));
 
 const mockSync = syncSessions as jest.MockedFunction<typeof syncSessions>;
 const mockCount = countPendingSessions as jest.MockedFunction<typeof countPendingSessions>;
 
-const ok = (): SessionSyncResult => ({ pushed: 1, pulled: 0, failed: 0 });
+const ok = (): SessionSyncResult => ({ pushed: 1, pulled: 0, failed: 0, deferred: 0 });
 const failed = (kind: SessionSyncResult['errorKind'], error = 'nope'): SessionSyncResult => ({
   pushed: 0,
   pulled: 0,
   failed: 1,
+  deferred: 0,
   error,
   errorKind: kind,
 });
@@ -273,5 +292,47 @@ describe('the foreground trigger', () => {
 
     expect(mockSync.mock.calls.length).toBe(before);
     stop();
+  });
+});
+
+it('reports deferred rows without calling them a failure', async () => {
+  // A session whose workout has not reached the server is waiting on a
+  // dependency, not broken — and since the FK error is a 4xx, and 4xx
+  // classifies as permanent, calling it a failure would make the
+  // orchestrator give up retrying perfectly good training.
+  mockCount.mockResolvedValue(1);
+  mockSync.mockResolvedValue({ pushed: 0, pulled: 0, failed: 0, deferred: 2 });
+  setSyncIdentity('user_1', token);
+  await settle(20);
+
+  expect(syncState().deferred).toBe(2);
+  expect(syncState().lastError).toBeNull();
+  expect(syncState().online).toBe(true);
+});
+
+describe('the pending count', () => {
+  it('includes dirty WORKOUTS, not just sessions', async () => {
+    // `pending` is not a badge number — it gates `schedule()` (which refuses
+    // to set a retry timer at 0) and the foreground trigger. Counting
+    // sessions only meant an edited plan that failed transiently got no
+    // backoff retry and no foreground retry, and could sit on the device
+    // indefinitely.
+    (countPendingSessions as jest.Mock).mockResolvedValue(0);
+    (countPendingWorkouts as jest.Mock).mockResolvedValue(3);
+
+    setSyncIdentity('u1', async () => 'tok');
+    await refreshPending();
+
+    expect(syncState().pending).toBe(3);
+  });
+
+  it('sums both outboxes', async () => {
+    (countPendingSessions as jest.Mock).mockResolvedValue(2);
+    (countPendingWorkouts as jest.Mock).mockResolvedValue(3);
+
+    setSyncIdentity('u1', async () => 'tok');
+    await refreshPending();
+
+    expect(syncState().pending).toBe(5);
   });
 });

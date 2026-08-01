@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 
 import { isOffline } from './apiError';
-import { countPendingSessions, syncSessions } from './sessionStore';
+import { countPendingSessions, countPendingWorkouts, syncSessions } from './sessionStore';
 import type { SyncErrorKind } from './sessionStore';
 import type { TokenGetter } from './useAuthToken';
 
@@ -43,6 +43,14 @@ export type SyncState = {
   syncing: boolean;
   /** Sessions holding local edits the server hasn't got. */
   pending: number;
+  /**
+   * Rows held back this run because something they depend on hasn't synced.
+   *
+   * Separate from an error on purpose: a session whose workout has not
+   * reached the server is *waiting*, and saying "sync failed" would both
+   * alarm the athlete and misdescribe a state that resolves itself.
+   */
+  deferred: number;
   /** When a run last completed with nothing failing. */
   lastSyncAt: number | null;
   /**
@@ -73,6 +81,7 @@ const BACKOFF_MS = [5_000, 15_000, 60_000, 300_000];
 let state: SyncState = {
   syncing: false,
   pending: 0,
+  deferred: 0,
   lastSyncAt: null,
   lastError: null,
   online: true,
@@ -123,7 +132,7 @@ export function setSyncIdentity(userID: string | null, getToken: TokenGetter | n
     // Not a "synced" state — an unknown one. Reporting 0 pending for a
     // signed-out app would let the UI claim everything is safely on the
     // server when we simply have no one to ask about.
-    emit({ syncing: false, pending: 0, lastError: null, lastSyncAt: null });
+    emit({ syncing: false, pending: 0, deferred: 0, lastError: null, lastSyncAt: null });
     return;
   }
   creds = { userID, getToken };
@@ -138,11 +147,26 @@ function cancelTimer(): void {
   }
 }
 
-/** Recount what's waiting, without syncing. Cheap: one indexed COUNT. */
+/**
+ * Recount what's waiting, without syncing. Cheap: two indexed COUNTs.
+ *
+ * Workouts are counted as well as sessions, and not for the badge's sake:
+ * `pending` gates the machinery. `schedule()` refuses to set a retry timer
+ * when it reads 0, and the foreground trigger declines to sync. So while this
+ * counted sessions only, an edited plan that failed transiently — a 5xx,
+ * which leaves `online: true` — got no backoff retry and no foreground retry,
+ * and could sit on the device indefinitely until some unrelated action
+ * happened to call `request()`. The offline case survived only by accident,
+ * because `!state.online` trips the foreground gate on its own.
+ */
 export async function refreshPending(): Promise<void> {
   if (!creds) return;
   try {
-    emit({ pending: await countPendingSessions(creds.userID) });
+    const [sessions, workouts] = await Promise.all([
+      countPendingSessions(creds.userID),
+      countPendingWorkouts(creds.userID),
+    ]);
+    emit({ pending: sessions + workouts });
   } catch {
     // A failed count must not break anything; the number is advisory.
   }
@@ -180,6 +204,8 @@ async function run(reason: string): Promise<void> {
       // The account may have changed while this ran.
       if (creds?.userID !== userID) return;
 
+      emit({ deferred: result.deferred });
+
       if (result.failed > 0) {
         failures++;
         const kind: SyncErrorKind = result.errorKind ?? 'transient';
@@ -210,6 +236,9 @@ async function run(reason: string): Promise<void> {
       emit({
         lastError: err instanceof Error ? err.message : String(err),
         online: !isOffline(err),
+        // Cleared, not carried. The run threw before reporting a count, so
+        // the previous run's number describes nothing that is true now.
+        deferred: 0,
       });
       retry = true;
     } finally {

@@ -19,10 +19,8 @@ import { useAuthToken } from '@/lib/useAuthToken';
 import { fetchExercises, pickImage, type Exercise } from '@/lib/exercises';
 import type { UnitSystem } from '@/lib/units';
 import {
-  deleteWorkout,
   emptyItem,
   getWorkout,
-  replaceItems,
   summariseTargets,
   targetFieldsFor,
   type TargetField,
@@ -30,7 +28,15 @@ import {
   type WorkoutItem,
 } from '@/lib/workouts';
 import { applySuggestions, fetchSuggestions, setsFromWorkout } from '@/lib/sessions';
-import { startLocalSession } from '@/lib/sessionStore';
+import {
+  cacheExercises,
+  cachedExercises,
+  cachedWorkouts,
+  deleteLocalWorkout,
+  dirtyWorkoutIDs,
+  saveLocalWorkoutItems,
+  startLocalSession,
+} from '@/lib/sessionStore';
 import { vola } from '@/constants/Colors';
 import { fromDisplayWeight, toDisplayWeight, weightUnit } from '@/lib/units';
 import { useUnits } from '@/lib/useUnits';
@@ -62,22 +68,64 @@ export default function WorkoutDetailScreen() {
   const canEdit = workout !== null && workout.owner_user_id !== null && workout.owner_user_id === userId;
 
   const load = useCallback(async () => {
-    if (!id) return;
+    if (!id || !userId) return;
+
+    // LOCAL FIRST. Until now this screen only ever called the network, so
+    // offline it rendered an error where the plan should be — and with
+    // writing now local-first, an editable plan you cannot open is no use.
+    let sport: string | null = null;
+    try {
+      const local = (await cachedWorkouts(userId)).find((w) => w.id === id);
+      if (local) {
+        setWorkout(local);
+        setItems(local.items);
+        sport = local.sport;
+        setError(null);
+        setLoading(false);
+      }
+    } catch {
+      // The network read below is still the real attempt.
+    }
+
     try {
       const w = await getWorkout(getToken, id);
-      setWorkout(w);
-      setItems(w.items);
-      // One catalog fetch for the sport, so every row can show a name and a
-      // thumbnail without an N+1 of per-exercise requests.
-      const list = await fetchExercises(getToken, { sport: w.sport });
-      setCatalog(new Map(list.map((e) => [e.id, e])));
+      // The server's copy is only newer if ours isn't waiting to be pushed.
+      //
+      // Unconditionally adopting it undid the offline edit ON SCREEN while
+      // SQLite still held it: reopen an edited plan online before its push
+      // lands and the change visibly vanished, Save went inactive (it
+      // compares against this same copy), and editing on from what was shown
+      // then overwrote the local row with server-derived stale items — the
+      // athlete's own work, lost with their unwitting help.
+      const dirtyLocal = await dirtyWorkoutIDs(userId).catch(() => new Set<string>());
+      sport = w.sport;
       setError(null);
+      if (!dirtyLocal.has(id)) {
+        setWorkout(w);
+        setItems(w.items);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
+      // Only an error if we have nothing to show. With a cached copy on
+      // screen, failing to refresh is an ordinary offline state.
+      if (!sport) setError(err instanceof Error ? err.message : String(err));
     }
-  }, [getToken, id]);
+
+    try {
+      // The cache renders the rows; the fetch refreshes it for next time.
+      // One catalog read for the sport, so every row can show a name and a
+      // thumbnail without an N+1 of per-exercise requests.
+      if (sport) {
+        const cached = await cachedExercises(sport);
+        if (cached.length > 0) setCatalog(new Map(cached.map((e) => [e.id, e])));
+        const list = await fetchExercises(getToken, { sport });
+        setCatalog(new Map(list.map((e) => [e.id, e])));
+        await cacheExercises(list);
+      }
+    } catch {
+      // Offline: the cached catalog stands.
+    }
+    setLoading(false);
+  }, [getToken, id, userId]);
 
   useEffect(() => {
     load();
@@ -88,11 +136,19 @@ export default function WorkoutDetailScreen() {
     setSaving(true);
     setError(null);
     try {
-      const updated = await replaceItems(getToken, id, items);
-      setWorkout(updated);
-      setItems(updated.items);
+      // The LOCAL write is the save; the push is an attempt. Same rule the
+      // session screen already follows — a plan edited in a basement is saved,
+      // and the server hears about it when it can.
+      await saveLocalWorkoutItems(userId!, id, items);
+      setWorkout((w) => (w ? { ...w, items } : w));
+      requestSync('workout-edited');
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      // A LOCAL failure is never quiet: the screen is showing these items, so
+      // if SQLite did not take them the athlete is looking at work that
+      // exists nowhere.
+      setError(
+        `Couldn't save on this device: ${err instanceof Error ? err.message : String(err)}`,
+      );
     } finally {
       setSaving(false);
     }
@@ -106,7 +162,8 @@ export default function WorkoutDetailScreen() {
         style: 'destructive',
         onPress: async () => {
           try {
-            await deleteWorkout(getToken, id!);
+            await deleteLocalWorkout(userId!, id!);
+                    requestSync('workout-deleted');
             router.back();
           } catch (err) {
             setError(err instanceof Error ? err.message : String(err));

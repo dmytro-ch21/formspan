@@ -98,6 +98,22 @@ const CREATE_WORKOUT_CACHE = `
     -- user_id above, which records whose device-cache row this is.
     owner_user_id TEXT,
     visibility TEXT NOT NULL DEFAULT 'private',
+    -- The outbox half, mirroring local_sessions exactly.
+    --
+    -- 0 = the server holds this; 1 = we owe it a push. 'remote' is 1 once the
+    -- server has acknowledged the workout EXISTS, which is separate from its
+    -- contents being current -- a plan can be dirty and remote at the same
+    -- time, which is the ordinary state while you edit one.
+    dirty INTEGER NOT NULL DEFAULT 0,
+    remote INTEGER NOT NULL DEFAULT 1,
+    -- Set when deleted here; the row survives until the server agrees. Same
+    -- tombstone rules as sessions, for the same reason: a hard delete leaves
+    -- nothing carrying the intent when the push fails.
+    deleted_at TEXT,
+    -- Bumped on every local write. The push CASes on it, so an edit landing
+    -- mid-push leaves the row dirty for the next pass instead of being
+    -- marked as already sent.
+    updated_at TEXT NOT NULL DEFAULT '',
     cached_at TEXT NOT NULL
   );
 `;
@@ -144,7 +160,7 @@ const CREATE_EXERCISE_CACHE = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -332,6 +348,19 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     await db.runAsync(
       `UPDATE workout_cache SET owner_user_id = user_id WHERE owner_user_id IS NULL`,
     );
+  }
+
+  if (current < 9) {
+    // v8 -> v9: workouts become writable offline.
+    //
+    // Existing rows default to dirty = 0 / remote = 1, which is the truth for
+    // them: everything cached so far arrived FROM the server, so none of it is
+    // owed a push. Defaulting the other way would push every cached workout
+    // back at the server on first launch after the upgrade.
+    await addColumnIfMissing(db, 'workout_cache', 'dirty', 'INTEGER NOT NULL DEFAULT 0');
+    await addColumnIfMissing(db, 'workout_cache', 'remote', 'INTEGER NOT NULL DEFAULT 1');
+    await addColumnIfMissing(db, 'workout_cache', 'deleted_at', 'TEXT');
+    await addColumnIfMissing(db, 'workout_cache', 'updated_at', "TEXT NOT NULL DEFAULT ''");
   }
 
   await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION};`);
