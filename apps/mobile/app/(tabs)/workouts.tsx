@@ -1,6 +1,7 @@
 import { Link, useFocusEffect } from 'expo-router';
 import { useAuth } from '@clerk/clerk-expo';
-import { cachedWorkouts, cacheWorkouts } from '@/lib/sessionStore';
+import { cachedWorkouts, cacheWorkouts, createLocalWorkout } from '@/lib/sessionStore';
+import { request as requestSync } from '@/lib/sync';
 import { useCallback, useRef, useState, useEffect } from 'react';
 import {
   ActivityIndicator,
@@ -18,7 +19,6 @@ import { enabledSports, labelFor, moduleFor } from '@/lib/modules';
 import { useModules } from '@/lib/ModulesProvider';
 import { useAuthToken } from '@/lib/useAuthToken';
 import {
-  createWorkout,
   listWorkouts,
   GOALS,
   type Goal,
@@ -230,12 +230,12 @@ function NewWorkoutSheet({
   onClose: () => void;
   onCreated: (w: Workout) => void;
 }) {
-  const getToken = useAuthToken();
   const [name, setName] = useState('');
   // The first sport this athlete actually trains, not a hardcoded 'strength'.
   // A strength-disabled athlete would otherwise silently create strength
   // workouts every time.
   const { modules } = useModules();
+  const { userId } = useAuth();
   const startable = enabledSports(modules);
   const [sport, setSport] = useState<Sport>((startable[0]?.key ?? 'strength') as Sport);
   // Corrects itself when the registry resolves, and again if the selected
@@ -262,7 +262,11 @@ function NewWorkoutSheet({
     setBusy(true);
     setError(null);
     try {
-      const w = await createWorkout(getToken, {
+      // Created LOCALLY, then pushed. A plan you build with no signal is a
+      // plan, not a failed request — and the id is generated here, so the
+      // push is idempotent and any session started from it references the
+      // same workout the server eventually receives.
+      const w = await createLocalWorkout(userId!, {
         name: name.trim(),
         sport,
         // Goal only applies to strength — sending one for a run would be
@@ -272,6 +276,7 @@ function NewWorkoutSheet({
         goal: moduleFor(modules, sport)?.capabilities.has_goals ? goal : null,
         visibility: isPublic ? 'public' : 'private',
       });
+      requestSync('workout-created');
       setName('');
       setIsPublic(false);
       onCreated(w);

@@ -4233,6 +4233,83 @@ reason that cannot happen on a device, which has every earlier table.)
 Writing. Creating and editing templates still needs the network — that is PR4b,
 and it is the headline of the original request.
 
+## 2026-08-01 — Offline-first PR4b: workouts writable offline
+
+The headline of the original request. `workout_cache` gains the same outbox
+shape `local_sessions` has — dirty / remote / deleted_at / updated_at — and
+create, edit-items and delete all write locally first.
+
+Existing rows upgrade to `dirty = 0 / remote = 1`, which is the truth for them:
+everything cached so far arrived *from* the server, so none of it is owed a
+push. Defaulting the other way would fire every cached workout back at the
+server on first launch after the upgrade.
+
+### Conflicts: the CAS, not last-write-wins
+
+Decided by the user, and mirroring sessions. `pushWorkoutRow` clears `dirty`
+only `WHERE updated_at` matches what it read, so an edit landing mid-push
+leaves the row dirty for the next pass rather than being marked as sent. The
+server-refresh path carries the same idea structurally rather than by
+convention: its `ON CONFLICT` refuses to write over a row with `dirty = 1` or a
+tombstone, because anything arriving from the server is by definition older
+than what this device has not pushed.
+
+### Ordering: workouts before sessions, and *deferral*
+
+`sessions.workout_id` is a real FK, so a session referencing a workout the
+server has never seen is refused. "Workouts first" alone is not enough,
+though — **if the workout push fails, the session must be held back too.**
+Otherwise it hits the FK error, and since a 4xx classifies as `permanent`
+under PR2's rules, the orchestrator would stop retrying training that is
+perfectly fine and report it as doomed.
+
+So the sync pushes dirty workouts, collects the ids still not `remote`, and
+**defers** any session pointing at one — counted as `deferred`, never `failed`.
+Today's badge says so in words: *"waiting on a plan that hasn't synced yet"*.
+That distinction is the same one this whole programme keeps turning on —
+"we couldn't ask" versus "the answer is no".
+
+### A silent id bug
+
+`createWorkout` minted its own UUID internally. Pushing an offline-created
+workout would therefore have created it server-side under a **different id**,
+leaving any session started from it pointing at a workout that never arrives.
+The id is caller-supplied now, the contract sessions already had.
+
+### Two bugs my own tests caught
+
+`cachedWorkouts` did not filter tombstones, so a deleted workout stayed
+visible. And **PR4a's reconcile would have deleted never-pushed local
+creations** — "absent from the server list" is only evidence of deletion for
+rows the server knows about, and a workout created offline is absent because
+the server has never heard of it. That one would have destroyed a plan made in
+a gym.
+
+### The detail screen had to become readable too
+
+PR4a made the *list* offline; the plan's contents still needed the network, so
+it dead-ended. An editable plan you cannot open is no use, so `workout/[id]`
+now reads cache-first as well, with the exercise catalog following the same
+cache-then-refresh shape the session screen uses.
+
+### Testing
+
+Five mutations checked: drop the CAS on refresh (1 test), let the reconcile
+delete unpushed rows (1), stop filtering tombstones (2), re-stamp an existing
+tombstone (1), report deferred rows as failures (1).
+
+A note on the SQL-comment guard added earlier today: the backtick trap fired a
+**third** time here, and the guard did not help — `tsc` runs first and reports
+it as unrelated syntax errors twenty lines down, so the named failure never got
+a chance to speak. The guard is worth less than I claimed when I added it.
+
+### Not in this PR
+
+`replaceItems` is still a whole-list replace, so two devices editing the same
+plan is last-writer-wins *at the server* even though the CAS protects the local
+row. Renaming a template is still impossible on any client — there is no
+endpoint. Both are worth deciding on deliberately rather than discovering.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

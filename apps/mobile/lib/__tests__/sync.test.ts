@@ -276,3 +276,18 @@ describe('the foreground trigger', () => {
     stop();
   });
 });
+
+it('reports deferred rows without calling them a failure', async () => {
+  // A session whose workout has not reached the server is waiting on a
+  // dependency, not broken — and since the FK error is a 4xx, and 4xx
+  // classifies as permanent, calling it a failure would make the
+  // orchestrator give up retrying perfectly good training.
+  mockCount.mockResolvedValue(1);
+  mockSync.mockResolvedValue({ pushed: 0, pulled: 0, failed: 0, deferred: 2 });
+  setSyncIdentity('user_1', token);
+  await settle(20);
+
+  expect(syncState().deferred).toBe(2);
+  expect(syncState().lastError).toBeNull();
+  expect(syncState().online).toBe(true);
+});

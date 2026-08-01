@@ -43,6 +43,14 @@ export type SyncState = {
   syncing: boolean;
   /** Sessions holding local edits the server hasn't got. */
   pending: number;
+  /**
+   * Rows held back this run because something they depend on hasn't synced.
+   *
+   * Separate from an error on purpose: a session whose workout has not
+   * reached the server is *waiting*, and saying "sync failed" would both
+   * alarm the athlete and misdescribe a state that resolves itself.
+   */
+  deferred: number;
   /** When a run last completed with nothing failing. */
   lastSyncAt: number | null;
   /**
@@ -73,6 +81,7 @@ const BACKOFF_MS = [5_000, 15_000, 60_000, 300_000];
 let state: SyncState = {
   syncing: false,
   pending: 0,
+  deferred: 0,
   lastSyncAt: null,
   lastError: null,
   online: true,
@@ -123,7 +132,7 @@ export function setSyncIdentity(userID: string | null, getToken: TokenGetter | n
     // Not a "synced" state — an unknown one. Reporting 0 pending for a
     // signed-out app would let the UI claim everything is safely on the
     // server when we simply have no one to ask about.
-    emit({ syncing: false, pending: 0, lastError: null, lastSyncAt: null });
+    emit({ syncing: false, pending: 0, deferred: 0, lastError: null, lastSyncAt: null });
     return;
   }
   creds = { userID, getToken };
@@ -179,6 +188,8 @@ async function run(reason: string): Promise<void> {
       const result = await syncSessions(userID, getToken);
       // The account may have changed while this ran.
       if (creds?.userID !== userID) return;
+
+      emit({ deferred: result.deferred });
 
       if (result.failed > 0) {
         failures++;

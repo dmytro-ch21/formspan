@@ -2006,3 +2006,35 @@ templates start being cached. What is testable now:
 - Opening a workout's **contents** needs the network — the detail screen has no
   cached read, so offline it shows an error. Only the *list* is offline, plus
   the session-start path that already had its own cache.
+
+## Workouts writable offline (mobile, offline-first PR4b)
+
+### The loop that has to work
+
+- With the network off: **create** a workout, **add exercises**, **save**. All
+  of it sticks. Force-quit and reopen — still there. Restore the network: it
+  appears on the web with the same contents.
+- Edit an existing plan offline; the edit survives a refresh that pulls the
+  server's older copy over it.
+- Delete offline: it goes, and stays gone once signal returns.
+
+### Ordering — the case that needs a gym
+
+- Offline: create a workout, then **start a session from it** and log sets.
+  Restore signal. The workout syncs first, then the session. Neither errors.
+- While the workout is still unsynced, the session is reported as **waiting on
+  a plan**, not as a failure — and the retry ladder keeps going. Calling it a
+  failure would be wrong twice over: it alarms, and a 4xx would classify as
+  permanent and stop the retries.
+
+### Conflicts
+
+- Edit a plan on the phone while offline, and the same plan on the web. On
+  reconnect the phone's pending edit is not silently overwritten by the pull.
+- An edit made *during* a push is not marked as sent — it goes out next pass.
+
+### Never destroy local work
+
+- A workout created offline is **not** removed by a server refresh that
+  doesn't list it. The server has simply never heard of it.
+- The same for a pending edit or a pending delete.
