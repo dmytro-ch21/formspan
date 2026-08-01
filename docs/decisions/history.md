@@ -3040,9 +3040,18 @@ the hips through the elbow line." That is **five instructions wearing a
 paragraph**, and it is most of why the screen read as a wall.
 
 `executionSteps` splits it. Measured across all 466 *before* any UI was built:
-458 (98%) yield 2+ steps, clustered at 3–4, averaging 30 characters, none under
-10 or over 110. The remaining 8 fall back to prose, because a one-item numbered
+460 (99%) yield 2+ steps, clustered at 3–4, averaging 30 characters, none under
+10 or over 110. The remaining 6 fall back to prose, because a one-item numbered
 list looks like a bug.
+
+The split takes `;` as well as `,` — several descriptions join instruction
+pairs with a semicolon — and deliberately **avoids a lookbehind**. `(?<=\.)\s+`
+matched zero of 466 (trailing periods are stripped anyway), while on web
+`lib/api.ts` is imported by every dashboard page and Next/SWC does not
+transpile regex features: an unsupported construct is a parse-time
+`SyntaxError` that takes the whole dashboard down on Safari/iOS < 16.4. The
+review verified the pattern compiles under the app's own Hermes binary, so this
+was risk removal rather than a fix — but it was free.
 
 The fragment-folding rule needed a correction that only showed up on screen:
 the first version folded anything under three words and silently merged "Control
@@ -3081,6 +3090,14 @@ straight through "Armbar from Closed". Neither is visible to a typechecker.
 Verifying meant a throwaway route rendering the **real** components against real
 library data, deep-linked into the Simulator — `/technique/[id]` needs auth, so
 it cannot be opened directly.
+
+### One bug the redesign introduced
+
+The new "Try again" button called `load()`, which cleared the error while
+`loading` stayed false and `technique` stayed null — so for the whole retry the
+screen rendered the fallback branch's **"Technique not found."**, the most
+alarming possible message, on exactly the slow connection the button exists
+for. Caught in review, not by any check.
 
 ### Parity
 

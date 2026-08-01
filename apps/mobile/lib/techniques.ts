@@ -265,13 +265,23 @@ export function edgeKey(label: string): string {
  * folded anything under three words and swallowed real instructions: "break
  * posture" is a step, not a tail. Length alone separates the two cleanly on
  * this corpus.
+
+ * The split deliberately avoids a lookbehind. `(?<=\.)\s+` fired on zero of
+ * 466 (trailing periods are stripped anyway), and on web `lib/api.ts` is
+ * imported by every dashboard page — a regex literal Next/SWC does not
+ * transpile, so an unsupported feature is a parse-time SyntaxError that takes
+ * the whole dashboard down on Safari/iOS < 16.4. `\.\s+` is byte-identical on
+ * this corpus and carries no engine-support risk.
+ *
+ * `;` joins the split for the same reason `,` does: 6 of the 8 prose fallbacks
+ * were semicolon-joined instruction pairs.
  */
 export function executionSteps(description: string): string[] {
   const raw = (description || '').trim();
   if (!raw) return [];
 
   const parts = raw
-    .split(/,\s*(?:and\s+)?|(?<=\.)\s+/)
+    .split(/[,;]\s*(?:and\s+)?|\.\s+/)
     .map((p) => p.trim().replace(/\.$/, ''))
     .filter(Boolean);
 

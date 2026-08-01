@@ -751,7 +751,7 @@ function TechniquePanel({
           <p className="eyebrow">How it works</p>
           <ol className="flex flex-col gap-2">
             {steps.map((s, i) => (
-              <li key={s} className="flex items-start gap-3">
+              <li key={i} className="flex items-start gap-3">
                 <span
                   aria-hidden="true"
                   className={`mt-px flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[0.6875rem] font-bold ${ACCENT_CLASS[accent].tile} ${ACCENT_CLASS[accent].text}`}

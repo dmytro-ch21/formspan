@@ -1595,7 +1595,7 @@ than replacing it.
 
 ### Edge cases
 
-- A technique whose description does not split into 2+ steps (8 of 466) renders
+- A technique whose description does not split into 2+ steps (6 of 466) renders
   the original prose under the same heading — **never** a one-item list.
 - `executionSteps` must produce zero steps under 10 characters across the whole
   library; a stray "and" as its own numbered step is a failure.
@@ -1603,6 +1603,11 @@ than replacing it.
   that differs between platforms is a content difference, not a styling one.
 - Sections with no content still do not render (`video_reference` is empty in
   all 466).
+- **Retry must not flash "Technique not found."** Tapping Try again shows the
+  spinner for the duration of the request, never the not-found fallback.
+- The step splitter must contain no regex lookbehind: `lib/api.ts` is imported
+  by every dashboard page, and an untranspiled unsupported construct is a
+  parse-time failure for the whole dashboard on older Safari.
 
 ### Media
 

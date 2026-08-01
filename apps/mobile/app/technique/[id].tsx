@@ -60,6 +60,10 @@ export default function TechniqueScreen() {
   const load = useCallback(
     async (signal?: AbortSignal) => {
       if (!id) return;
+      // Both, and in this order. Without setLoading(true) a retry renders the
+      // fallback branch — "Technique not found." — for the entire request,
+      // because error is cleared while technique is still null.
+      setLoading(true);
       setError(null);
       try {
         const t = await fetchTechnique(id, getToken, signal);
@@ -138,7 +142,12 @@ export default function TechniqueScreen() {
         {steps.length > 0 ? (
           <Card title="How it works" accent={accent}>
             {steps.map((s, i) => (
-              <RNView key={s} style={styles.step}>
+              <RNView
+                key={i}
+                style={styles.step}
+                accessible
+                accessibilityLabel={`Step ${i + 1} of ${steps.length}: ${s}`}
+              >
                 <RNView style={[styles.stepNum, { borderColor: accent }]}>
                   <Text style={[styles.stepNumText, { color: accent }]}>{i + 1}</Text>
                 </RNView>
