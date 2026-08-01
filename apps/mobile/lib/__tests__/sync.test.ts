@@ -23,11 +23,12 @@ jest.mock('../sessionStore', () => ({
 const mockSync = syncSessions as jest.MockedFunction<typeof syncSessions>;
 const mockCount = countPendingSessions as jest.MockedFunction<typeof countPendingSessions>;
 
-const ok = (): SessionSyncResult => ({ pushed: 1, pulled: 0, failed: 0 });
+const ok = (): SessionSyncResult => ({ pushed: 1, pulled: 0, failed: 0, deferred: 0 });
 const failed = (kind: SessionSyncResult['errorKind'], error = 'nope'): SessionSyncResult => ({
   pushed: 0,
   pulled: 0,
   failed: 1,
+  deferred: 0,
   error,
   errorKind: kind,
 });

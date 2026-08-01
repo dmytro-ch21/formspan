@@ -166,13 +166,31 @@ export async function getWorkout(
 
 export async function createWorkout(
   getToken: TokenGetter,
-  input: { name: string; sport: Sport; goal: Goal | null; visibility: Visibility },
+  input: {
+    name: string;
+    sport: Sport;
+    goal: Goal | null;
+    visibility: Visibility;
+    /**
+     * The id to create it under.
+     *
+     * Optional, and supplying it is what makes offline creation work: a
+     * workout created with no signal already exists locally under an id, and
+     * any session started from it references THAT id. Minting a fresh one at
+     * push time would create a second workout server-side and leave the
+     * session pointing at one that never arrives.
+     */
+    id?: string;
+  },
 ): Promise<Workout> {
+  const { id, ...rest } = input;
   // Client-generated ID, so creating a workout is idempotent on retry — the
-  // same contract as offline activity logging.
+  // same contract as offline activity logging. The server does
+  // ON CONFLICT (id) DO NOTHING, so re-pushing after a lost response is a
+  // no-op rather than a duplicate plan.
   return request<Workout>(getToken, '/workouts', {
     method: 'POST',
-    body: JSON.stringify({ id: randomUUID(), ...input, notes: '' }),
+    body: JSON.stringify({ id: id ?? randomUUID(), ...rest, notes: '' }),
   });
 }
 

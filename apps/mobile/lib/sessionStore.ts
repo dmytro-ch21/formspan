@@ -7,6 +7,11 @@ import { getDb } from './db';
 import type { Exercise } from './exercises';
 import type { Workout, WorkoutItem } from './workouts';
 import {
+  createWorkout,
+  deleteWorkout,
+  replaceItems,
+} from './workouts';
+import {
   finishSession as pushFinish,
   getSession as pullSession,
   deleteSession,
@@ -179,7 +184,7 @@ export async function startLocalSession(
     id: randomUUID(),
     user_id: userID,
     workout_id: input.workout_id ?? null,
-    sport: input.sport,
+    sport: input.sport as Workout['sport'],
     name: input.name,
     started_at: new Date().toISOString(),
     ended_at: null,
@@ -491,6 +496,15 @@ export type SessionSyncResult = {
   pushed: number;
   pulled: number;
   failed: number;
+  /**
+   * Rows held back because something they depend on has not synced yet.
+   *
+   * Counted apart from `failed` on purpose. A session whose workout has not
+   * reached the server is *waiting*, and calling that a failure would both
+   * alarm the athlete and — since the FK error is a 4xx, and 4xx classifies
+   * as permanent — make the orchestrator give up retrying it.
+   */
+  deferred: number;
   error?: string;
   errorKind?: SyncErrorKind;
 };
@@ -548,7 +562,7 @@ export function syncSessions(
     runSync(userID, getToken),
   );
   syncInFlight = run.catch(
-    () => ({ pushed: 0, pulled: 0, failed: 0 }) as SessionSyncResult,
+    () => ({ pushed: 0, pulled: 0, failed: 0, deferred: 0 }) as SessionSyncResult,
   );
   return run;
 }
@@ -558,14 +572,48 @@ async function runSync(
   getToken: TokenGetter,
 ): Promise<SessionSyncResult> {
   const db = await getDb();
-  const result: SessionSyncResult = { pushed: 0, pulled: 0, failed: 0 };
+  const result: SessionSyncResult = { pushed: 0, pulled: 0, failed: 0, deferred: 0 };
 
   const dirty = await db.getAllAsync<Row>(
     `SELECT * FROM local_sessions WHERE user_id = ? AND dirty = 1 ORDER BY started_at`,
     userID,
   );
 
+  // WORKOUTS FIRST, and not merely as a preference.
+  //
+  // sessions.workout_id is a real FK server-side, so a session referencing a
+  // workout the server has never seen is refused — and a 4xx classifies as
+  // `permanent`, which would make the orchestrator stop retrying training
+  // that is perfectly fine and report it as doomed. So the order is load
+  // bearing, and so is the deferral below.
+  const dirtyWorkouts = await db.getAllAsync<WorkoutRow>(
+    `SELECT * FROM workout_cache WHERE user_id = ? AND dirty = 1 ORDER BY updated_at`,
+    userID,
+  );
+  for (const w of dirtyWorkouts) {
+    try {
+      await pushWorkoutRow(db, w, userID, getToken);
+      result.pushed++;
+    } catch (err) {
+      result.failed++;
+      result.error = err instanceof Error ? err.message : String(err);
+      result.errorKind = worseKind(result.errorKind, classify(err));
+    }
+  }
+
+  // Whatever the server still has not acknowledged AFTER that attempt. A
+  // session pointing at one of these is waiting on a dependency, not broken.
+  const unsynced = await unsyncedWorkoutIDs(userID);
+
   for (const row of dirty) {
+    // Held back, and deliberately NOT counted as a failure: reporting it
+    // would tell the athlete their training failed to sync when the only
+    // thing wrong is that its plan has not landed yet. It stays dirty and
+    // goes out on the next pass, which is what `pending` already means.
+    if (row.workout_id && unsynced.has(row.workout_id)) {
+      result.deferred++;
+      continue;
+    }
     try {
       await pushRow(db, row, userID, getToken);
       result.pushed++;
@@ -694,7 +742,13 @@ export async function cacheWorkouts(userID: string, list: Workout[]): Promise<vo
     await db.runAsync(
       `DELETE FROM workout_cache
        WHERE user_id = ?
-         AND id NOT IN (${keep.map(() => '?').join(',') || "''"})`,
+         AND id NOT IN (${keep.map(() => '?').join(',') || "''"})
+         -- Absent from the server list is only evidence of deletion for rows
+         -- the server KNOWS about. A workout created here and not yet pushed
+         -- is absent because the server has never heard of it -- reconciling
+         -- it away would silently destroy the athlete's new plan. Same for a
+         -- pending local edit or delete.
+         AND dirty = 0 AND remote = 1 AND deleted_at IS NULL`,
       userID,
       ...keep,
     );
@@ -707,7 +761,14 @@ export async function cacheWorkouts(userID: string, list: Workout[]): Promise<vo
          ON CONFLICT(id) DO UPDATE SET
            sport = excluded.sport, name = excluded.name, goal = excluded.goal,
            items_json = excluded.items_json, cached_at = excluded.cached_at,
-           owner_user_id = excluded.owner_user_id, visibility = excluded.visibility`,
+           owner_user_id = excluded.owner_user_id, visibility = excluded.visibility
+         -- Never write over a local edit or a tombstone. Rows arriving here
+         -- come FROM the server, so they are by definition older than
+         -- anything this device has not pushed yet. Same backstop shape as
+         -- local_sessions, and for the same reason: the pull skips these
+         -- rows anyway, but relying on every caller to remember is how the
+         -- session store nearly lost a delete.
+         WHERE workout_cache.dirty = 0 AND workout_cache.deleted_at IS NULL`,
         w.id,
         userID,
         w.sport,
@@ -743,8 +804,10 @@ export async function cachedWorkouts(userID: string, sport?: string): Promise<Wo
     visibility: string;
   }>(
     sport
-      ? `SELECT * FROM workout_cache WHERE user_id = ? AND sport = ? ORDER BY name`
-      : `SELECT * FROM workout_cache WHERE user_id = ? ORDER BY name`,
+      ? `SELECT * FROM workout_cache
+           WHERE user_id = ? AND sport = ? AND deleted_at IS NULL ORDER BY name`
+      : `SELECT * FROM workout_cache
+           WHERE user_id = ? AND deleted_at IS NULL ORDER BY name`,
     ...(sport ? [userID, sport] : [userID]),
   );
 
@@ -866,4 +929,185 @@ export async function cachedExercises(sport?: string): Promise<Exercise[]> {
         ]
       : [],
   }));
+}
+
+// --- workouts, writable offline ------------------------------------------
+
+/**
+ * Create a workout on this device.
+ *
+ * The id is generated here, which is what makes the push idempotent: the
+ * server does `ON CONFLICT (id) DO NOTHING`, so a retry after a lost response
+ * is a no-op rather than a duplicate plan. Same contract sessions already use.
+ *
+ * `remote = 0` because the server has never heard of it. That flag is what the
+ * session push consults before sending anything that references this workout.
+ */
+export async function createLocalWorkout(
+  userID: string,
+  input: { name: string; sport: string; goal: string | null; visibility: string },
+): Promise<Workout> {
+  const db = await getDb();
+  const now = new Date().toISOString();
+  const w: Workout = {
+    id: randomUUID(),
+    owner_user_id: userID,
+    name: input.name,
+    sport: input.sport as Workout['sport'],
+    goal: input.goal as Workout['goal'],
+    notes: '',
+    visibility: input.visibility as Workout['visibility'],
+    items: [],
+    created_at: now,
+    updated_at: now,
+  };
+  await db.runAsync(
+    `INSERT INTO workout_cache
+       (id, user_id, sport, name, goal, items_json, owner_user_id, visibility,
+        dirty, remote, deleted_at, updated_at, cached_at)
+     VALUES (?, ?, ?, ?, ?, '[]', ?, ?, 1, 0, NULL, ?, ?)`,
+    w.id, userID, w.sport, w.name, w.goal, userID, w.visibility, now, now,
+  );
+  return w;
+}
+
+/** Replace a workout's exercises locally. Owed to the server afterwards. */
+export async function saveLocalWorkoutItems(
+  userID: string,
+  id: string,
+  items: WorkoutItem[],
+): Promise<void> {
+  const db = await getDb();
+  const now = new Date().toISOString();
+  await db.runAsync(
+    `UPDATE workout_cache SET items_json = ?, dirty = 1, updated_at = ?
+     WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+    JSON.stringify(items), now, id, userID,
+  );
+}
+
+/**
+ * Delete a workout — a tombstone, same rules as sessions.
+ *
+ * Always marked, never hard-deleted here: deciding on `remote` at this point
+ * races a first push that flips it mid-flight, which is exactly how a delete
+ * ended up resurrecting in the session store. The push decides.
+ */
+export async function deleteLocalWorkout(userID: string, id: string): Promise<void> {
+  const db = await getDb();
+  const now = new Date().toISOString();
+  await db.runAsync(
+    `UPDATE workout_cache SET deleted_at = ?, dirty = 1, updated_at = ?
+     WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+    now, now, id, userID,
+  );
+}
+
+/** Workout ids this device holds that the server has not acknowledged. */
+export async function unsyncedWorkoutIDs(userID: string): Promise<Set<string>> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<{ id: string }>(
+    `SELECT id FROM workout_cache WHERE user_id = ? AND remote = 0`,
+    userID,
+  );
+  return new Set(rows.map((r) => r.id));
+}
+
+/** Workouts with local changes the server hasn't got. */
+export async function countPendingWorkouts(userID: string): Promise<number> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM workout_cache WHERE user_id = ? AND dirty = 1`,
+    userID,
+  );
+  return row?.n ?? 0;
+}
+
+type WorkoutRow = {
+  id: string;
+  sport: string;
+  name: string;
+  goal: string | null;
+  items_json: string;
+  visibility: string;
+  remote: number;
+  deleted_at: string | null;
+  updated_at: string;
+};
+
+/**
+ * Push one workout's local state to the server.
+ *
+ * Mirrors `pushRow` for sessions, including the parts that were learned the
+ * hard way there: a tombstone is carried out and only then hard-deleted, a 404
+ * counts as success, a permanent refusal restores the row rather than hiding
+ * it forever, and the clean-up CASes on `updated_at` so an edit that landed
+ * mid-push is not marked as already sent.
+ */
+async function pushWorkoutRow(
+  db: SQLite.SQLiteDatabase,
+  row: WorkoutRow,
+  userID: string,
+  getToken: TokenGetter,
+): Promise<void> {
+  if (row.deleted_at) {
+    // Never pushed, so there is nothing to tell the server. Decided HERE, not
+    // at delete time, because `remote` is only trustworthy inside the
+    // serialised sync.
+    if (row.remote === 0) {
+      await db.runAsync(`DELETE FROM workout_cache WHERE id = ? AND user_id = ?`, row.id, userID);
+      return;
+    }
+    try {
+      await deleteWorkout(getToken, row.id);
+    } catch (err) {
+      if (isNotFound(err)) {
+        // The server agreeing it is gone IS the state being asked for.
+      } else if (isPermanentRejection(err)) {
+        // It will refuse identically forever. Keeping the tombstone would
+        // hide the plan for the life of the install while pending never
+        // reached zero. Restore it: the workout was not deleted.
+        await db.runAsync(
+          `UPDATE workout_cache SET deleted_at = NULL, dirty = 0 WHERE id = ? AND user_id = ?`,
+          row.id, userID,
+        );
+        throw err;
+      } else {
+        throw err;
+      }
+    }
+    await db.runAsync(`DELETE FROM workout_cache WHERE id = ? AND user_id = ?`, row.id, userID);
+    return;
+  }
+
+  if (row.remote === 0) {
+    await createWorkout(getToken, {
+      id: row.id,
+      name: row.name,
+      sport: row.sport as Workout['sport'],
+      goal: row.goal as Workout['goal'],
+      visibility: row.visibility as Workout['visibility'],
+    });
+    await db.runAsync(`UPDATE workout_cache SET remote = 1 WHERE id = ? AND user_id = ?`,
+      row.id, userID);
+  }
+
+  let items: WorkoutItem[] = [];
+  try {
+    items = JSON.parse(row.items_json) as WorkoutItem[];
+  } catch {
+    // A corrupt blob must not be pushed: replaceItems REPLACES the server's
+    // list, so sending [] would turn a local read failure into permanent
+    // remote deletion. Same guard sessions carry.
+    throw new Error('This workout is corrupted on this device and was not synced.');
+  }
+  await replaceItems(getToken, row.id, items);
+
+  await db.runAsync(
+    `UPDATE workout_cache SET dirty = 0 WHERE id = ? AND user_id = ?
+     -- Only if nothing changed underneath us mid-push, or we would mark a
+     -- newer edit as already sent and silently drop it.
+     AND updated_at = ?`,
+    row.id, userID, row.updated_at,
+  );
 }
