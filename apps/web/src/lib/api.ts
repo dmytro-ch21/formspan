@@ -1048,35 +1048,7 @@ export function searchTechniques(
   );
 }
 
-/**
- * Index every handle a graph edge might be written with: id, name, alias.
- *
- * The id keys are a back-compat shim and still load-bearing: `setup_from` used
- * to store ids (`grappling_stance_motion`), and a server that has not been
- * re-seeded still serves that shape. Ids are stored hyphenated and were written
- * underscored, hence `edgeKey`'s swap.
- *
- * Insertion order is deliberate — ids, then names, then aliases, with aliases
- * never overwriting. A name is a better answer than someone else's alias.
- */
-export function indexTechniques(
-  list: TechniqueSummary[],
-): Map<string, TechniqueSummary> {
-  const m = new Map<string, TechniqueSummary>();
-  for (const t of list) m.set(t.id.toLowerCase(), t);
-  for (const t of list) m.set(t.name.toLowerCase(), t);
-  for (const t of list) {
-    for (const a of t.aliases) {
-      if (!m.has(a.toLowerCase())) m.set(a.toLowerCase(), t);
-    }
-  }
-  return m;
-}
 
-/** Normalise an edge label to the form the index is keyed on. */
-export function edgeKey(label: string): string {
-  return label.trim().toLowerCase().replace(/_/g, "-");
-}
 
 /**
  * Split a technique's description into execution steps.

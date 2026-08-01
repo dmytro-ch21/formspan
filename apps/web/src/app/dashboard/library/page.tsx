@@ -4,10 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@clerk/nextjs";
 
 import {
-  edgeKey,
   executionSteps,
   getTechnique,
-  indexTechniques,
   listExercises,
   listRulesets,
   listTechniques,
@@ -251,8 +249,6 @@ export default function LibraryPage() {
     query,
   ]);
 
-  const byName = useMemo(() => indexTechniques(techniques), [techniques]);
-
   /**
    * Below `lg` the panel stacks *after* the entire grid, so on a narrow window
    * clicking a card appeared to do nothing — the detail landed hundreds of rows
@@ -265,6 +261,13 @@ export default function LibraryPage() {
       .getElementById("library-detail")
       ?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [selected]);
+  /** Only for the panel's loading title, so it never reads "Loading…". */
+  const nameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const t of techniques) m.set(t.id, t.name);
+    return m;
+  }, [techniques]);
+
   const isFiltered = query.trim() !== "" || sport !== "" || position !== "";
 
   return (
@@ -465,9 +468,7 @@ export default function LibraryPage() {
             // title while the new fetch is still in flight.
             key={selected.id}
             id={selected.id}
-            name={byName.get(selected.id)?.name ?? "Loading…"}
-            byName={byName}
-            onOpen={(id) => setSelected({ kind: "technique", id })}
+            name={nameById.get(selected.id) ?? "Loading…"}
             onClose={() => setSelected(null)}
           />
         )}
@@ -661,15 +662,11 @@ function ExercisePanel({
 function TechniquePanel({
   id,
   name,
-  byName,
-  onOpen,
   onClose,
 }: {
   /** Known from the card that opened this, so the shell never says "Loading…". */
   name: string;
   id: string;
-  byName: Map<string, TechniqueSummary>;
-  onOpen: (id: string) => void;
   onClose: () => void;
 }) {
   const { getToken } = useAuth();
@@ -774,26 +771,13 @@ function TechniquePanel({
 
       {rs && <Legality ruleset={rs} />}
 
-      {/* The reason this page beats the phone: following the graph costs
-          nothing, because the grid never moves. */}
-      <Edges
-        label="Set up from"
-        items={t.setup_from}
-        byName={byName}
-        onOpen={onOpen}
-      />
-      <Edges
-        label="Common next moves"
-        items={t.common_next_moves}
-        byName={byName}
-        onOpen={onOpen}
-      />
-      <Edges
-        label="Common counters"
-        items={t.common_counters}
-        byName={byName}
-        onOpen={onOpen}
-      />
+      {/* Reference text, not navigation — see the Edges docstring for why the
+          links were removed. The wide screen still earns its keep here: the
+          full prose and legality table fit beside the grid rather than
+          replacing it. */}
+      <Edges label="Set up from" items={t.setup_from} />
+      <Edges label="Common next moves" items={t.common_next_moves} />
+      <Edges label="Common counters" items={t.common_counters} />
 
       {/* Deliberately last and deliberately quiet. An observation about where
           this is usually taught, NOT a rule and NOT a prerequisite — the rule
@@ -878,53 +862,30 @@ function Division({
   );
 }
 
-function Edges({
-  label,
-  items,
-  byName,
-  onOpen,
-}: {
-  label: string;
-  items: string[];
-  byName: Map<string, TechniqueSummary>;
-  onOpen: (id: string) => void;
-}) {
+/**
+ * The graph, as reference text.
+ *
+ * These were buttons that swapped the panel until the coverage was looked at
+ * honestly: only ~80% of `setup_from` entries name a real library entry, and
+ * for `common_next_moves` it is ~29%, for `common_counters` ~6%. Most rows were
+ * plain text sitting beside a few links, which reads as a feature that
+ * half-works. The information stays; the navigation goes. Mirrors the phone.
+ */
+function Edges({ label, items }: { label: string; items: string[] }) {
   if (items.length === 0) return null;
   return (
     <div className="flex flex-col gap-2">
       <p className="eyebrow">{label}</p>
-      <div className="flex flex-wrap gap-2">
-        {items.map((raw) => {
-          const hit = byName.get(edgeKey(raw)) ?? null;
-          if (!hit) {
-            // Most of these name something that isn't a library entry — 71% of
-            // next-moves, 94% of counters are prose like "establish inside
-            // ties". Plain text, and it must LOOK like plain text: a dead link
-            // is worse than honest text.
-            return (
-              <span key={raw} className="text-xs text-text-muted">
-                {raw}
-              </span>
-            );
-          }
-          // Show what the author wrote, EXCEPT when they wrote an id — the only
-          // unreadable form. Substituting the target's canonical name on an
-          // alias match silently rewrites the content: "Straight Armbar" became
-          // "Armbar from Closed Guard", a different technique from a different
-          // position, presented as if the author had said it.
-          const display = edgeKey(raw) === hit.id ? hit.name : raw;
-          return (
-            <button
-              key={raw}
-              type="button"
-              onClick={() => onOpen(hit.id)}
-              className="rounded-pill border border-lime/40 px-2.5 py-1 text-xs font-medium text-lime-ink transition hover:bg-lime/10"
-            >
-              {display}
-            </button>
-          );
-        })}
-      </div>
+      <ul className="flex flex-col gap-1.5">
+        {items.map((raw) => (
+          <li
+            key={raw}
+            className="rounded-lg border border-line-soft bg-surface-hover px-3 py-2 text-xs leading-relaxed text-text-muted"
+          >
+            {raw}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

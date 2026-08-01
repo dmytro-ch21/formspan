@@ -1,5 +1,5 @@
 import { Image } from 'expo-image';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View as RNView } from 'react-native';
 
@@ -7,16 +7,11 @@ import { categoryBadge } from '@/components/LibraryTile';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import {
-  edgeKey,
   executionSteps,
   fetchRulesets,
   fetchTechnique,
-  fetchTechniques,
-  indexByName,
-  resolveEdge,
   type Ruleset,
   type Technique,
-  type TechniqueSummary,
 } from '@/lib/techniques';
 import { useAuthToken } from '@/lib/useAuthToken';
 
@@ -49,10 +44,8 @@ import { useAuthToken } from '@/lib/useAuthToken';
 export default function TechniqueScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const getToken = useAuthToken();
-  const router = useRouter();
 
   const [technique, setTechnique] = useState<Technique | null>(null);
-  const [byName, setByName] = useState<Map<string, TechniqueSummary>>(new Map());
   const [ruleset, setRuleset] = useState<Ruleset | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -75,15 +68,6 @@ export default function TechniqueScreen() {
           const all = await fetchRulesets(getToken, signal);
           setRuleset(all.get(t.ibjjf_ruleset_id) ?? null);
         }
-        // Deliberately NOT awaited. The index only decides which edge labels
-        // are tappable, so awaiting it held first paint hostage to a second
-        // request; edges upgrade from text to links when it lands. Cached
-        // after the first call, so this is usually free.
-        void fetchTechniques(getToken, signal)
-          .then((list) => setByName(indexByName(list)))
-          .catch(() => {
-            /* edges stay plain text — never fatal */
-          });
       } catch (err) {
         if ((err as Error)?.name === 'AbortError') return;
         setError('Could not load this technique. Check your connection and try again.');
@@ -175,14 +159,9 @@ export default function TechniqueScreen() {
 
         {/* The graph. Grouped rather than scattered, because "what leads here
             and what follows" is one question, not three. */}
-        <Edges label="Set up from" items={t.setup_from} byName={byName} router={router} />
-        <Edges
-          label="Common next moves"
-          items={t.common_next_moves}
-          byName={byName}
-          router={router}
-        />
-        <Edges label="Common counters" items={t.common_counters} byName={byName} router={router} />
+        <Edges label="Set up from" items={t.setup_from} />
+        <Edges label="Common next moves" items={t.common_next_moves} />
+        <Edges label="Common counters" items={t.common_counters} />
 
         {/* Deliberately last and deliberately quiet. An observation about where
             this is usually taught, NOT a rule and NOT a prerequisite — the rule
@@ -340,54 +319,32 @@ function Division({ label, belts, note }: { label: string; belts: string[]; note
   );
 }
 
-function Edges({
-  label,
-  items,
-  byName,
-  router,
-}: {
-  label: string;
-  items: string[];
-  byName: Map<string, TechniqueSummary>;
-  router: ReturnType<typeof useRouter>;
-}) {
+/**
+ * The graph, as reference text.
+ *
+ * These were tappable links until the coverage was looked at honestly: only
+ * ~80% of `setup_from` entries name a real library entry, and for
+ * `common_next_moves` it is ~29%, for `common_counters` ~6%. The rest is prose
+ * — "establish grips or inside ties". So most rows were plain text sitting
+ * beside a few links, which reads as a feature that half-works rather than a
+ * graph.
+ *
+ * The information is worth keeping: knowing an armbar chains to a triangle is
+ * useful whether or not the app can navigate there. The navigation is not. If
+ * coverage ever reaches the point where nearly every entry resolves, this is
+ * the place to reconsider.
+ */
+function Edges({ label, items }: { label: string; items: string[] }) {
   if (items.length === 0) return null;
   return (
     <RNView style={styles.edgeBlock}>
       <Text style={styles.edgeLabel}>{label.toUpperCase()}</Text>
       <RNView style={styles.edgeWrap}>
-        {items.map((raw) => {
-          const hit = resolveEdge(raw, byName);
-          if (!hit) {
-            // Most of these name something that isn't a library entry — 71% of
-            // next-moves, 94% of counters are prose like "establish inside
-            // ties". Plain text, and it must LOOK like plain text: a dead link
-            // is worse than honest text.
-            return (
-              <RNView key={raw} style={styles.edgeFlat}>
-                <Text style={styles.edgeFlatText}>{raw}</Text>
-              </RNView>
-            );
-          }
-          // Show what the author wrote, EXCEPT when they wrote an id — the only
-          // unreadable form. Substituting the target's canonical name on an
-          // alias match silently rewrites the content: "Straight Armbar" became
-          // "Armbar from Closed Guard", a different technique from a different
-          // position, presented as if the author had said it.
-          const display = edgeKey(raw) === hit.id ? hit.name : raw;
-          return (
-            <Pressable
-              key={raw}
-              onPress={() => router.push(`/technique/${hit.id}`)}
-              style={styles.edgeLink}
-              accessibilityRole="link"
-              accessibilityLabel={`Open ${hit.name}`}
-            >
-              <Text style={styles.edgeLinkText}>{display}</Text>
-              <Text style={styles.edgeChevron}>›</Text>
-            </Pressable>
-          );
-        })}
+        {items.map((raw) => (
+          <RNView key={raw} style={styles.edgeFlat}>
+            <Text style={styles.edgeFlatText}>{raw}</Text>
+          </RNView>
+        ))}
       </RNView>
     </RNView>
   );
@@ -489,22 +446,8 @@ const styles = StyleSheet.create({
   edgeBlock: { gap: 9 },
   edgeLabel: { color: vola.textDim, fontSize: 11, letterSpacing: 1.2, fontWeight: '800' },
   edgeWrap: { gap: 7 },
-  // Full-width rows rather than wrapped pills: technique names are long, pills
-  // truncated them, and a 44pt row is a far easier target than an inline word.
-  edgeLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10,
-    backgroundColor: vola.surface,
-    borderWidth: 1,
-    borderColor: `${vola.lime}3D`,
-    borderRadius: 10,
-    paddingHorizontal: 13,
-    paddingVertical: 11,
-  },
-  edgeLinkText: { flex: 1, color: vola.lime, fontSize: 14, fontWeight: '600' },
-  edgeChevron: { color: vola.lime, fontSize: 17, marginTop: -2 },
+  // Full-width rows rather than wrapped pills: technique names are long and
+  // pills truncated them.
   edgeFlat: {
     backgroundColor: vola.surface,
     borderWidth: 1,

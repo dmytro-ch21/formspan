@@ -1,0 +1,7 @@
+-- Deliberately empty.
+--
+-- The rows are reference content, not user data: their source of truth is
+-- exercises.json, and they were removed from it in the same change. Re-adding
+-- them here would either duplicate that list in SQL (guaranteed to drift) or
+-- restore rows the seed would not maintain. To bring them back, restore the
+-- entries in exercises.json and re-run `cmd/seed`.
