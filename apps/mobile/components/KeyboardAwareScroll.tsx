@@ -1,11 +1,5 @@
-import {
-  createContext,
-  forwardRef,
-  useCallback,
-  useContext,
-  useEffect,
-  useRef,
-} from 'react';
+import { useFocusEffect } from 'expo-router';
+import { createContext, forwardRef, useCallback, useContext, useEffect, useRef } from 'react';
 import {
   Keyboard,
   Platform,
@@ -16,41 +10,43 @@ import {
 } from 'react-native';
 
 /**
- * A ScrollView that lifts the focused input above the keyboard.
+ * Keeps the focused input visible in the one case iOS doesn't cover.
  *
- * **Why this exists, given `automaticallyAdjustKeyboardInsets` was already
- * set.** That prop was on the session screen the whole time, and the report
- * from the gym was still *"i had hard time with inputs that are lower and go
- * bihind the keyboard"*. Both are true, because the prop does less than its
- * name suggests: it adjusts the scroll view's **content inset**, so the field
- * becomes *reachable* — it does not **scroll** anything. The keyboard comes
- * up, the field you just tapped is behind it, and iOS's contribution is that
- * you are now allowed to drag it into view yourself. Mid-set, one-handed,
- * that is the complaint rather than the fix.
+ * **The first version of this file documented the wrong mechanism, and the
+ * wrong mechanism justified a bug.** It claimed
+ * `automaticallyAdjustKeyboardInsets` "adjusts the inset but never scrolls".
+ * That is false. In `RCTScrollViewComponentView.mm`'s
+ * `_keyboardWillChangeFrame:`, RN asks the first responder for its focus rect
+ * and, when the field's bottom sits below the keyboard, sets
+ * `contentDiff = keyboardEndFrame.origin.y - focusEnd` and scrolls by it — on
+ * the keyboard's own animation curve. `RCTTextInputComponentView.mm` even
+ * supplies a 15pt margin. iOS already lifts the field on every keyboard
+ * appearance, and does it better than this file can.
  *
- * So the inset prop stays (it is what makes the content slide back down when
- * the keyboard goes away, and it keeps the last field scrollable past the
- * fold) and this adds the missing half: on focus, measure the field against
- * the keyboard and scroll it clear.
+ * **The real gap is that it only runs when the keyboard's FRAME CHANGES.**
+ * Every field on the session screen is a `number-pad` or `decimal-pad`, and
+ * those are the same height. So moving focus Weight → Reps → RIR → RPE, or
+ * expanding a lower row while the keyboard is already up and tapping into it,
+ * posts no keyboard notification at all — no notification, no native scroll,
+ * and the field you just tapped stays hidden. That is precisely the gym
+ * report, and the only case this file exists to handle.
  *
- * **Measured, not assumed.** The obvious implementation guesses — scroll by a
- * fixed amount, or by the keyboard's height. Both are wrong for the set rows
- * this was built for, whose height varies with the exercise's measures
- * (reps-only versus weight+reps versus distance+seconds) and with whether the
- * row is expanded. `measureInWindow` asks where the field actually is, and
- * the scroll is the exact overlap plus a margin, so a field one pixel behind
- * the keyboard moves one pixel plus the margin rather than a screenful.
+ * **So on iOS the keyboard listeners deliberately do not scroll.** They only
+ * record where the keyboard is. Scrolling from them as well would race the
+ * native adjustment: `offset.current` lags behind (it updates from throttled
+ * `onScroll` events), so a JS scroll computed after the native one has landed
+ * uses a stale offset and drags the list back down — hiding the field again,
+ * intermittently, depending which won. Two mechanisms doing one job is worse
+ * than either alone.
  *
- * **Two orderings, both real.** Tapping a field with no keyboard up fires
- * focus *first* and the keyboard frame arrives after; tapping a second field
- * while the keyboard is already up gives the frame first and focus second.
- * Handling only the first ordering is the common bug — it works when you test
- * it once and fails as soon as you tab between fields, which is exactly what
- * logging a set is. So the focused field is remembered and the scroll is
- * attempted from both events.
+ * Android needs the opposite, because `automaticallyAdjustKeyboardInsets` is
+ * `@platform ios`: nothing there lifts the field for us, so the show event
+ * has to.
  *
- * No new dependency. `react-native-keyboard-controller` does this and more,
- * but it is native code, and this is ~40 lines against an API RN already has.
+ * **Measured, not assumed.** The target comes from `measureInWindow` rather
+ * than a row index, because set rows differ in height by the exercise's
+ * measures (reps-only vs weight+reps vs distance+seconds) and by whether the
+ * row is expanded.
  */
 
 type EnsureVisible = (node: Measurable | null) => void;
@@ -63,21 +59,52 @@ type Measurable = {
 /**
  * Gap left between the field and the top of the keyboard.
  *
- * Not merely cosmetic: a field flush against the keyboard reads as clipped,
- * and on the session screen the thing directly under a numeric field is
- * usually its own hint text or the next field, which you want to see to know
- * where you are.
+ * A little more than the 15pt iOS uses natively, so a field lifted by this
+ * file sits clearly free rather than looking like a near-miss of the platform
+ * behaviour.
  */
 const MARGIN = 24;
 
 /**
+ * Which keyboard events exist on this platform.
+ *
+ * **`keyboardWillShow`/`keyboardWillHide` are iOS-only.** Android never emits
+ * them, so using the iOS names there is not a slightly-worse experience — it
+ * is dead code, and the whole feature silently does nothing while reading as
+ * correct. One line deciding whether a feature exists at all, which is why it
+ * is a tested function rather than a comment.
+ */
+export function keyboardEventNames(os: string): {
+  show: 'keyboardWillShow' | 'keyboardDidShow';
+  hide: 'keyboardWillHide' | 'keyboardDidHide';
+  changeFrame: 'keyboardWillChangeFrame' | null;
+} {
+  return os === 'ios'
+    ? { show: 'keyboardWillShow', hide: 'keyboardWillHide', changeFrame: 'keyboardWillChangeFrame' }
+    : { show: 'keyboardDidShow', hide: 'keyboardDidHide', changeFrame: null };
+}
+
+/**
+ * Does the platform lift the focused field by itself when the keyboard shows?
+ *
+ * iOS does — see the note at the top: `automaticallyAdjustKeyboardInsets`
+ * genuinely scrolls, it does not merely inset. Android has no equivalent.
+ *
+ * This decides whether the show listener scrolls or only records, and it is
+ * wrong in a different way in each direction: `true` on Android means nothing
+ * ever lifts, `false` on iOS means two mechanisms fight over one scroll
+ * position with a stale offset between them.
+ */
+export function nativeScrollsFocusedFieldClear(os: string): boolean {
+  return os === 'ios';
+}
+
+/**
  * Where to scroll so a field clears the keyboard, or null to leave it alone.
  *
- * Pulled out as a pure function because it is the only part of this file that
- * makes a decision, and the rest is RN plumbing that needs a device to mean
- * anything. `apps/mobile` has no component test runner (see the tests
- * alongside this), so extracting the arithmetic is the difference between
- * this logic being covered and being hoped about.
+ * Pure, because it is the only arithmetic here and `apps/mobile` has no
+ * component test runner — extracting it is the difference between this being
+ * covered and being hoped about.
  */
 export function scrollTargetFor(a: {
   /** Field's absolute Y on screen. */
@@ -88,17 +115,16 @@ export function scrollTargetFor(a: {
   /**
    * Absolute Y of the bottom of the scroll view itself.
    *
-   * The reason this is not just `keyboardTop`, and the reason Android works:
-   * the two platforms hide the field in *different ways*. On iOS the window
-   * does not move, so the scroll view still extends behind the keyboard and
-   * the keyboard's own top edge is the boundary. On Android the default
+   * Not the same as `keyboardTop`, because the platforms hide the field in
+   * different ways. iOS leaves the window alone and puts the keyboard over
+   * it, so the keyboard's edge is the boundary. Android's default
    * `softwareKeyboardLayoutMode` is `resize`, so the WINDOW shrinks — the
    * scroll view is now short, the keyboard is not over it at all, and the
-   * field is clipped by the view's bottom rather than covered.
+   * field is clipped by the view's own bottom.
    *
-   * Taking the smaller of the two describes both without branching on
-   * `Platform` here: whichever edge is higher up the screen is the one
-   * actually cutting the field off.
+   * Taking whichever edge is higher describes both without branching on
+   * `Platform` for geometry, and degrades sensibly for a case neither of us
+   * predicted (a split keyboard, a floating window).
    */
   containerBottom: number;
   /** The scroll view's current offset. */
@@ -111,36 +137,10 @@ export function scrollTargetFor(a: {
   if (a.fieldHeight <= 0) return null;
   const usableBottom = Math.min(a.keyboardTop, a.containerBottom);
   const overlap = a.fieldY + a.fieldHeight + MARGIN - usableBottom;
-  // Already clear. Scrolling anyway would drag the list under someone's
-  // thumb every time they moved between two visible fields.
+  // Already clear. Scrolling anyway would drag the list under someone's thumb
+  // every time they moved between two fields that were both visible.
   if (overlap <= 0) return null;
   return a.offset + overlap;
-}
-
-/**
- * Which keyboard events to subscribe to on this platform.
- *
- * **`keyboardWillShow` and `keyboardWillHide` are iOS-only.** Android never
- * emits them, so subscribing there is not a slightly-worse experience — it is
- * dead code, and the entire feature silently does nothing on the platform
- * while looking completely correct in review. That is the whole Android bug,
- * and it is one line, which is exactly why it is worth a test rather than a
- * comment.
- *
- * iOS keeps `Will`: the scroll then animates alongside the keyboard instead
- * of visibly correcting itself once it has arrived. `keyboardWillChangeFrame`
- * is iOS-only too and covers what a show/hide pair misses — swapping between
- * a number pad and a taller text keyboard, and the floating/split keyboard on
- * iPad.
- */
-export function keyboardEventNames(os: string): {
-  show: 'keyboardWillShow' | 'keyboardDidShow';
-  hide: 'keyboardWillHide' | 'keyboardDidHide';
-  changeFrame: 'keyboardWillChangeFrame' | null;
-} {
-  return os === 'ios'
-    ? { show: 'keyboardWillShow', hide: 'keyboardWillHide', changeFrame: 'keyboardWillChangeFrame' }
-    : { show: 'keyboardDidShow', hide: 'keyboardDidHide', changeFrame: null };
 }
 
 const Ctx = createContext<EnsureVisible>(() => {});
@@ -150,8 +150,7 @@ const Ctx = createContext<EnsureVisible>(() => {});
  *
  * A context rather than a prop, because the inputs are two components deep
  * (screen → SetRow → Field) and threading a callback through every row would
- * put keyboard plumbing in the signature of a component that only renders a
- * number.
+ * put keyboard plumbing in the signature of a component that renders a number.
  */
 export function useEnsureVisible(): EnsureVisible {
   return useContext(Ctx);
@@ -164,22 +163,41 @@ export const KeyboardAwareScrollView = forwardRef<ScrollView, ScrollViewProps>(
     const offset = useRef(0);
     /** Absolute Y of the top of the keyboard; null when it is down. */
     const keyboardTop = useRef<number | null>(null);
-    /** The field to keep visible, remembered across the two event orderings. */
+    /** The field to keep visible. */
     const focused = useRef<Measurable | null>(null);
+
+    /**
+     * Whether this screen is the one on top.
+     *
+     * `Keyboard` listeners are global, and the session screen stays mounted
+     * when the exercise picker is pushed over it. Without this, focusing the
+     * picker's search field fires this screen's handler, which measures and
+     * scrolls a list nobody can see — and you come back to a session that has
+     * moved under you.
+     */
+    const onTop = useRef(true);
+    useFocusEffect(
+      useCallback(() => {
+        onTop.current = true;
+        return () => {
+          onTop.current = false;
+        };
+      }, []),
+    );
 
     const scrollClear = useCallback((node: Measurable | null) => {
       const kbTop = keyboardTop.current;
       const scroller = scrollRef.current;
-      if (!node || kbTop === null || !scroller) return;
-      // The scroll view is measured too, not just the field — see
-      // `containerBottom` above for why the keyboard's edge alone is not the
-      // boundary on every platform.
+      if (!node || kbTop === null || !scroller || !onTop.current) return;
       // `ScrollView`'s type does not declare `measureInWindow` — it is a
-      // native method on the underlying view — so this is checked rather
-      // than cast. A blind cast here would turn a future RN change into a
-      // crash on the one screen that must never crash mid-workout.
+      // native method on the underlying view — so this is checked rather than
+      // cast. A blind cast would turn a future RN change into a crash on the
+      // one screen that must never crash mid-workout.
       const frame = scroller as unknown as Partial<Measurable>;
       if (typeof frame.measureInWindow !== 'function') return;
+      // The scroll view is measured too, not just the field — see
+      // `containerBottom` for why the keyboard's edge alone is not the
+      // boundary on every platform.
       frame.measureInWindow((_sx: number, sy: number, _sw: number, sh: number) => {
         node.measureInWindow((_x, y, _w, h) => {
           const target = scrollTargetFor({
@@ -197,28 +215,38 @@ export const KeyboardAwareScrollView = forwardRef<ScrollView, ScrollViewProps>(
 
     useEffect(() => {
       const names = keyboardEventNames(Platform.OS);
-      const onFrame = (e: { endCoordinates: { screenY: number } }) => {
+      const nativeHandlesIt = nativeScrollsFocusedFieldClear(Platform.OS);
+      const track = (e: { endCoordinates: { screenY: number } }) => {
         keyboardTop.current = e.endCoordinates.screenY;
-        scrollClear(focused.current);
+        // Deliberately does NOT scroll on iOS: the platform is already doing
+        // it for this very event, and a second scroll from here would race it
+        // with a stale offset. Android gets no such help, so there it must.
+        if (!nativeHandlesIt) scrollClear(focused.current);
       };
       const subs = [
-        Keyboard.addListener(names.show, onFrame),
+        Keyboard.addListener(names.show, track),
         Keyboard.addListener(names.hide, () => {
           keyboardTop.current = null;
-          // The focused field is deliberately NOT cleared and the scroll
-          // position is deliberately NOT restored: the content comes back via
-          // the inset (iOS) or the window resize (Android), and yanking the
-          // list to where it was would move the row out from under someone
-          // who is still reading it.
+          // Cleared, so a later frame change cannot re-scroll to a field that
+          // no longer has focus. The scroll POSITION is deliberately left
+          // alone — the content returns via the inset (iOS) or the window
+          // resize (Android), and yanking the list back to where it was would
+          // move the row out from under someone still reading it.
+          focused.current = null;
         }),
       ];
-      if (names.changeFrame) subs.push(Keyboard.addListener(names.changeFrame, onFrame));
+      if (names.changeFrame) subs.push(Keyboard.addListener(names.changeFrame, track));
       return () => subs.forEach((s) => s.remove());
     }, [scrollClear]);
 
     const ensureVisible = useCallback<EnsureVisible>(
       (node) => {
         focused.current = node;
+        // The case that matters, and the only one the platform misses: the
+        // keyboard is ALREADY up (so `keyboardTop` is set) and focus moved to
+        // another same-height field, which posts no keyboard event. On the
+        // first tap `keyboardTop` is still null, this is a no-op, and iOS
+        // does the work when the keyboard arrives.
         scrollClear(node);
       },
       [scrollClear],
@@ -235,6 +263,9 @@ export const KeyboardAwareScrollView = forwardRef<ScrollView, ScrollViewProps>(
     return (
       <Ctx.Provider value={ensureVisible}>
         <ScrollView
+          // Before the spread so a caller can override it; `onScroll` goes
+          // after, because tracking `offset` is not optional.
+          scrollEventThrottle={16}
           {...props}
           ref={(node) => {
             scrollRef.current = node;
@@ -242,10 +273,6 @@ export const KeyboardAwareScrollView = forwardRef<ScrollView, ScrollViewProps>(
             else if (forwardedRef) forwardedRef.current = node;
           }}
           onScroll={handleScroll}
-          // Needed for `offset` to track: without it RN sends scroll events
-          // rarely enough that the stored offset is stale by the time a field
-          // is focused, and the scroll lands in the wrong place.
-          scrollEventThrottle={16}
         >
           {children}
         </ScrollView>
@@ -254,5 +281,5 @@ export const KeyboardAwareScrollView = forwardRef<ScrollView, ScrollViewProps>(
   },
 );
 
-/** The margin, exported so tests can assert the arithmetic rather than restate it. */
+/** The margin, exported so a caller can reason about the spacing it gets. */
 export const KEYBOARD_MARGIN = MARGIN;

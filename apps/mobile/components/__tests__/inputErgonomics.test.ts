@@ -1,9 +1,10 @@
 import {
   KEYBOARD_MARGIN,
   keyboardEventNames,
+  nativeScrollsFocusedFieldClear,
   scrollTargetFor,
-} from '../../components/KeyboardAwareScroll';
-import { shouldClaim, settleTarget } from '../../components/SwipeToDelete';
+} from '../KeyboardAwareScroll';
+import { shouldClaim, settleTarget } from '../SwipeToDelete';
 
 /**
  * The two decisions behind the in-session input fixes.
@@ -32,6 +33,13 @@ describe('lifting a field above the keyboard', () => {
       fieldY: 520, fieldHeight: 40, keyboardTop: kbTop, containerBottom: SCREEN, offset: 100,
     });
     expect(target).toBe(100 + 40 + KEYBOARD_MARGIN);
+  });
+
+  it('uses a margin of 24 — pinned to the NUMBER, not to the constant', () => {
+    // Importing KEYBOARD_MARGIN on both sides of an assertion makes the test
+    // agree with whatever the constant says, so a change to its value cannot
+    // fail it. One literal somewhere is what actually pins the spacing.
+    expect(KEYBOARD_MARGIN).toBe(24);
   });
 
   it('leaves a field that is already clear alone', () => {
@@ -101,25 +109,25 @@ describe('lifting a field above the keyboard', () => {
 
 describe('claiming a swipe without breaking the scroll', () => {
   it('claims a decisive horizontal drag', () => {
-    expect(shouldClaim(-40, 3)).toBe(true);
+    expect(shouldClaim(-40, 3, true)).toBe(true);
   });
 
   it('REFUSES a vertical scroll that wanders sideways', () => {
     // The failure this guards: a list that intermittently will not scroll
     // because a row claimed a mostly-vertical drag.
-    expect(shouldClaim(-20, 60)).toBe(false);
+    expect(shouldClaim(-20, 60, true)).toBe(false);
   });
 
   it('refuses a diagonal — |dx| must beat |dy|, not merely exist', () => {
-    expect(shouldClaim(-30, 25)).toBe(false);
+    expect(shouldClaim(-30, 25, true)).toBe(false);
   });
 
   it('refuses a small twitch even when it is purely horizontal', () => {
-    expect(shouldClaim(-6, 0)).toBe(false);
+    expect(shouldClaim(-6, 0, true)).toBe(false);
   });
 
   it('claims a rightward drag too, so an open row can be closed', () => {
-    expect(shouldClaim(40, 2)).toBe(true);
+    expect(shouldClaim(40, 2, true)).toBe(true);
   });
 });
 
@@ -170,5 +178,33 @@ describe('which keyboard events to listen for', () => {
   it('only subscribes to changeFrame on iOS, which is the only place it fires', () => {
     expect(keyboardEventNames('ios').changeFrame).toBe('keyboardWillChangeFrame');
     expect(keyboardEventNames('android').changeFrame).toBeNull();
+  });
+});
+
+describe('who lifts the field when the keyboard appears', () => {
+  it('leaves it to iOS, which already does it', () => {
+    // RCTScrollViewComponentView's _keyboardWillChangeFrame: measures the
+    // first responder and scrolls it clear. Doing it again from JS races that
+    // with a stale offset and can drag the field back behind the keyboard.
+    expect(nativeScrollsFocusedFieldClear('ios')).toBe(true);
+  });
+
+  it('does it ourselves on Android, which has no equivalent', () => {
+    // automaticallyAdjustKeyboardInsets is @platform ios. Assuming otherwise
+    // means nothing ever lifts there.
+    expect(nativeScrollsFocusedFieldClear('android')).toBe(false);
+  });
+});
+
+describe('the finished-session guard', () => {
+  it('refuses to claim any swipe when disabled', () => {
+    // A finished session is a record. This lives inside shouldClaim so it is
+    // covered by tests at all — outside, it was the one thing that can
+    // destroy a logged set with nothing able to reach it.
+    expect(shouldClaim(-40, 3, false)).toBe(false);
+  });
+
+  it('refuses even a perfect swipe when disabled', () => {
+    expect(shouldClaim(-200, 0, false)).toBe(false);
   });
 });

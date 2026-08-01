@@ -21,18 +21,27 @@ import { vola } from '@/constants/Colors';
  * at, and an accidental deletion costs a set of real training. Say the word
  * and full-swipe is a threshold constant away.
  *
- * **`PanResponder`, not `react-native-gesture-handler`.** The latter is the
- * usual answer and is genuinely better at gesture composition, but it is not
- * currently a dependency, and adding native code to get one row interaction
- * would mean a prebuild and a fresh device build for everyone. RN ships this.
+ * **`PanResponder`, not `react-native-gesture-handler`.** RNGH is better at
+ * gesture composition and is already in the store as an optional peer of
+ * `expo-router` — so the honest cost is not "a new dependency" but a fresh
+ * native build of the `expo run:ios --device` artifact this project installs
+ * on real phones. That is still a real cost for one row interaction, and
+ * PanResponder is sufficient here, but the earlier version of this comment
+ * overstated the case.
  *
- * **The competing-gesture problem is the whole difficulty.** The row lives in
- * a vertical ScrollView, so claiming a gesture too eagerly breaks scrolling —
- * the failure mode being a list that intermittently refuses to move because a
- * row decided a mostly-vertical drag was a swipe. The claim below therefore
- * requires the movement to be decisively horizontal AND past a threshold, and
- * refuses on the first move rather than waiting to see how the gesture
- * develops.
+ * **The competing-gesture problem, accurately.** On iOS a JS responder cannot
+ * actually stop a native `UIScrollView` pan: `blockNativeResponder` is
+ * Android-only, and `RCTSurfaceTouchHandler` refuses to be prevented by a
+ * recognizer inside the surface. So on iOS an over-eager claim causes a
+ * diagonal drag to swipe AND scroll at once, not a frozen list. The "list
+ * intermittently refuses to scroll" failure is the ANDROID one — which is
+ * also the platform this has never been run on. Either way the predicate
+ * below is deliberately conservative: decisively horizontal AND past a
+ * threshold.
+ *
+ * One consequence worth knowing: `TextInput` defaults `rejectResponderTermination`
+ * to true, so a swipe that STARTS on a focused field is ignored. The swipe
+ * target is the row, not the inputs on an expanded row.
  */
 
 /** How far the row slides open — wide enough for the button plus padding. */
@@ -61,7 +70,12 @@ const FLICK_VX = 0.3;
  * intermittently refuses to scroll, because a row decided a mostly-vertical
  * drag belonged to it.
  */
-export function shouldClaim(dx: number, dy: number): boolean {
+export function shouldClaim(dx: number, dy: number, enabled: boolean): boolean {
+  // `enabled` lives IN here rather than beside the call, so the
+  // finished-session guard is covered by the same tests as the geometry.
+  // Outside the function it was the one thing that can destroy a logged set
+  // and had no test that could reach it.
+  if (!enabled) return false;
   // Both conditions matter. The threshold alone lets a steep drag through;
   // the ratio alone lets a 2px twitch through.
   return Math.abs(dx) > CLAIM_DX && Math.abs(dx) > Math.abs(dy) * 1.5;
@@ -124,6 +138,13 @@ export function SwipeToDelete({
 
   const close = useCallback(() => settle(0), [settle]);
 
+  useEffect(() => {
+    // Refusing new claims is not enough. Swipe a row open, scroll down, tap
+    // "Finish session" — `enabled` goes false while `open` stays true, and a
+    // Delete sits armed on a session that is now a read-only record.
+    if (!enabled) close();
+  }, [enabled, close]);
+
   const firstRun = useRef(true);
   useEffect(() => {
     // Skipped on mount, or every row would animate closed as it appeared.
@@ -140,7 +161,7 @@ export function SwipeToDelete({
         // NOT `onStartShouldSetPanResponder`. Claiming on touch-down would
         // swallow taps meant for the row's own controls — the done tick and
         // the expand toggle live inside `children`.
-        onMoveShouldSetPanResponder: (_e, g) => enabled && shouldClaim(g.dx, g.dy),
+        onMoveShouldSetPanResponder: (_e, g) => shouldClaim(g.dx, g.dy, enabled),
         onPanResponderMove: (_e, g) => {
           const next = rest.current + g.dx;
           // Clamped both ways: left stops at the action's width so the row
@@ -160,10 +181,24 @@ export function SwipeToDelete({
 
   return (
     <View style={styles.wrap} testID={testID}>
-      {/* Behind the row. `pointerEvents` is driven by `open` so the button is
-          untappable while hidden — a Delete you cannot see must not be a
-          Delete you can hit. */}
-      <View style={styles.actions} pointerEvents={open ? 'auto' : 'none'}>
+      {/* Behind the row.
+          `pointerEvents` blocks the TOUCH, but it is NOT an accessibility
+          gate — it maps to `userInteractionEnabled`, which governs hit
+          testing only, while the accessibility tree is walked independently.
+          Left at that, VoiceOver read "Delete set 1, button" before every
+          single row, doubling the elements on the screen and announcing a
+          destructive action on rows nobody had swiped — including on a
+          finished, read-only session. Worse on Android, where TalkBack
+          activation goes through `performClick()`, which `pointerEvents` does
+          not gate at all, so the delete could plausibly fire.
+          So the subtree is hidden from assistive tech as well as from
+          touch. */}
+      <View
+        style={styles.actions}
+        pointerEvents={open ? 'auto' : 'none'}
+        accessibilityElementsHidden={!open}
+        importantForAccessibility={open ? 'auto' : 'no-hide-descendants'}
+      >
         <Pressable
           onPress={() => {
             close();
@@ -216,8 +251,13 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   deleteText: {
-    color: '#fff',
-    fontWeight: '600',
+    // `navy`, not white. White on `danger` measures 2.78:1 — below AA's 4.5
+    // and below even the 3:1 large-text floor — on a destructive control read
+    // in gym daylight. navy on the same red is 6.75:1. Every other colour in
+    // this app carries a measured ratio in constants/Colors.ts; this one was
+    // the first that did not, and it was also the one that failed.
+    color: vola.navy,
+    fontWeight: '700',
     fontSize: 15,
   },
   row: {

@@ -4388,19 +4388,48 @@ Reported as *"i had hard time with inputs that are lower and go bihind the
 keyboard from iphone, i think we need to push that block above the input block
 so it is always visible... and then slide it back"*.
 
-The interesting part is that the screen **already had
-`automaticallyAdjustKeyboardInsets`**, which is the prop everyone reaches for
-and which is named as though it solves this. It does not. It adjusts the
-scroll view's *content inset*, which makes the hidden field **reachable** — it
-does not scroll anything. So the keyboard comes up, the field you just tapped
-is behind it, and iOS's contribution is that you are now permitted to drag it
-into view yourself. Standing at a rack with twenty seconds of rest left, that
-is the complaint rather than the fix.
+The screen **already had `automaticallyAdjustKeyboardInsets`**, so the first
+question was why that wasn't enough.
 
-So the prop stays (it is what slides the content back down afterwards, and
-what lets the last field scroll past the fold at all) and
-`components/KeyboardAwareScroll.tsx` adds the missing half: on focus, measure
-the field against the keyboard and scroll it exactly clear.
+**I answered it wrong, confidently, and shipped the wrong answer in a doc
+comment.** I wrote that the prop "adjusts the inset but never scrolls" — that
+iOS merely makes the hidden field *reachable* and leaves you to drag it into
+view. The reviewer checked it against the actual RN 0.86 source and it is
+false. In `RCTScrollViewComponentView.mm`'s `_keyboardWillChangeFrame:`, RN
+asks the first responder for its focus rect and, when the field's bottom is
+below the keyboard, sets `contentDiff = keyboardEndFrame.origin.y - focusEnd`
+and scrolls by it, on the keyboard's own animation curve.
+`RCTTextInputComponentView.mm` even adds a 15pt margin. iOS lifts the field on
+every keyboard appearance, and does it better than we can.
+
+**The real gap is narrower and more specific: the native adjustment only runs
+when the keyboard's FRAME CHANGES.** Every field on this screen is a
+`number-pad` or `decimal-pad`, and those are the same height. So moving focus
+Weight → Reps → RIR → RPE — or expanding a lower row while the keyboard is
+already up and tapping into it — posts no keyboard notification at all. No
+notification, no native scroll, field stays hidden. That is exactly the
+reported experience, and it is the only case
+`components/KeyboardAwareScroll.tsx` needs to handle.
+
+**The wrong explanation was not harmless, which is the point.** Believing the
+platform did nothing, I had the keyboard listeners scroll as well as the
+`onFocus` path — so on every keyboard appearance two mechanisms raced for one
+scroll position. `offset.current` lags (it updates from throttled `onScroll`
+events), so a JS scroll computed after the native one landed used a stale
+offset and dragged the list *back down*, hiding the field again —
+intermittently, depending which won. A plausible mechanism, unverified,
+produced a real bug that the feature working most of the time would have
+hidden.
+
+The listeners now only record where the keyboard is; `onFocus` alone scrolls,
+and only when the keyboard is already up. That also dissolves the "two event
+orderings" problem the first version was carefully managing: there is one
+path now.
+
+**The lesson is the one this log already records once** — the Nixpacks entry
+that had to be corrected because the recorded mechanism was disproven by our
+own code. A mechanism you have not read is a guess, however well it predicts
+the symptom, and writing it down as fact is how it gets built on.
 
 Two details that would each have made it subtly wrong:
 
@@ -4500,6 +4529,45 @@ zero-height node *below* the keyboard, which only the height guard rejects.
 
 **Still untested:** the render path, the gesture wiring, the context plumbing,
 and all on-device behaviour. Adding a component runner is tracked separately.
+
+### What else the review caught
+
+- **`pointerEvents` is not an accessibility gate.** It maps to
+  `userInteractionEnabled`, which governs hit testing; the accessibility tree
+  is walked independently. So VoiceOver was reading "Delete set 1, button"
+  before every closed row — double the elements, a destructive action
+  announced on rows nobody had swiped, including on finished sessions. On
+  Android it is worse than noise: TalkBack activation goes through
+  `performClick()`, which `pointerEvents` does not gate, so it could plausibly
+  have fired. Now hidden from assistive tech as well as from touch.
+- **The Delete label failed the project's own contrast bar.** White on
+  `danger` measures 2.78:1 — under AA's 4.5 and under even the 3:1 large-text
+  floor — on a destructive control read in gym daylight. `navy` on the same
+  red is 6.75:1. Notably it was also the only colour in the app without a
+  measured ratio recorded next to it, which is exactly the one that turned out
+  to be wrong.
+- **`enabled` gated the swipe claim but not the open state**, so finishing a
+  session with a row already swiped left a live Delete on a read-only record.
+  It now force-closes, and the guard moved *inside* `shouldClaim` so the one
+  thing here that can destroy a logged set is covered by tests at all.
+- **Global keyboard listeners fire for other screens.** The session screen
+  stays mounted under the exercise picker, so focusing the picker's search
+  field scrolled the invisible list underneath. Gated on screen focus.
+- **`closeOn={sets.length}` was right by luck.** A count catches add/remove but
+  not a reorder that preserves length; the reorder case survived only because
+  the group key happens to remount the subtree. Now keyed on identity.
+- **My PanResponder rationale was inverted for iOS.** `blockNativeResponder`
+  is Android-only and `RCTSurfaceTouchHandler` refuses to be prevented from
+  inside the surface, so on iOS an over-eager claim cannot freeze the list —
+  it causes a diagonal drag to swipe and scroll at once. The frozen-list
+  failure I wrote the guard against is the *Android* one. The guard is right;
+  the stated reason was not.
+- **A test that could not fail for its own reason.** The margin test imported
+  `KEYBOARD_MARGIN` on both sides of its assertion, so changing the margin's
+  *value* could not break it — coverage existed, but in a different test than
+  the name implied. Pinned to a literal now. Same shape as the mocked-`ApiError`
+  problem earlier in the day, one degree milder, and the second time in one
+  session that a test agreed with its own fixture.
 
 ## Open items / known gaps as of this entry
 

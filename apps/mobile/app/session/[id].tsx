@@ -674,11 +674,16 @@ export default function SessionScreen() {
                   // same reason every other control here gates on `finished`.
                   enabled={!finished}
                   onDelete={() => removeSet(i)}
-                  // Rows are keyed by index and a set has no stable id, so a
-                  // change in the list's shape must close any open swipe —
-                  // otherwise the Delete stays armed against whichever set
-                  // shifted into that slot.
-                  closeOn={sets.length}
+                  // Rows are keyed by index and a set has no stable id, so
+                  // any change to WHAT LIVES AT THIS INDEX must close an open
+                  // swipe — otherwise Delete stays armed against whichever
+                  // set shifted into the slot. Keyed on identity rather than
+                  // on `sets.length`: a count only catches add/remove, and a
+                  // reorder that preserves length would slip through. (Today
+                  // `moveGroup` happens to remount the subtree via its group
+                  // key, so a count would survive by luck — which is not a
+                  // thing to depend on.)
+                  closeOn={`${sets[i].exercise_id}:${sets[i].set_type}:${sets.length}`}
                   accessibilityLabel={`set ${n + 1}`}
                   testID={`set-${i}-swipe`}
                 >
