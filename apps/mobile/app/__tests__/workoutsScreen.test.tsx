@@ -25,6 +25,21 @@ import type { Workout } from '@/lib/workouts';
  * then mean either thing.
  */
 
+/**
+ * Jest's 5s default is not enough for the FIRST render in a component file.
+ *
+ * It is not this test being slow — it is the one-off cost of instantiating the
+ * React Native module graph under `jest-expo` before anything can render at
+ * all. Locally that first test takes ~0.4s; on a cold CI runner it went past
+ * 5s and failed there while passing on every developer machine, which is the
+ * worst kind of flake.
+ *
+ * Raised here rather than globally: the pure-logic suites run in
+ * milliseconds, and leaving their timeout at 5s keeps a genuine hang in them
+ * failing fast.
+ */
+jest.setTimeout(30_000);
+
 // Typed to accept args so the `(...a) => mock(...a)` forwarding below
 // typechecks; a zero-arg jest.fn() rejects a spread call.
 const mockCachedWorkouts = jest.fn((..._a: unknown[]): Promise<unknown> => Promise.resolve([]));
