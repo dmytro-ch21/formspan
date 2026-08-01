@@ -3929,8 +3929,15 @@ Three decisions worth recording:
   server row created, next pull brings it back: the exact resurrection this
   feature exists to prevent, reintroduced by the optimisation meant to avoid a
   pointless outbox entry. Moving the decision into `pushRow` — which runs
-  inside the serialised sync and can act on what is true *then* — removes the
-  window instead of guarding it. Safe to interleave because the tombstone
+  inside the serialised sync and can act on what is true *then* — removes
+  *that* window. **It does not remove every one:** if a create lands
+  server-side but the response is lost — a half-open connection, which is this
+  app's home environment — `remote` stays 0 until the next successful push, and
+  a delete in that gap still drops the row locally while the server keeps the
+  session. Self-healing (the pulled copy comes back `remote = 1`, so a second
+  delete works), and closing it would cost the clears-offline property, so it
+  is a trade rather than an oversight. Recorded because the first draft of this
+  entry claimed the window was gone. Safe to interleave because the tombstone
   bumps `updated_at`, so a push already in flight finds its CAS no longer
   matches and leaves the row dirty for the next pass.
 - **A 404 on the delete counts as success.** The server agreeing it isn't there

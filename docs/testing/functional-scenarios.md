@@ -1959,8 +1959,9 @@ screen.
 ### Edge cases
 
 - Deleting a session the server has never seen (logged offline, never synced)
-  removes it outright — no tombstone left waiting on a server that has nothing
-  to delete.
+  clears on the next sync tick without any network call — the decision is made
+  in the push, not at delete time, because reading it at delete time races a
+  first push that is mid-flight.
 - Deleting the same session twice, or deleting it on the web first, clears
   cleanly: a 404 on the delete counts as success.
 - Opening a deleted session's screen by a stale link does **not** resurrect it

@@ -1,5 +1,8 @@
+import { readFileSync } from 'fs';
+import { join } from 'path';
+
 import { ApiError } from '../apiError';
-import { pushSession } from '../sessionStore';
+import { pushSession, syncSessions } from '../sessionStore';
 
 /**
  * What the push does with a tombstone.
@@ -18,13 +21,14 @@ import { pushSession } from '../sessionStore';
  */
 
 const mockDel = jest.fn();
+const mockPull = jest.fn();
 jest.mock('../sessions', () => ({
   deleteSession: (...a: unknown[]) => mockDel(...a),
+  listSessions: (...a: unknown[]) => mockPull(...a),
   startSession: jest.fn(),
   replaceSets: jest.fn(),
   finishSession: jest.fn(),
   getSession: jest.fn(),
-  listSessions: jest.fn(),
 }));
 
 type Row = {
@@ -32,12 +36,17 @@ type Row = {
   deleted_at: string | null; updated_at: string; sets_json: string;
 };
 let mockRow: Row | null = null;
+let mockTombstoned: string[] = [];
 const mockRan: string[] = [];
 
 jest.mock('../db', () => ({
   getDb: async () => ({
     getFirstAsync: async () => mockRow,
-    getAllAsync: async () => [],
+    getAllAsync: async (sql: string) => {
+      if (/deleted_at IS NOT NULL/.test(sql)) return mockTombstoned.map((id) => ({ id }));
+      if (/dirty = 1/.test(sql)) return [];
+      return [];
+    },
     runAsync: async (sql: string) => {
       mockRan.push(sql.trim().split('\n')[0]);
       if (/^DELETE FROM local_sessions/.test(sql.trim())) mockRow = null;
@@ -58,7 +67,11 @@ const seed = (over: Partial<Row> = {}) => {
   };
 };
 
-beforeEach(() => mockDel.mockReset());
+beforeEach(() => {
+  mockDel.mockReset();
+  mockPull.mockReset();
+  mockTombstoned = [];
+});
 
 it('drops a never-pushed session without calling the server', async () => {
   seed({ remote: 0 });
@@ -102,4 +115,55 @@ it('RESTORES the session when the server refuses permanently', async () => {
   expect(mockRow).not.toBeNull();
   expect(mockRow?.deleted_at).toBeNull();
   expect(mockRow?.dirty).toBe(0);
+});
+
+describe('the pull', () => {
+  // THE headline guard of this feature — without it the pull writes the
+  // server's copy straight back over a delete — and it had no coverage at
+  // all: sync.test.ts mocks syncSessions wholesale, so nothing exercised the
+  // real pull loop.
+  it('skips a session this device has tombstoned', async () => {
+    mockRow = {
+      id: 's1', user_id: 'u1', remote: 1, dirty: 0,
+      deleted_at: '2026-08-01T00:00:00Z', updated_at: '2026-08-01T00:00:00Z',
+      sets_json: '[]',
+    };
+    mockTombstoned = ['s1'];
+    mockPull.mockResolvedValue([
+      { id: 's1', user_id: 'u1', sport: 'strength', name: 'back', started_at: 'x',
+        ended_at: null, notes: '', sets: [], updated_at: '2026-08-02T00:00:00Z' },
+    ]);
+    mockRan.length = 0;
+
+    await syncSessions('u1', async () => 'tok');
+
+    // No INSERT/upsert for the tombstoned id — the server's copy is refused.
+    expect(mockRan.some((q) => /INSERT INTO local_sessions/.test(q))).toBe(false);
+  });
+});
+
+describe('reads and the pending count', () => {
+  // The "invisible from the tap" half of the feature, and the count that
+  // decides whether the retry ladder arms at all — both untested until now.
+  const sqlFor = (fn: string) => {
+    const src = readFileSync(join(__dirname, '..', 'sessionStore.ts'), 'utf8');
+    const from = src.indexOf(`export async function ${fn}`);
+    return src.slice(from, src.indexOf('\n}', from));
+  };
+
+  it('listLocalSessions filters tombstones', () => {
+    expect(sqlFor('listLocalSessions')).toMatch(/deleted_at IS NULL/);
+  });
+
+  it('readLocalSession filters tombstones', () => {
+    expect(sqlFor('readLocalSession')).toMatch(/deleted_at IS NULL/);
+  });
+
+  it('countPendingSessions counts them', () => {
+    // Load-bearing, not incidental: `schedule()` refuses to arm the backoff
+    // timer at pending === 0, so excluding tombstones would leave a device
+    // whose only dirty row is a delete never retrying it.
+    expect(sqlFor('countPendingSessions')).not.toMatch(/deleted_at IS NULL/);
+    expect(sqlFor('countPendingSessions')).toMatch(/dirty = 1/);
+  });
 });

@@ -381,6 +381,13 @@ async function pushRow(
         // hide it would be a lie about what the server holds. Rethrown so the
         // sync reports it rather than swallowing a delete that silently
         // didn't happen.
+        // `dirty = 0` is a small lie in one edge case: unsynced SET edits made
+        // before the delete are marked clean and will not push. Accepted
+        // because this branch is near-unreachable for a DELETE (404 is
+        // success, 401/408/429 retry, and the id is a client UUID so there is
+        // no validation failure to hit) and because the alternative — leaving
+        // it dirty — re-pushes a session the server just refused to let us
+        // touch. Worth knowing rather than discovering.
         await db.runAsync(
           `UPDATE local_sessions SET deleted_at = NULL, dirty = 0 WHERE id = ? AND user_id = ?`,
           row.id,

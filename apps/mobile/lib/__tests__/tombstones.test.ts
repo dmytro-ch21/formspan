@@ -56,9 +56,18 @@ jest.mock('../db', () => ({
         const row = rows.find((r) => r.id === id && r.user_id === user && r.deleted_at === null);
         if (row) {
           row.deleted_at = deletedAt;
-          row.dirty = 1;
+          // ONLY if the real SQL says so. Setting it unconditionally made the
+          // mock supply the behaviour the test below claims to check: dropping
+          // `dirty = 1` from the statement — which makes every delete
+          // invisible AND unpushable, this feature's worst silent failure —
+          // left the whole suite green.
+          if (/dirty = 1/.test(sql)) row.dirty = 1;
         }
+        return;
       }
+      // Anything unrecognised is a test bug, not a no-op. Silently ignoring
+      // it lets a reworded query drift green instead of failing loudly.
+      throw new Error(`mock db: unhandled SQL: ${sql.trim().split('\n')[0]}`);
     },
   }),
 }));
