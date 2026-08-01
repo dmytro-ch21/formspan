@@ -1,4 +1,5 @@
 import { useAuth } from '@clerk/clerk-expo';
+import { request as requestSync } from '@/lib/sync';
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
@@ -34,7 +35,6 @@ import {
   readLocalSession,
   pushSession,
   saveLocalSets,
-  syncSessions,
 } from '@/lib/sessionStore';
 import { ApiError, isPermanentRejection } from '@/lib/apiError';
 import { report } from '@/lib/report';
@@ -230,11 +230,11 @@ export default function SessionScreen() {
         );
       })().catch(() => {});
 
-      // Drain the outbox once, on focus. Saves push only their own session
-      // now, so without this a session logged with no signal would sit dirty
-      // until something happened to open the Today tab — which, on a phone
-      // resumed straight back into a workout, might be a long time.
-      syncSessions(userId, getToken).catch(() => {});
+      // Tell the orchestrator something may have changed; it decides whether
+      // that warrants a run. This used to be a fire-and-forget sync on every
+      // focus, which is one of seven places that each guessed at a good
+      // moment — see lib/sync.ts.
+      requestSync('session-focus');
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setEverLoaded(true);
@@ -831,7 +831,7 @@ export default function SessionScreen() {
                   setSets(s.sets);
                   setVolume(localVolume(s.sets));
                 }
-                syncSessions(userId!, getToken).catch(() => {});
+                requestSync('session-finished');
               } catch (err) {
                 setError(err instanceof Error ? err.message : String(err));
               }

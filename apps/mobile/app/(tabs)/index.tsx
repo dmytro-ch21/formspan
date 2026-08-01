@@ -1,4 +1,5 @@
 import { useAuth } from '@clerk/clerk-expo';
+import { request as requestSync, syncNow } from '@/lib/sync';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, AppState, Pressable, ScrollView, StyleSheet } from 'react-native';
@@ -8,7 +9,7 @@ import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { formatElapsed } from '@/lib/rest';
 import type { LoggedSet, Session } from '@/lib/sessions';
-import { countPendingSessions, listLocalSessions, syncSessions } from '@/lib/sessionStore';
+import { countPendingSessions, listLocalSessions } from '@/lib/sessionStore';
 import { formatVolume } from '@/lib/units';
 import { enabledSports } from '@/lib/modules';
 import { useModules } from '@/lib/ModulesProvider';
@@ -149,8 +150,11 @@ export default function TodayScreen() {
       // state below claim "nothing logged yet" without it being a guess.
       setLoaded(true);
     }
+    // Ask the orchestrator; it decides whether now is a moment worth a run
+    // (see lib/sync.ts). This screen no longer waits on the network to show
+    // the list — the local read above already did that.
+    requestSync('today-focus');
     try {
-      await syncSessions(userId, getToken);
       setSessions(await listLocalSessions(userId, 30));
       setPendingSessions(await countPendingSessions(userId));
     } catch {
@@ -233,10 +237,14 @@ export default function TodayScreen() {
       // session the server permanently refuses would sit at "1 waiting to
       // sync" with no way to find out why. "The count is the honest signal"
       // is only true of transient failures.
-      const result = await syncSessions(userId, getToken);
+      // syncNow, not request: a person pressed this, so it must always
+      // attempt rather than being told now is not the moment — and it
+      // resolves with the outcome so the button can report it instead of
+      // spinning and silently achieving nothing.
+      const result = await syncNow();
       setSessions(await listLocalSessions(userId, 30));
       setPendingSessions(await countPendingSessions(userId));
-      if (result.failed > 0 && result.error) setSyncError(result.error);
+      if (result.lastError) setSyncError(result.lastError);
     } catch (err) {
       setSyncError(err instanceof Error ? err.message : String(err));
     } finally {

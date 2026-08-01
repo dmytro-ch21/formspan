@@ -3706,6 +3706,64 @@ them is what found the group-boundary bug above.
 
 That runner gap is now the second entry in a row to mention it.
 
+## 2026-08-01 — Offline-first, PR2: something owns when sync happens
+
+First of the offline-first run (#115–#120). This one is about **writes getting
+off the phone**; it does not make reads work offline, and the entry says so
+because that distinction is the whole programme.
+
+### Nobody decided when to sync
+
+`syncSessions` was fired and forgotten from **seven** call sites — session
+focus, the exercise picker, finishing a session, starting one, Today's mount, a
+manual Retry. Each was an independent guess that *now* might be a good moment.
+Between them there was no timer, no connectivity trigger, and nothing that
+noticed the app had come back to the foreground.
+
+The shape an athlete meets: log a whole session in a basement gym, walk out
+into signal, pocket the phone. Nothing happens. The training sits there until
+you happen to open a screen whose mount fires a sync.
+
+`lib/sync.ts` now owns the question. Call sites say *"something changed"*
+(`request(reason)`); it decides whether to act. It coalesces — ten requests
+during a run cost two syncs, not eleven — backs off 5s/15s/60s/5min on failure,
+retries only when something is actually pending, and syncs on **foreground
+transition**, which is the trigger that was missing and the one that matches
+walking out of a basement.
+
+### Reachability, not radio state
+
+Deliberately **no `expo-network`/NetInfo dependency.** The OS answers "is wifi
+associated", and the case that started this entire thread — a phone on gym wifi
+with no upstream — answers that question *yes* while nothing works. So
+online/offline is inferred from whether requests actually succeed: an
+`OfflineError` means offline, a completed sync means online, and a 4xx means
+**online** (the server answered; it just refused). Adding the OS listener later
+is worth it only to shorten the wait after signal returns — an optimisation
+over the backoff, never the source of truth.
+
+It also avoids a native dependency, which on this project means a device
+rebuild before anything can be tested.
+
+### A bug found while wiring
+
+`schedule()` refuses to set a timer with nothing pending — sensible, but it was
+reading `state.pending` *before* the `finally` refreshed it. A session created
+moments earlier still reads as 0 until the recount, so the retry was skipped for
+exactly the rows that needed it. The recount now happens before the decision.
+Mutation-verified: reverting the order fails that test alone.
+
+### Not in this PR
+
+Reads. `GET /v1/sessions` still needs the network, so the Library, the workout
+list and history remain online-only — that is PR4a/PR4b/PR5. Background sync is
+also explicitly out: nothing runs while the app is suspended, and claiming
+otherwise in the UI would be worse than the honest "syncs when you open it".
+
+11 assertions from a standalone harness stubbing only the store and RN's
+AppState; two mutations checked. `apps/mobile` still has no test runner — third
+entry in a row to say so.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

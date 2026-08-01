@@ -1,4 +1,5 @@
 import { useAuth } from '@clerk/clerk-expo';
+import { request as requestSync } from '@/lib/sync';
 import { Image } from 'expo-image';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -29,7 +30,7 @@ import {
   type WorkoutItem,
 } from '@/lib/workouts';
 import { applySuggestions, fetchSuggestions, setsFromWorkout } from '@/lib/sessions';
-import { startLocalSession, syncSessions } from '@/lib/sessionStore';
+import { startLocalSession } from '@/lib/sessionStore';
 import { vola } from '@/constants/Colors';
 import { fromDisplayWeight, toDisplayWeight, weightUnit } from '@/lib/units';
 import { useUnits } from '@/lib/useUnits';
@@ -147,7 +148,7 @@ export default function WorkoutDetailScreen() {
         workout_id: workout.id,
         sets,
       });
-      syncSessions(userId, getToken).catch(() => {});
+      requestSync('workout-changed');
       router.push(`/session/${session.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

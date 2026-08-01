@@ -1,8 +1,10 @@
 import { ClerkProvider, useAuth, useSignUp } from '@clerk/clerk-expo';
+import { useAuthToken } from '@/lib/useAuthToken';
 import { clearSessionToken } from '@/lib/session';
 
 import { ModulesProvider } from '@/lib/ModulesProvider';
 import { TrackEffortProvider } from '@/lib/TrackEffortProvider';
+import { setSyncIdentity, startSyncOrchestrator } from '@/lib/sync';
 import { UnitsProvider } from '@/lib/UnitsProvider';
 import { useFonts } from 'expo-font';
 import { DarkTheme, Stack, ThemeProvider, useRouter, useSegments } from 'expo-router';
@@ -90,8 +92,9 @@ export default function RootLayout() {
 const AUTH_ROUTES = ['sign-in', 'sign-up', 'forgot-password'];
 
 function RootLayoutNav() {
-  const { isLoaded, isSignedIn } = useAuth();
+  const { isLoaded, isSignedIn, userId } = useAuth();
   const { signUp } = useSignUp();
+  const getToken = useAuthToken();
   const segments = useSegments();
   const router = useRouter();
 
@@ -107,6 +110,17 @@ function RootLayoutNav() {
   const hasPendingSignUp =
     signUp?.status === 'missing_requirements' &&
     (signUp.unverifiedFields?.includes('email_address') ?? false);
+
+  // The orchestrator owns timers and an AppState listener, so it is started
+  // once for the process rather than per screen — a listener per mounted
+  // screen is how one foreground transition becomes five syncs.
+  useEffect(() => startSyncOrchestrator(), []);
+
+  // Who to sync as. Cleared on sign-out so a queued retry can't fire against
+  // the previous athlete's rows.
+  useEffect(() => {
+    setSyncIdentity(isSignedIn ? (userId ?? null) : null, isSignedIn ? getToken : null);
+  }, [isSignedIn, userId, getToken]);
 
   useEffect(() => {
     if (!isLoaded) return;
