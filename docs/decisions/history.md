@@ -3156,13 +3156,42 @@ WHERE e.sport = 'bjj'
 clause. An unconditional delete would fail the migration outright or, worse,
 tempt someone into adding `CASCADE` and silently destroying training history. A
 drill that survives because someone logged it stays visible in the library —
-the right failure direction. Checked against staging first: 20 rows, 0
-referenced by anything.
+the right failure direction. Checked against staging first: 20 rows, 0 referenced by `session_sets`,
+`workout_items` or `pinned_exercises` — and, after review pointed out the
+original claim of "0 referenced by anything" skipped it, 0 in
+`exercise_unit_prefs` too. That one and `pinned_exercises` CASCADE, so on
+another database they would be deleted silently along with the drill; both are
+trivially recreatable preferences rather than training history, which is why
+they are not in the guard.
+
+### The consequence worth stating plainly
+
+With no bjj entries in the catalog and the existing sport-equality rule, **a
+`sport='bjj'` session can no longer contain a single set, and a bjj workout
+template can no longer contain an item.** Every remaining catalog entry
+mismatches, and techniques are not loggable — there is no `technique_id` on
+`session_sets`.
+
+That is coherent with where BJJ is going, and `docs/testing/functional-scenarios.md`
+already called the old arrangement a stopgap ("BJJ workouts only work because
+two BJJ entries live in the exercise catalog; a real technique library is its
+own module"). But it is a capability that existed this morning and does not
+now, and the review is what forced it to be written down rather than discovered
+later. Making techniques loggable is the work that closes it.
 
 ### What the test suite caught
 
-`TestPostgresRepository_ListFilters` asserted "expected at least one bjj
-exercise" and failed, which is the test doing its job. It now filters on
+Four integration tests in `session` and `workout` broke — both packages pinned
+`exBJJ = "bear-crawl-forward"` as their non-strength fixture — plus
+`TestPostgresRepository_ListFilters`, which asserted "expected at least one bjj
+exercise". All five are the tests doing their job.
+
+**They were nearly missed.** A local `go test ./...` reported those two packages
+as `(cached)`, so the run looked green while four tests were broken; only
+`-count=1` surfaced them. The documented gotcha about integration tests
+skipping without `TEST_DATABASE_URL` has a sibling: they can also be *cached*
+past a data change they depend on. The fixtures now point at `run`, the one
+remaining non-strength catalog entry. It now filters on
 `running` for the positive case and asserts bjj is **empty**, with a comment
 saying why — so if the drills ever come back, something fails loudly rather
 than bear crawls quietly reappearing among the armbars.

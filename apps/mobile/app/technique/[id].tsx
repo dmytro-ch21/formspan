@@ -37,9 +37,10 @@ import { useAuthToken } from '@/lib/useAuthToken';
  * 3. **Sections sit on surfaces.** Cards give the eye somewhere to stop, which
  *    flat stacked text never did.
  *
- * Two rules from the previous version carry over unchanged, because both exist
- * to stop the screen lying: a section with no content does not render at all,
- * and an edge is only tappable if it resolves to a real technique.
+ * One rule carries over unchanged, because it exists to stop the screen lying:
+ * a section with no content does not render at all. Its companion — "an edge is
+ * only tappable if it resolves" — is gone with the links themselves; nothing on
+ * this screen navigates any more.
  */
 export default function TechniqueScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();

@@ -147,10 +147,11 @@ export async function fetchTechnique(
 /**
  * The summaries, cached for the app's lifetime.
  *
- * Without this the detail screen refetched all 466 (~65 KB) on every open,
- * serially and before first paint, purely to decide which edges are tappable —
- * browsing ten techniques cost ~650 KB and ten round trips. The list screen
- * warms it, so opens from the list are free and a cold deep link pays once.
+ * Originally this existed because the detail screen refetched all 466 (~65 KB)
+ * on every open just to decide which edges were tappable. Those links are gone,
+ * and so is that fetch — but the cache still earns its keep: the Library holds
+ * the whole list to search locally, so returning to the tab is free rather than
+ * another ~65 KB, and typing never touches the network.
  *
  * Failures are not cached: a null cache retries, an empty array would look
  * like a library with nothing in it.

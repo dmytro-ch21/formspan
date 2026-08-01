@@ -44,13 +44,14 @@ const LOAD_LABEL: Record<Exercise["load_type"], string> = {
  * techniques lived somewhere else.
  *
  * What the wide screen adds, and the phone can't: the detail panel sits beside
- * the grid rather than replacing it, so **following a technique's graph costs
- * nothing.** Tapping "Armbar from Closed Guard" under Common next moves swaps
- * the panel and leaves your list, scroll position and search exactly where they
- * were. On a phone that same tap is a push-navigation you have to unwind. This
- * is the desk surface doing the thing a desk surface is for — reading around a
- * subject — which is why the full prose, the legality table and the graph all
- * live in the panel rather than being trimmed for width.
+ * the grid rather than replacing it, so selecting a technique never costs you
+ * your place in the list, your scroll position or your search. That is why the
+ * full prose and the legality table live here rather than being trimmed for
+ * width — reading around a subject is what a desk is for.
+ *
+ * The graph lists used to be buttons that swapped the panel. They are plain
+ * text now; see the `Edges` docstring for the coverage numbers that killed the
+ * links.
  *
  * Fetch shape: exercises are filtered server-side (debounced, cancellable);
  * techniques are fetched **once** (~65 KB for all 466) and filtered in memory.
