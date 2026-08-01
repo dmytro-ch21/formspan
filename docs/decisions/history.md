@@ -3760,8 +3760,48 @@ list and history remain online-only — that is PR4a/PR4b/PR5. Background sync i
 also explicitly out: nothing runs while the app is suspended, and claiming
 otherwise in the UI would be worse than the honest "syncs when you open it".
 
-11 assertions from a standalone harness stubbing only the store and RN's
-AppState; two mutations checked. `apps/mobile` still has no test runner — third
+### Review, and a second vacuous test
+
+Three things worth fixing came out of review, and one of them fixed three
+problems at once.
+
+**Classification moved into the sync result.** The orchestrator was deciding
+online-vs-offline by matching `/reach VOLA/` against the error *message* — the
+exact thing `apiError.ts` warns against, and worse than the usual case because
+the string is our own gym-facing UI copy, so it breaks when someone reasonably
+reworders it, and breaks *inverted and silently*. `SessionSyncResult` now
+carries a typed `errorKind` (`offline` | `permanent` | `transient`), classified
+where the error object still exists. That one change also stopped
+permanently-refused rows retrying forever — a 4xx-refused session keeps
+`dirty = 1`, so `pending` never reaches 0, so the 5-minute tail re-armed for the
+life of the install — and fixed last-row-wins, where an offline failure followed
+by a validation error classified as online.
+
+**`syncNow` could be silently stolen.** If a request landed during a run,
+`run`'s `finally` re-fires and occupies `running` in the same microtask that
+resolves `syncNow`'s single `await running` — so the manual attempt hit the
+in-flight guard and returned having done nothing, reporting the *previous*
+run's error and stopping the spinner. Reachable on exactly the tap the button
+exists for. It loops now.
+
+**Today's badge never reflected the sync it triggered.** The screen kept its own
+`pendingSessions` copy, which was fresh only because it used to `await` the
+sync. Now that the orchestrator decides, that copy went stale immediately —
+"N waiting to sync" persisted through the successful sync that same focus had
+started. It reads `useSyncState()` instead, which until then had *zero
+consumers* — a smell in its own right.
+
+**And a second vacuous test.** The "permanent rejection schedules no retry"
+assertion passed with the guard deleted. `failures` is module state that only
+resets on success, so by that point in the file the backoff was 300s and the
+5-second wait proved nothing. Fixed by putting the ladder back to rung 0 first,
+and paired with a control asserting a *transient* failure at the same rung does
+retry — so the test can't pass just because nothing ever retries. That is twice
+now a test of mine has passed for the wrong reason; mutation is the only thing
+that has caught either.
+
+14 assertions from a standalone harness stubbing only the store and RN's
+AppState; four mutations checked. `apps/mobile` still has no test runner — third
 entry in a row to say so.
 
 ## Open items / known gaps as of this entry

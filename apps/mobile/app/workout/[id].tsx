@@ -148,7 +148,7 @@ export default function WorkoutDetailScreen() {
         workout_id: workout.id,
         sets,
       });
-      requestSync('workout-changed');
+      requestSync('session-started-from-workout');
       router.push(`/session/${session.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

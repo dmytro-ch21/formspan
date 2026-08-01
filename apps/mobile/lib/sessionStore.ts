@@ -2,7 +2,7 @@ import { randomUUID } from 'expo-crypto';
 import type { TokenGetter } from './useAuthToken';
 import type * as SQLite from 'expo-sqlite';
 
-import { ApiError } from './apiError';
+import { ApiError, isOffline, isPermanentRejection } from './apiError';
 import { getDb } from './db';
 import type { Exercise } from './exercises';
 import type { Workout, WorkoutItem } from './workouts';
@@ -329,7 +329,54 @@ async function pushRow(
   );
 }
 
-export type SessionSyncResult = { pushed: number; pulled: number; failed: number; error?: string };
+/**
+ * How a sync failed, classified where the error object still exists.
+ *
+ * `error` is a display string, and a display string is all it is — the API
+ * conventions are explicit that codes are contract and messages are not.
+ * Classifying by pattern-matching that string (the orchestrator briefly did,
+ * on `/reach VOLA/`) is the exact thing `apiError.ts` warns against: it
+ * survives a server rewording but breaks the moment someone edits our own UI
+ * copy, and it breaks *silently, inverted*.
+ *
+ * - `offline` — never reached the server. Retrying is the whole plan.
+ * - `permanent` — the server answered and will answer the same way forever
+ *   (a 404, a 409, a validation error). Retrying is pointless, and retrying
+ *   forever is what made a single refused row cost 2-3 doomed requests per
+ *   foreground for the life of the install.
+ * - `transient` — anything else worth another go.
+ *
+ * Worst-case wins, not last-row-wins: with several failing rows the old code
+ * kept the final row's message, so an offline failure followed by a
+ * validation error classified as online.
+ */
+export type SyncErrorKind = 'offline' | 'permanent' | 'transient';
+
+export type SessionSyncResult = {
+  pushed: number;
+  pulled: number;
+  failed: number;
+  error?: string;
+  errorKind?: SyncErrorKind;
+};
+
+/**
+ * Keep the most actionable classification seen this run.
+ *
+ * `offline` outranks the rest: if we couldn't reach the server at all, that is
+ * the fact worth acting on, whatever else also went wrong.
+ */
+function worseKind(a: SyncErrorKind | undefined, b: SyncErrorKind): SyncErrorKind {
+  if (a === 'offline' || b === 'offline') return 'offline';
+  if (a === 'permanent' || b === 'permanent') return 'permanent';
+  return 'transient';
+}
+
+function classify(err: unknown): SyncErrorKind {
+  if (isOffline(err)) return 'offline';
+  if (isPermanentRejection(err)) return 'permanent';
+  return 'transient';
+}
 
 /**
  * Reconciles local and remote.
@@ -347,10 +394,11 @@ export type SessionSyncResult = { pushed: number; pulled: number; failed: number
 /**
  * One sync at a time, process-wide.
  *
- * `syncSessions` is fired and forgotten from six places, several of which
- * overlap by design (session focus, the exercise picker, Today's mount). Two
- * runs interleaving is what makes the pull's read-then-write racy in the first
- * place; serialising removes the window rather than only narrowing it.
+ * **`lib/sync.ts` is the only permitted caller** — it owns when sync happens.
+ * This inner queue predates it and is kept as a backstop, but it is exactly
+ * the kind of safety net that would silently rescue a new direct caller and
+ * let the seven-scattered-call-sites problem creep back unnoticed. If you are
+ * about to call this from a screen: don't, call `request()` instead.
  *
  * Callers keep their fire-and-forget shape — a queued run resolves with the
  * result of the run that actually happened for it.
@@ -389,6 +437,7 @@ async function runSync(
     } catch (err) {
       result.failed++;
       result.error = err instanceof Error ? err.message : String(err);
+      result.errorKind = worseKind(result.errorKind, classify(err));
     }
   }
 
@@ -436,6 +485,9 @@ async function runSync(
       result.failed++;
       result.error = err instanceof Error ? err.message : String(err);
     }
+    // Classified even when a push already failed: the kinds combine, and the
+    // pull failing offline is worth knowing regardless of what the push hit.
+    result.errorKind = worseKind(result.errorKind, classify(err));
   }
 
   return result;

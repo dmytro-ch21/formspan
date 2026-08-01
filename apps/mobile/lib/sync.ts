@@ -3,6 +3,7 @@ import { AppState, type AppStateStatus } from 'react-native';
 
 import { isOffline } from './apiError';
 import { countPendingSessions, syncSessions } from './sessionStore';
+import type { SyncErrorKind } from './sessionStore';
 import type { TokenGetter } from './useAuthToken';
 
 /**
@@ -88,7 +89,14 @@ let creds: { userID: string; getToken: TokenGetter } | null = null;
 
 function emit(next: Partial<SyncState>): void {
   state = { ...state, ...next };
-  for (const l of listeners) l(state);
+  for (const l of listeners) {
+    try {
+      l(state);
+    } catch {
+      // One throwing subscriber must not abort the rest, nor reject the
+      // un-awaited run and leave `syncing: true` stuck on forever.
+    }
+  }
 }
 
 export function subscribeSync(fn: (s: SyncState) => void): () => void {
@@ -161,8 +169,10 @@ export function request(reason: string): void {
 async function run(reason: string): Promise<void> {
   if (!creds || running) return;
   const { userID, getToken } = creds;
-  emit({ syncing: true });
 
+  // Assigned before the emit: listeners run synchronously, and one that
+  // called `request()` would otherwise see `running === null` and start a
+  // second run.
   running = (async () => {
     let retry = false;
     try {
@@ -172,18 +182,30 @@ async function run(reason: string): Promise<void> {
 
       if (result.failed > 0) {
         failures++;
+        const kind: SyncErrorKind = result.errorKind ?? 'transient';
         emit({
           lastError: result.error ?? 'Sync failed.',
-          // A failure whose cause was reachability tells us we are offline;
-          // a 4xx does not — the server answered, it just refused.
-          online: result.error ? !/reach VOLA/i.test(result.error) : state.online,
+          // Classified server-side of this boundary, from the error object.
+          // This used to match on the message text, which the API conventions
+          // forbid — and which would have inverted silently the first time
+          // someone reworded our own offline copy.
+          online: kind !== 'offline',
         });
-        retry = true;
+        // A permanent rejection will be refused identically forever. Retrying
+        // it costs a doomed request every backoff tick and every foreground,
+        // for the life of the install, and the row stays dirty so `pending`
+        // never reaches 0 to stop it. The error is already surfaced; leave it
+        // to the athlete (or a later tombstone/repair path) rather than
+        // grinding.
+        retry = kind !== 'permanent';
       } else {
         failures = 0;
         emit({ lastError: null, lastSyncAt: Date.now(), online: true });
       }
     } catch (err) {
+      // Same recheck as the success path: without it, a sign-out or account
+      // switch mid-run leaves the previous athlete's error on screen.
+      if (creds?.userID !== userID) return;
       failures++;
       emit({
         lastError: err instanceof Error ? err.message : String(err),
@@ -191,6 +213,12 @@ async function run(reason: string): Promise<void> {
       });
       retry = true;
     } finally {
+      if (creds?.userID !== userID) {
+        // Torn down mid-run. Do not write this run's counts over the state
+        // `setSyncIdentity` just cleared.
+        emit({ syncing: false });
+        return;
+      }
       emit({ syncing: false });
       // Recount BEFORE deciding to retry. `schedule()` refuses to set a timer
       // with nothing pending, and reading a stale count here would skip the
@@ -200,6 +228,8 @@ async function run(reason: string): Promise<void> {
       if (retry) schedule();
     }
   })();
+
+  emit({ syncing: true });
 
   try {
     await running;
@@ -222,7 +252,11 @@ async function run(reason: string): Promise<void> {
 function schedule(): void {
   cancelTimer();
   if (state.pending === 0) return;
-  const wait = BACKOFF_MS[Math.min(failures - 1, BACKOFF_MS.length - 1)];
+  // Clamped at both ends. `syncNow` zeroes `failures`, and it can do so while
+  // a failing run is suspended on an await — so this can be reached with
+  // failures === 0 and read BACKOFF_MS[-1], i.e. undefined, i.e. setTimeout
+  // fires immediately.
+  const wait = BACKOFF_MS[Math.max(0, Math.min(failures - 1, BACKOFF_MS.length - 1))];
   timer = setTimeout(() => {
     timer = null;
     request('backoff');
@@ -287,7 +321,14 @@ export async function syncNow(): Promise<SyncState> {
   if (!creds) return state;
   cancelTimer();
   failures = 0;
-  if (running) await running.catch(() => {});
+  // A LOOP, not a single await. `run`'s finally re-fires when `dirtyAgain` is
+  // set, occupying `running` again in the same microtask that resolves our
+  // await — so a single `await running` then hits `run`'s in-flight guard and
+  // returns having done nothing, while reporting the previous run's error and
+  // stopping the spinner. That interleaving is reachable on exactly the tap
+  // this button exists for: every foreground with pending rows sets
+  // `dirtyAgain`.
+  while (running) await running.catch(() => {});
   await run('manual').catch(() => {});
   return state;
 }
