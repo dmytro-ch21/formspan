@@ -1,6 +1,3 @@
-import { readFileSync } from 'fs';
-import { join } from 'path';
-
 import { ApiError } from '../apiError';
 import { pushSession, syncSessions } from '../sessionStore';
 
@@ -142,28 +139,8 @@ describe('the pull', () => {
   });
 });
 
-describe('reads and the pending count', () => {
-  // The "invisible from the tap" half of the feature, and the count that
-  // decides whether the retry ladder arms at all — both untested until now.
-  const sqlFor = (fn: string) => {
-    const src = readFileSync(join(__dirname, '..', 'sessionStore.ts'), 'utf8');
-    const from = src.indexOf(`export async function ${fn}`);
-    return src.slice(from, src.indexOf('\n}', from));
-  };
-
-  it('listLocalSessions filters tombstones', () => {
-    expect(sqlFor('listLocalSessions')).toMatch(/deleted_at IS NULL/);
-  });
-
-  it('readLocalSession filters tombstones', () => {
-    expect(sqlFor('readLocalSession')).toMatch(/deleted_at IS NULL/);
-  });
-
-  it('countPendingSessions counts them', () => {
-    // Load-bearing, not incidental: `schedule()` refuses to arm the backoff
-    // timer at pending === 0, so excluding tombstones would leave a device
-    // whose only dirty row is a delete never retrying it.
-    expect(sqlFor('countPendingSessions')).not.toMatch(/deleted_at IS NULL/);
-    expect(sqlFor('countPendingSessions')).toMatch(/dirty = 1/);
-  });
-});
+// The read filters and the pending count were pinned here by asserting on
+// query TEXT. They are now executed against a real database in
+// tombstoneSql.test.ts, which is strictly stronger — a text assertion proves
+// a clause is present, not that SQLite honours it. Removed rather than kept
+// alongside, so nobody reads text-matching as an accepted way to test SQL.
