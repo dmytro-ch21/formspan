@@ -3364,6 +3364,124 @@ techniques for every user regardless).
 `activity.kind` remains a fourth, unvalidated vocabulary. The registry is where
 it should eventually be validated.
 
+## 2026-08-01 — Phase C: the web app catches up, and the admin console stops measuring a dead table
+
+Phase A gave the backend a discipline registry; Phase B made the phone obey it.
+This is the desk half, plus the thing that fell out of asking "what should
+admin actually track?"
+
+### Web now obeys the toggles
+
+`apps/web` had its own hardcoded `SPORTS` list and its own reimplementations of
+what the registry already knows — a `HAS_TECHNIQUES` set, a `usesPosition()`
+predicate. All gone. The modules are fetched **once, server-side, in
+`dashboard/layout.tsx`**, and handed to a client `ModulesProvider` as an initial
+value.
+
+Server-side and once, for two reasons. The layout is a Server Component, so the
+read is awaited before anything paints — a client fetch would render the full
+navigation for one frame and then remove items, a visible flash of destinations
+the user doesn't have. And this codebase has already paid for the other shape:
+`useUnits` fetches the profile per call site with no shared cache, costing *one
+`GET /v1/profile` per session rendered* — 200 identical requests for one
+account-level enum, documented in `sessions/page.tsx`. Module state is read by
+the sidebar *and* every page, so repeating that would have been worse.
+
+Nav items gained a `needs` predicate. **Records is gated on "any enabled module
+has record kinds"**, not on strength — it is marginally useful to a runner
+(`longest_time`, `furthest_distance`) and useless to a BJJ-only athlete, whose
+five available record kinds are all lift- or run-shaped. Library is gated on any
+enabled module having a catalog. When the fetch fails the nav falls back to
+ungated: a preference endpoint blinking must not hide the app.
+
+Settings gained a **"What you train"** section. This closes a real hole rather
+than adding a nicety — the toggles existed only on the phone, so a discipline
+switched off there could not be switched back on from a desk, while web
+cheerfully kept showing it everywhere because it ignored the toggles entirely.
+
+### The admin console was measuring a table with no writer
+
+Asked to "track the most important things", the first thing worth checking was
+what it already tracked. Against staging:
+
+```
+activities: 0   sessions: 2   session_sets: 36   workouts: 2   health_events: 0
+```
+
+`activities` has had **no writer** since the in-app logging form was removed.
+Its two columns — `activity_count` and `last_activity_at` — were the entirety of
+the user-lookup table, and `/users/[id]` rendered nothing else. Every row read 0
+and null while the account's real training sat in `sessions`. The detail page's
+own empty state admitted it couldn't tell a wrong id from an idle account:
+*"Either they haven't logged any yet, or the ID doesn't exist — the API returns
+an empty list for both."*
+
+So the fix was not "add tracking". It was **deriving from rows that already
+exist**:
+
+- `session_count`, `last_session_at`, `set_count` — aggregates over `sessions`
+  and `session_sets`. `set_count` earns its place by separating someone who
+  started two sessions and abandoned them from someone who trained twice.
+- `modules` — enabled disciplines, resolved through the registry so a user with
+  no stored row reads as the *default* rather than as "off".
+- A new `GET /v1/admin/users/{userID}`: summary + recent sessions, **two queries
+  in one round trip** via `pgx.Batch`. The detail page is two requests total
+  (that, plus the per-user health log, run concurrently) — no per-row fetches.
+
+Both queries share one `userSummaryCols` projection so the list and the detail
+cannot drift into reporting different numbers for the same account; a test
+asserts they agree. Aggregates are correlated subqueries, not joins: joining
+`sessions` to `session_sets` in one `GROUP BY` multiplies rows before collapsing
+them, which is how a count quietly becomes a product.
+
+**A test caught me reintroducing a bug it was written to prevent.** Rewriting
+`ListUsers`, I keyed it `FROM profiles` — and
+`TestPostgresRepository_ListUsers_IncludesProfilelessUsers` exists precisely
+because that hides users who signed up and trained but never onboarded (there is
+no FK from `sessions` to `profiles`, so it is a real state). Users are now
+enumerated from a `UNION` of every table holding a user id. Verified by
+mutation: reverting to `FROM profiles` fails both that test and the new one.
+`/users`' own copy claimed "N with a profile", which was already false; it now
+says "N known to the API" and explains what that excludes.
+
+### `health_events` grew forever
+
+Migration 000016 reasoned that "on a healthy system this table stays close to
+empty" — true right up to the moment it matters. A degraded database pushes
+ordinary requests past the 2s slow threshold, and every one of them then writes
+a row into the same struggling database. The queue and single writer bounded the
+*rate*; nothing bounded the *total*. There was no TTL, no partitioning, no
+cleanup job, no `DELETE` anywhere in the repo.
+
+Now 90 days, matched to the read path's own 30-day `MaxWindow` clamp — anything
+older was already unreachable through the API and was pure storage. Migration
+000022 clears the backlog once; `cmd/seed` keeps it bounded, since the predeploy
+seed is the only scheduled thing this project has. `pg_cron` would be tidier and
+is not worth an extension for one statement. Verified by inserting a 100-day-old
+and a 10-day-old row and running the seed: `health_events pruned: 1`, the recent
+one untouched.
+
+### What was deliberately NOT added
+
+**A `last_seen_at` write.** It is the only way to get DAU — every count here
+measures *logged training*, not *opened the app*, so a daily browser who never
+logs is indistinguishable from a churned account. It would cost one stamped-
+once-a-day write off the existing `/v1/modules` launch call. It is a genuine
+gap, but it is a new write path on every launch and the user asked for no
+bloat, so it is written down rather than built. Naming the field
+`last_session_at` instead of `last_seen_at` keeps the current numbers honest
+about which question they answer.
+
+The dead `listUserActivities` client and `Activity` type were deleted from
+`apps/admin` — nothing rendered them. The backend route survives as the only
+read path for rows predating the form's removal.
+
+### Open
+
+`apps/web` still doesn't follow the shared hi-fi design system that `apps/admin`
+uses — unchanged by this and still unstarted. `activity.kind` remains a fourth,
+unvalidated vocabulary.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

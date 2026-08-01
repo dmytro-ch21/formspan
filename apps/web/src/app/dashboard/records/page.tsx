@@ -10,13 +10,18 @@ import {
   listExercises,
   RECORD_LABEL,
   setPinnedExercises,
-  SPORTS,
   type Exercise,
   type ExerciseRecords,
   type PersonalRecord,
   type Sport,
 } from "@/lib/api";
-import { formatDistance, formatEstimate, formatWeight, type UnitSystem } from "@/lib/units";
+import { useModules } from "@/lib/ModulesProvider";
+import {
+  formatDistance,
+  formatEstimate,
+  formatWeight,
+  type UnitSystem,
+} from "@/lib/units";
 import { useUnits } from "@/lib/useUnits";
 
 /** Matches the backend's pinned-shortlist cap. */
@@ -40,6 +45,12 @@ const MAX_PINNED = 12;
  * the drift this codebase has already paid for twice.
  */
 export default function RecordsPage() {
+  // Only disciplines that HAVE record kinds. A chip for one with none filters
+  // the grid to a guaranteed-empty state.
+  const { modules } = useModules();
+  const recordSports = modules.filter(
+    (m) => m.enabled && m.is_sport && m.capabilities.record_kinds.length > 0,
+  );
   const { getToken } = useAuth();
   const { units } = useUnits();
 
@@ -106,26 +117,32 @@ export default function RecordsPage() {
   const shown = useMemo(() => {
     if (!records) return [];
     const q = search.trim().toLowerCase();
-    const withNames = records.map((r) => ({ r, ex: catalog.get(r.exercise_id) }));
-    return withNames
-      .filter(({ r, ex }) => {
-        if (sport && ex?.sport !== sport) return false;
-        if (!q) return true;
-        return (ex?.name ?? r.exercise_id).toLowerCase().includes(q);
-      })
-      // Pinned first, then most-trained order as the API returned it.
-      .sort((a, b) => {
-        const ap = pinned.indexOf(a.r.exercise_id);
-        const bp = pinned.indexOf(b.r.exercise_id);
-        if (ap !== -1 && bp !== -1) return ap - bp;
-        if (ap !== -1) return -1;
-        if (bp !== -1) return 1;
-        return 0;
-      });
+    const withNames = records.map((r) => ({
+      r,
+      ex: catalog.get(r.exercise_id),
+    }));
+    return (
+      withNames
+        .filter(({ r, ex }) => {
+          if (sport && ex?.sport !== sport) return false;
+          if (!q) return true;
+          return (ex?.name ?? r.exercise_id).toLowerCase().includes(q);
+        })
+        // Pinned first, then most-trained order as the API returned it.
+        .sort((a, b) => {
+          const ap = pinned.indexOf(a.r.exercise_id);
+          const bp = pinned.indexOf(b.r.exercise_id);
+          if (ap !== -1 && bp !== -1) return ap - bp;
+          if (ap !== -1) return -1;
+          if (bp !== -1) return 1;
+          return 0;
+        })
+    );
   }, [records, catalog, pinned, sport, search]);
 
   const recentCount = useMemo(
-    () => (records ?? []).filter((r) => r.records.some((x) => x.is_recent)).length,
+    () =>
+      (records ?? []).filter((r) => r.records.some((x) => x.is_recent)).length,
     [records],
   );
 
@@ -157,12 +174,20 @@ export default function RecordsPage() {
             className="w-64 rounded-pill border border-line bg-surface px-4 py-1.5 text-sm placeholder:text-text-dim focus-visible:border-text"
           />
         </label>
-        <div role="group" aria-label="Sport" className="flex flex-wrap items-center gap-1.5">
+        <div
+          role="group"
+          aria-label="Sport"
+          className="flex flex-wrap items-center gap-1.5"
+        >
           <Chip active={sport === null} onClick={() => setSport(null)}>
             All
           </Chip>
-          {SPORTS.map((s) => (
-            <Chip key={s.key} active={sport === s.key} onClick={() => setSport(s.key)}>
+          {recordSports.map((s) => (
+            <Chip
+              key={s.key}
+              active={sport === s.key}
+              onClick={() => setSport(s.key)}
+            >
               {s.label}
             </Chip>
           ))}
@@ -173,7 +198,10 @@ export default function RecordsPage() {
       </div>
 
       {error && (
-        <p role="alert" className="rounded-card border border-danger/40 bg-danger/10 px-4 py-3 text-sm">
+        <p
+          role="alert"
+          className="rounded-card border border-danger/40 bg-danger/10 px-4 py-3 text-sm"
+        >
           {error}
         </p>
       )}
@@ -181,7 +209,10 @@ export default function RecordsPage() {
       {records === null ? (
         <div className="flex flex-col gap-3">
           {Array.from({ length: 4 }, (_, i) => (
-            <div key={i} className="h-28 animate-pulse rounded-card border border-line bg-surface" />
+            <div
+              key={i}
+              className="h-28 animate-pulse rounded-card border border-line bg-surface"
+            />
           ))}
         </div>
       ) : shown.length === 0 ? (
@@ -192,8 +223,12 @@ export default function RecordsPage() {
           <p className="mx-auto mt-2 max-w-sm text-sm text-text-muted">
             {records.length === 0 ? (
               <>
-                Log a few working sets and your bests appear here — nothing to set up.{" "}
-                <Link href="/dashboard/sessions" className="text-lime underline">
+                Log a few working sets and your bests appear here — nothing to
+                set up.{" "}
+                <Link
+                  href="/dashboard/sessions"
+                  className="text-lime underline"
+                >
                   Start a session
                 </Link>
                 .
@@ -247,7 +282,9 @@ function RecordCard({
           // Named for what it does, not for the glyph — "star" tells a screen
           // reader nothing about the consequence.
           aria-label={
-            pinned ? `Stop showing ${name} on your phone` : `Show ${name} on your phone`
+            pinned
+              ? `Stop showing ${name} on your phone`
+              : `Show ${name} on your phone`
           }
           title={pinned ? "Shown on your phone" : "Show on your phone"}
           className={`shrink-0 text-lg leading-none transition ${
@@ -256,7 +293,9 @@ function RecordCard({
         >
           {pinned ? "★" : "☆"}
         </button>
-        <h2 className="min-w-0 flex-1 truncate font-display text-lg font-bold">{name}</h2>
+        <h2 className="min-w-0 flex-1 truncate font-display text-lg font-bold">
+          {name}
+        </h2>
         {isNew && (
           <span className="rounded-pill bg-accent-fill px-2 py-0.5 text-[0.625rem] font-bold tracking-wide text-accent-on-fill">
             NEW
@@ -280,7 +319,13 @@ function RecordCard({
   );
 }
 
-function RecordCell({ record, units }: { record: PersonalRecord; units: UnitSystem }) {
+function RecordCell({
+  record,
+  units,
+}: {
+  record: PersonalRecord;
+  units: UnitSystem;
+}) {
   return (
     <div className="rounded-card border border-line-soft bg-surface-raised px-4 py-3">
       <dt className="eyebrow text-[0.625rem]">{RECORD_LABEL[record.kind]}</dt>

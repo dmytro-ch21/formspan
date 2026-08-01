@@ -6,7 +6,13 @@ import { formatWeight, type UnitSystem } from "@/lib/units";
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 const API_BASE = `${API_URL}/v1`;
 
-export type Sport = "strength" | "running" | "bjj";
+/**
+ * A discipline key. Deliberately NOT a hand-written union any more: the list
+ * lives in the server's registry (`GET /v1/modules`), and a union here was a
+ * second copy that drifted from it — this file's own SPORTS array listed them
+ * in a different order than the type did.
+ */
+export type Sport = string;
 export type Goal = "general" | "powerlifting" | "hypertrophy" | "endurance";
 export type Visibility = "private" | "public";
 export type LoadType =
@@ -59,11 +65,10 @@ export type Workout = {
   updated_at: string;
 };
 
-export const SPORTS: { key: Sport; label: string }[] = [
-  { key: "strength", label: "Strength" },
-  { key: "bjj", label: "BJJ" },
-  { key: "running", label: "Running" },
-];
+// SPORTS is gone. The list comes from GET /v1/modules — see `Module` below and
+// `ModulesProvider` in the dashboard layout. Eight places in this app hardcoded
+// disciplines; two of them reimplemented registry *capabilities* rather than
+// just the list.
 
 // Only meaningful for strength: powerlifting, hypertrophy and endurance are
 // all done with the same barbell squat, so they belong to the workout.
@@ -1091,6 +1096,90 @@ export function executionSteps(description: string): string[] {
 
   if (merged.length < 2) return [];
   return merged.map((p) => p.charAt(0).toUpperCase() + p.slice(1));
+}
+
+/* ── the discipline registry ───────────────────────────────────────────── */
+
+export type ModuleCapabilities = {
+  /** "exercises" | "techniques" | "" — what the Library shows for this. */
+  catalog: string;
+  /** Extra filter axes beyond the catalog's own. BJJ has "position". */
+  facets: string[];
+  has_goals: boolean;
+  has_progression: boolean;
+  /**
+   * Personal-best kinds that mean anything here. Empty for BJJ — which is why
+   * Records is gated on "any enabled module has record kinds" rather than on
+   * a sport name.
+   */
+  record_kinds: string[];
+};
+
+export type Module = {
+  key: string;
+  /** Carries the acronym: "BJJ", not the "Bjj" capitalising the key gives. */
+  label: string;
+  is_sport: boolean;
+  default_on: boolean;
+  enabled: boolean;
+  capabilities: ModuleCapabilities;
+};
+
+/** Normalise at the parse boundary — an older server may omit array fields. */
+function normaliseModule(m: Partial<Module> & { key: string }): Module {
+  const c = m.capabilities ?? ({} as Partial<ModuleCapabilities>);
+  return {
+    key: m.key,
+    label: m.label ?? m.key,
+    is_sport: m.is_sport ?? false,
+    default_on: m.default_on ?? false,
+    enabled: m.enabled ?? m.default_on ?? false,
+    capabilities: {
+      catalog: c.catalog ?? "",
+      facets: c.facets ?? [],
+      has_goals: c.has_goals ?? false,
+      has_progression: c.has_progression ?? false,
+      record_kinds: c.record_kinds ?? [],
+    },
+  };
+}
+
+export function normaliseModules(raw: unknown): Module[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((m): m is Partial<Module> & { key: string } => typeof m?.key === "string" && m.key)
+    .map(normaliseModule);
+}
+
+export async function listModules(getToken: Token, signal?: AbortSignal): Promise<Module[]> {
+  const b = await request<{ modules: Module[] }>(getToken, "/modules", {}, signal);
+  return normaliseModules(b.modules);
+}
+
+/** Toggle modules. Sparse — send only what changed. */
+export async function setModules(
+  getToken: Token,
+  changes: Record<string, boolean>,
+): Promise<Module[]> {
+  const b = await request<{ modules: Module[] }>(getToken, "/modules", {
+    method: "PATCH",
+    body: JSON.stringify(changes),
+  });
+  return normaliseModules(b.modules);
+}
+
+/** The enabled modules that can actually be a session's sport. */
+export function enabledSports(modules: Module[]): Module[] {
+  return modules.filter((m) => m.enabled && m.is_sport);
+}
+
+export function moduleFor(modules: Module[], key: string): Module | undefined {
+  return modules.find((m) => m.key === key);
+}
+
+/** Label for a key, falling back to the key — never "Bjj". */
+export function labelForModule(modules: Module[], key: string): string {
+  return moduleFor(modules, key)?.label ?? key;
 }
 
 export type RecordKind =

@@ -9,12 +9,15 @@ import {
   createWorkout,
   GOALS,
   listWorkouts,
-  SPORTS,
   summariseTargets,
   type Goal,
   type Sport,
   type Workout,
+  enabledSports,
+  labelForModule,
+  moduleFor,
 } from "@/lib/api";
+import { useModules } from "@/lib/ModulesProvider";
 import { useUnits } from "@/lib/useUnits";
 
 const SCOPES = [
@@ -23,6 +26,8 @@ const SCOPES = [
 ] as const;
 
 export default function WorkoutsPage() {
+  // For the sport label on each card — the registry carries the acronym.
+  const { modules } = useModules();
   const { getToken } = useAuth();
   const { units } = useUnits();
   const router = useRouter();
@@ -87,7 +92,9 @@ export default function WorkoutsPage() {
             }}
             aria-pressed={scope === s.key}
             className={`rounded-pill px-4 py-1.5 text-sm font-medium transition ${
-              scope === s.key ? "bg-surface-raised text-text" : "text-text-muted hover:text-text"
+              scope === s.key
+                ? "bg-surface-raised text-text"
+                : "text-text-muted hover:text-text"
             }`}
           >
             {s.label}
@@ -96,7 +103,10 @@ export default function WorkoutsPage() {
       </div>
 
       {error && (
-        <p role="alert" className="rounded-card border border-danger/40 bg-danger/10 px-4 py-3 text-sm">
+        <p
+          role="alert"
+          className="rounded-card border border-danger/40 bg-danger/10 px-4 py-3 text-sm"
+        >
           {error}
         </p>
       )}
@@ -128,7 +138,9 @@ export default function WorkoutsPage() {
                 className="group flex h-full flex-col gap-3 rounded-card border border-line bg-surface p-5 transition hover:bg-surface-raised"
               >
                 <div className="flex items-start justify-between gap-3">
-                  <h2 className="font-display text-2xl font-semibold leading-tight">{w.name}</h2>
+                  <h2 className="font-display text-2xl font-semibold leading-tight">
+                    {w.name}
+                  </h2>
                   {w.visibility === "public" && (
                     <span className="eyebrow shrink-0 rounded-pill border border-lime/40 px-2 py-0.5 text-lime">
                       Shared
@@ -137,20 +149,31 @@ export default function WorkoutsPage() {
                 </div>
 
                 <p className="text-sm capitalize text-text-muted">
-                  {SPORTS.find((s) => s.key === w.sport)?.label ?? w.sport}
-                  {w.goal ? ` · ${GOALS.find((g) => g.key === w.goal)?.label}` : ""}
+                  {labelForModule(modules, w.sport)}
+                  {w.goal
+                    ? ` · ${GOALS.find((g) => g.key === w.goal)?.label}`
+                    : ""}
                 </p>
 
                 {w.items.length > 0 ? (
                   <ul className="mt-auto flex flex-col gap-1 border-t border-line-soft pt-3">
                     {w.items.slice(0, 3).map((it, i) => (
-                      <li key={i} className="flex justify-between gap-3 text-xs text-text-dim">
-                        <span className="truncate">{it.exercise_id.replace(/-/g, " ")}</span>
-                        <span className="stat shrink-0">{summariseTargets(it, units)}</span>
+                      <li
+                        key={i}
+                        className="flex justify-between gap-3 text-xs text-text-dim"
+                      >
+                        <span className="truncate">
+                          {it.exercise_id.replace(/-/g, " ")}
+                        </span>
+                        <span className="stat shrink-0">
+                          {summariseTargets(it, units)}
+                        </span>
                       </li>
                     ))}
                     {w.items.length > 3 && (
-                      <li className="text-xs text-text-dim">+{w.items.length - 3} more</li>
+                      <li className="text-xs text-text-dim">
+                        +{w.items.length - 3} more
+                      </li>
                     )}
                   </ul>
                 ) : (
@@ -185,6 +208,8 @@ function NewWorkoutDialog({
   onClose: () => void;
   onCreated: (w: Workout) => void;
 }) {
+  const { modules } = useModules();
+  const startable = enabledSports(modules);
   const { getToken } = useAuth();
   const [name, setName] = useState("");
   const [sport, setSport] = useState<Sport>("strength");
@@ -211,7 +236,8 @@ function NewWorkoutDialog({
         name: name.trim(),
         sport,
         // Goal is meaningful only for strength.
-        goal: sport === "strength" ? goal : null,
+        // Capability, not a sport name.
+        goal: moduleFor(modules, sport)?.capabilities.has_goals ? goal : null,
         visibility: isPublic ? "public" : "private",
       });
       onCreated(w);
@@ -256,23 +282,32 @@ function NewWorkoutDialog({
         <fieldset className="flex flex-col gap-1.5">
           <legend className="eyebrow mb-1.5">Discipline</legend>
           <div className="flex flex-wrap gap-2">
-            {SPORTS.map((s) => (
-              <Chip key={s.key} active={sport === s.key} onClick={() => setSport(s.key)}>
+            {startable.map((s) => (
+              <Chip
+                key={s.key}
+                active={sport === s.key}
+                onClick={() => setSport(s.key)}
+              >
                 {s.label}
               </Chip>
             ))}
           </div>
           <p className="mt-1 text-xs text-text-dim">
-            One discipline per workout — that&apos;s what lets the catalog show only what fits.
+            One discipline per workout — that&apos;s what lets the catalog show
+            only what fits.
           </p>
         </fieldset>
 
-        {sport === "strength" && (
+        {moduleFor(modules, sport)?.capabilities.has_goals && (
           <fieldset className="flex flex-col gap-1.5">
             <legend className="eyebrow mb-1.5">Goal</legend>
             <div className="flex flex-wrap gap-2">
               {GOALS.map((g) => (
-                <Chip key={g.key} active={goal === g.key} onClick={() => setGoal(g.key)}>
+                <Chip
+                  key={g.key}
+                  active={goal === g.key}
+                  onClick={() => setGoal(g.key)}
+                >
                   {g.label}
                 </Chip>
               ))}
@@ -302,7 +337,11 @@ function NewWorkoutDialog({
         )}
 
         <div className="flex justify-end gap-3">
-          <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-text-muted hover:text-text">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 text-sm text-text-muted hover:text-text"
+          >
             Cancel
           </button>
           <button

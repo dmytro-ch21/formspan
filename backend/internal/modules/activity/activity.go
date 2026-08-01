@@ -46,13 +46,68 @@ type NewActivity struct {
 	TraceID    string
 }
 
-// UserSummary is what admin's user-lookup screen shows: every user who's
-// completed onboarding (has a profile), not just ones with activities.
+// UserSummary is what admin's user-lookup screen shows.
+//
+// It used to be `activity_count` and `last_activity_at` — both read from
+// `activities`, a table with **no writer**. The in-app form that used it was
+// removed, and nothing replaced it, so every row showed 0 and null while real
+// training sat in `sessions` and `session_sets`, invisible. Staging today: 0
+// activities, 2 sessions, 36 sets.
+//
+// The counts below come from `sessions`, which is the only table that records
+// something a user actually did. Nothing new is written to produce them —
+// they are aggregates over rows that already exist, which is the whole answer
+// to "track the important things without bloating the database".
+//
+// What this deliberately does NOT claim: "active" here means *logged
+// training*, not *opened the app*. No read path leaves a trace, so someone
+// browsing daily looks identical to a churned account. Naming the field
+// `LastSessionAt` rather than `LastSeenAt` keeps that honest.
 type UserSummary struct {
-	UserID         string     `json:"user_id"`
-	DisplayName    *string    `json:"display_name"`
-	ActivityCount  int        `json:"activity_count"`
-	LastActivityAt *time.Time `json:"last_activity_at"`
+	UserID      string  `json:"user_id"`
+	DisplayName *string `json:"display_name"`
+	// Sessions logged, all time.
+	SessionCount int `json:"session_count"`
+	// The most recent session start — the best "is this account alive" signal
+	// that exists without adding a write path.
+	LastSessionAt *time.Time `json:"last_session_at"`
+	// Sets logged, all time. Distinguishes someone who started two sessions
+	// and abandoned them from someone who trained twice.
+	SetCount int `json:"set_count"`
+	// Disciplines this user has switched ON, resolved through the registry so
+	// an absent row reads as the default rather than as "off".
+	Modules []string `json:"modules"`
+	// When they joined.
+	CreatedAt *time.Time `json:"created_at"`
+}
+
+// UserDetail is one athlete's admin page: the same summary row, plus the
+// sessions behind it.
+//
+// The page it feeds used to render `activities` and nothing else, so it was
+// permanently, misleadingly empty — "No activities for this user ID. Either
+// they haven't logged any yet, or the ID is wrong." was shown to operators
+// looking at accounts with real training in them.
+type UserDetail struct {
+	User UserSummary `json:"user"`
+	// Newest first, capped — see maxDetailSessions. An admin screen needs
+	// enough to answer "what have they been doing", not the whole history.
+	RecentSessions []SessionSummary `json:"recent_sessions"`
+}
+
+// SessionSummary is one training session as the admin console shows it.
+//
+// Deliberately NOT the full session with its sets: the question here is
+// "what did this person do, and did it finish", which needs a count, not 36
+// rows of weights. Anyone needing the detail has the athlete-facing API.
+type SessionSummary struct {
+	ID        string    `json:"id"`
+	Sport     string    `json:"sport"`
+	Name      string    `json:"name"`
+	StartedAt time.Time `json:"started_at"`
+	// Nil means still in progress — which, at a week old, is itself a finding.
+	EndedAt  *time.Time `json:"ended_at"`
+	SetCount int        `json:"set_count"`
 }
 
 type Repository interface {
@@ -62,4 +117,11 @@ type Repository interface {
 	Create(ctx context.Context, in NewActivity) (*Activity, error)
 	ListByUser(ctx context.Context, userID string) ([]Activity, error)
 	ListUsers(ctx context.Context) ([]UserSummary, error)
+	// GetUser is the per-athlete admin view. Returns ErrNotFound when no
+	// profile exists for the id — an operator pasting a wrong id must be told
+	// it is wrong, not shown a convincing page of zeroes.
+	GetUser(ctx context.Context, userID string) (*UserDetail, error)
 }
+
+// ErrNotFound means no profile exists for that user id.
+var ErrNotFound = errors.New("activity: user not found")

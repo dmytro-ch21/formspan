@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import { listUsers } from "@/lib/api";
 import { UserLookupTable } from "./UserLookupTable";
 
@@ -12,14 +14,20 @@ export default async function UserLookupPage() {
             User Lookup
           </h1>
           {/*
-            Deliberately not "N accounts": this lists users with a `profiles`
-            row, so anyone signed up but not yet onboarded is invisible here.
-            The real account directory lives in Clerk.
+            Everyone the API has a row for anywhere — profile, session or
+            activity — not just those with a `profiles` row. Someone who signed
+            up and trained but never finished onboarding appears here, with no
+            display name; they are precisely the account support gets asked
+            about. Still not the same as "all accounts": someone who signed up
+            and did nothing at all exists only in Clerk.
           */}
           <span className="text-[13px] text-text-secondary">
-            {users.length} with a profile
+            {users.length} known to the API
           </span>
         </div>
+        <Link href="/health" className="text-[13px] text-text-secondary underline">
+          Health
+        </Link>
       </header>
 
       <main className="px-10 py-8">

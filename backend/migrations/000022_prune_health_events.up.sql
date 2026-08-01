@@ -1,0 +1,21 @@
+-- Give health_events a retention bound.
+--
+-- It is the only table in the schema that grows from SERVER events rather than
+-- user action, and it had no pruning of any kind: no TTL, no partitioning, no
+-- cleanup job, no DELETE anywhere in the repo. It grew forever.
+--
+-- Migration 000016's own comment reasoned that "on a healthy system this table
+-- stays close to empty". That is true right up to the moment it matters: a
+-- degraded database pushes ordinary requests past the 2s slow threshold, and
+-- every one of them then writes a row — into the same struggling database. The
+-- 256-deep queue and single writer bound the RATE; nothing bounded the TOTAL.
+--
+-- 90 days, because the read path already refuses to look further back:
+-- health.Handler clamps `?hours=` to a 30-day MaxWindow. Rows older than that
+-- are unreachable through the API and were pure storage.
+--
+-- This deletes the backlog once. Keeping it bounded from here is the seed's
+-- job — see cmd/seed, which runs on every deploy and is the only scheduled
+-- thing this project has. A pg_cron job would be tidier and is not worth a
+-- new extension for one statement.
+DELETE FROM health_events WHERE occurred_at < now() - interval '90 days';
