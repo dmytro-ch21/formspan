@@ -1,4 +1,5 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { request as requestSync } from '@/lib/sync';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet } from 'react-native';
 
@@ -11,7 +12,7 @@ import { useModules } from '@/lib/ModulesProvider';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
 import { applySuggestions, fetchSuggestions, setsFromWorkout } from '@/lib/sessions';
-import { cachedWorkouts, cacheWorkouts, startLocalSession, syncSessions } from '@/lib/sessionStore';
+import { cachedWorkouts, cacheWorkouts, startLocalSession } from '@/lib/sessionStore';
 import { listWorkouts, summariseTargets, type Sport, type Workout } from '@/lib/workouts';
 
 /**
@@ -97,7 +98,7 @@ export default function StartSessionScreen() {
         workout_id: workout ? workout.id : null,
         sets,
       });
-      syncSessions(userId, getToken).catch(() => {});
+      requestSync('session-started');
       // replace, not push: finishing a session and pressing back should not
       // land on the chooser that created it.
       router.replace(`/session/${session.id}`);

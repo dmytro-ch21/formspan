@@ -1,4 +1,5 @@
 import { Image } from 'expo-image';
+import { request as requestSync } from '@/lib/sync';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, TextInput } from 'react-native';
@@ -15,7 +16,6 @@ import {
   cacheExercises,
   readLocalSession,
   saveLocalSets,
-  syncSessions,
 } from '@/lib/sessionStore';
 
 /**
@@ -121,7 +121,7 @@ export default function AddExerciseToSessionScreen() {
         ? swapExercise(session.sets, swap, exercise, current?.load_type)
         : [...session.sets, emptySet(exercise.id, session.sets.length)];
       await saveLocalSets(userId!, id, next);
-      syncSessions(userId!, getToken).catch(() => {});
+      requestSync('exercise-added');
       router.back();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

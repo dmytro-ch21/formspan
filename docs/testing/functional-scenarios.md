@@ -1904,3 +1904,44 @@ screen.
 
 - Sign out and in as someone else: neither preference carries over from the
   previous athlete.
+
+## Sync orchestration (mobile, offline-first PR2)
+
+### The loop that has to work
+
+- Log a full session with the network off. Kill the app. Restore the network,
+  reopen it: the session syncs **without visiting any particular screen**.
+  Foreground alone is enough. This is the scenario the whole PR exists for.
+- Same, without killing the app: background it, restore signal, foreground it.
+- With the network still off, the pending count stays honest and the error
+  reads as connectivity, never as auth.
+
+### Coalescing
+
+- Editing many sets quickly must not produce a sync per edit. A burst during a
+  run costs the run in flight plus at most one follow-up.
+- Opening Today, a session, and the picker in quick succession does not
+  produce three concurrent syncs.
+
+### Backoff
+
+- With something pending and the network down, retries follow 5s / 15s / 60s /
+  5min and stop lengthening there.
+- With **nothing** pending, a failure schedules no retry at all — no waking up
+  forever on the chance the network improved.
+- A successful sync resets the schedule.
+
+### Online vs refused
+
+- An unreachable server marks the app offline.
+- A server that answers and **refuses** (4xx) does not — it is online, with a
+  problem worth showing.
+- Retry (the button) always attempts, even when the orchestrator would have
+  waited, and reports the outcome rather than spinning.
+
+### Account changes
+
+- Sign out with work pending: no queued retry fires against the previous
+  athlete's rows.
+- A signed-out app does not report "0 pending" as if everything were safely on
+  the server — that state is unknown, not clean.

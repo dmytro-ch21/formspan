@@ -3706,6 +3706,104 @@ them is what found the group-boundary bug above.
 
 That runner gap is now the second entry in a row to mention it.
 
+## 2026-08-01 — Offline-first, PR2: something owns when sync happens
+
+First of the offline-first run (#115–#120). This one is about **writes getting
+off the phone**; it does not make reads work offline, and the entry says so
+because that distinction is the whole programme.
+
+### Nobody decided when to sync
+
+`syncSessions` was fired and forgotten from **seven** call sites — session
+focus, the exercise picker, finishing a session, starting one, Today's mount, a
+manual Retry. Each was an independent guess that *now* might be a good moment.
+Between them there was no timer, no connectivity trigger, and nothing that
+noticed the app had come back to the foreground.
+
+The shape an athlete meets: log a whole session in a basement gym, walk out
+into signal, pocket the phone. Nothing happens. The training sits there until
+you happen to open a screen whose mount fires a sync.
+
+`lib/sync.ts` now owns the question. Call sites say *"something changed"*
+(`request(reason)`); it decides whether to act. It coalesces — ten requests
+during a run cost two syncs, not eleven — backs off 5s/15s/60s/5min on failure,
+retries only when something is actually pending, and syncs on **foreground
+transition**, which is the trigger that was missing and the one that matches
+walking out of a basement.
+
+### Reachability, not radio state
+
+Deliberately **no `expo-network`/NetInfo dependency.** The OS answers "is wifi
+associated", and the case that started this entire thread — a phone on gym wifi
+with no upstream — answers that question *yes* while nothing works. So
+online/offline is inferred from whether requests actually succeed: an
+`OfflineError` means offline, a completed sync means online, and a 4xx means
+**online** (the server answered; it just refused). Adding the OS listener later
+is worth it only to shorten the wait after signal returns — an optimisation
+over the backoff, never the source of truth.
+
+It also avoids a native dependency, which on this project means a device
+rebuild before anything can be tested.
+
+### A bug found while wiring
+
+`schedule()` refuses to set a timer with nothing pending — sensible, but it was
+reading `state.pending` *before* the `finally` refreshed it. A session created
+moments earlier still reads as 0 until the recount, so the retry was skipped for
+exactly the rows that needed it. The recount now happens before the decision.
+Mutation-verified: reverting the order fails that test alone.
+
+### Not in this PR
+
+Reads. `GET /v1/sessions` still needs the network, so the Library, the workout
+list and history remain online-only — that is PR4a/PR4b/PR5. Background sync is
+also explicitly out: nothing runs while the app is suspended, and claiming
+otherwise in the UI would be worse than the honest "syncs when you open it".
+
+### Review, and a second vacuous test
+
+Three things worth fixing came out of review, and one of them fixed three
+problems at once.
+
+**Classification moved into the sync result.** The orchestrator was deciding
+online-vs-offline by matching `/reach VOLA/` against the error *message* — the
+exact thing `apiError.ts` warns against, and worse than the usual case because
+the string is our own gym-facing UI copy, so it breaks when someone reasonably
+reworders it, and breaks *inverted and silently*. `SessionSyncResult` now
+carries a typed `errorKind` (`offline` | `permanent` | `transient`), classified
+where the error object still exists. That one change also stopped
+permanently-refused rows retrying forever — a 4xx-refused session keeps
+`dirty = 1`, so `pending` never reaches 0, so the 5-minute tail re-armed for the
+life of the install — and fixed last-row-wins, where an offline failure followed
+by a validation error classified as online.
+
+**`syncNow` could be silently stolen.** If a request landed during a run,
+`run`'s `finally` re-fires and occupies `running` in the same microtask that
+resolves `syncNow`'s single `await running` — so the manual attempt hit the
+in-flight guard and returned having done nothing, reporting the *previous*
+run's error and stopping the spinner. Reachable on exactly the tap the button
+exists for. It loops now.
+
+**Today's badge never reflected the sync it triggered.** The screen kept its own
+`pendingSessions` copy, which was fresh only because it used to `await` the
+sync. Now that the orchestrator decides, that copy went stale immediately —
+"N waiting to sync" persisted through the successful sync that same focus had
+started. It reads `useSyncState()` instead, which until then had *zero
+consumers* — a smell in its own right.
+
+**And a second vacuous test.** The "permanent rejection schedules no retry"
+assertion passed with the guard deleted. `failures` is module state that only
+resets on success, so by that point in the file the backoff was 300s and the
+5-second wait proved nothing. Fixed by putting the ladder back to rung 0 first,
+and paired with a control asserting a *transient* failure at the same rung does
+retry — so the test can't pass just because nothing ever retries. That is twice
+now a test of mine has passed for the wrong reason; mutation is the only thing
+that has caught either.
+
+14 assertions from a standalone harness stubbing only the store and RN's
+AppState; four mutations checked. `apps/mobile` still has no test runner — third
+entry in a row to say so.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

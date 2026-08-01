@@ -1,4 +1,5 @@
 import { useAuth } from '@clerk/clerk-expo';
+import { request as requestSync, syncNow, useSyncState } from '@/lib/sync';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, AppState, Pressable, ScrollView, StyleSheet } from 'react-native';
@@ -8,7 +9,7 @@ import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { formatElapsed } from '@/lib/rest';
 import type { LoggedSet, Session } from '@/lib/sessions';
-import { countPendingSessions, listLocalSessions, syncSessions } from '@/lib/sessionStore';
+import { listLocalSessions } from '@/lib/sessionStore';
 import { formatVolume } from '@/lib/units';
 import { enabledSports } from '@/lib/modules';
 import { useModules } from '@/lib/ModulesProvider';
@@ -126,7 +127,14 @@ export default function TodayScreen() {
 
   const [sessions, setSessions] = useState<Session[]>([]);
   const [sessionError, setSessionError] = useState<string | null>(null);
-  const [pendingSessions, setPendingSessions] = useState(0);
+  // From the orchestrator, not a local copy. This screen used to `await` the
+  // sync and then re-count — so the number was fresh. Now that the sync is
+  // fire-and-forget (the orchestrator decides), a local copy would show
+  // "N waiting to sync" straight through the successful sync this very focus
+  // triggered, and keep showing it until the next focus. The orchestrator
+  // already recounts after every run; `useSyncState` had no consumers until
+  // now, which is its own smell.
+  const { pending: pendingSessions, lastSyncAt } = useSyncState();
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -140,7 +148,6 @@ export default function TodayScreen() {
       // than 5 so the week summary has a whole week to work from; the list
       // below shows only the most recent handful.
       setSessions(await listLocalSessions(userId, 30));
-      setPendingSessions(await countPendingSessions(userId));
       setSessionError(null);
     } catch (err) {
       setSessionError(err instanceof Error ? err.message : String(err));
@@ -149,14 +156,33 @@ export default function TodayScreen() {
       // state below claim "nothing logged yet" without it being a guess.
       setLoaded(true);
     }
+    // Ask the orchestrator; it decides whether now is a moment worth a run
+    // (see lib/sync.ts). This screen no longer waits on the network to show
+    // the list — the local read above already did that.
+    requestSync('today-focus');
     try {
-      await syncSessions(userId, getToken);
       setSessions(await listLocalSessions(userId, 30));
-      setPendingSessions(await countPendingSessions(userId));
     } catch {
       // Offline is not an error state here — the local list already rendered.
     }
   }, [getToken, userId]);
+
+  // Re-read the local list whenever a sync finishes. Without this the list is
+  // only as fresh as the last focus, so a session logged on the web appeared
+  // one focus late — and the sync this screen triggers on focus never showed
+  // its own results.
+  useEffect(() => {
+    if (!userId || lastSyncAt === null) return;
+    let alive = true;
+    listLocalSessions(userId, 30)
+      .then((rows) => {
+        if (alive) setSessions(rows);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [lastSyncAt, userId]);
 
   // On focus rather than on mount: coming back from a session should show its
   // new numbers, not the list as it was when the tab first rendered.
@@ -233,10 +259,13 @@ export default function TodayScreen() {
       // session the server permanently refuses would sit at "1 waiting to
       // sync" with no way to find out why. "The count is the honest signal"
       // is only true of transient failures.
-      const result = await syncSessions(userId, getToken);
+      // syncNow, not request: a person pressed this, so it must always
+      // attempt rather than being told now is not the moment — and it
+      // resolves with the outcome so the button can report it instead of
+      // spinning and silently achieving nothing.
+      const result = await syncNow();
       setSessions(await listLocalSessions(userId, 30));
-      setPendingSessions(await countPendingSessions(userId));
-      if (result.failed > 0 && result.error) setSyncError(result.error);
+      if (result.lastError) setSyncError(result.lastError);
     } catch (err) {
       setSyncError(err instanceof Error ? err.message : String(err));
     } finally {
