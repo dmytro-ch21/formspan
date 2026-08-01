@@ -299,6 +299,16 @@ def convert_ibjjf_rulesets(path: Path) -> tuple[list[dict], dict[tuple, str]]:
                 or gi_belts == "Not legal" or nogi_belts == "Not legal"
             ),
         })
+    # A 6-hex-char digest over ~25 rows collides with probability ~5e-7, but a
+    # collision would be SILENT: two different rulesets upsert onto one id, the
+    # second overwriting the first, and every technique in the first group then
+    # shows the wrong competition legality. That is precisely the failure this
+    # content-addressing was introduced to eliminate, so it fails loudly instead.
+    ids = [r["id"] for r in rulesets]
+    if len(set(ids)) != len(ids):
+        dupes = sorted({i for i in ids if ids.count(i) > 1})
+        raise SystemExit(f"ruleset id collision: {dupes} — widen the digest")
+
     return rulesets, lookup
 
 

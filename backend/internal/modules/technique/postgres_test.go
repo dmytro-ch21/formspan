@@ -242,11 +242,27 @@ func TestTechniqueEnrichment(t *testing.T) {
 	// setup_from must name techniques, not carry raw ids. The sheet writes ids;
 	// the importer resolves them. Regressing that put snake_case identifiers on
 	// 368 of 466 detail screens.
+	// One query over ALL 466 rather than repo.Get in a loop over a sample. A
+	// sample proves nothing about the rows it skipped, and the property here is
+	// meant to be total: NO entry may be a raw id.
+	var rawRows int
+	if err := repo.pool.QueryRow(ctx, `
+		SELECT count(*) FROM techniques
+		WHERE EXISTS (SELECT 1 FROM unnest(setup_from) e WHERE e LIKE '%\_%')`,
+	).Scan(&rawRows); err != nil {
+		t.Fatalf("count raw setup_from: %v", err)
+	}
+	if rawRows > 0 {
+		t.Errorf("%d techniques still carry raw snake_case ids in setup_from; the importer must resolve them", rawRows)
+	}
+
+	// Resolution rate stays a sample — it is a data-quality signal, not an
+	// invariant, and ~80% is the authored reality rather than a target.
 	byName := make(map[string]bool, len(all))
 	for _, s := range all {
 		byName[strings.ToLower(s.Name)] = true
 	}
-	raw, resolved, total := 0, 0, 0
+	resolved, total := 0, 0
 	for _, s := range all[:min(80, len(all))] {
 		f, err := repo.Get(ctx, s.ID)
 		if err != nil {
@@ -254,16 +270,10 @@ func TestTechniqueEnrichment(t *testing.T) {
 		}
 		for _, e := range f.SetupFrom {
 			total++
-			if strings.Contains(e, "_") {
-				raw++
-			}
 			if byName[strings.ToLower(e)] {
 				resolved++
 			}
 		}
-	}
-	if raw > 0 {
-		t.Errorf("%d setup_from entries are raw snake_case ids; the importer must resolve them", raw)
 	}
 	if total > 0 && resolved*100/total < 50 {
 		t.Errorf("only %d/%d setup_from entries name a technique — the graph is broken", resolved, total)

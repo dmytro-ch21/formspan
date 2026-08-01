@@ -5,7 +5,9 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet } from 'react-nati
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { LibraryTile, categoryBadge } from '@/components/LibraryTile';
 import {
+  edgeKey,
   fetchRulesets,
   fetchTechnique,
   fetchTechniques,
@@ -102,12 +104,20 @@ export default function TechniqueScreen() {
   }
 
   const t = technique;
+  const [code, accent] = categoryBadge(t.category);
 
   return (
     <ScrollView contentContainerStyle={styles.scroll} testID="technique-detail">
       <View style={styles.hero}>
-        <Text style={styles.eyebrow}>{t.category.toUpperCase()}</Text>
-        <Text style={styles.title}>{t.name}</Text>
+        {/* Same tile and code as the Library row this was opened from, so the
+            transition reads as the row expanding rather than a new screen. */}
+        <View style={styles.heroTop}>
+          <LibraryTile code={code} accent={accent} />
+          <View style={styles.heroText}>
+            <Text style={[styles.eyebrow, { color: accent }]}>{t.category.toUpperCase()}</Text>
+            <Text style={styles.title}>{t.name}</Text>
+          </View>
+        </View>
         {t.aliases.length > 0 && (
           <Text style={styles.aliases}>Also called {t.aliases.join(' · ')}</Text>
         )}
@@ -233,17 +243,24 @@ function Edges({
               </Text>
             );
           }
+          // Show what the author wrote, EXCEPT when they wrote an id — the
+          // only form that is unreadable. Substituting the canonical name on
+          // an alias match silently rewrites the content: "Straight Armbar"
+          // became "Armbar from Closed Guard", and "Wrist control" became
+          // "Turtle Hand Fighting" — a different technique from a different
+          // position, presented as if the author had said it. 128 edges did
+          // this. The link still goes where the match points; only the label
+          // stays honest.
+          const display = edgeKey(raw) === hit.id ? hit.name : raw;
           return (
             <Pressable
               key={raw}
               onPress={() => router.push(`/technique/${hit.id}`)}
-              hitSlop={6}
+              style={styles.edgeHit}
               accessibilityRole="link"
               accessibilityLabel={`Open ${hit.name}`}
             >
-              {/* The resolved NAME, never the raw label — `setup_from` stores
-                  ids, so echoing `raw` would show `seatbelt_back_control`. */}
-              <Text style={styles.edgeLink}>{hit.name}</Text>
+              <Text style={styles.edgeLink}>{display}</Text>
             </Pressable>
           );
         })}
@@ -258,7 +275,9 @@ const styles = StyleSheet.create({
   error: { color: vola.danger, fontSize: 14, textAlign: 'center', lineHeight: 20 },
 
   hero: { gap: 4 },
-  eyebrow: { color: vola.lime, fontSize: 11, letterSpacing: 1.4, fontWeight: '700' },
+  heroTop: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  heroText: { flex: 1, gap: 3 },
+  eyebrow: { fontSize: 11, letterSpacing: 1.4, fontWeight: '700' },
   title: { fontSize: 26, fontWeight: '700' },
   aliases: { color: vola.textMuted, fontSize: 13, marginTop: 2 },
 
@@ -294,7 +313,10 @@ const styles = StyleSheet.create({
   ruleNotes: { color: vola.textMuted, fontSize: 13, lineHeight: 19, marginTop: 6 },
 
   edgeWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  edgeText: { color: vola.textMuted, fontSize: 14 },
+  edgeText: { color: vola.textMuted, fontSize: 14, paddingVertical: 6 },
+  // paddingVertical rather than hitSlop: at 8px gaps, slop on both sides made
+  // adjacent links' touch regions abut, so a near-miss hit the wrong one.
+  edgeHit: { paddingVertical: 6 },
   edgeLink: { color: vola.lime, fontSize: 14, fontWeight: '600' },
 
   footnote: { color: vola.textDim, fontSize: 12, lineHeight: 18 },

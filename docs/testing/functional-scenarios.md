@@ -1407,14 +1407,19 @@ auth screens cannot exercise this at all. `expo run:ios --device`.
   credentials; grep the changed files for `console.*` as part of review.
 - **Cancelling must not leave a partial session** — assert still signed out.
 
-## BJJ technique library (`/v1/techniques`, mobile Library → BJJ Techniques)
+## BJJ technique library (`/v1/techniques`, mobile Library tab)
+
+> **Superseded in part (2026-07-31):** techniques no longer have their own
+> screen — they are merged into the Library list. The API scenarios below still
+> apply as written; for the mobile UI see "Unified Library" at the end of this
+> document.
 
 The property: **every field the authoring spreadsheet carries is readable when
 a technique is opened, and the library stays instant as it grows.**
 
 **Happy path**
 
-- Library tab → BJJ Techniques lists all 466, scrolls smoothly, and opening one
+- The Library tab lists all 466 alongside the exercise catalog, scrolls smoothly, and opening one
   shows mechanics (`description`) *and* the decision (`when_to_use`) as separate
   sections.
 - The IBJJF panel shows rule class and both divisions' belts.
@@ -1466,3 +1471,66 @@ a technique is opened, and the library stays instant as it grows.**
   terms or privacy URL to link to yet. Add the scenario when there is one.
 - Web/mobile nav destinations beyond Dashboard/Today (Calendar, Strength, BJJ, Nutrition, Insights, Account / Plan, Log, Progress, Profile) don't exist yet — add their scenarios here when each one is actually built, not preemptively.
 - Admin has no real backend data (subscriptions, device/platform tracking, integration sync, support tickets) and no `Jobs & Webhooks`/`Audit Log` screens — none of these are designed yet; add scenarios once each lands for real.
+
+## Unified Library — exercises + techniques in one list (`apps/mobile` Library tab)
+
+Domain: one Library tab lists the exercise catalog **and** the 466 BJJ
+techniques in a single alphabetically-sorted list, behind one search box and
+one set of sport chips. There is deliberately **no separate techniques screen**
+— a previous version had one and it is the specific thing these scenarios
+guard against regressing to.
+
+### Happy path
+
+- The Library shows both kinds of row. Searching "armbar" returns techniques;
+  searching "bench" returns exercises; **one box does both.**
+- Every row draws a tile: the photo when the item has one, otherwise a
+  three-letter code (`SUB`, `ESC`, `PIN`, …). No row is text-only.
+- Tapping the **BJJ** chip shows techniques *and* the BJJ exercise drills — not
+  drills alone. This is the exact bug the merge fixed; assert the list contains
+  at least one technique.
+- Under BJJ, a second row of position chips appears. Selecting **Mount** returns
+  both Mount-Top and Mount-Bottom techniques (family match, not exact match).
+- Selecting a non-BJJ sport hides the position chips **and clears** any position
+  filter, so the list is not silently narrowed by an invisible control.
+- The sport chip is remembered across visits; the search box is not.
+
+### Edge cases & errors
+
+- Techniques fail to load, exercises succeed → the exercise list still renders,
+  with a distinct "Techniques couldn't load" message. The two halves fail
+  independently and must not be reported as one outage.
+- Exercises fail, techniques succeed → the exercise error shows; technique rows
+  still render.
+- Neither has loaded yet → spinner, **never** "Nothing here yet". The empty
+  state may only claim emptiness after a successful read.
+- A 10s timeout on the exercise fetch surfaces a message with a working
+  recovery path (pull-to-refresh), not a silent empty list.
+- Typing fast does not fire a request per keystroke, and a superseded request
+  never overwrites a newer result or shows an error.
+
+### Technique detail (`/technique/[id]`)
+
+- Opening a technique from the Library shows the same tile and code as the row,
+  so the transition reads as the row expanding.
+- A graph edge that resolves to a library entry is tappable; one that doesn't
+  renders as plain text and **looks** like plain text (no dead links).
+- **A resolved edge shows the label the author wrote**, not the target's
+  canonical name — except when the author wrote a raw id, the only unreadable
+  form. Regression guard: "Straight Armbar" must not render as "Armbar from
+  Closed Guard".
+- `is_restricted` comes from the API and is never re-derived from belt counts.
+  A no-gi list of Blue/Purple/Brown/Black is the **baseline** (adult no-gi has
+  no white belt division), not a restriction — deriving it flags ~130 ordinary
+  techniques instead of the real 20.
+- An empty belt list renders its note ("N/A — gi-specific"), never "allowed at
+  no belt".
+- Sections with no content (e.g. `video_reference`, empty in all 466) do not
+  render an empty heading.
+
+### Auth / security
+
+- Signed out, the Library tab is unreachable (the `AUTH_ROUTES` guard).
+- Techniques are global reference content, identical for every user — the
+  module-level summary cache surviving a user switch is correct, not a leak.
+  Assert the API applies no user scoping to `/v1/techniques`.

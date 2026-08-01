@@ -217,12 +217,16 @@ export function resolveEdge(
 /**
  * Index every handle a graph edge might be written with: id, name, alias.
  *
- * `setup_from` stores **ids**, not names — `grappling_stance_motion`,
- * `seatbelt_back_control` — while `common_next_moves` and `common_counters`
- * store prose names. Indexing names only resolved 13 of 541 setup edges (2%)
- * instead of 417 (77%), so 368 of 466 detail screens rendered raw snake_case
- * identifiers at the user. Ids are stored hyphenated and written underscored,
- * hence the swap.
+ * The id keys are a **back-compat shim, and still load-bearing.** `setup_from`
+ * used to store ids (`grappling_stance_motion`) rather than names; the importer
+ * now resolves them, but a server that has not been re-seeded still serves the
+ * old shape — staging included, at the time of writing. Indexing names alone
+ * against that data resolved 13 of 541 setup edges (2%) instead of 417 (77%),
+ * so 368 of 466 detail screens showed raw snake_case at the user.
+ *
+ * Safe to keep against new data: no technique name or alias contains an
+ * underscore, so `edgeKey`'s `_`→`-` swap is a no-op on resolved names. Delete
+ * the id pass only once every deployment is re-seeded.
  *
  * Insertion order is deliberate: ids first, then names, then aliases, with
  * aliases never overwriting. A name is a better answer than someone else's
