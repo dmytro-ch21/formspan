@@ -2,6 +2,8 @@ import { ClerkProvider, useAuth, useSignUp } from '@clerk/clerk-expo';
 import { clearSessionToken } from '@/lib/session';
 
 import { ModulesProvider } from '@/lib/ModulesProvider';
+import { TrackEffortProvider } from '@/lib/TrackEffortProvider';
+import { UnitsProvider } from '@/lib/UnitsProvider';
 import { useFonts } from 'expo-font';
 import { DarkTheme, Stack, ThemeProvider, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
@@ -70,7 +72,11 @@ export default function RootLayout() {
       {/* Inside ClerkProvider because it keys on userId, and above the
           navigator because the tab bar is built from it. */}
       <ModulesProvider>
-        <RootLayoutNav />
+        <UnitsProvider>
+          <TrackEffortProvider>
+            <RootLayoutNav />
+          </TrackEffortProvider>
+        </UnitsProvider>
       </ModulesProvider>
     </ClerkProvider>
   );

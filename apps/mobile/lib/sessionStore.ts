@@ -344,7 +344,33 @@ export type SessionSyncResult = { pushed: number; pulled: number; failed: number
  * purposes, and precisely why the sets need their own PUT behind it. Two
  * requests, and both are safe to repeat.
  */
-export async function syncSessions(
+/**
+ * One sync at a time, process-wide.
+ *
+ * `syncSessions` is fired and forgotten from six places, several of which
+ * overlap by design (session focus, the exercise picker, Today's mount). Two
+ * runs interleaving is what makes the pull's read-then-write racy in the first
+ * place; serialising removes the window rather than only narrowing it.
+ *
+ * Callers keep their fire-and-forget shape — a queued run resolves with the
+ * result of the run that actually happened for it.
+ */
+let syncInFlight: Promise<SessionSyncResult> | null = null;
+
+export function syncSessions(
+  userID: string,
+  getToken: TokenGetter,
+): Promise<SessionSyncResult> {
+  const run = (syncInFlight ?? Promise.resolve(null)).catch(() => null).then(() =>
+    runSync(userID, getToken),
+  );
+  syncInFlight = run.catch(
+    () => ({ pushed: 0, pulled: 0, failed: 0 }) as SessionSyncResult,
+  );
+  return run;
+}
+
+async function runSync(
   userID: string,
   getToken: TokenGetter,
 ): Promise<SessionSyncResult> {
@@ -368,15 +394,40 @@ export async function syncSessions(
 
   // Pull only what we don't hold dirty — the server is authoritative for
   // everything the device isn't currently editing.
+  //
+  // `remote` is a snapshot from *before* the loop, and the local row can move
+  // underneath us between the fetch and the check. That is not hypothetical:
+  // adding an exercise mid-session fires one sync from the picker and another
+  // from the session screen's refocus, so two runs overlap by construction.
+  // The sequence that bit an athlete:
+  //
+  //   run A: pullSessions() -> snapshot WITHOUT the new exercise
+  //   picker: writes the new exercise locally, dirty = 1
+  //   run B: pushes it, sets dirty = 0
+  //   run A: reads dirty = 0, upserts its stale snapshot -> exercise gone
+  //   later: another pull brings it back
+  //
+  // Which is exactly "apparently the exercise was added but would just load
+  // without my intervention". The push side already guards against its own
+  // version of this with a CAS on `updated_at`; the pull side had nothing.
+  //
+  // NOTE: an earlier commit on this branch claimed the cause was a stale
+  // debounce racing the picker, and "fixed" it by flushing before navigating.
+  // That was wrong — both entry points already flushed — and the wrong
+  // diagnosis is recorded here so it is not re-derived.
   try {
     const remote = await pullSessions(getToken, { limit: 20 });
     for (const r of remote) {
-      const local = await db.getFirstAsync<{ dirty: number }>(
-        `SELECT dirty FROM local_sessions WHERE id = ? AND user_id = ?`,
+      const local = await db.getFirstAsync<{ dirty: number; updated_at: string }>(
+        `SELECT dirty, updated_at FROM local_sessions WHERE id = ? AND user_id = ?`,
         r.id,
         userID,
       );
       if (local?.dirty === 1) continue;
+      // Refuse to go backwards. If the local row is newer than the copy we
+      // fetched, this snapshot is stale and writing it would erase whatever
+      // landed in between.
+      if (local && local.updated_at > r.updated_at) continue;
       await upsert({ ...r, dirty: false }, userID, false, true);
       result.pulled++;
     }

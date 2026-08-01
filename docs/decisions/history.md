@@ -3570,6 +3570,142 @@ work in a basement. Serving reads from the local store is the offline-first
 programme, still untouched. This change is what stops *authentication* from
 being the thing that breaks first.
 
+## 2026-08-01 — In-session fixes, from a phone actually taken to a gym
+
+Five items from one session on the mat and under a bar. Four are done here;
+two are deliberately not.
+
+### The add-exercise bug — and a wrong diagnosis I shipped first
+
+*"when adding exercise it stuck when in session I had to wipe down few times
+and apparently the exercise was added but would just load without my
+intervention."*
+
+**My first diagnosis was wrong, and the review caught it.** I claimed the
+session screen's 700ms debounce held a pre-picker snapshot that landed after
+the picker's write, and that `Swap` flushed before navigating while `+ Add
+exercise` did not. The second half is simply false: `git show origin/main`
+has `await flush()` on *both* buttons. I had grepped for `router.push` and
+never read the lines above the one I found. The "fix" was a behavioural no-op
+dressed as a root cause — the worst kind, because the next person would have
+trusted the comment.
+
+The real mechanism is a check-then-act in the sync **pull**, and it is still
+live on main:
+
+```
+run A: pullSessions()          -> snapshot WITHOUT the new exercise
+picker: writes it locally, dirty = 1
+run B: pushes it, sets dirty = 0
+run A: reads dirty = 0, upserts its stale snapshot -> exercise gone
+later: another pull brings it back
+```
+
+`syncSessions` is fired and forgotten from six places, and the add flow
+overlaps two of them by construction — the picker's own sync and the session
+screen's refocus sync. The **push** side already guards its version of this
+with a CAS on `updated_at` ("or we'd mark a newer edit as already sent"). The
+pull side had nothing.
+
+Two fixes: the pull now refuses to write a snapshot older than the local row,
+and `syncSessions` is serialised process-wide so overlapping runs cannot
+interleave at all. The wrong diagnosis is recorded in the code beside the
+right one, so it is not re-derived.
+
+`openPicker` stays, because putting the flush in one place instead of two is
+worth keeping — but its comment now says plainly that it is not the fix.
+
+### Prefill, and a bug its own doc comment described
+
+*"when we have predefined few sets, and we enter some data in first the next
+ones should pick up those numbers."*
+
+`+ Set` already carried numbers forward; sets that arrive from a template do
+not, so a 3×5 meant typing the same weight three times. `fillForward` now fills
+later *planned* sets when you tick one done — the moment the numbers are final,
+and a tap already being made. It never overwrites a value already typed (a top
+set with back-offs is a real plan), never touches a completed set, and never
+carries effort.
+
+The first implementation filtered on `exercise_id` without stopping at the
+group boundary, so squat / bench / squat filled the *second* squat block from
+the first — a different piece of work. Its own doc comment said "stopping at
+the next one". A test caught the contradiction.
+
+### Reorder and remove an exercise
+
+Buttons on the group header rather than drag handles: a long-press-drag is a
+poor bet one-handed with a bar to get back to, and it fights the scroll view.
+Removal is confirmed and says how many logged sets go with it; `Swap` remains
+the non-destructive neighbour for "wrong exercise".
+
+### The done-set highlight, computed rather than eyeballed
+
+*"make it the whole thing highlighted so it is visible that is done. But color
+should be nice and a bit transparent."*
+
+Lime at 15% over `surface`, solved per channel and stored opaque as
+`vola.setDone` — the convention this palette already uses. 15% because it was
+measured: the tint is 1.47:1 against an untouched row (visible at a glance),
+`text` 11.5:1, `textMuted` 4.67:1. 20% reads better as a band but drops
+`textMuted` to 3.98:1; 10% keeps every ink happy but the tint falls to 1.26:1
+and stops being obvious. `textDim` is 2.51:1 on the tint, so the set ordinal
+steps up to `textMuted` on done rows only.
+
+### Not done, and why
+
+- **Swipe-left to delete a set.** Needs `react-native-gesture-handler`, which
+  isn't a dependency — a new native module plus a root-view wrapper, and it
+  wants device verification rather than a typecheck. There is already a
+  "Remove set" button in the expanded row, so this is an ergonomics upgrade,
+  not a missing capability. Its own change.
+- **Volume shown in kg when the athlete wants lb — now reproduced and fixed.**
+  The account was already imperial, which ruled out the "never been online"
+  theory and pointed at the real cause: **`useUnits` was a hook, so each of six
+  screens held its own copy** of one account-level enum, its own
+  `useState('metric')`, and its own `GET /v1/profile`. Every screen therefore
+  began in metric and corrected itself a frame later — and a finished-session
+  summary renders at mount, which is exactly that frame. Six resolutions racing
+  six fetches also meant screens disagreed with each other, which is the "why
+  it is not consistent?" in the report.
+
+  Now one `UnitsProvider` above the navigator: one copy, one fetch (six down to
+  one), cache read before first paint, and `unitsReady` so a unit-bearing
+  number is never printed in a unit not yet established — a dash for one frame
+  beats tonnes to someone who thinks in pounds. The offline/`owed` logic was
+  already correct and is carried over unchanged; it was just being run six
+  times.
+
+  Same shape as the documented 200-request `useUnits` bug on web.
+
+- **`useTrackEffort` collapsed too — and it had a bug units did not.** Two call
+  sites, two copies, two profile fetches: the same shape, though a boolean
+  cannot render a wrong *number*, so it never produced a visible symptom.
+
+  The substantive half is that it had **no record of a local choice that hadn't
+  reached the account**. Turning effort off with no signal pushed to the server,
+  failed, and had the failure swallowed by a bare `.catch(() => {})` — then the
+  next successful profile read did `setOn(p.track_effort)` and overwrote the
+  cache with the server's stale `true`. The switch turned itself back on,
+  minutes later, silently. `useUnits` carries an `owed` flag precisely to
+  prevent that, and its comment describes this exact failure; `useTrackEffort`
+  was written from the same template and left the flag out. It now has
+  `PREF_TRACK_EFFORT_OWED`, the same server-wins guard, and Settings admits the
+  state rather than swallowing it.
+
+  Four profile fetch sites remain (`you.tsx`, `profile/edit.tsx` and the two
+  providers), all of which genuinely want the whole profile.
+
+### Testing
+
+The two new transforms went into `lib/sessions.ts` beside `swapExercise`
+rather than staying inline in the screen — pure array logic belongs there, and
+it is the only way to exercise it at all given `apps/mobile` still has no test
+runner. 13 assertions run from a standalone harness over `tsc` output; one of
+them is what found the group-boundary bug above.
+
+That runner gap is now the second entry in a row to mention it.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.
