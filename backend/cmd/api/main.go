@@ -83,6 +83,10 @@ func main() {
 	mux.Handle("GET /v1/exercises", verifier.RequireAuth(http.HandlerFunc(exerciseHandler.List)))
 	mux.Handle("GET /v1/exercises/{exerciseID}", verifier.RequireAuth(http.HandlerFunc(exerciseHandler.Get)))
 	mux.Handle("GET /v1/techniques", verifier.RequireAuth(http.HandlerFunc(techniqueHandler.List)))
+	// Registered before the wildcard for readability only — Go 1.22's mux
+	// picks the more specific pattern regardless of order, so the literal
+	// "rulesets" wins over "{techniqueID}" and there is no shadowing risk.
+	mux.Handle("GET /v1/techniques/rulesets", verifier.RequireAuth(http.HandlerFunc(techniqueHandler.Rulesets)))
 	mux.Handle("GET /v1/techniques/{techniqueID}", verifier.RequireAuth(http.HandlerFunc(techniqueHandler.Get)))
 	mux.Handle("GET /v1/sessions", verifier.RequireAuth(http.HandlerFunc(sessionHandler.List)))
 	mux.Handle("POST /v1/sessions", verifier.RequireAuth(http.HandlerFunc(sessionHandler.Create)))

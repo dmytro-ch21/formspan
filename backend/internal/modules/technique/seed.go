@@ -15,6 +15,9 @@ import (
 //go:embed techniques.json
 var seedJSON []byte
 
+//go:embed ibjjf_rulesets.json
+var rulesetJSON []byte
+
 func SeedData() ([]Technique, error) {
 	var techniques []Technique
 	if err := json.Unmarshal(seedJSON, &techniques); err != nil {
@@ -24,6 +27,14 @@ func SeedData() ([]Technique, error) {
 		return nil, err
 	}
 	return techniques, nil
+}
+
+func RulesetSeedData() ([]Ruleset, error) {
+	var rulesets []Ruleset
+	if err := json.Unmarshal(rulesetJSON, &rulesets); err != nil {
+		return nil, fmt.Errorf("technique: parse rulesets: %w", err)
+	}
+	return rulesets, nil
 }
 
 // gi_no_gi is the one field with a DB-level CHECK, so a bad value would
@@ -56,8 +67,36 @@ func Seed(ctx context.Context, repo Repository) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	rulesets, err := RulesetSeedData()
+	if err != nil {
+		return 0, err
+	}
+	// Every technique carries an FK to a ruleset, so a technique written
+	// before its ruleset fails the constraint. Ordering is a correctness
+	// requirement here, not a preference.
+	if err := validateRulesetRefs(techniques, rulesets); err != nil {
+		return 0, err
+	}
+	if err := repo.UpsertRulesets(ctx, rulesets); err != nil {
+		return 0, err
+	}
 	if err := repo.UpsertAll(ctx, techniques); err != nil {
 		return 0, err
 	}
 	return len(techniques), nil
+}
+
+// A dangling reference would otherwise surface as an opaque FK violation
+// partway through the batch, naming a constraint rather than the technique.
+func validateRulesetRefs(techniques []Technique, rulesets []Ruleset) error {
+	known := make(map[string]bool, len(rulesets))
+	for _, r := range rulesets {
+		known[r.ID] = true
+	}
+	for _, t := range techniques {
+		if t.IBJJFRulesetID != "" && !known[t.IBJJFRulesetID] {
+			return fmt.Errorf("technique: %q references unknown ibjjf ruleset %q", t.ID, t.IBJJFRulesetID)
+		}
+	}
+	return nil
 }

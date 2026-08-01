@@ -2,7 +2,9 @@
 """Convert the authored XLSX catalogs into the seed JSON the backend embeds.
 
 Run from the repo root:
-    python3 scripts/import-exercise-catalog.py <catalog.xlsx> [techniques.xlsx]
+    python3 scripts/import-exercise-catalog.py <catalog.xlsx|-> [techniques.xlsx]
+
+Pass `-` for the catalog to import techniques only.
 
 Kept as a script rather than a one-off because the spreadsheets are the
 authoring surface: when they change, this regenerates the seed rather than
@@ -218,24 +220,107 @@ def convert_exercises(path: Path) -> list[dict]:
     return out
 
 
-def convert_techniques(path: Path) -> list[dict]:
+def _split(v, seps=";,"):
+    """Split a free-text list cell. The sheet mixes `;` and `,` as separators
+    within the same column, so both are honoured."""
+    import re
+    return [x.strip() for x in re.split(f"[{seps}]", str(v or "")) if x.strip()]
+
+
+def convert_ibjjf_rulesets(path: Path) -> tuple[list[dict], dict[tuple, str]]:
+    """Collapse the six IBJJF columns into the handful of distinct rulesets.
+
+    They are near-constant across the library: 450 techniques carry only 25
+    distinct combinations, `ibjjf_age_scope` has exactly one value, and the
+    most common `ibjjf_rule_notes` string repeats 359 times at ~200 chars.
+    Stored per technique that is 182 KB of duplicated prose; stored once per
+    ruleset it is 10.6 KB. That is the single biggest win available on the
+    wire, and it costs one join on a table that fits in a page.
+
+    Returns the rulesets plus a lookup from the raw tuple to its id, so the
+    technique conversion in the same run can reference them consistently.
+    """
+    COLS = ("ibjjf_age_scope", "ibjjf_rule_class", "ibjjf_adult_gi_allowed_belts",
+            "ibjjf_adult_no_gi_allowed_belts", "ibjjf_rule_notes", "ibjjf_rule_source")
+    tuples = []
+    for r in read_sheet(path, "Techniques", "technique_id"):
+        t = tuple(str(r.get(c) or "").strip() for c in COLS)
+        if t not in tuples:
+            tuples.append(t)
+
+    # Sorted so ids are deterministic run-to-run rather than row-order
+    # dependent. Several tuples share a rule_class and differ only in allowed
+    # belts, hence the suffix.
+    tuples.sort()
+    GI_BASELINE = {"White", "Blue", "Purple", "Brown", "Black"}
+    NOGI_BASELINE = {"Blue", "Purple", "Brown", "Black"}
+    rulesets, lookup, used = [], {}, {}
+    for t in tuples:
+        age, cls, gi_belts, nogi_belts, notes, source = t
+        base = slug(cls) or "ruleset"
+        used[base] = used.get(base, 0) + 1
+        rid = base if used[base] == 1 else f"{base}-{used[base]}"
+        lookup[t] = rid
+        gi_list = _split(gi_belts) if not gi_belts.startswith("N/A") and gi_belts != "Not legal" else []
+        nogi_list = _split(nogi_belts) if not nogi_belts.startswith("N/A") and nogi_belts != "Not legal" else []
+        rulesets.append({
+            "id": rid,
+            "age_scope": age,
+            "rule_class": cls,
+            # "N/A — gi-specific" is a statement about scope, not a belt list;
+            # kept verbatim in `*_note` rather than parsed into a fake belt
+            # array that would read as "allowed at no belts".
+            "gi_allowed_belts": gi_list,
+            "gi_note": gi_belts if gi_belts.startswith("N/A") or gi_belts == "Not legal" else "",
+            "no_gi_allowed_belts": nogi_list,
+            "no_gi_note": nogi_belts if nogi_belts.startswith("N/A") or nogi_belts == "Not legal" else "",
+            "notes": notes,
+            "sources": _split(source, ";"),
+            # Is this a real restriction, or just the shape of IBJJF's
+            # divisions? Adult no-gi simply has no White belt division, so a
+            # no-gi technique listing "Blue, Purple, Brown, Black" is the
+            # BASELINE, not a restriction on the technique. Conflating the two
+            # makes ~130 ordinary techniques look restricted — a mistake made
+            # three times while building this before it was written down.
+            # Only a list NARROWER than its division's baseline is a warning.
+            "is_restricted": bool(
+                (gi_list and set(gi_list) != GI_BASELINE)
+                or (nogi_list and set(nogi_list) != NOGI_BASELINE)
+                or gi_belts == "Not legal" or nogi_belts == "Not legal"
+            ),
+        })
+    return rulesets, lookup
+
+
+def convert_techniques(path: Path) -> tuple[list[dict], list[dict]]:
+    rulesets, ruleset_of = convert_ibjjf_rulesets(path)
+    COLS = ("ibjjf_age_scope", "ibjjf_rule_class", "ibjjf_adult_gi_allowed_belts",
+            "ibjjf_adult_no_gi_allowed_belts", "ibjjf_rule_notes", "ibjjf_rule_source")
     out = []
     for r in read_sheet(path, "Techniques", "technique_id"):
+        key = tuple(str(r.get(c) or "").strip() for c in COLS)
         out.append({
             "id": slug(r.get("technique_id")),
             "name": str(r.get("name") or "").strip(),
-            "aliases": [a.strip() for a in str(r.get("aliases") or "").split(",") if a.strip()],
+            "aliases": _split(r.get("aliases")),
             "category": str(r.get("category") or "").strip(),
             "position": str(r.get("position") or "").strip(),
             "position_detail": str(r.get("position_detail") or "").strip(),
             "gi_no_gi": str(r.get("gi_no_gi") or "").strip(),
-            "typical_belt": str(r.get("typical_belt") or "").strip(),
+            # The sheet renamed this column; accept either so a re-import of
+            # an older export doesn't silently blank every belt.
+            "typical_belt": str(r.get("suggested_learning_belt") or r.get("typical_belt") or "").strip(),
             "description": str(r.get("description") or "").strip(),
-            # The graph edges: what this comes from, and what beats it.
-            "setup_from": [s.strip() for s in str(r.get("setup_from") or "").split(",") if s.strip()],
-            "common_counters": [s.strip() for s in str(r.get("common_counters") or "").split(",") if s.strip()],
+            "when_to_use": str(r.get("when_to_use") or "").strip(),
+            # The graph edges: what this comes from, what follows, what beats it.
+            "setup_from": _split(r.get("setup_from")),
+            "common_next_moves": _split(r.get("common_next_moves")),
+            "common_counters": _split(r.get("common_counters")),
+            "video_reference": str(r.get("video_reference") or "").strip(),
+            "source_notes": str(r.get("source_notes") or "").strip(),
+            "ibjjf_ruleset_id": ruleset_of[key],
         })
-    return out
+    return out, rulesets
 
 
 def main() -> None:
@@ -243,13 +328,36 @@ def main() -> None:
         sys.exit(__doc__)
     root = Path(__file__).resolve().parent.parent
 
-    ex = convert_exercises(Path(sys.argv[1]))
-    dest = root / "backend/internal/modules/exercise/exercises.generated.json"
-    dest.write_text(json.dumps(ex, indent=2, ensure_ascii=False) + "\n")
-    print(f"exercises: {len(ex)} -> {dest.relative_to(root)}")
+    # `-` skips the exercise catalog. The two libraries are authored in
+    # separate spreadsheets on separate schedules, and coupling them meant a
+    # technique-only re-import had to rewrite exercises.generated.json from a
+    # file the author might not even have to hand.
+    if sys.argv[1] != "-":
+        ex = convert_exercises(Path(sys.argv[1]))
+        dest = root / "backend/internal/modules/exercise/exercises.generated.json"
+        dest.write_text(json.dumps(ex, indent=2, ensure_ascii=False) + "\n")
+        print(f"exercises: {len(ex)} -> {dest.relative_to(root)}")
+    else:
+        print("exercises: skipped")
 
     if len(sys.argv) > 2:
-        tech = convert_techniques(Path(sys.argv[2]))
+        tech, rulesets = convert_techniques(Path(sys.argv[2]))
+        rdest = root / "backend/internal/modules/technique/ibjjf_rulesets.generated.json"
+        rdest.write_text(json.dumps(rulesets, indent=2, ensure_ascii=False) + "\n")
+        print(f"ibjjf rulesets: {len(rulesets)} -> {rdest.relative_to(root)}")
+        # Techniques authored outside the spreadsheet (gap-fill for bottom
+        # positions and advanced material). Merged here so re-importing the
+        # sheet cannot silently delete them — which it would, since the sheet
+        # is a full replacement rather than a patch.
+        extra_path = root / "backend/internal/modules/technique/techniques.additions.json"
+        if extra_path.exists():
+            extra = json.loads(extra_path.read_text())
+            known = {x["id"] for x in tech}
+            dupes = [x["id"] for x in extra if x["id"] in known]
+            if dupes:
+                sys.exit(f"additions collide with sheet ids: {dupes}")
+            tech.extend(extra)
+            print(f"additions: {len(extra)} merged")
         dest = root / "backend/internal/modules/technique/techniques.generated.json"
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(json.dumps(tech, indent=2, ensure_ascii=False) + "\n")

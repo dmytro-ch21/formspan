@@ -95,7 +95,12 @@ func TestPostgresRepository_SeedAndFilter(t *testing.T) {
 	if len(all) != n {
 		t.Errorf("seeded %d but listed %d", n, len(all))
 	}
-	before := all[0]
+	// List returns summaries now, which carry no timestamps — fetch the full
+	// row so the no-op check still compares what it claims to.
+	before, err := repo.Get(ctx, all[0].ID)
+	if err != nil {
+		t.Fatalf("get before: %v", err)
+	}
 	if _, err := Seed(ctx, repo); err != nil {
 		t.Fatalf("re-seed: %v", err)
 	}
@@ -157,5 +162,87 @@ func TestPostgresRepository_GetNotFound(t *testing.T) {
 	}
 	if tq != nil {
 		t.Errorf("expected nil alongside the error, got %+v", tq)
+	}
+}
+
+// The enrichment's load-bearing claims, each of which would fail silently.
+func TestTechniqueEnrichment(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	if _, err := Seed(ctx, repo); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	rulesets, err := repo.Rulesets(ctx)
+	if err != nil {
+		t.Fatalf("rulesets: %v", err)
+	}
+	if len(rulesets) == 0 {
+		t.Fatal("no rulesets seeded")
+	}
+
+	// is_restricted must mean "narrower than this division's baseline", not
+	// "lists fewer than five belts". Adult no-gi has no white belt division,
+	// so a no-gi ruleset of Blue/Purple/Brown/Black is the baseline. Getting
+	// this wrong marks ~130 ordinary techniques as restricted.
+	restricted := 0
+	for _, rs := range rulesets {
+		if rs.IsRestricted {
+			restricted++
+		}
+	}
+	if restricted == 0 || restricted == len(rulesets) {
+		t.Errorf("is_restricted looks wrong: %d of %d flagged", restricted, len(rulesets))
+	}
+
+	all, err := repo.List(ctx, Filter{})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+
+	// Every technique's ruleset reference must resolve, or a detail view
+	// silently loses its legality panel.
+	known := make(map[string]bool, len(rulesets))
+	for _, rs := range rulesets {
+		known[rs.ID] = true
+	}
+	for _, s := range all {
+		if s.IBJJFRulesetID != "" && !known[s.IBJJFRulesetID] {
+			t.Fatalf("technique %q references unknown ruleset %q", s.ID, s.IBJJFRulesetID)
+		}
+	}
+
+	// Get resolves the ruleset so a detail view is one request, and carries
+	// the prose the list deliberately omits.
+	full, err := repo.Get(ctx, all[0].ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if full.IBJJFRulesetID != "" && full.IBJJF == nil {
+		t.Error("Get did not resolve the ruleset")
+	}
+
+	withProse := 0
+	for _, s := range all[:min(50, len(all))] {
+		f, err := repo.Get(ctx, s.ID)
+		if err != nil {
+			t.Fatalf("get %q: %v", s.ID, err)
+		}
+		if f.WhenToUse != "" {
+			withProse++
+		}
+	}
+	if withProse == 0 {
+		t.Error("when_to_use is empty across the sample — the enrichment did not land")
+	}
+
+	// Searching must find a technique by an alias, not only by its name.
+	// "Kesa-Gatame Escape" is known to most people as "scarf hold".
+	byAlias, err := repo.List(ctx, Filter{Query: "scarf hold"})
+	if err != nil {
+		t.Fatalf("alias search: %v", err)
+	}
+	if len(byAlias) == 0 {
+		t.Error("alias search found nothing; search is name-only again")
 	}
 }

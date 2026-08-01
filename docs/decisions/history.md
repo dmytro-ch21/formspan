@@ -2776,6 +2776,91 @@ device sitting plainly connected.
   third-party social login exists, so this becomes a shipping requirement the
   moment VOLA goes to TestFlight for real.
 
+## 2026-07-31 — The BJJ library gets everything it knows, and stays fast
+
+The technique library existed as an API nothing consumed: 450 techniques, no
+screen on mobile or web. A richer authoring spreadsheet arrived and the ask was
+twofold — surface everything it carries when a technique is opened, and keep a
+growing library snappy.
+
+### It was an enrichment, not an import
+
+The first useful finding was that these 450 were **already seeded** from an
+earlier cut of the same sheet. All 450 names matched; the ids differed only by
+delimiter (`grappling-stance-motion` vs `grappling_stance_motion`) and mapped
+450/450. Ten of 21 columns were simply not stored.
+
+Worth checking before writing an importer, because the alternative — treating
+it as new content — would have produced 450 duplicate rows keyed differently.
+
+### The optimisation was deduplication, not caching
+
+The IBJJF columns are near-constant across the library: `age_scope` has **one**
+distinct value across all 466 techniques, and the most common `rule_notes`
+string repeats **359 times** at ~200 characters. Per-row that is ~182 KB of
+duplicated prose; collapsed into 25 `ibjjf_rulesets` rows it is ~11 KB.
+
+Paired with splitting list columns from detail columns — the list endpoint was
+returning full rows — the measured result against a real database is a **65 kB
+list payload against 274 kB**, before counting the rule dedup. The client
+fetches the whole library once as summaries and searches locally, so typing
+costs nothing and works offline.
+
+The trigram index added alongside is **not** for speed; at 466 rows a seq scan
+is fine. It is for aliases: "scarf hold" not finding "Kesa-Gatame Escape" was a
+correctness bug, and search covered `name` only.
+
+### The mistake worth encoding
+
+`is_restricted` is a stored column, computed at import, and the reason is a
+mistake made **three times in one session**.
+
+Adult no-gi has no white belt division. So a no-gi technique listing "Blue,
+Purple, Brown, Black" is the **baseline**, not a restriction. Deriving
+"restricted?" by comparing belt lists therefore flags ~130 perfectly ordinary
+techniques — hand fighting, pummelling, sit-outs — as restricted. The true
+number is 20.
+
+It was measured wrong three times (137, then 5, then 9) before being measured
+right, each time by reporting a number without checking what it meant. Rather
+than get it right a fourth time, the rule now lives in the data: one boolean,
+computed once, documented in the migration, the domain type, the OpenAPI schema
+and a test that fails if the flag becomes all-or-nothing.
+
+### Belts: relabelled, not deleted
+
+`typical_belt` reads as "Commonly taught from", subordinate to the legality
+panel. The problem was never accuracy — it was two belt-shaped fields on one
+screen where one is advisory and one is a rule you can be disqualified for
+breaking. Relabelling dissolved the only two genuine conflicts: "commonly
+taught from Purple" alongside "IBJJF Brown/Black no-gi only" are both true.
+You drill a technique long before you may compete it.
+
+### 16 techniques added, after 6 were caught as duplicates
+
+A gap analysis by position count said Mount-Bottom, Side-Bottom, Back-Bottom
+and North-South were thin. 22 techniques were drafted; a collision check
+against names **and aliases** killed 6 as duplicates of entries that already
+existed, some with better descriptions. The counts looked thin because they
+were counted, not read.
+
+The remaining 16 are defensive positions and two advanced shoulder locks. They
+live in `techniques.additions.json`, merged at import — the sheet is a full
+replacement, so without the merge the next re-import would silently delete
+them. **They are machine-drafted and want a black belt's review.**
+
+### Honest limits
+
+`video_reference` is empty in all 466 rows, so the screen renders no video
+section rather than an empty one implying a missing asset. `common_next_moves`
+resolves to a real technique only ~29% of the time and `common_counters` ~6%,
+so those render as plain text unless they resolve — a dead link is worse than
+honest text. Only `setup_from` (~80%) is a navigable graph.
+
+**Nothing here is device-verified yet.** The screens typecheck and the backend
+is tested against a real Postgres, but no one has looked at the library on a
+phone.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

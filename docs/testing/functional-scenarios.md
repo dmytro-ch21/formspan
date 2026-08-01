@@ -1407,6 +1407,54 @@ auth screens cannot exercise this at all. `expo run:ios --device`.
   credentials; grep the changed files for `console.*` as part of review.
 - **Cancelling must not leave a partial session** — assert still signed out.
 
+## BJJ technique library (`/v1/techniques`, mobile Library → BJJ Techniques)
+
+The property: **every field the authoring spreadsheet carries is readable when
+a technique is opened, and the library stays instant as it grows.**
+
+**Happy path**
+
+- Library tab → BJJ Techniques lists all 466, scrolls smoothly, and opening one
+  shows mechanics (`description`) *and* the decision (`when_to_use`) as separate
+  sections.
+- The IBJJF panel shows rule class and both divisions' belts.
+- `setup_from` entries that name a real technique are tappable and navigate;
+  everything else is plain text.
+
+**Performance — the reason the API is shaped this way**
+
+- **The list response must not contain prose.** Assert `description` and
+  `when_to_use` are absent from `/v1/techniques`. Regressing to full rows takes
+  the payload from ~65 kB to ~274 kB and nothing visible breaks — which is why
+  it needs a test.
+- **Typing in search issues no network request.** Search is local over an
+  already-fetched list.
+- `/v1/techniques/rulesets` is fetched once, not per row.
+
+**The traps, each of which fails silently**
+
+- **`is_restricted` must come from the API, never be re-derived.** A client
+  computing it from belt-list length marks ~130 ordinary techniques as
+  restricted (adult no-gi has no white belt division, so Blue/Purple/Brown/Black
+  is the *baseline*). Assert the restricted count is ~20, not ~130.
+- **An empty belt array means "division doesn't apply", not "no belts".** A
+  gi-only technique must not render as prohibited in no-gi.
+- **Unresolvable edges must not look tappable.** ~71% of `common_next_moves`
+  and ~94% of `common_counters` name things absent from the library.
+- **No video section when `video_reference` is empty** — it is empty for all
+  466, so an always-present heading implies 466 missing assets.
+- **Alias search works**: "scarf hold" finds "Kesa-Gatame Escape".
+- **Empty states only claim emptiness after a successful read** — a failed
+  fetch says the library is unavailable, not that there are no techniques.
+
+**Seeding**
+
+- Rulesets upsert before techniques (techniques carry the FK); a dangling
+  reference fails with the technique named, not an opaque constraint error.
+- Re-seeding is value-idempotent: `updated_at` must not move on a no-op.
+- Re-importing the spreadsheet must not delete the 16 techniques in
+  `techniques.additions.json`.
+
 ## Not yet covered (tracked here so it isn't lost, not because it's blocking)
 
 - **Sign in with Apple.** App Store review requires it once an app offers a
