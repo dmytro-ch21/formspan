@@ -10,6 +10,7 @@ import {
   fetchTechnique,
   fetchTechniques,
   indexByName,
+  resolveEdge,
   type Ruleset,
   type Technique,
   type TechniqueSummary,
@@ -221,7 +222,7 @@ function Edges({
       <Text style={styles.sectionTitle}>{label}</Text>
       <View style={styles.edgeWrap}>
         {items.map((raw) => {
-          const hit = byName.get(raw.trim().toLowerCase());
+          const hit = resolveEdge(raw, byName);
           if (!hit) {
             // Most of these name something that isn't a library entry. Plain
             // text, and it must LOOK like plain text.
@@ -239,7 +240,9 @@ function Edges({
               accessibilityRole="link"
               accessibilityLabel={`Open ${hit.name}`}
             >
-              <Text style={styles.edgeLink}>{raw}</Text>
+              {/* The resolved NAME, never the raw label — `setup_from` stores
+                  ids, so echoing `raw` would show `seatbelt_back_control`. */}
+              <Text style={styles.edgeLink}>{hit.name}</Text>
             </Pressable>
           );
         })}
