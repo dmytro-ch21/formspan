@@ -3636,13 +3636,25 @@ steps up to `textMuted` on done rows only.
   wants device verification rather than a typecheck. There is already a
   "Remove set" button in the expanded row, so this is an ergonomics upgrade,
   not a missing capability. Its own change.
-- **Volume shown in kg when the athlete wants lb.** Not reproduced, so not
-  "fixed". `formatVolume` handles imperial correctly and `useUnits` is
-  cache-first, but it initialises to `metric` and only writes the cache after a
-  *successful* profile read — so a device that has never been online while
-  signed in shows kg. That is a real lead and matches an offline gym. It is
-  equally possible the account is simply set to metric. Guessing between those
-  and shipping a change would be worse than asking.
+- **Volume shown in kg when the athlete wants lb — now reproduced and fixed.**
+  The account was already imperial, which ruled out the "never been online"
+  theory and pointed at the real cause: **`useUnits` was a hook, so each of six
+  screens held its own copy** of one account-level enum, its own
+  `useState('metric')`, and its own `GET /v1/profile`. Every screen therefore
+  began in metric and corrected itself a frame later — and a finished-session
+  summary renders at mount, which is exactly that frame. Six resolutions racing
+  six fetches also meant screens disagreed with each other, which is the "why
+  it is not consistent?" in the report.
+
+  Now one `UnitsProvider` above the navigator: one copy, one fetch (six down to
+  one), cache read before first paint, and `unitsReady` so a unit-bearing
+  number is never printed in a unit not yet established — a dash for one frame
+  beats tonnes to someone who thinks in pounds. The offline/`owed` logic was
+  already correct and is carried over unchanged; it was just being run six
+  times.
+
+  Same shape as the documented 200-request `useUnits` bug on web. **`useTrackEffort`
+  still has this shape** and is the next one to collapse.
 
 ### Testing
 

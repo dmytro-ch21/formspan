@@ -114,7 +114,7 @@ export default function SessionScreen() {
     const timer = setInterval(tick, 1000);
     return () => clearInterval(timer);
   }, [session]);
-  const { units } = useUnits();
+  const { units, unitsReady } = useUnits();
   // Per-exercise overrides: a lifter who thinks in kilograms still faces a
   // leg press marked in pounds, and converting in your head at the moment
   // you're trying to record a number is exactly what this avoids.
@@ -551,7 +551,11 @@ export default function SessionScreen() {
             {finished && (
               <Stat
                 label="Volume"
-                value={volume.tonnage_kg > 0 ? formatVolume(volume.tonnage_kg, units) : '—'}
+                value={
+                  unitsReady && volume.tonnage_kg > 0
+                    ? formatVolume(volume.tonnage_kg, units)
+                    : '—'
+                }
               />
             )}
           </View>

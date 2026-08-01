@@ -122,7 +122,7 @@ export default function TodayScreen() {
   const { userId } = useAuth();
   const getToken = useAuthToken();
   const router = useRouter();
-  const { units } = useUnits();
+  const { units, unitsReady } = useUnits();
 
   const [sessions, setSessions] = useState<Session[]>([]);
   const [sessionError, setSessionError] = useState<string | null>(null);
@@ -362,7 +362,14 @@ export default function TodayScreen() {
                 value={String(week.sessions)}
                 label={week.sessions === 1 ? 'session' : 'sessions'}
               />
-              <Stat value={formatVolume(week.volumeKg, units)} label="volume" />
+              {/* Dash until the unit is known, rather than a number in the wrong
+                  one: this used to render kilograms for a moment to an athlete
+                  set to pounds, and on a finished-session mount that moment is
+                  exactly when it is read. */}
+              <Stat
+                value={unitsReady ? formatVolume(week.volumeKg, units) : '—'}
+                label="volume"
+              />
               <Stat value={String(week.days)} label={week.days === 1 ? 'day' : 'days'} />
             </View>
           </View>
