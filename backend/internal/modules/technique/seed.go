@@ -18,6 +18,12 @@ var seedJSON []byte
 //go:embed ibjjf_rulesets.json
 var rulesetJSON []byte
 
+// Hand-authored rather than generated from the spreadsheet: ten entries of
+// explanatory prose, written for someone who has never trained.
+//
+//go:embed positions.json
+var positionJSON []byte
+
 func SeedData() ([]Technique, error) {
 	var techniques []Technique
 	if err := json.Unmarshal(seedJSON, &techniques); err != nil {
@@ -27,6 +33,17 @@ func SeedData() ([]Technique, error) {
 		return nil, err
 	}
 	return techniques, nil
+}
+
+func PositionSeedData() ([]Position, error) {
+	var positions []Position
+	if err := json.Unmarshal(positionJSON, &positions); err != nil {
+		return nil, fmt.Errorf("technique: parse positions: %w", err)
+	}
+	if err := validatePositions(positions); err != nil {
+		return nil, err
+	}
+	return positions, nil
 }
 
 func RulesetSeedData() ([]Ruleset, error) {
@@ -58,6 +75,52 @@ func validate(techniques []Technique) error {
 		seen[t.ID] = true
 	}
 	return nil
+}
+
+// The families a position may claim, which are exactly the prefixes the
+// clients match against techniques.position. Validated because a typo here is
+// SILENT: "Back Control" instead of "Back" still seeds, still renders, and just
+// returns an empty technique list forever, with nothing anywhere reporting a
+// fault. The one field where being wrong looks identical to being right.
+var validFamilies = map[string]bool{
+	"Standing": true, "Guard": true, "Half Guard": true,
+	"Side Control": true, "Mount": true, "North-South": true,
+	"Back": true, "Turtle": true,
+}
+
+func validatePositions(positions []Position) error {
+	seen := make(map[string]bool, len(positions))
+	for _, p := range positions {
+		switch {
+		case p.ID == "":
+			return fmt.Errorf("technique: position %q has no id", p.Name)
+		case seen[p.ID]:
+			return fmt.Errorf("technique: duplicate position id %q", p.ID)
+		case p.Name == "":
+			return fmt.Errorf("technique: position %q has no name", p.ID)
+		case !validFamilies[p.Family]:
+			return fmt.Errorf("technique: position %q has unknown family %q", p.ID, p.Family)
+		case p.Description == "" || p.Priorities == "":
+			return fmt.Errorf("technique: position %q needs description and priorities", p.ID)
+		}
+		seen[p.ID] = true
+	}
+	return nil
+}
+
+// SeedPositions is deliberately separate from Seed rather than a step inside
+// it. Seed returns the technique count, which callers and tests compare against
+// the length of the technique list; folding a second content type into that
+// number would quietly break the comparison.
+func SeedPositions(ctx context.Context, repo Repository) (int, error) {
+	positions, err := PositionSeedData()
+	if err != nil {
+		return 0, err
+	}
+	if err := repo.UpsertPositions(ctx, positions); err != nil {
+		return 0, err
+	}
+	return len(positions), nil
 }
 
 // Seed upserts the embedded library in one transaction. Idempotent — meant

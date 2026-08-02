@@ -313,3 +313,155 @@ func TestTechniqueEnrichment(t *testing.T) {
 		t.Error("alias search found nothing; search is name-only again")
 	}
 }
+
+func TestPositionSeedData_IsValid(t *testing.T) {
+	positions, err := PositionSeedData()
+	if err != nil {
+		t.Fatalf("PositionSeedData: %v", err)
+	}
+
+	// The glossary exists to cover the positions a beginner meets, so a
+	// shrinking set is a content regression rather than a refactor.
+	if len(positions) < 10 {
+		t.Fatalf("expected the full glossary, got %d entries", len(positions))
+	}
+
+	// Every family must be one a client can actually resolve against the
+	// library. validatePositions already enforces this, but asserting it here
+	// too is what makes the cross-link a tested property rather than a
+	// convention someone has to remember.
+	for _, p := range positions {
+		if !validFamilies[p.Family] {
+			t.Errorf("position %q has family %q, which no technique will match", p.ID, p.Family)
+		}
+		if len(p.Description) < 100 || len(p.Priorities) < 100 {
+			t.Errorf("position %q has stub prose — the glossary is the feature", p.ID)
+		}
+	}
+
+	// Back control is the one entry where the obvious value is the wrong one:
+	// the technique rows say "Back - Top (Back Control)", so a family of
+	// "Back Control" silently matches nothing.
+	for _, p := range positions {
+		if p.ID == "back-control" && p.Family != "Back" {
+			t.Errorf(`back-control family is %q, must be "Back" to match the library`, p.Family)
+		}
+	}
+}
+
+func TestValidatePositions_RejectsBadContent(t *testing.T) {
+	ok := Position{ID: "a", Name: "A", Family: "Guard", Description: "d", Priorities: "p"}
+	mutate := func(f func(*Position)) []Position {
+		p := ok
+		f(&p)
+		return []Position{p}
+	}
+
+	cases := []struct {
+		name string
+		in   []Position
+	}{
+		{"duplicate id", []Position{ok, ok}},
+		{"missing id", mutate(func(p *Position) { p.ID = "" })},
+		{"missing name", mutate(func(p *Position) { p.Name = "" })},
+		{"unknown family", mutate(func(p *Position) { p.Family = "Back Control" })},
+		{"missing description", mutate(func(p *Position) { p.Description = "" })},
+		{"missing priorities", mutate(func(p *Position) { p.Priorities = "" })},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := validatePositions(tc.in); err == nil {
+				t.Fatal("expected a validation error, got nil")
+			}
+		})
+	}
+}
+
+func TestPostgresRepository_SeedPositionsAndGet(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	n, err := SeedPositions(ctx, repo)
+	if err != nil {
+		t.Fatalf("seed positions: %v", err)
+	}
+
+	all, err := repo.Positions(ctx)
+	if err != nil {
+		t.Fatalf("positions: %v", err)
+	}
+	if len(all) != n {
+		t.Errorf("seeded %d but listed %d", n, len(all))
+	}
+
+	// The reading order is the product decision — alphabetical would open the
+	// glossary on Back Control, which is the last thing a beginner needs.
+	for i := 1; i < len(all); i++ {
+		if all[i].OrderIndex < all[i-1].OrderIndex {
+			t.Fatalf("positions came back out of order: %q(%d) after %q(%d)",
+				all[i].ID, all[i].OrderIndex, all[i-1].ID, all[i-1].OrderIndex)
+		}
+	}
+
+	// Seeding runs on every deploy, so an unchanged entry must be a true no-op.
+	before, err := repo.GetPosition(ctx, all[0].ID)
+	if err != nil {
+		t.Fatalf("get before: %v", err)
+	}
+	if _, err := SeedPositions(ctx, repo); err != nil {
+		t.Fatalf("re-seed: %v", err)
+	}
+	after, err := repo.GetPosition(ctx, before.ID)
+	if err != nil {
+		t.Fatalf("get after: %v", err)
+	}
+	if !after.UpdatedAt.Equal(before.UpdatedAt) {
+		t.Error("updated_at moved on a no-op re-seed")
+	}
+
+	missing, err := repo.GetPosition(ctx, "no-such-position")
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+	if missing != nil {
+		t.Errorf("expected nil alongside the error, got %+v", missing)
+	}
+}
+
+// The glossary is only useful if its families actually resolve — an entry whose
+// family matches nothing renders a heading with an empty list under it. This is
+// the one test that would catch a family typo AFTER it reached the database.
+func TestPositionsCrossLinkToTechniques(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	if _, err := Seed(ctx, repo); err != nil {
+		t.Fatalf("seed techniques: %v", err)
+	}
+	if _, err := SeedPositions(ctx, repo); err != nil {
+		t.Fatalf("seed positions: %v", err)
+	}
+
+	techniques, err := repo.List(ctx, Filter{})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	positions, err := repo.Positions(ctx)
+	if err != nil {
+		t.Fatalf("positions: %v", err)
+	}
+
+	for _, p := range positions {
+		matches := 0
+		for _, tq := range techniques {
+			// The same prefix rule the clients apply.
+			if tq.Position == p.Family || strings.HasPrefix(tq.Position, p.Family+" - ") {
+				matches++
+			}
+		}
+		if matches == 0 {
+			t.Errorf("position %q (family %q) matches no technique — the cross-link is dead",
+				p.ID, p.Family)
+		}
+	}
+}

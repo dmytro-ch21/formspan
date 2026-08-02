@@ -38,6 +38,12 @@ const rulesetColumns = `
 	id, age_scope, rule_class, gi_allowed_belts, gi_note,
 	no_gi_allowed_belts, no_gi_note, is_restricted, notes, sources`
 
+// One column set, not two: at ten rows with ~250 words each the whole table is
+// a few KB, so the summary/detail split the techniques need buys nothing here.
+const positionColumns = `
+	id, name, aliases, family, order_index, description, priorities,
+	created_at, updated_at`
+
 type scannable interface{ Scan(dest ...any) error }
 
 func scanSummary(row scannable) (*Summary, error) {
@@ -72,6 +78,16 @@ func scanRuleset(row scannable) (*Ruleset, error) {
 		return nil, err
 	}
 	return &r, nil
+}
+
+func scanPosition(row scannable) (*Position, error) {
+	var p Position
+	err := row.Scan(&p.ID, &p.Name, &p.Aliases, &p.Family, &p.OrderIndex,
+		&p.Description, &p.Priorities, &p.CreatedAt, &p.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
 }
 
 // List composes its WHERE from compile-time-constant fragments plus bound
@@ -181,6 +197,85 @@ func (r *PostgresRepository) Rulesets(ctx context.Context) ([]Ruleset, error) {
 		return nil, fmt.Errorf("technique: ruleset rows: %w", err)
 	}
 	return out, nil
+}
+
+// Positions returns all ten in reading order. `id` breaks ties so the order is
+// total rather than merely sorted — two entries sharing an order_index would
+// otherwise come back in whatever order the scan produced, and a glossary that
+// reshuffles between opens looks broken.
+func (r *PostgresRepository) Positions(ctx context.Context) ([]Position, error) {
+	rows, err := r.pool.Query(ctx, `SELECT `+positionColumns+` FROM positions ORDER BY order_index, id`)
+	if err != nil {
+		return nil, fmt.Errorf("technique: positions: %w", err)
+	}
+	defer rows.Close()
+
+	out := []Position{}
+	for rows.Next() {
+		p, err := scanPosition(rows)
+		if err != nil {
+			return nil, fmt.Errorf("technique: scan position: %w", err)
+		}
+		out = append(out, *p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("technique: position rows: %w", err)
+	}
+	return out, nil
+}
+
+func (r *PostgresRepository) GetPosition(ctx context.Context, id string) (*Position, error) {
+	row := r.pool.QueryRow(ctx, `SELECT `+positionColumns+` FROM positions WHERE id = $1`, id)
+	p, err := scanPosition(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("technique: get position: %w", err)
+	}
+	return p, nil
+}
+
+const upsertPositionSQL = `
+	INSERT INTO positions (
+		id, name, aliases, family, order_index, description, priorities
+	) VALUES ($1, $2, $3, $4, $5, $6, $7)
+	ON CONFLICT (id) DO UPDATE SET
+		name        = EXCLUDED.name,
+		aliases     = EXCLUDED.aliases,
+		family      = EXCLUDED.family,
+		order_index = EXCLUDED.order_index,
+		description = EXCLUDED.description,
+		priorities  = EXCLUDED.priorities,
+		updated_at  = now()
+	WHERE (
+		positions.name, positions.aliases, positions.family,
+		positions.order_index, positions.description, positions.priorities
+	) IS DISTINCT FROM (
+		EXCLUDED.name, EXCLUDED.aliases, EXCLUDED.family,
+		EXCLUDED.order_index, EXCLUDED.description, EXCLUDED.priorities
+	)`
+
+// UpsertPositions has no ordering requirement against UpsertAll — nothing holds
+// an FK to these. Atomicity comes from pgx's SendBatch running the batch in an
+// implicit transaction, same as UpsertRulesets.
+func (r *PostgresRepository) UpsertPositions(ctx context.Context, positions []Position) error {
+	batch := &pgx.Batch{}
+	for _, p := range positions {
+		batch.Queue(upsertPositionSQL, p.ID, p.Name, p.Aliases, p.Family,
+			p.OrderIndex, p.Description, p.Priorities)
+	}
+	results := r.pool.SendBatch(ctx, batch)
+	for i := range positions {
+		if _, err := results.Exec(); err != nil {
+			results.Close() //nolint:errcheck // returning the more useful error
+			return fmt.Errorf("technique: upsert position %q: %w", positions[i].ID, err)
+		}
+	}
+	if err := results.Close(); err != nil {
+		return fmt.Errorf("technique: position batch: %w", err)
+	}
+	return nil
 }
 
 const upsertRulesetSQL = `

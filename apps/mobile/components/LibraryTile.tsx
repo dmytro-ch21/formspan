@@ -90,6 +90,31 @@ export function patternBadge(pattern: string): readonly [string, string] {
 }
 
 /**
+ * Positions, keyed on family.
+ *
+ * These are reference reading rather than a thing you do, so all of them take
+ * the achromatic HOLD. That is the point: a glossary tile sitting next to a
+ * technique tile should read as a different *kind* of item, and giving it a hue
+ * from the same palette would imply an intent (attacking, defending) that a
+ * position does not have — every position is both, depending on which end of it
+ * you are on.
+ */
+const POSITION_FAMILY: Record<string, string> = {
+  Standing: 'STD',
+  Guard: 'GRD',
+  'Half Guard': 'HLF',
+  'Side Control': 'SDE',
+  Mount: 'MNT',
+  'North-South': 'N-S',
+  Back: 'BCK',
+  Turtle: 'TRT',
+};
+
+export function positionBadge(family: string): readonly [string, string] {
+  return [POSITION_FAMILY[family] ?? 'POS', HOLD];
+}
+
+/**
  * Hex + alpha, as RN needs it. Kept explicit rather than using `opacity`,
  * which would fade the code text along with its backing.
  *

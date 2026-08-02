@@ -43,7 +43,16 @@ jest.mock('@clerk/clerk-expo', () => ({
   useAuth: () => ({ userId: 'u1', isLoaded: true, isSignedIn: true, getToken: async () => 'tok' }),
 }));
 
-jest.mock('@/lib/useAuthToken', () => ({ useAuthToken: () => async () => 'tok' }));
+// ONE getter, created once — not a fresh arrow per call.
+//
+// The real hook goes to deliberate lengths to be identity-stable (see the
+// comment in lib/useAuthToken.ts: an unstable getToken turns any effect that
+// depends on it into an infinite refetch loop, which was three live bugs). A
+// mock that hands back a new function every render breaks that guarantee and
+// reproduces exactly those loops — a screen under test re-enters its loading
+// state forever, and the failure reads as a bug in the screen.
+const mockTokenGetter = async () => 'tok';
+jest.mock('@/lib/useAuthToken', () => ({ useAuthToken: () => mockTokenGetter }));
 
 jest.mock('expo-secure-store', () => ({
   getItemAsync: jest.fn(async () => null),

@@ -12,7 +12,7 @@ import {
 
 import { useAuth } from '@clerk/clerk-expo';
 
-import { LibraryTile, categoryBadge, patternBadge } from '@/components/LibraryTile';
+import { LibraryTile, categoryBadge, patternBadge, positionBadge } from '@/components/LibraryTile';
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
@@ -27,6 +27,7 @@ import {
   type Ruleset,
   type TechniqueSummary,
 } from '@/lib/techniques';
+import { fetchPositions, type Position } from '@/lib/positions';
 import { useModules } from '@/lib/ModulesProvider';
 import { enabledSports, moduleFor, type Module } from '@/lib/modules';
 import { useAuthToken } from '@/lib/useAuthToken';
@@ -207,6 +208,10 @@ export default function LibraryScreen() {
   const [techniques, setTechniques] = useState<TechniqueSummary[]>([]);
   const [rulesets, setRulesets] = useState<Map<string, Ruleset>>(new Map());
   const [techniquesFailed, setTechniquesFailed] = useState(false);
+  // No matching `positionsFailed`. The glossary is an extra on this screen —
+  // if it doesn't load the row is absent, which is quieter and more honest
+  // than an error about content the user never asked for.
+  const [positions, setPositions] = useState<Position[]>([]);
   const [sport, setSportState] = useState<string>('');
   const [position, setPosition] = useState('');
   const [belt, setBeltState] = useState('');
@@ -391,6 +396,7 @@ export default function LibraryScreen() {
     if (!techniqueSport) {
       setTechniques([]);
       setTechniquesFailed(false);
+      setPositions([]);
       return;
     }
     techniqueAbortRef.current?.abort();
@@ -405,6 +411,14 @@ export default function LibraryScreen() {
       setTechniques(list);
       setRulesets(rs);
       setTechniquesFailed(false);
+
+      // Deliberately after the two that matter, and deliberately swallowed.
+      // The glossary must never be the reason the library shows an error.
+      try {
+        setPositions(await fetchPositions(getToken, ac.signal));
+      } catch {
+        setPositions([]);
+      }
     } catch (err) {
       // A supersede is not a failure; a timeout is. `fetchTechniques` rejects
       // with AbortError for both, so the only way to tell them apart is
@@ -688,6 +702,44 @@ export default function LibraryScreen() {
             })}
           </ScrollView>
         )}
+
+        {/* The glossary, and the one row on this screen that is reading rather
+            than filtering.
+
+            Last, and below every chip row, because that is the boundary it
+            marks: everything above narrows the list, this opens a page. It sits
+            near controls that look superficially similar and behave completely
+            differently, so it carries a label and a different shape — without
+            that separation the rows read as one broken control. */}
+        {usesPosition(sport, modules) && positions.length > 0 && (
+          <View style={styles.glossary}>
+            <Text style={styles.glossaryLabel}>NEW TO BJJ? START WITH THE POSITIONS</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.glossaryRow}
+            >
+              {positions.map((p) => {
+                const [code, accent] = positionBadge(p.family);
+                return (
+                  <Pressable
+                    key={p.id}
+                    onPress={() => router.push(`/position/${p.id}`)}
+                    style={({ pressed }) => [styles.posCard, pressed && styles.posCardPressed]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Read about ${p.name}`}
+                    testID={`library-glossary-${p.id}`}
+                  >
+                    <LibraryTile code={code} accent={accent} />
+                    <Text style={styles.posCardText} numberOfLines={2}>
+                      {p.name}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </View>
+        )}
       </View>
 
       {error && (
@@ -886,6 +938,23 @@ const styles = StyleSheet.create({
   posChipActive: { borderColor: vola.textMuted, backgroundColor: vola.surfaceRaised },
   posText: { color: vola.textDim, fontSize: 12, fontWeight: '600' },
   posTextActive: { color: vola.text },
+
+  // The glossary row. A hairline above it, because this is where the header
+  // stops being controls and starts being content.
+  glossary: {
+    gap: 9,
+    paddingTop: 13,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: vola.lineSoft,
+  },
+  glossaryLabel: { color: vola.textDim, fontSize: 10, letterSpacing: 1, fontWeight: '800' },
+  glossaryRow: { gap: 10, paddingRight: 20 },
+  // Fixed width so the names wrap to a predictable two lines and the cards
+  // form an even row — "Knee on Belly" and "Mount" cannot share an intrinsic
+  // width without one of them looking broken.
+  posCard: { width: 92, gap: 7 },
+  posCardPressed: { opacity: 0.6 },
+  posCardText: { color: vola.text, fontSize: 12, fontWeight: '600', lineHeight: 16 },
 
   error: { color: vola.danger, fontSize: 13, paddingHorizontal: 20, paddingTop: 10 },
   loader: { marginTop: 32 },

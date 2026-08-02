@@ -5149,6 +5149,101 @@ only "Blue" — leaving a screen-reader user no way to learn the filter is
 cumulative. `SmallChip` now takes an optional accessible name, used by the
 belt row and deliberately not by the position row, where the visible text
 already means what it says.
+## 2026-08-02 — The library's positions stop being filter labels and become content
+
+The user, reading the BJJ library as a beginner would, noticed what was
+missing: every one of the 466 entries is a *move*, and nothing anywhere says
+what a closed guard, a side control or a back mount actually **is**. Their
+framing is the whole justification — "imagine a novice starts the journey and
+they will download the app and learn from there... when we put together a
+course plan for belts etc., these should be there."
+
+They were right that it was absent, and it was absent by design rather than by
+oversight. `docs/decisions/bjj-tracking-design.md` §4 already describes the
+library as a graph — techniques are edges, positions are the organizing
+dimension they run between — and the July-31 "One Library" work built a
+position filter chip row on exactly that idea. But the nodes of that graph
+never had any content of their own. Positions existed as free text on
+`techniques.position` and as a seven-item client-side taxonomy: enough to
+narrow a list, useless to someone who does not already know the vocabulary.
+
+**What was built:** ten curated glossary entries (Standing, Closed Guard, Open
+Guard, Half Guard, Side Control, Knee on Belly, Mount, North-South, Back
+Control, Turtle), each with two prose fields — `description` (what it is and
+how you arrive there) and `priorities` (what each player is trying to do,
+written for both top and bottom, because every position is someone's good news
+and someone else's problem). Backend + mobile in this PR; web follows.
+
+**Why it lives in the `technique` module rather than its own.** Straight
+precedent from `ibjjf_rulesets`, which is already a secondary table inside that
+module: it is reference content for the library, read on the same screens,
+seeded by the same command. A module boundary would have bought a package and
+cost a cross-module call on every library render. Two things were deliberately
+*not* copied from the rulesets precedent, because they exist there for reasons
+that do not apply: positions have hand-authored stable ids rather than
+content-addressed hashes, so there is no orphan-pruning step, and nothing holds
+an FK to them, so there is no upsert-ordering constraint against `UpsertAll`.
+
+**`SeedPositions` is separate from `Seed` for a concrete reason.** `Seed`
+returns the technique count, and `postgres_test.go` compares that number
+against the length of the technique list. Folding a second content type into
+the same return value would have broken that assertion in a way that reads as
+an unrelated failure. One exported function per content type, one log line
+each in `cmd/seed`.
+
+**The failure mode this feature ships with, if it ships with one, is silent.**
+`family` is the join key back to the library, and it is prefix-matched against
+side-qualified technique values — so back control's family must be the string
+`Back`, not `Back Control`, because the rows say `Back - Top (Back Control)`. A
+typo there produces a screen that renders perfectly and lists no techniques,
+with nothing logging a fault anywhere. Hence two guards: Go-side seed
+validation rejects any family outside the known set, and
+`TestPositionsCrossLinkToTechniques` seeds both tables and asserts every
+position matches at least one real technique.
+
+**Known and accepted:** Closed Guard and Open Guard cross-link to the *same*
+techniques. `techniques.position` only distinguishes `Guard - Bottom` from
+`Guard - Top`; the closed/open split lives in free-text `position_detail`.
+Refining that is a later change. Knee on Belly has no techniques of its own in
+the library at all (verified — no row carries that position), so it borrows the
+Side Control family and its description says outright that it is a transitional
+control reached from there, rather than quietly rendering a thinner card.
+
+**Two things found while verifying, both worth more than the feature.**
+
+*The shared component-test mock manufactured the exact bug the real hook exists
+to prevent.* `jest.setup.js` mocked `useAuthToken` as `() => async () => 'tok'`
+— a fresh function per render. The real hook goes to deliberate lengths to be
+identity-stable, and its own doc comment lists the three live bugs an unstable
+`getToken` caused (infinite refetch loops, wiped local state, defeated
+debounces). The mock reintroduced all of it inside the test harness: the new
+screen re-entered its loading state forever, and every assertion after the
+first `waitFor` failed. It read exactly like a bug in the screen. Fixed by
+hoisting one getter — and it is worth noting the harness had this wrong for
+every screen test written since PR #82.
+
+*A test that passed for the wrong reason, caught by mutating the code it
+claimed to cover.* The cross-link test asserted that `Half Guard - Top` and
+`Mount - Bottom` are excluded from the Guard family. Removing the `- ` from the
+prefix rule — the separator the comment calls load-bearing — did not fail it,
+because neither fixture value starts with `Guard` at all. The assertion was
+decorative. A `Guardless Scramble` fixture now makes it real, and the mutation
+is caught. Same discipline as PR #75 and #78; the same lesson keeps arriving.
+
+**Not verified on device.** The Simulator was not able to exercise this. Expo
+Go on the booted simulator kept serving a cached bundle — it rendered a belt
+filter that exists in no branch of this repo, and made no request to the local
+API even after Metro served a fresh bundle twice with the right URL inlined.
+Along the way this reconfirmed two documented traps (`npx expo start` without
+`NODE_OPTIONS=--dns-result-order=ipv4first` binds Metro to `[::1]` only, and
+`.env.local` overrides a shell-supplied `EXPO_PUBLIC_*`, which needs
+`EXPO_NO_DOTENV=1`). Clearing Expo Go's data container would likely fix it but
+signs the account out of the simulator, so it was left for the user to decide.
+The render path is covered instead by seven component tests
+(`app/__tests__/positionScreen.test.tsx`), which is where this screen's bugs
+would live; the layout reuses `technique/[id]`'s measurements verbatim.
+
+---
 
 ## 2026-08-02 — Logging classes, drilling and rolling
 

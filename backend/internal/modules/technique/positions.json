@@ -1,0 +1,92 @@
+[
+  {
+    "id": "standing",
+    "name": "Standing",
+    "aliases": ["stand-up", "on the feet", "neutral"],
+    "family": "Standing",
+    "order_index": 0,
+    "description": "Both players on their feet, before anyone has been taken down or pulled guard. Every match starts here, and in the gi most of them are decided by who wins the grips first — a hand on the collar and a hand on the sleeve is worth more than being the stronger athlete. Standing is also the phase most hobbyists skip, because takedowns are hard on the body and mat space is tight, which is exactly why it becomes a hole in the game later.",
+    "priorities": "Both players want the same three things in the same order: posture, grips, then an angle. Keep your back straight and your head up — a bent-over posture is an invitation to a front headlock or a snapdown. Fight for the grip you want rather than accepting the one you are given; a grip you did not choose is one your opponent chose for you. Move to create an angle instead of pulling straight back, and remember the two exits that are not takedowns: pull guard deliberately on your own terms, or disengage and reset."
+  },
+  {
+    "id": "closed-guard",
+    "name": "Closed Guard",
+    "aliases": ["full guard", "closed", "guard"],
+    "family": "Guard",
+    "order_index": 10,
+    "description": "You are on your back with your legs wrapped around your opponent's torso and your ankles crossed behind their back. They are kneeling or standing inside your legs and cannot leave until they open them. You arrive here by pulling guard, by being taken down and recovering, or by an opponent passing badly. It is the position beginners are taught first, because it is the clearest demonstration that being underneath is not the same as losing — the person on the bottom has both arms, both legs and the ability to attack.",
+    "priorities": "Bottom: break their posture down and keep it broken. An opponent who can sit up straight can defend everything; one bent forward can defend almost nothing. Control a sleeve and something at their upper body, keep your hips mobile rather than lying flat, and understand that your attacks come in pairs — the sweep and the submission threaten the same arm, so whichever they defend gives you the other.\n\nTop: posture is the whole job. Sit up straight, keep your spine stacked over your hips, and get your elbows in tight so they cannot be isolated. Do not reach for their collar or start passing until the legs are open — every pass from inside a closed guard is a pass that has not started yet."
+  },
+  {
+    "id": "open-guard",
+    "name": "Open Guard",
+    "aliases": ["open", "guard", "de la riva", "butterfly guard", "spider guard"],
+    "family": "Guard",
+    "order_index": 20,
+    "description": "Any bottom guard where your ankles are not locked behind your opponent — your legs are free to frame, hook, push and off-balance instead. This is not one position but a whole family: butterfly, spider, De La Riva, X guard, collar-sleeve, seated. They differ in where your feet and grips go, and they all share one idea, which is that your legs are longer and stronger than their arms and can keep an opponent at a distance they cannot pass from. Open guard is where most of modern sport jiu-jitsu actually happens.",
+    "priorities": "Bottom: connection over distance. A leg touching nothing controls nothing, so keep at least one hook, foot or grip attached to them at all times, and match a leg connection with a hand connection — hooks without grips get pushed aside. Keep your shoulders off the mat and your hips underneath you, because a flat back is a passed guard waiting to happen. Off-balance them constantly rather than waiting: a person catching their balance is not a person passing.\n\nTop: control the hips and kill the connections. Strip a grip, pin the leg it belonged to, and move around rather than through. Keep your weight forward and your base wide, and do not stand tall in front of someone who is looking for exactly that."
+  },
+  {
+    "id": "half-guard",
+    "name": "Half Guard",
+    "aliases": ["half", "knee shield", "deep half", "lockdown"],
+    "family": "Half Guard",
+    "order_index": 30,
+    "description": "The bottom player has one of their opponent's legs trapped between their own; the other leg is free. It is the position everyone lands in on the way to somewhere else — a guard half-passed, a sweep half-finished — which is why it was treated as a defensive stall for years, and why it is now one of the most developed attacking guards in the sport. Whether it is good or bad for you depends almost entirely on where your shoulders and your top elbow are.",
+    "priorities": "Bottom: get on your side, never flat. A knee shield or an underhook is what turns a defensive half guard into an attacking one — with one of them you are threatening sweeps and the back, without either you are being flattened and passed. Frame against their shoulder or hip to keep your chest free, and use the trapped leg actively to off-balance rather than just holding on.\n\nTop: flatten them and win the underhook battle. Get a crossface and drive their head away from the trapped leg — a head that is turned away cannot come up onto its side. Keep your hips low and heavy so they cannot get underneath you, then free the leg with a knee slice or a backstep."
+  },
+  {
+    "id": "side-control",
+    "name": "Side Control",
+    "aliases": ["side mount", "cross side", "scarf hold", "kesa gatame", "100 kilos"],
+    "family": "Side Control",
+    "order_index": 40,
+    "description": "The top player lies perpendicular across their opponent's chest, with no legs between them — you have passed the guard and this is where you land. It scores three points in competition and it is, in practice, the first genuinely dominant position most beginners experience from both sides. On the bottom it is also the first position that feels genuinely awful: heavy, hard to breathe under, and hard to see a way out of.",
+    "priorities": "Top: connection before attacks. Chest to chest, hips low, a crossface on one side and an underhook or arm blocking the hip on the other — the pair matters more than either alone, because it stops them turning in and turning away at the same time. Kill the far arm before you go looking for a submission. Your knees should pinch toward them so there is no space to insert a knee or a frame.\n\nBottom: frames and hips. Get a forearm into their neck and a hand on their hip to make space, and turn onto your side toward them, never away — turning away gives up your back. Bridge to disrupt their base and shrimp into the space it makes. Do not reach across your own body for a grip; that is how the far arm gets isolated."
+  },
+  {
+    "id": "knee-on-belly",
+    "name": "Knee on Belly",
+    "aliases": ["knee on stomach", "knee ride", "KOB"],
+    "family": "Side Control",
+    "order_index": 50,
+    "description": "From side control, the top player posts one knee on their opponent's stomach or ribs and lifts the other foot off the mat, standing over them. It scores two points and it is deliberately uncomfortable: the whole point is that lying still becomes unattractive, so the bottom player moves and gives you something. It is a transitional control rather than a resting place — the top player is mobile and light here, not settled, and typically uses it to move to mount, back, or a submission the reaction opens up.\n\nBecause it is a transition, the technique library files these entries under side control and mount rather than under a knee-on-belly heading of their own — the techniques below are the ones you reach it from and pass through it to.",
+    "priorities": "Top: stay tall and stay light. Your posture is what makes the position work — hunching over gives them your collar and your balance. Keep the near knee driving into the soft space below the ribs, the other leg wide and posted for base, and your hands ready rather than committed. Expect to move: this position is worth points and pressure, not a pin.\n\nBottom: do not lie there absorbing it. Turn onto your side toward them and frame on the knee, hip escape to make space and recover a guard, or bridge into them if the knee is high. The one thing that never works is flattening out and waiting for it to pass."
+  },
+  {
+    "id": "mount",
+    "name": "Mount",
+    "aliases": ["full mount", "mounted", "high mount", "technical mount", "S-mount"],
+    "family": "Mount",
+    "order_index": 60,
+    "description": "The top player sits astride their opponent's torso with a knee on each side. It is worth four points, the most of any position, and it is the clearest dominance in the sport: the person on top has both hands free and gravity helping, while the person underneath has neither. How high you sit changes it completely — knees in the armpits is a different position from sitting on the hips, and the difference is most of what separates a mount that finishes fights from one that gets bridged off.",
+    "priorities": "Top: climb and stay connected. Get your knees high into the armpits — a low mount is the one they can bridge and shrimp out of, a high mount is the one that ends things. Keep your weight forward onto your hands or their shoulders rather than sitting back on your heels, and open the space they need to escape only when you are taking something in exchange. Isolate an arm before you commit to a submission.\n\nBottom: elbows and hips. Get your elbows inside their knees and keep them there — the escape is entirely about preventing the climb to high mount, because once they are in your armpits your options shrink to almost nothing. Bridge hard and turn to your side, trap an arm and a leg to bridge and roll, or shrimp your hips out to recover half guard. Never let both of their knees pass your elbows."
+  },
+  {
+    "id": "north-south",
+    "name": "North-South",
+    "aliases": ["north south", "69 position", "head to head"],
+    "family": "North-South",
+    "order_index": 70,
+    "description": "The top player lies chest to chest with their opponent but reversed — their head over the opponent's head, hips at the opponent's hips, bodies pointing in opposite directions. It is usually reached by rotating around the head from side control, either to escalate pressure or to follow an opponent who is turning away. Heavy, disorienting, and awkward to defend precisely because the usual landmarks are all in the wrong place.",
+    "priorities": "Top: chest on their chest and weight through your shoulders into their face and sternum, not on your knees. Control their arms — pinning both elbows above their head is what makes the position stable and what sets up the chokes from here. Keep your hips low and mobile so their bridge has nothing to launch.\n\nBottom: frame on their hips and shoulders to stop the weight settling, and turn to one side to face them — north-south is a position you escape by returning to guard or side control, not by pushing straight up. Bring your knees in toward your chest so you have something to insert between you."
+  },
+  {
+    "id": "back-control",
+    "name": "Back Control",
+    "aliases": ["back mount", "the back", "rear mount", "seatbelt", "hooks in"],
+    "family": "Back",
+    "order_index": 80,
+    "description": "The top player is behind their opponent, chest to their back, with both heels hooked inside the opponent's thighs and a seatbelt grip over one shoulder and under the other arm. It scores four points and it is the best position in jiu-jitsu, for one blunt reason: your opponent cannot see you, cannot reach you well, and their neck is directly in front of your hands, while they have almost no offence available at all. Every other dominant position is trying to get here.",
+    "priorities": "Top: chest connection first, choke second. Keep your chest glued to their back — a gap is what lets them turn in and escape. The seatbelt matters more than the hooks: keep the choking arm over their shoulder, keep your head on the same side as your underhook so they cannot trap it, and stay behind them as they roll rather than ending up underneath. Do not chase the choke so hard that you lose the position; the position produces the choke on its own.\n\nBottom: protect the neck and get your shoulders to the mat. Two hands on the choking arm is not selfish, it is the whole defence. Move your hips to one side, clear one hook, and slide your shoulders down and around to that side to come out on top of their leg. Never turn toward the choking arm, and never sit up — sitting up hands them the finish."
+  },
+  {
+    "id": "turtle",
+    "name": "Turtle",
+    "aliases": ["turtled", "referee's position", "all fours", "front headlock"],
+    "family": "Turtle",
+    "order_index": 90,
+    "description": "The bottom player is on their knees and elbows, curled forward with their head and neck tucked in and their limbs held close. People arrive here from a failed takedown, a guard that got passed, or a scramble that went badly. It is defensive but it is not lost — turtle is a legitimate waiting position that competitors use deliberately — though it is genuinely dangerous, because it is one step from having your back taken and one step from a front headlock.",
+    "priorities": "Bottom: keep your elbows tight to your knees and your neck tucked. The two things that end this position badly are a hand sliding under your armpit for a seatbelt and an arm wrapping your neck from the front, so deny both and do not stay static — turtle is somewhere you pass through, not somewhere you live. Look to sit back to guard, roll through, or come up on a single leg.\n\nTop: break them down before you take anything. Force their hips flat or roll them over rather than climbing on a stable turtle, and choose your route deliberately — the seatbelt and hooks toward the back, or a front headlock at their head. Keep your own weight over them and your hips low so a sit-out or a roll cannot reverse you."
+  }
+]
