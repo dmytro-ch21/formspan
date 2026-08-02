@@ -7,6 +7,7 @@ import { setModules } from "@/lib/api";
 import { useModules } from "@/lib/ModulesProvider";
 import { UNIT_SYSTEMS } from "@/lib/units";
 import { useUnits } from "@/lib/useUnits";
+import { BjjRankSection } from "./BjjRankSection";
 
 /**
  * Settings.
@@ -158,6 +159,12 @@ export default function SettingsPage() {
           never rewrites anything you&apos;ve logged.
         </p>
       </section>
+
+      {/* A belt is meaningless to someone who doesn't train BJJ — gated on the
+          module the same way the sidebar gates Records and Library, rather
+          than on a history existing, so turning BJJ off hides this even for
+          an account with a recorded history. */}
+      {modules.some((m) => m.key === "bjj" && m.enabled) && <BjjRankSection />}
     </div>
   );
 }

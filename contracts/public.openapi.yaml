@@ -22,6 +22,83 @@ components:
       description: Clerk-issued session token, verified server-side via Clerk's JWKS.
 
   schemas:
+    BjjRank:
+      type: object
+      required: [belt, stripes, degree]
+      properties:
+        belt:
+          type: string
+          enum: [white, blue, purple, brown, black]
+          description: >
+            Adult IBJJF belts only. Kids and coral/red belts are not yet
+            represented; the column has no CHECK constraint so adding them is
+            a code change rather than a migration.
+        stripes: { type: integer, minimum: 0, maximum: 4 }
+        degree:
+          type: integer
+          minimum: 0
+          maximum: 6
+          description: >
+            Black-belt degrees. 0 on every other belt, and only accepted as
+            non-zero on black.
+
+    BjjPromotionInput:
+      allOf:
+        - $ref: "#/components/schemas/BjjRank"
+        - type: object
+          properties:
+            promoted_on:
+              type: string
+              format: date
+              nullable: true
+              description: >
+                Nullable on purpose. Plenty of athletes do not remember when
+                they were promoted, and refusing the promotion to protect the
+                date would lose the fact. An undated promotion still
+                establishes rank; it just cannot contribute to time-at-belt.
+            academy:
+              type: string
+              description: Free text, per promotion. Not a shared entity.
+            instructor: { type: string }
+            note: { type: string }
+
+    BjjPromotion:
+      allOf:
+        - $ref: "#/components/schemas/BjjPromotionInput"
+        - type: object
+          required: [id, created_at, updated_at]
+          properties:
+            id:
+              type: string
+              description: >
+                Server-minted, unlike session and workout ids. Those are
+                client-generated so an offline push can retry idempotently;
+                a promotion has no offline outbox behind it.
+            created_at: { type: string, format: date-time }
+            updated_at: { type: string, format: date-time }
+
+    BjjStanding:
+      type: object
+      required: [promotions]
+      properties:
+        current:
+          allOf:
+            - $ref: "#/components/schemas/BjjRank"
+          nullable: true
+          description: >
+            The highest recorded rank, or null when nothing is recorded.
+            Derived, never stored.
+        time_at_current_days:
+          type: integer
+          nullable: true
+          description: >
+            Days since the promotion that set the current rank. Null when that
+            promotion has no date — "unknown" and "today" are different
+            answers, so this is not 0.
+        promotions:
+          type: array
+          items: { $ref: "#/components/schemas/BjjPromotion" }
+
     Error:
       type: object
       required: [error]
@@ -1763,6 +1840,90 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /bjj/standing:
+    get:
+      summary: The athlete's BJJ rank and promotion history
+      description: >
+        `current` is DERIVED from `promotions`, not stored — the highest rank
+        recorded, which is well defined even when promotions were entered out
+        of order or without dates. It is null when nothing has been recorded:
+        a new account has no belt, and defaulting to white would put a rank on
+        someone who has never trained.
+      operationId: getBjjStanding
+      responses:
+        "200":
+          description: Rank and history.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BjjStanding" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /bjj/promotions:
+    post:
+      summary: Record a promotion
+      operationId: createBjjPromotion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BjjPromotionInput" }
+      responses:
+        "201":
+          description: The recorded promotion.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BjjPromotion" }
+        "400":
+          description: >
+            Unknown belt, stripes outside 0-4, degree outside 0-6, a degree on
+            a belt other than black, or `promoted_on` not in `YYYY-MM-DD`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /bjj/promotions/{promotionID}:
+    parameters:
+      - name: promotionID
+        in: path
+        required: true
+        schema: { type: string }
+    patch:
+      summary: Correct a recorded promotion
+      description: >
+        Replaces every field. A promotion belonging to another account
+        answers 404, not 403 — the same non-disclosure the admin routes use.
+      operationId: updateBjjPromotion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BjjPromotionInput" }
+      responses:
+        "200":
+          description: The updated promotion.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BjjPromotion" }
+        "400":
+          description: >
+            Invalid rank, or `promoted_on` not in `YYYY-MM-DD`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      summary: Remove a recorded promotion
+      description: >
+        Removing the promotion that set the current rank lowers it, because
+        rank is derived from what remains.
+      operationId: deleteBjjPromotion
+      responses:
+        "204": { description: Removed. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /workouts:
     get:
       summary: List workouts visible to the caller
@@ -2484,6 +2645,35 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ActivityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /admin/users/{userID}/bjj/standing:
+    get:
+      summary: A specific user's BJJ rank and promotion history (admin-only)
+      operationId: adminGetBjjStanding
+      description: >
+        Same derivation as GET /bjj/standing, over the path user rather than
+        the caller. Read-only — the admin console shows rank beside the
+        athlete, it does not edit it. An id that matches no promotions answers
+        200 with `current: null`, the same as a real account that has never
+        recorded one; this endpoint does not distinguish "no such user" from
+        "no rank yet".
+      parameters:
+        - name: userID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: That user's rank and history.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BjjStanding"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":

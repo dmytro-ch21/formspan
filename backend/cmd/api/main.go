@@ -16,6 +16,7 @@ import (
 	_ "time/tzdata"
 
 	"github.com/dmytro-ch21/vola/backend/internal/modules/activity"
+	"github.com/dmytro-ch21/vola/backend/internal/modules/bjj"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/exercise"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/featureflag"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/health"
@@ -62,6 +63,7 @@ func main() {
 	defer pool.Close()
 
 	profileHandler := profile.NewHandler(profile.NewPostgresRepository(pool))
+	bjjHandler := bjj.NewHandler(bjj.NewPostgresRepository(pool))
 	featureFlagHandler := featureflag.NewHandler(featureflag.NewPostgresRepository(pool))
 	activityHandler := activity.NewHandler(activity.NewPostgresRepository(pool))
 	exerciseHandler := exercise.NewHandler(exercise.NewPostgresRepository(pool), os.Getenv("MEDIA_BASE_URL"))
@@ -72,6 +74,15 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/healthz", handleHealthz)
 	mux.Handle("GET /v1/me", verifier.RequireAuth(http.HandlerFunc(handleMe)))
+	// BJJ rank. Under /v1/bjj rather than /v1/profile because the data is
+	// discipline-scoped — see the note at the top of profile.go. The screens
+	// still show it inside the profile; that is a UI decision, not a
+	// reason to put a belt on the account record every sport shares.
+	mux.Handle("GET /v1/bjj/standing", verifier.RequireAuth(http.HandlerFunc(bjjHandler.GetStanding)))
+	mux.Handle("POST /v1/bjj/promotions", verifier.RequireAuth(http.HandlerFunc(bjjHandler.CreatePromotion)))
+	mux.Handle("PATCH /v1/bjj/promotions/{promotionID}", verifier.RequireAuth(http.HandlerFunc(bjjHandler.UpdatePromotion)))
+	mux.Handle("DELETE /v1/bjj/promotions/{promotionID}", verifier.RequireAuth(http.HandlerFunc(bjjHandler.DeletePromotion)))
+
 	mux.Handle("GET /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Get)))
 	mux.Handle("POST /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Create)))
 	mux.Handle("PATCH /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Update)))
@@ -116,6 +127,7 @@ func main() {
 	mux.Handle("GET /v1/admin/users", verifier.RequireAdmin(http.HandlerFunc(activityHandler.AdminListUsers)))
 	mux.Handle("GET /v1/admin/users/{userID}", verifier.RequireAdmin(http.HandlerFunc(activityHandler.AdminGetUser)))
 	mux.Handle("GET /v1/admin/users/{userID}/activities", verifier.RequireAdmin(http.HandlerFunc(activityHandler.AdminListUserActivities)))
+	mux.Handle("GET /v1/admin/users/{userID}/bjj/standing", verifier.RequireAdmin(http.HandlerFunc(bjjHandler.AdminGetStanding)))
 
 	healthRepo := health.NewPostgresRepository(pool)
 	healthHandler := health.NewHandler(healthRepo)

@@ -4791,6 +4791,235 @@ is generated and gitignored, so a new route fails `typecheck:mobile` locally
 against a stale copy while CI — which has no copy at all — is perfectly green.
 Verified by deleting it and re-running. Neither state is wrong; they just
 disagree, and the local one looks like a real error.
+## 2026-08-01 — BJJ rank: the backend and the belt, with the clients still to wire
+
+**Partial work, committed deliberately.** The backend module and the belt
+component are complete and tested; the client wiring is not started. Written
+up now rather than at the end so the next session picks up decisions rather
+than re-derives them.
+
+### Where it lives, and why not on `profile`
+
+`profile.go`'s package comment already called this before there was anything
+to put in it: *"BJJ-specific profile data (belt, stripes, academy, promotion
+history) belongs to the future bjj module, not here."* Profile is the
+account-level record four disciplines share, and a belt is meaningless to
+three of them. So the data is `internal/modules/bjj` behind `/v1/bjj/*`, and
+the *screens* still show it inside the profile — a UI decision, not a reason
+to put a belt column on the shared account record.
+
+### Rank is derived, and derived by RANK — not by date
+
+The obvious schema is `profiles.belt` + `profiles.stripes`. It is wrong twice
+over.
+
+**A current-rank column and a promotion history are two sources for one
+fact.** Edit a date, delete a mistaken entry, and the column still says brown.
+Deriving the rank from the history means there is nothing to keep in step.
+
+**And the derivation is by rank order, not by most-recent date.** Dates are
+optional — plenty of people genuinely do not remember when they got their blue
+belt — and they are hand-entered, so ordering by them makes the current belt a
+function of data-entry care. Rank in BJJ is monotonic: nobody is demoted. So
+the highest recorded rank *is* the current one, and that holds whether the
+promotions went in forwards, backwards, or with no dates at all.
+
+The test that pins it is `white/4` versus `blue/0` — the pair a naive
+`belt + stripes` score gets wrong, and not an edge case: every athlete passes
+through it. `Rank.Order()` multiplies by the maxima so a belt change always
+dominates stripes within a belt.
+
+Two smaller calls in the same vein:
+
+- **No promotions means no belt, not white.** A new account has no rank, and
+  defaulting to white puts a belt on someone who has never trained.
+- **An unknown belt is skipped, not sorted as zero.** A row written by a newer
+  build (coral, say) must not read as *below* white and lose to a real white
+  belt. Acting as though the row is absent is the honest degradation.
+
+### The belt is drawn, not illustrated
+
+`components/Belt.tsx` is three views: strap, rank bar, stripes. No
+`react-native-svg` — a native dependency means a prebuild and a fresh device
+build for everyone, which is a lot to pay to draw four straight lines. It also
+means the web and admin versions are the same shapes in CSS rather than an
+asset pipeline nobody remembers to regenerate.
+
+Details that matter to anyone who trains: the rank bar is **black on coloured
+belts and red on a black belt**, because that is how belts are made. The white
+belt carries a hairline border or it reads as a floating rank bar on VOLA's
+near-black ground. Stripe count is **clamped at render**, so a cached row from
+an older build degrades to a sensible belt instead of drawing off the end of
+the strap.
+
+One near-miss worth recording: the stripe gap was first written as `gap: '8%'`,
+which **typechecks and is not honoured** — RN accepts a percentage there in its
+types but does not apply it like a percentage padding, so four stripes would
+have bunched into one thick line and read as a different rank. It is computed
+numerically now.
+
+### Deliberately not built yet
+
+Answered up front, so the next session does not re-litigate:
+
+- **Adult IBJJF belts only** (white→black, 0–4 stripes, 1st–6th degree). Kids
+  and coral/red are absent from the enum; there is **no CHECK constraint** on
+  the column precisely so adding them is a code change, not a migration.
+- **Academy is free text per promotion**, not a shared entity. Shared academies
+  need dedupe, a naming authority and an admin merge surface, and nothing yet
+  asks "who else trains here".
+- **Promotion ids are server-minted** via `gen_random_uuid()`, unlike sessions
+  and workouts. Those are client-generated because they are created offline and
+  pushed later and the id is what makes the retry idempotent; a promotion is
+  entered at a desk, so a client id buys nothing — and the column default costs
+  no Go dependency.
+
+### What is left
+
+1. `lib/bjj.ts` client + the You screen (belt, time at belt, history) and an
+   add/edit promotion flow.
+2. The same rendering on web and admin — admin's user detail should show rank
+   beside the athlete.
+3. **Filtering the technique library by belt**, using the `TypicalBelt` and
+   `GiAllowedBelts`/`NoGiAllowedBelts` fields the technique module already
+   carries. Agreed as a separate PR.
+
+### Why belt is not decoration
+
+[bjj-tracking-design.md §5](bjj-tracking-design.md) already decided that
+curricula are **belt-level tracks** where each step sets the current focus —
+the top-down entry for an athlete who cannot yet self-select one. So belt is
+the entry point into the progression loop, and the promotion timeline is what
+makes "three years at blue" a fact the system can reason about instead of a
+memory. That is the thread from this record to the gameplan; the library
+filter in (3) is the first honest read along it.
+
+## 2026-08-02 — BJJ rank: the clients, wired end to end
+
+Closes the gap the previous entry left open: `lib/bjj.ts` + the You screen +
+add/edit/delete on mobile, the same on web's Settings page, and admin's
+read-only rank badge. The library filter (item 3 above) stays its own PR, as
+already agreed.
+
+### Mobile
+
+`lib/bjj.ts` mirrors the backend's wire shape exactly (`Belt`/`Rank`/
+`Promotion`/`Standing`), through `apiRequest` rather than the older
+hand-rolled `request` helper `profile.ts`/`records.ts` still carry — the
+newer convention, extracted precisely so a fourth copy wouldn't happen.
+
+The You screen gets a `BjjRankCard`, gated on the `bjj` module being
+**enabled**, not on a history existing — the same reasoning as web's
+Records/Library sidebar gating, so turning BJJ off hides the card even for an
+account with a recorded belt.
+
+`/bjj` is the hub: hero belt, time-at-belt, and the promotion timeline
+(already newest-first from the repository's own `ORDER BY`). `/bjj/promotion/new`
+and `/bjj/promotion/[id]` share one `PromotionForm` — add and edit are the
+same fields, and the only differences are which request goes out and whether
+Delete is offered. There's no GET-by-id promotion endpoint (only the list),
+so the edit screen doesn't fetch at all — it receives the row it already has
+from the hub's list as route params, all scalar. Delete goes through
+`Alert.alert`, the first native destructive-confirm this app has needed
+outside `SwipeToDelete` — deliberately not reused, since that component's own
+reasoning (sweaty hands, mid-set, a scrolling list of sets) doesn't describe
+editing a promotion at a desk.
+
+### Web and admin
+
+Web's `dashboard/settings/page.tsx` gets a `BjjRankSection`, gated the same
+way as mobile: belt swatch, promotion history, inline add/edit — no modal, no
+separate route, because Settings is already the account-facts page and a belt
+is an account fact. `apps/web`'s `Belt.tsx` is a third, deliberate copy of the
+same three-rectangle CSS drawing — no shared package across the three apps,
+so this duplication matches the reasoning the mobile component already gave
+for not reaching for `react-native-svg`. Admin gets its own fourth copy,
+read-only (no picker, no stepper — it never edits a rank).
+
+Admin needed a route the self-service API doesn't have:
+`GET /v1/admin/users/{userID}/bjj/standing`, under `RequireAdmin`, reusing
+`ListPromotions`/`StandingFrom` over a path `userID` instead of claims.
+Rendered as a small belt and label beside the display name in the header —
+beside the athlete, per the brief — with no edit affordance, matching the
+rest of admin.
+
+**Found in verification, not design:** an account that has recorded a
+promotion but never logged a session, activity or profile is invisible to
+admin entirely — `AdminGetUser` 404s, and `AdminListUsers` doesn't scan
+`bjj_promotions` for user discovery either. Not fixed here, since it's a
+discovery gap rather than part of wiring the display, but real — worth
+closing if a BJJ-only, never-trained-yet account ever needs support.
+
+### A real bug the live walkthrough caught
+
+Switching belt to black in the add/edit form left the old `stripes` count
+sitting in state. The stripes stepper is hidden once black is picked, so
+nothing on screen *looked* wrong — until the live preview label, which
+computes its text from `describeBelt` independently of the swatch, read
+"Black belt, 2 stripes" while the swatch correctly drew none. `describeBelt`
+checks `stripes > 0` before falling through to a bare belt name, with no way
+to know that value was stale for the belt now selected. Fixed by zeroing the
+field that stopped applying, not just the one that started — the belt-chip
+handler now clears `stripes` on a switch to black and `degree` on a switch
+away from it, symmetrically, in both the mobile and web forms. This was only
+caught because the promotion was walked through end-to-end on a real
+Simulator and a real browser against a real Postgres, not read off the diff.
+
+### A dev-environment footgun, unrelated to the feature
+
+Verifying this needed a live backend, and `docker compose up -d` in this
+worktree silently created a second, unused `bjj-postgres-1` container — the
+primary checkout's own Postgres (`fitness-platform-postgres-1`, already
+running, four days old) already held host port 5432, so the worktree's
+container came up with no port published and every connection kept reaching
+the older one. Nothing was actually wrong with the data — the primary's
+Postgres was the real target the whole time — but `docker compose exec`
+against the *worktree's* compose project queried a completely empty database,
+which looked like a fresh-migration bug for several minutes before `docker ps
+-a` explained it. Worth knowing before running two worktrees' `docker compose
+up -d` back to back: only the first one actually gets the port, and the
+second fails silently rather than erroring.
+
+### Verified live, not just typechecked
+
+Full CRUD walked end to end on a real iOS Simulator (empty state → add → edit
+→ delete → back to empty, against a real Postgres-backed API) and a real
+browser (the same cycle on web's Settings section, plus admin's read-only
+badge on an account with a recorded rank). `pnpm run verify`, `build:web`,
+`build:admin`, the Go integration suite against a real database,
+`docker build`, and `pnpm run lint:openapi` all pass.
+
+### What `/pre-merge`'s reviewers caught that the live walkthrough didn't
+
+`backend-reviewer` signed off on `AdminGetStanding` outright — the
+authorization boundary (`RequireAdmin`, never `RequireAuth`) and the
+non-disclosure shape both hold, with one non-blocking suggestion (no test
+pins that boundary, but no admin endpoint in this codebase has one, so it's
+filed as a follow-up rather than invented ad hoc for this one route).
+
+`frontend-reviewer` found one genuine blocking gap the manual walkthrough
+never would have hit, because the walkthrough only ever reached `/bjj`
+through the You-screen card: **the route itself had no self-check.** Gating
+lived only at the door (`BjjRankCard`), so a stale back-stack entry from
+before BJJ was turned off — or any other way of landing on `/bjj` — reached
+the full rank hub and the add/edit form regardless of the module toggle,
+directly contradicting the functional-scenarios.md entry written in this same
+change. Fixed by moving the same `bjjEnabled` check into `app/bjj/index.tsx`
+and `PromotionForm.tsx` themselves, so the route refuses on its own rather
+than trusting whoever links to it.
+
+It also caught a real, reproducible bug in web's form: wrapping the Belt and
+Stripes/Degree button groups in `<label>` meant a click on the caption text
+— not a button, the word "Belt" itself — forwarded to the first button in
+the group via plain HTML label semantics, silently resetting whatever was
+selected. `workouts/page.tsx`'s discipline picker already gets this right
+with `<fieldset>`/`<legend>`; `BjjRankSection.tsx` now matches it, and its
+belt/stripe pickers switched from `aria-pressed` to the same
+`radiogroup`/`radio`/`aria-checked` pattern the Units picker on the same page
+already uses. Mobile's edit route also gained a guard against a malformed
+deep link falling through to an edit form that silently defaults to
+White/0/blank — `BELTS.includes(...)` is checked before treating the params
+as a real row, redirecting to `/bjj` otherwise.
 
 ## Open items / known gaps as of this entry
 
@@ -4800,8 +5029,8 @@ disagree, and the local one looks like a real error.
 - No production Postgres — `staging` is currently doing double duty for dev/staging/testing.
 - JWT verification doesn't check the `azp` claim (fine for one frontend origin; revisit if that changes).
 - Mobile app shell exists (`apps/mobile`) and is now fully Simulator-verified (screenshot-confirmed on a real iPhone 15 Pro Simulator). Still has no auth, no other tabs (Plan/Log/Progress/Profile), and no dev client (Expo Go only) — all deliberately deferred to future increments.
-- Web app shell exists (`apps/web`, `/dashboard`) with only one destination (`Dashboard`) wired — Calendar/Strength/BJJ/Nutrition/Insights/Account are all still just IA on paper, no routes or stub pages yet.
-- Admin console exists (`apps/admin`) with `User Lookup`/`User Detail` running on **real backend data** — no mock data anywhere. Still missing: subscriptions/device-platform/integration-sync/support-ticket data (no real system behind any of them, so those columns are simply not shown rather than faked), and the `Jobs & Webhooks`/`Audit Log` screens (not designed yet). No in-app log viewer — trace correlation is by grepping the real log stream for a `request_id`.
+- Web app shell exists (`apps/web`, `/dashboard`) with `Dashboard`, `Workouts`, `History`, `Records`, `Library` and `Settings` wired. BJJ rank now lives inside Settings (belt + promotion history) rather than as its own sidebar destination — it's account data, not a screen's worth of content on its own. Calendar/Nutrition/Insights are still just IA on paper, no routes or stub pages yet.
+- Admin console exists (`apps/admin`) with `User Lookup`/`User Detail` running on **real backend data** — no mock data anywhere. `User Detail` now also shows BJJ rank beside the athlete, read-only, for accounts with one. Still missing: subscriptions/device-platform/integration-sync/support-ticket data (no real system behind any of them, so those columns are simply not shown rather than faked), and the `Jobs & Webhooks`/`Audit Log` screens (not designed yet). No in-app log viewer — trace correlation is by grepping the real log stream for a `request_id`. **New gap:** an account visible to nothing but `bjj_promotions` (a rank recorded, no session/activity/profile ever) is invisible to `User Lookup` and 404s on `User Detail` — user discovery scans profiles/sessions/activities only.
 - `apps/web`'s current visual style predates the shared hi-fi design system (Barlow/Barlow Condensed, the light palette used in `apps/admin`) and doesn't yet follow it — reconciling that is unstarted.
 - Structured logging + request/trace IDs exist in the API (`backend/internal/platform/httplog`), and `apps/web`/`apps/mobile` now propagate a `traceparent` on their real backend calls. `apps/admin` still doesn't — it has no backend calls of any kind yet, not a tracing gap specifically.
 - Feature flags exist (`GET /v1/flags`, `internal/modules/featureflag`) but are read-only — no write endpoint or admin-console screen yet (real backend admin authorization now exists, see below, so this is no longer the blocker it was). No frontend app fetches or gates on one yet.
