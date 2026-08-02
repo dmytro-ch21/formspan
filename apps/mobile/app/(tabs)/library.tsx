@@ -126,6 +126,10 @@ const POSITIONS = [
   { key: 'Side Control', label: 'Side control' },
   { key: 'Back', label: 'Back' },
   { key: 'Turtle', label: 'Turtle' },
+  // Its 7 techniques were unreachable by any chip while the glossary row
+  // directly above advertises the position with a card — the filter has to
+  // offer at least what the glossary names.
+  { key: 'North-South', label: 'North-south' },
 ] as const;
 
 function inPositionFamily(position: string, family: string): boolean {

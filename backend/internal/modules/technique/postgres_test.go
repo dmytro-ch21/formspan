@@ -411,10 +411,20 @@ func TestPositionsResolveAgainstTheLibrary(t *testing.T) {
 		}
 	}
 
-	// The whole point of the detail filters: these two must not be the same
-	// list. They were identical (187 each) until position_detail was used, and
-	// the Open Guard screen listed closed-guard techniques under a description
-	// saying the ankles are not locked.
+	// The whole point of the detail filters. EXACT counts, not "these differ" —
+	// the weaker assertion passes on the very regression this guards:
+	// deleting closed-guard's detail_includes puts it back on the whole
+	// 187-technique family while open-guard stays at 150, so the two are still
+	// unequal and nothing fails. Same lesson, and the same fix, as the pinned
+	// wantRestrictedRulesets above.
+	//
+	// The guard family is 187. The split is 37 closed ("Closed Guard" plus
+	// "Rubber Guard") and 150 open (the rest), and 37+150 == 187 is the check
+	// that the two partition the family rather than merely differing.
+	const (
+		wantClosedGuard = 37
+		wantOpenGuard   = 150
+	)
 	scoped := func(id string) int {
 		n := 0
 		for _, p := range positions {
@@ -430,11 +440,22 @@ func TestPositionsResolveAgainstTheLibrary(t *testing.T) {
 		return n
 	}
 	closed, open := scoped("closed-guard"), scoped("open-guard")
-	if closed == open {
-		t.Errorf("closed and open guard resolve to the same %d techniques — the split is not applied", closed)
+	if closed != wantClosedGuard {
+		t.Errorf("closed guard resolves to %d techniques, want %d", closed, wantClosedGuard)
 	}
-	if closed == 0 || open == 0 {
-		t.Errorf("guard split emptied a side: closed=%d open=%d", closed, open)
+	if open != wantOpenGuard {
+		t.Errorf("open guard resolves to %d techniques, want %d", open, wantOpenGuard)
+	}
+
+	family := 0
+	for _, tq := range techniques {
+		if inFamily(tq.Position, "Guard") {
+			family++
+		}
+	}
+	if closed+open != family {
+		t.Errorf("the two guards cover %d of the family's %d — they must partition it",
+			closed+open, family)
 	}
 
 	// The reverse direction. A technique position with no glossary entry behind

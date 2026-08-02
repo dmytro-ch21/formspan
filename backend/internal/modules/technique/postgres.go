@@ -241,7 +241,16 @@ const upsertPositionSQL = `
 	INSERT INTO positions (
 		id, name, aliases, family, detail_includes, detail_excludes,
 		order_index, description, priorities
-	) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	)
+	-- COALESCE because naming the columns explicitly means the DEFAULT '{}'
+	-- never applies, and pgx encodes a nil Go slice as SQL NULL. A Position
+	-- built in code with any array field left unset would otherwise fail the
+	-- NOT NULL constraint mid-batch, reporting a constraint name rather than
+	-- the entry. Seed data is normalised too; this makes it unconditional.
+	-- The ::text[] casts are required, not decoration: inside COALESCE a bare
+	-- '{}' is inferred as text and the statement fails to prepare.
+	VALUES ($1, $2, $3, $4, COALESCE($5, '{}'::text[]), COALESCE($6, '{}'::text[]),
+		$7, $8, $9)
 	ON CONFLICT (id) DO UPDATE SET
 		name            = EXCLUDED.name,
 		aliases         = EXCLUDED.aliases,
@@ -274,6 +283,15 @@ const upsertPositionSQL = `
 // renaming an id. Without it the old row keeps being served forever, and a
 // rename shows the athlete two glossary entries for one position.
 func (r *PostgresRepository) UpsertPositions(ctx context.Context, positions []Position) error {
+	// The prune below deletes everything not in `ids`, and `x <> ALL('{}')` is
+	// TRUE — so an empty slice truncates the glossary. validatePositions
+	// already rejects an empty seed, but that guard lives two layers away in
+	// another file, and the failure here is silent data loss inside a deploy
+	// command. Cheap to make the repository safe on its own.
+	if len(positions) == 0 {
+		return fmt.Errorf("technique: refusing to upsert an empty position set")
+	}
+
 	ids := make([]string, 0, len(positions))
 	batch := &pgx.Batch{}
 	for _, p := range positions {

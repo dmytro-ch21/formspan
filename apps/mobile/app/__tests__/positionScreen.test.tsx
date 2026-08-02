@@ -61,6 +61,12 @@ const CLOSED_GUARD: Position = {
   priorities: 'Bottom: break their posture down.\n\nTop: posture up and stay stacked.',
 };
 
+/**
+ * `position_detail` defaults to match the default `position`, and callers that
+ * override one should override both. A row carrying "Mount - Bottom" with a
+ * detail of "Closed Guard" cannot exist in the real catalog, and a fixture that
+ * pairs them teaches the next person the wrong shape.
+ */
 function technique(over: Partial<TechniqueSummary> & { id: string; name: string }): TechniqueSummary {
   return {
     aliases: [],
@@ -119,9 +125,24 @@ test('lists only the techniques from this position family', async () => {
   mockFetchTechniques.mockResolvedValue([
     technique({ id: 'armbar-closed-guard', name: 'Armbar from Closed Guard' }),
     technique({ id: 'scissor-sweep', name: 'Scissor Sweep', category: 'Sweep' }),
-    technique({ id: 'knee-slice', name: 'Knee Slice Pass', position: 'Half Guard - Top' }),
-    technique({ id: 'mount-escape', name: 'Mount Escape', position: 'Mount - Bottom' }),
-    technique({ id: 'guardless', name: 'Guardless Scramble', position: 'Guardless Scramble' }),
+    technique({
+      id: 'knee-slice',
+      name: 'Knee Slice Pass',
+      position: 'Half Guard - Top',
+      position_detail: 'Knee Shield',
+    }),
+    technique({
+      id: 'mount-escape',
+      name: 'Mount Escape',
+      position: 'Mount - Bottom',
+      position_detail: 'Low Mount',
+    }),
+    technique({
+      id: 'guardless',
+      name: 'Guardless Scramble',
+      position: 'Guardless Scramble',
+      position_detail: 'Open Space',
+    }),
   ]);
 
   render(<PositionScreen />);
@@ -175,6 +196,11 @@ test('the detail filter separates closed guard from open guard', async () => {
   expect(screen.getByText('Butterfly Sweep')).toBeTruthy();
   expect(screen.queryByText('Armbar from Closed Guard')).toBeNull();
   expect(screen.queryByText('Gogoplata')).toBeNull();
+  // The label, not just the rows. sectionLabel checks BOTH filter fields, and
+  // without this line dropping the detail_excludes half of that condition
+  // passes every test — silently regressing the 150-row entry to
+  // "THE GUARD FAMILY", which is the claim the label exists to prevent.
+  expect(screen.getByText('TECHNIQUES FROM HERE · 2')).toBeTruthy();
 });
 
 /**

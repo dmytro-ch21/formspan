@@ -638,12 +638,16 @@ components:
         family:
           type: string
           description: >
-            The join key back to the library. Match it against a
-            TechniqueSummary's `position` BY PREFIX (`position === family ||
-            position.startsWith(family + " - ")`) to list the techniques that
-            happen here — the technique rows carry side-qualified values like
-            "Guard - Bottom", so an equality check finds almost nothing.
-            NOTE "Back", not "Back Control", for back_control.
+            The join key back to the library, and the FIRST of two filters —
+            never sufficient alone. Match it against a TechniqueSummary's
+            `position` BY PREFIX (`position === family ||
+            position.startsWith(family + " - ")`) — the technique rows carry
+            side-qualified values like "Guard - Bottom", so an equality check
+            finds almost nothing. NOTE "Back", not "Back Control", for
+            back_control.
+
+            Then narrow with `detail_includes`/`detail_excludes`. Stopping here
+            puts closed and open guard on the same 187 techniques.
           enum:
             [
               Standing,
@@ -2030,8 +2034,10 @@ paths:
         All ten positions, already in pedagogical reading order. Fetch once and
         cache, like the rulesets. There is no per-position technique endpoint on
         purpose: a client that already holds the library resolves "techniques
-        from here" locally by prefix-matching each summary's `position` against
-        this entry's `family`.
+        from here" locally, by prefix-matching each summary's `position`
+        against this entry's `family` AND then applying
+        `detail_includes`/`detail_excludes` against its `position_detail`.
+        Both steps are required — see those fields.
       tags: [Techniques]
       responses:
         "200":

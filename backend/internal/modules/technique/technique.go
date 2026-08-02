@@ -118,6 +118,12 @@ type Position struct {
 	// positions that need them are opposite shapes: closed guard is a short
 	// enumerable set, open guard is everything-but. A client MUST apply both,
 	// or Open Guard silently lists closed-guard techniques again.
+	//
+	// Matching is exact and case-sensitive, and the library carries case
+	// variants ("High Mount" alongside "High mount", "S-Mount" alongside
+	// "S-mount"). Picking one silently drops the other's rows, and seed
+	// validation cannot catch it because both spellings genuinely exist. Check
+	// the distinct values before adding a detail here.
 	DetailIncludes []string `json:"detail_includes"`
 	DetailExcludes []string `json:"detail_excludes"`
 

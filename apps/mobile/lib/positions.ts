@@ -3,6 +3,16 @@ import { netFetch } from './authedFetch';
 import type { TokenGetter } from './useAuthToken';
 import type { TechniqueSummary } from './techniques';
 
+/**
+ * One collator, built once — the same fix `library.tsx` documents.
+ *
+ * `String.prototype.localeCompare` re-enters ICU on every call. Open guard
+ * cross-links 150 techniques, so sorting it is ~1,100 of those; a fresh
+ * collator per comparison is what produced measurable lag on the Library's
+ * merged list.
+ */
+const collator = new Intl.Collator(undefined, { sensitivity: 'base' });
+
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
 const API_BASE = `${API_URL}/v1`;
 
@@ -157,5 +167,5 @@ export function techniquesInPosition(
       if (includes.length > 0 && !includes.includes(t.position_detail)) return false;
       return !excludes.includes(t.position_detail);
     })
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .sort((a, b) => collator.compare(a.name, b.name));
 }

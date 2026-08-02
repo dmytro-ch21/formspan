@@ -69,7 +69,15 @@ export default function PositionScreen() {
 
   const load = useCallback(
     async (signal?: AbortSignal) => {
-      if (!id) return;
+      // `loading` starts true, so returning here without clearing it would
+      // leave the same permanent spinner the deadline handling exists to
+      // prevent — a route with no id is unreachable in practice, but "in
+      // practice" is what the timeout branch assumed too.
+      if (!id) {
+        setError('Position not found.');
+        setLoading(false);
+        return;
+      }
       // Both, and in this order. Without setLoading(true) a retry renders the
       // fallback branch for the whole request, because error is cleared while
       // position is still null.
