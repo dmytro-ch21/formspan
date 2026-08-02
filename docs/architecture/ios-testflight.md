@@ -52,9 +52,21 @@ npx expo run:ios --device --configuration Release
 
 Prerequisites, each of which fails the build in its own confusing way if missed:
 
-- **The phone plugged in over USB, unlocked, and trusted.** `xcrun devicectl
-  list devices` must show it. "No devices found" means the Trust prompt was
-  never accepted.
+- **The phone plugged in over USB, unlocked, and trusted.** Appearing in
+  `xcrun devicectl list devices` is **not** sufficient — that lists Wi-Fi-paired
+  phones too, so an unplugged phone still shows as `available (paired)` and the
+  build then hangs forever waiting for a device it cannot reach. Check the
+  transport, not the listing:
+
+  ```bash
+  xcrun devicectl list devices          # get the device's UUID column
+  xcrun devicectl device info details --device <UUID> --json-output /dev/stdout \
+    | grep -E 'tunnelState|transportType|pairingState|developerModeStatus'
+  ```
+
+  You want `tunnelState: connected`, `transportType: wired`,
+  `pairingState: paired`, `developerModeStatus: enabled`. "No devices found"
+  means the Trust prompt was never accepted.
 - **An Apple ID added in Xcode → Settings → Accounts.** Check with
   `security find-identity -v -p codesigning`; "0 valid identities found" means
   Xcode has no team to sign with.
@@ -64,6 +76,45 @@ Prerequisites, each of which fails the build in its own confusing way if missed:
 **Use `--configuration Release`.** A Debug build still needs Metro running on
 the same Wi-Fi, which defeats the point. Release bundles the JS into the binary,
 so the app runs standing alone at the gym with the Mac asleep at home.
+
+**Verify the bundle actually got embedded — `Build Succeeded` does not prove
+it.** A Debug build succeeds, installs, reports zero errors, and then shows
+"Could not connect to development server" the moment you open it away from the
+Mac, because `expo run:ios` stops Metro on exit. The two outcomes are
+indistinguishable from the build log; they differ by one file:
+
+```bash
+find ~/Library/Developer/Xcode/DerivedData/VOLA-*/Build/Products/Release-iphoneos/VOLA.app \
+  -name '*.jsbundle' -maxdepth 2
+```
+
+A ~5 MB `main.jsbundle` means the app is self-contained. No output means you
+built Debug — whatever the log said. This has been shipped by mistake once
+already, and the only reason it was caught was checking the `.app` rather than
+trusting the build output.
+
+**And a correct build is still not a correct install.** Observed: a Debug build
+installed at 22:54, a Release build at 22:56 whose log read
+`Installing .../Release-iphoneos/VOLA.app` — and the phone still ran the Debug
+one, failing with `No script URL provided … unsanitizedScriptURLString = (null)`.
+Both carry `CFBundleVersion: 1` and version `1.0.0`, which is the likely reason
+the replacement was skipped, though that was not proven. Verify on the device
+rather than in the log:
+
+```bash
+xcrun devicectl device process launch --device <UUID> --console \
+  --terminate-existing com.vola.fitness
+```
+
+`ReactInstance: evaluateJavaScript() with JS bundle` means the embedded bundle
+loaded. `No script URL provided` means the device is still running an older
+Debug install. Force the replacement explicitly — **do not uninstall first**,
+that destroys unsynced offline data in the app's SQLite store:
+
+```bash
+xcrun devicectl device install app --device <UUID> \
+  ~/Library/Developer/Xcode/DerivedData/VOLA-*/Build/Products/Release-iphoneos/VOLA.app
+```
 
 The signature **expires after 7 days** and the app stops launching — re-run the
 command to revive it. That is Apple's limit on free provisioning, not something
