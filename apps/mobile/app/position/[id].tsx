@@ -46,8 +46,17 @@ import { useAuthToken } from '@/lib/useAuthToken';
  * ~60s before it gives up, and a captive portal accepts the connection and then
  * says nothing — so without this the screen spins for a minute with no error
  * and nothing to retry.
+ *
+ * The abort REASON is half of it, and leaving it out is worse than having no
+ * deadline at all. Both an unmount and a timeout abort the same controller, and
+ * they need opposite handling: an unmount must set no state, a timeout must set
+ * an error. Treating them alike — returning early on `signal.aborted` — leaves
+ * `loading` true forever, replacing a slow screen that eventually errors with a
+ * spinner that never resolves and has no retry on it. `library.tsx` carries the
+ * same pair for the same reason.
  */
 const REQUEST_TIMEOUT_MS = 10_000;
+const TIMED_OUT = 'timed-out';
 
 export default function PositionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -75,18 +84,23 @@ export default function PositionScreen() {
         fetchTechniques(getToken, signal),
       ]);
 
-      if (signal?.aborted) return;
+      const timedOut = signal?.aborted && signal.reason === TIMED_OUT;
+      // An abort that is NOT the deadline is an unmount or a supersede: the
+      // screen is gone, so setting state would be pointless at best. The
+      // deadline falls through deliberately and is reported below.
+      if (signal?.aborted && !timedOut) return;
 
       if (p.status === 'rejected') {
-        if ((p.reason as Error)?.name === 'AbortError') return;
-        // A missing position and an unreachable server are different problems
-        // and only one of them is worth retrying. Telling someone to check
-        // their connection because they followed a dead link is a wrong answer
-        // delivered confidently.
+        // A missing position, a dead network and a timeout are three different
+        // problems, and only two of them are worth retrying. Telling someone to
+        // check their connection because they followed a dead link is a wrong
+        // answer delivered confidently.
         setError(
-          /\(404\)/.test(String((p.reason as Error)?.message))
-            ? 'That position is not in the library.'
-            : 'Could not load this position. Check your connection and try again.',
+          timedOut
+            ? 'This is taking too long. Check your connection and try again.'
+            : /\(404\)/.test(String((p.reason as Error)?.message))
+              ? 'That position is not in the library.'
+              : 'Could not load this position. Check your connection and try again.',
         );
         setLoading(false);
         return;
@@ -105,15 +119,23 @@ export default function PositionScreen() {
     [id, getToken],
   );
 
-  useEffect(() => {
-    const ac = new AbortController();
-    const deadline = setTimeout(() => ac.abort(), REQUEST_TIMEOUT_MS);
-    void load(ac.signal).finally(() => clearTimeout(deadline));
-    return () => {
-      clearTimeout(deadline);
-      ac.abort();
-    };
-  }, [load]);
+  // One place that arms a deadline, so the retry below gets the same treatment
+  // as the initial load. Without it a retry after a captive-portal hang — the
+  // single likeliest moment for one — runs with no deadline at all.
+  const loadWithDeadline = useCallback(
+    (external?: AbortController) => {
+      const ac = external ?? new AbortController();
+      const deadline = setTimeout(() => ac.abort(TIMED_OUT), REQUEST_TIMEOUT_MS);
+      void load(ac.signal).finally(() => clearTimeout(deadline));
+      return () => {
+        clearTimeout(deadline);
+        ac.abort();
+      };
+    },
+    [load],
+  );
+
+  useEffect(() => loadWithDeadline(), [loadWithDeadline]);
 
   if (loading) {
     return (
@@ -131,7 +153,7 @@ export default function PositionScreen() {
         <Text style={styles.error} testID="position-error">
           {error ?? 'Position not found.'}
         </Text>
-        <Pressable onPress={() => void load()} hitSlop={10} accessibilityRole="button">
+        <Pressable onPress={() => loadWithDeadline()} hitSlop={10} accessibilityRole="button">
           <Text style={styles.retry}>Try again</Text>
         </Pressable>
       </View>
@@ -149,9 +171,17 @@ export default function PositionScreen() {
       keyExtractor={(t) => t.id}
       contentContainerStyle={styles.list}
       // The 187-row case is why this is virtualised at all.
+      //
+      // No removeClippedSubviews, deliberately, though the Library uses it: RN
+      // documents it as able to drop content, and the shapes that trigger that
+      // are absolutely-positioned children and negative margins — both of which
+      // this list's header has (the hero's absoluteFill watermark, and the
+      // -20 margin that cancels the list padding). If it misfired, what would
+      // vanish is the prose, which is the entire point of the screen. windowSize
+      // already caps the mounted set, so the marginal gain is small and the
+      // downside is unverifiable without a device.
       initialNumToRender={10}
       windowSize={7}
-      removeClippedSubviews
       ListHeaderComponent={
         <>
           <Hero position={p} code={code} accent={accent} />
@@ -195,7 +225,15 @@ export default function PositionScreen() {
  * something it cannot know.
  */
 function sectionLabel(p: Position, count: number): string {
-  const scope = p.family.toLowerCase() === p.name.toLowerCase() ? 'HERE' : `THE ${p.family} FAMILY`;
+  // startsWith, not equality. Back Control's family is "Back" — a naming
+  // artefact of the technique rows saying "Back - Top (Back Control)", not a
+  // broader scope: nothing else maps to "Back", and both its top and bottom
+  // entries genuinely are back control. Equality qualified it as "THE BACK
+  // FAMILY", which is both wrong and not a phrase anyone in the sport uses.
+  // The qualifier is for the entries that really do share a family with a
+  // sibling — closed/open guard, and knee on belly under side control.
+  const shares = !p.name.toLowerCase().startsWith(p.family.toLowerCase());
+  const scope = shares ? `THE ${p.family} FAMILY` : 'HERE';
   return `TECHNIQUES FROM ${scope} · ${count}`.toUpperCase();
 }
 
@@ -374,7 +412,10 @@ const styles = StyleSheet.create({
   },
   cardHead: { flexDirection: 'row', alignItems: 'center', gap: 9 },
   cardRule: { width: 3, height: 13, borderRadius: 2 },
-  cardTitle: { color: vola.textDim, fontSize: 11, letterSpacing: 1.2, fontWeight: '800' },
+  // textMuted, not textDim: at 11px/800 this is not WCAG "large text", so 4.5:1
+  // applies and textDim measures 3.67:1 on `surface`. Same correction as the
+  // Library's glossary label.
+  cardTitle: { color: vola.textMuted, fontSize: 11, letterSpacing: 1.2, fontWeight: '800' },
 
   // Generous line height on purpose: this is read standing up, often between
   // rounds, and cramped leading is the first thing to fail in that state.
@@ -383,7 +424,16 @@ const styles = StyleSheet.create({
   sideBlock: { gap: 5 },
   sideLabel: { color: vola.lime, fontSize: 11, letterSpacing: 1.2, fontWeight: '800' },
 
-  edgeLabel: { color: vola.textDim, fontSize: 11, letterSpacing: 1.2, fontWeight: '800' },
+  edgeLabel: {
+    color: vola.textMuted, // 3.96:1 at textDim — under AA. See cardTitle.
+    fontSize: 11,
+    letterSpacing: 1.2,
+    fontWeight: '800',
+    // Pulls the label down toward the rows it names. The header's own 16pt
+    // padding otherwise leaves it equidistant between the card above and the
+    // list below, so it reads as floating rather than as a section heading.
+    marginBottom: -7,
+  },
   edgeRow: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 
 import PositionScreen from '../position/[id]';
 import type { Position } from '@/lib/positions';
@@ -216,10 +216,62 @@ test('still renders the position when the library fails', async () => {
 
 /** An honest failure, never a blank screen with empty fields. */
 test('reports a failure to load the position', async () => {
-  mockFetchPosition.mockRejectedValue(new Error('Request failed (404).'));
+  mockFetchPosition.mockRejectedValue(new Error('Request failed (500).'));
 
   render(<PositionScreen />);
 
   await waitFor(() => expect(screen.getByTestId('position-error')).toBeTruthy());
   expect(screen.queryByTestId('position-detail')).toBeNull();
+  expect(screen.getByText(/Check your connection/)).toBeTruthy();
+});
+
+/**
+ * A dead link and a dead network are different problems, and the text has to
+ * say which. Asserting the message, not just that *some* error rendered — the
+ * previous version of this test would have passed with the 404 branch deleted.
+ */
+test('says a missing position is missing, not that the network is down', async () => {
+  mockFetchPosition.mockRejectedValue(new Error('Request failed (404).'));
+
+  render(<PositionScreen />);
+
+  await waitFor(() => expect(screen.getByTestId('position-error')).toBeTruthy());
+  expect(screen.getByText('That position is not in the library.')).toBeTruthy();
+});
+
+/**
+ * The regression this screen shipped once: the request deadline fires, both
+ * promises reject with AbortError, and an unconditional `signal.aborted` guard
+ * returns before clearing `loading` — leaving a spinner that never resolves and
+ * carries no retry, which is strictly worse than having no deadline at all.
+ *
+ * An unmount aborts the same controller and must still set nothing, so the
+ * reason is what distinguishes them. Both directions are asserted.
+ */
+test('a timed-out request reports an error instead of spinning forever', async () => {
+  jest.useFakeTimers();
+  try {
+    // Never settles on its own — only the deadline can end this.
+    mockFetchPosition.mockImplementation((...args: unknown[]) => {
+      const signal = args[2] as AbortSignal | undefined;
+      return new Promise((_resolve, reject) => {
+        signal?.addEventListener('abort', () => {
+          const err = new Error('Aborted');
+          err.name = 'AbortError';
+          reject(err);
+        });
+      });
+    });
+    mockFetchTechniques.mockResolvedValue([]);
+
+    render(<PositionScreen />);
+    await act(async () => {
+      jest.advanceTimersByTime(10_000);
+    });
+
+    expect(screen.getByTestId('position-error')).toBeTruthy();
+    expect(screen.getByText(/taking too long/)).toBeTruthy();
+  } finally {
+    jest.useRealTimers();
+  }
 });

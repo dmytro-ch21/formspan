@@ -1,3 +1,13 @@
+// WITHOUT this the test is a no-op that reports success. `jest.setup.js`
+// mocks `@/lib/useAuthToken` globally, so the hook imported below would be the
+// mock's stable constant — trivially passing, with zero lines of the real hook
+// executed. Measured: coverage of useAuthToken.ts was 0% until this line.
+//
+// Clerk stays mocked on purpose. The setup's `useAuth` returns a fresh object
+// with a fresh `getToken` arrow per call, which is exactly the adversarial
+// condition the real hook exists to absorb.
+jest.unmock('@/lib/useAuthToken');
+
 import { renderHook } from '@testing-library/react-native';
 
 import { useAuthToken } from '@/lib/useAuthToken';

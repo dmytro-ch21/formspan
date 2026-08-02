@@ -5253,13 +5253,30 @@ of not having run it:
 invariant note above worried about a family typo producing a silently EMPTY
 list. What actually shipped was the opposite failure: `family` is coarse, so
 Closed Guard and Open Guard resolve to the same 187 techniques — and the Open
-Guard screen listed 36 entries whose names begin "Closed-Guard …" directly
-beneath its own sentence saying the ankles are *not* locked. An empty list
-looks broken and gets reported; an authoritative-looking wrong one does not,
-least of all by the beginner this feature exists for. Fixed in two places: the
-section header now names the scope ("TECHNIQUES FROM THE GUARD FAMILY") rather
-than claiming "FROM HERE", and both guard entries disclose the limitation in
-prose, which is the mitigation Knee on Belly already had and they didn't.
+Guard screen listed entries named "Closed-Guard …" directly beneath its own
+sentence saying the ankles are *not* locked. An empty list looks broken and
+gets reported; an authoritative-looking wrong one does not, least of all by the
+beginner this feature exists for. The section header now names the scope
+("TECHNIQUES FROM THE GUARD FAMILY") instead of claiming "FROM HERE", and both
+guard entries disclose the limitation in prose — the mitigation Knee on Belly
+already had and they didn't.
+
+**And the first attempt at that disclosure was itself false, which is the
+lesson worth keeping.** It told the reader the library "records only which side
+of the guard a technique happens on, not whether the guard is closed or open,"
+and offered a rule for spotting the strays: anything whose name begins
+"Closed-Guard". Both claims are wrong. `position_detail` *does* carry the
+distinction — 35 Closed Guard, 37 Open Guard — and the name rule catches 6 of
+those 35, implicitly endorsing the other 29 as open guard. Replacing a vague
+wrong claim with a specific checkable one aimed at the reader least able to
+check it is a worse outcome than doing nothing, and it took a second review
+pass to catch. The prose now says only what is true: the list is the whole
+guard family, closed and open together, and should be read as "guard".
+
+The real fix is available and deliberately not in this PR: `position_detail`
+supports splitting Closed Guard (35 exactly) from the rest of the family. It
+needs a way to express "narrow within a family" on a Position, which is a
+schema change, and this branch is already large. Logged as an open item.
 
 *A 187-row list was mounted eagerly.* `technique/[id]`'s `ScrollView` was
 copied wholesale, which is safe there because its edge lists are 6-29 items.
@@ -5267,6 +5284,18 @@ Here it meant ~900 native views on the two entries a beginner opens first —
 and `library.tsx` already carries the comment explaining why that stalls a
 phone. Now a `FlatList` with the prose as `ListHeaderComponent`. Purely a
 runtime defect: it typechecks, it tests green, and only a device shows it.
+
+*And the fix for it introduced a third.* Adding a 10-second request deadline —
+copied from `library.tsx`, whose comment explains that iOS otherwise takes ~60
+seconds to give up — reproduced a spinner that never resolves. Both an unmount
+and a timeout abort the same controller, and they need opposite handling: one
+must set no state, the other must set an error. `library.tsx` passes a *reason*
+to `abort()` and discriminates on it; only the timer was copied, not the
+reason, so an unconditional `signal.aborted` guard returned before clearing
+`loading`. That is strictly worse than having no deadline: the screen used to
+recover with an error at ~60s and now never recovered, from a branch with no
+retry control on it. Both directions are now tested, and the test was checked
+by restoring the bug.
 
 Smaller review outcomes worth keeping: the position tile code is keyed on the
 position id rather than its family, because keying on family printed `GRD`
@@ -5505,6 +5534,8 @@ gap between what the code claimed and what it did rather than only what it
 did.
 
 ## Open items / known gaps as of this entry
+
+- **Closed Guard and Open Guard cross-link to the same 187 techniques.** The glossary's `family` is coarse — it prefix-matches `techniques.position`, which only records `Guard - Bottom`/`Guard - Top`. Both screens now say so in prose and label the list "TECHNIQUES FROM THE GUARD FAMILY" rather than claiming the techniques are that position's own, so it is honest, but it is not right. The data to fix it exists: `position_detail` holds `Closed Guard` on exactly 35 rows and `Open Guard` on 37. What is missing is a way to express "narrow within a family" on a Position — an include/exclude list of `position_detail` values — which is a schema change deliberately left out of an already-large branch. Knee on Belly shares the shape at smaller scale (it borrows Side Control's 45).
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.
 - Functional test suite not yet passing — blocked on applying the `--hostname` fix to `tests/functional/support/start-stack.mjs` (the user's own in-progress file — not something to edit unilaterally).
