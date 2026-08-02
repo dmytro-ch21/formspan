@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -311,5 +312,238 @@ func TestTechniqueEnrichment(t *testing.T) {
 	}
 	if len(byAlias) == 0 {
 		t.Error("alias search found nothing; search is name-only again")
+	}
+}
+
+func TestPositionSeedData_IsValid(t *testing.T) {
+	positions, err := PositionSeedData()
+	if err != nil {
+		t.Fatalf("PositionSeedData: %v", err)
+	}
+
+	// The glossary exists to cover the positions a beginner meets, so a
+	// shrinking set is a content regression rather than a refactor.
+	if len(positions) < 10 {
+		t.Fatalf("expected the full glossary, got %d entries", len(positions))
+	}
+
+	for _, p := range positions {
+		if len(p.Description) < 100 || len(p.Priorities) < 100 {
+			t.Errorf("position %q has stub prose — the glossary is the feature", p.ID)
+		}
+	}
+}
+
+// The cross-link, checked against the real content and WITHOUT a database.
+//
+// This is the guard on the one thing that fails silently: `family` is
+// prefix-matched against `techniques.position`, so a wrong value seeds fine,
+// renders fine, and lists nothing. Three properties of this test matter.
+//
+// It runs offline. Both sides are embedded JSON, so the property is a pure
+// function of two files and needs no Postgres — which means it runs on every
+// `go test`, not only where TEST_DATABASE_URL happens to be set. The
+// integration test below still covers round-trip fidelity; this covers the
+// content, and the content is what changes.
+//
+// It is not circular. Asserting `validFamilies[p.Family]` would only restate
+// what validatePositions already enforces, and could never catch the likelier
+// mistake — someone "fixing" the set by adding "Back Control" to BOTH the map
+// and the JSON, at which point validator and test agree and the app is broken.
+// Matching against the actual technique rows is the only check that survives
+// that, and it subsumes the hardcoded back-control assertion this replaced.
+func TestPositionsResolveAgainstTheLibrary(t *testing.T) {
+	positions, err := PositionSeedData()
+	if err != nil {
+		t.Fatalf("PositionSeedData: %v", err)
+	}
+	techniques, err := SeedData()
+	if err != nil {
+		t.Fatalf("SeedData: %v", err)
+	}
+
+	// The clients' own rule, restated here on purpose: if it drifts from
+	// apps/mobile/lib/positions.ts, this test should be what notices.
+	inFamily := func(position, family string) bool {
+		return position == family || strings.HasPrefix(position, family+" - ")
+	}
+
+	// The detail filters, applied exactly as the client does.
+	inScope := func(p Position, detail string) bool {
+		if len(p.DetailIncludes) > 0 && !slices.Contains(p.DetailIncludes, detail) {
+			return false
+		}
+		return !slices.Contains(p.DetailExcludes, detail)
+	}
+
+	// Every detail a position names must exist in the library. This is the
+	// `family` trap one level down and it fails the same silent way: a typo in
+	// detail_includes empties the list rather than erroring, and closed guard —
+	// the entry most likely to be opened first — is the one that uses it.
+	details := make(map[string]bool, len(techniques))
+	for _, tq := range techniques {
+		details[tq.PositionDetail] = true
+	}
+
+	covered := make(map[string]bool)
+	for _, p := range positions {
+		for _, d := range slices.Concat(p.DetailIncludes, p.DetailExcludes) {
+			if !details[d] {
+				t.Errorf("position %q names position_detail %q, which no technique has", p.ID, d)
+			}
+		}
+
+		matches := 0
+		for _, tq := range techniques {
+			if inFamily(tq.Position, p.Family) {
+				// Coverage is tracked on the FAMILY match, not the narrowed
+				// one: a detail deliberately excluded from open guard is still
+				// explained by closed guard, so it is not an orphan.
+				covered[tq.Position] = true
+				if inScope(p, tq.PositionDetail) {
+					matches++
+				}
+			}
+		}
+		if matches == 0 {
+			t.Errorf("position %q (family %q) matches no technique — its cross-link is dead",
+				p.ID, p.Family)
+		}
+	}
+
+	// The whole point of the detail filters. EXACT counts, not "these differ" —
+	// the weaker assertion passes on the very regression this guards:
+	// deleting closed-guard's detail_includes puts it back on the whole
+	// 187-technique family while open-guard stays at 150, so the two are still
+	// unequal and nothing fails. Same lesson, and the same fix, as the pinned
+	// wantRestrictedRulesets above.
+	//
+	// The guard family is 187. The split is 37 closed ("Closed Guard" plus
+	// "Rubber Guard") and 150 open (the rest), and 37+150 == 187 is the check
+	// that the two partition the family rather than merely differing.
+	const (
+		wantClosedGuard = 37
+		wantOpenGuard   = 150
+	)
+	scoped := func(id string) int {
+		n := 0
+		for _, p := range positions {
+			if p.ID != id {
+				continue
+			}
+			for _, tq := range techniques {
+				if inFamily(tq.Position, p.Family) && inScope(p, tq.PositionDetail) {
+					n++
+				}
+			}
+		}
+		return n
+	}
+	closed, open := scoped("closed-guard"), scoped("open-guard")
+	if closed != wantClosedGuard {
+		t.Errorf("closed guard resolves to %d techniques, want %d", closed, wantClosedGuard)
+	}
+	if open != wantOpenGuard {
+		t.Errorf("open guard resolves to %d techniques, want %d", open, wantOpenGuard)
+	}
+
+	family := 0
+	for _, tq := range techniques {
+		if inFamily(tq.Position, "Guard") {
+			family++
+		}
+	}
+	if closed+open != family {
+		t.Errorf("the two guards cover %d of the family's %d — they must partition it",
+			closed+open, family)
+	}
+
+	// The reverse direction. A technique position with no glossary entry behind
+	// it means the Library offers a filter family the glossary cannot explain.
+	// "Other" is the one genuine orphan in the current library (1 of 466) and is
+	// not a position anyone would look up.
+	for _, tq := range techniques {
+		if tq.Position != "Other" && !covered[tq.Position] {
+			t.Errorf("technique position %q has no glossary entry behind it", tq.Position)
+		}
+	}
+}
+
+func TestValidatePositions_RejectsBadContent(t *testing.T) {
+	ok := Position{ID: "a", Name: "A", Family: "Guard", Description: "d", Priorities: "p"}
+	mutate := func(f func(*Position)) []Position {
+		p := ok
+		f(&p)
+		return []Position{p}
+	}
+
+	cases := []struct {
+		name string
+		in   []Position
+	}{
+		{"duplicate id", []Position{ok, ok}},
+		{"missing id", mutate(func(p *Position) { p.ID = "" })},
+		{"missing name", mutate(func(p *Position) { p.Name = "" })},
+		{"unknown family", mutate(func(p *Position) { p.Family = "Back Control" })},
+		{"missing description", mutate(func(p *Position) { p.Description = "" })},
+		{"missing priorities", mutate(func(p *Position) { p.Priorities = "" })},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := validatePositions(tc.in); err == nil {
+				t.Fatal("expected a validation error, got nil")
+			}
+		})
+	}
+}
+
+func TestPostgresRepository_SeedPositionsAndGet(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	n, err := SeedPositions(ctx, repo)
+	if err != nil {
+		t.Fatalf("seed positions: %v", err)
+	}
+
+	all, err := repo.Positions(ctx)
+	if err != nil {
+		t.Fatalf("positions: %v", err)
+	}
+	if len(all) != n {
+		t.Errorf("seeded %d but listed %d", n, len(all))
+	}
+
+	// The reading order is the product decision — alphabetical would open the
+	// glossary on Back Control, which is the last thing a beginner needs.
+	for i := 1; i < len(all); i++ {
+		if all[i].OrderIndex < all[i-1].OrderIndex {
+			t.Fatalf("positions came back out of order: %q(%d) after %q(%d)",
+				all[i].ID, all[i].OrderIndex, all[i-1].ID, all[i-1].OrderIndex)
+		}
+	}
+
+	// Seeding runs on every deploy, so an unchanged entry must be a true no-op.
+	before, err := repo.GetPosition(ctx, all[0].ID)
+	if err != nil {
+		t.Fatalf("get before: %v", err)
+	}
+	if _, err := SeedPositions(ctx, repo); err != nil {
+		t.Fatalf("re-seed: %v", err)
+	}
+	after, err := repo.GetPosition(ctx, before.ID)
+	if err != nil {
+		t.Fatalf("get after: %v", err)
+	}
+	if !after.UpdatedAt.Equal(before.UpdatedAt) {
+		t.Error("updated_at moved on a no-op re-seed")
+	}
+
+	missing, err := repo.GetPosition(ctx, "no-such-position")
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+	if missing != nil {
+		t.Errorf("expected nil alongside the error, got %+v", missing)
 	}
 }

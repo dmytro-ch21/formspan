@@ -80,6 +80,68 @@ type Summary struct {
 	IBJJFRulesetID string `json:"ibjjf_ruleset_id"`
 }
 
+// Position is one of the graph's nodes, made readable.
+//
+// The library models techniques as edges between positions (see the package
+// comment, and docs/decisions/bjj-tracking-design.md §4). The edges have always
+// been seeded; the nodes were only ever free-text tags on them, which is enough
+// to filter a list and useless to a beginner. "Armbar from Closed Guard" means
+// nothing until something says what closed guard is.
+//
+// Ten curated entries, so no filtering, paging or search — a client fetches
+// them once, like Rulesets. Unlike Rulesets, the ids are hand-authored and
+// stable rather than content-addressed, which is why there is no orphan-pruning
+// step and no ordering constraint against UpsertAll: positions are referenced by
+// nothing, and editing one updates its row instead of minting a new id.
+type Position struct {
+	ID      string   `json:"id"`
+	Name    string   `json:"name"`
+	Aliases []string `json:"aliases"`
+
+	// The join key back to the library, matching the family prefixes on
+	// Technique.Position ("Guard", "Half Guard", "Side Control", "Back" — note
+	// "Back", not "Back Control"). Clients resolve "techniques from here"
+	// locally against the summaries they already hold, so this is what makes
+	// the cross-link free. A wrong value produces an empty list rather than an
+	// error, so seed validation checks it against the known set.
+	Family string `json:"family"`
+
+	// Narrow the cross-link within Family, using techniques.position_detail.
+	//
+	// Family alone cannot separate closed guard from open guard: the technique
+	// rows say only "Guard - Bottom". PositionDetail can — it carries "Closed
+	// Guard" on 35 and "Open Guard" on 37 — so these two express which side of
+	// that split a position wants.
+	//
+	// Includes is a whitelist (empty means "the whole family"), Excludes a
+	// blacklist applied after it. They are opposite operations because the two
+	// positions that need them are opposite shapes: closed guard is a short
+	// enumerable set, open guard is everything-but. A client MUST apply both,
+	// or Open Guard silently lists closed-guard techniques again.
+	//
+	// Matching is exact and case-sensitive, and the library carries case
+	// variants ("High Mount" alongside "High mount", "S-Mount" alongside
+	// "S-mount"). Picking one silently drops the other's rows, and seed
+	// validation cannot catch it because both spellings genuinely exist. Check
+	// the distinct values before adding a detail here.
+	DetailIncludes []string `json:"detail_includes"`
+	DetailExcludes []string `json:"detail_excludes"`
+
+	// Pedagogical, not alphabetical — alphabetical opens the glossary on Back
+	// Control, which is the last thing a beginner needs. Spaced by 10 so an
+	// entry can be inserted later without renumbering.
+	OrderIndex int `json:"order_index"`
+
+	// Description is what the position is and how you arrive in it; Priorities
+	// is what you are trying to do while there, for both players. Split for the
+	// same reason Technique splits Description from WhenToUse.
+	Description string `json:"description"`
+	Priorities  string `json:"priorities"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 type Technique struct {
 	ID      string   `json:"id"`
 	Name    string   `json:"name"`
@@ -137,6 +199,16 @@ type Repository interface {
 	List(ctx context.Context, f Filter) ([]Summary, error)
 	Get(ctx context.Context, id string) (*Technique, error)
 	Rulesets(ctx context.Context) ([]Ruleset, error)
+
+	// Positions returns all ten, ordered pedagogically. GetPosition reports a
+	// missing id as ErrNotFound — the same sentinel Get uses, because the two
+	// id namespaces are disjoint and a caller always knows which it asked for.
+	Positions(ctx context.Context) ([]Position, error)
+	GetPosition(ctx context.Context, id string) (*Position, error)
+
+	// Unlike UpsertRulesets, this has no ordering constraint: nothing holds an
+	// FK to positions, so it may run before or after UpsertAll.
+	UpsertPositions(ctx context.Context, positions []Position) error
 
 	// Rulesets must be upserted before techniques: the technique rows carry an
 	// FK to them, so the reverse order fails on the constraint.

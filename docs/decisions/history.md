@@ -5149,6 +5149,178 @@ only "Blue" — leaving a screen-reader user no way to learn the filter is
 cumulative. `SmallChip` now takes an optional accessible name, used by the
 belt row and deliberately not by the position row, where the visible text
 already means what it says.
+## 2026-08-02 — The library's positions stop being filter labels and become content
+
+The user, reading the BJJ library as a beginner would, noticed what was
+missing: every one of the 466 entries is a *move*, and nothing anywhere says
+what a closed guard, a side control or a back mount actually **is**. Their
+framing is the whole justification — "imagine a novice starts the journey and
+they will download the app and learn from there... when we put together a
+course plan for belts etc., these should be there."
+
+They were right that it was absent, and it was absent by design rather than by
+oversight. `docs/decisions/bjj-tracking-design.md` §4 already describes the
+library as a graph — techniques are edges, positions are the organizing
+dimension they run between — and the July-31 "One Library" work built a
+position filter chip row on exactly that idea. But the nodes of that graph
+never had any content of their own. Positions existed as free text on
+`techniques.position` and as a seven-item client-side taxonomy: enough to
+narrow a list, useless to someone who does not already know the vocabulary.
+
+**What was built:** ten curated glossary entries (Standing, Closed Guard, Open
+Guard, Half Guard, Side Control, Knee on Belly, Mount, North-South, Back
+Control, Turtle), each with two prose fields — `description` (what it is and
+how you arrive there) and `priorities` (what each player is trying to do,
+written for both top and bottom, because every position is someone's good news
+and someone else's problem). Backend + mobile in this PR; web follows.
+
+**Why it lives in the `technique` module rather than its own.** Straight
+precedent from `ibjjf_rulesets`, which is already a secondary table inside that
+module: it is reference content for the library, read on the same screens,
+seeded by the same command. A module boundary would have bought a package and
+cost a cross-module call on every library render. Two things were deliberately
+*not* copied from the rulesets precedent, because they exist there for reasons
+that do not apply: positions have hand-authored stable ids rather than
+content-addressed hashes, so there is no orphan-pruning step, and nothing holds
+an FK to them, so there is no upsert-ordering constraint against `UpsertAll`.
+
+**`SeedPositions` is separate from `Seed` for a concrete reason.** `Seed`
+returns the technique count, and `postgres_test.go` compares that number
+against the length of the technique list. Folding a second content type into
+the same return value would have broken that assertion in a way that reads as
+an unrelated failure. One exported function per content type, one log line
+each in `cmd/seed`.
+
+**The failure mode this feature ships with, if it ships with one, is silent.**
+`family` is the join key back to the library, and it is prefix-matched against
+side-qualified technique values — so back control's family must be the string
+`Back`, not `Back Control`, because the rows say `Back - Top (Back Control)`. A
+typo there produces a screen that renders perfectly and lists no techniques,
+with nothing logging a fault anywhere. Hence two guards: Go-side seed
+validation rejects any family outside the known set, and
+`TestPositionsCrossLinkToTechniques` seeds both tables and asserts every
+position matches at least one real technique.
+
+**Known and accepted:** Closed Guard and Open Guard cross-link to the *same*
+techniques. `techniques.position` only distinguishes `Guard - Bottom` from
+`Guard - Top`; the closed/open split lives in free-text `position_detail`.
+Refining that is a later change. Knee on Belly has no techniques of its own in
+the library at all (verified — no row carries that position), so it borrows the
+Side Control family and its description says outright that it is a transitional
+control reached from there, rather than quietly rendering a thinner card.
+
+**Two things found while verifying, both worth more than the feature.**
+
+*The shared component-test mock manufactured the exact bug the real hook exists
+to prevent.* `jest.setup.js` mocked `useAuthToken` as `() => async () => 'tok'`
+— a fresh function per render. The real hook goes to deliberate lengths to be
+identity-stable, and its own doc comment lists the three live bugs an unstable
+`getToken` caused (infinite refetch loops, wiped local state, defeated
+debounces). The mock reintroduced all of it inside the test harness: the new
+screen re-entered its loading state forever, and every assertion after the
+first `waitFor` failed. It read exactly like a bug in the screen. Fixed by
+hoisting one getter — and it is worth noting the harness had this wrong for
+every screen test written since PR #82.
+
+*A test that passed for the wrong reason, caught by mutating the code it
+claimed to cover.* The cross-link test asserted that `Half Guard - Top` and
+`Mount - Bottom` are excluded from the Guard family. Removing the `- ` from the
+prefix rule — the separator the comment calls load-bearing — did not fail it,
+because neither fixture value starts with `Guard` at all. The assertion was
+decorative. A `Guardless Scramble` fixture now makes it real, and the mutation
+is caught. Same discipline as PR #75 and #78; the same lesson keeps arriving.
+
+**Not verified on device.** The Simulator was not able to exercise this. Expo
+Go on the booted simulator kept serving a cached bundle — it rendered a belt
+filter that, at the time, existed in no branch of this repo, and made no
+request to the local API even after Metro served a fresh bundle twice with the
+right URL inlined. (The belt filter turned out to be real: #87 landed
+mid-session. That resolved the mystery of *where* the stale bundle came from,
+not why Expo Go kept preferring it.) Along the way this reconfirmed two
+documented traps — `npx expo start` without
+`NODE_OPTIONS=--dns-result-order=ipv4first` binds Metro to `[::1]` only, and
+`.env.local` overrides a shell-supplied `EXPO_PUBLIC_*` unless
+`EXPO_NO_DOTENV=1` is set. Clearing Expo Go's data container would likely fix
+it but signs the account out of the simulator, so it was left for the user to
+decide. The render path is covered instead by ten component tests
+(`app/__tests__/positionScreen.test.tsx`), which is where this screen's bugs
+would live.
+
+**And the reviewers found two the tests could not.** Both were the direct cost
+of not having run it:
+
+*The cross-link was wrong-but-plausible, which is worse than empty.* The
+invariant note above worried about a family typo producing a silently EMPTY
+list. What actually shipped was the opposite failure: `family` is coarse, so
+Closed Guard and Open Guard resolve to the same 187 techniques — and the Open
+Guard screen listed entries named "Closed-Guard …" directly beneath its own
+sentence saying the ankles are *not* locked. An empty list looks broken and
+gets reported; an authoritative-looking wrong one does not, least of all by the
+beginner this feature exists for. The section header now names the scope
+("TECHNIQUES FROM THE GUARD FAMILY") instead of claiming "FROM HERE", and both
+guard entries disclose the limitation in prose — the mitigation Knee on Belly
+already had and they didn't.
+
+**And the first attempt at that disclosure was itself false, which is the
+lesson worth keeping.** It told the reader the library "records only which side
+of the guard a technique happens on, not whether the guard is closed or open,"
+and offered a rule for spotting the strays: anything whose name begins
+"Closed-Guard". Both claims are wrong. `position_detail` *does* carry the
+distinction — 35 Closed Guard, 37 Open Guard — and the name rule catches 6 of
+those 35, implicitly endorsing the other 29 as open guard. Replacing a vague
+wrong claim with a specific checkable one aimed at the reader least able to
+check it is a worse outcome than doing nothing, and it took a second review
+pass to catch. The prose now says only what is true: the list is the whole
+guard family, closed and open together, and should be read as "guard".
+
+**The real fix landed in the end, and it was smaller than the deferral
+implied.** `Position` gained `detail_includes`/`detail_excludes`, which narrow
+the family match using `techniques.position_detail`. Two columns rather than
+one because the two entries need opposite operations: closed guard whitelists
+a short enumerable set (`Closed Guard`, `Rubber Guard` — 37 techniques), while
+open guard is "the rest of the family" across 26 detail values that grow with
+the library, so it blacklists the same two (150). Every other position leaves
+both empty and takes its whole family. With the split real, the disclaimer
+prose came back out — the honest thing to say became nothing at all — and the
+section label stopped qualifying the two guards, since their lists are now
+genuinely their own. Knee on Belly is the only entry still labelled "FROM THE
+SIDE CONTROL FAMILY", which is correct: it has no techniques of its own.
+
+*A 187-row list was mounted eagerly.* `technique/[id]`'s `ScrollView` was
+copied wholesale, which is safe there because its edge lists are 6-29 items.
+Here it meant ~900 native views on the two entries a beginner opens first —
+and `library.tsx` already carries the comment explaining why that stalls a
+phone. Now a `FlatList` with the prose as `ListHeaderComponent`. Purely a
+runtime defect: it typechecks, it tests green, and only a device shows it.
+
+*And the fix for it introduced a third.* Adding a 10-second request deadline —
+copied from `library.tsx`, whose comment explains that iOS otherwise takes ~60
+seconds to give up — reproduced a spinner that never resolves. Both an unmount
+and a timeout abort the same controller, and they need opposite handling: one
+must set no state, the other must set an error. `library.tsx` passes a *reason*
+to `abort()` and discriminates on it; only the timer was copied, not the
+reason, so an unconditional `signal.aborted` guard returned before clearing
+`loading`. That is strictly worse than having no deadline: the screen used to
+recover with an error at ~60s and now never recovered, from a branch with no
+retry control on it. Both directions are now tested, and the test was checked
+by restoring the bug.
+
+Smaller review outcomes worth keeping: the position tile code is keyed on the
+position id rather than its family, because keying on family printed `GRD`
+twice and `SDE` twice — and with every glossary tile deliberately achromatic,
+the three letters are the *only* differentiator, so an ambiguous code breaks
+`LibraryTile`'s stated rule from the other side. Two factual errors in the seed
+prose were corrected (side control does not score three points — the *pass*
+does; and mount's four points are tied with back control, not "the most").
+`UpsertPositions` now deletes rows no longer in the seed: stable ids mean
+editing prose can't strand anything, but *renaming* an id would have shown the
+athlete two entries for one position. And the DB-gated cross-link test was
+rewritten to run offline against the two embedded JSON files — it was both
+circular (asserting the same map the validator enforces) and skipped on every
+local run, so the strongest guard on the load-bearing invariant only ever
+executed in CI.
+
+---
 
 ## 2026-08-02 — Logging classes, drilling and rolling
 
@@ -5370,6 +5542,10 @@ gap between what the code claimed and what it did rather than only what it
 did.
 
 ## Open items / known gaps as of this entry
+
+- **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
+- **Two position taxonomies now sit on one Library screen.** The filter chips are seven coarse families; the glossary is ten curated entries. Since the guard split they disagree in a visible way: a beginner can read the Closed Guard card, learn the distinction, and then find no chip that filters to those 37 techniques. Adding North-South closed the cheap half (a position the glossary advertised that no chip could reach). Keying the chips on the glossary's ten ids is the real answer and is design work, not a patch.
+
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.
 - Functional test suite not yet passing — blocked on applying the `--hostname` fix to `tests/functional/support/start-stack.mjs` (the user's own in-progress file — not something to edit unilaterally).

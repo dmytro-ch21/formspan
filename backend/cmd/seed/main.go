@@ -55,6 +55,12 @@ func main() {
 	}
 	log.Printf("seed: techniques: %d upserted", tn)
 
+	pn, err := technique.SeedPositions(ctx, technique.NewPostgresRepository(pool))
+	if err != nil {
+		log.Fatalf("seed: positions: %v", err)
+	}
+	log.Printf("seed: positions: %d upserted", pn)
+
 	// Bound health_events while we're here. The seed is the only thing this
 	// project runs on a schedule (predeploy, every deploy), and the table had
 	// no retention at all — it grew forever. Failure is logged, never fatal:

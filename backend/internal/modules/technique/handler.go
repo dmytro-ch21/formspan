@@ -56,6 +56,32 @@ func (h *Handler) Rulesets(w http.ResponseWriter, r *http.Request) {
 	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"rulesets": rulesets})
 }
 
+// Positions returns the whole glossary — ten entries, so the same
+// fetch-once-and-keep treatment as Rulesets. Clients resolve "techniques from
+// here" locally against the library they already hold, which is why there is no
+// filter parameter and no per-position technique endpoint.
+func (h *Handler) Positions(w http.ResponseWriter, r *http.Request) {
+	positions, err := h.repo.Positions(r.Context())
+	if err != nil {
+		apihttp.WriteInternal(w, r, "technique: positions", err)
+		return
+	}
+	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"positions": positions})
+}
+
+func (h *Handler) GetPosition(w http.ResponseWriter, r *http.Request) {
+	p, err := h.repo.GetPosition(r.Context(), r.PathValue("positionID"))
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			apihttp.WriteError(w, http.StatusNotFound, apihttp.CodeNotFound, "position not found")
+			return
+		}
+		apihttp.WriteInternal(w, r, "technique: position", err)
+		return
+	}
+	apihttp.WriteJSON(w, http.StatusOK, p)
+}
+
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	t, err := h.repo.Get(r.Context(), r.PathValue("techniqueID"))
 	if err != nil {

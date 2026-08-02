@@ -604,6 +604,114 @@ components:
           type: array
           items: { $ref: "#/components/schemas/IBJJFRuleset" }
 
+    Position:
+      type: object
+      description: >
+        One entry in the BJJ position glossary — the nodes of the graph the
+        technique library forms. Techniques are the edges between positions;
+        this is what the positions themselves are, written for someone who has
+        never trained. Ten curated entries, read-only, the same for every user.
+      required:
+        [
+          id,
+          name,
+          aliases,
+          family,
+          detail_includes,
+          detail_excludes,
+          order_index,
+          description,
+          priorities,
+          created_at,
+          updated_at,
+        ]
+      properties:
+        id:
+          type: string
+          description: Hand-authored and stable, unlike an IBJJFRuleset's content-addressed id.
+          example: closed-guard
+        name: { type: string, example: Closed Guard }
+        aliases:
+          type: array
+          items: { type: string }
+          description: What else the position is called — "full guard", "closed".
+        family:
+          type: string
+          description: >
+            The join key back to the library, and the FIRST of two filters —
+            never sufficient alone. Match it against a TechniqueSummary's
+            `position` BY PREFIX (`position === family ||
+            position.startsWith(family + " - ")`) — the technique rows carry
+            side-qualified values like "Guard - Bottom", so an equality check
+            finds almost nothing. NOTE "Back", not "Back Control", for
+            back_control.
+
+            Then narrow with `detail_includes`/`detail_excludes`. Stopping here
+            puts closed and open guard on the same 187 techniques.
+          enum:
+            [
+              Standing,
+              Guard,
+              Half Guard,
+              Side Control,
+              Mount,
+              North-South,
+              Back,
+              Turtle,
+            ]
+          example: Guard
+        detail_includes:
+          type: array
+          items: { type: string }
+          description: >
+            Narrows the family match using a TechniqueSummary's
+            `position_detail`. When non-empty, ONLY techniques whose
+            `position_detail` appears here belong to this position. Empty on
+            most entries, meaning "the whole family".
+          example: [Closed Guard, Rubber Guard]
+        detail_excludes:
+          type: array
+          items: { type: string }
+          description: >
+            The opposite operation, applied after `detail_includes`: techniques
+            whose `position_detail` appears here are dropped.
+
+            A client MUST apply BOTH, or the two guard entries collapse back
+            into one list. `family` cannot separate closed guard from open
+            guard — the technique rows record only "Guard - Bottom" — so
+            without these, Open Guard lists closed-guard techniques directly
+            beneath a description saying the ankles are not locked. Closed
+            guard whitelists the two details it wants; open guard blacklists
+            the same two, because "everything else in the family" spans 26
+            values that grow with the library.
+          example: [Closed Guard, Rubber Guard]
+        order_index:
+          type: integer
+          description: >
+            Pedagogical reading order, not alphabetical — standing, then the
+            guards, then the pins roughly as a beginner meets them. Already
+            applied by the list endpoint; re-sorting by name undoes the point.
+          example: 10
+        description:
+          type: string
+          description: What the position is, and how you end up in it.
+        priorities:
+          type: string
+          description: >
+            What each player is trying to do while there. Covers both sides of
+            the position in one field, separated by a blank line — every
+            position is someone's good news and someone else's problem.
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    PositionList:
+      type: object
+      required: [positions]
+      properties:
+        positions:
+          type: array
+          items: { $ref: "#/components/schemas/Position" }
+
     WorkoutItem:
       type: object
       description: >
@@ -1917,6 +2025,47 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/IBJJFRulesetList" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /techniques/positions:
+    get:
+      summary: List the BJJ position glossary
+      operationId: listPositions
+      description: >
+        All ten positions, already in pedagogical reading order. Fetch once and
+        cache, like the rulesets. There is no per-position technique endpoint on
+        purpose: a client that already holds the library resolves "techniques
+        from here" locally, by prefix-matching each summary's `position`
+        against this entry's `family` AND then applying
+        `detail_includes`/`detail_excludes` against its `position_detail`.
+        Both steps are required — see those fields.
+      tags: [Techniques]
+      responses:
+        "200":
+          description: Every position, ordered by order_index.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PositionList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /techniques/positions/{positionID}:
+    get:
+      summary: Get one position
+      operationId: getPosition
+      tags: [Techniques]
+      parameters:
+        - name: positionID
+          in: path
+          required: true
+          schema: { type: string }
+          example: closed-guard
+      responses:
+        "200":
+          description: The position.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Position" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /techniques/{techniqueID}:
     get:

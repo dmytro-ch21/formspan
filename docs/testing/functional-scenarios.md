@@ -2379,3 +2379,65 @@ own, so none of them is redundant with "the FK exists".
   rather than silently dropped.
 - A reflection blob that no longer parses is skipped, not fatal — the session
   and its timing still push and the row still settles clean.
+## BJJ position glossary (backend, mobile)
+
+The library's 466 entries are all *moves*; these ten are what those moves
+happen inside of. Every scenario here is about reference content a signed-in
+athlete reads — nothing writes, so there is no offline outbox and no
+conflict story.
+
+### Reading the glossary, happy path
+
+- With `bjj` enabled, the Library tab shows a "New to BJJ? Start with the
+  positions" row of ten cards, in pedagogical order: Standing first, Turtle
+  last. Alphabetical order is the bug to watch for — it opens the row on
+  Back Control.
+- Tapping a card opens the position screen with the header title "Position",
+  and it shows the name, its aliases, "What it is", and "What matters here".
+- A position whose priorities are written for both players renders two
+  labelled blocks (BOTTOM, TOP); Standing, which has one paragraph and no
+  labels, renders as plain prose with no empty heading above it.
+- "Techniques from here" lists real techniques with a count, and tapping one
+  opens that technique's detail screen. Back returns to the position, not to
+  the Library.
+- Knee on Belly is the entry that reads oddly if the cross-link is wrong: no
+  technique carries that position, so its list comes from the Side Control
+  family. It must not render an empty section.
+- Closed Guard and Open Guard must show **different** lists (37 and 150). They
+  share the `Guard` family and are separated only by `position_detail`, so a
+  client that applies `family` but not `detail_includes`/`detail_excludes`
+  silently collapses them back into one 187-entry list — with Open Guard
+  showing closed-guard material under a description saying the ankles are not
+  locked. Spot-check: "Armbar from Closed Guard" appears under Closed Guard and
+  NOT under Open Guard; a De La Riva or butterfly technique does the reverse.
+
+### The cross-link is the part that breaks silently
+
+- Every position's family must match at least one technique. A family typo
+  ("Back Control" instead of "Back") still renders a perfectly normal-looking
+  screen with an empty techniques list and no error anywhere — the failure
+  mode this feature is most likely to ship with.
+- The list is resolved from the already-fetched library, so it must render
+  with the device offline once the Library has been opened, and it must not
+  issue a per-position request.
+
+### Edge cases & errors
+
+- An unknown position id returns 404 in the standard error envelope, and the
+  screen shows "Position not found." with a working Try again — never a blank
+  page with empty fields.
+- If the technique library fails to load but the position itself succeeds,
+  the prose still renders and the "Techniques from here" section is simply
+  absent. The glossary must not fail on behalf of its cross-links.
+- If the glossary itself fails to load, the Library shows no glossary row and
+  **no error** — it is an extra on that screen, and the existing "BJJ
+  techniques couldn't load" message must not fire for it.
+
+### Module gating and auth
+
+- With `bjj` disabled, the glossary row is absent from the Library and no
+  request for it is made at all — hiding a module has to cut the fetch, not
+  just the pixels.
+- Both endpoints reject an unauthenticated request with 401.
+- The content is identical for every user: there is nothing user-scoped here,
+  and no endpoint takes a user id.

@@ -110,6 +110,8 @@ func main() {
 	// picks the more specific pattern regardless of order, so the literal
 	// "rulesets" wins over "{techniqueID}" and there is no shadowing risk.
 	mux.Handle("GET /v1/techniques/rulesets", verifier.RequireAuth(http.HandlerFunc(techniqueHandler.Rulesets)))
+	mux.Handle("GET /v1/techniques/positions", verifier.RequireAuth(http.HandlerFunc(techniqueHandler.Positions)))
+	mux.Handle("GET /v1/techniques/positions/{positionID}", verifier.RequireAuth(http.HandlerFunc(techniqueHandler.GetPosition)))
 	mux.Handle("GET /v1/techniques/{techniqueID}", verifier.RequireAuth(http.HandlerFunc(techniqueHandler.Get)))
 	mux.Handle("GET /v1/sessions", verifier.RequireAuth(http.HandlerFunc(sessionHandler.List)))
 	mux.Handle("POST /v1/sessions", verifier.RequireAuth(http.HandlerFunc(sessionHandler.Create)))

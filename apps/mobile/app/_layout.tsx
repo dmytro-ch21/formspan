@@ -212,6 +212,7 @@ function RootLayoutNav() {
         <Stack.Screen name="profile/edit" options={{ title: 'Edit profile' }} />
         <Stack.Screen name="exercise/[id]" options={{ title: 'Exercise' }} />
         <Stack.Screen name="technique/[id]" options={{ title: 'Technique' }} />
+        <Stack.Screen name="position/[id]" options={{ title: 'Position' }} />
         <Stack.Screen name="session/start" options={{ title: 'Start' }} />
         <Stack.Screen name="session/[id]" options={{ title: 'Session' }} />
         {/* Presented as a sheet: picking an exercise is an interruption of

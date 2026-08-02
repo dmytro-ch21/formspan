@@ -38,6 +38,12 @@ const rulesetColumns = `
 	id, age_scope, rule_class, gi_allowed_belts, gi_note,
 	no_gi_allowed_belts, no_gi_note, is_restricted, notes, sources`
 
+// One column set, not two: at ten rows with ~250 words each the whole table is
+// a few KB, so the summary/detail split the techniques need buys nothing here.
+const positionColumns = `
+	id, name, aliases, family, detail_includes, detail_excludes,
+	order_index, description, priorities, created_at, updated_at`
+
 type scannable interface{ Scan(dest ...any) error }
 
 func scanSummary(row scannable) (*Summary, error) {
@@ -72,6 +78,17 @@ func scanRuleset(row scannable) (*Ruleset, error) {
 		return nil, err
 	}
 	return &r, nil
+}
+
+func scanPosition(row scannable) (*Position, error) {
+	var p Position
+	err := row.Scan(&p.ID, &p.Name, &p.Aliases, &p.Family, &p.DetailIncludes,
+		&p.DetailExcludes, &p.OrderIndex, &p.Description, &p.Priorities,
+		&p.CreatedAt, &p.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
 }
 
 // List composes its WHERE from compile-time-constant fragments plus bound
@@ -181,6 +198,129 @@ func (r *PostgresRepository) Rulesets(ctx context.Context) ([]Ruleset, error) {
 		return nil, fmt.Errorf("technique: ruleset rows: %w", err)
 	}
 	return out, nil
+}
+
+// Positions returns all ten in reading order. `id` breaks ties so the order is
+// total rather than merely sorted — two entries sharing an order_index would
+// otherwise come back in whatever order the scan produced, and a glossary that
+// reshuffles between opens looks broken.
+func (r *PostgresRepository) Positions(ctx context.Context) ([]Position, error) {
+	rows, err := r.pool.Query(ctx, `SELECT `+positionColumns+` FROM positions ORDER BY order_index, id`)
+	if err != nil {
+		return nil, fmt.Errorf("technique: positions: %w", err)
+	}
+	defer rows.Close()
+
+	out := []Position{}
+	for rows.Next() {
+		p, err := scanPosition(rows)
+		if err != nil {
+			return nil, fmt.Errorf("technique: scan position: %w", err)
+		}
+		out = append(out, *p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("technique: position rows: %w", err)
+	}
+	return out, nil
+}
+
+func (r *PostgresRepository) GetPosition(ctx context.Context, id string) (*Position, error) {
+	row := r.pool.QueryRow(ctx, `SELECT `+positionColumns+` FROM positions WHERE id = $1`, id)
+	p, err := scanPosition(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("technique: get position: %w", err)
+	}
+	return p, nil
+}
+
+const upsertPositionSQL = `
+	INSERT INTO positions (
+		id, name, aliases, family, detail_includes, detail_excludes,
+		order_index, description, priorities
+	)
+	-- COALESCE because naming the columns explicitly means the DEFAULT '{}'
+	-- never applies, and pgx encodes a nil Go slice as SQL NULL. A Position
+	-- built in code with any array field left unset would otherwise fail the
+	-- NOT NULL constraint mid-batch, reporting a constraint name rather than
+	-- the entry. Seed data is normalised too; this makes it unconditional.
+	-- The ::text[] casts are required, not decoration: inside COALESCE a bare
+	-- '{}' is inferred as text and the statement fails to prepare.
+	VALUES ($1, $2, $3, $4, COALESCE($5, '{}'::text[]), COALESCE($6, '{}'::text[]),
+		$7, $8, $9)
+	ON CONFLICT (id) DO UPDATE SET
+		name            = EXCLUDED.name,
+		aliases         = EXCLUDED.aliases,
+		family          = EXCLUDED.family,
+		detail_includes = EXCLUDED.detail_includes,
+		detail_excludes = EXCLUDED.detail_excludes,
+		order_index     = EXCLUDED.order_index,
+		description     = EXCLUDED.description,
+		priorities      = EXCLUDED.priorities,
+		updated_at      = now()
+	WHERE (
+		positions.name, positions.aliases, positions.family,
+		positions.detail_includes, positions.detail_excludes,
+		positions.order_index, positions.description, positions.priorities
+	) IS DISTINCT FROM (
+		EXCLUDED.name, EXCLUDED.aliases, EXCLUDED.family,
+		EXCLUDED.detail_includes, EXCLUDED.detail_excludes,
+		EXCLUDED.order_index, EXCLUDED.description, EXCLUDED.priorities
+	)`
+
+// UpsertPositions has no ordering requirement against UpsertAll — nothing holds
+// an FK to these. Atomicity comes from pgx's SendBatch running the batch in an
+// implicit transaction, same as UpsertRulesets.
+//
+// It also deletes anything no longer in the seed. That is NOT the orphan-prune
+// rulesets need — those are content-addressed, so editing one mints a new id
+// and strands the old row. These ids are hand-authored and stable, so editing
+// prose updates in place and cannot strand anything. What it covers is the two
+// cases stable ids do not solve: removing an entry from positions.json, and
+// renaming an id. Without it the old row keeps being served forever, and a
+// rename shows the athlete two glossary entries for one position.
+func (r *PostgresRepository) UpsertPositions(ctx context.Context, positions []Position) error {
+	// The prune below deletes everything not in `ids`, and `x <> ALL('{}')` is
+	// TRUE — so an empty slice truncates the glossary. validatePositions
+	// already rejects an empty seed, but that guard lives two layers away in
+	// another file, and the failure here is silent data loss inside a deploy
+	// command. Cheap to make the repository safe on its own.
+	if len(positions) == 0 {
+		return fmt.Errorf("technique: refusing to upsert an empty position set")
+	}
+
+	ids := make([]string, 0, len(positions))
+	batch := &pgx.Batch{}
+	for _, p := range positions {
+		batch.Queue(upsertPositionSQL, p.ID, p.Name, p.Aliases, p.Family,
+			p.DetailIncludes, p.DetailExcludes, p.OrderIndex, p.Description,
+			p.Priorities)
+		ids = append(ids, p.ID)
+	}
+	// Queued last so it runs inside the same implicit transaction: the delete
+	// can never take effect without the writes that justify it. Guarded on a
+	// non-empty list by validatePositions, which rejects an empty glossary —
+	// otherwise this would truncate the table on a bad parse.
+	batch.Queue(`DELETE FROM positions WHERE id <> ALL($1)`, ids)
+
+	results := r.pool.SendBatch(ctx, batch)
+	for i := range positions {
+		if _, err := results.Exec(); err != nil {
+			results.Close() //nolint:errcheck // returning the more useful error
+			return fmt.Errorf("technique: upsert position %q: %w", positions[i].ID, err)
+		}
+	}
+	if _, err := results.Exec(); err != nil {
+		results.Close() //nolint:errcheck // returning the more useful error
+		return fmt.Errorf("technique: prune positions: %w", err)
+	}
+	if err := results.Close(); err != nil {
+		return fmt.Errorf("technique: position batch: %w", err)
+	}
+	return nil
 }
 
 const upsertRulesetSQL = `
