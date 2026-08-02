@@ -414,10 +414,15 @@ export default function LibraryScreen() {
 
       // Deliberately after the two that matter, and deliberately swallowed.
       // The glossary must never be the reason the library shows an error.
+      //
+      // Guarded on the controller for the same reason the outer catch is: a
+      // superseded request that rejects after the newer one already populated
+      // the row would otherwise blank it.
       try {
-        setPositions(await fetchPositions(getToken, ac.signal));
+        const list = await fetchPositions(getToken, ac.signal);
+        if (techniqueAbortRef.current === ac) setPositions(list);
       } catch {
-        setPositions([]);
+        if (techniqueAbortRef.current === ac) setPositions([]);
       }
     } catch (err) {
       // A supersede is not a failure; a timeout is. `fetchTechniques` rejects
@@ -713,18 +718,21 @@ export default function LibraryScreen() {
             that separation the rows read as one broken control. */}
         {usesPosition(sport, modules) && positions.length > 0 && (
           <View style={styles.glossary}>
-            <Text style={styles.glossaryLabel}>NEW TO BJJ? START WITH THE POSITIONS</Text>
+            <Text style={styles.glossaryLabel} accessibilityRole="header">
+              NEW TO BJJ? START WITH THE POSITIONS
+            </Text>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.glossaryRow}
             >
               {positions.map((p) => {
-                const [code, accent] = positionBadge(p.family);
+                const [code, accent] = positionBadge(p.id);
                 return (
                   <Pressable
                     key={p.id}
                     onPress={() => router.push(`/position/${p.id}`)}
+                    hitSlop={6}
                     style={({ pressed }) => [styles.posCard, pressed && styles.posCardPressed]}
                     accessibilityRole="button"
                     accessibilityLabel={`Read about ${p.name}`}
@@ -947,7 +955,12 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: vola.lineSoft,
   },
-  glossaryLabel: { color: vola.textDim, fontSize: 10, letterSpacing: 1, fontWeight: '800' },
+  // textMuted, not textDim, and 11px rather than 10. This label is the only
+  // thing telling a reader that the cards below it open a page while the chips
+  // above narrow a list, and at textDim/10px it measured 3.96:1 on `bg` —
+  // under AA, and a step smaller than the chips it has to distinguish itself
+  // from. textMuted is 7.19:1 and still reads as secondary.
+  glossaryLabel: { color: vola.textMuted, fontSize: 11, letterSpacing: 1, fontWeight: '800' },
   glossaryRow: { gap: 10, paddingRight: 20 },
   // Fixed width so the names wrap to a predictable two lines and the cards
   // form an even row — "Knee on Belly" and "Mount" cannot share an intrinsic

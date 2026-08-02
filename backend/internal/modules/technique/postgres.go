@@ -259,18 +259,38 @@ const upsertPositionSQL = `
 // UpsertPositions has no ordering requirement against UpsertAll — nothing holds
 // an FK to these. Atomicity comes from pgx's SendBatch running the batch in an
 // implicit transaction, same as UpsertRulesets.
+//
+// It also deletes anything no longer in the seed. That is NOT the orphan-prune
+// rulesets need — those are content-addressed, so editing one mints a new id
+// and strands the old row. These ids are hand-authored and stable, so editing
+// prose updates in place and cannot strand anything. What it covers is the two
+// cases stable ids do not solve: removing an entry from positions.json, and
+// renaming an id. Without it the old row keeps being served forever, and a
+// rename shows the athlete two glossary entries for one position.
 func (r *PostgresRepository) UpsertPositions(ctx context.Context, positions []Position) error {
+	ids := make([]string, 0, len(positions))
 	batch := &pgx.Batch{}
 	for _, p := range positions {
 		batch.Queue(upsertPositionSQL, p.ID, p.Name, p.Aliases, p.Family,
 			p.OrderIndex, p.Description, p.Priorities)
+		ids = append(ids, p.ID)
 	}
+	// Queued last so it runs inside the same implicit transaction: the delete
+	// can never take effect without the writes that justify it. Guarded on a
+	// non-empty list by validatePositions, which rejects an empty glossary —
+	// otherwise this would truncate the table on a bad parse.
+	batch.Queue(`DELETE FROM positions WHERE id <> ALL($1)`, ids)
+
 	results := r.pool.SendBatch(ctx, batch)
 	for i := range positions {
 		if _, err := results.Exec(); err != nil {
 			results.Close() //nolint:errcheck // returning the more useful error
 			return fmt.Errorf("technique: upsert position %q: %w", positions[i].ID, err)
 		}
+	}
+	if _, err := results.Exec(); err != nil {
+		results.Close() //nolint:errcheck // returning the more useful error
+		return fmt.Errorf("technique: prune positions: %w", err)
 	}
 	if err := results.Close(); err != nil {
 		return fmt.Errorf("technique: position batch: %w", err)

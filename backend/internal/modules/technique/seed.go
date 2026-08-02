@@ -82,6 +82,13 @@ func validate(techniques []Technique) error {
 // SILENT: "Back Control" instead of "Back" still seeds, still renders, and just
 // returns an empty technique list forever, with nothing anywhere reporting a
 // fault. The one field where being wrong looks identical to being right.
+//
+// This set is duplicated as an enum on the Position schema in
+// contracts/public.openapi.yaml — adding a family here without updating it
+// there makes real responses invalid against the published contract, and the
+// spec linter cannot see the disagreement. TestPositionsResolveAgainstTheLibrary
+// is the check that a family is real; this comment is the reminder that the
+// contract has its own copy.
 var validFamilies = map[string]bool{
 	"Standing": true, "Guard": true, "Half Guard": true,
 	"Side Control": true, "Mount": true, "North-South": true,
@@ -89,7 +96,14 @@ var validFamilies = map[string]bool{
 }
 
 func validatePositions(positions []Position) error {
+	// An empty glossary is a parse or embed failure wearing a success: seeding
+	// would report "0 upserted" and exit 0, leaving the clients to render a
+	// missing feature as an ordinary absent row.
+	if len(positions) == 0 {
+		return fmt.Errorf("technique: no positions in the glossary")
+	}
 	seen := make(map[string]bool, len(positions))
+	seenAlias := make(map[string]string, len(positions))
 	for _, p := range positions {
 		switch {
 		case p.ID == "":
@@ -104,6 +118,18 @@ func validatePositions(positions []Position) error {
 			return fmt.Errorf("technique: position %q needs description and priorities", p.ID)
 		}
 		seen[p.ID] = true
+
+		// Aliases exist here for the same reason they do on a technique — the
+		// name is one of several things the position is called — which means
+		// they will eventually be searched. An alias on two entries resolves
+		// ambiguously the day that happens, and "guard" was on both closed and
+		// open guard until this caught it.
+		for _, a := range p.Aliases {
+			if prev, dup := seenAlias[a]; dup {
+				return fmt.Errorf("technique: alias %q is on both %q and %q", a, prev, p.ID)
+			}
+			seenAlias[a] = p.ID
+		}
 	}
 	return nil
 }

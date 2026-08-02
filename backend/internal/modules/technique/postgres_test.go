@@ -326,25 +326,69 @@ func TestPositionSeedData_IsValid(t *testing.T) {
 		t.Fatalf("expected the full glossary, got %d entries", len(positions))
 	}
 
-	// Every family must be one a client can actually resolve against the
-	// library. validatePositions already enforces this, but asserting it here
-	// too is what makes the cross-link a tested property rather than a
-	// convention someone has to remember.
 	for _, p := range positions {
-		if !validFamilies[p.Family] {
-			t.Errorf("position %q has family %q, which no technique will match", p.ID, p.Family)
-		}
 		if len(p.Description) < 100 || len(p.Priorities) < 100 {
 			t.Errorf("position %q has stub prose — the glossary is the feature", p.ID)
 		}
 	}
+}
 
-	// Back control is the one entry where the obvious value is the wrong one:
-	// the technique rows say "Back - Top (Back Control)", so a family of
-	// "Back Control" silently matches nothing.
+// The cross-link, checked against the real content and WITHOUT a database.
+//
+// This is the guard on the one thing that fails silently: `family` is
+// prefix-matched against `techniques.position`, so a wrong value seeds fine,
+// renders fine, and lists nothing. Three properties of this test matter.
+//
+// It runs offline. Both sides are embedded JSON, so the property is a pure
+// function of two files and needs no Postgres — which means it runs on every
+// `go test`, not only where TEST_DATABASE_URL happens to be set. The
+// integration test below still covers round-trip fidelity; this covers the
+// content, and the content is what changes.
+//
+// It is not circular. Asserting `validFamilies[p.Family]` would only restate
+// what validatePositions already enforces, and could never catch the likelier
+// mistake — someone "fixing" the set by adding "Back Control" to BOTH the map
+// and the JSON, at which point validator and test agree and the app is broken.
+// Matching against the actual technique rows is the only check that survives
+// that, and it subsumes the hardcoded back-control assertion this replaced.
+func TestPositionsResolveAgainstTheLibrary(t *testing.T) {
+	positions, err := PositionSeedData()
+	if err != nil {
+		t.Fatalf("PositionSeedData: %v", err)
+	}
+	techniques, err := SeedData()
+	if err != nil {
+		t.Fatalf("SeedData: %v", err)
+	}
+
+	// The clients' own rule, restated here on purpose: if it drifts from
+	// apps/mobile/lib/positions.ts, this test should be what notices.
+	inFamily := func(position, family string) bool {
+		return position == family || strings.HasPrefix(position, family+" - ")
+	}
+
+	covered := make(map[string]bool)
 	for _, p := range positions {
-		if p.ID == "back-control" && p.Family != "Back" {
-			t.Errorf(`back-control family is %q, must be "Back" to match the library`, p.Family)
+		matches := 0
+		for _, tq := range techniques {
+			if inFamily(tq.Position, p.Family) {
+				matches++
+				covered[tq.Position] = true
+			}
+		}
+		if matches == 0 {
+			t.Errorf("position %q (family %q) matches no technique — its cross-link is dead",
+				p.ID, p.Family)
+		}
+	}
+
+	// The reverse direction. A technique position with no glossary entry behind
+	// it means the Library offers a filter family the glossary cannot explain.
+	// "Other" is the one genuine orphan in the current library (1 of 466) and is
+	// not a position anyone would look up.
+	for _, tq := range techniques {
+		if tq.Position != "Other" && !covered[tq.Position] {
+			t.Errorf("technique position %q has no glossary entry behind it", tq.Position)
 		}
 	}
 }
@@ -425,43 +469,5 @@ func TestPostgresRepository_SeedPositionsAndGet(t *testing.T) {
 	}
 	if missing != nil {
 		t.Errorf("expected nil alongside the error, got %+v", missing)
-	}
-}
-
-// The glossary is only useful if its families actually resolve — an entry whose
-// family matches nothing renders a heading with an empty list under it. This is
-// the one test that would catch a family typo AFTER it reached the database.
-func TestPositionsCrossLinkToTechniques(t *testing.T) {
-	repo := newTestRepo(t)
-	ctx := context.Background()
-
-	if _, err := Seed(ctx, repo); err != nil {
-		t.Fatalf("seed techniques: %v", err)
-	}
-	if _, err := SeedPositions(ctx, repo); err != nil {
-		t.Fatalf("seed positions: %v", err)
-	}
-
-	techniques, err := repo.List(ctx, Filter{})
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
-	positions, err := repo.Positions(ctx)
-	if err != nil {
-		t.Fatalf("positions: %v", err)
-	}
-
-	for _, p := range positions {
-		matches := 0
-		for _, tq := range techniques {
-			// The same prefix rule the clients apply.
-			if tq.Position == p.Family || strings.HasPrefix(tq.Position, p.Family+" - ") {
-				matches++
-			}
-		}
-		if matches == 0 {
-			t.Errorf("position %q (family %q) matches no technique — the cross-link is dead",
-				p.ID, p.Family)
-		}
 	}
 }

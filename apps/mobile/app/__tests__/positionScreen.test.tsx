@@ -126,8 +126,47 @@ test('lists only the techniques from this position family', async () => {
   expect(screen.queryByText('Knee Slice Pass')).toBeNull();
   expect(screen.queryByText('Mount Escape')).toBeNull();
   expect(screen.queryByText('Guardless Scramble')).toBeNull();
-  // The count is part of the label, so a wrong filter shows up here too.
-  expect(screen.getByText('TECHNIQUES FROM HERE · 2')).toBeTruthy();
+  // The count is part of the label, so a wrong filter shows up here too. And
+  // the scope is named because Closed Guard's family is "Guard" — see below.
+  expect(screen.getByText('TECHNIQUES FROM THE GUARD FAMILY · 2')).toBeTruthy();
+});
+
+/**
+ * The label must not claim these techniques are Closed Guard's own.
+ *
+ * `family` is coarse — `techniques.position` records "Guard - Bottom" and
+ * cannot distinguish closed from open — so this screen and Open Guard's show
+ * the same list, including entries named "Closed-Guard …" under a description
+ * that says the ankles are NOT locked. An unqualified "TECHNIQUES FROM HERE"
+ * turns a known data limitation into the screen stating something false, to
+ * exactly the reader with no way to check it.
+ */
+test('names the family when it is broader than the position', async () => {
+  mockFetchTechniques.mockResolvedValue([
+    technique({ id: 'armbar-closed-guard', name: 'Armbar from Closed Guard' }),
+  ]);
+
+  render(<PositionScreen />);
+
+  await waitFor(() => expect(screen.getByText(/TECHNIQUES FROM/)).toBeTruthy());
+  expect(screen.queryByText('TECHNIQUES FROM HERE · 1')).toBeNull();
+});
+
+/** ...and must not add the qualifier when the family IS the position. */
+test('says "from here" when the family is the position itself', async () => {
+  mockFetchPosition.mockResolvedValue({
+    ...CLOSED_GUARD,
+    id: 'mount',
+    name: 'Mount',
+    family: 'Mount',
+  });
+  mockFetchTechniques.mockResolvedValue([
+    technique({ id: 'americana', name: 'Americana from Mount', position: 'Mount - Top' }),
+  ]);
+
+  render(<PositionScreen />);
+
+  await waitFor(() => expect(screen.getByText('TECHNIQUES FROM HERE · 1')).toBeTruthy());
 });
 
 /**

@@ -5232,16 +5232,56 @@ is caught. Same discipline as PR #75 and #78; the same lesson keeps arriving.
 
 **Not verified on device.** The Simulator was not able to exercise this. Expo
 Go on the booted simulator kept serving a cached bundle — it rendered a belt
-filter that exists in no branch of this repo, and made no request to the local
-API even after Metro served a fresh bundle twice with the right URL inlined.
-Along the way this reconfirmed two documented traps (`npx expo start` without
+filter that, at the time, existed in no branch of this repo, and made no
+request to the local API even after Metro served a fresh bundle twice with the
+right URL inlined. (The belt filter turned out to be real: #87 landed
+mid-session. That resolved the mystery of *where* the stale bundle came from,
+not why Expo Go kept preferring it.) Along the way this reconfirmed two
+documented traps — `npx expo start` without
 `NODE_OPTIONS=--dns-result-order=ipv4first` binds Metro to `[::1]` only, and
-`.env.local` overrides a shell-supplied `EXPO_PUBLIC_*`, which needs
-`EXPO_NO_DOTENV=1`). Clearing Expo Go's data container would likely fix it but
-signs the account out of the simulator, so it was left for the user to decide.
-The render path is covered instead by seven component tests
+`.env.local` overrides a shell-supplied `EXPO_PUBLIC_*` unless
+`EXPO_NO_DOTENV=1` is set. Clearing Expo Go's data container would likely fix
+it but signs the account out of the simulator, so it was left for the user to
+decide. The render path is covered instead by ten component tests
 (`app/__tests__/positionScreen.test.tsx`), which is where this screen's bugs
-would live; the layout reuses `technique/[id]`'s measurements verbatim.
+would live.
+
+**And the reviewers found two the tests could not.** Both were the direct cost
+of not having run it:
+
+*The cross-link was wrong-but-plausible, which is worse than empty.* The
+invariant note above worried about a family typo producing a silently EMPTY
+list. What actually shipped was the opposite failure: `family` is coarse, so
+Closed Guard and Open Guard resolve to the same 187 techniques — and the Open
+Guard screen listed 36 entries whose names begin "Closed-Guard …" directly
+beneath its own sentence saying the ankles are *not* locked. An empty list
+looks broken and gets reported; an authoritative-looking wrong one does not,
+least of all by the beginner this feature exists for. Fixed in two places: the
+section header now names the scope ("TECHNIQUES FROM THE GUARD FAMILY") rather
+than claiming "FROM HERE", and both guard entries disclose the limitation in
+prose, which is the mitigation Knee on Belly already had and they didn't.
+
+*A 187-row list was mounted eagerly.* `technique/[id]`'s `ScrollView` was
+copied wholesale, which is safe there because its edge lists are 6-29 items.
+Here it meant ~900 native views on the two entries a beginner opens first —
+and `library.tsx` already carries the comment explaining why that stalls a
+phone. Now a `FlatList` with the prose as `ListHeaderComponent`. Purely a
+runtime defect: it typechecks, it tests green, and only a device shows it.
+
+Smaller review outcomes worth keeping: the position tile code is keyed on the
+position id rather than its family, because keying on family printed `GRD`
+twice and `SDE` twice — and with every glossary tile deliberately achromatic,
+the three letters are the *only* differentiator, so an ambiguous code breaks
+`LibraryTile`'s stated rule from the other side. Two factual errors in the seed
+prose were corrected (side control does not score three points — the *pass*
+does; and mount's four points are tied with back control, not "the most").
+`UpsertPositions` now deletes rows no longer in the seed: stable ids mean
+editing prose can't strand anything, but *renaming* an id would have shown the
+athlete two entries for one position. And the DB-gated cross-link test was
+rewritten to run offline against the two embedded JSON files — it was both
+circular (asserting the same map the validator enforces) and skipped on every
+local run, so the strongest guard on the load-bearing invariant only ever
+executed in CI.
 
 ---
 

@@ -90,28 +90,35 @@ export function patternBadge(pattern: string): readonly [string, string] {
 }
 
 /**
- * Positions, keyed on family.
+ * Positions, keyed on the position's own id — NOT on its family.
  *
- * These are reference reading rather than a thing you do, so all of them take
- * the achromatic HOLD. That is the point: a glossary tile sitting next to a
- * technique tile should read as a different *kind* of item, and giving it a hue
- * from the same palette would imply an intent (attacking, defending) that a
- * position does not have — every position is both, depending on which end of it
- * you are on.
+ * All of them take the achromatic HOLD, deliberately: these are reference
+ * reading rather than a thing you do, and a hue from this palette would imply
+ * an intent (attacking, defending) that a position does not have — every
+ * position is both, depending on which end of it you are on.
+ *
+ * Which is exactly why the code has to be per-position. With colour carrying
+ * nothing here, the three letters are the *only* differentiator, and keying on
+ * family printed GRD twice (closed and open guard) and SDE twice (side control
+ * and knee on belly) — two pairs of identical tiles sitting side by side in a
+ * ten-card row. That breaks this file's own rule from the other direction:
+ * colour never carries meaning alone, so the code may never be ambiguous.
  */
-const POSITION_FAMILY: Record<string, string> = {
-  Standing: 'STD',
-  Guard: 'GRD',
-  'Half Guard': 'HLF',
-  'Side Control': 'SDE',
-  Mount: 'MNT',
-  'North-South': 'N-S',
-  Back: 'BCK',
-  Turtle: 'TRT',
+const POSITION: Record<string, string> = {
+  standing: 'STD',
+  'closed-guard': 'CLG',
+  'open-guard': 'OPN',
+  'half-guard': 'HLF',
+  'side-control': 'SDE',
+  'knee-on-belly': 'KOB',
+  mount: 'MNT',
+  'north-south': 'N-S',
+  'back-control': 'BCK',
+  turtle: 'TRT',
 };
 
-export function positionBadge(family: string): readonly [string, string] {
-  return [POSITION_FAMILY[family] ?? 'POS', HOLD];
+export function positionBadge(id: string): readonly [string, string] {
+  return [POSITION[id] ?? 'POS', HOLD];
 }
 
 /**
