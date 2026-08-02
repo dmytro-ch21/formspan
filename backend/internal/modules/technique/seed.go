@@ -40,6 +40,22 @@ func PositionSeedData() ([]Position, error) {
 	if err := json.Unmarshal(positionJSON, &positions); err != nil {
 		return nil, fmt.Errorf("technique: parse positions: %w", err)
 	}
+	// A key absent from the JSON leaves a nil slice, and pgx encodes nil as SQL
+	// NULL — which the NOT NULL columns reject mid-batch, naming a constraint
+	// rather than the entry. Most entries omit the two detail keys entirely, so
+	// this is the common path, not an edge case. Normalised here so the domain
+	// object is well-formed for every consumer, not just the writer.
+	for i := range positions {
+		if positions[i].Aliases == nil {
+			positions[i].Aliases = []string{}
+		}
+		if positions[i].DetailIncludes == nil {
+			positions[i].DetailIncludes = []string{}
+		}
+		if positions[i].DetailExcludes == nil {
+			positions[i].DetailExcludes = []string{}
+		}
+	}
 	if err := validatePositions(positions); err != nil {
 		return nil, err
 	}
@@ -116,6 +132,11 @@ func validatePositions(positions []Position) error {
 			return fmt.Errorf("technique: position %q has unknown family %q", p.ID, p.Family)
 		case p.Description == "" || p.Priorities == "":
 			return fmt.Errorf("technique: position %q needs description and priorities", p.ID)
+		case len(p.DetailIncludes) > 0 && len(p.DetailExcludes) > 0:
+			// A whitelist already excludes everything not on it, so pairing the
+			// two means one of them is doing nothing — and which one is not
+			// obvious from reading the entry.
+			return fmt.Errorf("technique: position %q sets both detail_includes and detail_excludes", p.ID)
 		}
 		seen[p.ID] = true
 

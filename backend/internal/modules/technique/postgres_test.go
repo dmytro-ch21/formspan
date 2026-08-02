@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -367,19 +368,73 @@ func TestPositionsResolveAgainstTheLibrary(t *testing.T) {
 		return position == family || strings.HasPrefix(position, family+" - ")
 	}
 
+	// The detail filters, applied exactly as the client does.
+	inScope := func(p Position, detail string) bool {
+		if len(p.DetailIncludes) > 0 && !slices.Contains(p.DetailIncludes, detail) {
+			return false
+		}
+		return !slices.Contains(p.DetailExcludes, detail)
+	}
+
+	// Every detail a position names must exist in the library. This is the
+	// `family` trap one level down and it fails the same silent way: a typo in
+	// detail_includes empties the list rather than erroring, and closed guard —
+	// the entry most likely to be opened first — is the one that uses it.
+	details := make(map[string]bool, len(techniques))
+	for _, tq := range techniques {
+		details[tq.PositionDetail] = true
+	}
+
 	covered := make(map[string]bool)
 	for _, p := range positions {
+		for _, d := range slices.Concat(p.DetailIncludes, p.DetailExcludes) {
+			if !details[d] {
+				t.Errorf("position %q names position_detail %q, which no technique has", p.ID, d)
+			}
+		}
+
 		matches := 0
 		for _, tq := range techniques {
 			if inFamily(tq.Position, p.Family) {
-				matches++
+				// Coverage is tracked on the FAMILY match, not the narrowed
+				// one: a detail deliberately excluded from open guard is still
+				// explained by closed guard, so it is not an orphan.
 				covered[tq.Position] = true
+				if inScope(p, tq.PositionDetail) {
+					matches++
+				}
 			}
 		}
 		if matches == 0 {
 			t.Errorf("position %q (family %q) matches no technique — its cross-link is dead",
 				p.ID, p.Family)
 		}
+	}
+
+	// The whole point of the detail filters: these two must not be the same
+	// list. They were identical (187 each) until position_detail was used, and
+	// the Open Guard screen listed closed-guard techniques under a description
+	// saying the ankles are not locked.
+	scoped := func(id string) int {
+		n := 0
+		for _, p := range positions {
+			if p.ID != id {
+				continue
+			}
+			for _, tq := range techniques {
+				if inFamily(tq.Position, p.Family) && inScope(p, tq.PositionDetail) {
+					n++
+				}
+			}
+		}
+		return n
+	}
+	closed, open := scoped("closed-guard"), scoped("open-guard")
+	if closed == open {
+		t.Errorf("closed and open guard resolve to the same %d techniques — the split is not applied", closed)
+	}
+	if closed == 0 || open == 0 {
+		t.Errorf("guard split emptied a side: closed=%d open=%d", closed, open)
 	}
 
 	// The reverse direction. A technique position with no glossary entry behind

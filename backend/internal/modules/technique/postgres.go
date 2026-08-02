@@ -41,8 +41,8 @@ const rulesetColumns = `
 // One column set, not two: at ten rows with ~250 words each the whole table is
 // a few KB, so the summary/detail split the techniques need buys nothing here.
 const positionColumns = `
-	id, name, aliases, family, order_index, description, priorities,
-	created_at, updated_at`
+	id, name, aliases, family, detail_includes, detail_excludes,
+	order_index, description, priorities, created_at, updated_at`
 
 type scannable interface{ Scan(dest ...any) error }
 
@@ -82,8 +82,9 @@ func scanRuleset(row scannable) (*Ruleset, error) {
 
 func scanPosition(row scannable) (*Position, error) {
 	var p Position
-	err := row.Scan(&p.ID, &p.Name, &p.Aliases, &p.Family, &p.OrderIndex,
-		&p.Description, &p.Priorities, &p.CreatedAt, &p.UpdatedAt)
+	err := row.Scan(&p.ID, &p.Name, &p.Aliases, &p.Family, &p.DetailIncludes,
+		&p.DetailExcludes, &p.OrderIndex, &p.Description, &p.Priorities,
+		&p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -238,21 +239,26 @@ func (r *PostgresRepository) GetPosition(ctx context.Context, id string) (*Posit
 
 const upsertPositionSQL = `
 	INSERT INTO positions (
-		id, name, aliases, family, order_index, description, priorities
-	) VALUES ($1, $2, $3, $4, $5, $6, $7)
+		id, name, aliases, family, detail_includes, detail_excludes,
+		order_index, description, priorities
+	) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 	ON CONFLICT (id) DO UPDATE SET
-		name        = EXCLUDED.name,
-		aliases     = EXCLUDED.aliases,
-		family      = EXCLUDED.family,
-		order_index = EXCLUDED.order_index,
-		description = EXCLUDED.description,
-		priorities  = EXCLUDED.priorities,
-		updated_at  = now()
+		name            = EXCLUDED.name,
+		aliases         = EXCLUDED.aliases,
+		family          = EXCLUDED.family,
+		detail_includes = EXCLUDED.detail_includes,
+		detail_excludes = EXCLUDED.detail_excludes,
+		order_index     = EXCLUDED.order_index,
+		description     = EXCLUDED.description,
+		priorities      = EXCLUDED.priorities,
+		updated_at      = now()
 	WHERE (
 		positions.name, positions.aliases, positions.family,
+		positions.detail_includes, positions.detail_excludes,
 		positions.order_index, positions.description, positions.priorities
 	) IS DISTINCT FROM (
 		EXCLUDED.name, EXCLUDED.aliases, EXCLUDED.family,
+		EXCLUDED.detail_includes, EXCLUDED.detail_excludes,
 		EXCLUDED.order_index, EXCLUDED.description, EXCLUDED.priorities
 	)`
 
@@ -272,7 +278,8 @@ func (r *PostgresRepository) UpsertPositions(ctx context.Context, positions []Po
 	batch := &pgx.Batch{}
 	for _, p := range positions {
 		batch.Queue(upsertPositionSQL, p.ID, p.Name, p.Aliases, p.Family,
-			p.OrderIndex, p.Description, p.Priorities)
+			p.DetailIncludes, p.DetailExcludes, p.OrderIndex, p.Description,
+			p.Priorities)
 		ids = append(ids, p.ID)
 	}
 	// Queued last so it runs inside the same implicit transaction: the delete

@@ -617,6 +617,8 @@ components:
           name,
           aliases,
           family,
+          detail_includes,
+          detail_excludes,
           order_index,
           description,
           priorities,
@@ -654,6 +656,31 @@ components:
               Turtle,
             ]
           example: Guard
+        detail_includes:
+          type: array
+          items: { type: string }
+          description: >
+            Narrows the family match using a TechniqueSummary's
+            `position_detail`. When non-empty, ONLY techniques whose
+            `position_detail` appears here belong to this position. Empty on
+            most entries, meaning "the whole family".
+          example: [Closed Guard, Rubber Guard]
+        detail_excludes:
+          type: array
+          items: { type: string }
+          description: >
+            The opposite operation, applied after `detail_includes`: techniques
+            whose `position_detail` appears here are dropped.
+
+            A client MUST apply BOTH, or the two guard entries collapse back
+            into one list. `family` cannot separate closed guard from open
+            guard — the technique rows record only "Guard - Bottom" — so
+            without these, Open Guard lists closed-guard techniques directly
+            beneath a description saying the ankles are not locked. Closed
+            guard whitelists the two details it wants; open guard blacklists
+            the same two, because "everything else in the family" spans 26
+            values that grow with the library.
+          example: [Closed Guard, Rubber Guard]
         order_index:
           type: integer
           description: >

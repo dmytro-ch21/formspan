@@ -5273,10 +5273,18 @@ check it is a worse outcome than doing nothing, and it took a second review
 pass to catch. The prose now says only what is true: the list is the whole
 guard family, closed and open together, and should be read as "guard".
 
-The real fix is available and deliberately not in this PR: `position_detail`
-supports splitting Closed Guard (35 exactly) from the rest of the family. It
-needs a way to express "narrow within a family" on a Position, which is a
-schema change, and this branch is already large. Logged as an open item.
+**The real fix landed in the end, and it was smaller than the deferral
+implied.** `Position` gained `detail_includes`/`detail_excludes`, which narrow
+the family match using `techniques.position_detail`. Two columns rather than
+one because the two entries need opposite operations: closed guard whitelists
+a short enumerable set (`Closed Guard`, `Rubber Guard` — 37 techniques), while
+open guard is "the rest of the family" across 26 detail values that grow with
+the library, so it blacklists the same two (150). Every other position leaves
+both empty and takes its whole family. With the split real, the disclaimer
+prose came back out — the honest thing to say became nothing at all — and the
+section label stopped qualifying the two guards, since their lists are now
+genuinely their own. Knee on Belly is the only entry still labelled "FROM THE
+SIDE CONTROL FAMILY", which is correct: it has no techniques of its own.
 
 *A 187-row list was mounted eagerly.* `technique/[id]`'s `ScrollView` was
 copied wholesale, which is safe there because its edge lists are 6-29 items.
@@ -5535,7 +5543,6 @@ did.
 
 ## Open items / known gaps as of this entry
 
-- **Closed Guard and Open Guard cross-link to the same 187 techniques.** The glossary's `family` is coarse — it prefix-matches `techniques.position`, which only records `Guard - Bottom`/`Guard - Top`. Both screens now say so in prose and label the list "TECHNIQUES FROM THE GUARD FAMILY" rather than claiming the techniques are that position's own, so it is honest, but it is not right. The data to fix it exists: `position_detail` holds `Closed Guard` on exactly 35 rows and `Open Guard` on 37. What is missing is a way to express "narrow within a family" on a Position — an include/exclude list of `position_detail` values — which is a schema change deliberately left out of an already-large branch. Knee on Belly shares the shape at smaller scale (it borrows Side Control's 45).
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.
 - Functional test suite not yet passing — blocked on applying the `--hostname` fix to `tests/functional/support/start-stack.mjs` (the user's own in-progress file — not something to edit unilaterally).

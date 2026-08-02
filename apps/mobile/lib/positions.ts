@@ -27,6 +27,15 @@ export type Position = {
    * see `inPositionFamily`. Note that back control's family is `Back`.
    */
   family: string;
+  /**
+   * Narrow the family match by `position_detail`. Includes is a whitelist,
+   * excludes a blacklist applied after it; both empty means the whole family.
+   *
+   * BOTH must be applied or closed and open guard collapse into one list —
+   * see `techniquesInPosition`.
+   */
+  detail_includes: string[];
+  detail_excludes: string[];
   /** Pedagogical reading order. The server already sorts by it; do not re-sort. */
   order_index: number;
   /** What the position is, and how you end up in it. */
@@ -96,6 +105,8 @@ function normalise(p: Partial<Position> & { id: string; name: string }): Positio
     ...(p as Position),
     aliases: p.aliases ?? [],
     family: p.family ?? '',
+    detail_includes: p.detail_includes ?? [],
+    detail_excludes: p.detail_excludes ?? [],
     order_index: p.order_index ?? 0,
     description: p.description ?? '',
     priorities: p.priorities ?? '',
@@ -132,10 +143,19 @@ export function inPositionFamily(position: string, family: string): boolean {
  */
 export function techniquesInPosition(
   techniques: TechniqueSummary[],
-  family: string,
+  position: Pick<Position, 'family' | 'detail_includes' | 'detail_excludes'>,
 ): TechniqueSummary[] {
+  const { family, detail_includes: includes, detail_excludes: excludes } = position;
   if (!family) return [];
   return techniques
-    .filter((t) => inPositionFamily(t.position, family))
+    .filter((t) => {
+      if (!inPositionFamily(t.position, family)) return false;
+      // The second axis, and the one that stops Closed Guard and Open Guard
+      // being the same 187 rows. `position` is only ever "Guard - Bottom";
+      // `position_detail` is what knows which guard. Applying just one of the
+      // two silently restores the bug for whichever entry uses the other.
+      if (includes.length > 0 && !includes.includes(t.position_detail)) return false;
+      return !excludes.includes(t.position_detail);
+    })
     .sort((a, b) => a.name.localeCompare(b.name));
 }

@@ -2403,10 +2403,13 @@ conflict story.
 - Knee on Belly is the entry that reads oddly if the cross-link is wrong: no
   technique carries that position, so its list comes from the Side Control
   family. It must not render an empty section.
-- Closed Guard and Open Guard currently show the *same* technique list — both
-  map to the `Guard` family, and the closed/open distinction lives only in
-  free-text `position_detail`. Known and accepted; if this is ever refined,
-  this scenario is what changes.
+- Closed Guard and Open Guard must show **different** lists (37 and 150). They
+  share the `Guard` family and are separated only by `position_detail`, so a
+  client that applies `family` but not `detail_includes`/`detail_excludes`
+  silently collapses them back into one 187-entry list — with Open Guard
+  showing closed-guard material under a description saying the ankles are not
+  locked. Spot-check: "Armbar from Closed Guard" appears under Closed Guard and
+  NOT under Open Guard; a De La Riva or butterfly technique does the reverse.
 
 ### The cross-link is the part that breaks silently
 

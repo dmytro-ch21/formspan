@@ -51,6 +51,11 @@ const CLOSED_GUARD: Position = {
   name: 'Closed Guard',
   aliases: ['full guard'],
   family: 'Guard',
+  // The real entry's filter. Closed and open guard share a family and are
+  // separated only by position_detail, so a fixture without this would test a
+  // screen the app never renders.
+  detail_includes: ['Closed Guard', 'Rubber Guard'],
+  detail_excludes: [],
   order_index: 10,
   description: 'You are on your back with your legs wrapped around your opponent.',
   priorities: 'Bottom: break their posture down.\n\nTop: posture up and stay stacked.',
@@ -61,7 +66,7 @@ function technique(over: Partial<TechniqueSummary> & { id: string; name: string 
     aliases: [],
     category: 'Submission',
     position: 'Guard - Bottom',
-    position_detail: '',
+    position_detail: 'Closed Guard',
     gi_no_gi: 'Both',
     typical_belt: '',
     ibjjf_ruleset_id: '',
@@ -126,42 +131,97 @@ test('lists only the techniques from this position family', async () => {
   expect(screen.queryByText('Knee Slice Pass')).toBeNull();
   expect(screen.queryByText('Mount Escape')).toBeNull();
   expect(screen.queryByText('Guardless Scramble')).toBeNull();
-  // The count is part of the label, so a wrong filter shows up here too. And
-  // the scope is named because Closed Guard's family is "Guard" — see below.
-  expect(screen.getByText('TECHNIQUES FROM THE GUARD FAMILY · 2')).toBeTruthy();
+  // The count is part of the label, so a wrong filter shows up here too.
+  expect(screen.getByText('TECHNIQUES FROM HERE · 2')).toBeTruthy();
 });
 
 /**
- * The label must not claim these techniques are Closed Guard's own.
+ * The second filter axis, and the whole reason it exists.
  *
- * `family` is coarse — `techniques.position` records "Guard - Bottom" and
- * cannot distinguish closed from open — so this screen and Open Guard's show
- * the same list, including entries named "Closed-Guard …" under a description
- * that says the ankles are NOT locked. An unqualified "TECHNIQUES FROM HERE"
- * turns a known data limitation into the screen stating something false, to
- * exactly the reader with no way to check it.
+ * `family` cannot separate closed from open guard — every one of these rows
+ * says "Guard - Bottom". Only `position_detail` knows. Without it both entries
+ * listed the same 187 techniques, and Open Guard showed closed-guard material
+ * beneath its own sentence saying the ankles are not locked.
  */
-test('names the family when it is broader than the position', async () => {
+test('the detail filter separates closed guard from open guard', async () => {
+  const library = [
+    technique({ id: 'armbar-cg', name: 'Armbar from Closed Guard' }),
+    technique({ id: 'gogoplata', name: 'Gogoplata', position_detail: 'Rubber Guard' }),
+    technique({ id: 'dlr-sweep', name: 'De La Riva Sweep', position_detail: 'De La Riva' }),
+    technique({ id: 'butterfly', name: 'Butterfly Sweep', position_detail: 'Butterfly Guard' }),
+  ];
+  mockFetchTechniques.mockResolvedValue(library);
+
+  // Closed guard whitelists its two details.
+  render(<PositionScreen />);
+  await waitFor(() => expect(screen.getByText('Armbar from Closed Guard')).toBeTruthy());
+  expect(screen.getByText('Gogoplata')).toBeTruthy();
+  expect(screen.queryByText('De La Riva Sweep')).toBeNull();
+  expect(screen.queryByText('Butterfly Sweep')).toBeNull();
+  screen.unmount();
+
+  // Open guard blacklists the same two and takes the rest of the family.
+  mockFetchPosition.mockResolvedValue({
+    ...CLOSED_GUARD,
+    id: 'open-guard',
+    name: 'Open Guard',
+    detail_includes: [],
+    detail_excludes: ['Closed Guard', 'Rubber Guard'],
+  });
+  mockFetchTechniques.mockResolvedValue(library);
+
+  render(<PositionScreen />);
+  await waitFor(() => expect(screen.getByText('De La Riva Sweep')).toBeTruthy());
+  expect(screen.getByText('Butterfly Sweep')).toBeTruthy();
+  expect(screen.queryByText('Armbar from Closed Guard')).toBeNull();
+  expect(screen.queryByText('Gogoplata')).toBeNull();
+});
+
+/**
+ * The label may only say "FROM HERE" when the list really is this position's.
+ *
+ * Knee on Belly is the one entry where it isn't: no technique carries that
+ * position, so it borrows Side Control's whole list. Claiming those are its own
+ * would be the screen stating something false to the reader least able to check
+ * — the failure this label exists to prevent.
+ */
+test('names the family when the list is borrowed from a sibling', async () => {
+  mockFetchPosition.mockResolvedValue({
+    ...CLOSED_GUARD,
+    id: 'knee-on-belly',
+    name: 'Knee on Belly',
+    family: 'Side Control',
+    detail_includes: [],
+    detail_excludes: [],
+  });
   mockFetchTechniques.mockResolvedValue([
-    technique({ id: 'armbar-closed-guard', name: 'Armbar from Closed Guard' }),
+    technique({ id: 'kob-mount', name: 'Knee on Belly to Mount', position: 'Side Control - Top' }),
   ]);
 
   render(<PositionScreen />);
 
-  await waitFor(() => expect(screen.getByText(/TECHNIQUES FROM/)).toBeTruthy());
-  expect(screen.queryByText('TECHNIQUES FROM HERE · 1')).toBeNull();
+  await waitFor(() =>
+    expect(screen.getByText('TECHNIQUES FROM THE SIDE CONTROL FAMILY · 1')).toBeTruthy(),
+  );
 });
 
-/** ...and must not add the qualifier when the family IS the position. */
-test('says "from here" when the family is the position itself', async () => {
+/**
+ * Back Control's family is "Back" — an artefact of the rows saying
+ * "Back - Top (Back Control)", not a broader scope. Nothing else maps to it, so
+ * qualifying it as "THE BACK FAMILY" would be wrong, and is not a phrase in the
+ * sport either.
+ */
+test('does not qualify back control, whose family is a naming artefact', async () => {
   mockFetchPosition.mockResolvedValue({
     ...CLOSED_GUARD,
-    id: 'mount',
-    name: 'Mount',
-    family: 'Mount',
+    id: 'back-control',
+    name: 'Back Control',
+    family: 'Back',
+    detail_includes: [],
+    detail_excludes: [],
   });
   mockFetchTechniques.mockResolvedValue([
-    technique({ id: 'americana', name: 'Americana from Mount', position: 'Mount - Top' }),
+    technique({ id: 'rnc', name: 'Rear Naked Choke', position: 'Back - Top (Back Control)' }),
   ]);
 
   render(<PositionScreen />);

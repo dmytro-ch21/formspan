@@ -106,6 +106,21 @@ type Position struct {
 	// error, so seed validation checks it against the known set.
 	Family string `json:"family"`
 
+	// Narrow the cross-link within Family, using techniques.position_detail.
+	//
+	// Family alone cannot separate closed guard from open guard: the technique
+	// rows say only "Guard - Bottom". PositionDetail can — it carries "Closed
+	// Guard" on 35 and "Open Guard" on 37 — so these two express which side of
+	// that split a position wants.
+	//
+	// Includes is a whitelist (empty means "the whole family"), Excludes a
+	// blacklist applied after it. They are opposite operations because the two
+	// positions that need them are opposite shapes: closed guard is a short
+	// enumerable set, open guard is everything-but. A client MUST apply both,
+	// or Open Guard silently lists closed-guard techniques again.
+	DetailIncludes []string `json:"detail_includes"`
+	DetailExcludes []string `json:"detail_excludes"`
+
 	// Pedagogical, not alphabetical — alphabetical opens the glossary on Back
 	// Control, which is the last thing a beginner needs. Spaced by 10 so an
 	// entry can be inserted later without renumbering.

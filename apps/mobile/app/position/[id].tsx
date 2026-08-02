@@ -162,7 +162,7 @@ export default function PositionScreen() {
 
   const p = position;
   const [code, accent] = positionBadge(p.id);
-  const related = techniquesInPosition(techniques, p.family);
+  const related = techniquesInPosition(techniques, p);
 
   return (
     <FlatList
@@ -225,16 +225,21 @@ export default function PositionScreen() {
  * something it cannot know.
  */
 function sectionLabel(p: Position, count: number): string {
-  // startsWith, not equality. Back Control's family is "Back" — a naming
-  // artefact of the technique rows saying "Back - Top (Back Control)", not a
-  // broader scope: nothing else maps to "Back", and both its top and bottom
-  // entries genuinely are back control. Equality qualified it as "THE BACK
-  // FAMILY", which is both wrong and not a phrase anyone in the sport uses.
-  // The qualifier is for the entries that really do share a family with a
-  // sibling — closed/open guard, and knee on belly under side control.
-  const shares = !p.name.toLowerCase().startsWith(p.family.toLowerCase());
-  const scope = shares ? `THE ${p.family} FAMILY` : 'HERE';
-  return `TECHNIQUES FROM ${scope} · ${count}`.toUpperCase();
+  // Two conditions, and both are about whether the list is honestly this
+  // position's own.
+  //
+  // A detail filter means it is: closed and open guard each narrow the shared
+  // Guard family down to their own techniques, so "FROM HERE" is true of them
+  // even though their family is broader than their name.
+  //
+  // Without one, the name-vs-family check decides. startsWith rather than
+  // equality because Back Control's family is "Back" — an artefact of the rows
+  // saying "Back - Top (Back Control)", not a broader scope; nothing else maps
+  // to it. That leaves Knee on Belly as the only qualified entry, which is
+  // right: it genuinely borrows Side Control's list, having none of its own.
+  const scoped = p.detail_includes.length > 0 || p.detail_excludes.length > 0;
+  const own = scoped || p.name.toLowerCase().startsWith(p.family.toLowerCase());
+  return `TECHNIQUES FROM ${own ? 'HERE' : `THE ${p.family} FAMILY`} · ${count}`.toUpperCase();
 }
 
 /**
