@@ -11,7 +11,7 @@ import { formatElapsed } from '@/lib/rest';
 import type { LoggedSet, Session } from '@/lib/sessions';
 import { listLocalSessions } from '@/lib/sessionStore';
 import { formatVolume } from '@/lib/units';
-import { enabledSports } from '@/lib/modules';
+import { enabledSports, type Module } from '@/lib/modules';
 import { useModules } from '@/lib/ModulesProvider';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
@@ -87,12 +87,31 @@ function todayLabel(now: Date): string {
   return now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
 }
 
-function describeSession(s: Session): string {
-  const n = workingSets(s);
+/**
+ * Whether this discipline is logged after the fact rather than started and
+ * logged into.
+ *
+ * Keyed on the catalog kind rather than on `key === 'bjj'`, so a future
+ * discipline whose sessions are technique-shaped gets the right flow without
+ * this file learning its name — the same reasoning that moved the sport list
+ * itself into the registry.
+ */
+function logsAfterwards(sportKey: string, mods: Module[]): boolean {
+  return mods.find((m) => m.key === sportKey)?.capabilities.catalog === 'techniques';
+}
+
+function describeSession(s: Session, mods: Module[]): string {
   const parts = [
     new Date(s.started_at).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' }),
-    `${n} ${n === 1 ? 'set' : 'sets'}`,
   ];
+  // "0 sets" on every mat session is not a neutral default — it reads as an
+  // abandoned session. A BJJ session legally cannot hold a set (no BJJ
+  // exercises exist since migration 000019), so the count is structurally
+  // zero and saying it is worse than saying nothing.
+  if (!logsAfterwards(s.sport, mods)) {
+    const n = workingSets(s);
+    parts.push(`${n} ${n === 1 ? 'set' : 'sets'}`);
+  }
   if (s.ended_at) {
     parts.push(
       formatElapsed((new Date(s.ended_at).getTime() - new Date(s.started_at).getTime()) / 1000),
@@ -352,15 +371,29 @@ export default function TodayScreen() {
               <Pressable
                 key={s.key}
                 style={[styles.startButton, i > 0 && styles.startButtonSecondary]}
-                onPress={() => router.push(`/session/start?sport=${s.key}`)}
+                // BJJ logs rather than starts, and goes somewhere else
+                // entirely. On the mat you cannot touch a phone — sweaty
+                // hands, a mouthguard, six-minute rounds — so BJJ inverts
+                // the strength flow: zero interaction during the session,
+                // everything recalled straight after. Sending it to
+                // `/session/start` gave it a live set logger it can never
+                // legally hold a set in (there are no BJJ exercises since
+                // migration 000019), which is the shape this replaces.
+                onPress={() =>
+                  logsAfterwards(s.key, modules)
+                    ? router.push('/bjj/log')
+                    : router.push(`/session/start?sport=${s.key}`)
+                }
                 accessibilityRole="button"
-                accessibilityLabel={`Start a ${s.label} session`}
+                accessibilityLabel={
+                  logsAfterwards(s.key, modules) ? `Log a ${s.label} session` : `Start a ${s.label} session`
+                }
                 testID={`start-session-${s.key}`}
               >
                 <Text style={[styles.startText, i > 0 && styles.startTextSecondary]}>
                   {/* NOT lowercased: the registry carries the label precisely so BJJ
                       stays "BJJ". Lowercasing it renders "Start bjj". */}
-                  {i === 0 ? `Start ${s.label}` : s.label}
+                  {i === 0 ? `${logsAfterwards(s.key, modules) ? 'Log' : 'Start'} ${s.label}` : s.label}
                 </Text>
               </Pressable>
             ))}
@@ -415,12 +448,12 @@ export default function TodayScreen() {
                 accessibilityRole="button"
                 // Folds the meta line in, because the label replaces the
                 // children rather than adding to them.
-                accessibilityLabel={`${s.name || s.sport} session, ${describeSession(s)}`}
+                accessibilityLabel={`${s.name || s.sport} session, ${describeSession(s, modules)}`}
                 testID={`session-${s.id}`}
               >
                 <View style={styles.sessionMain}>
                   <Text style={styles.sessionName}>{s.name || s.sport}</Text>
-                  <Text style={styles.muted}>{describeSession(s)}</Text>
+                  <Text style={styles.muted}>{describeSession(s, modules)}</Text>
                 </View>
                 <Text style={styles.chevron}>›</Text>
               </Pressable>

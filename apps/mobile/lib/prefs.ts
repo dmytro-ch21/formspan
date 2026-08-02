@@ -147,6 +147,21 @@ export const PREF_LIBRARY_SPORT = 'library_sport';
  * transient narrowing that would surprise them if it silently persisted.
  */
 export const PREF_LIBRARY_BELT = 'library_belt';
+/**
+ * The shape of the last BJJ session logged, as this time's defaults.
+ *
+ * The single biggest lever on the three-tap budget: people train the same way
+ * most weeks, so last time's answers for how long, how many rounds and gi or
+ * not are almost always right, which turns four decisions into zero. Stored
+ * as one JSON blob for the same reason `PREF_MODULES` is — it is read once,
+ * before the first paint of the log screen, and N keyed reads would be N
+ * round trips to SQLite for one form.
+ *
+ * Deliberately does NOT carry the note, the body note or the tags: those are
+ * facts about one session, and pre-filling them would put last week's words
+ * in this week's record.
+ */
+export const PREF_BJJ_LAST_LOG = 'bjj_last_log';
 
 /**
  * The whole module set, JSON, under one key.

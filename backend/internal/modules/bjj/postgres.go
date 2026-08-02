@@ -101,6 +101,13 @@ type scanner interface {
 	Scan(dest ...any) error
 }
 
+// querier is the slice of pgx shared by *pgxpool.Pool and pgx.Tx, so a helper
+// can be handed either one. Lets a read run inside the caller's transaction
+// rather than on a separate connection that cannot see its uncommitted work.
+type querier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
 func scanPromotion(s scanner) (Promotion, error) {
 	var (
 		p  Promotion

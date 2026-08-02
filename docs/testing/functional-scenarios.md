@@ -2280,3 +2280,102 @@ Library" above for the base screen this extends.
   currently on screen.
 - Signing in as a different athlete on the same device does not carry over
   the previous athlete's belt cap.
+
+## Logging a BJJ session (mobile)
+
+The floor and the reflection are two layers and have to be tested as two —
+most of the value is in the floor working alone.
+
+### The three-tap floor
+
+- Today's BJJ action opens **`/bjj/log`**, not the live session logger. A BJJ
+  session cannot legally hold a set, so reaching `/session/start` for BJJ is
+  a regression however empty the screen looks.
+- A brand-new account can log a session in three taps: pick a kind, pick an
+  RPE, tap **Log it**. Everything else is already answered.
+- The second session of the same kind opens with the previous one's mat time,
+  rounds, round length and gi already filled in.
+- Changing the kind to **Drilling** clears rounds; changing back restores a
+  sensible default rather than leaving a drilling session with five rounds of
+  sparring attached.
+- **Gi has three states.** "Not saying" is a real answer and must round-trip
+  as distinct from No-gi — never coerced to one of the two.
+- The rolling readout (`≈ N min rolling`) is rounds × round length, and is
+  absent when rounds are "None".
+- **Logging works with the network off**, and the session appears on Today
+  immediately. It syncs later with no further interaction.
+- The logged session carries a real duration: Today shows the mat time, not
+  `unfinished` and not `0:00`. This is `ended_at` being written at log
+  time — without it BJJ contributes nothing to training history at all.
+- A BJJ session in any session list shows **no set count**. "0 sets" is not a
+  neutral default; it reads as an abandoned session.
+- With BJJ disabled, `/bjj/log` refuses rather than logging to a discipline
+  that is switched off — including from a stale back-stack entry.
+
+### The reflection wizard
+
+- Every step is skippable, **Done** is available from any step, and leaving
+  early keeps everything entered so far. Nothing here is required for the
+  session to count.
+- Backing out of the wizard entirely still leaves the floor session logged.
+- Drilled: searching finds techniques by name and by alias; adding one shows
+  it as a removable chip; adding the same technique twice does not duplicate
+  it.
+- A drilled technique records the **position family** derived from the
+  technique's own position ("Half Guard - Bottom" → "Half Guard") and a
+  category mapped from the library's ("Escape" → `escape`).
+- With the technique library unavailable (fresh install, offline, never
+  opened the Library tab), the drilled step says so honestly and stays
+  skippable — it must not block the rest of the wizard.
+- Live grid: tapping a cell increments it, long-pressing decrements, and
+  decrementing to zero removes the tag rather than storing a zero.
+- Tapping **the same cell three times produces one tag with count 3**, not
+  three tags.
+- Selecting a position before tapping attaches it; tapping the same category
+  again under a *different* position produces a **separate** tag, because
+  "swept from half guard" and "swept from guard" are different evidence.
+- The **Them** column records as `conceded` and is as easy to reach as the
+  You column. This is the half that answers "where do I keep getting stuck",
+  and a build where it is slower or hidden has lost the point of the screen.
+- Re-saving the same reflection (a retry, a second sync) does not duplicate
+  its tags — the whole set is replaced, not appended.
+
+### Reading it back
+
+- A logged BJJ session appears in training history and the consistency grid
+  alongside strength sessions, and contributes its mat time.
+- Deleting the session removes its reflection and tags with it — no orphaned
+  evidence attached to nothing.
+- A reflection written on one account is never visible or writable from
+  another; both "no such session" and "not yours" answer identically.
+
+### Auth & security
+
+These are the cases the composite owner foreign key does **not** cover on its
+own, so none of them is redundant with "the FK exists".
+
+- **Overwriting an existing reflection cross-account is refused.** Distinct
+  from writing a new one: once the detail row exists the upsert takes the
+  `DO UPDATE` path, where Postgres skips the FK check because no referencing
+  column changes. Write as the owner first, *then* attempt as another
+  account, and assert the owner's note survives unchanged.
+- That attempt must send **no tags** — a tag would hit the tag table's own
+  FK and fail there, so a test with tags passes whether or not the detail
+  write is guarded.
+- **A BJJ reflection cannot attach to a session of another sport.** Attempt a
+  reflection against a `strength` session owned by the same caller: refused
+  as `not_found`, and no detail row is left behind.
+- Both refusals answer `not_found` rather than `forbidden`, so neither
+  confirms that a session id exists on another account.
+
+### Sync durability
+
+- **A permanently-refused reflection never costs the session its duration.**
+  Force the reflection PUT to fail with a 400 (a tag naming a technique the
+  catalog no longer has) and assert the session still carries `ended_at`
+  server-side, and still contributes its mat time to history. The reflection
+  is optional; the session's timing is not.
+- The row stays dirty after such a failure, so the reflection is retried
+  rather than silently dropped.
+- A reflection blob that no longer parses is skipped, not fatal — the session
+  and its timing still push and the row still settles clean.

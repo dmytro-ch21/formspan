@@ -63,7 +63,9 @@ func main() {
 	defer pool.Close()
 
 	profileHandler := profile.NewHandler(profile.NewPostgresRepository(pool))
-	bjjHandler := bjj.NewHandler(bjj.NewPostgresRepository(pool))
+	bjjRepo := bjj.NewPostgresRepository(pool)
+	bjjHandler := bjj.NewHandler(bjjRepo)
+	bjjSessionHandler := bjj.NewSessionHandler(bjjRepo)
 	featureFlagHandler := featureflag.NewHandler(featureflag.NewPostgresRepository(pool))
 	activityHandler := activity.NewHandler(activity.NewPostgresRepository(pool))
 	exerciseHandler := exercise.NewHandler(exercise.NewPostgresRepository(pool), os.Getenv("MEDIA_BASE_URL"))
@@ -82,6 +84,12 @@ func main() {
 	mux.Handle("POST /v1/bjj/promotions", verifier.RequireAuth(http.HandlerFunc(bjjHandler.CreatePromotion)))
 	mux.Handle("PATCH /v1/bjj/promotions/{promotionID}", verifier.RequireAuth(http.HandlerFunc(bjjHandler.UpdatePromotion)))
 	mux.Handle("DELETE /v1/bjj/promotions/{promotionID}", verifier.RequireAuth(http.HandlerFunc(bjjHandler.DeletePromotion)))
+	// The BJJ half of a session. The session itself is created through
+	// POST /v1/sessions like any other sport — these only carry what a mat
+	// session has and a barbell session does not, exactly as
+	// PUT /v1/sessions/{id}/sets carries what a strength session has.
+	mux.Handle("PUT /v1/bjj/sessions/{sessionID}", verifier.RequireAuth(http.HandlerFunc(bjjSessionHandler.PutDetail)))
+	mux.Handle("GET /v1/bjj/sessions/{sessionID}", verifier.RequireAuth(http.HandlerFunc(bjjSessionHandler.GetDetail)))
 
 	mux.Handle("GET /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Get)))
 	mux.Handle("POST /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Create)))

@@ -21,6 +21,7 @@ import {
   type LoggedSet,
   type Session,
 } from './sessions';
+import { putDetail as pushBjjDetail, type SessionDetail as BjjDetail } from './bjjSession';
 
 /**
  * Offline-first session storage.
@@ -62,12 +63,37 @@ type Row = {
   ended_at: string | null;
   notes: string;
   sets_json: string;
+  /**
+   * The BJJ reflection, or NULL for every other sport. See the v12 note in
+   * `db.ts` — NULL is what tells the push path to skip the detail call
+   * entirely rather than send an empty one.
+   */
+  bjj_json: string | null;
   dirty: number;
   remote: number;
   /** Set once the athlete deleted it; the row survives until the server agrees. */
   deleted_at: string | null;
   updated_at: string;
 };
+
+/**
+ * Parsed BJJ reflection, or `null` if the blob is unreadable.
+ *
+ * Unreadable is survivable here in a way it is not for sets: the session, its
+ * timing and its RPE-driven load have already been pushed, so dropping a
+ * corrupt reflection costs the tags, not the training record. The push path
+ * therefore skips it rather than failing the whole row.
+ */
+function parseBjjDetail(json: string): BjjDetail | null {
+  try {
+    const d = JSON.parse(json) as BjjDetail;
+    // Tags absent from an older blob must read as "none recorded", not as a
+    // crash in the push path.
+    return { ...d, tags: d.tags ?? [] };
+  } catch {
+    return null;
+  }
+}
 
 /** Parsed sets, or `null` if the blob is unreadable. */
 function parseSets(json: string): LoggedSet[] | null {
@@ -178,7 +204,30 @@ export async function upsert(
 /** Starts a session locally. Returns immediately — no network involved. */
 export async function startLocalSession(
   userID: string,
-  input: { sport: string; name: string; workout_id?: string | null; sets?: LoggedSet[] },
+  input: {
+    sport: string;
+    name: string;
+    workout_id?: string | null;
+    sets?: LoggedSet[];
+    /**
+     * When it actually happened, for a session recorded after the fact.
+     *
+     * Retroactive logging is first-class rather than an edge case: most BJJ
+     * sessions get written down that evening, and the design that assumes
+     * "now" is when training started makes every one of them wrong. Defaults
+     * to now, so the live strength flow is unchanged.
+     */
+    started_at?: string;
+    /**
+     * Set when the session is already over at the moment it is created —
+     * a reflection log rather than a live one.
+     *
+     * Not cosmetic: training history derives every duration from
+     * `ended_at - started_at`, so a session created without one contributes
+     * nothing to mat time no matter how long it really was.
+     */
+    ended_at?: string | null;
+  },
 ): Promise<LocalSession> {
   const session: LocalSession = {
     id: randomUUID(),
@@ -186,8 +235,8 @@ export async function startLocalSession(
     workout_id: input.workout_id ?? null,
     sport: input.sport as Workout['sport'],
     name: input.name,
-    started_at: new Date().toISOString(),
-    ended_at: null,
+    started_at: input.started_at ?? new Date().toISOString(),
+    ended_at: input.ended_at ?? null,
     notes: '',
     sets: input.sets ?? [],
     created_at: new Date().toISOString(),
@@ -251,6 +300,53 @@ export async function finishLocalSession(userID: string, id: string): Promise<vo
     id,
     userID,
   );
+}
+
+/**
+ * Store the BJJ reflection locally and mark the session for push.
+ *
+ * The same shape as `saveLocalSets`, deliberately: written locally first,
+ * pushed by the ordinary outbox, replaced wholesale rather than merged. A
+ * reflection filled in on the mat with no signal is the normal case, not the
+ * edge case — the design doc puts reflection within ~20 minutes of stepping
+ * off the mat, which is exactly where the signal is worst.
+ */
+export async function saveLocalBjjDetail(
+  userID: string,
+  id: string,
+  detail: BjjDetail,
+): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    `UPDATE local_sessions SET bjj_json = ?, dirty = 1, updated_at = ?
+     WHERE id = ? AND user_id = ?`,
+    JSON.stringify(detail),
+    new Date().toISOString(),
+    id,
+    userID,
+  );
+}
+
+/**
+ * The locally-held reflection for a session, or null if there isn't one.
+ *
+ * Read from SQLite rather than the API so a session opened offline still
+ * shows what was logged — the reflection is the thing most likely to have
+ * been written offline in the first place.
+ */
+export async function readLocalBjjDetail(
+  userID: string,
+  id: string,
+): Promise<BjjDetail | null> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ bjj_json: string | null }>(
+    `SELECT bjj_json FROM local_sessions
+     WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+    id,
+    userID,
+  );
+  if (!row?.bjj_json) return null;
+  return parseBjjDetail(row.bjj_json);
 }
 
 /**
@@ -450,6 +546,17 @@ async function pushRow(
       name: s.name,
       workout_id: s.workout_id,
       started_at: s.started_at,
+      // Sent on the create, not left to the finish call below.
+      //
+      // A session that was already over when it was first pushed — every BJJ
+      // reflection log — must land complete in one request. Relying on the
+      // follow-up finish meant anything that could fail in between took the
+      // session's duration with it, and since history derives all duration
+      // from `ended_at - started_at`, "no duration" means the session counts
+      // for nothing. The optional reflection could therefore cost the
+      // mandatory floor its mat time, which inverts the whole point of the
+      // floor being independent.
+      ended_at: s.ended_at,
       sets,
     });
     remote = true;
@@ -470,7 +577,43 @@ async function pushRow(
     }
     throw err;
   }
+
+  // Before the reflection, deliberately. The finish is what the session's
+  // duration depends on; the reflection is optional. Ordered the other way
+  // round, a permanently-refused reflection (a 400 from a retired technique
+  // id, say) throws before this line is ever reached and the session is left
+  // with no `ended_at` at all — the optional half silently costing the
+  // mandatory one. Redundant now that the create carries `ended_at` too,
+  // and kept because two independent guarantees is the right number for the
+  // one field that decides whether a session counts.
   if (s.ended_at) await pushFinish(getToken, s.id, s.ended_at);
+
+  // The BJJ half, if this is one. After the session exists server-side,
+  // same as the sets push and for the same reason: the server rejects it
+  // with a 404 until it does.
+  //
+  // NULL means "not a BJJ session" and skips the call entirely — which is
+  // why the column is nullable rather than defaulted to an empty object.
+  if (row.bjj_json) {
+    const detail = parseBjjDetail(row.bjj_json);
+    // A corrupt blob is not a reason to fail the whole push: the session and
+    // its timing have already landed and are worth keeping. Same posture as
+    // the catalog's pre-v10 rows — degrade, don't discard.
+    if (detail !== null) {
+      try {
+        await pushBjjDetail(getToken, s.id, detail);
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 404) {
+          await db.runAsync(
+            `UPDATE local_sessions SET remote = 0 WHERE id = ? AND user_id = ?`,
+            s.id,
+            userID,
+          );
+        }
+        throw err;
+      }
+    }
+  }
 
   await db.runAsync(
     `UPDATE local_sessions SET dirty = 0 WHERE id = ? AND user_id = ?

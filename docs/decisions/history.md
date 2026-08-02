@@ -5150,6 +5150,225 @@ cumulative. `SmallChip` now takes an optional accessible name, used by the
 belt row and deliberately not by the position row, where the visible text
 already means what it says.
 
+## 2026-08-02 — Logging classes, drilling and rolling
+
+The first real BJJ logging increment, and the one
+[bjj-tracking-design.md](bjj-tracking-design.md) was written to specify. It
+implements §1's two-layer split and §3's capture order more or less
+literally; the parts of that document it does **not** implement are listed at
+the end rather than quietly skipped.
+
+### The inversion, and why Today's BJJ button changed
+
+Strength starts a session and logs into it while you train. On the mat that
+is impossible — sweaty hands, a mouthguard, six-minute rounds, gis without
+pockets — so BJJ inverts it: **zero interaction during the session,
+everything recalled straight after.**
+
+Today's BJJ button therefore no longer goes to `/session/start`. It went
+there because every sport did, and the destination was a live set logger
+that a BJJ session **cannot legally hold a single row in**:
+`session_sets.exercise_id` is NOT NULL and references `exercises`, the
+repository asserts each set's `exercises.sport` matches, and migration
+000019 removed the last BJJ exercises. So the old path offered an empty
+form that could never be filled — not a missing feature, an unreachable one.
+
+The button is keyed on `capabilities.catalog === 'techniques'` rather than
+on `key === 'bjj'`, so a future technique-shaped discipline gets the right
+flow without Today learning its name.
+
+### Two layers, and the floor is the product
+
+`system-design.md §4` sets a hard budget: a BJJ session logged in ≤3 taps.
+The floor screen honours it by pre-filling everything from the last session
+of that kind, so the three taps that remain are **pick the kind, pick how
+hard, log it**. Mat time, rounds, round length and gi all arrive already
+answered.
+
+That screen is a complete valid session on its own, and the copy says so.
+The reflection wizard is a separate, optional continuation. This split is
+the whole design rather than a nicety: a two-minute mandatory wizard kills
+the habit, and consistency data has to survive the lazy day.
+
+**`ended_at` is written at log time, from the duration.** Easy to miss and
+load-bearing: training history derives every duration from
+`ended_at - started_at`, so a BJJ session without one contributes nothing to
+mat time — and because the history chart falls back to *time* when there is
+no tonnage, a BJJ-only athlete would have got a flat zero line rather than
+their actual training.
+
+### The schema is graph-ready now because it cannot be later
+
+`bjj_session_details` is a 1:1 companion to `sessions`, not columns on it —
+the same reasoning that kept a belt off `profiles`. The session row itself
+stays exactly where every other sport's lives, which is what keeps BJJ
+visible to history, the consistency grid and the cross-sport load currency.
+
+`bjj_session_tags` is the part worth arguing about, and §4 of the design doc
+insisted it land in the **first** migration: every tag carries **position
+context and an outcome direction**, because both are nearly free to record
+today and expensive to retrofit onto months of history that lacks them.
+
+The vocabulary is one enum: `drilled → attempted → scored` is the technique
+funnel, and `conceded` is the symmetric half. That fourth value is the one
+that earns the table. "Where do I keep getting stuck" is the question every
+serious grappler is trying to answer and almost nobody has data on, and a
+schema recording only what worked could never answer it. It is why the live
+grid has a **Them** column at all.
+
+Tags carry a `count` rather than one row per repetition — reflection is
+recalled in counts ("got swept about three times"), and a row per rep would
+make editing a chip mean reconciling N rows.
+
+### No cross-module writes, and authorization for free
+
+The BJJ session is created through the ordinary `POST /v1/sessions`; the
+reflection goes to `PUT /v1/bjj/sessions/{id}`. That mirrors
+`PUT /v1/sessions/{id}/sets` exactly, and it means the bjj module writes only
+its own tables — no module reaching into another's.
+
+Both BJJ tables reference `sessions (id, user_id)` as a **composite** pair,
+the pattern `session_sets` already uses. The effect is that authorization is
+the foreign key: there is no ownership SELECT anywhere in `PutDetail`,
+because a write naming a session that does not exist *or* belongs to
+somebody else fails in the database. Both map to 404, indistinguishably, for
+the same non-disclosure reason the admin module was fixed for. The
+cross-user test goes red when only that mapping is removed, so the guard is
+genuinely load-bearing rather than decorative.
+
+### It works with no signal, because that is when it is used
+
+Reflection happens within ~20 minutes of stepping off the mat, which is
+reliably a car park. So the reflection is not pushed directly: schema v12
+adds `bjj_json` to `local_sessions`, written locally first and carried by
+the **existing** outbox — same tombstones, same compare-and-swap, same
+blocked-row repair screen, no second sync path to keep honest. In `pushRow`
+it sits exactly where the sets push sits, for exactly the same reason: it
+references a session that has to exist server-side first.
+
+Nullable rather than defaulted to `{}`, because "not a BJJ session" and "a
+BJJ session with an empty reflection" are different facts and only the first
+should skip the detail call.
+
+`startLocalSession` also gained optional `started_at`/`ended_at`. Retroactive
+logging is first-class per §4 of system-design — most BJJ sessions get
+written down that evening — and a function that always assumes "now" makes
+every one of them wrong.
+
+### What this increment deliberately does not do
+
+All of these are in the design doc and none are in this PR:
+
+- **Voice notes** (§3.6). Needs a native module, and the doc already flags it
+  as landing on the same pile as HealthKit and widgets.
+- **Focus mode** (§5), insights, the funnel and heatmap views, gap detection,
+  curricula. Every one of them is a pure read over the tags this now
+  accumulates, which was the point of settling the schema first.
+- **The post-class notification** that opens the wizard (§1). Needs
+  scheduling infrastructure that does not exist yet.
+- **Per-round detail and partner belt/size** — open questions 1 and 2, both
+  suggested as "aggregate for MVP" and left that way.
+- **Perceived performance** (§3.3). Dropped from the effort step on purpose:
+  it is the weakest signal in the flow and §2's own stance is evidence over
+  self-assessment. RPE and the body note are kept.
+- **Web review of a BJJ session.** Correcting a session at a desk is
+  legitimate under the platform rule, and reading a reflection back on web
+  is the natural next increment.
+
+### A local-environment note, not a code one
+
+`docs/decisions` and the shared dev Postgres disagreed for a while: an
+uncommitted `000024_positions` in the primary checkout had already been
+applied to the shared database, so golang-migrate refused to run anything
+numbered 24 from this branch and then refused to run *at all* (it wants a
+down file for the version the DB is on). This branch's migration is
+therefore **000025**, leaving 24 to the positions work in progress, and
+verification ran against its own `vola_bjjsess` databases rather than
+disturbing that state. Worth knowing before assuming a migration failure is
+a migration bug.
+
+That renumbering then turned out to have a consequence past this checkout,
+which review caught: **`feat/bjj-position-glossary` (000024) is not on main,
+and main stops at 23.** golang-migrate tracks one integer, and `migrate up`
+only runs versions *above* it — so if 25 lands first the version becomes 25
+and 24 is skipped **permanently and silently**, on every database that took
+25 first, staging included. No error is ever produced; the glossary tables
+just never exist. The constraint is only the counter — nothing here depends
+on 24 — so either branch may land first as long as the one that lands
+second holds the higher number. Flagged in a banner at the top of the
+migration itself, because the failure mode leaves no trace anywhere else.
+
+### What review changed, and one thing this log got wrong
+
+Three findings were worth the round:
+
+- **The upsert's `WHERE bjj_session_details.user_id` is the authorization
+  boundary on the update path, not the decoration this code's own comment
+  claimed.** The composite owner FK does reject a foreign session on
+  INSERT — but Postgres **skips the referential-integrity check entirely on
+  `ON CONFLICT DO UPDATE` when no referencing column changes**, and the
+  upsert rewrites only payload columns by design. So once a detail row
+  exists the FK stops running and that predicate is all that stands between
+  two athletes. The original comment described it as "belt and braces, and
+  unreachable today", which is an invitation to delete it. Removing it
+  reproduces a clean cross-user overwrite. It now carries the real
+  explanation and a test
+  (`TestExistingDetailCannotBeOverwrittenByAnotherUser`) that writes the
+  owner's row *first* — the case the existing tests missed, because they
+  all exercised the INSERT path where the FK does the work. That test sends
+  **no tags** deliberately: the tag table's own FK would refuse first and
+  mask whether the detail upsert was guarded at all.
+- **Nothing checked `sport`.** A BJJ reflection attached happily to a
+  strength session — the owner FK only knows `(id, user_id)`. Now an
+  explicit ownership-and-sport `SELECT` opens the transaction, mirroring
+  `assertSportsMatch` in the session module. Both answer `ErrNotFound`
+  rather than distinguishing "not yours" from "not BJJ", same
+  non-disclosure rule as everywhere else.
+- **The optional reflection could cost the mandatory session its
+  duration.** The push ran the reflection PUT *before* the finish call, so
+  a permanently-refused tag — one naming a retired technique — threw before
+  `ended_at` was ever sent. History derives every duration from
+  `ended_at - started_at`, so that session would have counted for nothing,
+  permanently, with the athlete seeing a generic sync error. Fixed twice
+  over: `ended_at` now rides along on the create (the API already accepted
+  it), and the finish is ordered ahead of the reflection. `bjjPush.test.ts`
+  pins both, and all three assertions go red when the order is put back.
+
+The pattern in the first two is the same one this project keeps
+re-learning: a foreign key that *looks* like it enforces something often
+enforces it on one path only, and a comment asserting "unreachable" ages
+into a licence to remove the thing holding the line. The check suite was
+green throughout.
+
+A second review pass over the fixes then caught two things worth recording,
+because both are the *fix* being subtly wrong rather than the original code:
+
+- **The test written to pin the `WHERE` predicate did not pin it.** Adding
+  the explicit ownership SELECT made the two guards independent, so the
+  SELECT answers first and the whole suite stays green with the `WHERE`
+  deleted — while the comment above it claimed a named test would fail.
+  The line was documented as load-bearing and was, in practice, untested.
+  Fixed by testing it where it actually lives:
+  `TestUpsertPredicateRefusesACrossUserUpdateAtTheSQLLevel` issues the
+  upsert directly against Postgres as an attacker and asserts zero rows
+  affected. Deliberately not routed through `PutDetail`, because nothing
+  routed through `PutDetail` can reach the predicate any more.
+- **The counter-scoping fix reintroduced its own bug one chip along.** The
+  live grid's counters were scoped to the selected position so display and
+  controls agree, with a line explaining what is recorded elsewhere — but
+  that line was gated on a *named* position being selected. The first chip
+  said "Anywhere", which reads as "all" and is actually the *unspecified*
+  bucket, so returning to it hid every position-tagged entry with no
+  explanation: the same "did I lose that?" moment the fix existed to
+  remove. The chip is now "Not saying" (matching the gi tri-state) and the
+  line shows for both cases.
+
+Both are the same failure mode as the original: a guard or an affordance
+that is *nearly* right, described by a comment that is confidently wrong.
+The reviewers were given the design intent, which is why they found the
+gap between what the code claimed and what it did rather than only what it
+did.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.
@@ -5165,4 +5384,7 @@ already means what it says.
 - Feature flags exist (`GET /v1/flags`, `internal/modules/featureflag`) but are read-only — no write endpoint or admin-console screen yet (real backend admin authorization now exists, see below, so this is no longer the blocker it was). No frontend app fetches or gates on one yet.
 - First end-to-end vertical slice: **complete** — all five phases done and verified together on a real Simulator (offline log → sync → Postgres → web → admin → log grep). Remaining gaps within it, all deliberate: mobile sync is manual/on-log with **no background sync**; there's **no conflict resolution** (activities are append-only); only one activity `kind` is loggable from the UI; and there's still no in-app log viewer (tracing is by grepping the real log stream for a `request_id`).
 - Mobile auth now covers **sign-in** (email+password plus TOTP/SMS/email-code/backup second factors), **sign-up** (`app/sign-up.tsx`) and **password reset** (`app/forgot-password.tsx`). Only **OAuth** is still missing, and it's a want rather than a hole — every account is reachable without it. The old note here said email-code 2FA needed a cast around Clerk's typings "worth revisiting when `@clerk/clerk-expo` updates": that revisit happened, and the cast was already unnecessary at the pinned version — see the entry above. **None of the three screens is device-verified** — see the sign-up entry for why neither the web preview nor the Simulator could render one.
+- **BJJ sessions are loggable and their evidence accumulates, but nothing reads it back yet.** The tags table is deliberately shaped for the technique funnel, the position heatmap and gap detection; none of those views exist, so today the data goes in and only the session itself comes out. That is the intended order (settle the schema, then read over it), but until a view lands the athlete has no reason to trust the tags are worth entering.
+- **A BJJ-only athlete still sees strength-shaped zeroes.** Today's week summary reads "0kg volume" and the history chart's tonnage is structurally 0 for BJJ — the client already falls back to a time metric when tonnage is zero everywhere, but the volume tile itself does not. Mat time and rounds now exist as real numbers; nothing surfaces them yet.
+- **The technique library is not cached in SQLite** (only in memory, for the app's lifetime). So the reflection wizard's drilled step is empty on a cold launch with no signal — the one moment it is most likely to be used. It degrades honestly and stays skippable, but a `technique_cache` table (or a prefs blob, as `PREF_MODULES` already does) is the fix.
 - The new `backend-module-scaffolder` agent and `/new-module` skill are still unverified in practice — the feature-flags module was scaffolded by hand instead, since its shape (global, ownerless, read-only) didn't fit the agent's per-user-CRUD template. No module has gone through the agent for real yet (the `profile` module it's modeled on predates it) — worth checking it actually produces correct output the first time it's used for a module that *does* fit the template (e.g. a future `goals` module).
