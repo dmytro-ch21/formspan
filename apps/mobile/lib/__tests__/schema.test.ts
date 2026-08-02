@@ -13,7 +13,7 @@ import { migratedFixture, openFixture } from './support/sqlite';
 it('a fresh install ends up at the current schema version', async () => {
   const db = await migratedFixture();
   const row = db.raw.prepare('PRAGMA user_version').get() as { user_version: number };
-  expect(row.user_version).toBe(9);
+  expect(row.user_version).toBe(11);
 });
 
 it('local_sessions has the tombstone column', async () => {
@@ -35,7 +35,7 @@ it('re-running migrate on the SAME database is idempotent', async () => {
   db.raw.exec('PRAGMA user_version = 0');
 
   await expect(migrate(db as never)).resolves.toBeUndefined();
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 9 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 11 });
 });
 
 it('upgrades a v6-shaped database by adding the column', async () => {
@@ -69,7 +69,7 @@ it('upgrades a v6-shaped database by adding the column', async () => {
   const cols = (db.raw.prepare('PRAGMA table_info(local_sessions)').all() as { name: string }[])
     .map((c) => c.name);
   expect(cols).toContain('deleted_at');
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 9 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 11 });
 });
 
 it('upgrades a v7-shaped database by adding the ownership columns', async () => {
@@ -90,7 +90,7 @@ it('upgrades a v7-shaped database by adding the ownership columns', async () => 
   const cols = (db.raw.prepare('PRAGMA table_info(workout_cache)').all() as { name: string }[])
     .map((c) => c.name);
   expect(cols).toEqual(expect.arrayContaining(['owner_user_id', 'visibility']));
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 9 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 11 });
 });
 
 it('an upgraded row is backfilled as owned by the athlete it is filed under', async () => {
@@ -143,4 +143,43 @@ it('an upgraded row is NOT owed to the server', async () => {
 
   const row = db.raw.prepare('SELECT dirty, remote, deleted_at FROM workout_cache').get();
   expect(row).toEqual({ dirty: 0, remote: 1, deleted_at: null });
+});
+
+it('an upgraded pref is NOT owed, and an upgraded exercise has no fabricated payload', async () => {
+  // A v9-SHAPED database specifically. `migratedFixture()` builds a fresh one
+  // where these columns come from CREATE TABLE, so it cannot see a wrong
+  // ALTER default at all — the same blind spot a reviewer caught for
+  // workout_cache in PR4b, which is why this is written the hard way.
+  //
+  // dirty must default to 0: everything already stored either came from the
+  // server or was pushed at the time, so defaulting the other way would queue
+  // an upgrader's entire preference set for a pointless replay — and, worse,
+  // replay stale values over newer ones set on the web.
+  //
+  // payload_json must be NULL, not an empty object: there is nothing to
+  // backfill from, and a default would be a FABRICATED exercise (no muscles,
+  // no equipment, no instructions) that reads as real and never gets
+  // refreshed, instead of a missing one that the next fetch fills in.
+  const db = openFixture();
+  db.raw.exec(`
+    CREATE TABLE prefs (
+      user_id TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL,
+      PRIMARY KEY (user_id, key));
+    CREATE TABLE exercise_cache (
+      id TEXT PRIMARY KEY NOT NULL, sport TEXT NOT NULL, name TEXT NOT NULL,
+      movement_pattern TEXT NOT NULL, load_type TEXT NOT NULL,
+      is_unilateral INTEGER NOT NULL DEFAULT 0, thumbnail_url TEXT,
+      cached_at TEXT NOT NULL);
+    INSERT INTO prefs VALUES ('u1','unit_system','imperial');
+    INSERT INTO exercise_cache VALUES
+      ('e1','strength','Back Squat','squat','weight_reps',0,NULL,'2026-08-01T00:00:00Z');
+    PRAGMA user_version = 9;
+  `);
+
+  await migrate(db as never);
+
+  expect(db.raw.prepare('SELECT dirty FROM prefs').get()).toEqual({ dirty: 0 });
+  expect(db.raw.prepare('SELECT payload_json FROM exercise_cache').get()).toEqual({
+    payload_json: null,
+  });
 });

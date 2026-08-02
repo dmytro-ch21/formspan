@@ -542,6 +542,104 @@ function classify(err: unknown): SyncErrorKind {
 }
 
 /**
+ * Record — or clear — why one row could not sync.
+ *
+ * Only PERMANENT rejections are stored. A transient failure is the ordinary
+ * state of a phone in a basement, and writing "Network request failed" onto
+ * every row would turn a repair list into a list of everything you have ever
+ * logged offline. What belongs here is the row the server will refuse
+ * forever, which is the only kind a person can act on.
+ *
+ * Cleared on success, so a row that was refused and later accepted (the
+ * server was fixed, the workout it referenced finally landed) stops being
+ * reported as broken.
+ */
+async function noteRowError(
+  db: SQLite.SQLiteDatabase,
+  table: 'local_sessions' | 'workout_cache',
+  id: string,
+  userID: string,
+  err: unknown,
+): Promise<void> {
+  if (err !== null && !isPermanentRejection(err)) return;
+  const message = err === null ? null : err instanceof Error ? err.message : String(err);
+  // The table name is interpolated, never the values: it comes from this
+  // function's own literal union, so there is no path from user input to it.
+  await db.runAsync(
+    `UPDATE ${table} SET last_error = ? WHERE id = ? AND user_id = ?`,
+    message,
+    id,
+    userID,
+  );
+}
+
+/** A row the server has refused, with what it said. */
+export type BlockedRow = {
+  kind: 'session' | 'workout';
+  id: string;
+  name: string;
+  lastError: string;
+};
+
+/**
+ * Everything that cannot sync and needs a person.
+ *
+ * Deliberately not merged into `pending`: these are rows that will never
+ * clear on their own, so counting them as "waiting" would be a lie that
+ * never resolves.
+ */
+export async function blockedRows(userID: string): Promise<BlockedRow[]> {
+  const db = await getDb();
+  const sessions = await db.getAllAsync<{ id: string; name: string; last_error: string }>(
+    `SELECT id, name, last_error FROM local_sessions
+      WHERE user_id = ? AND last_error IS NOT NULL AND dirty = 1
+      ORDER BY started_at DESC`,
+    userID,
+  );
+  const workouts = await db.getAllAsync<{ id: string; name: string; last_error: string }>(
+    `SELECT id, name, last_error FROM workout_cache
+      WHERE user_id = ? AND last_error IS NOT NULL AND dirty = 1
+      ORDER BY name`,
+    userID,
+  );
+  return [
+    ...sessions.map((r) => ({
+      kind: 'session' as const, id: r.id, name: r.name, lastError: r.last_error,
+    })),
+    ...workouts.map((r) => ({
+      kind: 'workout' as const, id: r.id, name: r.name, lastError: r.last_error,
+    })),
+  ];
+}
+
+/**
+ * Try one blocked row again.
+ *
+ * Clears the recorded error FIRST. Otherwise a row that now succeeds would
+ * keep its old message until a full sync happened to touch it, and the repair
+ * screen would report a fixed row as still broken.
+ */
+export async function retryBlockedRow(
+  userID: string,
+  row: BlockedRow,
+  getToken: TokenGetter,
+): Promise<void> {
+  const db = await getDb();
+  const table = row.kind === 'session' ? 'local_sessions' : 'workout_cache';
+  await noteRowError(db, table, row.id, userID, null);
+  if (row.kind === 'session') {
+    await pushSession(userID, row.id, getToken);
+    return;
+  }
+  const w = await db.getFirstAsync<WorkoutRow>(
+    `SELECT * FROM workout_cache WHERE id = ? AND user_id = ?`,
+    row.id,
+    userID,
+  );
+  if (w) await pushWorkoutRow(db, w, userID, getToken);
+}
+
+/**
  * Reconciles local and remote.
  *
  * Push first, then pull. The order is not incidental: pulling first would
@@ -608,10 +706,12 @@ async function runSync(
     try {
       await pushWorkoutRow(db, w, userID, getToken);
       result.pushed++;
+      await noteRowError(db, 'workout_cache', w.id, userID, null);
     } catch (err) {
       result.failed++;
       result.error = err instanceof Error ? err.message : String(err);
       result.errorKind = worseKind(result.errorKind, classify(err));
+      await noteRowError(db, 'workout_cache', w.id, userID, err);
     }
   }
 
@@ -631,10 +731,12 @@ async function runSync(
     try {
       await pushRow(db, row, userID, getToken);
       result.pushed++;
+      await noteRowError(db, 'local_sessions', row.id, userID, null);
     } catch (err) {
       result.failed++;
       result.error = err instanceof Error ? err.message : String(err);
       result.errorKind = worseKind(result.errorKind, classify(err));
+      await noteRowError(db, 'local_sessions', row.id, userID, err);
     }
   }
 
@@ -870,14 +972,16 @@ export async function cacheExercises(list: Exercise[]): Promise<void> {
     for (const e of list) {
       await db.runAsync(
         `INSERT INTO exercise_cache
-           (id, sport, name, movement_pattern, load_type, is_unilateral, thumbnail_url, cached_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           (id, sport, name, movement_pattern, load_type, is_unilateral, thumbnail_url,
+            payload_json, cached_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            sport = excluded.sport, name = excluded.name,
            movement_pattern = excluded.movement_pattern,
            load_type = excluded.load_type,
            is_unilateral = excluded.is_unilateral,
            thumbnail_url = excluded.thumbnail_url,
+           payload_json = excluded.payload_json,
            cached_at = excluded.cached_at`,
         e.id,
         e.sport,
@@ -886,6 +990,7 @@ export async function cacheExercises(list: Exercise[]): Promise<void> {
         e.load_type,
         e.is_unilateral ? 1 : 0,
         e.media.find((m) => m.kind === 'thumbnail' && m.url)?.url ?? null,
+        JSON.stringify(e),
         now,
       );
     }
@@ -909,6 +1014,7 @@ export async function cachedExercises(sport?: string): Promise<Exercise[]> {
     load_type: string;
     is_unilateral: number;
     thumbnail_url: string | null;
+    payload_json: string | null;
   }>(
     sport
       ? `SELECT * FROM exercise_cache WHERE sport = ? ORDER BY name`
@@ -916,33 +1022,51 @@ export async function cachedExercises(sport?: string): Promise<Exercise[]> {
     ...(sport ? [sport] : []),
   );
 
-  return rows.map((r) => ({
-    id: r.id,
-    name: r.name,
-    sport: r.sport,
-    movement_pattern: r.movement_pattern,
-    movement_pattern_detail: '',
-    primary_muscles: [],
-    secondary_muscles: [],
-    equipment: [],
-    load_type: r.load_type as Exercise['load_type'],
-    is_unilateral: r.is_unilateral === 1,
-    instructions: '',
-    media: r.thumbnail_url
-      ? [
-          {
-            kind: 'thumbnail' as const,
-            storage_key: '',
-            url: r.thumbnail_url,
-            content_type: '',
-            width: null,
-            height: null,
-            position: 0,
-            is_default: false,
-          },
-        ]
-      : [],
-  }));
+  return rows.map((r) => {
+    // The stored payload IS the exercise the API sent, so prefer it whole.
+    //
+    // The reconstruction below it is not an equivalent fallback — it fabricates
+    // empty muscles, empty equipment and empty instructions, which is why the
+    // Library used to look gutted offline rather than merely cached. It stays
+    // only for rows written before v10, which have no payload to read and
+    // nothing to backfill from; the next catalog fetch replaces them.
+    if (r.payload_json) {
+      try {
+        return JSON.parse(r.payload_json) as Exercise;
+      } catch {
+        // A corrupt blob falls through to the typed columns rather than
+        // dropping the exercise from the list entirely — a searchable name
+        // with no detail beats an exercise you cannot find.
+      }
+    }
+    return {
+      id: r.id,
+      name: r.name,
+      sport: r.sport,
+      movement_pattern: r.movement_pattern,
+      movement_pattern_detail: '',
+      primary_muscles: [],
+      secondary_muscles: [],
+      equipment: [],
+      load_type: r.load_type as Exercise['load_type'],
+      is_unilateral: r.is_unilateral === 1,
+      instructions: '',
+      media: r.thumbnail_url
+        ? [
+            {
+              kind: 'thumbnail' as const,
+              storage_key: '',
+              url: r.thumbnail_url,
+              content_type: '',
+              width: null,
+              height: null,
+              position: 0,
+              is_default: false,
+            },
+          ]
+        : [],
+    };
+  });
 }
 
 // --- workouts, writable offline ------------------------------------------

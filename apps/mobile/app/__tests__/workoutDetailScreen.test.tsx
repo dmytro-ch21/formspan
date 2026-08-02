@@ -78,7 +78,16 @@ const mockFetchExercises = jest.fn((..._a: unknown[]): Promise<unknown> => Promi
 jest.mock('@/lib/exercises', () => ({
   fetchExercises: (...a: unknown[]) => mockFetchExercises(...a),
 }));
-jest.mock('@/lib/sync', () => ({ request: jest.fn() }));
+jest.mock('@/lib/sync', () => ({
+  request: jest.fn(),
+  syncNow: jest.fn(async () => {}),
+  // The shared ScreenHeader renders the sync chip now, so every screen test
+  // needs this — a screen that could not read sync state would fail on the
+  // header before reaching anything it asserts.
+  useSyncState: () => ({
+    syncing: false, pending: 0, deferred: 0, lastSyncAt: null, lastError: null, online: true,
+  }),
+}));
 jest.mock('@/lib/sessions', () => ({
   applySuggestions: jest.fn(),
   fetchSuggestions: jest.fn(async () => new Map()),
