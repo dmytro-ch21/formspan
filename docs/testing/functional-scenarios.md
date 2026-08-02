@@ -2104,3 +2104,21 @@ tested on a device with a real keyboard and a real thumb.
   record, not a workspace.
 - Delete the set that is currently being edited, and confirm the right one
   goes — rows are keyed by index, so this is where an off-by-one would show.
+
+## Render-path regressions (mobile, automated)
+
+These are covered by `apps/mobile/app/__tests__/` rather than by hand, and are
+listed here because they are invisible to any store-level check — the SQLite
+layer is correct in both cases and the screen is what goes wrong.
+
+- Reopen an offline-edited plan while online, before its push lands: the edit
+  is still on screen. Adopting the server's older copy here loses the
+  athlete's work with their unwitting help, since editing on from what is
+  displayed writes the stale items back.
+- The converse, which is why it cannot simply always prefer the cache: with
+  nothing owed locally, an edit made on the web must appear.
+- A workout created offline stays in the list when a stale `listWorkouts`
+  response arrives. Creating one fires the sync request and the list reload
+  together, so this is the ordinary path, not a rare interleaving.
+- The shared tab still renders the network list — only `mine` is cached, and
+  the cache-first path must not swallow it.

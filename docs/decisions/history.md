@@ -4615,6 +4615,68 @@ and all on-device behaviour. Adding a component runner is tracked separately.
   problem earlier in the day, one degree milder, and the second time in one
   session that a test agreed with its own fixture.
 
+## 2026-08-01 — A component test runner, because two real bugs lived where no test could see
+
+`apps/mobile` had jest and a real SQLite fixture, and the config said in as
+many words that rendering tests "would be a lot of ceremony aimed away from
+where the bugs are" — with a note to widen it when a component test earned its
+place. The PR #80 review is when it did.
+
+Two of that review's blocking findings were defects **only in the render
+path**, with the store underneath behaving perfectly:
+
+- The workout detail screen adopted the server's copy over an unpushed local
+  edit. The CAS in SQLite correctly refused to mark the newer edit as sent,
+  and the screen undid that visually — reopen an offline-edited plan while
+  online and the edit vanished, Save went inactive, and editing on from what
+  was displayed wrote stale items back over the local row.
+- The workouts list rendered the raw `listWorkouts` response instead of the
+  reconciled cache, so a workout created offline disappeared the moment a
+  stale response landed. Not an unlucky race: creating one fires the sync
+  request and the reload together.
+
+No SQLite-level test can see either. `@testing-library/react-native` now
+covers both, and each is mutation-verified — revert either fix and its test
+turns red.
+
+### What the setup cost, and what it taught
+
+Three things went wrong that are worth writing down, because they are the
+generic ones:
+
+- **A mock that quietly diverged from the hook it replaced.** `useFocusEffect`
+  was stubbed as `useEffect(cb, [])`. The real hook re-runs when its callback
+  identity changes, and screens depend on that — the workouts list wraps
+  `load` in a `useCallback` keyed on `scope`, so switching tabs is what
+  triggers the refetch. Pinned to `[]`, the mock produced a screen that could
+  never reload, and the scope test failed for a reason that existed only in
+  the mock.
+- **RNTL must be imported at module scope in setup**, not inside a hook.
+  Importing it registers its own cleanup hooks, and doing that from inside a
+  running test throws "Hooks cannot be defined inside tests" — which broke
+  every pure-logic suite in the project, not just the new ones.
+- **`verify` caught what jest did not.** The suite went green while `tsc`
+  failed on the mock signatures. That is the check chain doing exactly the job
+  it was built for after the two occasions this year when tests were pushed
+  without a typecheck.
+
+### The act() warnings are still there, on purpose
+
+The detail-screen tests emit seven "not wrapped in act(...)" warnings. The
+screen chains its loads — cache, then `getWorkout`, then the exercise catalog
+for whichever sport that returned — and the tail resolves while the test body
+is still running.
+
+Every fix tried was worse than the noise, and each was measured rather than
+assumed: extra flush rounds in shared setup change nothing (the updates have
+already happened); act-wrapping `render` clears the warnings but makes each
+assertion observe the fully-settled state instead of the frame under test, and
+collides with RNTL's auto-cleanup. So they stay, documented at the top of the
+file, with the note that the assertions under them are mutation-verified.
+
+This is a deliberate acceptance rather than an unnoticed mess — the reason to
+write it down is so the next person doesn't spend the same hour on it.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.
