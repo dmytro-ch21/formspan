@@ -12,6 +12,22 @@ backend/bin/
 .env
 .env.local
 .env.*.local
+# Backups of the above. `.env.local.bak` does not match `.env.*.local`, so a
+# copy made before editing an env file was landing in `git status` as an
+# ordinary untracked file — carrying whatever keys the original held.
+*.bak
+
+# Secrets that have no business being in a repo at all.
+#
+# `secrets.txt` shows up in the root periodically containing a live API key. It
+# was never gitignored, which meant a single `git add -A` would have published a
+# credential to a public remote — and `git add -A` is exactly what "commit
+# everything" reaches for. Ignored rather than merely remembered.
+secrets.txt
+
+# Worktrees created for parallel branches. These are whole checkouts of the
+# repo; committing one nests the repository inside itself.
+.claude/worktrees/
 
 # OS
 .DS_Store
