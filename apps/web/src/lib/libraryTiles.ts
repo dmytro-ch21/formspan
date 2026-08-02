@@ -105,3 +105,45 @@ export const POSITIONS = [
 export function inPositionFamily(position: string, family: string): boolean {
   return position === family || position.startsWith(`${family} - `);
 }
+
+/**
+ * Belt filters, capped rather than exact-match.
+ *
+ * Picking "Blue" shows White and Blue material, not Blue alone — a curriculum
+ * is cumulative, so a Blue-belt technique doesn't stop being relevant the day
+ * you reach Brown. An exact-match filter would hide material a higher belt
+ * still uses, which is the opposite of what "commonly taught from" means.
+ *
+ * Deliberately NOT the same axis as IBJJF legality (`gi_allowed_belts` /
+ * `no_gi_allowed_belts` on the ruleset, rendered by `Legality` below) — see
+ * the technique-library history entries on why "commonly taught from" and
+ * "legal to compete with" are two different questions that must not collapse
+ * into one filter.
+ */
+export const BELT_CAPS = [
+  { key: "White", label: "White" },
+  { key: "Blue", label: "Blue" },
+  { key: "Purple", label: "Purple" },
+  { key: "Brown", label: "Brown" },
+  { key: "Black", label: "Black" },
+] as const;
+
+/** Matches the technique catalog's own capitalisation of `typical_belt`. */
+const BELT_RANK: Record<string, number> = {
+  White: 0,
+  Blue: 1,
+  Purple: 2,
+  Brown: 3,
+  Black: 4,
+};
+
+export function atOrBelowBelt(typicalBelt: string, cap: string): boolean {
+  const capRank = BELT_RANK[cap];
+  const rowRank = BELT_RANK[typicalBelt];
+  // An unrecognised value on either side means "don't filter this out" —
+  // hiding real content because its categorisation is unreadable is worse
+  // than showing one extra row. Same reasoning as bjj.StandingFrom skipping
+  // an unknown belt rather than sorting it as zero.
+  if (capRank === undefined || rowRank === undefined) return true;
+  return rowRank <= capRank;
+}

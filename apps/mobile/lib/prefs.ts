@@ -137,6 +137,16 @@ export const PREF_TRACK_EFFORT_OWED = 'track_effort_owed';
 /** The Library tab's sport filter. Deliberately remembered; its search box
  *  deliberately isn't — see the Library screen for the reasoning. */
 export const PREF_LIBRARY_SPORT = 'library_sport';
+/**
+ * The Library tab's belt cap for BJJ techniques.
+ *
+ * Remembered like the sport filter, and deliberately NOT cleared when the
+ * sport chip moves away from BJJ the way the position filter is — a belt
+ * changes over years, not per visit, so "I've reached Blue" is a standing
+ * fact about the athlete in the same way "I train Strength" is, not a
+ * transient narrowing that would surprise them if it silently persisted.
+ */
+export const PREF_LIBRARY_BELT = 'library_belt';
 
 /**
  * The whole module set, JSON, under one key.

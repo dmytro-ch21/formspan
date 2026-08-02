@@ -312,7 +312,7 @@ components:
           nullable: true
           items:
             type: string
-          description: Extra filter axes beyond the catalog's own. BJJ has `position`.
+          description: Extra filter axes beyond the catalog's own. BJJ has `position` and `belt`.
         has_goals:
           type: boolean
           description: Gates the powerlifting/hypertrophy/endurance picker. Strength only.

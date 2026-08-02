@@ -2223,3 +2223,60 @@ rendering, submitting and reflecting what the server derived.
   way the athlete-facing apps are.
 - There is no edit or delete affordance anywhere on this page for a rank —
   admin only ever reads it.
+
+## Technique library belt filter (mobile and web Library)
+
+A second filter axis on the same screen as the position row — see "Unified
+Library" above for the base screen this extends.
+
+### Gating
+
+- The belt row is absent unless BJJ is both enabled and the active sport
+  chip — same rule as the position row, checked the same way.
+- Turning BJJ off hides the belt row even if a cap was selected; nothing
+  about the technique list is affected for a discipline with no belt axis.
+
+### The cap, not an exact match
+
+- Selecting a belt shows techniques `typical_belt`'d at or below it, not
+  only that belt — White techniques remain visible with Blue selected.
+- Raising the cap only ever adds rows; it never removes one that was already
+  showing at a lower cap.
+- "All levels" (mobile: the leftmost chip; web: its own explicit chip) shows
+  every technique regardless of `typical_belt`, identical to no filter.
+- A technique with an unrecognised or blank `typical_belt` is never hidden
+  by this filter, at any cap — a categorisation gap must not read as "not
+  for you."
+
+### Not the same axis as IBJJF legality
+
+- Capping by belt never changes what the detail screen's legality section
+  (mobile) / `Legality` panel (web) shows for a technique — that reads
+  `gi_allowed_belts`/`no_gi_allowed_belts` and `is_restricted` independently
+  and is unaffected by this filter's selection.
+- A technique legal only for Blue-and-up in competition still appears under
+  a White cap if its `typical_belt` is White — the filter answers "commonly
+  taught from," not "may I compete with this."
+
+### Default from the athlete's own rank
+
+- Opening Library with BJJ selected and a recorded rank pre-selects that
+  belt as the cap — on both mobile and web.
+- An account with BJJ enabled but no recorded promotion opens on "All
+  levels" — no rank is not silently read as White.
+- The default is a starting point, not a lock: every other chip is tappable
+  immediately, on both platforms.
+- Mobile only computes this default once per app session (a stored manual
+  choice from a prior visit is never overwritten by it); web computes it
+  once per page load, since web has no persisted Library filters at all.
+
+### Persistence (mobile only — web resets every filter on reload)
+
+- A manually chosen belt cap is remembered across visits, the same as the
+  sport chip.
+- Unlike the position filter, the belt cap is **not** cleared when the sport
+  chip moves away from BJJ and back — it is a standing fact about the
+  athlete ("I've reached Blue"), not a transient narrowing tied to what's
+  currently on screen.
+- Signing in as a different athlete on the same device does not carry over
+  the previous athlete's belt cap.

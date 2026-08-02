@@ -5,6 +5,7 @@ import { useAuth } from "@clerk/nextjs";
 
 import {
   executionSteps,
+  getBjjStanding,
   getTechnique,
   listExercises,
   listRulesets,
@@ -21,6 +22,8 @@ import {
 import { useModules } from "@/lib/ModulesProvider";
 import {
   ACCENT_CLASS,
+  atOrBelowBelt,
+  BELT_CAPS,
   categoryBadge,
   inPositionFamily,
   patternBadge,
@@ -75,6 +78,12 @@ function usesPosition(sport: string, mods: Module[]): boolean {
   return (m?.enabled && m.capabilities.facets.includes("position")) ?? false;
 }
 
+/** Same reasoning as {@link usesPosition}, for the belt cap. */
+function usesBelt(sport: string, mods: Module[]): boolean {
+  const m = mods.find((x) => x.key === sport);
+  return (m?.enabled && m.capabilities.facets.includes("belt")) ?? false;
+}
+
 /**
  * One collator, built once. `localeCompare` re-enters ICU per call; the sources
  * are kept pre-sorted and merged linearly so a keystroke costs ~990
@@ -116,7 +125,57 @@ export default function LibraryPage() {
 
   const [sport, setSport] = useState("");
   const [position, setPosition] = useState("");
+  const [belt, setBelt] = useState("");
   const [query, setQuery] = useState("");
+
+  /**
+   * A one-time suggestion, not a stored preference — this page has none of
+   * those (sport and position both reset on reload too), so belt matches
+   * that scope rather than inventing persistence for just one filter.
+   *
+   * Suggests the athlete's own recorded rank once BJJ's standing has loaded,
+   * the same way a belt-level curriculum would open on "your level" rather
+   * than "everything" — see the design note in docs/decisions/history.md on
+   * why belt is meant to be the entry point into that loop, not decoration.
+   * Only ever a suggestion: every chip stays reachable either side of it.
+   *
+   * The two refs answer different questions and must not be one flag.
+   * `beltFetched` stops a `modules` reference change from re-issuing a
+   * request whose answer cannot have changed; `mounted` stops a resolved
+   * request writing state after the page is gone. Folding them together —
+   * cancelling in this effect's own cleanup — silently loses the default
+   * whenever `modules` changes mid-flight: the cleanup discards the answer
+   * while the already-set flag stops the re-run from asking again.
+   */
+  const beltFetchedRef = useRef(false);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (beltFetchedRef.current) return;
+    const bjjModule = modules.find((m) => m.key === "bjj");
+    // Modules haven't loaded yet — wait for a real answer rather than
+    // guessing "off" from an empty list.
+    if (!bjjModule) return;
+    if (!bjjModule.enabled) return;
+    beltFetchedRef.current = true;
+    getBjjStanding(getToken)
+      .then((standing) => {
+        if (!mountedRef.current || !standing.current) return;
+        const capitalised =
+          standing.current.belt.charAt(0).toUpperCase() +
+          standing.current.belt.slice(1);
+        setBelt(capitalised);
+      })
+      .catch(() => {
+        // No default is a fine default — the row still lets them pick one.
+      });
+  }, [modules, getToken]);
 
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [techniques, setTechniques] = useState<TechniqueSummary[]>([]);
@@ -251,12 +310,13 @@ export default function LibraryPage() {
 
     let tq: TechniqueSummary[] = [];
     if (showTechniques) {
-      const scoped =
-        usesPosition(sport, modules) && position
-          ? sortedTechniques.filter((t) =>
-              inPositionFamily(t.position, position),
-            )
-          : sortedTechniques;
+      let scoped = sortedTechniques;
+      if (usesPosition(sport, modules) && position) {
+        scoped = scoped.filter((t) => inPositionFamily(t.position, position));
+      }
+      if (usesBelt(sport, modules) && belt) {
+        scoped = scoped.filter((t) => atOrBelowBelt(t.typical_belt, belt));
+      }
       tq = searchTechniques(scoped, query);
     }
 
@@ -285,6 +345,7 @@ export default function LibraryPage() {
     showTechniques,
     sport,
     position,
+    belt,
     query,
     modules,
   ]);
@@ -308,7 +369,16 @@ export default function LibraryPage() {
     return m;
   }, [techniques]);
 
-  const isFiltered = query.trim() !== "" || sport !== "" || position !== "";
+  // Each clause has to match the condition the `rows` memo actually filters
+  // on, not just "is this value set" — a belt cap suggested from the
+  // athlete's rank sits in state from page load while its row is hidden
+  // under any non-BJJ chip, and counting it there would answer an empty
+  // catalog with "Nothing matches this filter" when nothing is filtering.
+  const isFiltered =
+    query.trim() !== "" ||
+    sport !== "" ||
+    position !== "" ||
+    (usesBelt(sport, modules) && belt !== "");
 
   return (
     <div className="flex flex-col gap-8">
@@ -377,6 +447,32 @@ export default function LibraryPage() {
                 onClick={() => setPosition(p.key)}
               >
                 {p.label}
+              </SmallChip>
+            ))}
+          </div>
+        )}
+
+        {/* Same reasoning as the position row, one axis over: BJJ-only, and
+            hidden rather than shown-and-inert against a strength catalog. */}
+        {usesBelt(sport, modules) && (
+          <div
+            role="group"
+            aria-label="Filter by belt"
+            className="flex flex-wrap gap-2"
+          >
+            <SmallChip active={belt === ""} onClick={() => setBelt("")}>
+              All levels
+            </SmallChip>
+            {BELT_CAPS.map((b) => (
+              <SmallChip
+                key={b.key}
+                active={belt === b.key}
+                onClick={() => setBelt(b.key)}
+                // The cap is cumulative, and the chip's own text can't say
+                // so — matching the wording mobile already reads out.
+                label={`Filter up to ${b.label}`}
+              >
+                {b.label}
               </SmallChip>
             ))}
           </div>
@@ -982,16 +1078,26 @@ function SmallChip({
   active,
   onClick,
   children,
+  label,
 }: {
   active: boolean;
   onClick: () => void;
   children: React.ReactNode;
+  /**
+   * Accessible name, when the visible text alone doesn't carry the meaning.
+   *
+   * The belt row needs it and the position row doesn't: "Guard" filters to
+   * Guard, but "Blue" filters to *Blue and everything below it*, and a
+   * screen reader hearing only the belt name has no way to learn that.
+   */
+  label?: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
       aria-pressed={active}
+      aria-label={label}
       className={`rounded border px-2.5 py-1 text-xs font-medium transition ${
         active
           ? "border-text-muted bg-surface-raised text-text"
