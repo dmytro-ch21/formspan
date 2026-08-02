@@ -417,6 +417,19 @@ export async function startSession(
     /** Supplied when pushing a session that was started offline. */
     id?: string;
     started_at?: string;
+    /**
+     * Sent when the session was already over before it was ever pushed — a
+     * reflection log rather than a live one.
+     *
+     * Carried on the CREATE rather than left to the follow-up finish call,
+     * because a session's duration must not depend on a later request
+     * succeeding. Training history derives every duration from
+     * `ended_at - started_at`, so a create that omits it produces a session
+     * worth nothing until the finish lands — and anything that can fail
+     * between the two (a refused reflection, a dropped connection) would
+     * take the session's mat time with it.
+     */
+    ended_at?: string | null;
   },
 ): Promise<{ session: Session; volume: Volume }> {
   // Client-generated ID, so starting a session is idempotent on retry — the

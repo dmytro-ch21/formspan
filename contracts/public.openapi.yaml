@@ -99,6 +99,102 @@ components:
           type: array
           items: { $ref: "#/components/schemas/BjjPromotion" }
 
+    BjjSessionTag:
+      type: object
+      required: [category, event]
+      description: >
+        One piece of evidence from a session. Never a self-assessment —
+        "attempted twice from closed guard, hit once" is a fact that stays
+        true; a 1-5 rating is a number with no provenance that goes stale.
+      properties:
+        id:
+          type: integer
+          format: int64
+          readOnly: true
+        category:
+          type: string
+          enum: [submission, sweep, pass, escape, takedown, control]
+          description: >
+            Drawn from the technique library's own category vocabulary, and
+            limited to the ones with a genuine symmetric opposite — you can
+            hit a sweep or be swept; "transition" has no other side.
+        event:
+          type: string
+          enum: [drilled, attempted, scored, conceded]
+          description: >
+            The outcome direction. `drilled → attempted → scored` is the
+            technique funnel, whose drop-offs are the actionable numbers;
+            `conceded` is the symmetric half and answers "where do I keep
+            getting stuck", which a success-only schema never could.
+        position:
+          type: string
+          description: >
+            Position family ("Half Guard", "Mount"), matching the library's
+            own filter granularity. Empty is a normal fast-path outcome, not
+            an error.
+        technique_id:
+          type: string
+          nullable: true
+          description: >
+            The specific technique when the athlete named one. Null is
+            ordinary — "got swept from half guard" is real evidence and must
+            not require naming the sweep.
+        count:
+          type: integer
+          minimum: 1
+          default: 1
+          description: >
+            Reflection is recalled in counts. Three armbars is one tag with
+            count 3, not three tags.
+
+    BjjSessionDetail:
+      type: object
+      required: [session_id, kind, tags]
+      description: >
+        The BJJ half of a session. The session itself is an ordinary
+        `sessions` row created through POST /v1/sessions — this carries only
+        what a mat session has and a barbell session does not, exactly as
+        PUT /v1/sessions/{id}/sets carries what a strength session has.
+      properties:
+        session_id: { type: string, readOnly: true }
+        kind:
+          type: string
+          enum: [class, drilling, positional, rolling]
+          description: >
+            Different training rather than different intensities of the same
+            training: an hour of drilling and an hour of hard rounds cost the
+            body different amounts and produce different evidence.
+        gi:
+          type: boolean
+          nullable: true
+          description: Null means "didn't say", which is not the same as no-gi.
+        rounds:
+          type: integer
+          nullable: true
+          minimum: 1
+        round_minutes:
+          type: integer
+          nullable: true
+          minimum: 1
+        session_rpe:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 10
+          description: >
+            The internal-load half of sRPE x duration — the mechanism that
+            puts a round of rolling and a set of squats in the same unit.
+        academy: { type: string }
+        note: { type: string }
+        body_note:
+          type: string
+          description: Body/injury flag, feeding the recommendation safety floors.
+        tags:
+          type: array
+          items: { $ref: "#/components/schemas/BjjSessionTag" }
+        created_at: { type: string, format: date-time, readOnly: true }
+        updated_at: { type: string, format: date-time, readOnly: true }
+
     Error:
       type: object
       required: [error]
@@ -1921,6 +2017,77 @@ paths:
       operationId: deleteBjjPromotion
       responses:
         "204": { description: Removed. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /bjj/sessions/{sessionID}:
+    parameters:
+      - name: sessionID
+        in: path
+        required: true
+        schema: { type: string }
+    put:
+      summary: Store the reflection for a BJJ session
+      description: >
+        Upserts the BJJ detail for a session the caller has already created
+        through POST /v1/sessions, and replaces its tag set wholesale.
+
+
+        PUT and upsert rather than POST and insert, for the same reason
+        replacing a session's sets is a PUT: the client holds the desired
+        state and re-sends it, so a retry after a failed push converges
+        instead of duplicating. That is what lets the mobile outbox treat a
+        BJJ reflection exactly like a set list.
+
+
+        Ownership is checked explicitly against the session before anything
+        is written. Three cases answer identically with 404 and are
+        deliberately indistinguishable: no such session, a session belonging
+        to somebody else, and a session that is not a BJJ session. Telling
+        them apart would confirm which session ids are real.
+      operationId: putBjjSessionDetail
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BjjSessionDetail" }
+      responses:
+        "200":
+          description: The stored detail.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [detail]
+                properties:
+                  detail: { $ref: "#/components/schemas/BjjSessionDetail" }
+        "400":
+          description: >
+            Unknown kind, tag category or tag event; session_rpe outside
+            1-10; rounds, round_minutes or a tag count below 1; or a
+            technique_id naming no technique.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    get:
+      summary: Read a BJJ session's reflection
+      operationId: getBjjSessionDetail
+      description: >
+        404 when the session has no BJJ detail — which includes a session of
+        another sport, and a BJJ session logged as the three-tap floor before
+        any reflection was added.
+      responses:
+        "200":
+          description: The stored detail.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [detail]
+                properties:
+                  detail: { $ref: "#/components/schemas/BjjSessionDetail" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
 

@@ -175,7 +175,7 @@ const CREATE_EXERCISE_CACHE = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 11;
+const SCHEMA_VERSION = 12;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -419,6 +419,22 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     // which is when someone actually goes looking.
     await addColumnIfMissing(db, 'local_sessions', 'last_error', 'TEXT');
     await addColumnIfMissing(db, 'workout_cache', 'last_error', 'TEXT');
+  }
+
+  if (current < 12) {
+    // v11 -> v12: a BJJ session's reflection gets somewhere to live offline.
+    //
+    // The BJJ half of a session is to a mat session what `sets_json` is to a
+    // barbell one — the discipline's own detail, pushed after the session
+    // exists server-side, replaced wholesale rather than merged. Storing it
+    // the same way means the existing outbox carries it for free: the same
+    // tombstones, the same compare-and-swap, the same blocked-row repair
+    // screen, with no second sync path to keep honest.
+    //
+    // Nullable rather than defaulted to '{}': "this is not a BJJ session"
+    // and "this is a BJJ session with an empty reflection" are different
+    // facts, and only the first should skip the detail push entirely.
+    await addColumnIfMissing(db, 'local_sessions', 'bjj_json', 'TEXT');
   }
 
   await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION};`);
