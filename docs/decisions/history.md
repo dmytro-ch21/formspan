@@ -3026,52 +3026,6 @@ data, and staging needs a sign-in. The technique summaries are cached for the
 tab's lifetime with no invalidation, which is right for reference content and
 wrong the moment techniques become editable.
 
-## 2026-07-31 — A green build log is not a working app on a phone
-
-Three separate failures in one install session, none of which any check in this
-repo would have caught, and all three of which reported success.
-
-**1. `expo run:ios` hangs silently when the phone isn't reachable.** No error,
-no timeout, no `xcodebuild` process — sixteen minutes at 0.4% CPU with nothing
-written to the build directory. Diagnosing it produced a correction worth
-keeping: `xcrun xctrace list devices` files a perfectly usable wired phone under
-`== Devices Offline ==`, and `xcrun devicectl list devices` shows an **unplugged**
-phone as `available (paired)` because it counts the Wi-Fi pairing. Neither
-listing is a readiness check. `tunnelState: connected` + `transportType: wired`
-from `devicectl device info details`, plus `ioreg -p IOUSB` finding the device,
-are the signals that mean anything.
-
-**2. A Debug build installs, reports zero errors, and cannot run.** `expo run:ios`
-without `--configuration Release` produces an app with no `main.jsbundle`; it
-loads JS from Metro, which the same command stops on exit. The build log is
-identical to a working one. `docs/architecture/ios-testflight.md` already said
-to use Release and already explained why — the failure was not reading it.
-
-**3. A correct build is still not a correct install.** The Release rebuild's log
-read `Installing .../Release-iphoneos/VOLA.app`, and the phone kept running the
-Debug build from two minutes earlier, failing with `No script URL provided …
-unsanitizedScriptURLString = (null)`. Both builds carry `CFBundleVersion: 1` and
-version `1.0.0`, which is the plausible reason the replacement was skipped —
-**not proven**, and worth revisiting if it recurs. An explicit
-`devicectl device install app` fixed it. Uninstall-then-install would also have
-worked and is the wrong instinct: it destroys unsynced offline data in the app's
-SQLite store.
-
-### Why this is a docs entry and not just a bad afternoon
-
-Each failure was invisible to `tsc`, to lint, to a production build, and to CI.
-The only thing that caught any of them was looking at the artifact instead of
-the log — `find` for the `.jsbundle`, and launching with `--console` to watch
-the bridge actually evaluate it. That check is now written down next to the
-build command, along with the device-readiness probes.
-
-A related habit, from the same session: a background command's output is
-buffered until it exits, so a hung build looks identical to a working one.
-Redirecting to a log under `script -q /dev/null` makes progress visible within
-seconds, which is the difference between noticing a stall and being asked about
-it fifteen minutes later.
-
-
 ## 2026-07-31 — The technique detail screen: "just a bunch of text"
 
 Accurate description of what shipped. Eight stacked sections in identical type,
@@ -4677,6 +4631,166 @@ file, with the note that the assertions under them are mutation-verified.
 This is a deliberate acceptance rather than an unnoticed mess — the reason to
 write it down is so the next person doesn't spend the same hour on it.
 
+## 2026-08-01 — Offline-first PR5: a fresh install fills itself, and the catalog stops lying
+
+Three related gaps, all versions of "the offline work protected what you had
+and never made sure you had anything".
+
+### The exercise cache was lossy, and it looked like a product decision
+
+`exercise_cache` stored seven typed columns and **reconstructed the rest as
+empty** — `primary_muscles: []`, `equipment: []`, `instructions: ''`. So
+offline, every exercise in the Library rendered with no muscles, no equipment
+and no explanation, which reads as an app with thin content rather than a
+cached copy of a full one.
+
+Schema v10 adds `payload_json`: the exercise exactly as the API sent it. The
+typed columns stay, because they are what SQL filters and sorts on — the blob
+is for fidelity, the columns are for queries, and storing only the blob would
+mean filtering the whole catalog in JS.
+
+`payload_json` is deliberately **nullable with no backfill**. There is nothing
+to backfill *from* — the dropped fields were never stored — so a default would
+be a fabricated exercise that reads as real and never gets refreshed, rather
+than a missing one the next fetch fills in. Pre-v10 rows fall back to the old
+reconstruction, which is worse but findable.
+
+**And the Library never read the cache it had been writing since v2.** It
+warmed the catalog on every visit and then went to the network anyway, so the
+one screen that feeds the mid-workout exercise picker was online-only in the
+room with the worst signal in the building.
+
+### Preferences get a real outbox
+
+The `*_OWED` companion keys worked but did not generalise: every new syncable
+preference needed its own flag, its own read and its own clear, and forgetting
+one meant a preference that silently reverted on the next profile fetch.
+
+v10 puts `dirty` on `prefs` itself. Two details are load-bearing:
+
+- **`dirty = max(prefs.dirty, excluded.dirty)` on conflict**, not
+  `excluded.dirty`. A write that says nothing about the debt must leave it
+  standing — clearing it would drop a change made offline seconds earlier,
+  which is the exact failure the OWED keys existed to prevent.
+- **`clearPrefOwed` is a compare-and-swap on the pushed value.** A change made
+  while the push was in flight stays owed instead of being marked as sent —
+  the same CAS the session and workout outboxes use.
+
+Existing OWED flags are *migrated*, not dropped: the flag means "the athlete
+changed this offline and the account still has not heard", so discarding it on
+upgrade reverts their choice.
+
+### The first-run seed
+
+Every cache in this app is filled as a side effect of opening a screen while
+online. Fine after a week of use; useless for the case that actually happens —
+install VOLA at home, open it, go to the gym, find the exercise picker empty
+because you never opened the Library.
+
+`lib/seed.ts` runs once per account per device, ordered by dependency rather
+than importance: profile (carries the unit system, and a weight in the wrong
+unit for one frame is the bug that started the units work) → exercises (a
+plan's items are exercise ids; a plan of raw UUIDs is not a plan) → workouts →
+sessions (same order as the push, for the same reason) → pinned.
+
+Two properties worth stating because both are easy to get backwards:
+
+- **A failed step does not abort the run.** Offline every step fails, so there
+  is nothing to abort early for, and a failed workouts fetch must not also
+  cost the athlete their sessions.
+- **A partial run is NOT recorded as seeded.** Marking it done would leave the
+  missing pieces missing until someone happened to open the right screen —
+  precisely the situation this exists to prevent.
+
+It does not block the UI. Screens already paint cache-first with honest empty
+states; blocking a first launch on five network calls would trade a rare bad
+gym session for a bad first impression on every single install.
+
+### Two process notes
+
+**The backtick-in-SQL-comment trap fired a fourth time**, in my own comment.
+The guard added for it *does* catch it — the earlier entry claiming "the guard
+did not help" was wrong about why. The real problem was ordering: `verify` ran
+`typecheck:mobile` before `test:mobile`, so a broken template literal surfaced
+as a pile of unrelated TS errors and the named guard never got to speak. The
+two are now swapped, which was verified by breaking it on purpose.
+
+**A mutation run reported CAUGHT for a file that was already failing.** Adding
+the v10 schema test broke three existing assertions (they pin the version
+number deliberately), and the mutation harness read those pre-existing
+failures as the mutants being caught. A mutation result only means anything
+against a green baseline — checked, fixed, and re-run.
+
+## 2026-08-01 — Offline-first PR6: the sync state finally says something
+
+`SyncState` has carried `pending`, `deferred`, `online` and `lastError` since
+PR2, and the only place any of it surfaced was a Retry button on one screen.
+So the honest answer to the question an athlete has after a basement workout —
+*did that make it off my phone* — was to open the right screen and infer it.
+
+### The chip, and what it deliberately does not say
+
+It lives in `ScreenHeader`, so every tab gets it and a screen added later gets
+it for free rather than being the one place that quietly doesn't report.
+
+**It is silent when everything is synced.** A permanent "Synced ✓" badge is
+furniture: it trains you to stop reading that corner, which is exactly where
+you need to look on the day it says something else. The chip appearing *is*
+the signal.
+
+The priority order is the design, and each step of it is a claim:
+
+- **Offline outranks the pending count**, because it explains it. "3 waiting"
+  beside a phone with no signal invites a pointless retry; "Offline · 3
+  waiting" says the app is behaving correctly.
+- **Offline also outranks the error.** The last run failing because there was
+  no signal is not a fault, and calling it one teaches people to distrust the
+  indicator.
+- **Deferred outranks the plain count**, and gets its own wording. Those rows
+  are waiting on a workout that hasn't landed and resolve themselves; they are
+  counted inside `pending`, so checking `pending` first would describe them as
+  an ordinary backlog.
+- **An error outranks "Syncing…"**, because a retry is usually already
+  underway when someone looks, and hiding the failure behind progress makes it
+  invisible exactly when it is being looked for.
+
+### A permanent rejection had nowhere to live
+
+It surfaced as one screen-level message for the whole run and vanished on the
+next attempt — so a session the server will refuse forever looked identical to
+one that simply hadn't been tried. No way to see which row, what the server
+said, or to retry just that one after fixing it.
+
+Schema v11 puts `last_error` on `local_sessions` and `workout_cache`, and
+`app/sync.tsx` is where it is answerable: what is stuck, the server's own
+words, and a button per row.
+
+**Only permanent refusals are recorded.** A transient failure is the ordinary
+state of a phone in a basement; writing "Network request failed" onto every
+row would turn a repair list into a list of everything ever logged offline,
+none of which needs a person.
+
+### Two things this round taught, both about tests
+
+**A test that passed for the wrong reason, caught by mutation.** "Clears the
+error once the row goes through" asserted via `blockedRows` — but a successful
+push also clears `dirty`, and `blockedRows` filters on that, so the row left
+the list whether or not the message was cleared. It now asserts on the column.
+That is three times in this programme that a passing test was measuring a
+neighbour rather than the guard it named.
+
+**The migration fragility from PR5 was still there and bit again.** The v11
+`ALTER` on `local_sessions` failed against fixtures that never created it,
+same as v10's did for `exercise_cache`. All the `CREATE ... IF NOT EXISTS`
+statements now run unconditionally before any versioned `ALTER` — they are
+idempotent, an existing table keeps its shape, so the ALTERs are still what
+upgrades a real device and still what the tests exercise.
+
+**And a local-only false failure worth knowing about:** `.expo/types/router.d.ts`
+is generated and gitignored, so a new route fails `typecheck:mobile` locally
+against a stale copy while CI — which has no copy at all — is perfectly green.
+Verified by deleting it and re-running. Neither state is wrong; they just
+disagree, and the local one looks like a real error.
 ## 2026-08-01 — BJJ rank: the backend and the belt, with the clients still to wire
 
 **Partial work, committed deliberately.** The backend module and the belt

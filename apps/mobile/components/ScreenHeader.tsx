@@ -1,6 +1,7 @@
 import { StyleSheet, View as RNView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { SyncChip } from '@/components/SyncChip';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 
@@ -22,6 +23,10 @@ import { vola } from '@/constants/Colors';
  *
  * The screen name is small and left-aligned because it's orientation, not a
  * headline — you already know where you are, you just want confirming.
+ *
+ * It also carries the sync chip, which is why sync state reaches every tab
+ * without each screen having to opt in — and why a screen added later gets it
+ * for free rather than being the one place that quietly doesn't report.
  */
 export function ScreenHeader({ title, action }: { title: string; action?: React.ReactNode }) {
   const insets = useSafeAreaInsets();
@@ -38,6 +43,10 @@ export function ScreenHeader({ title, action }: { title: string; action?: React.
           </Text>
           <Chevron />
         </RNView>
+        {/* Before `action`, so a screen's own control stays in the corner it
+            has always been in. The chip is silent unless there is something
+            to say, so most of the time this row is unchanged. */}
+        <SyncChip />
         {action}
       </View>
     </View>

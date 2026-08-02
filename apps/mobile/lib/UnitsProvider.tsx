@@ -1,7 +1,14 @@
 import { useAuth } from '@clerk/clerk-expo';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
-import { PREF_UNIT_SYSTEM, PREF_UNIT_SYSTEM_OWED, readPref, writePref } from './prefs';
+import {
+  PREF_UNIT_SYSTEM,
+  adoptLegacyOwedFlags,
+  clearPrefOwed,
+  owedPrefs,
+  readPref,
+  writePref,
+} from './prefs';
 import { getProfile, updateUnitSystem } from './profile';
 import type { UnitSystem } from './units';
 import { useAuthToken } from './useAuthToken';
@@ -101,9 +108,13 @@ export function UnitsProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       const forUser = userId;
+      // Carries any pre-v10 OWED companion key onto the `dirty` column. Runs
+      // before the read below, or an upgrading device would read `owed` as
+      // false and let the profile fetch revert a choice made offline.
+      await adoptLegacyOwedFlags(userId).catch(() => {});
       const cached = await readPref(userId, PREF_UNIT_SYSTEM);
       const local = cached === 'metric' || cached === 'imperial' ? cached : null;
-      const owed = (await readPref(userId, PREF_UNIT_SYSTEM_OWED)) === '1';
+      const owed = (await owedPrefs(userId)).some((p) => p.key === PREF_UNIT_SYSTEM);
       if (!alive || forUser !== currentUser.current) return;
       if (local) setLocal(local);
       if (owed) setUnsynced(true);
@@ -123,11 +134,17 @@ export function UnitsProvider({ children }: { children: React.ReactNode }) {
           await updateUnitSystem(getToken, local);
         } else if (!owed) {
           setLocal(p.unit_system);
+          // Adopting the server's value owes nothing — `writePref` preserves
+          // an existing debt rather than clearing it, so this cannot drop a
+          // change made in another tab a moment ago.
           await writePref(userId, PREF_UNIT_SYSTEM, p.unit_system);
         }
 
-        if (owed) {
-          await writePref(userId, PREF_UNIT_SYSTEM_OWED, '0');
+        if (owed && local) {
+          // Cleared against the value that was actually pushed: a change made
+          // while the push was in flight must stay owed rather than be marked
+          // as sent.
+          await clearPrefOwed(userId, PREF_UNIT_SYSTEM, local);
           if (alive) setUnsynced(false);
         }
       } catch {
@@ -145,7 +162,10 @@ export function UnitsProvider({ children }: { children: React.ReactNode }) {
       // account-level write follows.
       setLocal(u);
       try {
-        if (userId) await writePref(userId, PREF_UNIT_SYSTEM, u);
+        // Written as owed up front. If the push below succeeds it is cleared;
+        // if the app dies between the two, the debt is already on disk —
+        // recording it only on failure loses the change to a crash.
+        if (userId) await writePref(userId, PREF_UNIT_SYSTEM, u, { owed: true });
       } catch {
         // Leaves the switch applied in memory only — it won't survive a
         // restart. Nothing here can recover that, but it must not reject: the
@@ -154,15 +174,14 @@ export function UnitsProvider({ children }: { children: React.ReactNode }) {
       }
       try {
         await updateUnitSystem(getToken, u);
-        if (userId) await writePref(userId, PREF_UNIT_SYSTEM_OWED, '0').catch(() => {});
+        if (userId) await clearPrefOwed(userId, PREF_UNIT_SYSTEM, u).catch(() => {});
         setUnsynced(false);
       } catch {
-        // The debt is written to SQLite rather than kept in component state,
-        // because Settings is a screen people leave straight away: an
-        // in-memory flag would stop admitting the change was local-only while
-        // it still was, and would let the next mount's profile read quietly
-        // revert the choice.
-        if (userId) await writePref(userId, PREF_UNIT_SYSTEM_OWED, '1').catch(() => {});
+        // The debt is already on disk from the write above — this only
+        // surfaces it. Kept in SQLite rather than component state because
+        // Settings is a screen people leave straight away: an in-memory flag
+        // would stop admitting the change was local-only while it still was,
+        // and would let the next mount's profile read quietly revert it.
         setUnsynced(true);
       }
     },
