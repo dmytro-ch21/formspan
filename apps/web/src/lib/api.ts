@@ -710,6 +710,121 @@ export async function updateUnitSystem(
   }
 }
 
+/**
+ * BJJ rank, client half of `internal/modules/bjj`.
+ *
+ * `current` on {@link BjjStanding} is DERIVED server-side from `promotions`,
+ * not stored — see the backend's `StandingFrom`. This client never computes a
+ * rank itself, for the same reason the server doesn't let a date decide it:
+ * two independent derivations are two chances to disagree.
+ */
+export type BjjBelt = "white" | "blue" | "purple" | "brown" | "black";
+
+/** Belts, in rank order — for a picker that doesn't hardcode the list again. */
+export const BJJ_BELTS: BjjBelt[] = ["white", "blue", "purple", "brown", "black"];
+
+export const BJJ_MAX_STRIPES = 4;
+export const BJJ_MAX_DEGREE = 6;
+
+export type BjjRank = {
+  belt: BjjBelt;
+  stripes: number;
+  /** Black-belt degrees. 0 on every other belt. */
+  degree: number;
+};
+
+/** What the add/edit form sends — a rank plus the promotion's own facts. */
+export type BjjPromotionInput = BjjRank & {
+  /** "YYYY-MM-DD", or null when the athlete doesn't remember. */
+  promoted_on: string | null;
+  academy: string;
+  instructor: string;
+  note: string;
+};
+
+export type BjjPromotion = BjjPromotionInput & {
+  id: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type BjjStanding = {
+  /** Null means no rank recorded — a real state, not a loading placeholder. */
+  current: BjjRank | null;
+  time_at_current_days: number | null;
+  promotions: BjjPromotion[];
+};
+
+export function getBjjStanding(
+  getToken: Token,
+  signal?: AbortSignal,
+): Promise<BjjStanding> {
+  return request<BjjStanding>(getToken, "/bjj/standing", {}, signal);
+}
+
+export function createBjjPromotion(
+  getToken: Token,
+  input: BjjPromotionInput,
+): Promise<BjjPromotion> {
+  return request<BjjPromotion>(getToken, "/bjj/promotions", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateBjjPromotion(
+  getToken: Token,
+  id: string,
+  input: BjjPromotionInput,
+): Promise<BjjPromotion> {
+  return request<BjjPromotion>(
+    getToken,
+    `/bjj/promotions/${encodeURIComponent(id)}`,
+    { method: "PATCH", body: JSON.stringify(input) },
+  );
+}
+
+export function deleteBjjPromotion(getToken: Token, id: string): Promise<void> {
+  return request<void>(getToken, `/bjj/promotions/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
+/**
+ * The obvious next step from a current rank — one more stripe, or the next
+ * belt once a stripe run is full.
+ *
+ * A suggestion for the add-promotion form to start from, not a value the
+ * server ever sees or trusts: every field is still editable before saving,
+ * for the jumps and corrections this can't guess.
+ *
+ * Black is degrees, not stripes — advancing past `BJJ_MAX_DEGREE` has
+ * nowhere further to go, so it holds rather than wrapping to white.
+ */
+export function nextBjjRank(current: BjjRank): BjjRank {
+  if (current.belt === "black") {
+    return { belt: "black", stripes: 0, degree: Math.min(current.degree + 1, BJJ_MAX_DEGREE) };
+  }
+  if (current.stripes < BJJ_MAX_STRIPES) {
+    return { belt: current.belt, stripes: current.stripes + 1, degree: 0 };
+  }
+  const next = BJJ_BELTS[Math.min(BJJ_BELTS.indexOf(current.belt) + 1, BJJ_BELTS.length - 1)];
+  return { belt: next, stripes: 0, degree: 0 };
+}
+
+/**
+ * "3 years", "6 months", "12 days" — the coarsest unit that doesn't round to
+ * zero. Matches how a grappler actually states time at a belt; nobody says
+ * "1,097 days".
+ */
+export function describeTimeAtBjjBelt(days: number): string {
+  const years = Math.floor(days / 365);
+  if (years >= 1) return `${years} ${years === 1 ? "year" : "years"}`;
+  const months = Math.floor(days / 30);
+  if (months >= 1) return `${months} ${months === 1 ? "month" : "months"}`;
+  return `${days} ${days === 1 ? "day" : "days"}`;
+}
+
 export type SessionQuery = {
   limit?: number;
   offset?: number;

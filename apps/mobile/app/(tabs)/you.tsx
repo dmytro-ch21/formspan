@@ -3,6 +3,7 @@ import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet } from 'react-native';
 
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
+import { BjjRankCard } from '@/components/BjjRankCard';
 import { RecordsCard } from '@/components/RecordsCard';
 import { TrainingSummary } from '@/components/TrainingSummary';
 import { Text, View } from '@/components/Themed';
@@ -74,6 +75,11 @@ export default function YouScreen() {
   const { modules, ready: modulesReady } = useModules();
   // null means "we don't know yet", which is NOT the same as "none chosen".
   const enabledLabels = modulesReady ? modules.filter((m) => m.enabled).map((m) => m.label) : null;
+  // A belt is meaningless to someone who doesn't train BJJ — gated the same
+  // way Records and Library are gated on the web dashboard, on the module
+  // rather than on data existing, so turning BJJ off hides the card even for
+  // an account with a recorded history.
+  const bjjEnabled = modulesReady && modules.some((m) => m.key === 'bjj' && m.enabled);
 
   return (
     <ScrollView contentContainerStyle={styles.scroll} testID="you-screen">
@@ -127,6 +133,8 @@ export default function YouScreen() {
                 they're the payoff for the logging above, and the thing people
                 actually open this tab to look at. */}
             <RecordsCard getToken={getToken} units={profile?.unit_system ?? 'metric'} />
+
+            {bjjEnabled && <BjjRankCard getToken={getToken} />}
 
             <Text style={styles.sectionLabel}>Profile</Text>
             <View style={styles.card}>

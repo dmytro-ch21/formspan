@@ -1875,8 +1875,8 @@ paths:
               schema: { $ref: "#/components/schemas/BjjPromotion" }
         "400":
           description: >
-            Unknown belt, stripes outside 0-4, degree outside 0-6, or a degree
-            on a belt other than black.
+            Unknown belt, stripes outside 0-4, degree outside 0-6, a degree on
+            a belt other than black, or `promoted_on` not in `YYYY-MM-DD`.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -1906,7 +1906,8 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/BjjPromotion" }
         "400":
-          description: Invalid rank.
+          description: >
+            Invalid rank, or `promoted_on` not in `YYYY-MM-DD`.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -2644,6 +2645,35 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ActivityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /admin/users/{userID}/bjj/standing:
+    get:
+      summary: A specific user's BJJ rank and promotion history (admin-only)
+      operationId: adminGetBjjStanding
+      description: >
+        Same derivation as GET /bjj/standing, over the path user rather than
+        the caller. Read-only — the admin console shows rank beside the
+        athlete, it does not edit it. An id that matches no promotions answers
+        200 with `current: null`, the same as a real account that has never
+        recorded one; this endpoint does not distinguish "no such user" from
+        "no rank yet".
+      parameters:
+        - name: userID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: That user's rank and history.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BjjStanding"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":

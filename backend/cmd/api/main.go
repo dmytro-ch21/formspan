@@ -127,6 +127,7 @@ func main() {
 	mux.Handle("GET /v1/admin/users", verifier.RequireAdmin(http.HandlerFunc(activityHandler.AdminListUsers)))
 	mux.Handle("GET /v1/admin/users/{userID}", verifier.RequireAdmin(http.HandlerFunc(activityHandler.AdminGetUser)))
 	mux.Handle("GET /v1/admin/users/{userID}/activities", verifier.RequireAdmin(http.HandlerFunc(activityHandler.AdminListUserActivities)))
+	mux.Handle("GET /v1/admin/users/{userID}/bjj/standing", verifier.RequireAdmin(http.HandlerFunc(bjjHandler.AdminGetStanding)))
 
 	healthRepo := health.NewPostgresRepository(pool)
 	healthHandler := health.NewHandler(healthRepo)

@@ -2122,3 +2122,68 @@ layer is correct in both cases and the screen is what goes wrong.
   together, so this is the ordinary path, not a rare interleaving.
 - The shared tab still renders the network list — only `mine` is cached, and
   the cache-first path must not swallow it.
+
+## BJJ rank (mobile, web, admin)
+
+Rank is derived server-side from the promotion list — none of these scenarios
+should ever be about a client computing a belt itself, only about it
+rendering, submitting and reflecting what the server derived.
+
+### Standing, happy path
+
+- A new account with `bjj` enabled and no promotions shows "No rank recorded
+  yet" — on the You screen card, the `/bjj` hub, web's Settings section, and
+  (silently, no badge at all) on admin's user detail.
+- Add a promotion: the belt, stripes/degree, and time-at-belt update
+  everywhere that reads standing — the You screen card, the `/bjj` hero, and
+  web's Settings card — without a manual refresh.
+- Add a second, higher-ranked promotion: current rank becomes the higher one
+  regardless of which was entered first or which has the later date.
+- Add a lower-ranked promotion after a higher one is already recorded:
+  current rank does **not** regress — rank is monotonic.
+- An undated promotion still sets the current rank; "time at this rank" is
+  simply not shown when its date is absent.
+- Deleting the only promotion returns the account to "No rank recorded yet",
+  not to a default belt.
+
+### Add / edit form
+
+- Switching belt to Black hides the stripes stepper and shows a degree
+  stepper 0–6; switching away from Black does the reverse. The live preview
+  label and the drawn belt must agree in both directions — this is the exact
+  shape of the stale-state bug already found and fixed once (belt switched to
+  Black must clear stripes, not just leave degree at what it was).
+- Degree cannot be set on any belt but Black — the control for it isn't
+  offered on a coloured belt in the first place.
+- Stripes are capped 0–4, degree 0–6, matching the stepper's own range — there
+  is no way to reach an out-of-range value through the UI to have the server
+  reject it.
+- Leaving the date blank saves successfully; typing an unparsable date is
+  rejected before or by the server, not silently dropped.
+- Editing a promotion pre-fills every field from the row that was tapped, not
+  from a blank form.
+- Cancelling an edit discards changes — the list and hero still show the
+  pre-edit values.
+- Deleting a promotion asks for confirmation first (`Alert.alert` on mobile,
+  `confirm()` on web) and does nothing if declined.
+
+### Module gating
+
+- With `bjj` disabled, the You-screen card, the `/bjj` route, and web's
+  Settings section are all absent — including for an account that has a
+  recorded promotion history from before the module was turned off. Nothing
+  you've logged is deleted; turning BJJ back on brings the belt back too.
+
+### Admin (read-only)
+
+- A non-admin account visiting `/users/{id}` is refused before any BJJ data
+  would even be requested.
+- An admin viewing a BJJ-enabled athlete with a recorded rank sees the belt
+  and rank text beside the display name.
+- An admin viewing a BJJ-enabled athlete with **no** recorded rank sees no
+  belt at all — not an empty swatch, not a loading state stuck open.
+- An admin viewing an athlete with `bjj` disabled sees no belt, regardless of
+  whether one was ever recorded — the fetch is gated on the module the same
+  way the athlete-facing apps are.
+- There is no edit or delete affordance anywhere on this page for a rank —
+  admin only ever reads it.

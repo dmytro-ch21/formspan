@@ -99,6 +99,38 @@ export async function getUserDetail(userID: string): Promise<AdminUserDetail> {
   return adminFetch<AdminUserDetail>(`/admin/users/${encodeURIComponent(userID)}`);
 }
 
+/**
+ * BJJ rank, admin's read-only half of `internal/modules/bjj`.
+ *
+ * `current` is DERIVED server-side from `promotions`, not stored — see the
+ * backend's `StandingFrom`. Admin never edits a rank; it only shows one
+ * beside the athlete, so there's no input type here, only the read shape.
+ */
+export type BjjBelt = "white" | "blue" | "purple" | "brown" | "black";
+
+export type BjjRank = {
+  belt: BjjBelt;
+  stripes: number;
+  /** Black-belt degrees. 0 on every other belt. */
+  degree: number;
+};
+
+export type BjjStanding = {
+  /** Null means no rank recorded — a real state, not a loading placeholder. */
+  current: BjjRank | null;
+  time_at_current_days: number | null;
+};
+
+/**
+ * A user with no promotions answers 200 with `current: null` — the same as a
+ * real account that has never recorded one. This endpoint doesn't distinguish
+ * "no such user" from "no rank yet", so callers only fetch it for a user
+ * `getUserDetail` has already confirmed exists.
+ */
+export async function getUserBjjStanding(userID: string): Promise<BjjStanding> {
+  return adminFetch<BjjStanding>(`/admin/users/${encodeURIComponent(userID)}/bjj/standing`);
+}
+
 // `listUserActivities` and the `Activity` type lived here. Both are gone:
 // nothing rendered them once the detail page moved to sessions, and the table
 // they read has had no writer since the in-app logging form was removed. The

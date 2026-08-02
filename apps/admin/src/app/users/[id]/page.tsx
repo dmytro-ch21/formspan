@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { ApiError, fetchHealth, getUserDetail } from "@/lib/api";
-import type { HealthEvent } from "@/lib/api";
+import { ApiError, fetchHealth, getUserBjjStanding, getUserDetail } from "@/lib/api";
+import type { BjjStanding, HealthEvent } from "@/lib/api";
 import { formatUTC } from "@/lib/format";
+import { BeltSwatch, describeBelt } from "./Belt";
 
 /**
  * One athlete, as an operator needs to see them.
@@ -48,6 +49,14 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
   const { user, recent_sessions: sessions } = detail;
   const problems = health?.events ?? [];
 
+  // Only fetched for an athlete who actually trains BJJ — the `Trains`
+  // section below already knows this from `user.modules`, and the endpoint
+  // itself doesn't distinguish a real user with no rank from one it's never
+  // heard of, so there's nothing to learn by asking for a non-BJJ account.
+  const standing: BjjStanding | null = user.modules.includes("bjj")
+    ? await getUserBjjStanding(id).catch(() => null)
+    : null;
+
   return (
     <div className="min-h-screen w-full">
       <header className="flex w-full items-center justify-between border-b border-border bg-card px-10 py-5">
@@ -56,6 +65,21 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
             {user.display_name ?? "User Detail"}
           </span>
           <span className="font-mono text-[12px] text-text-secondary">{id}</span>
+          {/* Rank, beside the athlete rather than in a section further down —
+              it's read as identity here, the same way a display name is. */}
+          {standing?.current && (
+            <div className="flex items-center gap-2">
+              <BeltSwatch
+                belt={standing.current.belt}
+                stripes={standing.current.stripes}
+                degree={standing.current.degree}
+                width={64}
+              />
+              <span className="text-[12px] text-text-secondary">
+                {describeBelt(standing.current.belt, standing.current.stripes, standing.current.degree)}
+              </span>
+            </div>
+          )}
         </div>
         <Link href="/users" className="text-[13px] text-text-secondary underline">
           Back to User Lookup
