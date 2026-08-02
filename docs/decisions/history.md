@@ -4677,6 +4677,109 @@ file, with the note that the assertions under them are mutation-verified.
 This is a deliberate acceptance rather than an unnoticed mess — the reason to
 write it down is so the next person doesn't spend the same hour on it.
 
+## 2026-08-01 — BJJ rank: the backend and the belt, with the clients still to wire
+
+**Partial work, committed deliberately.** The backend module and the belt
+component are complete and tested; the client wiring is not started. Written
+up now rather than at the end so the next session picks up decisions rather
+than re-derives them.
+
+### Where it lives, and why not on `profile`
+
+`profile.go`'s package comment already called this before there was anything
+to put in it: *"BJJ-specific profile data (belt, stripes, academy, promotion
+history) belongs to the future bjj module, not here."* Profile is the
+account-level record four disciplines share, and a belt is meaningless to
+three of them. So the data is `internal/modules/bjj` behind `/v1/bjj/*`, and
+the *screens* still show it inside the profile — a UI decision, not a reason
+to put a belt column on the shared account record.
+
+### Rank is derived, and derived by RANK — not by date
+
+The obvious schema is `profiles.belt` + `profiles.stripes`. It is wrong twice
+over.
+
+**A current-rank column and a promotion history are two sources for one
+fact.** Edit a date, delete a mistaken entry, and the column still says brown.
+Deriving the rank from the history means there is nothing to keep in step.
+
+**And the derivation is by rank order, not by most-recent date.** Dates are
+optional — plenty of people genuinely do not remember when they got their blue
+belt — and they are hand-entered, so ordering by them makes the current belt a
+function of data-entry care. Rank in BJJ is monotonic: nobody is demoted. So
+the highest recorded rank *is* the current one, and that holds whether the
+promotions went in forwards, backwards, or with no dates at all.
+
+The test that pins it is `white/4` versus `blue/0` — the pair a naive
+`belt + stripes` score gets wrong, and not an edge case: every athlete passes
+through it. `Rank.Order()` multiplies by the maxima so a belt change always
+dominates stripes within a belt.
+
+Two smaller calls in the same vein:
+
+- **No promotions means no belt, not white.** A new account has no rank, and
+  defaulting to white puts a belt on someone who has never trained.
+- **An unknown belt is skipped, not sorted as zero.** A row written by a newer
+  build (coral, say) must not read as *below* white and lose to a real white
+  belt. Acting as though the row is absent is the honest degradation.
+
+### The belt is drawn, not illustrated
+
+`components/Belt.tsx` is three views: strap, rank bar, stripes. No
+`react-native-svg` — a native dependency means a prebuild and a fresh device
+build for everyone, which is a lot to pay to draw four straight lines. It also
+means the web and admin versions are the same shapes in CSS rather than an
+asset pipeline nobody remembers to regenerate.
+
+Details that matter to anyone who trains: the rank bar is **black on coloured
+belts and red on a black belt**, because that is how belts are made. The white
+belt carries a hairline border or it reads as a floating rank bar on VOLA's
+near-black ground. Stripe count is **clamped at render**, so a cached row from
+an older build degrades to a sensible belt instead of drawing off the end of
+the strap.
+
+One near-miss worth recording: the stripe gap was first written as `gap: '8%'`,
+which **typechecks and is not honoured** — RN accepts a percentage there in its
+types but does not apply it like a percentage padding, so four stripes would
+have bunched into one thick line and read as a different rank. It is computed
+numerically now.
+
+### Deliberately not built yet
+
+Answered up front, so the next session does not re-litigate:
+
+- **Adult IBJJF belts only** (white→black, 0–4 stripes, 1st–6th degree). Kids
+  and coral/red are absent from the enum; there is **no CHECK constraint** on
+  the column precisely so adding them is a code change, not a migration.
+- **Academy is free text per promotion**, not a shared entity. Shared academies
+  need dedupe, a naming authority and an admin merge surface, and nothing yet
+  asks "who else trains here".
+- **Promotion ids are server-minted** via `gen_random_uuid()`, unlike sessions
+  and workouts. Those are client-generated because they are created offline and
+  pushed later and the id is what makes the retry idempotent; a promotion is
+  entered at a desk, so a client id buys nothing — and the column default costs
+  no Go dependency.
+
+### What is left
+
+1. `lib/bjj.ts` client + the You screen (belt, time at belt, history) and an
+   add/edit promotion flow.
+2. The same rendering on web and admin — admin's user detail should show rank
+   beside the athlete.
+3. **Filtering the technique library by belt**, using the `TypicalBelt` and
+   `GiAllowedBelts`/`NoGiAllowedBelts` fields the technique module already
+   carries. Agreed as a separate PR.
+
+### Why belt is not decoration
+
+[bjj-tracking-design.md §5](bjj-tracking-design.md) already decided that
+curricula are **belt-level tracks** where each step sets the current focus —
+the top-down entry for an athlete who cannot yet self-select one. So belt is
+the entry point into the progression loop, and the promotion timeline is what
+makes "three years at blue" a fact the system can reason about instead of a
+memory. That is the thread from this record to the gameplan; the library
+filter in (3) is the first honest read along it.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.
