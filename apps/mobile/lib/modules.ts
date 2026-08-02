@@ -156,7 +156,7 @@ const FALLBACK: Module[] = [
     enabled: true,
     capabilities: {
       catalog: 'techniques',
-      facets: ['position'],
+      facets: ['position', 'belt'],
       has_goals: false,
       has_progression: false,
       record_kinds: [],

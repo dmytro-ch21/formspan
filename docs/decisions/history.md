@@ -5021,6 +5021,135 @@ deep link falling through to an edit form that silently defaults to
 White/0/blank — `BELTS.includes(...)` is checked before treating the params
 as a real row, redirecting to `/bjj` otherwise.
 
+## 2026-08-02 — Filtering the technique library by belt
+
+Closes item 3 from the BJJ rank entries above, agreed at the time as its own
+PR. The whole feature turned out to be client-only: `typical_belt` is already
+on every technique summary both apps already fetch and cache, so no new
+query param or endpoint was needed — only a new axis on a filter mechanism
+that already existed.
+
+### One new backend line, for a reason worth stating
+
+The only backend change is adding `"belt"` to BJJ's `Facets` in
+`internal/platform/discipline`, alongside the existing `"position"`. Clients
+already had a mechanism for "extra filter axes this discipline supports,
+gated on the module being enabled" — the position chip row reads it rather
+than hardcoding "BJJ has positions" — so the belt row is the second thing to
+ever use that extension point rather than a new one.
+
+### Capped, not exact-match
+
+Picking "Blue" shows White and Blue material, not Blue alone. A curriculum
+is cumulative — a Blue-belt technique doesn't stop being relevant at Brown —
+so an exact-match filter would hide material a higher belt still uses, which
+contradicts what "commonly taught from" already means on the detail screen.
+`atOrBelowBelt()` (one copy per app, matching how `inPositionFamily` already
+has one copy per app) compares rank order, the same shape as the bjj
+module's own `Rank.Order()`: an unrecognised belt on either side is treated
+as "don't filter this out" rather than excluded, for the same reason
+`StandingFrom` skips an unknown belt instead of sorting it as zero — hiding
+real content because its categorisation is unreadable is worse than showing
+one extra row.
+
+**Deliberately not the same axis as IBJJF legality.** `gi_allowed_belts` /
+`no_gi_allowed_belts` live on the `Ruleset` a technique references, not on
+the technique itself, and an empty list there means "this division doesn't
+apply," not "no belt may use this" — the exact mistake the technique-library
+history entries already record being made three times. This filter only
+ever reads `typical_belt`. Competition eligibility stays exactly where it
+already was, in the detail panel's `Legality` section, un-touched.
+
+### Defaulted from the athlete's own rank, once
+
+Opening the Library with BJJ selected suggests the athlete's own current
+belt as the cap — mobile fetches `getStanding`, web `getBjjStanding`, and
+capitalises the lowercase `bjj.Belt` value to match the technique catalog's
+own casing (the two vocabularies were never linked; this is the one place
+they now have to agree, and only informally). It's a suggestion, not a
+lock — every chip stays reachable either side of it, for browsing above or
+below your own rank. Mobile remembers a manual choice afterward, the same
+way it already remembers the sport chip, and does NOT clear it when the
+sport chip moves elsewhere the way the position filter does — a belt is a
+standing fact over years, not a transient narrowing that should silently
+reappear and surprise someone, so it behaves like "I train BJJ," not like
+"I'm looking at Mount right now." Web has no persistence for any Library
+filter (sport and position both reset on reload too), so belt matches that
+scope instead of inventing storage for one axis.
+
+### A real, hours-long red herring: the backend was stale, not the code
+
+Verifying this cost most of the time it took to build it, and the cause had
+nothing to do with the filter. `go run ./cmd/api`, killed with
+`pkill -f "go run ./cmd/api"`, leaves its **compiled child process** running
+— the actual binary's command line is a `/var/folders/.../exe/api` temp
+path, which that pattern never matches. Every "restart" this session
+appeared to work (the port answered, `/v1/healthz` returned 200) while the
+real server, from hours earlier, kept serving requests underneath, with
+no "belt" in its module facets because it predated the whole change. The
+belt row never rendered, on a real Simulator and against a real backend,
+because the athlete-facing app was correct and the thing answering its
+requests wasn't. Found by checking `lsof -iTCP:8080` for the actual PID and
+its real start time rather than trusting that a `pkill` pattern matching the
+command *name* had matched the process. Killing the backend for real means
+killing the PID `lsof` names, not the invocation that spawned it.
+
+### Verified live against the fixed backend
+
+Real Simulator: belt row renders under BJJ, defaults to the signed-in
+athlete's recorded rank, changes the list on tap. Real browser: the same,
+plus the count moving exactly as expected across caps on one account's real
+data — 150 shown at White, 450 at Purple, 466 (the full technique count) at
+All levels. `pnpm run verify`, `build:web`, and the discipline/technique Go
+packages' tests all pass.
+
+### What `/pre-merge`'s reviewers caught
+
+`backend-reviewer` traced the whole `/v1/modules` path specifically to
+confirm there is no caching layer anywhere in it — `ModulesFor` calls
+`discipline.All()` fresh per request, `WriteJSON` sets no `Cache-Control`
+or `ETag` — which is worth having written down, because the stale-server
+episode above briefly made a cached facets list look like a plausible
+explanation. It wasn't; the process was. It also confirmed nothing reads
+`Facets` positionally or exhaustively, so adding a string really is inert.
+
+`frontend-reviewer` found no blocking issues but four things worth fixing,
+all of which were:
+
+- **An account-identity race with a documented guarantee behind it.** The
+  mobile belt-default effect awaited a network round trip and then wrote
+  state and prefs against a closed-over `userId`, with no check that the
+  same athlete was still signed in — the exact race `ModulesProvider`
+  already carries a `currentUser` ref for. It mattered more than usual
+  because the functional-scenarios entry written in this same change
+  *asserts* "signing in as a different athlete does not carry over the
+  previous athlete's belt cap." The effect now mirrors `ModulesProvider`'s
+  ref guard, and `beltDefaultedFor` holds the account it defaulted for
+  rather than a boolean — a boolean conflated "already spent a request" with
+  "for the person currently signed in," so the second athlete on a shared
+  device would have been skipped entirely.
+- **A lost default on web**, from folding two concerns into one ref: the
+  effect's own cleanup cancelled the in-flight request whenever `modules`
+  changed reference, while the already-set flag stopped the re-run asking
+  again. Split into `beltFetched` (don't re-ask) and `mounted` (don't write
+  after unmount), which are genuinely different questions.
+- **`isFiltered` didn't match what `rows` filters on.** It counted
+  `belt !== ''` unconditionally, but the filter itself is gated on
+  `usesBelt(...)`. Since the belt cap deliberately survives the sport chip
+  moving off BJJ, a cap could sit in state with its row hidden and inert —
+  and an empty catalog would then read "Nothing matches this filter" when
+  nothing was filtering. Cosmetic, but a real mismatch.
+- **The offline fallback registry** in `apps/mobile/lib/modules.ts` still
+  listed `facets: ['position']`, the one place duplicating the old
+  assumption.
+
+Plus one accessibility gap it named precisely: mobile reads each chip as
+"Filter up to Blue," conveying the cap semantics, while web's chips said
+only "Blue" — leaving a screen-reader user no way to learn the filter is
+cumulative. `SmallChip` now takes an optional accessible name, used by the
+belt row and deliberately not by the position row, where the visible text
+already means what it says.
+
 ## Open items / known gaps as of this entry
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

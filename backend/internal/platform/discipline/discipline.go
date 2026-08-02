@@ -57,7 +57,7 @@ type Capabilities struct {
 	Catalog string `json:"catalog"`
 
 	// Facets are extra filter axes beyond the catalog's own. BJJ has
-	// "position"; nothing else does yet.
+	// "position" and "belt"; nothing else does yet.
 	Facets []string `json:"facets"`
 
 	// HasGoals gates the powerlifting/hypertrophy/endurance picker. Strength
@@ -129,7 +129,13 @@ var modules = []Module{
 			// 000019 removed the last BJJ entries from `exercises`, so this is
 			// now literally true rather than aspirational.
 			Catalog: "techniques",
-			Facets:  []string{"position"},
+			// "belt" filters the already-fetched technique list by
+			// `typical_belt` client-side — no query param, no new endpoint.
+			// See docs/decisions/history.md for why: the library already
+			// fetches its catalog once and filters locally (position, sport,
+			// search all work this way), and `typical_belt` is already on
+			// every summary row.
+			Facets: []string{"position", "belt"},
 			// Deliberately empty — see Capabilities.RecordKinds.
 			RecordKinds: []string{},
 		},

@@ -16,8 +16,9 @@ import { LibraryTile, categoryBadge, patternBadge } from '@/components/LibraryTi
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { getStanding } from '@/lib/bjj';
 import { fetchExercises, pickImage, type Exercise } from '@/lib/exercises';
-import { PREF_LIBRARY_SPORT, readPref, writePref } from '@/lib/prefs';
+import { PREF_LIBRARY_BELT, PREF_LIBRARY_SPORT, readPref, writePref } from '@/lib/prefs';
 import { cacheExercises, cachedExercises } from '@/lib/sessionStore';
 import {
   fetchRulesets,
@@ -85,6 +86,12 @@ function usesPosition(sport: string, mods: Module[]): boolean {
   return (m?.enabled && m.capabilities.facets.includes('position')) ?? false;
 }
 
+/** Same reasoning as {@link usesPosition}, for the belt cap. */
+function usesBelt(sport: string, mods: Module[]): boolean {
+  const m = moduleFor(mods, sport);
+  return (m?.enabled && m.capabilities.facets.includes('belt')) ?? false;
+}
+
 /**
  * One collator, built once.
  *
@@ -122,6 +129,42 @@ const POSITIONS = [
 
 function inPositionFamily(position: string, family: string): boolean {
   return position === family || position.startsWith(`${family} - `);
+}
+
+/**
+ * Belt filters, capped rather than exact-match.
+ *
+ * Picking "Blue" shows White and Blue material, not Blue alone — a curriculum
+ * is cumulative, so a Blue-belt technique doesn't stop being relevant the day
+ * you reach Brown. An exact-match filter would hide material a higher belt
+ * still uses, which is the opposite of what "commonly taught from" means.
+ *
+ * Deliberately NOT the same axis as IBJJF legality (`gi_allowed_belts` /
+ * `no_gi_allowed_belts` on the ruleset) — see the technique-library history
+ * entries on why "commonly taught from" and "legal to compete with" are two
+ * different questions that must not collapse into one filter.
+ */
+const BELT_CAPS = [
+  { key: '', label: 'All levels' },
+  { key: 'White', label: 'White' },
+  { key: 'Blue', label: 'Blue' },
+  { key: 'Purple', label: 'Purple' },
+  { key: 'Brown', label: 'Brown' },
+  { key: 'Black', label: 'Black' },
+] as const;
+
+/** Matches the technique catalog's own capitalisation of `typical_belt`. */
+const BELT_RANK: Record<string, number> = { White: 0, Blue: 1, Purple: 2, Brown: 3, Black: 4 };
+
+function atOrBelowBelt(typicalBelt: string, cap: string): boolean {
+  const capRank = BELT_RANK[cap];
+  const rowRank = BELT_RANK[typicalBelt];
+  // An unrecognised value on either side means "don't filter this out" —
+  // hiding real content because its categorisation is unreadable is worse
+  // than showing one extra row. Same reasoning as bjj.StandingFrom skipping
+  // an unknown belt rather than sorting it as zero.
+  if (capRank === undefined || rowRank === undefined) return true;
+  return rowRank <= capRank;
 }
 
 /** Human labels for the load types the catalog uses. */
@@ -166,6 +209,7 @@ export default function LibraryScreen() {
   const [techniquesFailed, setTechniquesFailed] = useState(false);
   const [sport, setSportState] = useState<string>('');
   const [position, setPosition] = useState('');
+  const [belt, setBeltState] = useState('');
   const [query, setQuery] = useState('');
 
   /**
@@ -203,6 +247,89 @@ export default function LibraryScreen() {
     // `modules` is read via usesPosition; without it this captures the
     // first-render empty list forever and over-clears the position filter.
     [userId, modules],
+  );
+
+  /**
+   * The belt cap, restored like the sport filter — with one thing sport
+   * doesn't have: a first-time default. A brand-new visit with no stored
+   * choice suggests the athlete's own recorded rank, once, the same way a
+   * belt-level curriculum would open on "your level" rather than "everything"
+   * — see the design note in docs/decisions/history.md on why belt is meant
+   * to be the entry point into that loop rather than decoration. It is only
+   * ever a suggestion: every chip stays reachable, for browsing above or
+   * below your own rank.
+   *
+   * `beltDefaultedFor` holds the ACCOUNT already suggested for, not a
+   * boolean, because a boolean conflates two questions: "have we already
+   * spent a request on this?" (so a `modules` reference change — this
+   * effect's own dependency, for the same cold-start reason the sport
+   * restore has it — doesn't repeat a call whose answer cannot have
+   * changed) and "was that for the person currently signed in?" (so the
+   * next athlete on a shared device still gets their own default instead of
+   * being skipped because the flag was already set by the previous one).
+   */
+  const beltDefaultedFor = useRef<string | null>(null);
+  /**
+   * The CURRENT account, readable from inside an in-flight callback.
+   *
+   * The same guard, for the same reason, as `ModulesProvider`'s: this effect
+   * closes over `userId`, so comparing a captured copy against the
+   * closed-over one compares a value with itself and can never fire. Only a
+   * ref changes underneath a running promise — and this promise awaits a
+   * network round trip, which is a wide enough window to land athlete A's
+   * belt on athlete B's screen after a fast sign-out/sign-in.
+   */
+  const currentUser = useRef(userId);
+  useEffect(() => {
+    currentUser.current = userId;
+  }, [userId]);
+
+  useEffect(() => {
+    if (!userId) return;
+    const forUser = userId;
+    readPref(forUser, PREF_LIBRARY_BELT)
+      .then(async (v) => {
+        if (forUser !== currentUser.current) return;
+        if (v && BELT_RANK[v] !== undefined) {
+          setBeltState(v);
+          beltDefaultedFor.current = forUser;
+          return;
+        }
+        if (beltDefaultedFor.current === forUser) return;
+        const bjjModule = modules.find((m) => m.key === 'bjj');
+        // Modules haven't loaded yet — wait for a real answer rather than
+        // guessing "off" from an empty list.
+        if (!bjjModule) return;
+        // Nothing stored for THIS account, so whatever is on screen belongs
+        // to whoever was signed in before. Cleared before the lookup rather
+        // than after it, because the lookup can legitimately end without a
+        // value (no rank recorded, BJJ off, offline) and every one of those
+        // outcomes must still leave B looking at B's state, not A's.
+        setBeltState('');
+        beltDefaultedFor.current = forUser;
+        if (!bjjModule.enabled) return;
+        try {
+          const standing = await getStanding(getToken);
+          // The account may have changed while this was in flight.
+          if (forUser !== currentUser.current) return;
+          if (!standing.current) return;
+          const capitalised =
+            standing.current.belt.charAt(0).toUpperCase() + standing.current.belt.slice(1);
+          setBeltState(capitalised);
+          writePref(forUser, PREF_LIBRARY_BELT, capitalised).catch(() => {});
+        } catch {
+          // No default is a fine default — the row still lets them pick one.
+        }
+      })
+      .catch(() => {});
+  }, [userId, modules, getToken]);
+
+  const setBelt = useCallback(
+    (next: string) => {
+      setBeltState(next);
+      if (userId) writePref(userId, PREF_LIBRARY_BELT, next).catch(() => {});
+    },
+    [userId],
   );
 
   /**
@@ -426,10 +553,13 @@ export default function LibraryScreen() {
 
     let tq: TechniqueSummary[] = [];
     if (showTechniques) {
-      const scoped =
-        usesPosition(sport, modules) && position
-          ? sortedTechniques.filter((t) => inPositionFamily(t.position, position))
-          : sortedTechniques;
+      let scoped = sortedTechniques;
+      if (usesPosition(sport, modules) && position) {
+        scoped = scoped.filter((t) => inPositionFamily(t.position, position));
+      }
+      if (usesBelt(sport, modules) && belt) {
+        scoped = scoped.filter((t) => atOrBelowBelt(t.typical_belt, belt));
+      }
       tq = searchTechniques(scoped, query);
     }
 
@@ -449,9 +579,18 @@ export default function LibraryScreen() {
       }
     }
     return out;
-  }, [sortedExercises, sortedTechniques, showTechniques, sport, position, query]);
+  }, [sortedExercises, sortedTechniques, showTechniques, sport, position, belt, query]);
 
-  const isFiltered = query.trim() !== '' || sport !== '' || position !== '';
+  // Each clause has to match the condition the `rows` memo actually filters
+  // on, not just "is this value set". Belt is deliberately NOT cleared when
+  // the sport chip moves off BJJ, so a cap can sit in state with its row
+  // hidden and doing nothing — counting it there would answer an empty
+  // catalog with "Nothing matches this filter" when nothing is filtering.
+  const isFiltered =
+    query.trim() !== '' ||
+    sport !== '' ||
+    position !== '' ||
+    (usesBelt(sport, modules) && belt !== '');
 
   return (
     <View style={styles.container} testID="library-screen">
@@ -516,6 +655,34 @@ export default function LibraryScreen() {
                   testID={`library-position-${p.key || 'all'}`}
                 >
                   <Text style={[styles.posText, active && styles.posTextActive]}>{p.label}</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        )}
+
+        {/* Same reasoning as the position row, one axis over: BJJ-only, and
+            hidden rather than shown-and-inert against a strength catalog. */}
+        {usesBelt(sport, modules) && (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.positionRow}
+          >
+            {BELT_CAPS.map((b) => {
+              const active = belt === b.key;
+              return (
+                <Pressable
+                  key={b.key || 'all'}
+                  onPress={() => setBelt(b.key)}
+                  style={[styles.posChip, active && styles.posChipActive]}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Filter up to ${b.label}`}
+                  accessibilityState={{ selected: active }}
+                  testID={`library-belt-${b.key || 'all'}`}
+                >
+                  <Text style={[styles.posText, active && styles.posTextActive]}>{b.label}</Text>
                 </Pressable>
               );
             })}
