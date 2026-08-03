@@ -414,16 +414,25 @@ func TestPositionsResolveAgainstTheLibrary(t *testing.T) {
 	// The whole point of the detail filters. EXACT counts, not "these differ" —
 	// the weaker assertion passes on the very regression this guards:
 	// deleting closed-guard's detail_includes puts it back on the whole
-	// 187-technique family while open-guard stays at 150, so the two are still
+	// 161-technique family while open-guard stays at 124, so the two are still
 	// unequal and nothing fails. Same lesson, and the same fix, as the pinned
 	// wantRestrictedRulesets above.
 	//
-	// The guard family is 187. The split is 37 closed ("Closed Guard" plus
-	// "Rubber Guard") and 150 open (the rest), and 37+150 == 187 is the check
+	// The guard family is 161. The split is 37 closed ("Closed Guard" plus
+	// "Rubber Guard") and 124 open (the rest), and 37+124 == 161 is the check
 	// that the two partition the family rather than merely differing.
+	//
+	// It was 187/150 until the leg entanglements were promoted out of it. The
+	// 26 ashi garami entries — saddle, 50/50, backside 50/50, single-leg X —
+	// used to be filed as "Guard - Bottom" and therefore resolved as open
+	// guard, which put a heel hook from the saddle on the same screen as a
+	// spider-guard sweep. They are their own position now, so the family they
+	// left is smaller by exactly that many. If this number moves again without
+	// a position being added or removed, something has drifted rather than
+	// been decided.
 	const (
 		wantClosedGuard = 37
-		wantOpenGuard   = 150
+		wantOpenGuard   = 124
 	)
 	scoped := func(id string) int {
 		n := 0
@@ -545,5 +554,115 @@ func TestPostgresRepository_SeedPositionsAndGet(t *testing.T) {
 	}
 	if missing != nil {
 		t.Errorf("expected nil alongside the error, got %+v", missing)
+	}
+}
+
+// Every technique carries a function, and the four that do not are the four
+// that should not.
+//
+// This runs offline against the embedded JSON, because the property is about
+// the seed data rather than the database. The count is pinned deliberately:
+// an entry added later with no `function` is almost certainly an oversight,
+// and the failure should make someone say so out loud rather than let the
+// library quietly grow a second population of unclassified rows. If a genuine
+// new fundamental is added, update the number and the list together.
+func TestEveryTechniqueHasAFunctionExceptTheFundamentals(t *testing.T) {
+	techniques, err := SeedData()
+	if err != nil {
+		t.Fatalf("SeedData: %v", err)
+	}
+
+	// Movement fundamentals: library content that is not a technique, so it
+	// has no noun and no verb. Asserting one would make the taxonomy lie.
+	wantBlank := map[string]bool{
+		"Grappling Stance and Motion": true,
+		"Backward Breakfall":          true,
+		"Side Breakfall":              true,
+		"Forward Shoulder Roll":       true,
+	}
+
+	var blank []string
+	for _, tq := range techniques {
+		if tq.Function == "" {
+			blank = append(blank, tq.Name)
+			continue
+		}
+		if !validFunctions[tq.Function] {
+			t.Errorf("%q has function %q, which is not one of the five", tq.ID, tq.Function)
+		}
+	}
+
+	if len(blank) != len(wantBlank) {
+		t.Fatalf("%d techniques have no function, want %d: %v", len(blank), len(wantBlank), blank)
+	}
+	for _, name := range blank {
+		if !wantBlank[name] {
+			t.Errorf("%q has no function but is not a known movement fundamental", name)
+		}
+	}
+}
+
+// The leg entanglements are their own noun, not a kind of guard.
+//
+// A heel hook from the saddle used to be filed under the same position as a
+// closed-guard armbar, because the coarse axis only had "Guard - Bottom".
+// That is wrong for the position graph every deferred BJJ feature reads: the
+// saddle is not closed guard, and "where do I keep getting stuck" cannot
+// answer honestly if the two collapse.
+//
+// The guard against over-reach is the interesting half. "Judo Ashi-waza" is
+// foot sweeps and "Single-Leg Defense"/"Single-Leg Finish" are takedown work
+// — all three read as leg-adjacent and none is an ashi garami. Matching is
+// exact for that reason.
+func TestLegEntanglementsAreTheirOwnPosition(t *testing.T) {
+	techniques, err := SeedData()
+	if err != nil {
+		t.Fatalf("SeedData: %v", err)
+	}
+
+	entangled := map[string]bool{
+		"Leg Entanglement": true, "50/50": true,
+		"Backside 50/50": true, "Single-Leg X": true,
+	}
+	decoy := map[string]bool{
+		"Judo Ashi-waza": true, "Single-Leg Defense": true, "Single-Leg Finish": true,
+	}
+
+	var n int
+	for _, tq := range techniques {
+		switch {
+		case entangled[tq.PositionDetail]:
+			n++
+			if tq.Position != "Leg Entanglement" {
+				t.Errorf("%q is %q but sits at position %q", tq.ID, tq.PositionDetail, tq.Position)
+			}
+		case decoy[tq.PositionDetail]:
+			if tq.Position == "Leg Entanglement" {
+				t.Errorf("%q (%q) was swept into Leg Entanglement; it is not an ashi garami",
+					tq.ID, tq.PositionDetail)
+			}
+		case tq.Position == "Leg Entanglement":
+			t.Errorf("%q sits at Leg Entanglement on detail %q, which is not one of the four",
+				tq.ID, tq.PositionDetail)
+		}
+	}
+	if n == 0 {
+		t.Fatal("no leg entanglements found at all — the detail values must have been renamed")
+	}
+
+	// And the glossary has a node for the new noun, or the position screen is
+	// a family with no entry and the techniques resolve to nothing.
+	positions, err := PositionSeedData()
+	if err != nil {
+		t.Fatalf("PositionSeedData: %v", err)
+	}
+	var found bool
+	for _, p := range positions {
+		if p.Family == "Leg Entanglement" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("no position entry claims the Leg Entanglement family")
 	}
 }

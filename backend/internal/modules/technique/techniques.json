@@ -121,6 +121,7 @@
       "Technical lift"
     ],
     "category": "Transition",
+    "function": "escape",
     "position": "Other",
     "position_detail": "Seated / Grounded",
     "gi_no_gi": "Both",
@@ -153,6 +154,7 @@
       "Inside ties"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Standing",
     "position_detail": "Hand Fighting",
     "gi_no_gi": "No-Gi Only",
@@ -185,6 +187,7 @@
       "Kumi kata"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Standing",
     "position_detail": "Grip Fighting",
     "gi_no_gi": "Gi Only",
@@ -217,6 +220,7 @@
       "Swim drill"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Standing",
     "position_detail": "Clinch",
     "gi_no_gi": "No-Gi Only",
@@ -248,6 +252,7 @@
       "Collar-and-elbow"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Standing",
     "position_detail": "Clinch",
     "gi_no_gi": "No-Gi Only",
@@ -280,6 +285,7 @@
       "Russian arm"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Standing",
     "position_detail": "Clinch",
     "gi_no_gi": "Both",
@@ -310,6 +316,7 @@
       "Two-on-one drag"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Clinch",
     "gi_no_gi": "Both",
@@ -341,6 +348,7 @@
       "Inside tie duck"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Clinch",
     "gi_no_gi": "No-Gi Only",
@@ -372,6 +380,7 @@
       "Shuck-by"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Clinch",
     "gi_no_gi": "No-Gi Only",
@@ -403,6 +412,7 @@
       "Head-and-arm snap"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Clinch",
     "gi_no_gi": "Both",
@@ -435,6 +445,7 @@
       "Circling go-behind"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Front Headlock",
     "gi_no_gi": "Both",
@@ -468,6 +479,7 @@
       "Morote-gari (Japanese two-hand reap)"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Open Space",
     "gi_no_gi": "Both",
@@ -501,6 +513,7 @@
       "Blast double"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Open Space",
     "gi_no_gi": "No-Gi Only",
@@ -531,6 +544,7 @@
       "Cut-the-corner double"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Open Space",
     "gi_no_gi": "Both",
@@ -562,6 +576,7 @@
       "Hi-C"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Open Space",
     "gi_no_gi": "Both",
@@ -595,6 +610,7 @@
       "Kuchiki-taoshi (Japanese one-hand drop)"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Open Space",
     "gi_no_gi": "Both",
@@ -628,6 +644,7 @@
       "Kuchiki-taoshi (Japanese one-hand drop)"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Open Space",
     "gi_no_gi": "Both",
@@ -660,6 +677,7 @@
       "Shelf finish"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Single-Leg Finish",
     "gi_no_gi": "Both",
@@ -691,6 +709,7 @@
       "Treelift"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Single-Leg Finish",
     "gi_no_gi": "Both",
@@ -722,6 +741,7 @@
       "Single to inside trip"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Single-Leg Finish",
     "gi_no_gi": "Both",
@@ -752,6 +772,7 @@
       "Crackdown position"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Single-Leg Finish",
     "gi_no_gi": "No-Gi Only",
@@ -783,6 +804,7 @@
       "Kuchiki-taoshi variation"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Open Space",
     "gi_no_gi": "No-Gi Only",
@@ -814,6 +836,7 @@
       "Kibisu-gaeshi (Japanese heel reversal)"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Clinch",
     "gi_no_gi": "Both",
@@ -844,6 +867,7 @@
       "Knee tap"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Clinch",
     "gi_no_gi": "Both",
@@ -875,6 +899,7 @@
       "Kosoto-style trip"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Body Lock",
     "gi_no_gi": "Both",
@@ -906,6 +931,7 @@
       "Ouchi-style trip"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Body Lock",
     "gi_no_gi": "Both",
@@ -937,6 +963,7 @@
       "Mat return"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Rear Body Lock",
     "gi_no_gi": "Both",
@@ -970,6 +997,7 @@
       "Knee block return"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Rear Body Lock",
     "gi_no_gi": "No-Gi Only",
@@ -1000,6 +1028,7 @@
       "Advancing foot sweep"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Judo Ashi-waza",
     "gi_no_gi": "Gi Only",
@@ -1031,6 +1060,7 @@
       "Sasae"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Judo Ashi-waza",
     "gi_no_gi": "Both",
@@ -1062,6 +1092,7 @@
       "Minor inner reap"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Judo Ashi-waza",
     "gi_no_gi": "Both",
@@ -1093,6 +1124,7 @@
       "Major inner reap"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Judo Ashi-waza",
     "gi_no_gi": "Both",
@@ -1124,6 +1156,7 @@
       "Major outer reap"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Judo Ashi-waza",
     "gi_no_gi": "Both",
@@ -1155,6 +1188,7 @@
       "Minor outer hook"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Judo Ashi-waza",
     "gi_no_gi": "Both",
@@ -1186,6 +1220,7 @@
       "Inner-thigh throw"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Judo Ashi-waza",
     "gi_no_gi": "Both",
@@ -1217,6 +1252,7 @@
       "Sweeping hip throw"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Judo Koshi-waza",
     "gi_no_gi": "Both",
@@ -1248,6 +1284,7 @@
       "Major hip throw"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Judo Koshi-waza",
     "gi_no_gi": "Both",
@@ -1280,6 +1317,7 @@
       "Head-and-arm hip throw"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Judo Koshi-waza",
     "gi_no_gi": "Both",
@@ -1311,6 +1349,7 @@
       "One-arm shoulder throw"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Judo Te-waza",
     "gi_no_gi": "Gi Only",
@@ -1343,6 +1382,7 @@
       "Drop shoulder throw"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Judo Te-waza",
     "gi_no_gi": "Gi Only",
@@ -1374,6 +1414,7 @@
       "Body drop"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Judo Te-waza",
     "gi_no_gi": "Gi Only",
@@ -1405,6 +1446,7 @@
       "Shoulder wheel"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Judo / Wrestling",
     "gi_no_gi": "Both",
@@ -1436,6 +1478,7 @@
       "Carry finish"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Wrestling",
     "gi_no_gi": "No-Gi Only",
@@ -1467,6 +1510,7 @@
       "Sacrifice butterfly throw"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Judo Sutemi-waza",
     "gi_no_gi": "Both",
@@ -1499,6 +1543,7 @@
       "Stomach throw"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Judo Sutemi-waza",
     "gi_no_gi": "Gi Only",
@@ -1529,6 +1574,7 @@
       "Valley drop"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Judo Sutemi-waza",
     "gi_no_gi": "Both",
@@ -1560,6 +1606,7 @@
       "Side drop"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Judo Sutemi-waza",
     "gi_no_gi": "Gi Only",
@@ -1591,6 +1638,7 @@
       "Side suplex"
     ],
     "category": "Takedown",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Wrestling",
     "gi_no_gi": "No-Gi Only",
@@ -1621,6 +1669,7 @@
       "Front choke from standing"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Standing",
     "position_detail": "Front Headlock",
     "gi_no_gi": "Both",
@@ -1653,6 +1702,7 @@
       "Ude-garami family"
     ],
     "category": "Transition",
+    "function": "escape",
     "position": "Standing",
     "position_detail": "Single-Leg Defense",
     "gi_no_gi": "Both",
@@ -1684,6 +1734,7 @@
       "Shot defense"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Standing",
     "position_detail": "Takedown Defense",
     "gi_no_gi": "Both",
@@ -1716,6 +1767,7 @@
       "Overhook defense"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Standing",
     "position_detail": "Takedown Defense",
     "gi_no_gi": "Both",
@@ -1746,6 +1798,7 @@
       "Face crank defense"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Standing",
     "position_detail": "Takedown Defense",
     "gi_no_gi": "No-Gi Only",
@@ -1776,6 +1829,7 @@
       "Guard jump to closed guard"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Guard Pull",
     "gi_no_gi": "Both",
@@ -1807,6 +1861,7 @@
       "Sit to guard"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Guard Pull",
     "gi_no_gi": "Both",
@@ -1838,6 +1893,7 @@
       "DLR pull"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Guard Pull",
     "gi_no_gi": "Gi Only",
@@ -1870,6 +1926,7 @@
       "Ashi pull"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Standing",
     "position_detail": "Guard Pull",
     "gi_no_gi": "Both",
@@ -1902,6 +1959,7 @@
       "Breaking posture"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Guard - Bottom",
     "position_detail": "Closed Guard",
     "gi_no_gi": "Both",
@@ -1934,6 +1992,7 @@
       "Side angle"
     ],
     "category": "Transition",
+    "function": "control",
     "position": "Guard - Bottom",
     "position_detail": "Closed Guard",
     "gi_no_gi": "Both",
@@ -1966,6 +2025,7 @@
       "Clamp"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Guard - Bottom",
     "position_detail": "Closed Guard",
     "gi_no_gi": "Both",
@@ -1997,6 +2057,7 @@
       "Underhook climb to back"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Guard - Bottom",
     "position_detail": "Closed Guard",
     "gi_no_gi": "Both",
@@ -2028,6 +2089,7 @@
       "Two-on-one back take"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Guard - Bottom",
     "position_detail": "Closed Guard",
     "gi_no_gi": "Both",
@@ -2063,6 +2125,7 @@
       "Juji-gatame family"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Guard - Bottom",
     "position_detail": "Closed Guard",
     "gi_no_gi": "Both",
@@ -2097,6 +2160,7 @@
       "Sankaku-jime family"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Guard - Bottom",
     "position_detail": "Closed Guard",
     "gi_no_gi": "Both",
@@ -2131,6 +2195,7 @@
       "Ude-garami family"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Guard - Bottom",
     "position_detail": "Closed Guard",
     "gi_no_gi": "Both",
@@ -2163,6 +2228,7 @@
       "Arm-in guillotine"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Guard - Bottom",
     "position_detail": "Closed Guard",
     "gi_no_gi": "Both",
@@ -2194,6 +2260,7 @@
       "Shoulder entanglement"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Guard - Bottom",
     "position_detail": "Closed Guard",
     "gi_no_gi": "Both",
@@ -2228,6 +2295,7 @@
       "Gyaku-juji-jime variation"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Guard - Bottom",
     "position_detail": "Closed Guard",
     "gi_no_gi": "Gi Only",
@@ -2258,6 +2326,7 @@
       "Looping collar choke"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Guard - Bottom",
     "position_detail": "Closed Guard",
     "gi_no_gi": "Gi Only",
@@ -2289,6 +2358,7 @@
       "Collar wrap choke"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Guard - Bottom",
     "position_detail": "Closed Guard",
     "gi_no_gi": "Gi Only",
@@ -2320,6 +2390,7 @@
       "Sode-guruma-jime"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Guard - Bottom",
     "position_detail": "Closed Guard",
     "gi_no_gi": "Gi Only",
@@ -2351,6 +2422,7 @@
       "Kimura sweep"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "Closed Guard",
     "gi_no_gi": "Both",
@@ -2382,6 +2454,7 @@
       "Knee-shield scissor sweep"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "Closed Guard",
     "gi_no_gi": "Gi Only",
@@ -2414,6 +2487,7 @@
       "Scissor variation"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "Closed Guard",
     "gi_no_gi": "Gi Only",
@@ -2445,6 +2519,7 @@
       "Underhook leg sweep"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "Closed Guard",
     "gi_no_gi": "Both",
@@ -2476,6 +2551,7 @@
       "Pendulum-style sleeve sweep"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "Closed Guard",
     "gi_no_gi": "Gi Only",
@@ -2506,6 +2582,7 @@
       "Double-ankle sweep"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "Closed Guard",
     "gi_no_gi": "Both",
@@ -2536,6 +2613,7 @@
       "Bump sweep with underhook"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "Closed Guard",
     "gi_no_gi": "Both",
@@ -2566,6 +2644,7 @@
       "Russian-tie guard sweep"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "Closed Guard",
     "gi_no_gi": "Both",
@@ -2597,6 +2676,7 @@
       "Sankaku-jime family"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Guard - Bottom",
     "position_detail": "Closed Guard",
     "gi_no_gi": "Both",
@@ -2628,6 +2708,7 @@
       "Ude-garami family"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Guard - Bottom",
     "position_detail": "Closed Guard",
     "gi_no_gi": "Both",
@@ -2659,6 +2740,7 @@
       "Juji-gatame family"
     ],
     "category": "Transition",
+    "function": "finish",
     "position": "Guard - Bottom",
     "position_detail": "Closed Guard",
     "gi_no_gi": "Both",
@@ -2694,6 +2776,7 @@
       "Clamp guard"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Guard - Bottom",
     "position_detail": "Closed Guard",
     "gi_no_gi": "Both",
@@ -2724,6 +2807,7 @@
       "High guard overhook"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Guard - Bottom",
     "position_detail": "Rubber Guard",
     "gi_no_gi": "No-Gi Only",
@@ -2755,6 +2839,7 @@
       "Gogo-clinch omoplata path"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Guard - Bottom",
     "position_detail": "Rubber Guard",
     "gi_no_gi": "No-Gi Only",
@@ -2785,6 +2870,7 @@
       "Shoulder clamp sweep"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "Closed Guard",
     "gi_no_gi": "Both",
@@ -2816,6 +2902,7 @@
       "Shoulder-clamp armbar"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Guard - Bottom",
     "position_detail": "Closed Guard",
     "gi_no_gi": "Both",
@@ -2849,6 +2936,7 @@
       "Ebi movement (Japanese shrimping)"
     ],
     "category": "Guard Retention",
+    "function": "escape",
     "position": "Guard - Bottom",
     "position_detail": "Open Guard",
     "gi_no_gi": "Both",
@@ -2881,6 +2969,7 @@
       "Hip-in recovery"
     ],
     "category": "Guard Retention",
+    "function": "escape",
     "position": "Guard - Bottom",
     "position_detail": "Open Guard",
     "gi_no_gi": "Both",
@@ -2911,6 +3000,7 @@
       "Inside-space frame"
     ],
     "category": "Guard Retention",
+    "function": "escape",
     "position": "Guard - Bottom",
     "position_detail": "Open Guard",
     "gi_no_gi": "Both",
@@ -2941,6 +3031,7 @@
       "Inside feet"
     ],
     "category": "Guard Retention",
+    "function": "escape",
     "position": "Guard - Bottom",
     "position_detail": "Open Guard",
     "gi_no_gi": "Both",
@@ -2972,6 +3063,7 @@
       "Shoulder-line recovery"
     ],
     "category": "Guard Retention",
+    "function": "escape",
     "position": "Guard - Bottom",
     "position_detail": "Open Guard",
     "gi_no_gi": "Both",
@@ -3003,6 +3095,7 @@
       "Shoulder roll recovery"
     ],
     "category": "Guard Retention",
+    "function": "escape",
     "position": "Guard - Bottom",
     "position_detail": "Open Guard",
     "gi_no_gi": "Both",
@@ -3034,6 +3127,7 @@
       "Upside-down retention"
     ],
     "category": "Guard Retention",
+    "function": "escape",
     "position": "Guard - Bottom",
     "position_detail": "Open Guard",
     "gi_no_gi": "Both",
@@ -3064,6 +3158,7 @@
       "Seated reset"
     ],
     "category": "Guard Retention",
+    "function": "escape",
     "position": "Guard - Bottom",
     "position_detail": "Open Guard",
     "gi_no_gi": "Both",
@@ -3097,6 +3192,7 @@
       "Hip-heist to guard"
     ],
     "category": "Guard Retention",
+    "function": "escape",
     "position": "Turtle - Bottom",
     "position_detail": "Sit-Out",
     "gi_no_gi": "Both",
@@ -3127,6 +3223,7 @@
       "Granby roll recovery"
     ],
     "category": "Guard Retention",
+    "function": "escape",
     "position": "Turtle - Bottom",
     "position_detail": "Granby",
     "gi_no_gi": "Both",
@@ -3158,6 +3255,7 @@
       "Seated open guard connections"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Guard - Bottom",
     "position_detail": "Seated Guard",
     "gi_no_gi": "Both",
@@ -3190,6 +3288,7 @@
       "Double under butterfly"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Guard - Bottom",
     "position_detail": "Butterfly Guard",
     "gi_no_gi": "Both",
@@ -3222,6 +3321,7 @@
       "Sumi-gaeshi-style sweep"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "Butterfly Guard",
     "gi_no_gi": "Both",
@@ -3253,6 +3353,7 @@
       "Whizzer hook sweep"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "Butterfly Guard",
     "gi_no_gi": "Both",
@@ -3283,6 +3384,7 @@
       "Underhook hook sweep"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "Butterfly Guard",
     "gi_no_gi": "Both",
@@ -3314,6 +3416,7 @@
       "Double-elevation sweep"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "Butterfly Guard",
     "gi_no_gi": "Both",
@@ -3344,6 +3447,7 @@
       "Shoulder clamp sweep"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "Butterfly Guard",
     "gi_no_gi": "Both",
@@ -3374,6 +3478,7 @@
       "Seated arm drag"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Guard - Bottom",
     "position_detail": "Butterfly Guard",
     "gi_no_gi": "Both",
@@ -3406,6 +3511,7 @@
       "Seated snapdown"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Guard - Bottom",
     "position_detail": "Butterfly Guard",
     "gi_no_gi": "No-Gi Only",
@@ -3437,6 +3543,7 @@
       "Butterfly ashi entry"
     ],
     "category": "Transition",
+    "function": "control",
     "position": "Guard - Bottom",
     "position_detail": "Butterfly Guard",
     "gi_no_gi": "Both",
@@ -3468,6 +3575,7 @@
       "Butterfly X entry"
     ],
     "category": "Transition",
+    "function": "control",
     "position": "Guard - Bottom",
     "position_detail": "Butterfly Guard",
     "gi_no_gi": "Both",
@@ -3501,6 +3609,7 @@
       "Seated guillotine"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Guard - Bottom",
     "position_detail": "Butterfly Guard",
     "gi_no_gi": "No-Gi Only",
@@ -3531,6 +3640,7 @@
       "Snapdown go-behind from seated guard"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "Butterfly Guard",
     "gi_no_gi": "No-Gi Only",
@@ -3561,6 +3671,7 @@
       "Underhook knee tap"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "Butterfly Guard",
     "gi_no_gi": "Both",
@@ -3591,6 +3702,7 @@
       "Double shin push sweep"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "Butterfly Guard",
     "gi_no_gi": "Both",
@@ -3621,6 +3733,7 @@
       "Stand from seated guard"
     ],
     "category": "Transition",
+    "function": "escape",
     "position": "Guard - Bottom",
     "position_detail": "Butterfly Guard",
     "gi_no_gi": "Both",
@@ -3654,6 +3767,7 @@
       "Shin-on-shin guard"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Guard - Bottom",
     "position_detail": "Shin-to-Shin",
     "gi_no_gi": "Both",
@@ -3685,6 +3799,7 @@
       "Shin-to-shin ashi entry"
     ],
     "category": "Transition",
+    "function": "control",
     "position": "Guard - Bottom",
     "position_detail": "Shin-to-Shin",
     "gi_no_gi": "Both",
@@ -3718,6 +3833,7 @@
       "Seated single-leg wrestle-up"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "Shin-to-Shin",
     "gi_no_gi": "Both",
@@ -3748,6 +3864,7 @@
       "Inside knee tap"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "Shin-to-Shin",
     "gi_no_gi": "Both",
@@ -3778,6 +3895,7 @@
       "Sit-up guard wrestle-up"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "Sit-Up Guard",
     "gi_no_gi": "Both",
@@ -3809,6 +3927,7 @@
       "Seated knee tap"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "Sit-Up Guard",
     "gi_no_gi": "Both",
@@ -3839,6 +3958,7 @@
       "Seated drag wrestle-up"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Guard - Bottom",
     "position_detail": "Sit-Up Guard",
     "gi_no_gi": "Both",
@@ -3871,6 +3991,7 @@
       "Seated ankle pick"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "Sit-Up Guard",
     "gi_no_gi": "Both",
@@ -3902,7 +4023,8 @@
       "Straight ashi garami"
     ],
     "category": "Control/Pin",
-    "position": "Guard - Bottom",
+    "function": "control",
+    "position": "Leg Entanglement",
     "position_detail": "Single-Leg X",
     "gi_no_gi": "Both",
     "typical_belt": "Blue",
@@ -3934,7 +4056,8 @@
       "SLX outside dump"
     ],
     "category": "Sweep",
-    "position": "Guard - Bottom",
+    "function": "reverse",
+    "position": "Leg Entanglement",
     "position_detail": "Single-Leg X",
     "gi_no_gi": "Both",
     "typical_belt": "Blue",
@@ -3965,7 +4088,8 @@
       "SLX inside tilt"
     ],
     "category": "Sweep",
-    "position": "Guard - Bottom",
+    "function": "reverse",
+    "position": "Leg Entanglement",
     "position_detail": "Single-Leg X",
     "gi_no_gi": "Both",
     "typical_belt": "Blue",
@@ -3995,7 +4119,8 @@
       "Ashi wrestle-up"
     ],
     "category": "Sweep",
-    "position": "Guard - Bottom",
+    "function": "reverse",
+    "position": "Leg Entanglement",
     "position_detail": "Single-Leg X",
     "gi_no_gi": "Both",
     "typical_belt": "Blue",
@@ -4025,7 +4150,8 @@
       "SLX to full X"
     ],
     "category": "Transition",
-    "position": "Guard - Bottom",
+    "function": "control",
+    "position": "Leg Entanglement",
     "position_detail": "Single-Leg X",
     "gi_no_gi": "Both",
     "typical_belt": "Blue",
@@ -4058,7 +4184,8 @@
       "Reverse X entry"
     ],
     "category": "Transition",
-    "position": "Guard - Bottom",
+    "function": "control",
+    "position": "Leg Entanglement",
     "position_detail": "Single-Leg X",
     "gi_no_gi": "No-Gi Only",
     "typical_belt": "Purple",
@@ -4089,6 +4216,7 @@
       "Full X guard"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Guard - Bottom",
     "position_detail": "X Guard",
     "gi_no_gi": "Both",
@@ -4121,6 +4249,7 @@
       "Rear tilt sweep"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "X Guard",
     "gi_no_gi": "Both",
@@ -4151,6 +4280,7 @@
       "Lateral X sweep"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "X Guard",
     "gi_no_gi": "Both",
@@ -4182,6 +4312,7 @@
       "X-guard wrestle-up"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "X Guard",
     "gi_no_gi": "Both",
@@ -4212,6 +4343,7 @@
       "X guard to rear body lock"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Guard - Bottom",
     "position_detail": "X Guard",
     "gi_no_gi": "Both",
@@ -4244,6 +4376,7 @@
       "X guard technical stand to drag"
     ],
     "category": "Transition",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "X Guard",
     "gi_no_gi": "Both",
@@ -4276,6 +4409,7 @@
       "DLR guard"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Guard - Bottom",
     "position_detail": "De La Riva",
     "gi_no_gi": "Gi Only",
@@ -4307,6 +4441,7 @@
       "DLR tripod"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "De La Riva",
     "gi_no_gi": "Gi Only",
@@ -4338,6 +4473,7 @@
       "DLR hook sweep"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "De La Riva",
     "gi_no_gi": "Gi Only",
@@ -4368,6 +4504,7 @@
       "DLR wrestle-up"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "De La Riva",
     "gi_no_gi": "Both",
@@ -4399,6 +4536,7 @@
       "Inverted back take"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Guard - Bottom",
     "position_detail": "De La Riva",
     "gi_no_gi": "Gi Only",
@@ -4434,6 +4572,7 @@
       "Hip-clamp back take"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Guard - Bottom",
     "position_detail": "De La Riva",
     "gi_no_gi": "Gi Only",
@@ -4467,6 +4606,7 @@
       "Matrix back-take entry"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Guard - Bottom",
     "position_detail": "De La Riva",
     "gi_no_gi": "Gi Only",
@@ -4500,6 +4640,7 @@
       "DLR balloon sweep"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "De La Riva",
     "gi_no_gi": "Gi Only",
@@ -4531,6 +4672,7 @@
       "Spiral guard"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Guard - Bottom",
     "position_detail": "Reverse De La Riva",
     "gi_no_gi": "Both",
@@ -4563,6 +4705,7 @@
       "RDLR inversion back take"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Guard - Bottom",
     "position_detail": "Reverse De La Riva",
     "gi_no_gi": "Both",
@@ -4595,6 +4738,7 @@
       "RDLR tilt sweep"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "Reverse De La Riva",
     "gi_no_gi": "Both",
@@ -4625,6 +4769,7 @@
       "RDLR ashi entry"
     ],
     "category": "Transition",
+    "function": "control",
     "position": "Guard - Bottom",
     "position_detail": "Reverse De La Riva",
     "gi_no_gi": "Both",
@@ -4657,6 +4802,7 @@
       "RDLR spin retention"
     ],
     "category": "Guard Retention",
+    "function": "escape",
     "position": "Guard - Bottom",
     "position_detail": "Reverse De La Riva",
     "gi_no_gi": "Both",
@@ -4687,6 +4833,7 @@
       "Collar sleeve guard"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Guard - Bottom",
     "position_detail": "Collar-Sleeve",
     "gi_no_gi": "Gi Only",
@@ -4718,6 +4865,7 @@
       "Collar sleeve ankle sweep"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "Collar-Sleeve",
     "gi_no_gi": "Gi Only",
@@ -4748,6 +4896,7 @@
       "Hook sweep from collar sleeve"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "Collar-Sleeve",
     "gi_no_gi": "Gi Only",
@@ -4779,6 +4928,7 @@
       "Juji-gatame family"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Guard - Bottom",
     "position_detail": "Collar-Sleeve",
     "gi_no_gi": "Gi Only",
@@ -4810,6 +4960,7 @@
       "Sankaku-jime family"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Guard - Bottom",
     "position_detail": "Collar-Sleeve",
     "gi_no_gi": "Gi Only",
@@ -4840,6 +4991,7 @@
       "Open-guard shoulder lock"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Guard - Bottom",
     "position_detail": "Collar-Sleeve",
     "gi_no_gi": "Gi Only",
@@ -4870,6 +5022,7 @@
       "Arm-drag back take"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Guard - Bottom",
     "position_detail": "Collar-Sleeve",
     "gi_no_gi": "Gi Only",
@@ -4902,6 +5055,7 @@
       "Double biceps guard"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Guard - Bottom",
     "position_detail": "Spider Guard",
     "gi_no_gi": "Gi Only",
@@ -4933,6 +5087,7 @@
       "Spider ankle sweep"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "Spider Guard",
     "gi_no_gi": "Gi Only",
@@ -4963,6 +5118,7 @@
       "Spider shoulder lock"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Guard - Bottom",
     "position_detail": "Spider Guard",
     "gi_no_gi": "Gi Only",
@@ -4994,6 +5150,7 @@
       "Sankaku-jime family"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Guard - Bottom",
     "position_detail": "Spider Guard",
     "gi_no_gi": "Gi Only",
@@ -5025,6 +5182,7 @@
       "Lasso spider"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Guard - Bottom",
     "position_detail": "Lasso Guard",
     "gi_no_gi": "Gi Only",
@@ -5056,6 +5214,7 @@
       "Lasso tilt sweep"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "Lasso Guard",
     "gi_no_gi": "Gi Only",
@@ -5086,6 +5245,7 @@
       "Lasso wrestle-up"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "Lasso Guard",
     "gi_no_gi": "Gi Only",
@@ -5116,6 +5276,7 @@
       "Lasso shoulder lock"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Guard - Bottom",
     "position_detail": "Lasso Guard",
     "gi_no_gi": "Gi Only",
@@ -5147,6 +5308,7 @@
       "Sleeve guard sweep"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "Double-Sleeve Guard",
     "gi_no_gi": "Gi Only",
@@ -5177,6 +5339,7 @@
       "Lapel wrap guard"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Guard - Bottom",
     "position_detail": "Worm Guard",
     "gi_no_gi": "Gi Only",
@@ -5208,6 +5371,7 @@
       "Lapel tilt sweep"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "Worm Guard",
     "gi_no_gi": "Gi Only",
@@ -5238,6 +5402,7 @@
       "Lapel guard back take"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Guard - Bottom",
     "position_detail": "Worm Guard",
     "gi_no_gi": "Gi Only",
@@ -5270,6 +5435,7 @@
       "Lapel-under-leg guard"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Guard - Bottom",
     "position_detail": "Squid Guard",
     "gi_no_gi": "Gi Only",
@@ -5301,6 +5467,7 @@
       "Lapel underhook sweep"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "Squid Guard",
     "gi_no_gi": "Gi Only",
@@ -5331,6 +5498,7 @@
       "Lapel-fed single"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "Lapel Guard",
     "gi_no_gi": "Gi Only",
@@ -5362,6 +5530,7 @@
       "K-guard"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Guard - Bottom",
     "position_detail": "K Guard",
     "gi_no_gi": "Both",
@@ -5394,6 +5563,7 @@
       "Closed guard to K"
     ],
     "category": "Transition",
+    "function": "control",
     "position": "Guard - Bottom",
     "position_detail": "K Guard",
     "gi_no_gi": "Both",
@@ -5426,6 +5596,7 @@
       "Half butterfly K entry"
     ],
     "category": "Transition",
+    "function": "control",
     "position": "Half Guard - Bottom",
     "position_detail": "K Guard",
     "gi_no_gi": "Both",
@@ -5458,6 +5629,7 @@
       "K-to-backside entry"
     ],
     "category": "Transition",
+    "function": "control",
     "position": "Guard - Bottom",
     "position_detail": "K Guard",
     "gi_no_gi": "No-Gi Only",
@@ -5491,6 +5663,7 @@
       "K-matrix"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Guard - Bottom",
     "position_detail": "K Guard",
     "gi_no_gi": "Both",
@@ -5524,6 +5697,7 @@
       "K-guard single-leg rise"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "K Guard",
     "gi_no_gi": "Both",
@@ -5555,6 +5729,7 @@
       "Deep under-leg guard"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Guard - Bottom",
     "position_detail": "Waiter Guard",
     "gi_no_gi": "Both",
@@ -5587,6 +5762,7 @@
       "Waiter tilt sweep"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Guard - Bottom",
     "position_detail": "Waiter Guard",
     "gi_no_gi": "Both",
@@ -5617,6 +5793,7 @@
       "Waiter to crab ride"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Guard - Bottom",
     "position_detail": "Waiter Guard",
     "gi_no_gi": "Both",
@@ -5651,7 +5828,8 @@
       "Parallel ashi"
     ],
     "category": "Control/Pin",
-    "position": "Guard - Bottom",
+    "function": "control",
+    "position": "Leg Entanglement",
     "position_detail": "50/50",
     "gi_no_gi": "Both",
     "typical_belt": "Blue",
@@ -5683,7 +5861,8 @@
       "50/50 wrestle-up"
     ],
     "category": "Sweep",
-    "position": "Guard - Bottom",
+    "function": "reverse",
+    "position": "Leg Entanglement",
     "position_detail": "50/50",
     "gi_no_gi": "Both",
     "typical_belt": "Blue",
@@ -5713,7 +5892,8 @@
       "Fifty-fifty hip turn back take"
     ],
     "category": "Transition",
-    "position": "Guard - Bottom",
+    "function": "advance",
+    "position": "Leg Entanglement",
     "position_detail": "50/50",
     "gi_no_gi": "Both",
     "typical_belt": "Purple",
@@ -5746,7 +5926,8 @@
       "Outside backside ashi"
     ],
     "category": "Control/Pin",
-    "position": "Guard - Bottom",
+    "function": "control",
+    "position": "Leg Entanglement",
     "position_detail": "Backside 50/50",
     "gi_no_gi": "No-Gi Only",
     "typical_belt": "Purple",
@@ -5778,6 +5959,7 @@
       "Hip ride"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Guard - Bottom",
     "position_detail": "Crab Ride",
     "gi_no_gi": "Both",
@@ -5810,6 +5992,7 @@
       "Crab ride chair-sit"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Guard - Bottom",
     "position_detail": "Crab Ride",
     "gi_no_gi": "Both",
@@ -5842,6 +6025,7 @@
       "Hip-clamp mount transition"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Guard - Bottom",
     "position_detail": "Crab Ride",
     "gi_no_gi": "Gi Only",
@@ -5875,6 +6059,7 @@
       "Under-leg inversion back take"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Guard - Bottom",
     "position_detail": "Matrix",
     "gi_no_gi": "Gi Only",
@@ -5908,6 +6093,7 @@
       "Half-guard structure"
     ],
     "category": "Guard Retention",
+    "function": "escape",
     "position": "Half Guard - Bottom",
     "position_detail": "Half Guard",
     "gi_no_gi": "Both",
@@ -5940,6 +6126,7 @@
       "Knee shield"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Half Guard - Bottom",
     "position_detail": "Knee Shield",
     "gi_no_gi": "Both",
@@ -5971,6 +6158,7 @@
       "High Z guard"
     ],
     "category": "Guard Retention",
+    "function": "escape",
     "position": "Half Guard - Bottom",
     "position_detail": "Knee Shield",
     "gi_no_gi": "Both",
@@ -6001,6 +6189,7 @@
       "Low Z to underhook"
     ],
     "category": "Transition",
+    "function": "control",
     "position": "Half Guard - Bottom",
     "position_detail": "Knee Shield",
     "gi_no_gi": "Both",
@@ -6034,6 +6223,7 @@
       "Coyote underhook rise"
     ],
     "category": "Transition",
+    "function": "control",
     "position": "Half Guard - Bottom",
     "position_detail": "Underhook Half Guard",
     "gi_no_gi": "Both",
@@ -6066,6 +6256,7 @@
       "Coyote sweep"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Half Guard - Bottom",
     "position_detail": "Dogfight",
     "gi_no_gi": "Both",
@@ -6097,6 +6288,7 @@
       "Old school"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Half Guard - Bottom",
     "position_detail": "Dogfight",
     "gi_no_gi": "Both",
@@ -6127,6 +6319,7 @@
       "Roll-under dogfight sweep"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Half Guard - Bottom",
     "position_detail": "Dogfight",
     "gi_no_gi": "Both",
@@ -6157,6 +6350,7 @@
       "Limp-arm from half guard"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Half Guard - Bottom",
     "position_detail": "Dogfight",
     "gi_no_gi": "Both",
@@ -6189,6 +6383,7 @@
       "Underhook back door"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Half Guard - Bottom",
     "position_detail": "Underhook Half Guard",
     "gi_no_gi": "Both",
@@ -6221,6 +6416,7 @@
       "Knee-lever sweep"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Half Guard - Bottom",
     "position_detail": "Half Guard",
     "gi_no_gi": "Both",
@@ -6252,6 +6448,7 @@
       "Ude-garami family"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Half Guard - Bottom",
     "position_detail": "Knee Shield",
     "gi_no_gi": "Both",
@@ -6284,6 +6481,7 @@
       "Ude-garami family"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Half Guard - Bottom",
     "position_detail": "Kimura Trap",
     "gi_no_gi": "Both",
@@ -6316,6 +6514,7 @@
       "Half-guard front choke"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Half Guard - Bottom",
     "position_detail": "Knee Shield",
     "gi_no_gi": "No-Gi Only",
@@ -6346,6 +6545,7 @@
       "Half-guard loop choke"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Half Guard - Bottom",
     "position_detail": "Knee Shield",
     "gi_no_gi": "Gi Only",
@@ -6377,6 +6577,7 @@
       "Half hook guard"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Half Guard - Bottom",
     "position_detail": "Half Butterfly",
     "gi_no_gi": "Both",
@@ -6408,6 +6609,7 @@
       "Butterfly half hook sweep"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Half Guard - Bottom",
     "position_detail": "Half Butterfly",
     "gi_no_gi": "Both",
@@ -6438,6 +6640,7 @@
       "Butterfly half X entry"
     ],
     "category": "Transition",
+    "function": "control",
     "position": "Half Guard - Bottom",
     "position_detail": "Half Butterfly",
     "gi_no_gi": "Both",
@@ -6470,6 +6673,7 @@
       "Butterfly half ashi entry"
     ],
     "category": "Transition",
+    "function": "control",
     "position": "Half Guard - Bottom",
     "position_detail": "Half Butterfly",
     "gi_no_gi": "Both",
@@ -6502,6 +6706,7 @@
       "Deep half"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Half Guard - Bottom",
     "position_detail": "Deep Half",
     "gi_no_gi": "Both",
@@ -6533,6 +6738,7 @@
       "Deep-half roll sweep"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Half Guard - Bottom",
     "position_detail": "Deep Half",
     "gi_no_gi": "Both",
@@ -6563,6 +6769,7 @@
       "Waiter lift from deep half"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Half Guard - Bottom",
     "position_detail": "Deep Half",
     "gi_no_gi": "Both",
@@ -6593,6 +6800,7 @@
       "Deep half escape to rear"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Half Guard - Bottom",
     "position_detail": "Deep Half",
     "gi_no_gi": "Both",
@@ -6623,6 +6831,7 @@
       "Deep-half X transition"
     ],
     "category": "Transition",
+    "function": "control",
     "position": "Half Guard - Bottom",
     "position_detail": "Deep Half",
     "gi_no_gi": "Both",
@@ -6655,6 +6864,7 @@
       "Double-triangle leg stretch"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Half Guard - Bottom",
     "position_detail": "Lockdown",
     "gi_no_gi": "No-Gi Only",
@@ -6686,6 +6896,7 @@
       "Whip-up underhooks"
     ],
     "category": "Transition",
+    "function": "control",
     "position": "Half Guard - Bottom",
     "position_detail": "Lockdown",
     "gi_no_gi": "No-Gi Only",
@@ -6717,6 +6928,7 @@
       "Lockdown leg-underhook sweep"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Half Guard - Bottom",
     "position_detail": "Lockdown",
     "gi_no_gi": "No-Gi Only",
@@ -6747,6 +6959,7 @@
       "Whip-up to dogfight"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Half Guard - Bottom",
     "position_detail": "Lockdown",
     "gi_no_gi": "No-Gi Only",
@@ -6778,6 +6991,7 @@
       "Reverse underhook half"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Half Guard - Bottom",
     "position_detail": "Octopus Guard",
     "gi_no_gi": "Both",
@@ -6809,6 +7023,7 @@
       "Octopus sit-up sweep"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Half Guard - Bottom",
     "position_detail": "Octopus Guard",
     "gi_no_gi": "Both",
@@ -6839,6 +7054,7 @@
       "Octopus spin behind"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Half Guard - Bottom",
     "position_detail": "Octopus Guard",
     "gi_no_gi": "Both",
@@ -6871,6 +7087,7 @@
       "Full-guard recovery"
     ],
     "category": "Guard Retention",
+    "function": "escape",
     "position": "Half Guard - Bottom",
     "position_detail": "Half Guard",
     "gi_no_gi": "Both",
@@ -6901,6 +7118,7 @@
       "Butterfly recovery"
     ],
     "category": "Guard Retention",
+    "function": "escape",
     "position": "Half Guard - Bottom",
     "position_detail": "Half Guard",
     "gi_no_gi": "Both",
@@ -6931,6 +7149,7 @@
       "Safe posture in closed guard"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Guard - Top",
     "position_detail": "Closed Guard",
     "gi_no_gi": "Both",
@@ -6960,6 +7179,7 @@
       "Seated guard opening"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Closed Guard",
     "gi_no_gi": "Both",
@@ -6992,6 +7212,7 @@
       "Stand-to-open guard"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Closed Guard",
     "gi_no_gi": "Both",
@@ -7023,6 +7244,7 @@
       "Knee wedge opening"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Closed Guard",
     "gi_no_gi": "Both",
@@ -7055,6 +7277,7 @@
       "Tozi pass"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Closed Guard",
     "gi_no_gi": "Both",
@@ -7085,6 +7308,7 @@
       "Stand-open knee slice"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Closed Guard",
     "gi_no_gi": "Both",
@@ -7115,6 +7339,7 @@
       "Stand-open stack pass"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Closed Guard",
     "gi_no_gi": "Both",
@@ -7145,6 +7370,7 @@
       "Double-under stack pass"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Open Guard",
     "gi_no_gi": "Both",
@@ -7175,6 +7401,7 @@
       "Single-under pass"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Open Guard",
     "gi_no_gi": "Both",
@@ -7205,6 +7432,7 @@
       "Pressure pass"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Open Guard",
     "gi_no_gi": "Both",
@@ -7235,6 +7463,7 @@
       "Bullfighter pass"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Open Guard",
     "gi_no_gi": "Both",
@@ -7266,6 +7495,7 @@
       "Bullfighter knee ride"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Open Guard",
     "gi_no_gi": "Both",
@@ -7298,6 +7528,7 @@
       "Bullfighter chain"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Open Guard",
     "gi_no_gi": "Both",
@@ -7328,6 +7559,7 @@
       "Standing cross-step pass"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Open Guard",
     "gi_no_gi": "Both",
@@ -7360,6 +7592,7 @@
       "Knee-through pass"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Open Guard",
     "gi_no_gi": "Both",
@@ -7392,6 +7625,7 @@
       "Crossface knee slice"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Open Guard",
     "gi_no_gi": "Both",
@@ -7422,6 +7656,7 @@
       "Knee slice long-step combination"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Open Guard",
     "gi_no_gi": "Both",
@@ -7452,6 +7687,7 @@
       "Outside leg drag"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Open Guard",
     "gi_no_gi": "Both",
@@ -7484,6 +7720,7 @@
       "Leg-drag chair sit"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Open Guard",
     "gi_no_gi": "Both",
@@ -7516,6 +7753,7 @@
       "High-hip pressure pass"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Open Guard",
     "gi_no_gi": "Both",
@@ -7547,6 +7785,7 @@
       "Split squat passing"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Guard - Top",
     "position_detail": "Open Guard",
     "gi_no_gi": "Both",
@@ -7578,6 +7817,7 @@
       "HQ knee slice"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Open Guard",
     "gi_no_gi": "Both",
@@ -7608,6 +7848,7 @@
       "Split-squat smash"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Open Guard",
     "gi_no_gi": "Both",
@@ -7638,6 +7879,7 @@
       "Backstep from HQ"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Open Guard",
     "gi_no_gi": "Both",
@@ -7668,6 +7910,7 @@
       "Double-under body lock pass"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Butterfly / Seated Guard",
     "gi_no_gi": "No-Gi Only",
@@ -7699,6 +7942,7 @@
       "Knee-block body lock"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Butterfly / Seated Guard",
     "gi_no_gi": "No-Gi Only",
@@ -7729,6 +7973,7 @@
       "Body lock smash to half"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Butterfly / Seated Guard",
     "gi_no_gi": "No-Gi Only",
@@ -7761,6 +8006,7 @@
       "Hip-post float"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Open Guard",
     "gi_no_gi": "No-Gi Only",
@@ -7792,6 +8038,7 @@
       "Hover backstep"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Open Guard",
     "gi_no_gi": "No-Gi Only",
@@ -7822,6 +8069,7 @@
       "Stack-and-fold pass"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Open Guard",
     "gi_no_gi": "Both",
@@ -7854,6 +8102,7 @@
       "Knee-shield weave pass"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Open Guard",
     "gi_no_gi": "Both",
@@ -7885,6 +8134,7 @@
       "Hip-switch pass"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Open Guard",
     "gi_no_gi": "Both",
@@ -7917,6 +8167,7 @@
       "Long backstep pass"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Open Guard",
     "gi_no_gi": "Both",
@@ -7948,6 +8199,7 @@
       "Hip-switch mount pass"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Open Guard",
     "gi_no_gi": "Both",
@@ -7980,6 +8232,7 @@
       "Aerial cartwheel pass"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Seated Guard",
     "gi_no_gi": "Both",
@@ -8010,6 +8263,7 @@
       "Seated shuck pass"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Seated Guard",
     "gi_no_gi": "No-Gi Only",
@@ -8040,6 +8294,7 @@
       "Snapdown pass"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Seated Guard",
     "gi_no_gi": "No-Gi Only",
@@ -8071,6 +8326,7 @@
       "Outside shin pin"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Seated Guard",
     "gi_no_gi": "Both",
@@ -8101,6 +8357,7 @@
       "Step-over open guard pass"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Open Guard",
     "gi_no_gi": "Both",
@@ -8131,6 +8388,7 @@
       "Around-the-head pass"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Open Guard",
     "gi_no_gi": "Both",
@@ -8162,6 +8420,7 @@
       "Toreando–X-pass–leg drag chain"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Open Guard",
     "gi_no_gi": "Both",
@@ -8196,6 +8455,7 @@
       "HQ–knee cut–smash chain"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Guard - Top",
     "position_detail": "Open Guard",
     "gi_no_gi": "Both",
@@ -8228,6 +8488,7 @@
       "Chest-to-chest half guard"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Half Guard - Top",
     "position_detail": "Chest-to-Chest Half Guard",
     "gi_no_gi": "Both",
@@ -8260,6 +8521,7 @@
       "Half-guard knee cut"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Half Guard - Top",
     "position_detail": "Chest-to-Chest Half Guard",
     "gi_no_gi": "Both",
@@ -8290,6 +8552,7 @@
       "Tripod half pass"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Half Guard - Top",
     "position_detail": "Chest-to-Chest Half Guard",
     "gi_no_gi": "Both",
@@ -8320,6 +8583,7 @@
       "Two-stage half guard pass"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Half Guard - Top",
     "position_detail": "Chest-to-Chest Half Guard",
     "gi_no_gi": "Both",
@@ -8350,6 +8614,7 @@
       "Backstep from half"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Half Guard - Top",
     "position_detail": "Half Guard",
     "gi_no_gi": "Both",
@@ -8381,6 +8646,7 @@
       "Reverse sit half pass"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Half Guard - Top",
     "position_detail": "Reverse Half Guard",
     "gi_no_gi": "Both",
@@ -8411,6 +8677,7 @@
       "Z-guard smash"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Half Guard - Top",
     "position_detail": "Knee Shield",
     "gi_no_gi": "Both",
@@ -8441,6 +8708,7 @@
       "Z-guard weave"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Half Guard - Top",
     "position_detail": "Knee Shield",
     "gi_no_gi": "Both",
@@ -8471,6 +8739,7 @@
       "Z-guard pressure pass"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Half Guard - Top",
     "position_detail": "Knee Shield",
     "gi_no_gi": "Both",
@@ -8501,6 +8770,7 @@
       "Near-side underhook pressure pass"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Half Guard - Top",
     "position_detail": "Half Guard",
     "gi_no_gi": "Both",
@@ -8531,6 +8801,7 @@
       "Lockdown escape"
     ],
     "category": "Pass",
+    "function": "advance",
     "position": "Half Guard - Top",
     "position_detail": "Lockdown",
     "gi_no_gi": "No-Gi Only",
@@ -8563,6 +8834,7 @@
       "Yoko-shiho-gatame variation"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Side Control - Top",
     "position_detail": "Chest-to-Chest",
     "gi_no_gi": "Both",
@@ -8595,6 +8867,7 @@
       "Hip-control side pin"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Side Control - Top",
     "position_detail": "Chest-to-Chest",
     "gi_no_gi": "Both",
@@ -8626,6 +8899,7 @@
       "Scarf hold"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Side Control - Top",
     "position_detail": "Scarf Hold",
     "gi_no_gi": "Both",
@@ -8659,6 +8933,7 @@
       "Underhook scarf hold"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Side Control - Top",
     "position_detail": "Modified Scarf Hold",
     "gi_no_gi": "Both",
@@ -8689,6 +8964,7 @@
       "Reverse scarf hold"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Side Control - Top",
     "position_detail": "Reverse Scarf Hold",
     "gi_no_gi": "Both",
@@ -8719,6 +8995,7 @@
       "Knee ride transition"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Side Control - Top",
     "position_detail": "Chest-to-Chest",
     "gi_no_gi": "Both",
@@ -8749,6 +9026,7 @@
       "Knee-slide mount transition"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Side Control - Top",
     "position_detail": "Chest-to-Chest",
     "gi_no_gi": "Both",
@@ -8780,6 +9058,7 @@
       "Head-switch transition"
     ],
     "category": "Transition",
+    "function": "control",
     "position": "Side Control - Top",
     "position_detail": "Chest-to-Chest",
     "gi_no_gi": "Both",
@@ -8812,6 +9091,7 @@
       "Juji-gatame family"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Side Control - Top",
     "position_detail": "Chest-to-Chest",
     "gi_no_gi": "Both",
@@ -8843,6 +9123,7 @@
       "Juji-gatame family"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Side Control - Top",
     "position_detail": "Chest-to-Chest",
     "gi_no_gi": "Both",
@@ -8875,6 +9156,7 @@
       "Ude-garami family"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Side Control - Top",
     "position_detail": "Chest-to-Chest",
     "gi_no_gi": "Both",
@@ -8908,6 +9190,7 @@
       "Ude-garami family"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Side Control - Top",
     "position_detail": "Chest-to-Chest",
     "gi_no_gi": "Both",
@@ -8941,6 +9224,7 @@
       "Juji-gatame family"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Side Control - Top",
     "position_detail": "Chest-to-Chest",
     "gi_no_gi": "Both",
@@ -8973,6 +9257,7 @@
       "Sankaku-jime family"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Side Control - Top",
     "position_detail": "Chest-to-Chest",
     "gi_no_gi": "Both",
@@ -9003,6 +9288,7 @@
       "Bread-cutter choke"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Side Control - Top",
     "position_detail": "Chest-to-Chest",
     "gi_no_gi": "Gi Only",
@@ -9033,6 +9319,7 @@
       "Baseball choke"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Side Control - Top",
     "position_detail": "Chest-to-Chest",
     "gi_no_gi": "Gi Only",
@@ -9064,6 +9351,7 @@
       "Lapel brabo"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Side Control - Top",
     "position_detail": "Chest-to-Chest",
     "gi_no_gi": "Gi Only",
@@ -9094,6 +9382,7 @@
       "Brabo choke no-gi"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Side Control - Top",
     "position_detail": "Near-Side Underhook",
     "gi_no_gi": "No-Gi Only",
@@ -9125,6 +9414,7 @@
       "Ude-garami family"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Side Control - Top",
     "position_detail": "Kimura Trap",
     "gi_no_gi": "Both",
@@ -9155,6 +9445,7 @@
       "Wrist-to-neck gift wrap"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Side Control - Top",
     "position_detail": "Chest-to-Chest",
     "gi_no_gi": "Both",
@@ -9186,6 +9477,7 @@
       "Gooseneck wrist lock"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Side Control - Top",
     "position_detail": "Chest-to-Chest",
     "gi_no_gi": "Both",
@@ -9218,6 +9510,7 @@
       "Juji-gatame family"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Side Control - Top",
     "position_detail": "Scarf Hold",
     "gi_no_gi": "Both",
@@ -9248,6 +9541,7 @@
       "Scarf-hold compression"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Side Control - Top",
     "position_detail": "Scarf Hold",
     "gi_no_gi": "No-Gi Only",
@@ -9278,6 +9572,7 @@
       "Buggy triangle"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Side Control - Bottom",
     "position_detail": "Late-Stage Side Control",
     "gi_no_gi": "No-Gi Only",
@@ -9308,6 +9603,7 @@
       "Chair-sit from side pin"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Side Control - Top",
     "position_detail": "Chest-to-Chest",
     "gi_no_gi": "Both",
@@ -9340,6 +9636,7 @@
       "Ebi escape (Japanese shrimping)"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Side Control - Bottom",
     "position_detail": "Chest-to-Chest",
     "gi_no_gi": "Both",
@@ -9371,6 +9668,7 @@
       "Come-up escape"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Side Control - Bottom",
     "position_detail": "Chest-to-Chest",
     "gi_no_gi": "Both",
@@ -9401,6 +9699,7 @@
       "Reversal from side control"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Side Control - Bottom",
     "position_detail": "Chest-to-Chest",
     "gi_no_gi": "Both",
@@ -9431,6 +9730,7 @@
       "Under-arm spin escape"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Side Control - Bottom",
     "position_detail": "Chest-to-Chest",
     "gi_no_gi": "No-Gi Only",
@@ -9461,6 +9761,7 @@
       "Defensive shell escape"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Side Control - Bottom",
     "position_detail": "Chest-to-Back Side Pin",
     "gi_no_gi": "Both",
@@ -9492,6 +9793,7 @@
       "Marcelo-style elbow push"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Side Control - Bottom",
     "position_detail": "Chest-to-Chest",
     "gi_no_gi": "No-Gi Only",
@@ -9523,6 +9825,7 @@
       "High pummel escape"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Side Control - Bottom",
     "position_detail": "Chest-to-Chest",
     "gi_no_gi": "Both",
@@ -9553,6 +9856,7 @@
       "Turn-away escape"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Side Control - Bottom",
     "position_detail": "Chest-to-Chest",
     "gi_no_gi": "Both",
@@ -9584,6 +9888,7 @@
       "Scarf-hold reversal"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Side Control - Bottom",
     "position_detail": "Scarf Hold",
     "gi_no_gi": "Both",
@@ -9614,6 +9919,7 @@
       "Scarf-hold hip escape"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Side Control - Bottom",
     "position_detail": "Scarf Hold",
     "gi_no_gi": "Both",
@@ -9644,6 +9950,7 @@
       "Reverse scarf re-guard"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Side Control - Bottom",
     "position_detail": "Reverse Scarf Hold",
     "gi_no_gi": "Both",
@@ -9674,6 +9981,7 @@
       "Sit-up single from side control"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Side Control - Bottom",
     "position_detail": "Loose Side Control",
     "gi_no_gi": "Both",
@@ -9704,6 +10012,7 @@
       "Follow-the-hips escape"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Side Control - Bottom",
     "position_detail": "North–South Transition",
     "gi_no_gi": "Both",
@@ -9734,6 +10043,7 @@
       "Kami shiho gatame"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "North-South",
     "position_detail": "Standard North–South",
     "gi_no_gi": "Both",
@@ -9765,6 +10075,7 @@
       "North-south strangulation"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "North-South",
     "position_detail": "Head-and-Arm",
     "gi_no_gi": "No-Gi Only",
@@ -9796,6 +10107,7 @@
       "Ude-garami family"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "North-South",
     "position_detail": "Arm Isolation",
     "gi_no_gi": "Both",
@@ -9828,6 +10140,7 @@
       "Juji-gatame family"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "North-South",
     "position_detail": "Arm Isolation",
     "gi_no_gi": "Both",
@@ -9858,6 +10171,7 @@
       "Spin-behind from north-south"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "North-South",
     "position_detail": "Standard North–South",
     "gi_no_gi": "Both",
@@ -9890,6 +10204,7 @@
       "Head-side mount transition"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "North-South",
     "position_detail": "Standard North–South",
     "gi_no_gi": "Both",
@@ -9922,6 +10237,7 @@
       "Leg-swing turn escape"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Side Control - Bottom",
     "position_detail": "North–South",
     "gi_no_gi": "Both",
@@ -9952,6 +10268,7 @@
       "Elbow wedge recovery"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Side Control - Bottom",
     "position_detail": "North–South",
     "gi_no_gi": "Both",
@@ -9982,6 +10299,7 @@
       "Invert-to-guard escape"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Side Control - Bottom",
     "position_detail": "North–South",
     "gi_no_gi": "Both",
@@ -10014,6 +10332,7 @@
       "Tate-shiho-gatame variation"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Mount - Top",
     "position_detail": "Low Mount",
     "gi_no_gi": "Both",
@@ -10047,6 +10366,7 @@
       "High tate-shiho-gatame"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Mount - Top",
     "position_detail": "High Mount",
     "gi_no_gi": "Both",
@@ -10078,6 +10398,7 @@
       "Technical mount armbar position"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Mount - Top",
     "position_detail": "S-Mount",
     "gi_no_gi": "Both",
@@ -10110,6 +10431,7 @@
       "Side mount"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Mount - Top",
     "position_detail": "Technical Mount",
     "gi_no_gi": "Both",
@@ -10142,6 +10464,7 @@
       "Head-and-arm mount control"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Mount - Top",
     "position_detail": "Low Mount",
     "gi_no_gi": "Both",
@@ -10174,6 +10497,7 @@
       "Ude-garami family"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Mount - Top",
     "position_detail": "Low Mount",
     "gi_no_gi": "Both",
@@ -10206,6 +10530,7 @@
       "Juji-gatame family"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Mount - Top",
     "position_detail": "Low Mount",
     "gi_no_gi": "Both",
@@ -10238,6 +10563,7 @@
       "Sankaku-jime family"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Mount - Top",
     "position_detail": "Low Mount",
     "gi_no_gi": "Both",
@@ -10269,6 +10595,7 @@
       "Juji-gatame family"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Mount - Top",
     "position_detail": "High Mount",
     "gi_no_gi": "Both",
@@ -10302,6 +10629,7 @@
       "Sankaku-jime family"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Mount - Top",
     "position_detail": "High Mount",
     "gi_no_gi": "Both",
@@ -10334,6 +10662,7 @@
       "Juji-gatame family"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Mount - Top",
     "position_detail": "High Mount",
     "gi_no_gi": "Both",
@@ -10366,6 +10695,7 @@
       "Gyaku-juji-jime variation"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Mount - Top",
     "position_detail": "Low Mount",
     "gi_no_gi": "Gi Only",
@@ -10396,6 +10726,7 @@
       "Sode guruma jime"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Mount - Top",
     "position_detail": "Low Mount",
     "gi_no_gi": "Gi Only",
@@ -10428,6 +10759,7 @@
       "Sode-guruma-jime"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Mount - Top",
     "position_detail": "Low Mount",
     "gi_no_gi": "No-Gi Only",
@@ -10458,6 +10790,7 @@
       "Top guillotine from mount"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Mount - Top",
     "position_detail": "Low Mount",
     "gi_no_gi": "No-Gi Only",
@@ -10490,6 +10823,7 @@
       "Smother pressure"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Mount - Top",
     "position_detail": "Low Mount",
     "gi_no_gi": "No-Gi Only",
@@ -10521,6 +10855,7 @@
       "Dagestani handcuff from mount"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Mount - Top",
     "position_detail": "Technical Mount",
     "gi_no_gi": "Both",
@@ -10552,6 +10887,7 @@
       "Chair-sit back take"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Mount - Top",
     "position_detail": "Technical Mount",
     "gi_no_gi": "Both",
@@ -10584,6 +10920,7 @@
       "Juji-gatame family"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Mount - Top",
     "position_detail": "Technical Mount",
     "gi_no_gi": "Both",
@@ -10614,6 +10951,7 @@
       "Technical-mount collar choke"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Mount - Top",
     "position_detail": "Technical Mount",
     "gi_no_gi": "Gi Only",
@@ -10645,6 +10983,7 @@
       "Gooseneck wrist lock"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Mount - Top",
     "position_detail": "High Mount",
     "gi_no_gi": "Both",
@@ -10676,6 +11015,7 @@
       "Technical armbar climb"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Mount - Top",
     "position_detail": "High Mount",
     "gi_no_gi": "Both",
@@ -10707,6 +11047,7 @@
       "Active mount"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Mount - Top",
     "position_detail": "Low Mount",
     "gi_no_gi": "No-Gi Only",
@@ -10737,6 +11078,7 @@
       "Dismount to side pin"
     ],
     "category": "Transition",
+    "function": "control",
     "position": "Mount - Top",
     "position_detail": "Low Mount",
     "gi_no_gi": "Both",
@@ -10767,6 +11109,7 @@
       "Upa escape"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Mount - Bottom",
     "position_detail": "Low Mount",
     "gi_no_gi": "Both",
@@ -10800,6 +11143,7 @@
       "Ebi escape (Japanese shrimping)"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Mount - Bottom",
     "position_detail": "Low Mount",
     "gi_no_gi": "Both",
@@ -10831,6 +11175,7 @@
       "Kip escape"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Mount - Bottom",
     "position_detail": "Low Mount",
     "gi_no_gi": "No-Gi Only",
@@ -10862,6 +11207,7 @@
       "Foot-drag mount escape"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Mount - Bottom",
     "position_detail": "Low Mount",
     "gi_no_gi": "Both",
@@ -10892,6 +11238,7 @@
       "Mount escape to ashi"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Mount - Bottom",
     "position_detail": "Low Mount",
     "gi_no_gi": "No-Gi Only",
@@ -10922,6 +11269,7 @@
       "Double-knee insertion escape"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Mount - Bottom",
     "position_detail": "Low Mount",
     "gi_no_gi": "Both",
@@ -10953,6 +11301,7 @@
       "Side-door mount escape"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Mount - Bottom",
     "position_detail": "Low Mount",
     "gi_no_gi": "Both",
@@ -10983,6 +11332,7 @@
       "Under-leg mount escape"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Mount - Bottom",
     "position_detail": "High Mount",
     "gi_no_gi": "Both",
@@ -11013,6 +11363,7 @@
       "Elbow recovery in mount"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Mount - Bottom",
     "position_detail": "High Mount",
     "gi_no_gi": "Both",
@@ -11043,6 +11394,7 @@
       "Turn-in technical mount escape"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Mount - Bottom",
     "position_detail": "Technical Mount",
     "gi_no_gi": "Both",
@@ -11073,6 +11425,7 @@
       "Slide-down escape"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Mount - Bottom",
     "position_detail": "Technical Mount",
     "gi_no_gi": "Both",
@@ -11103,6 +11456,7 @@
       "Upa–elbow escape–kip sequence"
     ],
     "category": "Transition",
+    "function": "escape",
     "position": "Mount - Bottom",
     "position_detail": "Low Mount",
     "gi_no_gi": "Both",
@@ -11138,6 +11492,7 @@
       "Sankaku-jime family"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Mount - Bottom",
     "position_detail": "Mounted Triangle",
     "gi_no_gi": "Both",
@@ -11169,6 +11524,7 @@
       "Over-under back control"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Back - Top (Back Control)",
     "position_detail": "Seatbelt",
     "gi_no_gi": "Both",
@@ -11201,6 +11557,7 @@
       "Rear mount"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Back - Top (Back Control)",
     "position_detail": "Double Hooks",
     "gi_no_gi": "Both",
@@ -11232,6 +11589,7 @@
       "Sankaku-jime family"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Back - Top (Back Control)",
     "position_detail": "Body Triangle",
     "gi_no_gi": "No-Gi Only",
@@ -11263,6 +11621,7 @@
       "Sit-to-back"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Back - Top (Back Control)",
     "position_detail": "Back-Take Finish",
     "gi_no_gi": "Both",
@@ -11295,6 +11654,7 @@
       "Harness recovery"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Back - Top (Back Control)",
     "position_detail": "Seatbelt",
     "gi_no_gi": "Both",
@@ -11328,6 +11688,7 @@
       "Mata-leão (Portuguese)"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Back - Top (Back Control)",
     "position_detail": "Seatbelt",
     "gi_no_gi": "Both",
@@ -11360,6 +11721,7 @@
       "Palm-to-palm choke"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Back - Top (Back Control)",
     "position_detail": "Seatbelt",
     "gi_no_gi": "No-Gi Only",
@@ -11392,6 +11754,7 @@
       "Hadaka-jime hand-trap finish"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Back - Top (Back Control)",
     "position_detail": "Straightjacket",
     "gi_no_gi": "No-Gi Only",
@@ -11423,6 +11786,7 @@
       "Cross-wrist hand-trap system"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Back - Top (Back Control)",
     "position_detail": "Straightjacket",
     "gi_no_gi": "No-Gi Only",
@@ -11456,6 +11820,7 @@
       "Sankaku-jime family"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Back - Top (Back Control)",
     "position_detail": "Rear Triangle",
     "gi_no_gi": "Both",
@@ -11489,6 +11854,7 @@
       "Juji-gatame family"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Back - Top (Back Control)",
     "position_detail": "Rear Triangle",
     "gi_no_gi": "Both",
@@ -11520,6 +11886,7 @@
       "Juji-gatame family"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Back - Top (Back Control)",
     "position_detail": "Seatbelt",
     "gi_no_gi": "Both",
@@ -11553,6 +11920,7 @@
       "Sankaku-jime family"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Back - Top (Back Control)",
     "position_detail": "Straightjacket",
     "gi_no_gi": "Both",
@@ -11584,6 +11952,7 @@
       "Okuri-eri-jime variation"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Back - Top (Back Control)",
     "position_detail": "Collar Control",
     "gi_no_gi": "Gi Only",
@@ -11615,6 +11984,7 @@
       "Okuri eri jime"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Back - Top (Back Control)",
     "position_detail": "Collar Control",
     "gi_no_gi": "Gi Only",
@@ -11646,6 +12016,7 @@
       "Rear clock finish"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Back - Top (Back Control)",
     "position_detail": "Collar Control",
     "gi_no_gi": "Gi Only",
@@ -11678,6 +12049,7 @@
       "Sode-guruma-jime"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Back - Top (Back Control)",
     "position_detail": "Seatbelt",
     "gi_no_gi": "Gi Only",
@@ -11709,6 +12081,7 @@
       "Rear gooseneck wrist lock"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Back - Top (Back Control)",
     "position_detail": "Straightjacket",
     "gi_no_gi": "Both",
@@ -11740,6 +12113,7 @@
       "Top-side dismount to mount"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Back - Top (Back Control)",
     "position_detail": "Seatbelt",
     "gi_no_gi": "Both",
@@ -11771,6 +12145,7 @@
       "Mat return ride"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Back - Top (Back Control)",
     "position_detail": "Rear Body Lock",
     "gi_no_gi": "No-Gi Only",
@@ -11803,6 +12178,7 @@
       "Half-nelson turn"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Back - Top (Back Control)",
     "position_detail": "Rear Ride",
     "gi_no_gi": "No-Gi Only",
@@ -11835,6 +12211,7 @@
       "Spinal lock"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Back - Top (Back Control)",
     "position_detail": "Twister",
     "gi_no_gi": "No-Gi Only",
@@ -11867,6 +12244,7 @@
       "Two-on-one choke defense"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Back - Bottom (Being Controlled)",
     "position_detail": "Seatbelt",
     "gi_no_gi": "Both",
@@ -11898,6 +12276,7 @@
       "Underhook-side escape"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Back - Bottom (Being Controlled)",
     "position_detail": "Double Hooks",
     "gi_no_gi": "Both",
@@ -11929,6 +12308,7 @@
       "Upper-body escape"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Back - Bottom (Being Controlled)",
     "position_detail": "Seatbelt",
     "gi_no_gi": "Both",
@@ -11959,6 +12339,7 @@
       "Remove bottom hook"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Back - Bottom (Being Controlled)",
     "position_detail": "Double Hooks",
     "gi_no_gi": "Both",
@@ -11990,6 +12371,7 @@
       "Sankaku-jime family"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Back - Bottom (Being Controlled)",
     "position_detail": "Body Triangle",
     "gi_no_gi": "No-Gi Only",
@@ -12021,6 +12403,7 @@
       "Sankaku-jime family"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Back - Bottom (Being Controlled)",
     "position_detail": "Body Triangle",
     "gi_no_gi": "No-Gi Only",
@@ -12051,6 +12434,7 @@
       "Turn-in escape"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Back - Bottom (Being Controlled)",
     "position_detail": "Seatbelt",
     "gi_no_gi": "Both",
@@ -12082,6 +12466,7 @@
       "Shoulder scrape"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Back - Bottom (Being Controlled)",
     "position_detail": "Seated Back Control",
     "gi_no_gi": "No-Gi Only",
@@ -12112,6 +12497,7 @@
       "Rear-waist stand escape"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Back - Bottom (Being Controlled)",
     "position_detail": "Rear Body Lock",
     "gi_no_gi": "No-Gi Only",
@@ -12142,6 +12528,7 @@
       "Rear-ride Granby"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Back - Bottom (Being Controlled)",
     "position_detail": "Rear Ride",
     "gi_no_gi": "Both",
@@ -12173,6 +12560,7 @@
       "Hadaka-jime defense"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Back - Bottom (Being Controlled)",
     "position_detail": "Seatbelt",
     "gi_no_gi": "Both",
@@ -12204,6 +12592,7 @@
       "Hadaka-jime late defense"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Back - Bottom (Being Controlled)",
     "position_detail": "Seatbelt",
     "gi_no_gi": "Both",
@@ -12234,6 +12623,7 @@
       "Collar choke defense from back"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Back - Bottom (Being Controlled)",
     "position_detail": "Collar Control",
     "gi_no_gi": "Gi Only",
@@ -12264,6 +12654,7 @@
       "Harness from turtle"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Turtle - Top",
     "position_detail": "Rear Turtle",
     "gi_no_gi": "Both",
@@ -12297,6 +12688,7 @@
       "Waist ride"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Turtle - Top",
     "position_detail": "Rear Turtle",
     "gi_no_gi": "No-Gi Only",
@@ -12329,6 +12721,7 @@
       "Wrestling spiral"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Turtle - Top",
     "position_detail": "Rear Turtle",
     "gi_no_gi": "No-Gi Only",
@@ -12361,6 +12754,7 @@
       "Far-lat ride"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Turtle - Top",
     "position_detail": "Rear Turtle",
     "gi_no_gi": "No-Gi Only",
@@ -12392,6 +12786,7 @@
       "Dagestani handcuff"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Turtle - Top",
     "position_detail": "Rear Turtle",
     "gi_no_gi": "No-Gi Only",
@@ -12422,6 +12817,7 @@
       "Near-ankle ride"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Turtle - Top",
     "position_detail": "Rear Turtle",
     "gi_no_gi": "No-Gi Only",
@@ -12453,6 +12849,7 @@
       "Near-arm chop"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Turtle - Top",
     "position_detail": "Rear Turtle",
     "gi_no_gi": "Both",
@@ -12484,6 +12881,7 @@
       "Spiral stretch"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Turtle - Top",
     "position_detail": "Rear Turtle",
     "gi_no_gi": "No-Gi Only",
@@ -12514,6 +12912,7 @@
       "Turtle chair sit"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Turtle - Top",
     "position_detail": "Rear Turtle",
     "gi_no_gi": "Both",
@@ -12546,6 +12945,7 @@
       "Near-side hook insertion"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Turtle - Top",
     "position_detail": "Rear Turtle",
     "gi_no_gi": "Both",
@@ -12579,6 +12979,7 @@
       "Far knee wedge turn"
     ],
     "category": "Transition",
+    "function": "advance",
     "position": "Turtle - Top",
     "position_detail": "Rear Turtle",
     "gi_no_gi": "Both",
@@ -12611,6 +13012,7 @@
       "Turtle clock choke"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Turtle - Top",
     "position_detail": "Front / Side Turtle",
     "gi_no_gi": "Gi Only",
@@ -12642,6 +13044,7 @@
       "Rolling collar choke"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Turtle - Top",
     "position_detail": "Front / Side Turtle",
     "gi_no_gi": "Gi Only",
@@ -12672,6 +13075,7 @@
       "Rear crucifix"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Turtle - Top",
     "position_detail": "Rear Turtle",
     "gi_no_gi": "Both",
@@ -12703,6 +13107,7 @@
       "Crucifix choke"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Turtle - Top",
     "position_detail": "Crucifix",
     "gi_no_gi": "Both",
@@ -12734,6 +13139,7 @@
       "Juji-gatame family"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Turtle - Top",
     "position_detail": "Crucifix",
     "gi_no_gi": "Both",
@@ -12765,6 +13171,7 @@
       "Front headlock"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Turtle - Top",
     "position_detail": "Front Headlock",
     "gi_no_gi": "No-Gi Only",
@@ -12798,6 +13205,7 @@
       "Marcelotine"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Turtle - Top",
     "position_detail": "Front Headlock",
     "gi_no_gi": "No-Gi Only",
@@ -12828,6 +13236,7 @@
       "No-gi brabo choke"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Turtle - Top",
     "position_detail": "Front Headlock",
     "gi_no_gi": "No-Gi Only",
@@ -12858,6 +13267,7 @@
       "Arm-triangle roll choke"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Turtle - Top",
     "position_detail": "Front Headlock",
     "gi_no_gi": "No-Gi Only",
@@ -12888,6 +13298,7 @@
       "Leg-over front-headlock choke"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Turtle - Top",
     "position_detail": "Front Headlock",
     "gi_no_gi": "No-Gi Only",
@@ -12918,6 +13329,7 @@
       "Compact turtle"
     ],
     "category": "Control/Pin",
+    "function": "control",
     "position": "Turtle - Bottom",
     "position_detail": "Defensive Turtle",
     "gi_no_gi": "Both",
@@ -12952,6 +13364,7 @@
       "Wrist control"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Turtle - Bottom",
     "position_detail": "Defensive Turtle",
     "gi_no_gi": "Both",
@@ -12984,6 +13397,7 @@
       "Sit-out"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Turtle - Bottom",
     "position_detail": "Rear Turtle",
     "gi_no_gi": "No-Gi Only",
@@ -13015,6 +13429,7 @@
       "Head-and-arm escape"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Turtle - Bottom",
     "position_detail": "Front Headlock",
     "gi_no_gi": "No-Gi Only",
@@ -13045,6 +13460,7 @@
       "Wrestling switch"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Turtle - Bottom",
     "position_detail": "Rear Turtle",
     "gi_no_gi": "No-Gi Only",
@@ -13076,6 +13492,7 @@
       "Quadpod stand"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Turtle - Bottom",
     "position_detail": "Rear Turtle",
     "gi_no_gi": "No-Gi Only",
@@ -13107,6 +13524,7 @@
       "Four-point escape"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Turtle - Bottom",
     "position_detail": "Rear Turtle",
     "gi_no_gi": "No-Gi Only",
@@ -13137,6 +13555,7 @@
       "Shoulder-roll re-guard"
     ],
     "category": "Guard Retention",
+    "function": "escape",
     "position": "Turtle - Bottom",
     "position_detail": "Rear Turtle",
     "gi_no_gi": "Both",
@@ -13167,6 +13586,7 @@
       "Sit-to-half recovery"
     ],
     "category": "Guard Retention",
+    "function": "escape",
     "position": "Turtle - Bottom",
     "position_detail": "Rear Turtle",
     "gi_no_gi": "Both",
@@ -13198,6 +13618,7 @@
       "Sit-out single"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Turtle - Bottom",
     "position_detail": "Rear Turtle",
     "gi_no_gi": "Both",
@@ -13228,6 +13649,7 @@
       "Granby single-leg counter"
     ],
     "category": "Sweep",
+    "function": "reverse",
     "position": "Turtle - Bottom",
     "position_detail": "Rear Turtle",
     "gi_no_gi": "No-Gi Only",
@@ -13259,6 +13681,7 @@
       "Ude-garami family"
     ],
     "category": "Transition",
+    "function": "finish",
     "position": "Turtle - Bottom",
     "position_detail": "Rear Turtle",
     "gi_no_gi": "Both",
@@ -13292,7 +13715,8 @@
       "Inside-foot straight ashi"
     ],
     "category": "Control/Pin",
-    "position": "Guard - Bottom",
+    "function": "control",
+    "position": "Leg Entanglement",
     "position_detail": "Leg Entanglement",
     "gi_no_gi": "No-Gi Only",
     "typical_belt": "Blue",
@@ -13324,7 +13748,8 @@
       "Double outside ashi"
     ],
     "category": "Control/Pin",
-    "position": "Guard - Bottom",
+    "function": "control",
+    "position": "Leg Entanglement",
     "position_detail": "Leg Entanglement",
     "gi_no_gi": "No-Gi Only",
     "typical_belt": "Blue",
@@ -13357,7 +13782,8 @@
       "Inside sankaku"
     ],
     "category": "Control/Pin",
-    "position": "Guard - Bottom",
+    "function": "control",
+    "position": "Leg Entanglement",
     "position_detail": "Leg Entanglement",
     "gi_no_gi": "No-Gi Only",
     "typical_belt": "Purple",
@@ -13390,7 +13816,8 @@
       "Outside cross-ashi entry"
     ],
     "category": "Transition",
-    "position": "Guard - Bottom",
+    "function": "control",
+    "position": "Leg Entanglement",
     "position_detail": "Leg Entanglement",
     "gi_no_gi": "No-Gi Only",
     "typical_belt": "Purple",
@@ -13423,7 +13850,8 @@
       "Reverse-X inside sankaku entry"
     ],
     "category": "Transition",
-    "position": "Guard - Bottom",
+    "function": "control",
+    "position": "Leg Entanglement",
     "position_detail": "Leg Entanglement",
     "gi_no_gi": "No-Gi Only",
     "typical_belt": "Purple",
@@ -13457,7 +13885,8 @@
       "Straight ashi-garami foot lock"
     ],
     "category": "Submission",
-    "position": "Guard - Bottom",
+    "function": "finish",
+    "position": "Leg Entanglement",
     "position_detail": "Single-Leg X",
     "gi_no_gi": "Both",
     "typical_belt": "White",
@@ -13489,7 +13918,8 @@
       "Straight ashi-garami foot lock"
     ],
     "category": "Submission",
-    "position": "Guard - Bottom",
+    "function": "finish",
+    "position": "Leg Entanglement",
     "position_detail": "Leg Entanglement",
     "gi_no_gi": "No-Gi Only",
     "typical_belt": "Blue",
@@ -13520,7 +13950,8 @@
       "Shotgun grip"
     ],
     "category": "Submission",
-    "position": "Guard - Bottom",
+    "function": "finish",
+    "position": "Leg Entanglement",
     "position_detail": "Leg Entanglement",
     "gi_no_gi": "No-Gi Only",
     "typical_belt": "Purple",
@@ -13552,7 +13983,8 @@
       "Straight ashi-garami foot lock"
     ],
     "category": "Submission",
-    "position": "Guard - Bottom",
+    "function": "finish",
+    "position": "Leg Entanglement",
     "position_detail": "Leg Entanglement",
     "gi_no_gi": "Both",
     "typical_belt": "Blue",
@@ -13582,7 +14014,8 @@
       "Inside-rotation ankle lock"
     ],
     "category": "Submission",
-    "position": "Guard - Bottom",
+    "function": "finish",
+    "position": "Leg Entanglement",
     "position_detail": "Leg Entanglement",
     "gi_no_gi": "No-Gi Only",
     "typical_belt": "Brown",
@@ -13613,6 +14046,7 @@
       "Inverted toe hold from top"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Guard - Top",
     "position_detail": "Open Guard",
     "gi_no_gi": "Both",
@@ -13643,7 +14077,8 @@
       "Outside heel hook"
     ],
     "category": "Submission",
-    "position": "Guard - Bottom",
+    "function": "finish",
+    "position": "Leg Entanglement",
     "position_detail": "Leg Entanglement",
     "gi_no_gi": "No-Gi Only",
     "typical_belt": "Brown",
@@ -13674,7 +14109,8 @@
       "Reverse heel hook"
     ],
     "category": "Submission",
-    "position": "Guard - Bottom",
+    "function": "finish",
+    "position": "Leg Entanglement",
     "position_detail": "Leg Entanglement",
     "gi_no_gi": "No-Gi Only",
     "typical_belt": "Brown",
@@ -13704,7 +14140,8 @@
       "Backside fifty heel hook"
     ],
     "category": "Submission",
-    "position": "Guard - Bottom",
+    "function": "finish",
+    "position": "Leg Entanglement",
     "position_detail": "Backside 50/50",
     "gi_no_gi": "No-Gi Only",
     "typical_belt": "Brown",
@@ -13734,7 +14171,8 @@
       "Fifty-fifty outside heel hook"
     ],
     "category": "Submission",
-    "position": "Guard - Bottom",
+    "function": "finish",
+    "position": "Leg Entanglement",
     "position_detail": "50/50",
     "gi_no_gi": "No-Gi Only",
     "typical_belt": "Brown",
@@ -13764,7 +14202,8 @@
       "Straight knee bar from cross ashi"
     ],
     "category": "Submission",
-    "position": "Guard - Bottom",
+    "function": "finish",
+    "position": "Leg Entanglement",
     "position_detail": "Leg Entanglement",
     "gi_no_gi": "Both",
     "typical_belt": "Brown",
@@ -13794,6 +14233,7 @@
       "Backstep kneebar"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Half Guard - Top",
     "position_detail": "Half Guard",
     "gi_no_gi": "Both",
@@ -13825,6 +14265,7 @@
       "Half-guard kneebar"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Half Guard - Bottom",
     "position_detail": "Half Guard",
     "gi_no_gi": "Both",
@@ -13856,7 +14297,8 @@
       "Figure-four foot lock"
     ],
     "category": "Submission",
-    "position": "Guard - Bottom",
+    "function": "finish",
+    "position": "Leg Entanglement",
     "position_detail": "Leg Entanglement",
     "gi_no_gi": "Both",
     "typical_belt": "Brown",
@@ -13887,6 +14329,7 @@
       "Figure-four foot lock from half"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Half Guard - Top",
     "position_detail": "Half Guard",
     "gi_no_gi": "Both",
@@ -13918,6 +14361,7 @@
       "Knee compression"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Half Guard - Top",
     "position_detail": "Half Guard",
     "gi_no_gi": "Both",
@@ -13948,6 +14392,7 @@
       "Truck calf crank"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Back - Top (Back Control)",
     "position_detail": "Truck",
     "gi_no_gi": "No-Gi Only",
@@ -13979,6 +14424,7 @@
       "Biceps crusher"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Guard - Top",
     "position_detail": "Armbar Defense",
     "gi_no_gi": "Both",
@@ -14011,6 +14457,7 @@
       "Armpit frames"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Mount - Bottom",
     "position_detail": "High mount",
     "gi_no_gi": "Both",
@@ -14040,6 +14487,7 @@
       "Defending S-mount"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Mount - Bottom",
     "position_detail": "S-mount",
     "gi_no_gi": "Both",
@@ -14069,6 +14517,7 @@
       "Hitchhiker"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Mount - Bottom",
     "position_detail": "Defending armbar",
     "gi_no_gi": "Both",
@@ -14098,6 +14547,7 @@
       "Headlock pin escape"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Side Control - Bottom",
     "position_detail": "Scarf hold",
     "gi_no_gi": "Both",
@@ -14127,6 +14577,7 @@
       "Wrestle-up from bottom side"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Side Control - Bottom",
     "position_detail": "Far-side underhook",
     "gi_no_gi": "Both",
@@ -14157,6 +14608,7 @@
       "Kimura grip defence"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Side Control - Bottom",
     "position_detail": "Defending the figure-four",
     "gi_no_gi": "Both",
@@ -14185,6 +14637,7 @@
       "Bridging out of north-south"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "North-South",
     "position_detail": "Bottom",
     "gi_no_gi": "Both",
@@ -14216,6 +14669,7 @@
       "Chin defence"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Back - Bottom (Being Controlled)",
     "position_detail": "Defending the choke",
     "gi_no_gi": "Both",
@@ -14245,6 +14699,7 @@
       "Sliding down the back escape"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Back - Bottom (Being Controlled)",
     "position_detail": "Escaping the hooks",
     "gi_no_gi": "Both",
@@ -14274,6 +14729,7 @@
       "Escaping the body lock from the back"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Back - Bottom (Being Controlled)",
     "position_detail": "Body triangle",
     "gi_no_gi": "Both",
@@ -14304,6 +14760,7 @@
       "Shoulder roll recovery"
     ],
     "category": "Guard Retention",
+    "function": "escape",
     "position": "Turtle - Bottom",
     "position_detail": "Recovering guard",
     "gi_no_gi": "Both",
@@ -14334,6 +14791,7 @@
       "Shoulder lock from mount"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Guard - Bottom",
     "position_detail": "Shoulder lock",
     "gi_no_gi": "Both",
@@ -14366,6 +14824,7 @@
       "Baratoplata from mount"
     ],
     "category": "Submission",
+    "function": "finish",
     "position": "Guard - Bottom",
     "position_detail": "Shoulder lock",
     "gi_no_gi": "Both",
@@ -14396,6 +14855,7 @@
       "Defensive posture under mount"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Mount - Bottom",
     "position_detail": "Survival",
     "gi_no_gi": "Both",
@@ -14424,6 +14884,7 @@
       "Defensive frames under side control"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Side Control - Bottom",
     "position_detail": "Survival",
     "gi_no_gi": "Both",
@@ -14452,6 +14913,7 @@
       "Defensive turtle"
     ],
     "category": "Escape",
+    "function": "escape",
     "position": "Turtle - Bottom",
     "position_detail": "Survival",
     "gi_no_gi": "Both",

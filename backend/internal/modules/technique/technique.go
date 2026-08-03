@@ -62,13 +62,20 @@ type Ruleset struct {
 // list. This is ~70 KB. Aliases are included deliberately: the client searches
 // locally, and "kesa gatame" has to find "Scarf Hold".
 type Summary struct {
-	ID             string   `json:"id"`
-	Name           string   `json:"name"`
-	Aliases        []string `json:"aliases"`
-	Category       string   `json:"category"`
-	Position       string   `json:"position"`
-	PositionDetail string   `json:"position_detail"`
-	GiNoGi         string   `json:"gi_no_gi"`
+	ID       string   `json:"id"`
+	Name     string   `json:"name"`
+	Aliases  []string `json:"aliases"`
+	Category string   `json:"category"`
+
+	// The queryable axis; see Technique.Function. Carried on the summary
+	// deliberately — clients resolve "every way to escape from here" against
+	// the list they already hold, so leaving it to the detail payload would
+	// mean a request per technique to answer one question.
+	Function string `json:"function,omitempty"`
+
+	Position       string `json:"position"`
+	PositionDetail string `json:"position_detail"`
+	GiNoGi         string `json:"gi_no_gi"`
 
 	// Presented as "commonly taught from", never as a recommendation. It sits
 	// beside IBJJF legality, and two belt-shaped fields where one is advisory
@@ -149,7 +156,24 @@ type Technique struct {
 
 	// Submission | Sweep | Pass | Escape | Takedown | Control/Pin |
 	// Transition | Guard Retention | Other.
+	//
+	// Colloquial and deliberately kept: "Sweep" is the word a coach says. It
+	// fuses two axes though — "Takedown" is Function advance at Position
+	// standing — so it is the display label, not the queryable one. Use
+	// Function for "every way to X from here".
 	Category string `json:"category"`
+
+	// What it does: advance | reverse | escape | control | finish.
+	//
+	// Empty for the handful of movement fundamentals (breakfalls, grappling
+	// stance) that are library content rather than techniques — they have no
+	// verb, and asserting one would be a lie. `omitempty` so those serialise
+	// as absent rather than as an empty string a client would have to
+	// special-case.
+	//
+	// Note for TypeScript callers: `function` is a reserved word, so read it
+	// as `t.function` — it cannot be destructured as `const { function } = t`.
+	Function string `json:"function,omitempty"`
 
 	// Where it happens — "Guard - Bottom", "Standing", "Mount - Top".
 	Position       string `json:"position"`

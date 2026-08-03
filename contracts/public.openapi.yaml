@@ -452,8 +452,31 @@ components:
           items: { type: string }
         category:
           type: string
-          description: Submission, Sweep, Pass, Escape, Takedown, Control/Pin, Transition, Guard Retention, Other.
+          description: >
+            Submission, Sweep, Pass, Escape, Takedown, Control/Pin, Transition,
+            Guard Retention, Other. The colloquial label — what a coach says out
+            loud. See `function` for the queryable axis.
           example: Submission
+        function:
+          type: string
+          enum: [advance, reverse, escape, control, finish]
+          description: >
+            What the technique DOES, independent of where it happens. The five
+            verbs of the taxonomy: advance (takedowns, passes, back takes),
+            reverse (sweeps), escape (pin escapes, submission defence, guard
+            retention), control (pins, rides, grip and frame systems), finish
+            (submissions).
+
+            Use this rather than `category` to ask "every way to X from here".
+            `category` is colloquial and fuses two axes — "Takedown" means
+            advance-at-standing and "Pass" means advance-at-guard-top — so
+            "every way to advance" spans three categories while this is one
+            value.
+
+            ABSENT on a handful of movement fundamentals (breakfalls, grappling
+            stance) which are library content rather than techniques and have no
+            verb. Treat missing as "not applicable", not as an error.
+          example: finish
         position:
           type: string
           description: Where it happens.
@@ -540,6 +563,26 @@ components:
           type: array
           items: { type: string }
         category: { type: string }
+        function:
+          type: string
+          enum: [advance, reverse, escape, control, finish]
+          description: >
+            What the technique DOES, independent of where it happens. The five
+            verbs of the taxonomy: advance (takedowns, passes, back takes),
+            reverse (sweeps), escape (pin escapes, submission defence, guard
+            retention), control (pins, rides, grip and frame systems), finish
+            (submissions).
+
+            Use this rather than `category` to ask "every way to X from here".
+            `category` is colloquial and fuses two axes — "Takedown" means
+            advance-at-standing and "Pass" means advance-at-guard-top — so
+            "every way to advance" spans three categories while this is one
+            value.
+
+            ABSENT on a handful of movement fundamentals (breakfalls, grappling
+            stance) which are library content rather than techniques and have no
+            verb. Treat missing as "not applicable", not as an error.
+          example: finish
         position: { type: string }
         position_detail: { type: string }
         gi_no_gi:
@@ -658,6 +701,7 @@ components:
               North-South,
               Back,
               Turtle,
+              Leg Entanglement,
             ]
           example: Guard
         detail_includes:

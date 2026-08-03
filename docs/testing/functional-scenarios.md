@@ -343,6 +343,50 @@ Domain: the BJJ technique library — 450 entries with position, category, gi/no
 - No UI in any client.
 
 ---
+### Function — what a technique does (`function`)
+
+The verb axis, separate from `category`. Test the properties, not the counts —
+except where a count is the property.
+
+- **Every technique has a `function`, except the movement fundamentals.** The
+  four exceptions (Side Breakfall, Backward Breakfall, Forward Shoulder Roll,
+  Grappling Stance and Motion) are library content rather than techniques and
+  carry none. A *fifth* entry with no function should fail: it is far more
+  likely an oversight than a new fundamental.
+- **`function` is one of the five** — advance, reverse, escape, control,
+  finish. The column has no CHECK constraint, so seed validation is the only
+  thing between a typo and a value no client can render.
+- **It is absent, not empty, in JSON** for the fundamentals — clients treat
+  missing as "not applicable" rather than special-casing `""`.
+- **It appears on the list payload, not only the detail one.** Clients answer
+  "every way to escape from here" against the summaries they already hold; if
+  it were detail-only that becomes one request per technique.
+- **The axis genuinely cross-cuts `category`.** Advancing from standing spans
+  Takedown and Transition; from guard-top spans Pass and Transition. A test
+  asserting one category per function would be asserting the bug.
+- **Changing only `function` still bumps `updated_at`.** The seed upsert gates
+  on an `IS DISTINCT FROM` tuple; a field missing from it updates nothing and
+  no delta-syncing client ever learns. Same class as the `completed` flag that
+  was written but never read back.
+
+### Leg entanglement as a position
+
+- **The 26 ashi garami entries resolve to Leg Entanglement, not Guard.** Saddle,
+  50/50, backside 50/50 and single-leg X. A heel hook from the saddle must not
+  appear on the Open Guard screen beside a spider-guard sweep.
+- **The near-misses stay out, by name.** `Judo Ashi-waza` is foot sweeps —
+  same word, unrelated technique — and `Single-Leg Defense`/`Single-Leg Finish`
+  are takedown work. Matching is exact; a substring match on "ashi" or
+  "single-leg" sweeps all three in and the taxonomy starts lying.
+- **Open guard is 124 and closed guard 37, and they partition the family.**
+  The counts are pinned deliberately: "the two differ" passes on the exact
+  regression this guards. They moved from 150/187 when the entanglements left,
+  and should not move again without a position being added or removed.
+- **Every technique position has a glossary entry behind it** (bar the single
+  `Other`), or the Library offers a filter family the glossary cannot explain.
+- **The mobile session-tag position chips include it.** That list is hardcoded
+  for offline use, so it can silently fall behind the glossary — without it,
+  "got swept from 50/50" has nowhere to go.
 
 ## Exercise catalog (`/v1/exercises`)
 

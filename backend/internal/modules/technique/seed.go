@@ -87,6 +87,12 @@ func validate(techniques []Technique) error {
 			return fmt.Errorf("technique: %q needs name, category, and position", t.ID)
 		case !validGiNoGi[t.GiNoGi]:
 			return fmt.Errorf("technique: %q has unknown gi_no_gi %q", t.ID, t.GiNoGi)
+		case t.Function != "" && !validFunctions[t.Function]:
+			// The column has no CHECK constraint (see migration 000028), so
+			// this is the only thing standing between a typo and a value no
+			// client knows how to render. Empty is legal and means "not a
+			// technique" — the breakfalls and the grappling stance.
+			return fmt.Errorf("technique: %q has unknown function %q", t.ID, t.Function)
 		}
 		seen[t.ID] = true
 	}
@@ -108,7 +114,17 @@ func validate(techniques []Technique) error {
 var validFamilies = map[string]bool{
 	"Standing": true, "Guard": true, "Half Guard": true,
 	"Side Control": true, "Mount": true, "North-South": true,
-	"Back": true, "Turtle": true,
+	"Back": true, "Turtle": true, "Leg Entanglement": true,
+}
+
+// The five things a technique can do. See migration 000028 for why this is
+// separate from Category and why it is validated here rather than by a CHECK.
+//
+// Same duplication warning as validFamilies: this set is also an enum on the
+// Technique schema in contracts/public.openapi.yaml.
+var validFunctions = map[string]bool{
+	"advance": true, "reverse": true, "escape": true,
+	"control": true, "finish": true,
 }
 
 func validatePositions(positions []Position) error {

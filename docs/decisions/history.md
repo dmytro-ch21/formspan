@@ -5573,6 +5573,105 @@ that is *nearly* right, described by a comment that is confidently wrong.
 The reviewers were given the design intent, which is why they found the
 gap between what the code claimed and what it did rather than only what it
 did.
+## 2026-08-03 — Positions are nouns, techniques are verbs
+
+A taxonomy for the library, and the first half of implementing it. The idea
+is one sentence: **every technique is a verb applied at a noun.** A double
+leg and a berimbolo are not different in kind — one is *advance* at
+standing, the other is *advance* from De La Riva with an inversion. Once
+that is in the data, "complex" decomposes and the library becomes
+queryable in the way a deterministic rule engine will need.
+
+### What was already true, and what wasn't
+
+The nouns existed: `techniques.position` plus the ten-entry glossary from
+the position PR. What did not exist was a verb axis — and the reason is
+that `category` **already contains one, fused to a noun.** "Takedown"
+means advance-at-standing. "Pass" means advance-at-guard-top. "Sweep"
+means reverse-at-guard-bottom. The where half is recorded twice.
+
+Two columns holding the same fact can disagree, so the first thing checked
+was whether they already had. They had not: zero takedowns filed off
+standing, zero sweeps from a top position, zero passes from the bottom,
+across all 466 entries. That is what made this cheap — the verb could be
+*derived* rather than curated, and the check would have been much more
+expensive to run later.
+
+The cost of the fusion is that the library cannot answer its own central
+question. "Every way to advance from here" spans three categories;
+"every way to escape" spans two. After the change, each is one value —
+and the split really is cross-cutting: advancing from standing spans
+`Takedown, Transition`, from guard-top spans `Pass, Transition`.
+
+### The five verbs
+
+`advance` (takedowns, passes, back takes) · `reverse` (sweeps) · `escape`
+(pin escapes, submission defence, guard retention) · `control` (pins,
+rides, grip and frame systems) · `finish` (submissions).
+
+Eight of the nine categories map onto one verb each. `Transition` (76
+entries) was the only genuine work: it is not one verb. "X-Guard Back
+Take" is advance, "Butterfly Technical Stand-Up" is escape, "Side Control
+to North–South" is control. Classified by an explicit rule table rather
+than by feel, so the reasoning is reviewable and re-runnable.
+
+**`category` was kept, not replaced.** It is not wrong, it is colloquial —
+"Sweep" is the word a coach says out loud, and "reverse-at-guard-bottom"
+is not. It stays the display label; `function` is the queryable axis
+underneath. Replacing it would also have silently rewritten the belt
+filter and every client that groups by it, for nothing.
+
+### Four entries that have no verb, and were left that way
+
+Side Breakfall, Backward Breakfall, Forward Shoulder Roll, and Grappling
+Stance and Motion. These are movement fundamentals — library content, not
+techniques. They have no noun and no verb, and forcing them into one of
+the five would make the taxonomy assert something false. `function` is
+nullable for exactly this, and the test pins the count at four so a
+*fifth* unclassified entry fails loudly rather than joining a quiet second
+population.
+
+### Leg entanglements became their own noun
+
+The sharper of the two fixes. Modern grappling treats the ashi garami
+family as its own positional subsystem — guards for the legs — and the
+schema disagreed: all 26 entries were filed as `Guard - Bottom`, so a heel
+hook from the saddle resolved to the same position as a spider-guard
+sweep, and appeared on the Open Guard screen. `position_detail` had
+carried the distinction all along; the coarse axis the glossary and the
+tag stream both use could not express it.
+
+They are now `position = "Leg Entanglement"` with a glossary entry and a
+new family. The interesting part is what was deliberately *not* swept in:
+**"Judo Ashi-waza" is foot sweeps, not ashi garami** — same word, unrelated
+technique — and "Single-Leg Defense"/"Single-Leg Finish" are takedown
+work. All three read as leg-adjacent; matching is exact for that reason,
+and a test asserts each stays out by name.
+
+This moved a pinned count that a previous PR deliberately hardcoded: open
+guard was 150 techniques and is now 124, because the 26 left the family.
+That test failing was the system working — the count is pinned precisely
+so a change like this cannot pass unnoticed.
+
+### Also removed
+
+`techniques.additions.json` — 16 records, byte-identical to their
+counterparts in the base file, and embedded by nothing. A leftover from
+the PR that merged them in. Editing it would have had no effect, which is
+the kind of file that eventually costs someone an afternoon.
+
+### What this does not do
+
+**Nothing reads `function` yet.** No client filters on it, and the session
+tag stream still uses its own six-value vocabulary (`submission`, `sweep`,
+`pass`, `escape`, `takedown`, `control`) which fuses verb and noun exactly
+as `category` did. Aligning it is the natural next step and was kept
+separate on purpose: it changes a wire contract the installed phone build
+depends on, and this PR does not.
+
+The third axis of the taxonomy — the *mechanic* (inversion, back-step, leg
+drag) — is deliberately absent. It has no consumer, and unlike the other
+two, nothing currently depends on getting it right.
 
 ## Open items / known gaps as of this entry
 
