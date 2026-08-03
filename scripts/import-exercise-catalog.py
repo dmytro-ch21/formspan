@@ -312,6 +312,86 @@ def convert_ibjjf_rulesets(path: Path) -> tuple[list[dict], dict[tuple, str]]:
     return rulesets, lookup
 
 
+# --- Taxonomy derivation -----------------------------------------------------
+#
+# Two facts about a technique that the spreadsheet does not carry, derived here
+# so `techniques.json` stays a reproducible build artifact rather than becoming
+# hand-maintained. Both were applied by hand once, in the PR that introduced
+# them; this is that same logic, in the pipeline, so the next re-import does not
+# silently revert it.
+
+# The ashi garami family is its own position, not a kind of guard. The sheet
+# files all of these as "Guard - Bottom", which puts a heel hook from the saddle
+# on the same noun as a spider-guard sweep.
+#
+# EXACT matches only. "Judo Ashi-waza" is foot sweeps — same word, unrelated
+# technique — and "Single-Leg Defense"/"Single-Leg Finish" are takedown work.
+# A substring match on "ashi" or "single-leg" sweeps all three in.
+ENTANGLEMENT_DETAILS = {
+    "Leg Entanglement", "50/50", "Backside 50/50", "Single-Leg X",
+}
+
+# What a technique DOES, as opposed to where it happens. Eight of the nine sheet
+# categories are a verb wearing a colloquial name; only "Transition" is genuinely
+# many-to-many and needs the outcome, which lives in the name.
+CATEGORY_FUNCTION = {
+    "Takedown": "advance", "Pass": "advance",
+    "Sweep": "reverse",
+    "Escape": "escape", "Guard Retention": "escape",
+    "Control/Pin": "control",
+    "Submission": "finish",
+    "Other": "",            # movement fundamentals: no noun, no verb
+}
+
+# Ordered; first match wins. Only consulted for "Transition".
+TRANSITION_RULES = [
+    (r"Armbar–Triangle–Omoplata|Kimura Counter", "finish"),
+    (r"Escape Chain|Technical Stand-Up", "escape"),
+    (r"Standing Kimura Trap", "escape"),
+    (r"Back Take|Back-Take|Berimbolo|Bolo|Matrix|Kiss of the Dragon", "advance"),
+    (r"to Mount|to S-Mount|to Knee-on-Belly", "advance"),
+    (r"Pass|Guard Break|Leg Drag|Toreando", "advance"),
+    (r"Guard Pull|Pull$", "advance"),
+    (r"Arm Drag|Throw-By|Duck-Under|Snapdown", "advance"),
+    (r"to North–South|Backstep to Side Control", "control"),
+    (r"Angle Change|Whip-Up|Underhook Entry|to Dogfight", "control"),
+    (r"to X Guard|to Single-Leg X|to Reverse X|to Saddle|to Backside 50/50|Entry", "control"),
+]
+
+
+def derive_function(category: str, name: str) -> str:
+    """The verb. Empty for the movement fundamentals, which have none."""
+    if category in CATEGORY_FUNCTION:
+        return CATEGORY_FUNCTION[category]
+    if category != "Transition":
+        sys.exit(f"technique taxonomy: unknown category {category!r} on {name!r}")
+    # A sweep named inside a transition is still a reversal.
+    if "Sweep" in name:
+        return "reverse"
+    for pattern, fn in TRANSITION_RULES:
+        if re.search(pattern, name):
+            return fn
+    sys.exit(f"technique taxonomy: no rule matches transition {name!r} — add one")
+
+
+def apply_taxonomy(records: list) -> list:
+    """Set `position` and `function`, keeping `function` next to `category`."""
+    out = []
+    for r in records:
+        position = r["position"]
+        if r.get("position_detail") in ENTANGLEMENT_DETAILS:
+            position = "Leg Entanglement"
+        rebuilt = {}
+        for k, v in r.items():
+            rebuilt[k] = position if k == "position" else v
+            if k == "category":
+                fn = derive_function(r["category"], r["name"])
+                if fn:
+                    rebuilt["function"] = fn
+        out.append(rebuilt)
+    return out
+
+
 def convert_techniques(path: Path) -> tuple[list[dict], list[dict]]:
     rulesets, ruleset_of = convert_ibjjf_rulesets(path)
 
@@ -395,6 +475,11 @@ def main() -> None:
                 sys.exit(f"additions collide with sheet ids: {dupes}")
             tech.extend(extra)
             print(f"additions: {len(extra)} merged")
+
+        # After the merge on purpose: the additions are authored in the sheet's
+        # shape and get the same derivation, so there is one rule rather than
+        # two that can disagree.
+        tech = apply_taxonomy(tech)
         dest = root / "backend/internal/modules/technique/techniques.generated.json"
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(json.dumps(tech, indent=2, ensure_ascii=False) + "\n")

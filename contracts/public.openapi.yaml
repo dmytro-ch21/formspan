@@ -690,7 +690,7 @@ components:
             back_control.
 
             Then narrow with `detail_includes`/`detail_excludes`. Stopping here
-            puts closed and open guard on the same 187 techniques.
+            puts closed and open guard on the same 161 techniques.
           enum:
             [
               Standing,

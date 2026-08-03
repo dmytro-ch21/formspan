@@ -367,7 +367,15 @@ except where a count is the property.
 - **Changing only `function` still bumps `updated_at`.** The seed upsert gates
   on an `IS DISTINCT FROM` tuple; a field missing from it updates nothing and
   no delta-syncing client ever learns. Same class as the `completed` flag that
-  was written but never read back.
+  was written but never read back. Test the **upgrade** path specifically —
+  seed, `UPDATE techniques SET function = NULL`, re-seed — because a fresh
+  seed into an empty table populates the column either way and proves nothing.
+- **A re-import reproduces the library.** `techniques.json` is a build
+  artifact, so running `import-exercise-catalog.py` over the same sheet must
+  reproduce it — including the derived `function` values and the
+  leg-entanglement positions, neither of which the spreadsheet carries. If a
+  hand-edit ever survives only in the artifact, the next import reverts it
+  silently and the comment claiming it is generated is a lie.
 
 ### Leg entanglement as a position
 

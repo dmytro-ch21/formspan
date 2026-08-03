@@ -5653,12 +5653,37 @@ guard was 150 techniques and is now 124, because the 26 left the family.
 That test failing was the system working — the count is pinned precisely
 so a change like this cannot pass unnoticed.
 
-### Also removed
+### The file that looked dead and wasn't
 
-`techniques.additions.json` — 16 records, byte-identical to their
-counterparts in the base file, and embedded by nothing. A leftover from
-the PR that merged them in. Editing it would have had no effect, which is
-the kind of file that eventually costs someone an afternoon.
+`techniques.additions.json` was deleted on the reasoning that its 16 records
+are byte-identical to their counterparts in `techniques.json` and no Go file
+embeds it. Both halves are true. The conclusion was wrong: **the importer
+reads it.** `scripts/import-exercise-catalog.py` merges it into every
+regenerated library, precisely so re-importing the sheet — a full
+replacement, not a patch — cannot silently drop the hand-authored
+bottom-position gap-fill that exists nowhere else. Deleting it turned that
+merge into a silent no-op, and a scenario in `functional-scenarios.md`
+("re-importing must not delete the 16 techniques") into something
+unsatisfiable. Restored.
+
+The wider version of that mistake was worse and is the reason this section
+exists. `seed.go` says `techniques.json` is *"generated from the authored
+spreadsheet — the spreadsheet is the authoring surface, this is the build
+artifact."* Hand-editing 462 `function` values and 26 positions into the
+artifact made that false without changing the sentence that asserts it: the
+next re-import would have reverted the entire taxonomy, quietly, and the
+comment would still have claimed everything was fine.
+
+So the rules moved into the pipeline rather than the sentence being softened.
+`import-exercise-catalog.py` now derives `function` from category and name
+(the same table used for the one-time pass, `Transition` and all) and applies
+the leg-entanglement position rule, with the same exact-match discipline —
+`ENTANGLEMENT_DETAILS` is a set, not a substring test, for the Judo Ashi-waza
+reason. Verified the only way worth verifying: running the derivation over
+the pre-taxonomy data reproduces the committed `techniques.json` **byte for
+byte across all 466 records**. The artifact is reproducible again, so the
+comment is true again, and the classification logic lives in the repo instead
+of a scratch script.
 
 ### Review caught the change hiding 26 techniques
 
@@ -5691,6 +5716,35 @@ Fixing this properly means one shared constant per app, or keying the chips
 on the glossary ids outright. Both are design work rather than a patch, so
 the test is the floor: hand-maintenance continues, but drift now fails in CI
 instead of in a gym.
+
+### Two guards that were right, and held there by nothing
+
+Review confirmed the three properties this change depends on are correct as
+written — and that two of them stayed correct only by luck, because no test
+would have noticed them breaking.
+
+The sharper one is the seed's `IS DISTINCT FROM` tuple, which decides whether
+a row updates at all. `function` was in it correctly. But removing it left
+the entire suite green while writing **zero** functions on the upgrade path —
+rows that already exist with the column NULL, which is exactly what deploying
+this migration produces. That is the `completed`-flag failure the project has
+already shipped once: a SET clause that looks right, a seed that logs "466
+upserted", and a value that never lands. `TestReseedPopulatesFunctionOnRows­
+ThatPredateTheColumn` now simulates that path and fails with the diagnostic
+rather than silently.
+
+The other: `validFunctions` is the only thing between a typo and a value no
+client can render, since there is deliberately no CHECK — and replacing the
+guard with `case false:` also left the suite green. `TestValidate_Rejects­
+BadContent` gained the case it was built for.
+
+Also dropped the `(position, function)` index this branch added. Measured on
+the seeded table it is never chosen, because no query supplies both: the
+axis is resolved client-side against the summary payload by design, and
+there is no `?function=` filter. Migration 000018 dropped an index from this
+same table for exactly that reason — "it reads as reassurance that search is
+indexed when it isn't" — and adding one back with no caller would have been
+the same mistake with a different name.
 
 ### What this does not do
 

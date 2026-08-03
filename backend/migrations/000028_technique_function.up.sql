@@ -43,8 +43,16 @@ SET lock_timeout = '3s';
 ALTER TABLE techniques
     ADD COLUMN function TEXT;
 
--- Answers "every way to advance from side control" without scanning. The
--- library is small enough that this is not urgent today; it is here because
--- the read that motivated the column is exactly (position, function).
-CREATE INDEX IF NOT EXISTS techniques_position_function_idx
-    ON techniques (position, function);
+-- NO INDEX ON (position, function), deliberately.
+--
+-- The obvious one to add, and measured on the seeded table it is never used:
+-- no query supplies both. `Filter` has no Function field and the list handler
+-- accepts no ?function=, because the design resolves the axis CLIENT-side —
+-- the summary payload carries `function` precisely so a client answers "every
+-- way to escape from here" against the list it already holds.
+--
+-- Migration 000018 dropped techniques_name_trgm_idx from this same table for
+-- exactly this reason: "An index that is never chosen is not free: it costs
+-- write amplification on every seed and, worse, reads as reassurance that
+-- search is indexed when it isn't." Add one when a server-side filter exists
+-- to use it, not before.

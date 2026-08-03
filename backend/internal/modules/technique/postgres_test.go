@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/database"
 )
@@ -68,6 +69,13 @@ func TestValidate_RejectsBadContent(t *testing.T) {
 		}},
 		{"missing position", []Technique{
 			{ID: "a", Name: "A", Category: "Sweep", GiNoGi: "Both"},
+		}},
+		// The column has no CHECK, so this validator is the ONLY thing between
+		// a typo and a value no client can render. Without a case here,
+		// replacing the guard with `case false:` leaves the whole suite green.
+		{"unknown function", []Technique{
+			{ID: "a", Name: "A", Category: "Sweep", Position: "Guard - Bottom",
+				GiNoGi: "Both", Function: "submit"},
 		}},
 	}
 	for _, tc := range cases {
@@ -585,11 +593,11 @@ func TestEveryTechniqueHasAFunctionExceptTheFundamentals(t *testing.T) {
 	for _, tq := range techniques {
 		if tq.Function == "" {
 			blank = append(blank, tq.Name)
-			continue
 		}
-		if !validFunctions[tq.Function] {
-			t.Errorf("%q has function %q, which is not one of the five", tq.ID, tq.Function)
-		}
+		// Deliberately no "is it one of the five" assertion here: SeedData()
+		// runs validate(), which has already failed the test above if any
+		// value were invalid. TestValidate_RejectsBadContent covers that
+		// property where it can actually fail.
 	}
 
 	if len(blank) != len(wantBlank) {
@@ -664,5 +672,85 @@ func TestLegEntanglementsAreTheirOwnPosition(t *testing.T) {
 	}
 	if !found {
 		t.Error("no position entry claims the Leg Entanglement family")
+	}
+}
+
+// A function-only change must actually reach the database.
+//
+// This is the `completed`-flag failure mode, which this project has already
+// shipped once: a column written by the upsert but absent from the
+// `IS DISTINCT FROM` tuple that decides whether the row updates at all. The
+// SET clause looks right, the seed logs "466 upserted", and the value never
+// lands — with nothing failing anywhere.
+//
+// It is not hypothetical here. Removing `function` from the two tuple sides
+// (while leaving the SET clause) leaves the entire technique suite green and
+// writes zero functions on the upgrade path this simulates. So the test has
+// to exercise the upgrade specifically: rows that already exist, with the
+// column NULL, which is exactly what a deploy of migration 000028 produces
+// against a database seeded before it.
+func TestReseedPopulatesFunctionOnRowsThatPredateTheColumn(t *testing.T) {
+	repo := newTestRepo(t)
+	pool := repo.pool
+	ctx := context.Background()
+
+	techniques, err := SeedData()
+	if err != nil {
+		t.Fatalf("SeedData: %v", err)
+	}
+	if err := repo.UpsertAll(ctx, techniques); err != nil {
+		t.Fatalf("first seed: %v", err)
+	}
+
+	// Rewind to the state migration 000028 leaves behind: every row present,
+	// every function NULL.
+	if _, err := pool.Exec(ctx,
+		`UPDATE techniques SET function = NULL, updated_at = now() - interval '1 day'`,
+	); err != nil {
+		t.Fatalf("rewind: %v", err)
+	}
+
+	var before time.Time
+	if err := pool.QueryRow(ctx,
+		`SELECT max(updated_at) FROM techniques`).Scan(&before); err != nil {
+		t.Fatalf("read updated_at: %v", err)
+	}
+
+	if err := repo.UpsertAll(ctx, techniques); err != nil {
+		t.Fatalf("re-seed: %v", err)
+	}
+
+	var populated, blank int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FILTER (WHERE function IS NOT NULL),
+		       count(*) FILTER (WHERE function IS NULL)
+		FROM techniques`).Scan(&populated, &blank); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+
+	var want int
+	for _, tq := range techniques {
+		if tq.Function != "" {
+			want++
+		}
+	}
+	if populated != want {
+		t.Fatalf("re-seed populated %d functions, want %d — the change-detection "+
+			"tuple is not seeing `function`, so the update is a silent no-op",
+			populated, want)
+	}
+	if blank != len(techniques)-want {
+		t.Errorf("%d rows left NULL, want %d", blank, len(techniques)-want)
+	}
+
+	// And the clients have to be able to notice: a delta sync keyed on
+	// updated_at learns nothing from a row whose timestamp did not move.
+	var after time.Time
+	if err := pool.QueryRow(ctx,
+		`SELECT max(updated_at) FROM techniques`).Scan(&after); err != nil {
+		t.Fatalf("read updated_at: %v", err)
+	}
+	if !after.After(before) {
+		t.Error("updated_at did not move, so no delta-syncing client would ever refetch")
 	}
 }

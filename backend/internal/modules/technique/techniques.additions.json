@@ -1,0 +1,472 @@
+[
+  {
+    "id": "mount-escape-high-mount-frames",
+    "name": "High Mount Framing and Descent",
+    "aliases": [
+      "Stopping the climb",
+      "Armpit frames"
+    ],
+    "category": "Escape",
+    "position": "Mount - Bottom",
+    "position_detail": "High mount",
+    "gi_no_gi": "Both",
+    "typical_belt": "Blue",
+    "description": "Frame into the hips rather than pushing the chest, walk the shoulders back toward the feet, and force the opponent's weight down to low mount before attempting any escape.",
+    "when_to_use": "Use the moment the opponent's knees pass your armpit line. High mount removes the trap-and-roll and the foot drag at once, so recovering low mount is the prerequisite for every other escape rather than an escape itself.",
+    "setup_from": [
+      "Mount Bottom Frames and Survival Posture"
+    ],
+    "common_next_moves": [
+      "Heel-Drag Mount Escape",
+      "Trap-and-Roll Escape"
+    ],
+    "common_counters": [
+      "Grapevines",
+      "Arm isolation for the armbar",
+      "S-mount"
+    ],
+    "video_reference": "",
+    "source_notes": "Bottom-position curriculum; naming varies by academy.",
+    "ibjjf_ruleset_id": "generally-legal-adult-6a0242"
+  },
+  {
+    "id": "mount-escape-s-mount-defence",
+    "name": "S-Mount Defence",
+    "aliases": [
+      "Defending S-mount"
+    ],
+    "category": "Escape",
+    "position": "Mount - Bottom",
+    "position_detail": "S-mount",
+    "gi_no_gi": "Both",
+    "typical_belt": "Purple",
+    "description": "Connect the hands, keep the trapped elbow pinned to your own ribs, turn toward the raised knee, and rebuild a frame under the shin to return the opponent to flat mount.",
+    "when_to_use": "Use as soon as one of the opponent's knees rises under your armpit. S-mount is an armbar setup rather than a pin, so the priority is the arm connection first and the position second.",
+    "setup_from": [
+      "High Mount Framing and Descent"
+    ],
+    "common_next_moves": [
+      "Heel-Drag Mount Escape",
+      "Hitchhiker escape"
+    ],
+    "common_counters": [
+      "Armbar from mount",
+      "Transition to back"
+    ],
+    "video_reference": "",
+    "source_notes": "Bottom-position curriculum; naming varies by academy.",
+    "ibjjf_ruleset_id": "generally-legal-adult-6a0242"
+  },
+  {
+    "id": "mount-escape-armbar-defence-hitchhiker",
+    "name": "Hitchhiker Escape from Armbar",
+    "aliases": [
+      "Thumb-down escape",
+      "Hitchhiker"
+    ],
+    "category": "Escape",
+    "position": "Mount - Bottom",
+    "position_detail": "Defending armbar",
+    "gi_no_gi": "Both",
+    "typical_belt": "Purple",
+    "description": "Turn the thumb toward the opponent's feet, follow the rotation of your own shoulder, and walk around to your knees so the elbow leaves the hyperextension line.",
+    "when_to_use": "Use when the arm is already extended and stacking has failed, before the hips finish rising. It trades position for the elbow, which is the correct trade once the joint is genuinely at risk.",
+    "setup_from": [
+      "Straight Armbar from Mount"
+    ],
+    "common_next_moves": [
+      "Turtle - Bottom recovery",
+      "Standing up in base"
+    ],
+    "common_counters": [
+      "Belly-down armbar follow",
+      "Re-mount as the turn completes"
+    ],
+    "video_reference": "",
+    "source_notes": "Bottom-position curriculum; naming varies by academy.",
+    "ibjjf_ruleset_id": "generally-legal-adult-6a0242"
+  },
+  {
+    "id": "side-control-escape-kesa-gatame",
+    "name": "Kesa-Gatame Escape",
+    "aliases": [
+      "Scarf hold escape",
+      "Headlock pin escape"
+    ],
+    "category": "Escape",
+    "position": "Side Control - Bottom",
+    "position_detail": "Scarf hold",
+    "gi_no_gi": "Both",
+    "typical_belt": "Blue",
+    "description": "Free the trapped arm to the far side of their back, bridge over the near shoulder, and either roll them backwards or sit up into their armpit space.",
+    "when_to_use": "Use when the opponent turns their chest away and sits into a headlock pin. The pin is strong against the head and weak against a bridge over the shoulder they have turned away from.",
+    "setup_from": [
+      "Side Control Bottom Frames"
+    ],
+    "common_next_moves": [
+      "Top position after the roll",
+      "North-South escape",
+      "Turtle - Bottom"
+    ],
+    "common_counters": [
+      "Post the far leg",
+      "Switch back to orthodox side control"
+    ],
+    "video_reference": "",
+    "source_notes": "Bottom-position curriculum; naming varies by academy.",
+    "ibjjf_ruleset_id": "generally-legal-adult-6a0242"
+  },
+  {
+    "id": "side-control-escape-underhook-to-turtle",
+    "name": "Underhook Escape to Turtle",
+    "aliases": [
+      "Wrestle-up from bottom side"
+    ],
+    "category": "Escape",
+    "position": "Side Control - Bottom",
+    "position_detail": "Far-side underhook",
+    "gi_no_gi": "Both",
+    "typical_belt": "Blue",
+    "description": "Win the underhook on the far side, turn onto your knees while keeping the head high, and come up to turtle or straight into a single leg.",
+    "when_to_use": "Use when the crossface is loose or the opponent is chasing a submission rather than holding the pin. Turning without the underhook gives up the back, so the underhook is the precondition rather than a bonus.",
+    "setup_from": [
+      "Side Control Bottom Frames"
+    ],
+    "common_next_moves": [
+      "Turtle - Bottom",
+      "Single-leg entry",
+      "Wrestle-up"
+    ],
+    "common_counters": [
+      "Crossface",
+      "Sprawl and spin to the back",
+      "Whizzer"
+    ],
+    "video_reference": "",
+    "source_notes": "Bottom-position curriculum; naming varies by academy.",
+    "ibjjf_ruleset_id": "generally-legal-adult-6a0242"
+  },
+  {
+    "id": "side-control-kimura-defence",
+    "name": "Kimura Defence from Bottom Side Control",
+    "aliases": [
+      "Kimura grip defence"
+    ],
+    "category": "Escape",
+    "position": "Side Control - Bottom",
+    "position_detail": "Defending the figure-four",
+    "gi_no_gi": "Both",
+    "typical_belt": "Blue",
+    "description": "Grip your own belt or thigh to shorten the lever, bring the elbow tight to the ribs, and turn toward the trapped arm rather than away from it.",
+    "when_to_use": "Use the instant the figure-four closes, before the arm is walked behind the back. Turning away lengthens the lever and finishes the lock for them, which is why the direction of the turn is the whole technique.",
+    "setup_from": [
+      "Kimura from Side Control"
+    ],
+    "common_next_moves": [
+      "Underhook Escape to Turtle",
+      "Ghost Escape"
+    ],
+    "common_counters": [
+      "Step over the head",
+      "Sit back into the roll"
+    ],
+    "video_reference": "",
+    "source_notes": "Bottom-position curriculum; naming varies by academy.",
+    "ibjjf_ruleset_id": "generally-legal-adult-6a0242"
+  },
+  {
+    "id": "north-south-escape",
+    "name": "North-South Escape",
+    "aliases": [
+      "Bridging out of north-south"
+    ],
+    "category": "Escape",
+    "position": "North-South",
+    "position_detail": "Bottom",
+    "gi_no_gi": "Both",
+    "typical_belt": "Blue",
+    "description": "Frame on the hips, bridge to lift their weight off the chest, and spin the head out to one side to arrive at bottom side control or guard.",
+    "when_to_use": "Use before the opponent settles their chest onto yours and starts hunting the north-south choke or the kimura. North-south is a transitional pin, so escaping it early is far cheaper than escaping it late.",
+    "setup_from": [
+      "North-South Control"
+    ],
+    "common_next_moves": [
+      "Guard recovery",
+      "Side Control - Bottom",
+      "Turtle - Bottom"
+    ],
+    "common_counters": [
+      "North-South Choke",
+      "Kimura from north-south",
+      "Switch back to side control"
+    ],
+    "video_reference": "",
+    "source_notes": "Bottom-position curriculum; naming varies by academy.",
+    "ibjjf_ruleset_id": "generally-legal-adult-6a0242"
+  },
+  {
+    "id": "back-defence-hand-fighting",
+    "name": "Back Defence Hand Fighting",
+    "aliases": [
+      "Two-on-one from the back",
+      "Chin defence"
+    ],
+    "category": "Escape",
+    "position": "Back - Bottom (Being Controlled)",
+    "position_detail": "Defending the choke",
+    "gi_no_gi": "Both",
+    "typical_belt": "White",
+    "description": "Tuck the chin, keep both hands on the choking arm with a two-on-one, and never let the strangling hand cross the centreline of your neck.",
+    "when_to_use": "Use immediately on losing the back, before any escape. Survival precedes escape here: an escape attempted while the choking arm is under the chin simply hands over the finish.",
+    "setup_from": [
+      "Back Control"
+    ],
+    "common_next_moves": [
+      "Body Triangle Escape",
+      "Shoulder-to-Shoulder Escape"
+    ],
+    "common_counters": [
+      "Rear Naked Choke",
+      "Switch to the other side",
+      "Bow-and-arrow in the gi"
+    ],
+    "video_reference": "",
+    "source_notes": "Bottom-position curriculum; naming varies by academy.",
+    "ibjjf_ruleset_id": "generally-legal-adult-6a0242"
+  },
+  {
+    "id": "back-escape-shoulder-to-shoulder",
+    "name": "Shoulder-to-Shoulder Escape",
+    "aliases": [
+      "Sliding down the back escape"
+    ],
+    "category": "Escape",
+    "position": "Back - Bottom (Being Controlled)",
+    "position_detail": "Escaping the hooks",
+    "gi_no_gi": "Both",
+    "typical_belt": "Blue",
+    "description": "Trap the choking arm, walk your shoulders toward the mat on the side away from the danger, and slide the hips down until both hooks are cleared and you land in bottom side control.",
+    "when_to_use": "Use once the choking arm is controlled and you can pick a side. Escaping toward the choking arm is the common error; going shoulder-to-shoulder on the safe side is what makes it work.",
+    "setup_from": [
+      "Back Defence Hand Fighting"
+    ],
+    "common_next_moves": [
+      "Side Control - Bottom",
+      "Guard recovery"
+    ],
+    "common_counters": [
+      "Re-insert the hook",
+      "Follow to mount",
+      "Body triangle to stop the slide"
+    ],
+    "video_reference": "",
+    "source_notes": "Bottom-position curriculum; naming varies by academy.",
+    "ibjjf_ruleset_id": "generally-legal-adult-6a0242"
+  },
+  {
+    "id": "back-escape-body-triangle",
+    "name": "Body Triangle Escape",
+    "aliases": [
+      "Escaping the body lock from the back"
+    ],
+    "category": "Escape",
+    "position": "Back - Bottom (Being Controlled)",
+    "position_detail": "Body triangle",
+    "gi_no_gi": "Both",
+    "typical_belt": "Purple",
+    "description": "Turn toward the locked ankle side, peel the top foot down toward your hip, and sit up over the triangle so the lock breaks or slides to the waist.",
+    "when_to_use": "Use when the opponent replaces hooks with a body triangle, which is far harder to slide out of than hooks. It must be attacked toward the ankle side; turning the other way tightens it.",
+    "setup_from": [
+      "Back Defence Hand Fighting"
+    ],
+    "common_next_moves": [
+      "Shoulder-to-Shoulder Escape",
+      "Side Control - Bottom"
+    ],
+    "common_counters": [
+      "Re-lock higher on the torso",
+      "Switch to hooks",
+      "Attack the choke as the turn starts"
+    ],
+    "video_reference": "",
+    "source_notes": "Bottom-position curriculum; naming varies by academy.",
+    "ibjjf_ruleset_id": "generally-legal-adult-6a0242"
+  },
+  {
+    "id": "turtle-bottom-granby-recovery",
+    "name": "Granby Roll to Guard",
+    "aliases": [
+      "Granby",
+      "Shoulder roll recovery"
+    ],
+    "category": "Guard Retention",
+    "position": "Turtle - Bottom",
+    "position_detail": "Recovering guard",
+    "gi_no_gi": "Both",
+    "typical_belt": "Purple",
+    "description": "Roll over the near shoulder while keeping the hips higher than the head, and come out facing the opponent with the legs back between you.",
+    "when_to_use": "Use from turtle when the opponent is chasing hooks but has not yet secured a seatbelt. The head must stay off the mat throughout, which is the difference between a recovery and giving up the back.",
+    "setup_from": [
+      "Turtle Bottom Survival Posture"
+    ],
+    "common_next_moves": [
+      "Guard - Bottom",
+      "Single-leg entry"
+    ],
+    "common_counters": [
+      "Follow the roll to the back",
+      "Ride the hips",
+      "Crucifix entry"
+    ],
+    "video_reference": "",
+    "source_notes": "Guard-retention curriculum; naming varies by academy.",
+    "ibjjf_ruleset_id": "generally-legal-adult-6a0242"
+  },
+  {
+    "id": "monoplata",
+    "name": "Monoplata",
+    "aliases": [
+      "One-armed omoplata",
+      "Shoulder lock from mount"
+    ],
+    "category": "Submission",
+    "position": "Guard - Bottom",
+    "position_detail": "Shoulder lock",
+    "gi_no_gi": "Both",
+    "typical_belt": "Purple",
+    "description": "Trap the arm with one leg over the shoulder while the arm stays in front of your body, sit up onto the hip, and lever the shoulder without needing the second leg.",
+    "when_to_use": "Use as an armbar or omoplata fails and the arm slips to the near side. It is most valuable as a chain link rather than a primary attack, because the entry is usually a rescued position.",
+    "setup_from": [
+      "Armbar from Closed Guard",
+      "Omoplata from Closed Guard"
+    ],
+    "common_next_moves": [
+      "Omoplata",
+      "Back Take",
+      "Sweep to top"
+    ],
+    "common_counters": [
+      "Posture and pull the arm free",
+      "Roll forward",
+      "Stack"
+    ],
+    "video_reference": "",
+    "source_notes": "Submission chain curriculum; naming varies by academy.",
+    "ibjjf_ruleset_id": "generally-legal-adult-6a0242"
+  },
+  {
+    "id": "baratoplata",
+    "name": "Baratoplata",
+    "aliases": [
+      "Bicep-slicer shoulder lock",
+      "Baratoplata from mount"
+    ],
+    "category": "Submission",
+    "position": "Guard - Bottom",
+    "position_detail": "Shoulder lock",
+    "gi_no_gi": "Both",
+    "typical_belt": "Brown",
+    "description": "From a kimura grip, thread your leg over your own wrist so the shin replaces the second hand, then rotate the shoulder with the hip rather than the arm.",
+    "when_to_use": "Use when a kimura grip is secured but the opponent defends by gripping their own belt or leg. Replacing your hand with the shin beats the grip strength that stalls the plain kimura.",
+    "setup_from": [
+      "Kimura from Closed Guard"
+    ],
+    "common_next_moves": [
+      "Omoplata",
+      "Sweep to top",
+      "Armbar"
+    ],
+    "common_counters": [
+      "Posture up early",
+      "Roll through",
+      "Clear the leg before it settles"
+    ],
+    "video_reference": "",
+    "source_notes": "Submission chain curriculum; naming varies by academy.",
+    "ibjjf_ruleset_id": "generally-legal-adult-6a0242"
+  },
+  {
+    "id": "mount-bottom-survival-posture",
+    "name": "Mount Bottom Frames and Survival Posture",
+    "aliases": [
+      "Defensive posture under mount"
+    ],
+    "category": "Escape",
+    "position": "Mount - Bottom",
+    "position_detail": "Survival",
+    "gi_no_gi": "Both",
+    "typical_belt": "White",
+    "description": "Keep elbows inside the knees, hands protecting the collar line, head off the mat, and hips moving so no submission or high mount can settle.",
+    "when_to_use": "Use as the default the moment you are mounted, before choosing an escape. Every mount escape depends on frames that already exist, so building them is the first move rather than a fallback.",
+    "setup_from": [],
+    "common_next_moves": [
+      "Heel-Drag Mount Escape",
+      "Trap-and-Roll Escape",
+      "High Mount Framing and Descent"
+    ],
+    "common_counters": [
+      "Isolate an arm",
+      "Climb to high mount",
+      "Grapevine the legs"
+    ],
+    "video_reference": "",
+    "source_notes": "Bottom-position curriculum; naming varies by academy.",
+    "ibjjf_ruleset_id": "generally-legal-adult-6a0242"
+  },
+  {
+    "id": "side-control-bottom-frames",
+    "name": "Side Control Bottom Frames",
+    "aliases": [
+      "Defensive frames under side control"
+    ],
+    "category": "Escape",
+    "position": "Side Control - Bottom",
+    "position_detail": "Survival",
+    "gi_no_gi": "Both",
+    "typical_belt": "White",
+    "description": "Place one forearm across the hip and one into the neck or shoulder, keep the near elbow off the mat, and stay on your side rather than flat.",
+    "when_to_use": "Use immediately on being pinned and before attempting anything else. Flat and square is where side control submissions live; on your side with frames is where escapes live.",
+    "setup_from": [],
+    "common_next_moves": [
+      "Ghost Escape",
+      "Underhook Escape to Turtle",
+      "Guard recovery"
+    ],
+    "common_counters": [
+      "Crossface",
+      "Kill the near arm",
+      "Switch to kesa-gatame"
+    ],
+    "video_reference": "",
+    "source_notes": "Bottom-position curriculum; naming varies by academy.",
+    "ibjjf_ruleset_id": "generally-legal-adult-6a0242"
+  },
+  {
+    "id": "turtle-bottom-survival-posture",
+    "name": "Turtle Bottom Survival Posture",
+    "aliases": [
+      "Defensive turtle"
+    ],
+    "category": "Escape",
+    "position": "Turtle - Bottom",
+    "position_detail": "Survival",
+    "gi_no_gi": "Both",
+    "typical_belt": "White",
+    "description": "Keep elbows to knees, head up and off the mat, hands defending the collar and the near-side hook entry, and never let the hips rise above the shoulders.",
+    "when_to_use": "Use whenever a scramble drops you to turtle. Turtle is a waypoint rather than a destination, so the posture exists to buy the two seconds a Granby or a wrestle-up needs.",
+    "setup_from": [],
+    "common_next_moves": [
+      "Granby Roll to Guard",
+      "Wrestle-up",
+      "Single-leg entry"
+    ],
+    "common_counters": [
+      "Seatbelt and hooks",
+      "Crucifix entry",
+      "Clock choke in the gi"
+    ],
+    "video_reference": "",
+    "source_notes": "Bottom-position curriculum; naming varies by academy.",
+    "ibjjf_ruleset_id": "generally-legal-adult-6a0242"
+  }
+]
