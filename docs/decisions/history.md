@@ -6491,20 +6491,31 @@ reports a total the visible list contradicts.
 that is where a conclusion is safest, with the id making the order total.
 
 **Deleting the tiebreak does not turn any test red**, and the test says so
-rather than implying coverage. The plan is a HashAggregate feeding a Sort, and
-with tied rows that sort happens to emit them in the same sequence every time.
-The tiebreak stays because "happens to" is not a guarantee: Postgres promises
-no order for equal sort keys, and a reorder would re-hash the response and make
-this endpoint's ETag a permanent cache miss. Provoking it reliably would mean
-pinning a query plan, which is a worse dependency than the tiebreak itself.
-That is the third time this pattern has come up — a correct guard whose
-mutation is masked by the current plan — and each time the honest move has been
-to write it down.
+rather than implying coverage. The first version of this entry also gave the
+*wrong reason* — it claimed a HashAggregate. `EXPLAIN` at two scales says
+otherwise:
 
-`LIMIT 500` for the same reason every list has one now, and it **cannot bind**:
-the shared library holds 466 techniques, so only a client inventing ids could
-reach it. A memory backstop, not a page size — nothing truncates a real
-athlete's funnel.
+	Limit -> Sort(sum DESC, technique_id) -> GroupAggregate -> Sort(technique_id, ...)
+
+`COUNT(DISTINCT t.session_id)` forces that inner sort, and it leads with
+`technique_id`, so the aggregate hands the outer sort an already-ordered stream
+and Postgres preserves it for equal keys. Getting this right matters because it
+names the real fragility, which the wrong explanation hid: **the tiebreak is
+redundant only while `COUNT(DISTINCT session_id)` keeps the aggregate sorted.**
+Drop that column and the planner picks a HashAggregate, whose group output is
+bucket order — measured on 466 tied techniques, 459 of 466 positions moved.
+So the guard is load-bearing *and* currently invisible, which is the worst
+combination to leave undocumented.
+
+`LIMIT 500` for the same reason every list has one now, and it **cannot bind**
+today — but the first version of this entry was wrong about why, too. It said
+"only a client inventing ids could reach it"; a client cannot invent ids at
+all, because `technique_id` has an FK and an unknown one is rejected as invalid
+input. The row count is capped by the library, at 466. The only way it ever
+binds is **the library growing past 500**, at which point the funnel truncates
+silently and the summary — folded from the truncated rows — under-reports in
+step. That is now pinned by a test asserting the catalog stays under the cap,
+which is the version of this guard that can actually fail.
 
 ### Nav gating stays capability-based
 
@@ -6553,6 +6564,44 @@ toward "Everything" and toward no sub-bucket, so the chip counts silently failed
 to sum, and it rendered as a line of dashes that reads like a data bug. It is
 now its own bucket ("Used on you"), which also gives `conceded` its first
 display surface anywhere in the product.
+
+### The OpenAPI gate had been dead for months
+
+The two new schemas landed in `components.parameters` rather than
+`components.schemas` — an insertion anchored one section too low — so the
+endpoint's documented 200 body pointed at nothing. `pnpm run lint:openapi`
+reported "Woohoo! Your API description is valid."
+
+It always did. `.redocly.yaml` declared a root-level `rules:` block with **no
+`extends:`**, and that *replaces* redocly's default ruleset rather than amending
+it. The gate ran zero rules. Long enough that four `$ref`s to
+`#/components/responses/InvalidInput` — a response that has never existed, it
+is called `BadRequest` — and one `security: [{ bearerAuth: [] }]` naming a
+scheme that is actually `ClerkBearerAuth` were sitting in the contract
+unnoticed.
+
+This is precisely the shape `CLAUDE.md` already records for `fmt:api`: a check
+that cannot fail is worse than no check, because it is counted as having
+passed. `extends: [recommended]` is back, the five pre-existing breakages are
+fixed, two flow-style descriptions containing commas (which YAML parsed as
+extra properties — one of them mine) are quoted, and the gate is now verified
+to go red on a dangling `$ref` rather than assumed to.
+
+### Three guards that were invisible, and one number that could stick a 500
+
+Review found seven surviving mutations where I had expected two. Three were
+cheap to close and are now asserted: `MAX(started_at)` could be `MIN` (both
+fixture sessions were stamped `time.Now()` microseconds apart, so the fixture
+needed fixing before the assertion could exist), the whole `conceded` pivot
+could be `0`, and `position`/`category` could be swapped in the SELECT list —
+the standing hazard of a ten-column positional `Scan`, and both fields are
+`required` in the contract.
+
+Separately, `Tag.Count` had a lower bound and no upper one. `SUM(count)` is a
+bigint that this query narrows with `::int`, so two rows near `MaxInt32` on one
+technique make the endpoint fail with "integer out of range" — durable data, so
+it stays broken for that athlete until the sessions are deleted. Now capped at
+1000, which constrains only nonsense.
 
 ### Gaps this leaves
 

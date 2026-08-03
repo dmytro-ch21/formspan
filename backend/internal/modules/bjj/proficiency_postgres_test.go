@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/database"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -40,10 +41,20 @@ func profFixture(t *testing.T) (*PostgresRepository, *pgxpool.Pool, string) {
 // seedEvidence writes a session (via the package's existing seeder, so the
 // owner FK has a real row to reference) plus its tags. A nil techniqueID means
 // an untagged live-grid row.
-func seedEvidence(t *testing.T, pool *pgxpool.Pool, userID, sessionID string, tags []tag) {
+func seedEvidence(
+	t *testing.T, pool *pgxpool.Pool, userID, sessionID string,
+	startedAt time.Time, tags []tag,
+) {
 	t.Helper()
 	ctx := context.Background()
 	seedSession(t, pool, sessionID, userID)
+	// The shared seeder stamps time.Now(), so two sessions land microseconds
+	// apart and MAX(started_at) is indistinguishable from MIN. Set it here so
+	// last_seen has something to be wrong about.
+	if _, err := pool.Exec(ctx,
+		`UPDATE sessions SET started_at = $2 WHERE id = $1`, sessionID, startedAt); err != nil {
+		t.Fatalf("set started_at on %s: %v", sessionID, err)
+	}
 	for _, tg := range tags {
 		if _, err := pool.Exec(ctx, `
 			INSERT INTO bjj_session_tags
@@ -71,18 +82,25 @@ func TestListProficiencyFoldsTheFunnelAcrossSessions(t *testing.T) {
 	// Two catalog techniques that certainly exist (the seed runs in CI).
 	const armbar = "americana-mount"
 	const triangle = "aoki-lock"
+	older := time.Now().Add(-72 * time.Hour).Truncate(time.Second).UTC()
+	newer := time.Now().Add(-24 * time.Hour).Truncate(time.Second).UTC()
 
-	seedEvidence(t, pool, userID, "prof-s1", []tag{
+	seedEvidence(t, pool, userID, "prof-s1", older, []tag{
 		{"drilled", techID(armbar), 1},
 		{"attempted", techID(armbar), 2},
 		{"scored", techID(armbar), 1},
+		// Technique-tagged conceded. No client authors one, the API accepts
+		// one, and it drives the web "Used on you" bucket — so the pivot for
+		// it needs an assertion or it can be replaced with 0 and nothing
+		// notices.
+		{"conceded", techID(armbar), 4},
 		// An untagged live-grid row for the SAME category. It must not be
 		// counted here: the same real armbar can be recorded twice, once
 		// technique-tagged and once as the category catch-all, and summing
 		// both is how one submission becomes two.
 		{"scored", nil, 5},
 	})
-	seedEvidence(t, pool, userID, "prof-s2", []tag{
+	seedEvidence(t, pool, userID, "prof-s2", newer, []tag{
 		{"drilled", techID(armbar), 3},
 		{"drilled", techID(triangle), 4},
 	})
@@ -107,6 +125,21 @@ func TestListProficiencyFoldsTheFunnelAcrossSessions(t *testing.T) {
 	// The untagged scored:5 must be nowhere in this number.
 	if a.Scored == 6 {
 		t.Error("the untagged live-grid row was summed into the technique's scored count")
+	}
+	if a.Conceded != 4 {
+		t.Errorf("armbar conceded = %d, want 4", a.Conceded)
+	}
+	// The Scan is positional over ten columns, so two same-typed neighbours
+	// swapped in the SELECT list would be invisible without this.
+	if a.Position != "Mount - Top" || a.Category != "Submission" {
+		t.Errorf("position/category = %q/%q, want \"Mount - Top\"/\"Submission\" — "+
+			"a positional Scan makes a swapped SELECT list silent", a.Position, a.Category)
+	}
+	// MAX(started_at), not MIN: "last seen" is the recency signal the UI leans
+	// on, and MIN passes every other assertion in this file.
+	if !a.LastSeen.After(older.Add(time.Hour)) {
+		t.Errorf("last_seen = %s, want the NEWER session (~%s), not the older (%s)",
+			a.LastSeen, newer, older)
 	}
 	if a.Sessions != 2 {
 		t.Errorf("armbar sessions = %d, want 2 — counts are worth less from one class", a.Sessions)
@@ -138,10 +171,10 @@ func TestListProficiencyIsScopedToTheCaller(t *testing.T) {
 		}
 	})
 
-	seedEvidence(t, pool, other, "prof-other", []tag{
+	seedEvidence(t, pool, other, "prof-other", time.Now(), []tag{
 		{"drilled", techID("americana-mount"), 9},
 	})
-	seedEvidence(t, pool, userID, "prof-mine", []tag{
+	seedEvidence(t, pool, userID, "prof-mine", time.Now(), []tag{
 		{"drilled", techID("aoki-lock"), 1},
 	})
 
@@ -168,7 +201,7 @@ func TestListProficiencyOrderIsTotalAndStable(t *testing.T) {
 	// the result deterministic. Postgres gives no stable order for equal sort
 	// keys, and an unstable order here would re-hash the response on every
 	// request, turning this endpoint's ETag into a permanent cache miss.
-	seedEvidence(t, pool, userID, "prof-tie", []tag{
+	seedEvidence(t, pool, userID, "prof-tie", time.Now(), []tag{
 		{"drilled", techID("aoki-lock"), 7},
 		{"drilled", techID("americana-mount"), 7},
 	})
@@ -210,15 +243,23 @@ func TestListProficiencyOrderIsTotalAndStable(t *testing.T) {
 	// only a client inventing ids could reach it. It is a memory backstop (see
 	// the const), not a page size — nothing truncates a real athlete's funnel.
 	//
-	// And deleting `, t.technique_id` from the ORDER BY does not turn this red.
-	// The plan is a HashAggregate feeding a Sort, and with two tied rows the
-	// sort happens to emit them in the same sequence every time. The tiebreak
-	// stays because "happens to" is not a guarantee — Postgres promises no
-	// order for equal sort keys, and a plan change or a different row count can
-	// reorder them, which would re-hash the response and make this endpoint's
-	// ETag a permanent cache miss. Provoking that reliably from a test would
-	// mean pinning a query plan, which is a worse thing to depend on than the
-	// tiebreak itself.
+	// And deleting `, t.technique_id` from the ORDER BY does not turn this red —
+	// but NOT for the reason first written here, which claimed a HashAggregate.
+	// Verified with EXPLAIN at two scales, the plan is:
+	//
+	//	Limit -> Sort(sum DESC, technique_id) -> GroupAggregate -> Sort(technique_id, ...)
+	//
+	// `COUNT(DISTINCT t.session_id)` is what forces that inner sort, and it
+	// leads with `technique_id` — so the aggregate hands the outer sort a
+	// technique_id-ordered stream and Postgres preserves it for equal keys.
+	//
+	// That names the actual fragility, which the wrong explanation hid: the
+	// tiebreak is redundant ONLY while `COUNT(DISTINCT session_id)` keeps the
+	// aggregate sorted. Drop that column and the planner picks a HashAggregate,
+	// whose group output is bucket order — measured on 466 tied techniques,
+	// 459 of 466 positions moved between plans. So the tiebreak is load-bearing
+	// and currently invisible, which is the worst combination to leave
+	// undocumented.
 }
 
 func TestListProficiencyIgnoresUntaggedRowsEntirely(t *testing.T) {
@@ -228,7 +269,7 @@ func TestListProficiencyIgnoresUntaggedRowsEntirely(t *testing.T) {
 	// A session with nothing BUT live-grid rows. This athlete has evidence,
 	// but none of it names a technique, so the funnel is honestly empty
 	// rather than showing a phantom row.
-	seedEvidence(t, pool, userID, "prof-untagged", []tag{
+	seedEvidence(t, pool, userID, "prof-untagged", time.Now(), []tag{
 		{"scored", nil, 3},
 		{"conceded", nil, 2},
 		{"drilled", nil, 1},
@@ -272,5 +313,38 @@ func TestSummaryIsFoldedFromTheSameRowsTheClientSees(t *testing.T) {
 	}
 	if got := SummariseProficiency(rows).Techniques; got != len(rows) {
 		t.Errorf("summary counted %d of %d rows it was given", got, len(rows))
+	}
+}
+
+func TestTheLibraryStaysUnderTheProficiencyCap(t *testing.T) {
+	// The version of the LIMIT guard that can actually fail.
+	//
+	// maxProficiencyRows cannot bind while the catalog is smaller than it —
+	// the GROUP BY is on technique_id and the FK caps the distinct count at the
+	// library size. The comment on the const says so; this asserts it. Grow the
+	// library past 500 without raising the cap and the funnel starts truncating
+	// silently, with the summary folding from the truncated rows and
+	// under-reporting in step. No error, no pagination, nothing to notice.
+	databaseURL := os.Getenv("TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("TEST_DATABASE_URL not set, skipping Postgres integration test")
+	}
+	ctx := context.Background()
+	pool, err := database.NewPool(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { pool.Close() })
+
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*)::int FROM techniques`).Scan(&n); err != nil {
+		t.Fatalf("count techniques: %v", err)
+	}
+	if n == 0 {
+		t.Skip("catalog not seeded")
+	}
+	if n >= maxProficiencyRows {
+		t.Fatalf("the library holds %d techniques and maxProficiencyRows is %d — "+
+			"the funnel now truncates silently. Raise the cap.", n, maxProficiencyRows)
 	}
 }
