@@ -2404,7 +2404,7 @@ most of the value is in the floor working alone.
   session to count.
 - Backing out of the wizard entirely still leaves the floor session logged.
 - Drilled: searching finds techniques by name and by alias; adding one shows
-  it as a removable chip; adding the same technique twice does not duplicate
+  it as a removable row; adding the same technique twice does not duplicate
   it.
 - A drilled technique records the **position family** derived from the
   technique's own position ("Half Guard - Bottom" → "Half Guard") and a
@@ -2424,6 +2424,42 @@ most of the value is in the floor working alone.
   and a build where it is slower or hidden has lost the point of the screen.
 - Re-saving the same reflection (a retry, a second sync) does not duplicate
   its tags — the whole set is replaced, not appended.
+
+#### The technique funnel (`drilled → attempted → scored`)
+
+- Each drilled technique carries **Tried** and **Landed** counters. Tap
+  increments, long-press decrements, decrementing to zero removes the row
+  rather than storing a zero — a zero-count row fails the backend's
+  `count > 0` CHECK, so the whole reflection would 400 on save because
+  someone tapped once and undid it.
+- The attempted/scored rows **inherit `category` and `position` from the
+  drilled row**, not from a second derivation. `familyOf()` returns `''` for
+  a family the hardcoded POSITIONS list has fallen behind on — which has
+  happened twice — so deriving it again could file the drilled row under
+  "Half Guard" and the attempted row under nothing, splitting one technique's
+  evidence with no error anywhere.
+- **Attempted and scored are disjoint.** `attempted` is "went for it and it
+  didn't land", so four tries with one hit is `attempted: 3, scored: 1`. The
+  copy has to say so — the cumulative reading is at least as natural and
+  produces different numbers from the same taps.
+- Removing a drilled technique **removes its Tried/Landed rows too**. Leaving
+  them behind strands evidence that is still saved and sent while being
+  invisible and uneditable — the counters are only reachable through the
+  drilled row.
+- ...but a **technique-tagged `conceded`** row survives that removal. This
+  screen cannot author one, but the API accepts one, so a reflection authored
+  elsewhere and read back can carry it; deleting someone's "they armbarred
+  me" record because they removed a drilled chip is data loss.
+- **The live grid and the funnel must partition the tag list.** The grid owns
+  untagged rows, the drilled step owns technique-tagged ones. If either
+  counts the other's, a number appears that its own control refuses to move
+  and nothing explains why.
+- **The session read-back screen must agree with the wizard**, on both halves:
+  its live grid excludes technique-tagged rows the same way, and the Drilled
+  section shows each technique's tried/landed. Getting the second one wrong
+  recreates the exact write-but-never-read defect the funnel exists to fix.
+- Leaving every counter at zero is a valid, meaningful answer — "drilled,
+  never tried live" is the finding, not an empty cell.
 
 ### Reading it back
 
