@@ -762,6 +762,48 @@ export function getBjjStanding(
   return request<BjjStanding>(getToken, "/bjj/standing", {}, signal);
 }
 
+/**
+ * One technique's accumulated evidence — NOT a score.
+ *
+ * `attempted` and `scored` are disjoint: attempted is "went for it live and it
+ * didn't land", so `attempted + scored` is how often it was tried and
+ * `scored / (attempted + scored)` is the hit rate. Reading `attempted` as
+ * total tries is the natural mistake and gives different numbers.
+ */
+export type BjjProficiency = {
+  technique_id: string;
+  name: string;
+  position: string;
+  category: string;
+  drilled: number;
+  attempted: number;
+  scored: number;
+  conceded: number;
+  /** How many separate sessions contributed — the honesty check on the rest. */
+  sessions: number;
+  last_seen: string;
+};
+
+/** Counts of TECHNIQUES, not of reps. */
+export type BjjProficiencySummary = {
+  techniques: number;
+  drilled: number;
+  tried_live: number;
+  landed: number;
+};
+
+export function getBjjProficiency(
+  getToken: Token,
+  signal?: AbortSignal,
+): Promise<{ techniques: BjjProficiency[]; summary: BjjProficiencySummary }> {
+  return request<{ techniques: BjjProficiency[]; summary: BjjProficiencySummary }>(
+    getToken,
+    "/bjj/proficiency",
+    {},
+    signal,
+  );
+}
+
 export function createBjjPromotion(
   getToken: Token,
   input: BjjPromotionInput,

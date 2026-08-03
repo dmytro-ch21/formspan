@@ -2519,6 +2519,56 @@ own, so none of them is redundant with "the FK exists".
 - A reflection blob that no longer parses is skipped, not fatal — the session
   and its timing still push and the row still settles clean.
 
+
+### The technique funnel, read back (`GET /v1/bjj/proficiency`, `/dashboard/proficiency`)
+
+**Happy path**
+
+- A technique drilled in two sessions reports the SUM of both, and
+  `sessions: 2`. Counts from one class are weaker evidence than the same count
+  across six weeks, which is why that field exists and should be shown.
+- A technique drilled but never taken live reports `attempted 0, scored 0` and
+  lands in the "Never tried live" bucket. That is the headline finding, not an
+  empty row.
+- The summary counts **techniques, not reps** — 40 reps of one technique is
+  `drilled: 1` in the summary. A build that reports 40 has misread the point of
+  the screen.
+- The summary is folded from the rows the client is shown, so the two can never
+  disagree. Assert that directly: the headline must equal what you get by
+  counting the visible list.
+
+**Edge cases and errors**
+
+- **An untagged live-grid row must never be summed into a technique's number.**
+  The same real armbar can be recorded twice — once technique-tagged from the
+  drilled step, once as the category catch-all from the live grid. The
+  convention is that the tagged row is the specific record; per-technique reads
+  take it and only it. Seed both and assert the untagged count is absent.
+- An athlete whose only evidence is untagged rows gets an **empty funnel**, not
+  a phantom row — and `[]`, never `null`, so a client can iterate without a
+  null check.
+- A hit rate is **withheld below five live tries**. One landed out of one is
+  not 100%, and showing it as such invites a conclusion the data can't carry.
+- The order is `SUM(count) DESC, technique_id` and must be stable across
+  identical requests. Note removing the tiebreak does **not** currently turn a
+  test red — the plan happens to be stable — so this is a property to assert,
+  not one a mutation can prove.
+- The `LIMIT` cannot bind in practice (500 vs a 466-technique library). It is a
+  memory backstop, not pagination; do not write a test that implies it
+  truncates real data.
+- On a failed load the page shows an error banner with a retry, **not** the
+  empty state — "no evidence yet" is a different and wrong claim.
+
+**Auth and security**
+
+- Self-scoped: no path parameter, and another athlete's evidence must never
+  appear. Seed two users and assert the caller sees only their own — this is
+  the same cross-user shape that has been caught twice in other modules.
+- Unauthenticated returns 401, not an empty list.
+- The nav link is gated on `catalog === "techniques"`, so an athlete with no
+  technique-catalog discipline never sees it. That is UI tidiness only — the
+  endpoint's own auth is the real boundary.
+
 ## Reading a BJJ session back (mobile)
 
 The half that was missing when logging shipped. Its absence did not read as an

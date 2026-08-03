@@ -1785,6 +1785,51 @@ components:
         list and `*`.
       schema: { type: string }
 
+    Proficiency:
+      type: object
+      description: >
+        One technique's accumulated evidence. Deliberately NOT a score — the
+        design rules out self-assessment, so this is the facts (drilled twelve
+        times, went for it three times, landed twice) and a reader forms the
+        judgement.
+      required: [technique_id, name, position, category, drilled, attempted, scored, conceded, sessions, last_seen]
+      properties:
+        technique_id: { type: string, example: americana-mount }
+        name: { type: string, description: "From the shared library; falls back to the id.", example: Americana from Mount }
+        position: { type: string, example: Mount }
+        category: { type: string, example: Submission }
+        drilled: { type: integer, description: Reps practised, not live. }
+        attempted:
+          type: integer
+          description: >
+            Went for it live and it did NOT land. Disjoint from `scored`, so
+            `attempted + scored` is how often it was tried.
+        scored: { type: integer, description: Landed it live. }
+        conceded:
+          type: integer
+          description: >
+            This technique done TO the athlete. No client can author one today;
+            reported rather than dropped because the API accepts one.
+        sessions:
+          type: integer
+          description: >
+            How many separate sessions contributed — the honesty check on every
+            count above. Twelve reps in one class is not twelve reps over six
+            weeks.
+        last_seen: { type: string, format: date-time }
+
+    ProficiencySummary:
+      type: object
+      description: >
+        The headline funnel, folded from the same rows in `techniques` so the
+        two cannot disagree. These are COUNTS OF TECHNIQUES, not of reps.
+      required: [techniques, drilled, tried_live, landed]
+      properties:
+        techniques: { type: integer, description: Distinct techniques with any evidence. }
+        drilled: { type: integer, description: How many were ever drilled. }
+        tried_live: { type: integer, description: How many were ever taken into a live round. }
+        landed: { type: integer, description: How many ever worked live. }
+
   responses:
     NotModified:
       description: >
@@ -2418,6 +2463,42 @@ paths:
         "204": { description: Removed. }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+
+  /bjj/proficiency:
+    get:
+      summary: The technique funnel across every session
+      operationId: getBjjProficiency
+      description: >
+        Per-technique evidence for the caller, most-evidence first. Reads only
+        technique-tagged rows: the same real event can also be recorded as an
+        untagged category row by the live grid, so a technique-tagged row is
+        the specific record and an untagged one the catch-all — summing both
+        would count one submission twice. Capped at 500 with no pagination,
+        which cannot bind in practice (the library holds 466 techniques).
+      parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
+      responses:
+        "200":
+          description: The caller's funnel, and the headline folded from it.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [techniques, summary]
+                properties:
+                  techniques:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Proficiency"
+                  summary:
+                    $ref: "#/components/schemas/ProficiencySummary"
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+        "304":
+          $ref: "#/components/responses/NotModified"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /bjj/sessions/{sessionID}:
     parameters:

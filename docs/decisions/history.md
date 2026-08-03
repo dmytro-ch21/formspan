@@ -6437,6 +6437,100 @@ it is the honest place for them.
   regression here, but the layout and VoiceOver behaviour are unconfirmed.
 
 
+## 2026-08-03 — Reading the funnel back
+
+`GET /v1/bjj/proficiency` and `/dashboard/proficiency`. The other half of the
+capture PR that landed earlier today: the evidence stream now has a reader.
+
+Web, per the platform rule — this is review and analysis, done sitting down.
+The phone captures the evidence mid-reflection and nothing here belongs on it.
+
+### Not a score, and that is the design
+
+`docs/decisions/bjj-tracking-design.md` rules out asking anyone to rate their
+triangle 1–5: people are bad at it, it goes stale, and it produces a number
+with no provenance. So the endpoint returns facts — drilled twelve times, went
+for it three times, landed twice, across five sessions — and the page shows
+them. Every judgement it invites is one the reader can see the basis for.
+
+The **drop-off leads**, not the totals. "You have drilled 34 techniques and
+taken 6 of them into a live round" is something to act on this week; "210 reps"
+is a statistic. The page is ordered funnel-first, list-second for that reason
+alone, and the summary counts TECHNIQUES rather than reps.
+
+A hit rate appears only past five live tries. One landed out of one is not a
+100% hit rate, and rendering it as one invites a conclusion the data cannot
+carry — the same honesty the rest of the screen is built on, applied to the
+one number that would otherwise flatter.
+
+### The double-count convention, now enforced
+
+The capture PR recorded a trap rather than fixing it: tapping "Landed" on the
+armbar row *and* "Submissions / Hit" in the live grid, for one armbar, writes
+two `scored` rows — one technique-tagged, one not. Both screens render them
+correctly and separately, so nothing looks wrong anywhere.
+
+This endpoint is where that had to be decided, and the rule is: **a
+technique-tagged row is the specific record, an untagged row is the catch-all**,
+so per-technique reads take the former and only the former. It is enforced by
+one clause (`AND t.technique_id IS NOT NULL`) and pinned by a test that seeds
+an untagged `scored: 5` alongside the tagged rows and asserts it is nowhere in
+the technique's number. Deleting the clause turns that test red.
+
+### The summary is folded, not queried
+
+`SummariseProficiency` is a pure function over the rows the client is being
+shown, not a second aggregate with its own `WHERE`. Two reasons: it cannot
+drift from the list underneath it, and it is testable without a database. The
+failure it forecloses is specific — once a cap binds, a separate `COUNT(*)`
+reports a total the visible list contradicts.
+
+### Ordering, and one guard that cannot be tested
+
+`ORDER BY SUM(t.count) DESC, t.technique_id` — most evidence first, because
+that is where a conclusion is safest, with the id making the order total.
+
+**Deleting the tiebreak does not turn any test red**, and the test says so
+rather than implying coverage. The plan is a HashAggregate feeding a Sort, and
+with tied rows that sort happens to emit them in the same sequence every time.
+The tiebreak stays because "happens to" is not a guarantee: Postgres promises
+no order for equal sort keys, and a reorder would re-hash the response and make
+this endpoint's ETag a permanent cache miss. Provoking it reliably would mean
+pinning a query plan, which is a worse dependency than the tiebreak itself.
+That is the third time this pattern has come up — a correct guard whose
+mutation is masked by the current plan — and each time the honest move has been
+to write it down.
+
+`LIMIT 500` for the same reason every list has one now, and it **cannot bind**:
+the shared library holds 466 techniques, so only a client inventing ids could
+reach it. A memory backstop, not a page size — nothing truncates a real
+athlete's funnel.
+
+### Nav gating stays capability-based
+
+`catalog === "techniques"`, not `key === "bjj"` — the check this codebase has
+deliberately avoided everywhere else. Mild over-inclusion accepted and recorded:
+the evidence stream is `bjj_session_tags`, so a future discipline with a
+technique catalog (judo, wrestling) would surface the link and find it empty.
+That is the right failure — an analytical screen with an honest empty state.
+
+### Gaps this leaves
+
+- **`conceded` is returned but not displayed.** No client can author a
+  technique-tagged conceded row, so the column is always zero today. The
+  defensive funnel — "which submission keeps catching me" — is the obvious next
+  feature and the API side of it already exists.
+- **No position or category rollup.** The design doc's position heatmap is a
+  different read over the same rows and is not this PR.
+- **No time axis.** Everything is all-time. "Improving" is not answerable from
+  this screen, only "how much evidence exists", and that gap is the reason
+  `sessions` and `last_seen` are in the payload.
+- **The page is unverified against a signed-in session.** It builds, the route
+  registers, and the endpoint returns 401 unauthenticated as designed — but
+  rendering it with real rows needs credentials, which is not something to
+  automate. Worth a look before it is trusted.
+
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

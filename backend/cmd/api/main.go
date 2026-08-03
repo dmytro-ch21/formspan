@@ -66,6 +66,7 @@ func main() {
 	bjjRepo := bjj.NewPostgresRepository(pool)
 	bjjHandler := bjj.NewHandler(bjjRepo)
 	bjjSessionHandler := bjj.NewSessionHandler(bjjRepo)
+	bjjProficiencyHandler := bjj.NewProficiencyHandler(bjjRepo)
 	featureFlagHandler := featureflag.NewHandler(featureflag.NewPostgresRepository(pool))
 	activityHandler := activity.NewHandler(activity.NewPostgresRepository(pool))
 	exerciseHandler := exercise.NewHandler(exercise.NewPostgresRepository(pool), os.Getenv("MEDIA_BASE_URL"))
@@ -90,6 +91,9 @@ func main() {
 	// PUT /v1/sessions/{id}/sets carries what a strength session has.
 	mux.Handle("PUT /v1/bjj/sessions/{sessionID}", verifier.RequireAuth(http.HandlerFunc(bjjSessionHandler.PutDetail)))
 	mux.Handle("GET /v1/bjj/sessions/{sessionID}", verifier.RequireAuth(http.HandlerFunc(bjjSessionHandler.GetDetail)))
+	// The technique funnel, read across every session. Under /v1/bjj because
+	// it is discipline-scoped evidence, not a property of the account.
+	mux.Handle("GET /v1/bjj/proficiency", verifier.RequireAuth(http.HandlerFunc(bjjProficiencyHandler.List)))
 
 	mux.Handle("GET /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Get)))
 	mux.Handle("POST /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Create)))
