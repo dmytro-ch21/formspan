@@ -3,6 +3,7 @@ package apihttp
 import (
 	"bytes"
 	"compress/gzip"
+	"crypto/rand"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -99,17 +100,44 @@ func TestLeavesTheBodyAloneWhenTheClientDidNotAskForGzip(t *testing.T) {
 func TestDoesNotDoubleEncode(t *testing.T) {
 	// A handler that encoded its own body owns the encoding. Wrapping it
 	// again produces something no client can read, and nothing reports it.
+	//
+	// The payload MUST be incompressible. The first version of this test used
+	// repeated text, which gzipped to 289 bytes — under the threshold — so the
+	// small-body path handled it and the guard was never reached. Deleting the
+	// guard left the whole suite green. Random bytes keep the pre-encoded body
+	// over 1 KB so the passthrough branch is the one under test.
+	payload := make([]byte, 8192)
+	if _, err := rand.Read(payload); err != nil {
+		t.Fatalf("rand: %v", err)
+	}
+
 	res := serve(t, "gzip", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Encoding", "gzip")
 		w.WriteHeader(http.StatusOK)
 		zw := gzip.NewWriter(w)
-		_, _ = io.WriteString(zw, strings.Repeat("already compressed ", 5000))
+		_, _ = zw.Write(payload)
 		_ = zw.Close()
 	})
 
-	// Exactly one layer: readable in a single gunzip.
-	if got := body(t, res); !strings.HasPrefix(got, "already compressed") {
-		t.Errorf("body was encoded twice; got %.40q", got)
+	// Exactly one layer: one gunzip returns the original bytes.
+	raw, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if len(raw) <= compressMinBytes {
+		t.Fatalf("pre-encoded body is %d bytes — under the threshold, so this "+
+			"test would pass without the guard", len(raw))
+	}
+	zr, err := gzip.NewReader(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatalf("gunzip: %v", err)
+	}
+	got, err := io.ReadAll(zr)
+	if err != nil {
+		t.Fatalf("gunzip read: %v — body was encoded twice", err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Error("one gunzip did not recover the original — encoded twice")
 	}
 }
 

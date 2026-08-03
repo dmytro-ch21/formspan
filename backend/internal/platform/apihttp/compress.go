@@ -33,7 +33,8 @@ import (
 // that did not ask for gzip. Both are checked before anything is buffered.
 const compressMinBytes = 1024
 
-// gzipPool avoids allocating a ~200 KB window per response. Writers are Reset
+// gzipPool avoids allocating a ~788 KB window per response (measured, not
+// the ~200 KB first guessed here). Writers are Reset
 // onto each new target, which is what makes reuse safe.
 var gzipPool = sync.Pool{
 	New: func() any { return gzip.NewWriter(nil) },
@@ -85,8 +86,13 @@ type compressWriter struct {
 	// threshold. Nil once the decision is made either way.
 	buf []byte
 	gz  *gzip.Writer
-	// passthrough means "decided: send this uncompressed", either because the
-	// handler set its own Content-Encoding or because the body is small.
+	// passthrough means the HANDLER owns the encoding — it set its own
+	// Content-Encoding, so bytes stream straight through untouched.
+	//
+	// NOT the small-body case: a response that simply finishes under the
+	// threshold is flushed by close()'s `case c.wroteHeader`, with buf still
+	// holding it. Two different paths to "uncompressed", and conflating them
+	// is how the buffered bytes get lost.
 	passthrough bool
 }
 
@@ -129,6 +135,22 @@ func (c *compressWriter) Write(p []byte) (int, error) {
 	// Content-Length must go. It describes the uncompressed body, and leaving
 	// it produces a response whose declared length disagrees with its bytes —
 	// which clients handle by truncating or hanging, not by erroring.
+	// Re-checked here, not just at WriteHeader. Because the real WriteHeader
+	// is deferred, a handler setting Content-Encoding AFTER it still lands in
+	// the header map — under stdlib that write would simply be ignored, here
+	// it would steer us into gzipping an already-encoded body. Also stops
+	// "identity" being read as "handler owns this".
+	if enc := c.Header().Get("Content-Encoding"); enc != "" && !strings.EqualFold(enc, "identity") {
+		c.passthrough = true
+		c.ResponseWriter.WriteHeader(c.status)
+		buffered := c.buf
+		c.buf = nil
+		if _, err := c.ResponseWriter.Write(buffered); err != nil {
+			return 0, err
+		}
+		return len(p), nil
+	}
+
 	c.Header().Del("Content-Length")
 	c.Header().Set("Content-Encoding", "gzip")
 	c.ResponseWriter.WriteHeader(c.status)
@@ -137,12 +159,18 @@ func (c *compressWriter) Write(p []byte) (int, error) {
 	gz.Reset(c.ResponseWriter)
 	c.gz = gz
 
-	buffered := c.buf
+	// Flush only the prefix that was buffered BEFORE this write, then hand p
+	// straight to the compressor. Appending p first meant a single 175 KB
+	// WriteJSON allocated a 175 KB throwaway copy — measured 255 KB/op vs
+	// 72 KB/op. Same bytes, same order.
+	buffered := c.buf[:len(c.buf)-len(p)]
 	c.buf = nil
-	if _, err := c.gz.Write(buffered); err != nil {
-		return 0, err
+	if len(buffered) > 0 {
+		if _, err := c.gz.Write(buffered); err != nil {
+			return 0, err
+		}
 	}
-	return len(p), nil
+	return c.gz.Write(p)
 }
 
 // close settles whichever state the response ended in. Always runs, including

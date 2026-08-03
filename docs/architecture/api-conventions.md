@@ -55,7 +55,7 @@ Current codes: `invalid_input`, `unauthorized`, `not_found`, `already_exists`, `
 
 ## CORS
 
-Single allowed origin via the `WEB_ORIGIN` env var (see `docs/architecture/deployment.md`) — revisit once staging/production domains exist and more than one origin needs to be trusted.
+Allowed origins via the `WEB_ORIGIN` env var (comma-separated; only listed origins are echoed back, never a wildcard) (see `docs/architecture/deployment.md`) — revisit once staging/production domains exist and more than one origin needs to be trusted.
 
 ## Pagination
 

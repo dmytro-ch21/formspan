@@ -190,13 +190,13 @@ func withCORS(next http.Handler) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
+		// Outside the allowlist check on purpose: a response to a request with
+		// no/disallowed Origin varies on Origin just as much, and a cache that
+		// stored it without saying so could later hand it to an allowed origin
+		// with no Access-Control-Allow-Origin on it.
+		w.Header().Add("Vary", "Origin")
 		if allowed[origin] {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
-			// Add, not Set: apihttp.Compress also varies on Accept-Encoding,
-			// and Vary is a list. Set drops whichever middleware ran first,
-			// which would let a cache serve a gzipped body to a client that
-			// cannot read it — or the wrong origin's response.
-			w.Header().Add("Vary", "Origin")
 		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, traceparent")
