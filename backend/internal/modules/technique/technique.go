@@ -75,7 +75,20 @@ type Summary struct {
 
 	Position       string `json:"position"`
 	PositionDetail string `json:"position_detail"`
-	GiNoGi         string `json:"gi_no_gi"`
+
+	// Where the technique LEAVES you, or empty when not recorded.
+	//
+	// Closes the half of the graph `position` and `function` cannot express:
+	// where it starts and what it does, but not where it ends. Sparse by
+	// design — see migration 000029 for the two measurements that made this
+	// authoring work rather than derivation work.
+	//
+	// Empty means NOT RECORDED, never "goes nowhere". A technique that
+	// genuinely leaves you where you started carries its own position, so
+	// "stays put" is recorded as a fact rather than read out of an absence.
+	ToPosition string `json:"to_position,omitempty"`
+
+	GiNoGi string `json:"gi_no_gi"`
 
 	// Presented as "commonly taught from", never as a recommendation. It sits
 	// beside IBJJF legality, and two belt-shaped fields where one is advisory
@@ -192,6 +205,10 @@ type Technique struct {
 	// Where it happens — "Guard - Bottom", "Standing", "Mount - Top".
 	Position       string `json:"position"`
 	PositionDetail string `json:"position_detail"`
+
+	// Where it LEAVES you; see Summary.ToPosition. Empty means not recorded,
+	// never "goes nowhere".
+	ToPosition string `json:"to_position,omitempty"`
 
 	GiNoGi      string `json:"gi_no_gi"` // Both | Gi Only | No-Gi Only
 	TypicalBelt string `json:"typical_belt"`

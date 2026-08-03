@@ -503,6 +503,28 @@ components:
             The decision — when the mechanics apply, and what has to be true
             first. Distinct from `description` on purpose; merging them
             produces a paragraph that answers neither question well.
+        to_position:
+          type: string
+          description: >
+            Where the technique LEAVES you. Closes the half of the graph
+            `position` and `function` cannot express — where it starts and
+            what it does, but not where it ends.
+
+
+            SPARSE ON PURPOSE, and absent far more often than present. It is
+            authored rather than derived: name parsing reaches 42% (mostly
+            submissions, whose destination is the end of the exchange), and
+            inverting `setup_from` infers a real position change for only 22
+            of 466 — that edge links control-to-attack WITHIN a position.
+            Populated where the destination is both knowable and useful
+            (passes, sweeps, back takes, takedowns).
+
+
+            ABSENT means NOT RECORDED, never "goes nowhere". A technique that
+            genuinely leaves you where you started carries its own `position`
+            value here, so "stays put" is a recorded fact rather than an
+            absence. Do not infer a self-loop from a missing key.
+          example: Side Control - Top
         setup_from:
           type: array
           description: >
@@ -598,6 +620,26 @@ components:
           enum: [Both, "Gi Only", "No-Gi Only"]
         typical_belt: { type: string }
         ibjjf_ruleset_id: { type: string }
+        to_position:
+          type: string
+          description: >
+            Where the technique LEAVES you. Declared here as well as on the
+            detail schema because the LIST is where a graph consumer reads it
+            — walking the transition map from 466 detail calls is not a thing
+            anyone would do.
+
+
+            SPARSE ON PURPOSE (149 of 466) and hand-authored: name parsing
+            reaches 42%, and inverting `setup_from` infers a real position
+            change for only 22 of 466, because that edge links
+            control-to-attack WITHIN a position.
+
+
+            ABSENT means NOT RECORDED, never "goes nowhere" — a technique
+            that genuinely leaves you where you started carries its own
+            `position` value here. Do not infer a self-loop from a missing
+            key.
+          example: Side Control - Top
         setup_from:
           type: array
           items: { type: string }

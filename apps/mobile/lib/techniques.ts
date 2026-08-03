@@ -58,6 +58,12 @@ export type TechniqueSummary = {
    */
   function?: string;
   position: string;
+  /**
+   * Where the technique leaves you. Absent means NOT RECORDED, never "goes
+   * nowhere" — a technique that genuinely stays put carries its own
+   * `position` value here. Sparse by design; see migration 000029.
+   */
+  to_position?: string;
   position_detail: string;
   gi_no_gi: string;
   /** Commonly taught from — an observation, never a gate. */

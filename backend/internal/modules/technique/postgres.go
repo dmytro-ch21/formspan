@@ -26,11 +26,13 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 const summaryColumns = `
 	t.id, t.name, t.aliases, t.category, COALESCE(t.function, ''),
 	t.position, t.position_detail,
+	COALESCE(t.to_position, ''),
 	t.gi_no_gi, t.typical_belt, COALESCE(t.ibjjf_ruleset_id, ''), t.setup_from`
 
 const detailColumns = `
 	t.id, t.name, t.aliases, t.category, COALESCE(t.function, ''),
 	t.position, t.position_detail,
+	COALESCE(t.to_position, ''),
 	t.gi_no_gi, t.typical_belt, t.description, t.when_to_use,
 	t.setup_from, t.common_next_moves, t.common_counters,
 	t.video_reference, t.source_notes, COALESCE(t.ibjjf_ruleset_id, ''),
@@ -51,7 +53,7 @@ type scannable interface{ Scan(dest ...any) error }
 func scanSummary(row scannable) (*Summary, error) {
 	var s Summary
 	err := row.Scan(&s.ID, &s.Name, &s.Aliases, &s.Category, &s.Function,
-		&s.Position, &s.PositionDetail, &s.GiNoGi, &s.TypicalBelt,
+		&s.Position, &s.PositionDetail, &s.ToPosition, &s.GiNoGi, &s.TypicalBelt,
 		&s.IBJJFRulesetID, &s.SetupFrom)
 	if err != nil {
 		return nil, err
@@ -62,7 +64,7 @@ func scanSummary(row scannable) (*Summary, error) {
 func scanTechnique(row scannable) (*Technique, error) {
 	var t Technique
 	err := row.Scan(&t.ID, &t.Name, &t.Aliases, &t.Category, &t.Function,
-		&t.Position, &t.PositionDetail, &t.GiNoGi, &t.TypicalBelt, &t.Description,
+		&t.Position, &t.PositionDetail, &t.ToPosition, &t.GiNoGi, &t.TypicalBelt, &t.Description,
 		&t.WhenToUse, &t.SetupFrom, &t.CommonNextMoves, &t.CommonCounters,
 		&t.VideoReference, &t.SourceNotes, &t.IBJJFRulesetID,
 		&t.CreatedAt, &t.UpdatedAt)
@@ -405,14 +407,15 @@ const upsertSQL = `
 		id, name, aliases, category, position, position_detail, gi_no_gi,
 		typical_belt, description, setup_from, common_counters,
 		when_to_use, common_next_moves, video_reference, source_notes,
-		ibjjf_ruleset_id, function
+		ibjjf_ruleset_id, function, to_position
 	) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-		NULLIF($16, ''), NULLIF($17, ''))
+		NULLIF($16, ''), NULLIF($17, ''), NULLIF($18, ''))
 	ON CONFLICT (id) DO UPDATE SET
 		name            = EXCLUDED.name,
 		aliases         = EXCLUDED.aliases,
 		category        = EXCLUDED.category,
 		function        = EXCLUDED.function,
+		to_position     = EXCLUDED.to_position,
 		position        = EXCLUDED.position,
 		position_detail = EXCLUDED.position_detail,
 		gi_no_gi        = EXCLUDED.gi_no_gi,
@@ -433,7 +436,7 @@ const upsertSQL = `
 		techniques.setup_from, techniques.common_counters,
 		techniques.when_to_use, techniques.common_next_moves,
 		techniques.video_reference, techniques.source_notes,
-		techniques.ibjjf_ruleset_id, techniques.function
+		techniques.ibjjf_ruleset_id, techniques.function, techniques.to_position
 	) IS DISTINCT FROM (
 		EXCLUDED.name, EXCLUDED.aliases, EXCLUDED.category,
 		EXCLUDED.position, EXCLUDED.position_detail, EXCLUDED.gi_no_gi,
@@ -441,7 +444,7 @@ const upsertSQL = `
 		EXCLUDED.setup_from, EXCLUDED.common_counters,
 		EXCLUDED.when_to_use, EXCLUDED.common_next_moves,
 		EXCLUDED.video_reference, EXCLUDED.source_notes,
-		EXCLUDED.ibjjf_ruleset_id, EXCLUDED.function
+		EXCLUDED.ibjjf_ruleset_id, EXCLUDED.function, EXCLUDED.to_position
 	)`
 
 // UpsertAll writes the whole library in one transaction, so a deploy either
@@ -458,7 +461,8 @@ func (r *PostgresRepository) UpsertAll(ctx context.Context, techniques []Techniq
 		batch.Queue(upsertSQL, t.ID, t.Name, t.Aliases, t.Category, t.Position,
 			t.PositionDetail, t.GiNoGi, t.TypicalBelt, t.Description,
 			t.SetupFrom, t.CommonCounters, t.WhenToUse, t.CommonNextMoves,
-			t.VideoReference, t.SourceNotes, t.IBJJFRulesetID, t.Function)
+			t.VideoReference, t.SourceNotes, t.IBJJFRulesetID, t.Function,
+			t.ToPosition)
 	}
 
 	results := tx.SendBatch(ctx, batch)
