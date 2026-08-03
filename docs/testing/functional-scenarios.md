@@ -2588,3 +2588,33 @@ conflict story.
 - Both endpoints reject an unauthenticated request with 401.
 - The content is identical for every user: there is nothing user-scoped here,
   and no endpoint takes a user id.
+
+## Response compression (`internal/platform/apihttp`)
+
+Every response now carries a new header and large ones change encoding, so
+this is API-surface behaviour even though no endpoint changed.
+
+- **A large response round-trips.** Fetch the technique list with
+  `Accept-Encoding: gzip` and confirm the decompressed body equals the
+  uncompressed one byte for byte. `fetch` and Go's `http.Client` decompress
+  transparently, so a client-side test sees only that it still parses.
+- **A small response is NOT compressed.** An error body is ~60 bytes and
+  gzip's header alone is 18 — compressing it makes it bigger. Assert no
+  `Content-Encoding` on a 404/401.
+- **The threshold test needs an INCOMPRESSIBLE payload.** Repeated text gzips
+  below the threshold, so a test built on it exercises the small-body path and
+  passes whatever the compression logic does. This bit the original
+  double-encode test.
+- **`Vary: Accept-Encoding` on every response**, compressed or not — plus
+  `Vary: Origin`. Both are `Add`ed; a middleware using `Set` silently drops
+  the other, which is how a cache serves a gzipped body to a client that
+  cannot read it.
+- **No double encoding.** A handler that sets its own `Content-Encoding` owns
+  it; the middleware must pass those bytes through untouched.
+- **`Content-Length` is absent when compressed.** Left in place it describes
+  the uncompressed body, and clients truncate or hang rather than error.
+- **Empty responses survive** — 204 and a bare `WriteHeader` must not hang,
+  gain gzip framing, or lose their status.
+- **The access log still records the right status.** The header write is
+  deferred past the handler returning; if that ordering breaks, every log line
+  reports the wrong code while responses look fine.
