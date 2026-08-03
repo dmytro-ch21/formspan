@@ -5470,6 +5470,39 @@ on 24 — so either branch may land first as long as the one that lands
 second holds the higher number. Flagged in a banner at the top of the
 migration itself, because the failure mode leaves no trace anywhere else.
 
+**Resolved, and the paragraph above got one thing wrong.** 25 landed
+first (PR #88), and the glossary branch was renumbered on top of it:
+`000024_positions` → **000026**, and a second migration that branch had
+gained since, `000025_position_detail_scope` → **000027**. Both then
+merged as PR #89. `main` now runs 23 → 25 → 26 → 27; the gap at 24 is
+harmless, because `migrate up` runs every version above the current one
+and does not care about gaps.
+
+The correction: by the time this was resolved the glossary branch carried
+its *own* `000025`, so the real collision was a **duplicate version, not a
+skipped one** — and that does not fail silently. Verified directly against
+`golang-migrate`'s file source rather than assumed: it returns `duplicate
+migration file` and refuses to open the migrations directory at all, so
+every `migrate` command fails loudly, including on a deploy. The silent
+skip described above was the correct analysis of the branch as it stood
+when the banner was written; it stopped being the whole story when that
+branch grew a second migration. Both hazards are worth knowing, and they
+have opposite signatures — a skip is invisible, a duplicate is total.
+
+Verified end to end rather than by inspection: the post-merge migration
+set applied to a throwaway database reaches version 27 clean, with each
+migration's actual effect present (`bjj_promotions`, `bjj_session_details`
+/`bjj_session_tags`, `positions`, and 27's `detail_includes`/
+`detail_excludes` columns — that last one being precisely what a silent
+skip would have omitted). A full `migrate down` then leaves zero tables
+behind, so the down files are genuine inverses.
+
+The durable lesson is about *when* the check is worth running, not about
+these two branches: two unmerged branches each adding a migration is a
+collision that neither branch's CI can see, because each is green in
+isolation. Nothing in the tooling catches it, and the number is chosen at
+the moment the file is created — long before the conflict exists.
+
 ### What review changed, and one thing this log got wrong
 
 Three findings were worth the round:
