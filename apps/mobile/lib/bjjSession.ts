@@ -78,6 +78,9 @@ export const LIVE_ROWS: { category: Category; label: string; scored: string; con
  * signal, but that also means it can silently fall behind — when leg
  * entanglement became its own position in the library, this list still
  * offered only the seven it had, so "got swept from 50/50" had nowhere to go.
+ * North-South was missing for the same reason and is added here too — the
+ * wizard's familyOf() returns '' on no match, so a technique in an unlisted
+ * family records a tag with no position at all, silently.
  */
 export const POSITIONS = [
   'Guard',
@@ -86,6 +89,7 @@ export const POSITIONS = [
   'Mount',
   'Back',
   'Leg Entanglement',
+  'North-South',
   'Turtle',
   'Standing',
 ] as const;

@@ -5660,6 +5660,38 @@ counterparts in the base file, and embedded by nothing. A leftover from
 the PR that merged them in. Editing it would have had no effect, which is
 the kind of file that eventually costs someone an afternoon.
 
+### Review caught the change hiding 26 techniques
+
+The taxonomy work was right and the client work was not. Moving the
+entanglements out of the Guard family moved them out from under the **Guard
+filter chip** on both clients, and neither had a chip for their new home —
+so 26 techniques became reachable by typing and nothing else. Mobile's chip
+coverage went 465/466 → 439/466, web's 458/466 → 432/466, and web is worse
+because it has no position glossary at all, so there was no second route to
+them. Both clients would have rendered a glossary card advertising a
+position their own filter could not produce.
+
+The deeper finding is why that happened. The position vocabulary is copied
+into **four** client files and one backend map, enforced in none of them,
+and this PR updated one of the four. It had already drifted once the same
+way — North-South was added to the glossary and left off the chips — and
+that was also caught by a human reading a diff, which is not a mechanism.
+
+So there is now a mechanism: `positionVocabulary.test.ts` reads
+`positions.json` and all three hardcoded client arrays off disk and asserts
+they agree in both directions — no family the clients miss, no chip keyed on
+a family that does not exist (which filters to an empty list and reads as
+"nothing here" rather than as a bug). Deleting the leg-entanglement entry
+from the web file reproduces the exact defect review found. It lives in the
+mobile jest suite because that is the only one in the repo; a test in a
+slightly wrong app is a smaller problem than a filter that silently hides a
+quarter of the leg-lock library.
+
+Fixing this properly means one shared constant per app, or keying the chips
+on the glossary ids outright. Both are design work rather than a patch, so
+the test is the floor: hand-maintenance continues, but drift now fails in CI
+instead of in a gym.
+
 ### What this does not do
 
 **Nothing reads `function` yet.** No client filters on it, and the session
@@ -5676,7 +5708,7 @@ two, nothing currently depends on getting it right.
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
-- **Two position taxonomies now sit on one Library screen.** The filter chips are seven coarse families; the glossary is ten curated entries. Since the guard split they disagree in a visible way: a beginner can read the Closed Guard card, learn the distinction, and then find no chip that filters to those 37 techniques. Adding North-South closed the cheap half (a position the glossary advertised that no chip could reach). Keying the chips on the glossary's ten ids is the real answer and is design work, not a patch.
+- **Two position taxonomies now sit on one Library screen.** The filter chips are nine coarse families; the glossary is eleven curated entries. Since the guard split they disagree in a visible way: a beginner can read the Closed Guard card, learn the distinction, and then find no chip that filters to those 37 techniques. Adding North-South, and later Leg Entanglement, closed the cheap half each time (a position the glossary advertised that no chip could reach) — but doing it twice by hand is the evidence that hand-maintenance is the actual bug: the vocabulary is copied across four client files and one backend map, and the taxonomy PR updated one of the four until review caught it. Keying the chips on the glossary's ids, or a shared constant with a test asserting it matches positions.json, is the real answer and is design work, not a patch.
 
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

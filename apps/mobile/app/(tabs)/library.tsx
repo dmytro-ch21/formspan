@@ -111,7 +111,7 @@ const collator = new Intl.Collator(undefined, { sensitivity: 'base' });
  * excluded every bottom and escape position — half the library, and the half a
  * white belt needs most. Worse, a chip labelled "Mount" that returns only
  * Mount-Top is a label making a promise the filter doesn't keep. Matching the
- * family covers 458 of 466.
+ * family covers 465 of 466.
  *
  * "Half Guard" is listed separately and before nothing else depends on it:
  * `startsWith('Guard - ')` cannot match "Half Guard - Bottom", so the two
@@ -130,6 +130,11 @@ const POSITIONS = [
   // directly above advertises the position with a card — the filter has to
   // offer at least what the glossary names.
   { key: 'North-South', label: 'North-south' },
+  // Same rule, same reason. The ashi garami family became its own position,
+  // and its 26 techniques moved out from under the Guard chip in the same
+  // change — so without this they are reachable only by typing. A saddle
+  // entry is exactly what someone browses for and cannot spell.
+  { key: 'Leg Entanglement', label: 'Leg entanglement' },
 ] as const;
 
 function inPositionFamily(position: string, family: string): boolean {
