@@ -6514,12 +6514,58 @@ the evidence stream is `bjj_session_tags`, so a future discipline with a
 technique catalog (judo, wrestling) would surface the link and find it empty.
 That is the right failure — an analytical screen with an honest empty state.
 
+### The two defects only rendering could catch, caught by reading the CSS
+
+**`bg-lime-rule` is not a class.** `@theme` maps `--color-lime`, `--color-lime-ink`
+and the rest; it never maps `--color-lime-rule`, which exists only as a raw var
+that `.accent-rule` consumes. So the funnel bars — the one element carrying the
+drop-off visually — emitted no background rule and rendered transparent. Three
+invisible bars on the section the page is built around.
+
+The fix was not to add the token. `--c-lime-rule` is `#b8ff2c` in *both* modes,
+which is 1.21:1 on a light card; globals.css says as much. `--c-lime` is
+theme-stepped (3.27:1 light, 15.12:1 dark) and is the right one.
+
+**The bar widths resolved against the wrong box.** A percentage width on a flex
+item resolves against the flex *container's* content box, not the track left
+after the label and the number. The bar was the only shrinkable item, so it
+absorbed the overflow — and by construction the longest bar always requested
+exactly 100%, so it was always the one clamped while shorter bars sat at their
+true percentage. Net effect: the drop-off was drawn consistently shallower than
+it is, on the screen whose entire purpose is showing that drop-off. Fixed by
+giving the fill its own `flex-1` track. The denominator now spans all three
+stages too, since `tried_live` can exceed `drilled` (they are counted
+independently) and would otherwise ask for >100% and clamp two different
+numbers to identical bars.
+
+Both were found by reading the branch's own compiled stylesheet, not by looking
+at the page — which is the part worth remembering. **No unit test would ever
+catch a Tailwind class that does not exist**, and the functional scenarios
+written for this feature are all behavioural. The page still has not been
+rendered.
+
+### A bucket that was reachable and had nowhere to go
+
+`bucketOf` returned `null` for a technique with no drilled, attempted or scored
+evidence — which the endpoint can absolutely return, because its only filter is
+`technique_id IS NOT NULL` and a `conceded`-only row passes it. That row counted
+toward "Everything" and toward no sub-bucket, so the chip counts silently failed
+to sum, and it rendered as a line of dashes that reads like a data bug. It is
+now its own bucket ("Used on you"), which also gives `conceded` its first
+display surface anywhere in the product.
+
 ### Gaps this leaves
 
-- **`conceded` is returned but not displayed.** No client can author a
-  technique-tagged conceded row, so the column is always zero today. The
-  defensive funnel — "which submission keeps catching me" — is the obvious next
-  feature and the API side of it already exists.
+- **`conceded` has a bucket but still no column.** The "Used on you" filter
+  surfaces those rows; the table has no count for them. The defensive funnel —
+  "which submission keeps catching me" — is the obvious next feature, and both
+  the API and the bucket now exist for it.
+- **No web test suite exists at all.** `bucketOf`, the chip-count fold and the
+  hit-rate withholding rule are pure functions over plain data, each encoding a
+  load-bearing property, and nothing can assert any of them. Lifting them into
+  `src/lib/` would make them testable without a renderer. Named here because
+  the mobile suite exists precisely for this shape of logic and web has no
+  equivalent.
 - **No position or category rollup.** The design doc's position heatmap is a
   different read over the same rows and is not this PR.
 - **No time axis.** Everything is all-time. "Improving" is not answerable from
