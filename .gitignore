@@ -35,3 +35,9 @@ secrets.txt
 # Editors
 .vscode/
 .idea/
+
+# Python bytecode. `scripts/` is run directly, never imported — except by a
+# one-off `importlib` load during review, which is how a .pyc got committed
+# once. Ignored so that cannot happen again.
+__pycache__/
+*.pyc
