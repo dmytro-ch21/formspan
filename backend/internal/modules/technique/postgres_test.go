@@ -754,3 +754,61 @@ func TestReseedPopulatesFunctionOnRowsThatPredateTheColumn(t *testing.T) {
 		t.Error("updated_at did not move, so no delta-syncing client would ever refetch")
 	}
 }
+
+// to_position is sparse on purpose, and every value must name a real position.
+//
+// The sparseness is the point: it is authored, not derived (see migration
+// 000029 for the two measurements), so a NULL means "not recorded" and is
+// honest. What must never happen is a value naming a position that does not
+// exist — "Side Control" instead of "Side Control - Top" — because that edge
+// then resolves to nothing on every traversal and NOTHING reports a fault.
+// The seed validator is the only guard; this is the test that it works.
+//
+// The count is pinned so coverage can only rise. If it falls, authored data
+// was lost rather than a decision being made.
+func TestToPositionNamesRealPositionsAndOnlyGrows(t *testing.T) {
+	techniques, err := SeedData()
+	if err != nil {
+		t.Fatalf("SeedData: %v", err)
+	}
+
+	positions := map[string]bool{}
+	for _, tq := range techniques {
+		positions[tq.Position] = true
+	}
+
+	var populated, selfLoops int
+	for _, tq := range techniques {
+		if tq.ToPosition == "" {
+			continue
+		}
+		populated++
+		if !positions[tq.ToPosition] {
+			t.Errorf("%q has to_position %q, which is not a position any technique uses",
+				tq.ID, tq.ToPosition)
+		}
+		if tq.ToPosition == tq.Position {
+			selfLoops++
+		}
+	}
+
+	const wantAtLeast = 149
+	if populated < wantAtLeast {
+		t.Fatalf("only %d techniques have a destination, want at least %d — authored data was lost",
+			populated, wantAtLeast)
+	}
+
+	// Self-loops are meaningful, not a bug: a guard BREAK leaves you in
+	// guard-top having not yet passed, and a single-leg entry leaves you
+	// standing having not yet finished. Recording "stays put" as a fact is
+	// what lets NULL mean "not recorded" without ambiguity.
+	if selfLoops == 0 {
+		t.Error("no self-loops at all — 'stays put' should be recorded, not left NULL")
+	}
+
+	// The transitions must actually cross positions, or the column is just a
+	// copy of `position` and answers nothing.
+	if populated-selfLoops < 100 {
+		t.Errorf("only %d real position changes recorded", populated-selfLoops)
+	}
+}
