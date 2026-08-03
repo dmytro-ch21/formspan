@@ -282,6 +282,19 @@ func (c *conditionalWriter) Write(p []byte) (int, error) {
 // after it streams straight through.
 func (c *conditionalWriter) adoptHandlerETag(etag string) {
 	c.passthrough = true
+	// The no-store opt-out has to be honoured HERE too, not only in the
+	// post-handler block — that block is unreachable once passthrough is set,
+	// so a handler setting both `no-store` and its own ETag would have got a
+	// 304 or not depending purely on WHERE it stamped the tag. Three orderings
+	// that disagree is worse than any one of the three answers.
+	if hasNoStore(c.Header().Get("Cache-Control")) {
+		c.ResponseWriter.WriteHeader(c.status)
+		if c.buf.Len() > 0 {
+			_, _ = c.ResponseWriter.Write(c.buf.Bytes())
+			c.buf.Reset()
+		}
+		return
+	}
 	// Same default as the hashed path, and it matters MORE here: this is the
 	// branch a per-repository validator over user-scoped data will take, and
 	// adoptHandlerETag commits the status line, so nothing downstream can add

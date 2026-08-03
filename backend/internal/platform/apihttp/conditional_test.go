@@ -703,3 +703,44 @@ func TestHandlerETagSetAfterTheLASTWriteStillWins(t *testing.T) {
 		t.Errorf("304 carried a body: %q", got)
 	}
 }
+
+func TestNoStoreBeatsAHandlerETagInEveryOrdering(t *testing.T) {
+	// api-conventions.md states the rule categorically: no-store opts a route
+	// out of conditional GET ENTIRELY. It has to hold for a handler that sets
+	// its own validator too, and identically in all three orderings — because
+	// adoptHandlerETag commits the status line, the post-handler no-store
+	// check is unreachable from two of them, so the answer would otherwise
+	// depend on where the handler happened to stamp the tag.
+	const own = `"handler-tag"`
+	orderings := map[string]http.HandlerFunc{
+		"before WriteHeader": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("ETag", own)
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.WriteString(w, "body")
+		},
+		"mid-stream": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Cache-Control", "no-store")
+			_, _ = io.WriteString(w, "bo")
+			w.Header().Set("ETag", own)
+			_, _ = io.WriteString(w, "dy")
+		},
+		"after the last write": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Cache-Control", "no-store")
+			_, _ = io.WriteString(w, "body")
+			w.Header().Set("ETag", own)
+		},
+	}
+	for name, handler := range orderings {
+		res := cond(t, http.MethodGet, own, handler)
+		if res.StatusCode != http.StatusOK {
+			t.Errorf("%s: no-store still returned %d, want 200", name, res.StatusCode)
+		}
+		if got := readAll(t, res); got != "body" {
+			t.Errorf("%s: body = %q", name, got)
+		}
+		if cc := res.Header.Get("Cache-Control"); cc != "no-store" {
+			t.Errorf("%s: Cache-Control = %q", name, cc)
+		}
+	}
+}

@@ -381,6 +381,24 @@ func TestListCapDoesNotEvictTheCallersOwnWorkouts(t *testing.T) {
 		}
 	}
 
+	// A VOLA-authored official template: owner_user_id IS NULL, forced public
+	// by the workouts_official_is_public CHECK. Created directly because
+	// Create() takes an owner. This row is why the ownership term uses
+	// IS NOT DISTINCT FROM: `NULL = $1` is NULL, and `ORDER BY ... DESC` is
+	// NULLS FIRST, so `=` sorts every official template ABOVE the caller's own
+	// — the same eviction, by the one row class that outranks them. A fixture
+	// where every row has a real owner cannot see it.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO workouts (id, owner_user_id, name, sport, visibility)
+		VALUES ('wk-cap-official', NULL, 'aaa official template', 'strength', 'public')`); err != nil {
+		t.Fatalf("create official template: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := pool.Exec(ctx, `DELETE FROM workouts WHERE id = 'wk-cap-official'`); err != nil {
+			t.Logf("cleanup official: %v", err)
+		}
+	})
+
 	got, err := repo.List(ctx, owner, Filter{})
 	if err != nil {
 		t.Fatalf("list: %v", err)

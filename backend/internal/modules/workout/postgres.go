@@ -85,9 +85,19 @@ const visibleTo = `(owner_user_id = $1 OR visibility = 'public')`
 // public ones, so a plain `ORDER BY name, id` evicts alphabetically across
 // ownership: once 500 public workouts sort ahead of it, your own workout named
 // "Z…" silently vanishes from the default list. Measured — 501 public rows and
-// the survivors were the first 500 by name, regardless of owner. Ordering
-// `(owner_user_id = $1) DESC` first means the eviction lands on strangers'
-// content, which is the only kind anyone can afford to lose.
+// the survivors were the first 500 by name, regardless of owner. Sorting the
+// caller's own rows first means the eviction lands on other people's content,
+// which is the only kind anyone can afford to lose.
+//
+// `IS NOT DISTINCT FROM`, not `=`. `owner_user_id` is NULLABLE — NULL is a
+// VOLA-authored official template (migration 000006), and the
+// `workouts_official_is_public` CHECK forces those public, so they are always
+// in the default list. `NULL = $1` is NULL, and `ORDER BY … DESC` is NULLS
+// FIRST, so `=` would have sorted every official template ABOVE the caller's
+// own — reintroducing the exact eviction this ordering exists to prevent, by
+// the one row class that outranks them. No official template exists yet, so
+// nothing was broken in practice; the comment claiming otherwise was the
+// dangerous part.
 //
 // `name, id` after it keeps the order total, so the cap's membership is stable
 // and the response hashes the same way twice.
@@ -116,7 +126,7 @@ func (r *PostgresRepository) List(ctx context.Context, userID string, f Filter) 
 
 	args = append(args, maxWorkouts)
 	rows, err := r.pool.Query(ctx, `SELECT `+workoutColumns+` FROM workouts WHERE `+
-		strings.Join(where, " AND ")+` ORDER BY (owner_user_id = $1) DESC, name, id
+		strings.Join(where, " AND ")+` ORDER BY (owner_user_id IS NOT DISTINCT FROM $1) DESC, name, id
 		LIMIT $`+fmt.Sprint(len(args)), args...)
 	if err != nil {
 		return nil, fmt.Errorf("workout: list: %w", err)
