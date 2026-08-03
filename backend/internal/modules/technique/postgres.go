@@ -21,8 +21,8 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 
 // Two column sets, deliberately. The prose fields (description, when_to_use,
 // the three edge arrays) are most of the library's bytes, and a list request
-// needs none of them: returning full rows ships ~550 KB to draw a scrolling
-// list where ~70 KB will do.
+// needs none of them: returning full rows ships ~485 KB to draw a scrolling
+// list where ~175 KB will do.
 const summaryColumns = `
 	t.id, t.name, t.aliases, t.category, COALESCE(t.function, ''),
 	t.position, t.position_detail,

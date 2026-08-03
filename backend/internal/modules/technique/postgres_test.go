@@ -881,3 +881,61 @@ func TestReseedPopulatesToPositionOnRowsThatPredateTheColumn(t *testing.T) {
 		t.Error("updated_at did not move, so no delta-syncing client would ever refetch")
 	}
 }
+
+// `setup_from` must be on the SUMMARY, not just the detail row.
+//
+// It is what makes the library a traversable graph: the client inverts it
+// once over the cached list to answer "what follows from here". Detail-only,
+// that costs one request per technique to walk a single hop, and
+// `lib/techniqueGraph.ts` could not exist.
+//
+// Added post-merge, because a review found that deleting `t.setup_from` from
+// `summaryColumns` and `&s.SetupFrom` from `scanSummary` — reverting the
+// whole change that put it there — left this entire suite GREEN. Every other
+// SetupFrom assertion in this file reaches it through `Get` (the detail path)
+// or a direct pool query. None read it off a Summary.
+//
+// The nil check is the sharp half. `SetupFrom` has no `omitempty`, so a nil
+// slice marshals to `"setup_from": null` — which violates the `required` +
+// `type: array` contract, and reaches the client as a null where it expects
+// an array. Silent server-side, loud in the app.
+func TestSummaryCarriesTheGraphEdge(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	seed, err := SeedData()
+	if err != nil {
+		t.Fatalf("SeedData: %v", err)
+	}
+	if err := repo.UpsertAll(ctx, seed); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	list, err := repo.List(ctx, Filter{})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(list) < 400 {
+		t.Fatalf("listed %d techniques, expected the whole library", len(list))
+	}
+
+	var withEdges int
+	for _, s := range list {
+		// Never nil, even for the entries that genuinely have no edges: the
+		// column is NOT NULL DEFAULT '{}', and pgx decodes that to an empty
+		// non-nil slice. A nil here means the column left the summary.
+		if s.SetupFrom == nil {
+			t.Fatalf("%q has a nil setup_from on the summary — it marshals to "+
+				"null, violating the contract's required array", s.ID)
+		}
+		if len(s.SetupFrom) > 0 {
+			withEdges++
+		}
+	}
+
+	// Pinned low against ordinary library growth, high enough that a summary
+	// silently losing the column cannot pass.
+	if withEdges < 300 {
+		t.Errorf("only %d of %d summaries carry graph edges", withEdges, len(list))
+	}
+}
