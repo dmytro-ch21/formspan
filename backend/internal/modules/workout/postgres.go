@@ -80,8 +80,17 @@ const visibleTo = `(owner_user_id = $1 OR visibility = 'public')`
 // produce — a claim that is only true if every list has a ceiling. This was
 // the last one without one.
 //
-// `ORDER BY name, id` is already total, so the cap's membership is
-// deterministic and the response hashes stably.
+// The caller's OWN rows sort first, and that is what makes the cap safe rather
+// than merely deterministic. `visibleTo` mixes your workouts with every user's
+// public ones, so a plain `ORDER BY name, id` evicts alphabetically across
+// ownership: once 500 public workouts sort ahead of it, your own workout named
+// "Z…" silently vanishes from the default list. Measured — 501 public rows and
+// the survivors were the first 500 by name, regardless of owner. Ordering
+// `(owner_user_id = $1) DESC` first means the eviction lands on strangers'
+// content, which is the only kind anyone can afford to lose.
+//
+// `name, id` after it keeps the order total, so the cap's membership is stable
+// and the response hashes the same way twice.
 const maxWorkouts = 500
 
 func (r *PostgresRepository) List(ctx context.Context, userID string, f Filter) ([]Workout, error) {
@@ -107,7 +116,8 @@ func (r *PostgresRepository) List(ctx context.Context, userID string, f Filter) 
 
 	args = append(args, maxWorkouts)
 	rows, err := r.pool.Query(ctx, `SELECT `+workoutColumns+` FROM workouts WHERE `+
-		strings.Join(where, " AND ")+` ORDER BY name, id LIMIT $`+fmt.Sprint(len(args)), args...)
+		strings.Join(where, " AND ")+` ORDER BY (owner_user_id = $1) DESC, name, id
+		LIMIT $`+fmt.Sprint(len(args)), args...)
 	if err != nil {
 		return nil, fmt.Errorf("workout: list: %w", err)
 	}

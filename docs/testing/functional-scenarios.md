@@ -2667,6 +2667,19 @@ this is API-surface behaviour even though no endpoint changed.
   `Content-Encoding: gzip` on an empty 304 gets grafted onto a stored identity
   body. The damage lands in someone else's cache, never in a response anyone
   here would look at.
+- **`Cache-Control: no-store` opts a route out entirely** — no `ETag`, no
+  `304`, even against `If-None-Match: *`. `/v1/healthz` relies on it: a
+  constant body means a constant validator, so a prober would be answered
+  `304` for the life of the deployment while a checker asserting `200`
+  reported an outage that isn't happening.
+- **A handler-supplied validator must be user-scoped.** `Vary` does not
+  include `Authorization`, so a bare `max(updated_at)` over a shared table
+  would revalidate user B against user A's stored body. The body-hash default
+  cannot do this; nothing enforces it for a handler's own tag.
+- **The `Cache-Control` default reaches all four ETag paths** — handler tag set
+  before `WriteHeader`, mid-stream, after the last write, and the middleware's
+  own hash. The three handler paths commit the status line early, so the
+  header cannot be added afterwards and has to be set on each.
 - **The ETag comes with `Cache-Control: private, no-cache`.** Making responses
   revalidatable invites intermediaries that were not there before, and almost
   everything served is per-user data on an authenticated route.
@@ -2684,3 +2697,14 @@ this is API-surface behaviour even though no endpoint changed.
   match the `ORDER BY` supplies the order too, so removing the SQL tiebreak
   may not turn the test red; say that in the test rather than implying
   coverage that isn't there.
+- **A cap over a MULTI-OWNER list must sort the caller's own rows first.**
+  `workout.List` mixes your workouts with every user's public ones, so a plain
+  alphabetical cap evicts across ownership — your own workout named "Z…"
+  disappears once 500 public "A…" ones sort ahead of it. A count-only
+  assertion sees none of this; the fixture needs the caller's row to sort
+  last by name.
+- **Distinguish outcome from mechanism.** Two guards that produce the same
+  status code can both be deleted one at a time with the suite still green,
+  because each covers for the other. If a guard exists for a reason the status
+  code cannot show (streaming instead of buffering, say), assert that reason
+  directly or write down that the test does not pin it.

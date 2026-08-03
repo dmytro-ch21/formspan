@@ -228,6 +228,19 @@ func withCORS(next http.Handler) http.Handler {
 }
 
 func handleHealthz(w http.ResponseWriter, r *http.Request) {
+	// The one route that opts out of conditional GET, and the only one where
+	// caching is actively wrong. Its body is a constant, so its ETag would be
+	// constant forever — a prober sending If-None-Match would get 304 for the
+	// life of the deployment, and a checker asserting `status == 200` would
+	// report unhealthy with nothing wrong. A liveness probe wants proof the
+	// server produced a response, not proof it hasn't changed.
+	//
+	// `no-store` also removes the one response that RFC 9111 §3.5 does NOT
+	// protect from shared caches: this route carries no Authorization, so
+	// without it a CDN with a default TTL could keep serving `{"status":"ok"}`
+	// for a dead API. Setting it here rather than in the middleware because it
+	// is a property of what this endpoint MEANS, not of the transport.
+	w.Header().Set("Cache-Control", "no-store")
 	apihttp.WriteJSON(w, http.StatusOK, map[string]string{
 		"status":  "ok",
 		"service": "api",

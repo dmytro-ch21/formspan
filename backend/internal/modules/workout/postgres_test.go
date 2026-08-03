@@ -3,6 +3,7 @@ package workout
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -336,5 +337,67 @@ func TestInvalidTarget_IsInvalidInputNotInternal(t *testing.T) {
 		if strings.Contains(err.Error(), leak) {
 			t.Errorf("error leaks internal detail %q: %v", leak, err)
 		}
+	}
+}
+
+// The visible list mixes the caller's own workouts with EVERY user's public
+// ones, so it is the one list on the platform whose size is driven by total
+// user count. apihttp.ConditionalGet buffers response bodies to hash them,
+// which made that a memory ceiling rather than a latency smell — hence the
+// cap.
+//
+// A cap over a mixed-ownership list has a failure mode a plain count
+// assertion cannot see: order alphabetically and a user's own workout named
+// "Z…" is evicted by 500 strangers' workouts named "A…". Own rows sort first
+// for exactly that reason.
+func TestListCapDoesNotEvictTheCallersOwnWorkouts(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+
+	const owner = "user_cap_owner"
+	const stranger = "user_cap_stranger"
+	t.Cleanup(func() {
+		if _, err := pool.Exec(ctx,
+			`DELETE FROM workouts WHERE owner_user_id = ANY($1)`,
+			[]string{owner, stranger}); err != nil {
+			t.Logf("cleanup: %v", err)
+		}
+	})
+
+	// The caller's own workout sorts LAST alphabetically, so nothing but the
+	// ownership term can keep it in.
+	own := strengthWorkout("wk-cap-own", owner, VisibilityPrivate)
+	own.Name = "zzz last by name"
+	if _, err := repo.Create(ctx, own); err != nil {
+		t.Fatalf("create own: %v", err)
+	}
+
+	// Enough public workouts from someone else to fill the cap on their own.
+	for i := 0; i < maxWorkouts; i++ {
+		w := strengthWorkout(fmt.Sprintf("wk-cap-pub-%04d", i), stranger, VisibilityPublic)
+		w.Name = fmt.Sprintf("aaa public %04d", i)
+		if _, err := repo.Create(ctx, w); err != nil {
+			t.Fatalf("create public %d: %v", i, err)
+		}
+	}
+
+	got, err := repo.List(ctx, owner, Filter{})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(got) != maxWorkouts {
+		t.Fatalf("got %d workouts, want the ceiling of %d", len(got), maxWorkouts)
+	}
+	if got[0].ID != "wk-cap-own" {
+		t.Errorf("the caller's own workout is not first: got %s", got[0].ID)
+	}
+	found := false
+	for _, w := range got {
+		if w.ID == "wk-cap-own" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("the cap evicted the caller's own workout in favour of strangers' public ones")
 	}
 }

@@ -126,6 +126,29 @@ than emitting it and ignoring it. This is the seam a per-repository
 `max(updated_at)` validator drops into: it skips building the body as well,
 where the middleware only skips sending it.
 
+**Any such validator must be user-scoped.** `Vary` is `Accept-Encoding,
+Origin` — not `Authorization` — and a browser cache keys on URL + `Vary`. A
+bare `max(updated_at)` over a shared table is the obvious first draft and
+would revalidate user B against user A's stored body. The body-hash default is
+immune to this (different users, different bytes, different hash); a
+handler-supplied validator is not, and nothing enforces it.
+
+Every 200 carries **`Cache-Control: private, no-cache`** unless the handler set
+its own. `no-cache` is not "don't cache" — it is "cache, but revalidate before
+reuse", which is exactly the contract an ETag describes, and `private` keeps
+shared caches out of per-user data. RFC 9111 §3.5 already forbids a shared
+cache from storing an `Authorization`-carrying response, so this is defence in
+depth rather than the only thing standing between a proxy and someone's
+training log.
+
+A handler setting **`Cache-Control: no-store` opts out of conditional GET
+entirely** — no `ETag` is emitted and no `304` is returned, because a
+validator for reusing a response that must not be stored is a contradiction.
+`/v1/healthz` uses this: its body is a constant, so its validator would never
+change, and a liveness probe sending `If-None-Match` would be answered `304`
+for the life of the deployment while a checker asserting `200` reported an
+outage that wasn't happening.
+
 Browsers need two CORS headers for any of this: `If-None-Match` in
 `Access-Control-Allow-Headers` (it isn't safelisted, so the preflight rejects
 it otherwise) and `ETag` in `Access-Control-Expose-Headers` (JS cannot read a
@@ -141,6 +164,16 @@ produced — which is only a bound if every list has a ceiling, so the two that
 had none now do (`activity.ListByUser`, `workout.List`; both 500, both with a
 total `ORDER BY` so the cap's membership and the response hash are stable).
 **A new list endpoint without a `LIMIT` silently unbounds this property.**
+Note the +344 KB figure is anchored to `/v1/exercises` (~212 KB, the largest
+*today*); `/v1/workouts` is capped at 500 workouts × up to 200 items, so the
+ceiling is an order of magnitude above it. Still a ceiling — but the benchmark
+is not the worst case.
+
+A cap over a list that spans more than one owner needs one more thing:
+**sort the caller's own rows first.** `workout.List` mixes your workouts with
+every user's public ones, so ordering by name alone evicts alphabetically
+across ownership — your own workout named "Z…" disappears once 500 public ones
+sort ahead of it. Deterministic and correct are not the same property.
 
 Not supported behind this stack, deliberately: `Flusher`, `Hijacker`,
 `ReaderFrom`. Buffering to hash is incompatible with mid-response flushing,

@@ -12,6 +12,12 @@ info:
     per-operation choices, even though OpenAPI can only express them
     per-operation. Every GET returns a strong `ETag` and honours
     `If-None-Match` with a `304` — both are documented on each GET below.
+    Every such response also carries `Cache-Control: private, no-cache` —
+    "revalidate before reuse", which is the contract the `ETag` describes.
+    A route that opts out sends `Cache-Control: no-store` and no validator
+    (`/healthz` does, so a liveness probe is never answered `304`).
+
+
     And any response over ~1 KB is gzipped when the client sends
     `Accept-Encoding: gzip`; the `ETag` is computed from the *uncompressed*
     body, so it does not change with the encoding a client asks for.
@@ -1825,20 +1831,16 @@ paths:
       summary: Liveness check
       operationId: getHealthz
       security: []
-      parameters:
-        - $ref: "#/components/parameters/IfNoneMatch"
       responses:
         "200":
-          description: The API is up.
+          description: >
+            The API is up. Deliberately NOT conditional: it sends
+            `Cache-Control: no-store` and no `ETag`, so a liveness probe is
+            always answered with a fresh 200 rather than a 304.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Healthz"
-          headers:
-            ETag:
-              $ref: "#/components/headers/ETag"
-        "304":
-          $ref: "#/components/responses/NotModified"
 
   /me:
     get:

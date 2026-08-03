@@ -6208,14 +6208,25 @@ added here was mutation-checked — deleted, confirmed red, restored.
 
 ### Verified live
 
-Against the running API, not only in tests. `GET /v1/healthz` returns
-`ETag: "_fdCXnLztuTSo0buAHtRdg"` with `Cache-Control: private, no-cache`, and
-the whole revalidation matrix behaves on the wire: the exact tag, a `W/`
-weakened echo, `*`, and a comma list all return `304` with **0 body bytes**; a
-wrong tag returns `200` with 32. `HEAD` carries the same validator. Two
-separate `If-None-Match` field lines with the match in the *second* return
-`304`, which is the `Header.Values` fix confirmed rather than assumed. A `304`
-requested with `Accept-Encoding: gzip` comes back with no `Content-Encoding`.
+Against the running API, not only in tests. `GET /v1/healthz` initially served
+as the probe — it returned `ETag: "_fdCXnLztuTSo0buAHtRdg"` and the whole
+revalidation matrix behaved on the wire: the exact tag, a `W/` weakened echo,
+`*`, and a comma list all returned `304` with **0 body bytes**, while a wrong
+tag returned `200` with 32. `HEAD` carried the same validator. Two separate
+`If-None-Match` field lines with the match in the *second* returned `304`,
+confirming the `Header.Values` fix rather than assuming it. A `304` requested
+with `Accept-Encoding: gzip` came back with no `Content-Encoding`.
+
+That route has since opted out (`no-store`, below), and re-verified as such:
+`Cache-Control: no-store`, no `ETag`, and `200` with a body against `*`, the
+old tag, and a weakened echo alike.
+
+A trap worth recording, because it produced a confidently wrong reading for
+several minutes: killing `go run`'s PID does **not** kill the compiled binary
+it spawned. The second verification run silently answered from the *first*
+run's still-listening process, which predated the change — so the new
+behaviour looked broken while the unit test for it passed. `lsof -i :PORT -P
+-n` names the real process; kill that one.
 
 Every endpoint over the gzip threshold is behind auth while `/v1/healthz` is
 not, so the large-payload path is verified instead by

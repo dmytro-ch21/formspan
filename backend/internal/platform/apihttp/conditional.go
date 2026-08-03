@@ -45,6 +45,13 @@ import (
 // and honours it (see adoptHandlerETag), so per-repository validators are the
 // next step rather than something this forecloses.
 //
+// ONE CONSTRAINT ON THAT SEAM, because it is not obvious and the body-hash
+// design is immune to it: a handler-supplied validator MUST be user-scoped.
+// `Vary` is `Accept-Encoding, Origin` — not `Authorization` — and a browser
+// cache keys on URL + Vary. A bare `max(updated_at)` over a shared table is
+// the obvious first draft and would revalidate user B against user A's stored
+// body. A hash of the bytes cannot do that, because the bytes differ.
+//
 // And it costs MEMORY: the identity body is held whole in order to hash it.
 // Benchmarked at the size of the largest response above (BenchmarkStack…),
 // gzip path: 461 KB/op with Compress alone, 806 KB/op with both — so roughly
@@ -92,6 +99,17 @@ func ConditionalGet(next http.Handler) http.Handler {
 			return
 		}
 
+		// `no-store` is a handler saying this response must not be held
+		// anywhere, so a validator for reusing it is a contradiction. It is
+		// also the opt-out: /v1/healthz uses it because a constant body would
+		// otherwise get a validator that never changes, and a liveness probe
+		// sending If-None-Match would be answered 304 for the life of the
+		// deployment.
+		if hasNoStore(cw.Header().Get("Cache-Control")) {
+			cw.flush()
+			return
+		}
+
 		// The third ordering: an ETag set after the handler's LAST Write never
 		// reaches adoptHandlerETag, because nothing writes after it. Since
 		// this middleware has not set one at this point, any tag present is
@@ -117,9 +135,7 @@ func ConditionalGet(next http.Handler) http.Handler {
 		//
 		// Left alone if a handler set its own — a public reference endpoint
 		// that wants a max-age should be able to say so.
-		if w.Header().Get("Cache-Control") == "" {
-			w.Header().Set("Cache-Control", "private, no-cache")
-		}
+		setDefaultCacheControl(w.Header())
 
 		if matches(cw.ifNoneMatch, etag) {
 			// 304 carries no body, and RFC 9110 says it must not carry
@@ -132,6 +148,21 @@ func ConditionalGet(next http.Handler) http.Handler {
 		}
 		cw.flush()
 	})
+}
+
+func hasNoStore(cacheControl string) bool {
+	for _, d := range strings.Split(cacheControl, ",") {
+		if strings.EqualFold(strings.TrimSpace(d), "no-store") {
+			return true
+		}
+	}
+	return false
+}
+
+func setDefaultCacheControl(h http.Header) {
+	if h.Get("Cache-Control") == "" {
+		h.Set("Cache-Control", "private, no-cache")
+	}
 }
 
 // ifNoneMatch joins repeated field lines. Header.Get returns only the first,
@@ -171,12 +202,15 @@ func matches(header, etag string) bool {
 	if header == "" {
 		return false
 	}
-	if strings.TrimSpace(header) == "*" {
-		return true
-	}
 	etag = strings.TrimPrefix(etag, "W/")
 	for _, candidate := range strings.Split(header, ",") {
 		candidate = strings.TrimSpace(candidate)
+		// `*` means "any current representation", which for a 200 always
+		// matches. RFC 9110 has it sent alone; accepting it as a list member
+		// costs one comparison and removes a surprise.
+		if candidate == "*" {
+			return true
+		}
 		candidate = strings.TrimPrefix(candidate, "W/")
 		if candidate == etag {
 			return true
@@ -248,6 +282,11 @@ func (c *conditionalWriter) Write(p []byte) (int, error) {
 // after it streams straight through.
 func (c *conditionalWriter) adoptHandlerETag(etag string) {
 	c.passthrough = true
+	// Same default as the hashed path, and it matters MORE here: this is the
+	// branch a per-repository validator over user-scoped data will take, and
+	// adoptHandlerETag commits the status line, so nothing downstream can add
+	// it afterwards.
+	setDefaultCacheControl(c.Header())
 	if c.status == http.StatusOK && matches(c.ifNoneMatch, etag) {
 		c.status = http.StatusNotModified
 		// 304 carries no body, and must not claim a length for bytes that

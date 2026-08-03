@@ -303,9 +303,14 @@ func TestHandlerSuppliedETagIsHonouredNotJustEchoed(t *testing.T) {
 func TestHandlerETagSetAfterTheFirstWriteStillWins(t *testing.T) {
 	// Under stdlib this ETag would be silently dropped (headers are frozen at
 	// the first Write). Here the header write is deferred, so it is still in
-	// the map — and without an explicit re-check this middleware would quietly
-	// overwrite it with a body hash. compress.go carries the same fix for
-	// Content-Encoding.
+	// the map and gets honoured.
+	//
+	// Note what this does and does not pin. Deleting the mid-stream re-check
+	// in Write leaves this green, because the post-handler block also treats
+	// any ETag present as the handler's — the two overlap on the OUTCOME. What
+	// the re-check uniquely decides is the MECHANISM: with it the response
+	// streams through as passthrough, without it the bytes stay buffered. The
+	// separate assertion below is the one that can tell them apart.
 	const own = `"set-late"`
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, "first chunk ")
@@ -328,6 +333,112 @@ func TestHandlerETagSetAfterTheFirstWriteStillWins(t *testing.T) {
 	}
 	if got := readAll(t, revalidated); got != "" {
 		t.Errorf("304 carried a body: %q", got)
+	}
+}
+
+func TestAMidStreamETagStopsBuffering(t *testing.T) {
+	// The mechanism the outcome-level test above cannot see. Once the handler
+	// names its own validator there is nothing left to hash, so continuing to
+	// buffer would hold the whole body for no reason — which is the entire
+	// memory cost this middleware is charged with.
+	//
+	// Observed through the ResponseWriter: a passthrough response reaches the
+	// underlying writer DURING the handler, a buffered one only after it
+	// returns.
+	spy := &writeSpy{ResponseWriter: httptest.NewRecorder()}
+	req := httptest.NewRequest(http.MethodGet, "/x", nil)
+
+	var duringHandler int
+	ConditionalGet(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "first chunk ")
+		w.Header().Set("ETag", `"mid-stream"`)
+		_, _ = io.WriteString(w, "second chunk")
+		duringHandler = spy.writes
+	})).ServeHTTP(spy, req)
+
+	if duringHandler == 0 {
+		t.Error("nothing reached the underlying writer while the handler ran — " +
+			"the response was buffered despite the handler owning the validator")
+	}
+}
+
+type writeSpy struct {
+	http.ResponseWriter
+	writes int
+}
+
+func (s *writeSpy) Write(p []byte) (int, error) {
+	s.writes++
+	return s.ResponseWriter.Write(p)
+}
+
+func TestNoStoreOptsOutOfValidatorsEntirely(t *testing.T) {
+	// A validator exists so a response can be REUSED. On a response the
+	// handler has said must not be stored, one is a contradiction — and on
+	// /v1/healthz specifically it is harmful: the body is constant, so the
+	// ETag would never change, and a prober sending If-None-Match would be
+	// answered 304 for the life of the deployment while a checker asserting
+	// 200 reported an outage that isn't happening.
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = io.WriteString(w, `{"status":"ok"}`)
+	}
+
+	res := cond(t, http.MethodGet, "", handler)
+	if etag := res.Header.Get("ETag"); etag != "" {
+		t.Errorf("no-store response got an ETag: %q", etag)
+	}
+	if got := readAll(t, res); got != `{"status":"ok"}` {
+		t.Errorf("body = %q", got)
+	}
+	if cc := res.Header.Get("Cache-Control"); cc != "no-store" {
+		t.Errorf("Cache-Control = %q, want the handler's no-store", cc)
+	}
+
+	// And `*` must not 304 it either — that is the header a naive prober sends.
+	star := cond(t, http.MethodGet, "*", handler)
+	if star.StatusCode != http.StatusOK {
+		t.Errorf("If-None-Match: * against a no-store response returned %d, want 200", star.StatusCode)
+	}
+	if got := readAll(t, star); got == "" {
+		t.Error("a no-store response lost its body to a conditional request")
+	}
+}
+
+func TestAHandlerETagAlsoGetsTheCacheControlDefault(t *testing.T) {
+	// adoptHandlerETag commits the status line, so nothing downstream can add
+	// this afterwards — it has to be set on that path explicitly. And this is
+	// the path a per-repository validator over USER-SCOPED data will take, so
+	// it is the one that needs `private` most.
+	for name, handler := range map[string]http.HandlerFunc{
+		"before WriteHeader": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("ETag", `"own"`)
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.WriteString(w, "body")
+		},
+		"mid-stream": func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.WriteString(w, "part ")
+			w.Header().Set("ETag", `"own"`)
+			_, _ = io.WriteString(w, "two")
+		},
+		"after the last write": func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.WriteString(w, "body")
+			w.Header().Set("ETag", `"own"`)
+		},
+	} {
+		res := cond(t, http.MethodGet, "", handler)
+		if cc := res.Header.Get("Cache-Control"); cc != "private, no-cache" {
+			t.Errorf("%s: Cache-Control = %q, want \"private, no-cache\"", name, cc)
+		}
+	}
+}
+
+func TestStarInsideAListStillMatches(t *testing.T) {
+	res := cond(t, http.MethodGet, `"other", *`, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "anything")
+	})
+	if res.StatusCode != http.StatusNotModified {
+		t.Errorf(`If-None-Match: "other", * returned %d, want 304`, res.StatusCode)
 	}
 }
 
