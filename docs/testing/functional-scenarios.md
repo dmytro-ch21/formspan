@@ -2618,3 +2618,19 @@ this is API-surface behaviour even though no endpoint changed.
 - **The access log still records the right status.** The header write is
   deferred past the handler returning; if that ordering breaks, every log line
   reports the wrong code while responses look fine.
+
+## Conditional GET (`internal/platform/apihttp`)
+
+- **A repeat request returns 304 with no body.** Fetch, keep the `ETag`, send
+  it back as `If-None-Match`. Assert zero bytes — that is the entire feature.
+- **A changed body returns 200 and a different ETag.** Otherwise clients pin
+  themselves to stale content forever.
+- **The ETag does not change with `Accept-Encoding`.** It is computed inside
+  the compression middleware for exactly this reason; if it moves, every
+  gzip-capable client is a permanent cache miss and the feature does nothing.
+- **Never 304 a write.** A conditional POST/PUT/PATCH/DELETE must proceed
+  normally — a 304 tells the client its write was a no-op.
+- **Never 304 an error.** A 404 or 500 must keep its status, its body, and
+  carry no ETag, or a client caches the failure.
+- **A 304 carries no `Content-Length`.** A declared length with no bytes makes
+  a client hang waiting for them.

@@ -101,3 +101,21 @@ a gzipped body to a client that cannot read it.
 
 Clients need no change: `fetch` and Go's `http.Client` both decompress
 transparently.
+
+## Conditional GET
+
+`GET`/`HEAD` responses with status 200 carry a strong `ETag` (a hash of the
+body). A client echoing it back in `If-None-Match` gets `304 Not Modified`
+with no body — reference content changes only on deploy, so repeat fetches
+cost a header exchange.
+
+Only 200s. A 304 on an error would cache the failure, and a 304 on a write
+would tell the client its write was a no-op.
+
+`ConditionalGet` runs **inside** `Compress` so the ETag is computed over the
+identity body — otherwise it would change with `Accept-Encoding` and every
+gzip-capable client would be a permanent cache miss.
+
+This saves bandwidth, not database work: the query still runs. A validator
+derived from `max(updated_at)` would skip the query too, and is the natural
+next step.

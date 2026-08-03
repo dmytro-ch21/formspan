@@ -5983,6 +5983,60 @@ test rather than an observation of the deployed path.
 No `ETag`/conditional GET. Reference content changes only on deploy and every
 row carries `updated_at`, so `max(updated_at)` is a ready-made validator —
 the natural next step, and a bigger saving still for repeat opens.
+## 2026-08-03 — Conditional GET
+
+`apihttp.ConditionalGet`, the other half of the compression saving and the
+larger one for the case that actually recurs. Compression took the technique
+list from ~175 KB to ~17 KB; this takes the *repeat* fetch to a ~150-byte
+header exchange.
+
+Most of what this API serves on a cold open is reference content that changes
+only on deploy — the 466-technique library, the position glossary, the
+exercise catalog, the rulesets.
+
+### Why a body hash and not `max(updated_at)`
+
+The cheaper design computes a validator from the data *before* running the
+query and skips the query too. It was rejected for two reasons. It needs a
+per-module `LastModified` on every repository that wants it, and
+`updated_at` does not cover the parts of a response that are not rows — the
+derived volume summary, the embedded ruleset object, a filter applied in SQL.
+A hash of the bytes about to be sent cannot disagree with what it describes.
+
+The cost is honest and worth stating: **this saves bandwidth, not database
+work.** The query still runs. For a 175 KB payload over a phone connection
+that is the dominant cost, and it is the half fixable without touching every
+module. Per-repository validators remain the next step, not a replacement.
+
+### The order is load-bearing
+
+`ConditionalGet` sits **inside** `Compress`, so it hashes the identity body.
+Outside, the ETag would change with `Accept-Encoding` and every gzip-capable
+client — which is all of them — would be a permanent cache miss. A test
+pins that the plain and gzipped responses share one ETag, and that a 304
+comes back out through the compressor with no body and no gzip framing.
+
+### Scope, and the two things that would be bugs
+
+GET and HEAD only, 200 only.
+
+- **A 304 on a POST** would be a silent data-loss bug: the client believes
+  its write was a no-op.
+- **A 304 on a 404 or 500** would cache the failure — the client keeps
+  treating a stale copy as valid because the server said nothing changed.
+
+Both are tested. Also: `*` matches, a comma list matches, a `W/`-prefixed
+echo matches (If-None-Match comparison is explicitly weak), a handler's own
+ETag is left alone, and a 304 carries no `Content-Length` — a declared length
+with no bytes behind it is what makes a client hang waiting for them.
+
+### Verified live
+
+Against the running API, not only in tests: first request returns
+`ETag: "_fdCXnLztuTSo0buAHtRdg"`, the repeat with `If-None-Match` returns
+`304 Not Modified` with no body. That is the verification the compression
+entry above could not get, because every endpoint over the gzip threshold is
+behind auth while `/v1/healthz` is not.
 
 ## Open items / known gaps as of this entry
 

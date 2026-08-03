@@ -164,7 +164,7 @@ func main() {
 	recorder := health.NewRecorder(healthRepo, slowRequestAfter, logger)
 
 	logger.Info("api listening", "port", port, "slow_request_ms", slowRequestAfter.Milliseconds())
-	if err := http.ListenAndServe(":"+port, httplog.Middleware(logger, recorder.Observe)(apihttp.Compress(withCORS(mux)))); err != nil {
+	if err := http.ListenAndServe(":"+port, httplog.Middleware(logger, recorder.Observe)(apihttp.Compress(apihttp.ConditionalGet(withCORS(mux))))); err != nil {
 		logger.Error("server exited", "err", err)
 		os.Exit(1)
 	}
