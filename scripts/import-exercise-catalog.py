@@ -382,14 +382,34 @@ def carry_to_position(records: list, existing_path) -> list:
     if not existing_path.exists():
         return records
     prior = {x["id"]: x.get("to_position") for x in json.loads(existing_path.read_text())}
-    kept = 0
+    available = sum(1 for v in prior.values() if v)
+    out, kept = [], 0
     for r in records:
         v = prior.get(r["id"])
-        if v:
-            r["to_position"] = v
-            kept += 1
+        if not v:
+            out.append(r)
+            continue
+        # Rebuilt rather than assigned, so the key lands after
+        # position_detail where the committed artifact has it. A plain
+        # assignment appends it, and every carried record then differs in key
+        # ORDER — the artifact stops being byte-reproducible and a 149-record
+        # reordering diff hides any real content change in the same import.
+        rebuilt = {}
+        for k, val in r.items():
+            rebuilt[k] = val
+            if k == "position_detail":
+                rebuilt["to_position"] = v
+        out.append(rebuilt)
+        kept += 1
+    if kept < available:
+        # A renamed id in the sheet silently drops a hand-authored
+        # destination that exists nowhere else. Fail the import instead.
+        sys.exit(
+            f"to_position: carried {kept} of {available} — an id was renamed "
+            f"and destinations would be lost"
+        )
     print(f"to_position: {kept} destinations carried forward")
-    return records
+    return out
 
 
 def apply_taxonomy(records: list) -> list:

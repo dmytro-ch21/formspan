@@ -5875,10 +5875,12 @@ single-leg entry leaves you standing having not yet finished. Recording
 mean one unambiguous thing. A client must not infer a self-loop from a
 missing key.
 
-### Lessons applied rather than rediscovered
+### Lessons half-applied, and the half that was missed
 
-Everything the `function` column had to learn under review was applied up
-front this time: `to_position` is in the `IS DISTINCT FROM` tuple (a field
+The fixes `function` learned under review were applied up front. **The tests
+that hold them were not** — which is the same gap the immediately preceding
+commit had just closed for `function`, reproduced one column over, and
+review caught it: `to_position` is in the `IS DISTINCT FROM` tuple (a field
 missing from it updates nothing and no delta-syncing client ever learns —
 the `completed`-flag shape, found twice already); validated in Go with no
 CHECK per 000021; **no index** per 000018, because nothing filters on it yet
@@ -5886,6 +5888,29 @@ and an unused index reads as reassurance; on the summary payload *and* its
 OpenAPI schema; normalised at the client parse boundary; and carried forward
 by the importer, because the spreadsheet does not have this column and a
 re-import would otherwise silently blank every authored destination.
+
+What was missed, and is now fixed: all three of those guards were written
+correctly and held there by **nothing**. Deleting `to_position` from the
+tuple left the entire suite green while writing zero destinations on the
+upgrade path; replacing the validator with `case false:` did the same; and
+the new test's headline assertion was unreachable, because `SeedData()` had
+already validated the slice the assertion's own map was built from. There is
+a reseed test and a validator case now, both mutation-checked.
+
+Two more the same review found. `knownPositions` was package-level and only
+ever grew, which made `validate()` **order-dependent** — a bad destination
+was rejected in a clean process and accepted after any earlier `SeedData()`,
+so a validator test would pass alone and go silently weaker in the suite —
+and it was a concurrent map write under `-race`. It is a local now. And
+`carry_to_position` preserved the values but appended the key, so all 149
+records differed in key order and the artifact stopped being byte-
+reproducible **one commit after that property was established**. It rebuilds
+the dict now, and fails the import outright if a renamed id would drop a
+destination that exists nowhere else.
+
+The pattern worth naming: applying a fix is not applying the lesson. The
+lesson was "a guard nothing exercises is a guard that gets deleted", and it
+had to be learned twice.
 
 ### Open
 

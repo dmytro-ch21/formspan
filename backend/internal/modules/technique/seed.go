@@ -76,10 +76,22 @@ func RulesetSeedData() ([]Ruleset, error) {
 var validGiNoGi = map[string]bool{"Both": true, "Gi Only": true, "No-Gi Only": true}
 
 func validate(techniques []Technique) error {
-	// Built before the loop below reads it: a to_position may name any
-	// position the library uses, including one only introduced by a later
-	// entry in the same file.
-	indexPositions(techniques)
+	// The `techniques.position` vocabulary — the destinations a to_position
+	// may name. Derived from the library itself rather than hardcoded: the
+	// set grew by one when leg entanglement was promoted, and a second list
+	// to keep in step is a second list to forget.
+	//
+	// LOCAL, deliberately. As package state it never reset and only ever
+	// grew, which made validate() order-dependent — a bad to_position was
+	// rejected in a clean process and accepted after any earlier SeedData(),
+	// so a validator test would pass alone and go silently weaker in the
+	// suite. It was also a concurrent map write under -race.
+	known := make(map[string]bool, len(techniques))
+	for _, t := range techniques {
+		if t.Position != "" {
+			known[t.Position] = true
+		}
+	}
 
 	seen := make(map[string]bool, len(techniques))
 	for _, t := range techniques {
@@ -92,7 +104,7 @@ func validate(techniques []Technique) error {
 			return fmt.Errorf("technique: %q needs name, category, and position", t.ID)
 		case !validGiNoGi[t.GiNoGi]:
 			return fmt.Errorf("technique: %q has unknown gi_no_gi %q", t.ID, t.GiNoGi)
-		case t.ToPosition != "" && !knownPositions[t.ToPosition]:
+		case t.ToPosition != "" && !known[t.ToPosition]:
 			// A typo here is SILENT and total: "Side Control" instead of
 			// "Side Control - Top" produces an edge pointing at a position
 			// that does not exist, so every traversal through it returns
@@ -134,20 +146,8 @@ var validFamilies = map[string]bool{
 //
 // Same duplication warning as validFamilies: this set is also an enum on the
 // Technique schema in contracts/public.openapi.yaml.
-// knownPositions is the `techniques.position` vocabulary — the destinations a
-// to_position may name. Derived from the library itself rather than hardcoded:
-// the set grew by one when leg entanglement was promoted, and a second list to
-// keep in step is a second list to forget.
-var knownPositions = map[string]bool{}
-
-func indexPositions(techniques []Technique) {
-	for _, t := range techniques {
-		if t.Position != "" {
-			knownPositions[t.Position] = true
-		}
-	}
-}
-
+//
+//nolint:gochecknoglobals // vocabulary, not state
 var validFunctions = map[string]bool{
 	"advance": true, "reverse": true, "escape": true,
 	"control": true, "finish": true,
