@@ -175,6 +175,12 @@ describe('removeDrilledTechnique', () => {
       { category: 'sweep', event: 'scored', position: 'Half Guard', technique_id: null, count: 4 },
       { category: 'pass', event: 'conceded', position: 'Guard', technique_id: null, count: 2 },
     ];
+    // Only the `null` case does work against the guard — every fixture row
+    // carries an explicit null, so `=== undefined` never matches anyway. null
+    // IS the reachable shape (the API sends it; a locally-authored drilled row
+    // always has a real id). The other two are cheap breadth, not three
+    // independent proofs, and this file has enough history of assertions
+    // satisfied by the wrong thing to be worth saying so.
     expect(removeDrilledTechnique(serverShaped, null)).toEqual(serverShaped);
     expect(removeDrilledTechnique(serverShaped, undefined)).toEqual(serverShaped);
     expect(removeDrilledTechnique(serverShaped, '')).toEqual(serverShaped);
@@ -197,6 +203,21 @@ describe('removeDrilledTechnique', () => {
 });
 
 describe('techniqueOutcomeCount', () => {
+  it('returns 0 for a nullish id rather than summing every untagged row', () => {
+    // The funnel side of the partition property. Both call sites currently
+    // launder the value before it gets here, so without this the guard is
+    // protected by its callers rather than the other way round — and a third
+    // call site that forgets would silently attribute the whole live grid to
+    // one technique.
+    const untagged: Tag[] = [
+      { category: 'sweep', event: 'scored', position: 'Guard', count: 4 },
+      { category: 'sweep', event: 'scored', position: 'Guard', technique_id: null, count: 2 },
+    ];
+    expect(techniqueOutcomeCount(untagged, null, 'scored')).toBe(0);
+    expect(techniqueOutcomeCount(untagged, undefined, 'scored')).toBe(0);
+    expect(techniqueOutcomeCount(untagged, '', 'scored')).toBe(0);
+  });
+
   it('sums counts across rows and never crosses technique or event', () => {
     const tags: Tag[] = [
       { ...armbar, event: 'attempted', count: 2 },

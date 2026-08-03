@@ -2374,45 +2374,6 @@ included, and a no-op on Android where Expo's `resize` mode already handles it.
 The content also still scrolls by hand, so the worst case is inelegant rather
 than unreachable — which is the property to want when you can't see the screen.
 
-### What review caught, and it was the dangerous kind
-
-`removeDrilledTechnique` lost the `event === 'drilled'` guard the inline
-filter it replaced had carried, leaving the technique-id match as the only
-bound. A nullish id then matches every **untagged** row — and the API sends
-`"technique_id": null` on every one of them, because the Go field has no
-`omitempty`. So removing a drilled row that had lost its technique deleted the
-live grid's entire "You" column. Reachable, not theoretical: migration 000025
-sets `technique_id` NULL when a technique is retired from the library, on
-purpose, so the athlete's record of having drilled it survives. And
-`PUT /bjj/sessions/{id}` replaces the tag set wholesale, so it would have
-synced to the server and every other device.
-
-The test named for that exact property could not catch it. Its only untagged
-fixture row was `conceded`, which the guard excludes independently of the id
-match — replacing the whole function body with `filter(t => t.event ===
-'conceded')` kept it green. Every fixture in the file also omitted
-`technique_id` entirely (giving `undefined`, the locally-authored shape)
-rather than the `null` the API actually sends, which is where the bug lived.
-
-That is three in a row now — the conditional-GET order test, the activity
-LIMIT tie test, and this — where the test written to demonstrate a property
-was satisfied by something other than that property. The common shape: the
-fixture accidentally contains the value the broken code produces.
-
-One thing worth stating rather than papering over: with the nullish-id guard
-in place, the explicit `drilled | attempted | scored` allow-list is
-**equivalent** to `!== conceded`, since there are only four events. No test
-distinguishes them and none pretends to. It is written the long way so a fifth
-event cannot silently join the set this function deletes.
-
-Review also caught the read-back screen making a technique-tagged `conceded`
-row invisible everywhere — a row the delete path goes out of its way to
-preserve — and, because `hasAnyDetail` counted only what was displayed, a
-reflection holding nothing else would have rendered "No detail recorded" on
-the screen that exists because detail was being recorded and never shown. The
-grid now carries those rows: there is no editor for them to disagree with, so
-it is the honest place for them.
-
 ### Gaps this leaves
 
 - **No password reset**, which is now the most urgent hole in mobile auth and is
@@ -6390,8 +6351,9 @@ change would have broken it two ways: its live grid summed technique-tagged
 number than the wizard for the same session with nothing to explain the gap;
 and `attempted` appeared nowhere on it at all. The second one is the funnier
 failure — recreating the exact write-but-never-read defect this feature exists
-to fix, one screen along. Both fixed here: the grid mirrors `tagCount`, and
-the Drilled section carries each technique's tried/landed numbers.
+to fix, one screen along. Both fixed here: the grid mirrors `tagCount` for
+`scored`, and the Drilled section carries each technique's tried/landed
+numbers. Not for `conceded` — see below.
 
 ### No backend change
 
@@ -6399,6 +6361,45 @@ the Drilled section carries each technique's tried/landed numbers.
 table already had the columns. The whole PR is `apps/mobile`. Worth recording
 because it is what the schema-first decision bought: the expensive half was
 done months ago, on purpose, and the feature landed as a pure client change.
+
+### What review caught, and it was the dangerous kind
+
+`removeDrilledTechnique` lost the `event === 'drilled'` guard the inline
+filter it replaced had carried, leaving the technique-id match as the only
+bound. A nullish id then matches every **untagged** row — and the API sends
+`"technique_id": null` on every one of them, because the Go field has no
+`omitempty`. So removing a drilled row that had lost its technique deleted the
+live grid's entire "You" column. Reachable, not theoretical: migration 000025
+sets `technique_id` NULL when a technique is retired from the library, on
+purpose, so the athlete's record of having drilled it survives. And
+`PUT /bjj/sessions/{id}` replaces the tag set wholesale, so it would have
+synced to the server and every other device.
+
+The test named for that exact property could not catch it. Its only untagged
+fixture row was `conceded`, which the guard excludes independently of the id
+match — replacing the whole function body with `filter(t => t.event ===
+'conceded')` kept it green. Every fixture in the file also omitted
+`technique_id` entirely (giving `undefined`, the locally-authored shape)
+rather than the `null` the API actually sends, which is where the bug lived.
+
+That is three in a row now — the conditional-GET order test, the activity
+LIMIT tie test, and this — where the test written to demonstrate a property
+was satisfied by something other than that property. The common shape: the
+fixture accidentally contains the value the broken code produces.
+
+One thing worth stating rather than papering over: with the nullish-id guard
+in place, the explicit `drilled | attempted | scored` allow-list is
+**equivalent** to `!== conceded`, since there are only four events. No test
+distinguishes them and none pretends to. It is written the long way so a fifth
+event cannot silently join the set this function deletes.
+
+Review also caught the read-back screen making a technique-tagged `conceded`
+row invisible everywhere — a row the delete path goes out of its way to
+preserve — and, because `hasAnyDetail` counted only what was displayed, a
+reflection holding nothing else would have rendered "No detail recorded" on
+the screen that exists because detail was being recorded and never shown. The
+grid now carries those rows: there is no editor for them to disagree with, so
+it is the honest place for them.
 
 ### Gaps this leaves
 
@@ -6414,6 +6415,15 @@ done months ago, on purpose, and the feature landed as a pure client change.
   untagged live grid. Fine while the funnel's purpose is measuring the
   drilled→attempted drop-off specifically; wrong if the goal becomes complete
   per-technique history.
+- **The two displays partition the tag list; the evidence stream does not.**
+  Tap "Landed 1" on the armbar row and then "Submissions / Hit" once, for one
+  armbar, and two `scored` rows exist for a single real event — one
+  technique-tagged, one not. Each screen renders them correctly and
+  separately, so nothing looks wrong anywhere. The follow-up web view has to
+  pick a convention (technique-tagged rows are the specific record, untagged
+  the catch-all) rather than sum both, or the same armbar counts twice.
+  Recorded here so that lands as a known decision and not as a data bug
+  discovered later.
 - **A drilled row whose technique was retired gets no counters at all.** It
   renders as a named row with no funnel, because outcomes cannot attach to
   nothing. Correct, but it means retiring a library entry silently ends the

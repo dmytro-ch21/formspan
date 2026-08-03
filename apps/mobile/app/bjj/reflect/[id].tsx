@@ -406,7 +406,7 @@ function DrilledStep({
                     outcomes cannot attach to nothing. Rendering counters
                     there would give two controls that look live, read 0
                     forever, and tell VoiceOver they can be tapped. */}
-                {t.technique_id && (
+                {!!t.technique_id && (
                 <RNView style={styles.drilledOutcomes}>
                   {FUNNEL_OUTCOMES.map((o) => (
                     <Counter
@@ -717,7 +717,16 @@ function familyOf(position: string): string {
 
 function nameFor(all: TechniqueSummary[], id: string | null | undefined): string {
   if (!id) return 'Technique';
-  return all.find((t) => t.id === id)?.name ?? 'Technique';
+  // Fall back to the ID before the placeholder. `fetchTechniques` caches only
+  // in module memory, so on a COLD OFFLINE launch — reopening a reflection at
+  // the gym, which is the flow this app exists for — `all` is empty and every
+  // row rendered as the same word "Technique". That makes the counters
+  // unbindable to a technique for a sighted user and turns the funnel
+  // counters' accessibility context into "Technique, Tried: 0" repeated down
+  // the list, which is exactly the ambiguity that context prop was added to
+  // remove. The ids are readable slugs (`armbar-from-guard`), so they are a
+  // genuinely useful last resort. Matches the read-back screen's `nameOf`.
+  return all.find((t) => t.id === id)?.name ?? id;
 }
 
 const styles = StyleSheet.create({

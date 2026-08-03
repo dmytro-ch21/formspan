@@ -2454,10 +2454,28 @@ most of the value is in the floor working alone.
   untagged rows, the drilled step owns technique-tagged ones. If either
   counts the other's, a number appears that its own control refuses to move
   and nothing explains why.
-- **The session read-back screen must agree with the wizard**, on both halves:
-  its live grid excludes technique-tagged rows the same way, and the Drilled
-  section shows each technique's tried/landed. Getting the second one wrong
+- **The session read-back screen must agree with the wizard on `scored`**: its
+  grid excludes technique-tagged `scored` the same way, and the Drilled section
+  shows each technique's tried/landed instead. Getting the second half wrong
   recreates the exact write-but-never-read defect the funnel exists to fix.
+- **...but NOT on `conceded`, deliberately.** The read-back grid *includes*
+  technique-tagged `conceded` rows. No screen in this app can author one, so
+  there is no editor for the grid to disagree with — and filtering it out
+  would leave that row with no display surface anywhere, saved and synced and
+  invisible. A test written from "the grid mirrors tagCount" would fail
+  against correct code here.
+- **Every tag must be displayed somewhere.** The stronger property behind both
+  bullets above, and the one worth testing directly: take a reflection with
+  one row of every (event × tagged/untagged) combination and assert each is
+  visible on the read-back screen. `hasAnyDetail` must agree — a reflection
+  holding only a technique-tagged `conceded` row must not render "No detail
+  recorded".
+- **Do not record the same live event twice.** Tapping "Landed" on the armbar
+  row *and* "Submissions / Hit" in the live grid, for one armbar, writes two
+  `scored` rows — one technique-tagged, one not. Both screens show them
+  correctly and separately, so nothing looks wrong; any cross-session view
+  that sums `scored` across both shapes double-counts. Pick one convention
+  and test it.
 - Leaving every counter at zero is a valid, meaningful answer — "drilled,
   never tried live" is the finding, not an empty cell.
 
