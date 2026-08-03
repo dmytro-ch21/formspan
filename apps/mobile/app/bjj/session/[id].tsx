@@ -1,11 +1,12 @@
 import { useAuth } from '@clerk/clerk-expo';
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, TextInput, View as RNView } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, TextInput, View as RNView } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import {
+  getDetail,
   KINDS,
   LIVE_ROWS,
   describeRPE,
@@ -14,6 +15,9 @@ import {
   type Tag,
 } from '@/lib/bjjSession';
 import {
+  deleteLocalSession,
+  saveLocalBjjDetail,
+  finishLocalSession,
   readLocalBjjDetail,
   readLocalSession,
   renameLocalSession,
@@ -58,19 +62,46 @@ export default function BjjSessionScreen() {
   const [loading, setLoading] = useState(true);
   const [techniques, setTechniques] = useState<TechniqueSummary[]>([]);
 
+  const [error, setError] = useState<string | null>(null);
+  // True once the server has been asked and had nothing either.
+  const [remoteMissing, setRemoteMissing] = useState(true);
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState('');
 
   const load = useCallback(async () => {
     if (!userId || !id) return;
-    const [s, d] = await Promise.all([
-      readLocalSession(userId, id),
-      readLocalBjjDetail(userId, id),
-    ]);
-    setSession(s);
-    setDetail(d);
-    setLoading(false);
-  }, [userId, id]);
+    try {
+      const [s, d] = await Promise.all([
+        readLocalSession(userId, id),
+        readLocalBjjDetail(userId, id),
+      ]);
+      setSession(s);
+      setDetail(d);
+
+      // The blob is local-only: the pull writes the session row but not
+      // `bjj_json`, so after a reinstall or on a second device a reflection
+      // the SERVER is holding reads as "nothing recorded" — the same
+      // write-only failure this screen exists to fix, displaced one device
+      // over. Fall back to the API and cache what comes back, so the next
+      // open is offline-fast and the wizard can edit it.
+      if (!d) {
+        setRemoteMissing(false);
+        try {
+          const { detail: fromServer } = await getDetail(getToken, id);
+          setDetail(fromServer);
+          await saveLocalBjjDetail(userId, id, fromServer);
+        } catch {
+          // Offline, or genuinely no reflection. Either way the floor still
+          // rendered; `remoteMissing` only decides which sentence shows.
+          setRemoteMissing(true);
+        }
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [userId, id, getToken]);
 
   // On focus, not just on mount: the whole point of this screen is that the
   // wizard is reachable from it, and coming back from an edit to the numbers
@@ -97,6 +128,39 @@ export default function BjjSessionScreen() {
       cancelled = true;
     };
   }, [getToken]);
+
+  /**
+   * Delete and Finish, which live here because nothing else offers them.
+   *
+   * Both had exactly one call site in the app — the strength session screen —
+   * and routing BJJ away from it silently removed them. A double-logged class
+   * would have been permanent on the phone, still feeding mat time and the
+   * consistency grid, with no way to remove it.
+   */
+  function confirmDelete() {
+    if (!userId || !id) return;
+    Alert.alert('Delete this session?', 'It will be removed everywhere, not just on this phone.', [
+      { text: 'Keep it', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => {
+          void (async () => {
+            await deleteLocalSession(userId, id);
+            requestSync('bjj-session-deleted');
+            router.back();
+          })();
+        },
+      },
+    ]);
+  }
+
+  async function finishNow() {
+    if (!userId || !id) return;
+    await finishLocalSession(userId, id);
+    await load();
+    requestSync('bjj-session-finished');
+  }
 
   async function commitRename() {
     if (!userId || !id) return;
@@ -140,6 +204,13 @@ export default function BjjSessionScreen() {
         .filter(Boolean)
         .join(' · ')
     : '';
+  const hasAnyDetail =
+    drilled.length + live.length > 0 ||
+    !!detail?.note ||
+    !!detail?.body_note ||
+    !!detail?.academy ||
+    detail?.session_rpe != null ||
+    detail?.gi != null;
   const nameOf = (t: Tag) =>
     techniques.find((x) => x.id === t.technique_id)?.name ?? t.technique_id ?? '';
 
@@ -159,6 +230,9 @@ export default function BjjSessionScreen() {
             style={styles.renameInput}
             placeholder="Session name"
             placeholderTextColor={vola.textMuted}
+            // Matches the server's maxNameLen. A longer name is a permanent
+            // 400, and a permanent rejection on the push path strands the row.
+            maxLength={120}
             returnKeyType="done"
             onSubmitEditing={commitRename}
             accessibilityLabel="Session name"
@@ -273,12 +347,42 @@ export default function BjjSessionScreen() {
         </Text>
       </Pressable>
 
-      {drilled.length + live.length === 0 && (
+      {/* Only for a session with no end time. A BJJ session is normally
+          logged complete, so this is the recovery path for one that was not —
+          without it, Today's "in progress" card opens a screen with no way to
+          close the session. */}
+      {!session.ended_at && (
+        <Pressable
+          onPress={finishNow}
+          style={styles.cta}
+          accessibilityRole="button"
+          testID="bjj-session-finish"
+        >
+          <Text style={styles.ctaText}>Finish this session</Text>
+        </Pressable>
+      )}
+
+      <Pressable
+        onPress={confirmDelete}
+        style={styles.destructive}
+        accessibilityRole="button"
+        testID="bjj-session-delete"
+      >
+        <Text style={styles.destructiveText}>Delete session</Text>
+      </Pressable>
+
+      {/* Counts EVERY field the wizard writes, not just the tags: skipping
+          both tag steps and typing a body note used to render the note above
+          and "no detail recorded" beneath it, on the screen built to answer
+          "I can't see any logs I've entered". */}
+      {!hasAnyDetail && (
         <Text style={styles.footnote}>
-          No detail recorded — the session still counts. Add it any time; there’s no window
-          that closes.
+          {remoteMissing
+            ? 'No detail recorded — the session still counts. Add it any time; there’s no window that closes.'
+            : 'Detail hasn’t reached this device yet. It’s safe on the server; pull to refresh once you have signal.'}
         </Text>
       )}
+      {!!error && <Text style={styles.footnote}>Couldn’t load everything: {error}</Text>}
     </ScrollView>
   );
 }
@@ -383,5 +487,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   ctaText: { fontSize: 16, fontWeight: '700', color: vola.lime },
+  destructive: {
+    marginTop: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  destructiveText: { fontSize: 15, fontWeight: '600', color: vola.danger },
   footnote: { fontSize: 13, color: vola.textMuted, marginTop: 12, lineHeight: 19 },
 });

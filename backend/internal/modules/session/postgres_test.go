@@ -1281,9 +1281,15 @@ func TestBestOneRMs_EffortPathsMatchTheEstimator(t *testing.T) {
 // create is ON CONFLICT DO NOTHING, so replaying it does NOT carry a later
 // rename, and the outbox marked the row clean regardless.
 func TestRenameChangesOnlyTheNameAndOnlyForTheOwner(t *testing.T) {
-	repo, _ := newTestRepo(t)
+	repo, pool := newTestRepo(t)
 	ctx := context.Background()
 	const id, owner, attacker = "ses-rename", "user_rename_owner", "user_rename_attacker"
+	// Without this the test stops testing the rename after its first run:
+	// Create is ON CONFLICT DO NOTHING and returns the EXISTING row, so on a
+	// second run `before` is already the renamed name and the assertion below
+	// can no longer fail. Deleting the UPDATE from Rename passes on a dirty
+	// database and fails only on a fresh one.
+	cleanup(t, pool, id)
 
 	before, err := repo.Create(ctx, strengthSession(id, owner, nil))
 	if err != nil {
@@ -1306,6 +1312,10 @@ func TestRenameChangesOnlyTheNameAndOnlyForTheOwner(t *testing.T) {
 
 	// Ids are client-generated, so a foreign id is guessable — the same IDOR
 	// this module has already had to close once.
+	// This assertion alone does NOT detect a missing ownership gate: without
+	// requireOwner the attacker's UPDATE commits and the user-scoped re-Get
+	// still returns ErrNotFound. The owner re-read below is what catches it —
+	// do not "simplify" this test by dropping it.
 	if _, err := repo.Rename(ctx, attacker, id, "PWNED"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("cross-user rename gave %v, want ErrNotFound", err)
 	}

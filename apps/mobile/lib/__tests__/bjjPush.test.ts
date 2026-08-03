@@ -44,7 +44,7 @@ jest.mock('../bjjSession', () => ({
 type Row = {
   id: string; user_id: string; remote: number; dirty: number;
   deleted_at: string | null; updated_at: string; sets_json: string;
-  sport: string; name: string; workout_id: string | null;
+  sport: string; name: string; workout_id: string | null; name_dirty: number;
   started_at: string; ended_at: string | null; bjj_json: string | null;
 };
 
@@ -71,7 +71,7 @@ const seed = (over: Partial<Row> = {}) => {
   mockRow = {
     id: 's1', user_id: 'u1', remote: 0, dirty: 1,
     deleted_at: null, updated_at: '2026-08-01T10:00:00Z', sets_json: '[]',
-    sport: 'bjj', name: 'Evening rolls', workout_id: null,
+    sport: 'bjj', name: 'Evening rolls', workout_id: null, name_dirty: 0,
     started_at: '2026-08-01T09:00:00Z', ended_at: '2026-08-01T10:00:00Z',
     bjj_json: REFLECTION, ...over,
   };
@@ -152,11 +152,19 @@ it('drops a corrupt reflection rather than failing the whole push', async () => 
  */
 describe('renaming a session that the server already holds', () => {
   it('sends the name', async () => {
-    seed({ remote: 1, name: 'Tuesday no-gi open mat' });
+    seed({ remote: 1, name_dirty: 1, name: 'Tuesday no-gi open mat' });
     await pushSession('u1', 's1', async () => 'tok');
 
     expect(mockRename).toHaveBeenCalledWith(expect.anything(), 's1', 'Tuesday no-gi open mat');
     expect(calls).toContain('mark-clean');
+  });
+
+  it('does NOT send it when the name has not changed', async () => {
+    // The gate that stops every strength set-save from becoming two requests:
+    // pushRow is shared, and a live session pushes on every debounced edit.
+    seed({ remote: 1, name_dirty: 0 });
+    await pushSession('u1', 's1', async () => 'tok');
+    expect(mockRename).not.toHaveBeenCalled();
   });
 
   it('does NOT send it for a session the server has never seen', async () => {

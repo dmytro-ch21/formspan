@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/auth"
@@ -503,18 +504,22 @@ func (h *Handler) Rename(w http.ResponseWriter, r *http.Request) {
 
 	var req renameRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&req); err != nil {
-		apihttp.WriteError(w, http.StatusBadRequest, "invalid_input", "Body must be valid JSON.")
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "Body must be valid JSON.")
 		return
 	}
 	name := strings.TrimSpace(req.Name)
 	// Refused rather than stored: a blank name renders as a gap in the history
 	// list with nothing to identify or tap.
 	if name == "" {
-		apihttp.WriteError(w, http.StatusBadRequest, "invalid_input", "Name is required.")
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "Name is required.")
 		return
 	}
-	if len(name) > maxNameLen {
-		apihttp.WriteError(w, http.StatusBadRequest, "invalid_input", "Name is too long.")
+	// Runes, not bytes. `len()` on a Go string counts bytes, which would cap a
+	// Japanese or Portuguese name at 40-60 characters against a limit the
+	// contract publishes as 120 — in a product whose domain vocabulary is
+	// exactly those languages ("kesa gatame", "raspagem").
+	if utf8.RuneCountInString(name) > maxNameLen {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "Name is too long.")
 		return
 	}
 

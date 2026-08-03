@@ -2806,6 +2806,12 @@ paths:
                   minLength: 1
                   maxLength: 120
                   description: >
+                    Counted in CHARACTERS, not bytes — the server uses
+                    `utf8.RuneCountInString`, so "kesa gatame" and a Japanese
+                    or Portuguese name all get the same 120 the contract
+                    publishes.
+
+
                     Trimmed server-side. Empty after trimming is rejected — a
                     blank name renders as a gap in the history list with
                     nothing to identify or tap.
@@ -2817,10 +2823,14 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/SessionWithVolume" }
         "400":
-          description: Name missing, blank or too long
+          description: >
+            Name missing, blank after trimming, longer than 120 characters, a
+            malformed body, or a body over 8 KB.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: No such session for this caller
           content:

@@ -71,6 +71,8 @@ type Row = {
    */
   bjj_json: string | null;
   dirty: number;
+  /** 1 while this row's name has not reached the server. */
+  name_dirty: number;
   remote: number;
   /** Set once the athlete deleted it; the row survives until the server agrees. */
   deleted_at: string | null;
@@ -349,7 +351,7 @@ export async function renameLocalSession(
   if (!trimmed) return false;
   const db = await getDb();
   await db.runAsync(
-    `UPDATE local_sessions SET name = ?, dirty = 1, updated_at = ?
+    `UPDATE local_sessions SET name = ?, dirty = 1, name_dirty = 1, updated_at = ?
      WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
     trimmed,
     new Date().toISOString(),
@@ -624,14 +626,6 @@ async function pushRow(
   // one field that decides whether a session counts.
   if (s.ended_at) await pushFinish(getToken, s.id, s.ended_at);
 
-  // The name, for a session the server already had.
-  //
-  // `POST /v1/sessions` is ON CONFLICT DO NOTHING, so a replayed create does
-  // NOT carry a later rename — without this the phone renamed locally, marked
-  // the row clean, and the change never left the device. Cheap enough to send
-  // unconditionally: the row is only here because something about it changed.
-  if (wasRemote) await pushRename(getToken, s.id, s.name);
-
   // The BJJ half, if this is one. After the session exists server-side,
   // same as the sets push and for the same reason: the server rejects it
   // with a 404 until it does.
@@ -657,6 +651,27 @@ async function pushRow(
         throw err;
       }
     }
+  }
+
+  // The name, LAST, and only when it actually changed.
+  //
+  // `POST /v1/sessions` is ON CONFLICT DO NOTHING, so a replayed create does
+  // not carry a later rename — without this the phone renamed locally, marked
+  // the row clean, and the change never left the device.
+  //
+  // Ordered after the reflection for the same reason the finish is ordered
+  // before it: the server bounds the name at 120 characters and rejects a
+  // longer one PERMANENTLY. Sent first, that 400 aborted the row before the
+  // reflection ever went out, and every retry replayed the same doomed
+  // request — one over-long name stranding a session's evidence forever.
+  // Last means the worst case costs only the name.
+  if (wasRemote && row.name_dirty === 1) {
+    await pushRename(getToken, s.id, s.name);
+    await db.runAsync(
+      `UPDATE local_sessions SET name_dirty = 0 WHERE id = ? AND user_id = ?`,
+      s.id,
+      userID,
+    );
   }
 
   await db.runAsync(

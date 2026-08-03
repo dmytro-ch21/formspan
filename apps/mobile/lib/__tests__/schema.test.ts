@@ -13,7 +13,7 @@ import { migratedFixture, openFixture } from './support/sqlite';
 it('a fresh install ends up at the current schema version', async () => {
   const db = await migratedFixture();
   const row = db.raw.prepare('PRAGMA user_version').get() as { user_version: number };
-  expect(row.user_version).toBe(12);
+  expect(row.user_version).toBe(13);
 });
 
 it('local_sessions has the tombstone column', async () => {
@@ -25,7 +25,7 @@ it('local_sessions has the tombstone column', async () => {
 });
 
 it('local_sessions can hold a BJJ reflection', async () => {
-  // v12. Nullable on purpose: the push path uses "is bjj_json null?" to
+  // v13. Nullable on purpose: the push path uses "is bjj_json null?" to
   // decide whether a session needs a detail PUT at all, so defaulting it to
   // '{}' would make every strength session attempt one.
   const db = await migratedFixture();
@@ -49,7 +49,7 @@ it('re-running migrate on the SAME database is idempotent', async () => {
   db.raw.exec('PRAGMA user_version = 0');
 
   await expect(migrate(db as never)).resolves.toBeUndefined();
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 12 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 13 });
 });
 
 it('upgrades a v6-shaped database by adding the column', async () => {
@@ -83,7 +83,7 @@ it('upgrades a v6-shaped database by adding the column', async () => {
   const cols = (db.raw.prepare('PRAGMA table_info(local_sessions)').all() as { name: string }[])
     .map((c) => c.name);
   expect(cols).toContain('deleted_at');
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 12 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 13 });
 });
 
 it('upgrades a v7-shaped database by adding the ownership columns', async () => {
@@ -104,7 +104,7 @@ it('upgrades a v7-shaped database by adding the ownership columns', async () => 
   const cols = (db.raw.prepare('PRAGMA table_info(workout_cache)').all() as { name: string }[])
     .map((c) => c.name);
   expect(cols).toEqual(expect.arrayContaining(['owner_user_id', 'visibility']));
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 12 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 13 });
 });
 
 it('an upgraded row is backfilled as owned by the athlete it is filed under', async () => {
