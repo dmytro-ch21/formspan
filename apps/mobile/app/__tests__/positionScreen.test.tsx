@@ -70,6 +70,7 @@ const CLOSED_GUARD: Position = {
 function technique(over: Partial<TechniqueSummary> & { id: string; name: string }): TechniqueSummary {
   return {
     aliases: [],
+    setup_from: [],
     category: 'Submission',
     position: 'Guard - Bottom',
     position_detail: 'Closed Guard',

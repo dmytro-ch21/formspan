@@ -48,12 +48,26 @@ export type TechniqueSummary = {
   name: string;
   aliases: string[];
   category: string;
+  /**
+   * What the technique DOES: advance | reverse | escape | control | finish.
+   *
+   * Optional because the movement fundamentals (breakfalls, grappling stance)
+   * genuinely have none — the API omits the key rather than sending "".
+   * Note it cannot be destructured (`const { function } = t` is a syntax
+   * error); read it as `t.function`.
+   */
+  function?: string;
   position: string;
   position_detail: string;
   gi_no_gi: string;
   /** Commonly taught from — an observation, never a gate. */
   typical_belt: string;
   ibjjf_ruleset_id: string;
+  /**
+   * What this is set up from, by NAME. Carried on the summary so the graph
+   * can be inverted client-side — see `lib/techniqueGraph.ts`.
+   */
+  setup_from: string[];
 };
 
 export type Technique = TechniqueSummary & {
@@ -61,7 +75,6 @@ export type Technique = TechniqueSummary & {
   description: string;
   /** The decision: when the mechanics apply. */
   when_to_use: string;
-  setup_from: string[];
   common_next_moves: string[];
   common_counters: string[];
   /** Empty for every technique in the current library. */

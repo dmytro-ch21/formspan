@@ -85,6 +85,20 @@ type Summary struct {
 	TypicalBelt string `json:"typical_belt"`
 
 	IBJJFRulesetID string `json:"ibjjf_ruleset_id"`
+
+	// The graph edge, carried on the SUMMARY and not only the detail row.
+	//
+	// This is what makes the library a traversable graph rather than 466
+	// isolated entries. `setup_from` names what a technique comes FROM; a
+	// client inverts it once over the list it already holds to get the far
+	// more useful direction — what FOLLOWS from here — which is the question
+	// a position screen and any "what should I learn next" answer are made of.
+	//
+	// Detail-only, it would cost one request per technique to walk a single
+	// hop. On the summary it costs ~21 KB on a ~149 KB list (+14%), against
+	// ~478 KB for shipping full rows. Names rather than ids, matching the
+	// detail payload — see the migration for why.
+	SetupFrom []string `json:"setup_from"`
 }
 
 // Position is one of the graph's nodes, made readable.
