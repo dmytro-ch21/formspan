@@ -67,6 +67,23 @@ func scanWorkout(row scannable) (*Workout, error) {
 // than its List is a classic way to leak rows.
 const visibleTo = `(owner_user_id = $1 OR visibility = 'public')`
 
+// maxWorkouts bounds the visible workout list.
+//
+// This is the one list on the platform whose size is driven by TOTAL USER
+// COUNT rather than by one athlete's history: `visibleTo` admits every user's
+// public workouts, so `?scope=shared` grows with the platform, and each row
+// then fans out through attachItems.
+//
+// It mattered enough on its own; apihttp.ConditionalGet made it structural.
+// That middleware buffers the whole identity body to hash it, so peak memory
+// per in-flight request is now bounded by the largest response the API can
+// produce — a claim that is only true if every list has a ceiling. This was
+// the last one without one.
+//
+// `ORDER BY name, id` is already total, so the cap's membership is
+// deterministic and the response hashes stably.
+const maxWorkouts = 500
+
 func (r *PostgresRepository) List(ctx context.Context, userID string, f Filter) ([]Workout, error) {
 	where := []string{visibleTo}
 	args := []any{userID}
@@ -88,8 +105,9 @@ func (r *PostgresRepository) List(ctx context.Context, userID string, f Filter) 
 		where = append(where, fmt.Sprintf(`goal = $%d`, len(args)))
 	}
 
+	args = append(args, maxWorkouts)
 	rows, err := r.pool.Query(ctx, `SELECT `+workoutColumns+` FROM workouts WHERE `+
-		strings.Join(where, " AND ")+` ORDER BY name, id`, args...)
+		strings.Join(where, " AND ")+` ORDER BY name, id LIMIT $`+fmt.Sprint(len(args)), args...)
 	if err != nil {
 		return nil, fmt.Errorf("workout: list: %w", err)
 	}

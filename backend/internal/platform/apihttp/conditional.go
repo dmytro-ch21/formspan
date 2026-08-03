@@ -55,6 +55,14 @@ import (
 // SCOPE: GET and HEAD only, and only 200 responses. A conditional request is
 // meaningless on a POST, and 304 on a 404 or 500 would cache a failure.
 //
+// NOT SUPPORTED, deliberately: http.Flusher, http.Hijacker, io.ReaderFrom.
+// This middleware buffers in order to hash, so a mid-response Flush cannot
+// mean what a caller would expect — and exposing one via Unwrap would let a
+// handler push bytes past the buffer and emit the body twice. Compress makes
+// the same choice for the same reason, so the two agree. The consequence to
+// know: SSE or any streaming endpoint cannot live behind this stack, and
+// would need to be routed around it rather than "fixed" here.
+//
 // ORDER: this must sit INSIDE Compress. It hashes the identity body, so the
 // ETag does not change when a client switches Accept-Encoding — and a 304 it
 // returns has no body for Compress to consider.
@@ -68,7 +76,7 @@ func ConditionalGet(next http.Handler) http.Handler {
 		cw := &conditionalWriter{
 			ResponseWriter: w,
 			status:         http.StatusOK,
-			ifNoneMatch:    r.Header.Get("If-None-Match"),
+			ifNoneMatch:    ifNoneMatch(r),
 		}
 		next.ServeHTTP(cw, r)
 
@@ -84,10 +92,36 @@ func ConditionalGet(next http.Handler) http.Handler {
 			return
 		}
 
-		etag := strongETag(cw.buf.Bytes())
-		w.Header().Set("ETag", etag)
+		// The third ordering: an ETag set after the handler's LAST Write never
+		// reaches adoptHandlerETag, because nothing writes after it. Since
+		// this middleware has not set one at this point, any tag present is
+		// unambiguously the handler's — hashing over it would silently
+		// replace a cheap validator with an expensive one.
+		etag := cw.Header().Get("ETag")
+		if etag == "" {
+			etag = strongETag(cw.buf.Bytes())
+			w.Header().Set("ETag", etag)
+		}
 
-		if matches(r.Header.Get("If-None-Match"), etag) {
+		// An ETag makes a response *revalidatable*, which is an invitation to
+		// intermediaries that did not exist before this middleware. Almost
+		// everything here is per-user data on an authenticated route.
+		//
+		// RFC 9111 §3.5 already forbids a shared cache from storing a response
+		// to a request carrying `Authorization`, so this is defence in depth
+		// rather than a hole being closed — but "every proxy between here and
+		// the athlete honours §3.5" is not a thing to rely on silently, and
+		// this project's stated default is privacy by default. `no-cache` is
+		// not "do not cache": it is "cache, but revalidate before reuse",
+		// which is exactly the contract an ETag describes.
+		//
+		// Left alone if a handler set its own — a public reference endpoint
+		// that wants a max-age should be able to say so.
+		if w.Header().Get("Cache-Control") == "" {
+			w.Header().Set("Cache-Control", "private, no-cache")
+		}
+
+		if matches(cw.ifNoneMatch, etag) {
 			// 304 carries no body, and RFC 9110 says it must not carry
 			// Content-Length either — a length with no bytes is what makes a
 			// client hang waiting for them.
@@ -98,6 +132,15 @@ func ConditionalGet(next http.Handler) http.Handler {
 		}
 		cw.flush()
 	})
+}
+
+// ifNoneMatch joins repeated field lines. Header.Get returns only the first,
+// and RFC 9110 §5.3 makes repeated lines equivalent to one comma-joined line —
+// browsers send one, but proxies are entitled to split. Getting this wrong
+// fails safe (a missed 304, never a wrong one), which is also why it would
+// never be noticed.
+func ifNoneMatch(r *http.Request) string {
+	return strings.Join(r.Header.Values("If-None-Match"), ",")
 }
 
 // strongETag is a strong validator: it is a hash of the exact bytes, so two
@@ -113,6 +156,17 @@ func strongETag(body []byte) string {
 
 // matches implements If-None-Match. `*` means "any current representation",
 // which for a 200 is always a match.
+//
+// Comparison is the WEAK one (RFC 9110 §13.1.2 — If-None-Match uses weak
+// comparison), which means the `W/` prefix is stripped from BOTH sides. It
+// used to be stripped from the client's candidate only, so a handler that
+// supplied a weak validator never revalidated: the client echoed it back
+// verbatim, the strings differed by four characters, and it got a 200 every
+// time. That broke the seam this middleware exists to leave open —
+// `max(updated_at)` is precisely a validator that must be weak, since it
+// cannot promise byte-identity (two writes inside one second, derived fields
+// that move without it). It failed in the exact way the doc comment says the
+// design avoids: a validator that looks like it works.
 func matches(header, etag string) bool {
 	if header == "" {
 		return false
@@ -120,11 +174,9 @@ func matches(header, etag string) bool {
 	if strings.TrimSpace(header) == "*" {
 		return true
 	}
+	etag = strings.TrimPrefix(etag, "W/")
 	for _, candidate := range strings.Split(header, ",") {
 		candidate = strings.TrimSpace(candidate)
-		// A client may echo back a weak tag for a strong one; comparison for
-		// If-None-Match is explicitly weak, so the W/ prefix is stripped
-		// rather than treated as a mismatch.
 		candidate = strings.TrimPrefix(candidate, "W/")
 		if candidate == etag {
 			return true

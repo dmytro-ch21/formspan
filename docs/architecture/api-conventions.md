@@ -136,5 +136,13 @@ Two costs, both real. It saves **bandwidth, not database work** — the query
 still runs and the JSON is still marshalled, because the hash is of the
 finished body. And it **buffers**: the identity body is held whole to hash it,
 benchmarked at ~+344 KB per in-flight request on the largest response the API
-serves. That is why no list endpoint gets to be unbounded any more — peak
-memory is now bounded by the largest response that can be produced.
+serves. Peak memory is therefore bounded by the largest response that can be
+produced — which is only a bound if every list has a ceiling, so the two that
+had none now do (`activity.ListByUser`, `workout.List`; both 500, both with a
+total `ORDER BY` so the cap's membership and the response hash are stable).
+**A new list endpoint without a `LIMIT` silently unbounds this property.**
+
+Not supported behind this stack, deliberately: `Flusher`, `Hijacker`,
+`ReaderFrom`. Buffering to hash is incompatible with mid-response flushing,
+and exposing one would let a handler emit the body twice. A streaming endpoint
+has to be routed around the stack rather than accommodated inside it.

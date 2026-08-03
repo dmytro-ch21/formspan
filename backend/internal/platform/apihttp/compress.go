@@ -106,7 +106,16 @@ func (c *compressWriter) WriteHeader(status int) {
 	c.wroteHeader = true
 	// A handler that encoded its own body owns the encoding; wrapping it
 	// again produces a body no client can read and nothing reports it.
-	if c.Header().Get("Content-Encoding") != "" {
+	//
+	// A status that cannot carry a body is passed through for a subtler
+	// reason. RFC 9111 §4.3.4 has a cache copy a 304's headers onto the stored
+	// 200 it is validating — so a `Content-Encoding: gzip` stamped on an empty
+	// 304 gets grafted onto a stored *identity* body, and the client then
+	// tries to gunzip plaintext. Unreachable today (nothing emits a 304 but
+	// ConditionalGet, which writes zero bytes, so the threshold never trips),
+	// but 304s have only just entered this codebase's vocabulary and the
+	// failure would surface in someone else's cache, not in a test.
+	if c.Header().Get("Content-Encoding") != "" || !bodyAllowedForStatus(status) {
 		c.passthrough = true
 		c.ResponseWriter.WriteHeader(status)
 	}
@@ -194,4 +203,17 @@ func (c *compressWriter) close() {
 		}
 		c.buf = nil
 	}
+}
+
+// bodyAllowedForStatus mirrors net/http's unexported function of the same
+// name (RFC 9110 §6.4.1 / §15.4.5). Duplicated rather than imported because
+// the stdlib does not export it, and it is four lines.
+func bodyAllowedForStatus(status int) bool {
+	switch {
+	case status >= 100 && status <= 199:
+		return false
+	case status == http.StatusNoContent, status == http.StatusNotModified:
+		return false
+	}
+	return true
 }

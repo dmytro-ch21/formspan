@@ -2655,8 +2655,32 @@ this is API-surface behaviour even though no endpoint changed.
   `Access-Control-Allow-Headers`, `ETag` in `Access-Control-Expose-Headers`.
   Neither affects iOS or Android, so a native-only test pass says nothing —
   this needs a real cross-origin fetch from `apps/web`.
+- **A WEAK `ETag` from a handler must still revalidate.** Comparison for
+  If-None-Match is the weak one, so `W/` is stripped from **both** sides.
+  Stripping only the client's candidate passes every strong-ETag test and
+  silently breaks `max(updated_at)`-style validators, which must be weak
+  because they cannot promise byte-identity. Test the verbatim echo — that is
+  what a real client sends. And test that a *different* weak tag is still a
+  200, or the strip has become "any weak tag matches".
+- **A status that cannot carry a body is never gzipped.** RFC 9111 §4.3.4 has
+  a cache copy a 304's headers onto the stored 200 it validates, so
+  `Content-Encoding: gzip` on an empty 304 gets grafted onto a stored identity
+  body. The damage lands in someone else's cache, never in a response anyone
+  here would look at.
+- **The ETag comes with `Cache-Control: private, no-cache`.** Making responses
+  revalidatable invites intermediaries that were not there before, and almost
+  everything served is per-user data on an authenticated route.
 - **List endpoints stay bounded.** The identity body is buffered whole to hash
   it, so an unbounded row count is an unbounded per-request allocation. Any
   new list endpoint needs a real-database test that it caps — and that the cap
   keeps the **newest** rows, since a flipped `ORDER BY` still passes a
   count-only assertion while quietly answering with the table's prehistory.
+- **A bounded list needs a TOTAL `ORDER BY`, and the test needs a real tie.**
+  A cap on a non-unique sort key makes membership nondeterministic: which row
+  falls outside can change between identical requests, and the reordered array
+  hashes differently, so the ETag on that endpoint becomes a permanent cache
+  miss. Space every fixture row apart and the test cannot see any of it —
+  create rows that tie *across the cut*. Note a covering index whose columns
+  match the `ORDER BY` supplies the order too, so removing the SQL tiebreak
+  may not turn the test red; say that in the test rather than implying
+  coverage that isn't there.

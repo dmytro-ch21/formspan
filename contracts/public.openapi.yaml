@@ -2077,6 +2077,9 @@ paths:
     get:
       summary: List the authenticated caller's own activities
       operationId: listActivities
+      description: >
+        The caller's own activity log, newest first. Capped at 500; there is no
+        pagination, so older entries are simply not returned.
       parameters:
         - $ref: "#/components/parameters/IfNoneMatch"
       responses:
@@ -2496,6 +2499,10 @@ paths:
     get:
       summary: List workouts visible to the caller
       operationId: listWorkouts
+      description: >
+        Workouts visible to the caller — their own plus every public one, which
+        is why this list grows with the platform rather than with one athlete's
+        history. Ordered by name; capped at 500, with no pagination.
       parameters:
         - $ref: "#/components/parameters/IfNoneMatch"
         - name: scope
@@ -3332,7 +3339,8 @@ paths:
       description: >
         No longer what the admin console renders — see GET /admin/users/{userID}.
         Retained as the only read path for `activities` rows written before the
-        in-app logging form was removed; nothing writes that table now.
+        in-app logging form was removed; nothing writes that table now. Newest
+        first, capped at 500, with no pagination.
       parameters:
         - $ref: "#/components/parameters/IfNoneMatch"
         - name: userID

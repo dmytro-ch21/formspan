@@ -407,3 +407,188 @@ func BenchmarkStackRevalidation(b *testing.B) {
 		handler.ServeHTTP(tc, req)
 	}
 }
+
+func TestAHandlerSuppliedWEAKETagStillRevalidates(t *testing.T) {
+	// If-None-Match comparison is the WEAK one (RFC 9110 §13.1.2), so `W/`
+	// must be stripped from BOTH sides. Stripping only the client's candidate
+	// looks right and passes every strong-ETag test, while silently breaking
+	// the case the design exists to support: `max(updated_at)` is precisely a
+	// validator that MUST be weak, since it cannot promise byte-identity —
+	// two writes inside one second, or a derived field that moves without it.
+	//
+	// The failure mode is the one this middleware's doc comment says it avoids:
+	// the client echoes the tag on every request and always gets the payload.
+	const weak = `W/"v-2026-08-03T10:00:00Z"`
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("ETag", weak)
+		_, _ = io.WriteString(w, `{"expensive":"body"}`)
+	}
+
+	fresh := cond(t, http.MethodGet, "", handler)
+	if got := fresh.Header.Get("ETag"); got != weak {
+		t.Fatalf("ETag = %q, want the handler's %q", got, weak)
+	}
+
+	// Verbatim echo — what every real client actually sends back.
+	for _, echoed := range []string{
+		weak,                       // exactly as received
+		`"v-2026-08-03T10:00:00Z"`, // strengthened by a proxy
+		`"other", ` + weak,         // in a list
+	} {
+		res := cond(t, http.MethodGet, echoed, handler)
+		if res.StatusCode != http.StatusNotModified {
+			t.Errorf("If-None-Match: %s returned %d, want 304", echoed, res.StatusCode)
+		}
+		if got := readAll(t, res); got != "" {
+			t.Errorf("If-None-Match: %s — 304 carried a body", echoed)
+		}
+	}
+
+	// And a genuinely different weak tag must still be a 200, or the strip has
+	// turned into "any weak tag matches".
+	other := cond(t, http.MethodGet, `W/"v-2020-01-01T00:00:00Z"`, handler)
+	if other.StatusCode != http.StatusOK {
+		t.Errorf("a different weak tag returned %d, want 200", other.StatusCode)
+	}
+}
+
+func TestAStatusThatCannotCarryABodyIsNeverGzipped(t *testing.T) {
+	// RFC 9111 §4.3.4 has a cache copy a 304's headers onto the stored 200 it
+	// is validating. A `Content-Encoding: gzip` on an empty 304 therefore gets
+	// grafted onto a stored *identity* body, and the client gunzips plaintext.
+	// The damage lands in someone else's cache, not in a response anyone here
+	// would look at.
+	for _, status := range []int{http.StatusNotModified, http.StatusNoContent} {
+		big := strings.Repeat("x", 8192) // far past the gzip threshold
+		req := httptest.NewRequest(http.MethodGet, "/x", nil)
+		req.Header.Set("Accept-Encoding", "gzip")
+		rec := httptest.NewRecorder()
+		Compress(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(status)
+			_, _ = io.WriteString(w, big) // a handler being wrong; must not make it worse
+		})).ServeHTTP(rec, req)
+
+		res := rec.Result()
+		if res.StatusCode != status {
+			t.Errorf("status %d became %d", status, res.StatusCode)
+		}
+		if enc := res.Header.Get("Content-Encoding"); enc != "" {
+			t.Errorf("status %d got Content-Encoding %q", status, enc)
+		}
+	}
+}
+
+func TestTheStackThroughARealServer(t *testing.T) {
+	// Every other test here drives a ResponseRecorder, which does not enforce
+	// bodyAllowedForStatus, does not suppress HEAD bodies, and does not apply
+	// the stdlib's own 304 header suppression. One pass through a real server
+	// covers that whole class — and HEAD is the method where the divergence is
+	// widest, which is why nothing in this file was testing it.
+	payload := strings.Repeat(`{"technique":"armbar"},`, 3000)
+	srv := httptest.NewServer(Stack(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, payload)
+	})))
+	t.Cleanup(srv.Close)
+
+	// DisableCompression, or the transport adds Accept-Encoding and silently
+	// decompresses — which would hide exactly what this is checking.
+	client := &http.Client{Transport: &http.Transport{DisableCompression: true}}
+	do := func(method, acceptEncoding, ifNoneMatch string) *http.Response {
+		t.Helper()
+		req, err := http.NewRequest(method, srv.URL+"/x", nil)
+		if err != nil {
+			t.Fatalf("request: %v", err)
+		}
+		if acceptEncoding != "" {
+			req.Header.Set("Accept-Encoding", acceptEncoding)
+		}
+		if ifNoneMatch != "" {
+			req.Header.Set("If-None-Match", ifNoneMatch)
+		}
+		res, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("%s: %v", method, err)
+		}
+		t.Cleanup(func() { _ = res.Body.Close() })
+		return res
+	}
+
+	get := do(http.MethodGet, "gzip", "")
+	etag := get.Header.Get("ETag")
+	if etag == "" {
+		t.Fatal("no ETag over the wire")
+	}
+	if get.Header.Get("Content-Encoding") != "gzip" {
+		t.Error("the large body was not gzipped over the wire")
+	}
+	if cc := get.Header.Get("Cache-Control"); cc != "private, no-cache" {
+		t.Errorf("Cache-Control = %q", cc)
+	}
+
+	// HEAD: same validator as GET — a client must be able to revalidate with
+	// one without fetching the body.
+	head := do(http.MethodHead, "gzip", "")
+	if got := head.Header.Get("ETag"); got != etag {
+		t.Errorf("HEAD ETag = %q, want the GET's %q", got, etag)
+	}
+	if b := readAll(t, head); b != "" {
+		t.Errorf("HEAD returned %d body bytes", len(b))
+	}
+
+	// The 304, through the real server: no body, no gzip framing, and none of
+	// the headers a bodiless response must not carry.
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		res := do(method, "gzip", etag)
+		if res.StatusCode != http.StatusNotModified {
+			t.Fatalf("%s revalidation returned %d, want 304", method, res.StatusCode)
+		}
+		if b := readAll(t, res); b != "" {
+			t.Errorf("%s 304 carried %d bytes", method, len(b))
+		}
+		if enc := res.Header.Get("Content-Encoding"); enc != "" {
+			t.Errorf("%s 304 got Content-Encoding %q", method, enc)
+		}
+		if cl := res.Header.Get("Content-Length"); cl != "" && cl != "0" {
+			t.Errorf("%s 304 declared Content-Length %q", method, cl)
+		}
+		// Vary must survive: a cache keying on it is the whole reason the
+		// ETag is computed over the identity body.
+		if v := res.Header.Get("Vary"); !strings.Contains(v, "Accept-Encoding") {
+			t.Errorf("%s 304 lost Vary: Accept-Encoding (got %q)", method, v)
+		}
+	}
+}
+
+func TestHandlerETagSetAfterTheLASTWriteStillWins(t *testing.T) {
+	// The third ordering, and the one neither of the other two covers.
+	// adoptHandlerETag is reached from WriteHeader (tag set before any write)
+	// and from Write (tag set mid-stream, so a later write finds it). A tag set
+	// after the FINAL write reaches neither — nothing writes again — so only
+	// the post-handler block sees it, and that block used to Set straight over
+	// it with a body hash.
+	//
+	// This is the shape a handler naturally produces: apihttp.WriteJSON, then
+	// stamp the validator.
+	const own = `"set-after-everything"`
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"expensive":"body"}`)
+		w.Header().Set("ETag", own)
+	}
+
+	fresh := cond(t, http.MethodGet, "", handler)
+	if got := fresh.Header.Get("ETag"); got != own {
+		t.Fatalf("ETag = %q, want the handler's %q", got, own)
+	}
+	if got := readAll(t, fresh); got != `{"expensive":"body"}` {
+		t.Errorf("body = %q", got)
+	}
+
+	revalidated := cond(t, http.MethodGet, own, handler)
+	if revalidated.StatusCode != http.StatusNotModified {
+		t.Errorf("revalidation returned %d, want 304", revalidated.StatusCode)
+	}
+	if got := readAll(t, revalidated); got != "" {
+		t.Errorf("304 carried a body: %q", got)
+	}
+}

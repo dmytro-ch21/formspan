@@ -4980,6 +4980,97 @@ which looked like a fresh-migration bug for several minutes before `docker ps
 up -d` back to back: only the first one actually gets the port, and the
 second fails silently rather than erroring.
 
+### Two blocking defects a second review round found
+
+**Weak comparison was one-sided.** `matches` stripped `W/` from the client's
+candidate but never from the server's tag. Every strong-ETag test passed, and
+a handler supplying a *weak* validator never revalidated — the client echoed
+it back verbatim, the strings differed by four characters, 200 every time.
+
+That is not a corner: `max(updated_at)` is precisely a validator that must be
+weak, because it cannot promise byte-identity (two writes inside one second, a
+derived field that moves without it). So the seam this middleware advertises
+for per-repository validators was broken for the exact shape it was built for,
+and broken in the specific way its own doc comment says the design avoids —
+"a validator that looks like it works". RFC 9110 §13.1.2: If-None-Match uses
+weak comparison, strip both sides.
+
+**A `LIMIT` without a unique tiebreak.** `ORDER BY occurred_at DESC` alone,
+with a ceiling newly on top of it. `occurred_at` is client-supplied (mobile
+writes it from local SQLite), so ties are realistic, and Postgres gives no
+stable order for equal sort keys. Two consequences: membership of the cap can
+change between identical requests (a row the caller can never see), and the
+array reorders, so the hash changes and the endpoint becomes a permanent cache
+miss — defeating the feature on the very endpoint the cap was added for. This
+module already documents the rule on `ListUsers`; the new query was the one
+query in `internal/modules` that added a `LIMIT` without honouring it.
+
+Measured rather than argued: on an index of `(user_id, occurred_at DESC)` with
+no `id`, a plain `UPDATE` to one row of a tied pair flipped which of the two
+survived the cap.
+
+### The test written to prove the fix could not catch the bug in it
+
+The integration test spaced every row an hour apart, so the ordering was total
+and the tie case was never exercised. It now creates a real tie straddling the
+cut and pins the exact expected order.
+
+And a limit worth stating rather than papering over: **deleting `, id DESC`
+still does not turn that test red.** Migration 000030 adds
+`(user_id, occurred_at DESC, id DESC)` — every ORDER BY column, same
+direction — so an index scan hands back that order whether or not the SQL asks
+for it. The tiebreak stays because it is what keeps the order total if the
+plan changes to a seq scan or the index is altered; the index stays because it
+turns a fetch-everything-then-sort into a scan that stops at 500. Neither is
+redundant with the other, and the test comment says so, because a guard that
+only looks covered is the failure this project keeps repeating.
+
+### Every list now has a ceiling, because the memory claim depends on it
+
+"Peak memory is bounded by the largest response the API can produce" is only
+true if no list is unbounded. `workout.List` still was — and it is the one
+list whose size is driven by *total user count* rather than one athlete's
+history, since `visibleTo` admits every user's public workouts. Capped at 500;
+its `ORDER BY name, id` was already total.
+
+### Smaller things from the same round
+
+- **`Cache-Control: private, no-cache`** now accompanies the ETag. An ETag
+  makes a response revalidatable, which is an invitation to intermediaries
+  that did not exist before. RFC 9111 §3.5 already forbids a shared cache from
+  storing a response to an `Authorization`-carrying request, so this is
+  defence in depth — but "every proxy honours §3.5" is not something to rely
+  on silently when the stated default is privacy by default.
+- **`Compress` no longer gzips a status that cannot carry a body.** RFC 9111
+  §4.3.4 has a cache copy a 304's headers onto the stored 200 it validates, so
+  `Content-Encoding: gzip` on an empty 304 gets grafted onto a stored identity
+  body and the client gunzips plaintext. Unreachable today; 304s only just
+  entered this codebase's vocabulary, and the damage would land in someone
+  else's cache.
+- **A handler ETag set after its *last* write** was silently overwritten by
+  the body hash — a third ordering neither earlier fix covered, and the one a
+  natural `WriteJSON`-then-stamp handler produces.
+- **`If-None-Match` is now read with `Header.Values`**, joined. `Get` returns
+  only the first field line; RFC 9110 §5.3 makes repeated lines equivalent to
+  one comma-joined line. Fails safe, which is why it would never be noticed.
+- **`Flusher`/`Hijacker`/`ReaderFrom` are deliberately not supported** and now
+  say so. Buffering to hash is incompatible with mid-response flushing, and
+  exposing them via `Unwrap` would let a handler emit the body twice. A
+  streaming endpoint has to be routed around this stack, not accommodated
+  inside it.
+- **One test now runs through a real `httptest.NewServer`.** Every other test
+  drives a `ResponseRecorder`, which does not enforce `bodyAllowedForStatus`,
+  does not suppress HEAD bodies, and does not apply the stdlib's own 304
+  header suppression — and nothing was testing HEAD at all, the method where
+  that divergence is widest.
+
+The review also flagged a contradiction between the new comment ("the offline
+mobile outbox appends to this table on every sync") and the contract ("nothing
+writes that table now"), and leaned toward the comment. The contract was
+right: `apps/mobile/lib/activities.ts` has the `POST` code but no caller, and
+says so in its own header. The comment was corrected — the bound does not
+depend on the outbox being live.
+
 ### The contract said none of this
 
 `contracts/public.openapi.yaml` had no `304`, no `ETag`, no `If-None-Match`
@@ -6117,11 +6208,22 @@ added here was mutation-checked — deleted, confirmed red, restored.
 
 ### Verified live
 
-Against the running API, not only in tests: first request returns
-`ETag: "_fdCXnLztuTSo0buAHtRdg"`, the repeat with `If-None-Match` returns
-`304 Not Modified` with no body. That is the verification the compression
-entry above could not get, because every endpoint over the gzip threshold is
-behind auth while `/v1/healthz` is not.
+Against the running API, not only in tests. `GET /v1/healthz` returns
+`ETag: "_fdCXnLztuTSo0buAHtRdg"` with `Cache-Control: private, no-cache`, and
+the whole revalidation matrix behaves on the wire: the exact tag, a `W/`
+weakened echo, `*`, and a comma list all return `304` with **0 body bytes**; a
+wrong tag returns `200` with 32. `HEAD` carries the same validator. Two
+separate `If-None-Match` field lines with the match in the *second* return
+`304`, which is the `Header.Values` fix confirmed rather than assumed. A `304`
+requested with `Accept-Encoding: gzip` comes back with no `Content-Encoding`.
+
+Every endpoint over the gzip threshold is behind auth while `/v1/healthz` is
+not, so the large-payload path is verified instead by
+`TestTheStackThroughARealServer` — a real `net/http` server over a real
+socket, asserting a gzipped ~66 KB body, a matching ETag on `GET` and `HEAD`,
+and a `304` that keeps `Vary` while carrying no body, no `Content-Encoding`
+and no `Content-Length`. That closes the "never verified on the wire" thread
+the compression entry left open.
 
 ## Open items / known gaps as of this entry
 
