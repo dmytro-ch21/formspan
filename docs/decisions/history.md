@@ -5818,6 +5818,86 @@ watched the PATCH land, and read the new name back out of Postgres.
 Web has no BJJ session view — this is mobile only. Reading history back on a
 desk is squarely web's half under the platform rule, and it is the natural
 companion, but a working phone screen beat half of both.
+## 2026-08-03 — Where a technique leaves you
+
+`to_position`, closing the last axis of the taxonomy. `position` says where a
+technique starts, `function` says what it does, and until now nothing said
+where it ends — so the library could answer "what can I do from here" and
+"what follows this" but not "where does this put me", which is the question a
+gameplan or a curriculum is made of.
+
+### It was measured twice before a line was written, and both said "author it"
+
+1. **Name parsing** ("X to Y", back takes, guard pulls) reaches 42% — and 97
+   of those are submissions, whose destination is the end of the exchange
+   rather than a position.
+2. **Inverting `setup_from`** looked like the clever answer and was not. Of
+   the 159 techniques with followers, **137 have followers in the same
+   position**: that edge links control-to-attack *within* a position, not
+   transitions between them. It infers a real position change for 22 of 466.
+
+So this was authoring work. Synthesising the other ~270 would have produced
+plausible-looking data that a rule engine cannot distinguish from the truth —
+the same failure this project keeps circling, and the reason the column is
+deliberately sparse instead of complete.
+
+**149 of 466 populated**, scoped to advance/reverse — the transitions a
+gameplan is made of. The destinations were authored by the user; every id and
+every destination was validated against the library before being written,
+because the failure mode is silent: `Side Control` instead of
+`Side Control - Top` produces an edge that resolves to nothing on every
+traversal with nothing reporting a fault. Seed validation catches exactly
+that, by name, and resolves against the library's own position vocabulary
+rather than a second hardcoded list — that set already grew by one when leg
+entanglement was promoted.
+
+### What it buys, immediately
+
+```
+from                  to                          ways
+Guard - Top        -> Side Control - Top            31
+Standing           -> Guard - Top                   29
+Guard - Bottom     -> Guard - Top                   16
+Guard - Bottom     -> Mount - Top                   13
+Half Guard - Top   -> Side Control - Top            10
+Guard - Bottom     -> Standing                      10
+```
+
+The passing game, the takedown game, and the sweep game splitting between
+coming up in their guard and going straight to mount.
+
+### NULL means "not recorded", never "goes nowhere"
+
+The distinction is load-bearing, and the 7 **self-loops** are what make it
+work: a guard *break* leaves you in guard-top having not yet passed, a
+single-leg entry leaves you standing having not yet finished. Recording
+"stays put" as a fact rather than an absence is what lets a missing value
+mean one unambiguous thing. A client must not infer a self-loop from a
+missing key.
+
+### Lessons applied rather than rediscovered
+
+Everything the `function` column had to learn under review was applied up
+front this time: `to_position` is in the `IS DISTINCT FROM` tuple (a field
+missing from it updates nothing and no delta-syncing client ever learns —
+the `completed`-flag shape, found twice already); validated in Go with no
+CHECK per 000021; **no index** per 000018, because nothing filters on it yet
+and an unused index reads as reassurance; on the summary payload *and* its
+OpenAPI schema; normalised at the client parse boundary; and carried forward
+by the importer, because the spreadsheet does not have this column and a
+re-import would otherwise silently blank every authored destination.
+
+### Open
+
+`situp-guard-arm-drag` was given conditionally ("Back - Top if taught as a
+completed arm-drag to the back, otherwise SAME") and recorded as the
+completed reading. The remaining 317 are unrecorded by choice, not oversight;
+the pinned count means coverage can only rise.
+
+Nothing reads `to_position` yet — no screen, no suggestion. That is the same
+foundation-before-feature order as `function`, which took a round of user
+feedback to justify. The difference is that `function` now has two surfaces
+reading it, so the pattern has at least been shown to close.
 
 ## Open items / known gaps as of this entry
 

@@ -377,6 +377,39 @@ except where a count is the property.
   hand-edit ever survives only in the artifact, the next import reverts it
   silently and the comment claiming it is generated is a lie.
 
+### Destination — where a technique leaves you (`to_position`)
+
+Sparse ON PURPOSE (149 of 466). Test the invariants, not the coverage.
+
+- **Every value names a real position.** The load-bearing one. `Side Control`
+  instead of `Side Control - Top` produces an edge that resolves to nothing on
+  every traversal, and nothing anywhere reports a fault — the seed validator is
+  the only guard. Inject the typo and confirm the seed refuses by name.
+- **The validator resolves against the library's own position vocabulary**, not
+  a second hardcoded list. That set grew by one when leg entanglement was
+  promoted; a list to keep in step is a list to forget.
+- **Absent means NOT RECORDED, never "goes nowhere".** A client must not infer
+  a self-loop from a missing key. The distinction only works because "stays
+  put" is recorded explicitly — see below.
+- **Self-loops exist and are correct.** A guard *break* records Guard - Top (you
+  have broken it, not passed it); a single-leg entry records Standing (you have
+  the leg, not the takedown). A test asserting zero self-loops would be
+  asserting the bug.
+- **Populated count only rises.** Pinned at 149. A fall means authored data was
+  lost rather than a decision being made — the values are hand-authored and
+  exist nowhere else.
+- **A re-import preserves them.** The spreadsheet does not carry this column,
+  so `import-exercise-catalog.py` must carry destinations forward from the
+  existing artifact. Without it the next import silently blanks every one, and
+  `seed.go` still claims the file is generated.
+- **Changing only `to_position` still bumps `updated_at`** — it is in the seed
+  upsert's `IS DISTINCT FROM` tuple. A field missing from that tuple updates
+  nothing and no delta-syncing client ever learns.
+- **The transition map answers.** `GROUP BY position, to_position` should show
+  the passing game (Guard-Top → Side Control-Top), the takedown game (Standing →
+  Guard-Top) and sweeps splitting between Guard-Top and Mount-Top. If those
+  three shapes are absent, the data is wrong regardless of what validates.
+
 ### Leg entanglement as a position
 
 - **The 26 ashi garami entries resolve to Leg Entanglement, not Guard.** Saddle,
