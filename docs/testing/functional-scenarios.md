@@ -2431,6 +2431,68 @@ own, so none of them is redundant with "the FK exists".
   rather than silently dropped.
 - A reflection blob that no longer parses is skipped, not fatal — the session
   and its timing still push and the row still settles clean.
+
+## Reading a BJJ session back (mobile)
+
+The half that was missing when logging shipped. Its absence did not read as an
+incomplete feature — it read as a broken one, because the reflection could be
+written and then never seen again.
+
+### Routing
+
+- **Tapping a BJJ session in Today opens the BJJ screen, not the set logger.**
+  The regression to guard is the original bug: `/session/[id]` renders "Sets 0
+  · Reps 0 · Volume —" over an empty group list for a sport that cannot hold a
+  set. Strength sessions must still open the set logger.
+- **The route and the log button agree.** Both are keyed on the same
+  `logsAfterwards` predicate. A test that lets them diverge lets a session open
+  a screen built for a different shape.
+
+### What it shows
+
+- **A logged reflection is visible.** Drill three techniques, record two sweeps
+  scored and one pass conceded, leave, come back — all of it is on the screen.
+  This is the whole point; if only this one scenario is ever automated, make it
+  this one.
+- **A floor-only session is complete, not broken.** Logged with `Log it` and no
+  detail: still shows mat time, rolling minutes and RPE, and offers "Add
+  detail" rather than an empty state that implies something failed.
+- **No volume tile, ever.** BJJ cannot hold a set, so a zero there is
+  structural. Showing it was the original defect.
+- **Unresolvable technique ids degrade to the id, not to nothing.** On a cold
+  offline launch the catalog is in-memory only and unfetched, so the drilled
+  chips cannot be named — "you drilled 3 things we can't name" still beats a
+  section that vanishes.
+
+### Editing
+
+- **The wizard is reachable after the fact.** It used to be entered by
+  `replace` from the log screen and linked from nowhere, so a session logged
+  with `Log it` could never gain detail and a mis-tapped counter could never be
+  corrected.
+- **Returning from an edit shows the edit.** The screen reloads on focus; stale
+  numbers after an edit read as the edit having been lost, which is the exact
+  doubt this screen exists to remove.
+
+### Renaming
+
+- **A rename reaches the server.** The load-bearing one. `POST /v1/sessions` is
+  `ON CONFLICT DO NOTHING`, so a replayed create does NOT carry a later rename
+  — before `PATCH /v1/sessions/{id}` existed, renaming marked the row dirty,
+  sync marked it clean, and the change never left the device with nothing
+  reporting a fault. Assert the new name in the database, not just on screen.
+- **A brand-new session does not send a separate rename** — the create already
+  carries the name. Easy to get wrong: `remote` is flipped by the create, so a
+  guard reading it afterwards fires on every first push.
+- **Blank names are refused**, client and server. A session with no name is a
+  gap in the history list with nothing to identify or tap.
+- **Renaming someone else's session is `not_found`.** Ids are client-generated
+  and therefore guessable; this module has had a cross-user IDOR closed once
+  already. "Not yours" and "doesn't exist" must stay indistinguishable.
+- **Only the name changes.** Not sport (it decides which screen renders the
+  session), not the timestamps (they are what history counts), not the sets
+  (they have their own replace endpoint).
+
 ## BJJ position glossary (backend, mobile)
 
 The library's 466 entries are all *moves*; these ten are what those moves

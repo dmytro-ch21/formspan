@@ -5758,6 +5758,66 @@ depends on, and this PR does not.
 The third axis of the taxonomy — the *mechanic* (inversion, back-step, leg
 drag) — is deliberately absent. It has no consumer, and unlike the other
 two, nothing currently depends on getting it right.
+## 2026-08-03 — The BJJ log could be written and never read
+
+User feedback, and the sharpest kind: *"the bjj class gets logged with the
+details or wout and then I see nothing in the Class. Cant edit title, cant
+see any logs i have entered — doesnt seem complete."*
+
+All of it was true, and worse than "unfinished". The reflection was
+**write-only**. `readLocalBjjDetail` had exactly one caller — the wizard that
+writes it. Today's list sent every session to `/session/[id]`, which has zero
+BJJ awareness, so a class opened onto the strength record: "Sets 0 · Reps 0 ·
+Volume —" over an empty group list. And the wizard was reached by `replace`
+from the log screen and linked from nowhere else, so it was a one-way door:
+a session logged with "Log it" could never gain detail, and a mis-tapped
+counter could never be corrected.
+
+The previous two entries both noted "nothing reads the tags back yet" and
+treated it as acceptable sequencing. Putting it on a real phone proved that
+wrong. A capture surface with no read surface does not read as *incomplete*,
+it reads as *broken* — and it removes the reason to fill the thing in.
+
+### What landed
+
+`app/bjj/session/[id].tsx`, routed to by sport from Today via the **same**
+`logsAfterwards` predicate the log button uses — so the two cannot disagree
+about what a BJJ session is. It shows what a mat session has: time, rolling
+minutes, RPE with its word, what was drilled, and the scored/conceded grid.
+Deliberately no volume tile; that is the column BJJ can never fill, and
+showing it was the original bug.
+
+Reload happens on **focus**, not mount: the wizard is reachable from here, and
+returning from an edit to unchanged numbers would read as the edit being
+lost — the exact doubt the screen exists to remove.
+
+### Renaming needed a backend endpoint, which is why it nearly shipped broken
+
+The name defaults to the kind ("Class"), which is wrong the moment it was a
+seminar or an open mat. The UI was easy. Then: `POST /v1/sessions` is
+`ON CONFLICT (id) DO NOTHING`, and `pushRow` sent sets, finish and the BJJ
+detail — **no name**. So renaming a synced session would mark the row dirty,
+sync would mark it clean, and the change would never leave the device. The
+same silent-drop shape as the `completed` flag and the `IS DISTINCT FROM`
+tuple, found for the third time in two days by asking "does this actually
+reach the server?" rather than "does the button work?".
+
+So `PATCH /v1/sessions/{sessionID}` exists now — deliberately rename-only
+rather than a general update, because `sport` decides which screen renders
+the session, the timestamps are what history counts, and sets have their own
+replace endpoint. A general PATCH would make all of those editable by
+accident. Ownership goes through the same `requireOwner` as `Finish`; ids are
+client-generated and therefore guessable, which is the IDOR this module has
+closed once already.
+
+Verified end to end rather than by unit test alone: renamed on the Simulator,
+watched the PATCH land, and read the new name back out of Postgres.
+
+### Still open
+
+Web has no BJJ session view — this is mobile only. Reading history back on a
+desk is squarely web's half under the platform rule, and it is the natural
+companion, but a working phone screen beat half of both.
 
 ## Open items / known gaps as of this entry
 

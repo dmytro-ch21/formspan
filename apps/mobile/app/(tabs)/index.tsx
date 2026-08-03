@@ -100,6 +100,28 @@ function logsAfterwards(sportKey: string, mods: Module[]): boolean {
   return mods.find((m) => m.key === sportKey)?.capabilities.catalog === 'techniques';
 }
 
+/**
+ * Where tapping a session goes.
+ *
+ * Keyed on the SAME predicate as the log button, deliberately: a sport that
+ * logs afterwards is a sport whose sessions cannot hold a set, so sending one
+ * to the set logger renders "Sets 0 · Reps 0 · Volume —" over an empty list.
+ * That is what shipped, and it made the whole reflection unreachable — the
+ * wizard is entered by `replace` from the log screen and linked from nowhere
+ * else, so a logged class had no surface that would ever show it back.
+ *
+ * If the two predicates ever disagree, a session opens a screen built for a
+ * different shape. Reusing the one function is what stops that.
+ */
+function sessionHref(s: Session, mods: Module[]) {
+  // The object form rather than a template string: expo-router's typed routes
+  // reject a bare `string`, and going through the generated pathname literals
+  // means a renamed route breaks the build instead of the tap.
+  return logsAfterwards(s.sport, mods)
+    ? ({ pathname: '/bjj/session/[id]', params: { id: s.id } } as const)
+    : ({ pathname: '/session/[id]', params: { id: s.id } } as const);
+}
+
 function describeSession(s: Session, mods: Module[]): string {
   const parts = [
     new Date(s.started_at).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' }),
@@ -320,7 +342,7 @@ export default function TodayScreen() {
         {active ? (
           <Pressable
             style={[styles.resumeCard, activeIsStale && styles.resumeCardStale]}
-            onPress={() => router.push(`/session/${active.id}`)}
+            onPress={() => router.push(sessionHref(active, modules))}
             accessibilityRole="button"
             // Deliberately excludes the ticking time. A 1 Hz live region would
             // be hostile, but the label overrides the children entirely, so a
@@ -444,7 +466,7 @@ export default function TodayScreen() {
               <Pressable
                 key={s.id}
                 style={styles.sessionRow}
-                onPress={() => router.push(`/session/${s.id}`)}
+                onPress={() => router.push(sessionHref(s, modules))}
                 accessibilityRole="button"
                 // Folds the meta line in, because the label replaces the
                 // children rather than adding to them.

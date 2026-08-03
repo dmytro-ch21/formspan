@@ -1272,3 +1272,58 @@ func TestBestOneRMs_EffortPathsMatchTheEstimator(t *testing.T) {
 		}
 	}
 }
+
+// Renaming, and the boundary it has to respect.
+//
+// The name defaults to the workout or, for BJJ, the kind — "Class" — which is
+// right until the session was a seminar or an open mat. This exists because
+// the phone could rename locally and then silently drop the change: the
+// create is ON CONFLICT DO NOTHING, so replaying it does NOT carry a later
+// rename, and the outbox marked the row clean regardless.
+func TestRenameChangesOnlyTheNameAndOnlyForTheOwner(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const id, owner, attacker = "ses-rename", "user_rename_owner", "user_rename_attacker"
+	// Without this the test stops testing the rename after its first run:
+	// Create is ON CONFLICT DO NOTHING and returns the EXISTING row, so on a
+	// second run `before` is already the renamed name and the assertion below
+	// can no longer fail. Deleting the UPDATE from Rename passes on a dirty
+	// database and fails only on a fresh one.
+	cleanup(t, pool, id)
+
+	before, err := repo.Create(ctx, strengthSession(id, owner, nil))
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	after, err := repo.Rename(ctx, owner, id, "Tuesday no-gi open mat")
+	if err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	if after.Name != "Tuesday no-gi open mat" {
+		t.Fatalf("name is %q", after.Name)
+	}
+	// Only the name. A general update would make these editable by accident,
+	// and sport in particular decides which screen renders the session at all.
+	if after.Sport != before.Sport || !after.StartedAt.Equal(before.StartedAt) {
+		t.Errorf("rename changed more than the name: sport %q->%q, started %v->%v",
+			before.Sport, after.Sport, before.StartedAt, after.StartedAt)
+	}
+
+	// Ids are client-generated, so a foreign id is guessable — the same IDOR
+	// this module has already had to close once.
+	// This assertion alone does NOT detect a missing ownership gate: without
+	// requireOwner the attacker's UPDATE commits and the user-scoped re-Get
+	// still returns ErrNotFound. The owner re-read below is what catches it —
+	// do not "simplify" this test by dropping it.
+	if _, err := repo.Rename(ctx, attacker, id, "PWNED"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-user rename gave %v, want ErrNotFound", err)
+	}
+	still, err := repo.Get(ctx, owner, id)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if still.Name != "Tuesday no-gi open mat" {
+		t.Errorf("owner's name was changed by another user: %q", still.Name)
+	}
+}

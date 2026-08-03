@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/auth"
@@ -22,6 +23,10 @@ func NewHandler(repo Repository) *Handler { return &Handler{repo: repo} }
 // larger is a mistake or an attempt to make the database work for nothing,
 // and each set is a statement in a batch.
 const maxSets = 500
+
+// maxNameLen bounds a session name. Long enough for "Tuesday no-gi open mat
+// with the comp team", short enough that the column is not an essay field.
+const maxNameLen = 120
 
 func writeErr(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
@@ -480,6 +485,45 @@ func (h *Handler) Finish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s, err := h.repo.Finish(r.Context(), claims.UserID, r.PathValue("sessionID"), end)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"session": s, "volume": Summarise(s.Sets)})
+}
+
+type renameRequest struct {
+	Name string `json:"name"`
+}
+
+// Rename is PATCH rather than PUT: it changes one field and leaves the rest,
+// which is exactly what PATCH means. A PUT would imply the body is the whole
+// session and that omitting `sets` should empty them.
+func (h *Handler) Rename(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.ClaimsFromContext(r.Context())
+
+	var req renameRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&req); err != nil {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "Body must be valid JSON.")
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	// Refused rather than stored: a blank name renders as a gap in the history
+	// list with nothing to identify or tap.
+	if name == "" {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "Name is required.")
+		return
+	}
+	// Runes, not bytes. `len()` on a Go string counts bytes, which would cap a
+	// Japanese or Portuguese name at 40-60 characters against a limit the
+	// contract publishes as 120 — in a product whose domain vocabulary is
+	// exactly those languages ("kesa gatame", "raspagem").
+	if utf8.RuneCountInString(name) > maxNameLen {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "Name is too long.")
+		return
+	}
+
+	s, err := h.repo.Rename(r.Context(), claims.UserID, r.PathValue("sessionID"), name)
 	if err != nil {
 		writeErr(w, r, err)
 		return

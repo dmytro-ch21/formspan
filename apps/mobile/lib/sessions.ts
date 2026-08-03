@@ -469,6 +469,25 @@ export async function finishSession(
   });
 }
 
+/**
+ * Change a session's name, and nothing else.
+ *
+ * PATCH rather than a full update: the name is the only field a client may
+ * change after the fact. Everything else either decides which screen renders
+ * the session (sport), is what history counts (the timestamps), or has its own
+ * replace endpoint (sets).
+ */
+export async function renameSession(
+  getToken: TokenGetter,
+  id: string,
+  name: string,
+): Promise<{ session: Session; volume: Volume }> {
+  return request(getToken, `/sessions/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name }),
+  });
+}
+
 export async function deleteSession(
   getToken: TokenGetter,
   id: string,

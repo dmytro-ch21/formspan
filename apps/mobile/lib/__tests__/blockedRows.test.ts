@@ -22,6 +22,7 @@ jest.mock('../db', () => {
 
 const mockPushSets = jest.fn();
 jest.mock('../sessions', () => ({
+  renameSession: jest.fn(),
   startSession: jest.fn(),
   replaceSets: (...a: unknown[]) => mockPushSets(...a),
   finishSession: jest.fn(),

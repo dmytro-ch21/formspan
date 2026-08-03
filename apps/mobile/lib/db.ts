@@ -175,7 +175,7 @@ const CREATE_EXERCISE_CACHE = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 12;
+const SCHEMA_VERSION = 13;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -419,6 +419,17 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     // which is when someone actually goes looking.
     await addColumnIfMissing(db, 'local_sessions', 'last_error', 'TEXT');
     await addColumnIfMissing(db, 'workout_cache', 'last_error', 'TEXT');
+  }
+
+  if (current < 13) {
+    // Which rows have an unsent name.
+    //
+    // Without it the push has to send the name on EVERY push of every synced
+    // session, because it cannot tell a rename from a set edit — and pushRow
+    // is shared with the strength flow, where a live session saves on every
+    // debounced set. That turned one request into two on the hottest write
+    // path in the app, in the place with the worst signal.
+    await addColumnIfMissing(db, 'local_sessions', 'name_dirty', 'INTEGER NOT NULL DEFAULT 0');
   }
 
   if (current < 12) {

@@ -17,6 +17,7 @@ import {
   deleteSession,
   listSessions as pullSessions,
   replaceSets as pushSets,
+  renameSession as pushRename,
   startSession as pushCreate,
   type LoggedSet,
   type Session,
@@ -70,6 +71,8 @@ type Row = {
    */
   bjj_json: string | null;
   dirty: number;
+  /** 1 while this row's name has not reached the server. */
+  name_dirty: number;
   remote: number;
   /** Set once the athlete deleted it; the row survives until the server agrees. */
   deleted_at: string | null;
@@ -328,6 +331,37 @@ export async function saveLocalBjjDetail(
 }
 
 /**
+ * Rename a session.
+ *
+ * BJJ sessions are named from their kind ("Class", "Rolling"), which is right
+ * as a default and wrong the moment it was actually a seminar, an open mat or
+ * a competition class. Marks the row dirty so the outbox carries it — the name
+ * is part of the session the server already stores, so this needs no new
+ * endpoint.
+ *
+ * Trimmed, and an empty result is refused rather than written: a session with
+ * a blank name renders as a gap in the history list with nothing to tap on.
+ */
+export async function renameLocalSession(
+  userID: string,
+  id: string,
+  name: string,
+): Promise<boolean> {
+  const trimmed = name.trim();
+  if (!trimmed) return false;
+  const db = await getDb();
+  await db.runAsync(
+    `UPDATE local_sessions SET name = ?, dirty = 1, name_dirty = 1, updated_at = ?
+     WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+    trimmed,
+    new Date().toISOString(),
+    id,
+    userID,
+  );
+  return true;
+}
+
+/**
  * The locally-held reflection for a session, or null if there isn't one.
  *
  * Read from SQLite rather than the API so a session opened offline still
@@ -535,6 +569,10 @@ async function pushRow(
 
   const s = toSession(row);
   let remote = row.remote === 1;
+  // Captured BEFORE the create flips `remote`, because the create already
+  // carries the name — re-sending it would add a wasted round trip to the
+  // one path that is already two.
+  const wasRemote = remote;
 
   // Only until the server has acknowledged it. The create is idempotent, so
   // repeating it was harmless — but it doubled the cost of every keystroke
@@ -613,6 +651,27 @@ async function pushRow(
         throw err;
       }
     }
+  }
+
+  // The name, LAST, and only when it actually changed.
+  //
+  // `POST /v1/sessions` is ON CONFLICT DO NOTHING, so a replayed create does
+  // not carry a later rename — without this the phone renamed locally, marked
+  // the row clean, and the change never left the device.
+  //
+  // Ordered after the reflection for the same reason the finish is ordered
+  // before it: the server bounds the name at 120 characters and rejects a
+  // longer one PERMANENTLY. Sent first, that 400 aborted the row before the
+  // reflection ever went out, and every retry replayed the same doomed
+  // request — one over-long name stranding a session's evidence forever.
+  // Last means the worst case costs only the name.
+  if (wasRemote && row.name_dirty === 1) {
+    await pushRename(getToken, s.id, s.name);
+    await db.runAsync(
+      `UPDATE local_sessions SET name_dirty = 0 WHERE id = ? AND user_id = ?`,
+      s.id,
+      userID,
+    );
   }
 
   await db.runAsync(

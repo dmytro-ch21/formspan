@@ -128,6 +128,7 @@ func main() {
 	mux.Handle("GET /v1/sessions/{sessionID}", verifier.RequireAuth(http.HandlerFunc(sessionHandler.Get)))
 	mux.Handle("PUT /v1/sessions/{sessionID}/sets", verifier.RequireAuth(http.HandlerFunc(sessionHandler.ReplaceSets)))
 	mux.Handle("POST /v1/sessions/{sessionID}/finish", verifier.RequireAuth(http.HandlerFunc(sessionHandler.Finish)))
+	mux.Handle("PATCH /v1/sessions/{sessionID}", verifier.RequireAuth(http.HandlerFunc(sessionHandler.Rename)))
 	mux.Handle("DELETE /v1/sessions/{sessionID}", verifier.RequireAuth(http.HandlerFunc(sessionHandler.Delete)))
 	mux.Handle("GET /v1/workouts", verifier.RequireAuth(http.HandlerFunc(workoutHandler.List)))
 	mux.Handle("POST /v1/workouts", verifier.RequireAuth(http.HandlerFunc(workoutHandler.Create)))
