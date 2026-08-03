@@ -374,6 +374,24 @@ def derive_function(category: str, name: str) -> str:
     sys.exit(f"technique taxonomy: no rule matches transition {name!r} — add one")
 
 
+# to_position is AUTHORED, not derived — see migration 000029 for the two
+# measurements that established that. The sheet does not carry it, so a
+# re-import would silently blank every destination someone hand-authored.
+# Carried forward from the existing artifact by id, which is the only source.
+def carry_to_position(records: list, existing_path) -> list:
+    if not existing_path.exists():
+        return records
+    prior = {x["id"]: x.get("to_position") for x in json.loads(existing_path.read_text())}
+    kept = 0
+    for r in records:
+        v = prior.get(r["id"])
+        if v:
+            r["to_position"] = v
+            kept += 1
+    print(f"to_position: {kept} destinations carried forward")
+    return records
+
+
 def apply_taxonomy(records: list) -> list:
     """Set `position` and `function`, keeping `function` next to `category`."""
     out = []
@@ -480,6 +498,9 @@ def main() -> None:
         # shape and get the same derivation, so there is one rule rather than
         # two that can disagree.
         tech = apply_taxonomy(tech)
+        tech = carry_to_position(
+            tech, root / "backend/internal/modules/technique/techniques.json"
+        )
         dest = root / "backend/internal/modules/technique/techniques.generated.json"
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(json.dumps(tech, indent=2, ensure_ascii=False) + "\n")

@@ -76,6 +76,11 @@ func RulesetSeedData() ([]Ruleset, error) {
 var validGiNoGi = map[string]bool{"Both": true, "Gi Only": true, "No-Gi Only": true}
 
 func validate(techniques []Technique) error {
+	// Built before the loop below reads it: a to_position may name any
+	// position the library uses, including one only introduced by a later
+	// entry in the same file.
+	indexPositions(techniques)
+
 	seen := make(map[string]bool, len(techniques))
 	for _, t := range techniques {
 		switch {
@@ -87,6 +92,13 @@ func validate(techniques []Technique) error {
 			return fmt.Errorf("technique: %q needs name, category, and position", t.ID)
 		case !validGiNoGi[t.GiNoGi]:
 			return fmt.Errorf("technique: %q has unknown gi_no_gi %q", t.ID, t.GiNoGi)
+		case t.ToPosition != "" && !knownPositions[t.ToPosition]:
+			// A typo here is SILENT and total: "Side Control" instead of
+			// "Side Control - Top" produces an edge pointing at a position
+			// that does not exist, so every traversal through it returns
+			// nothing and nothing reports a fault. Same failure shape as the
+			// family typo this file already guards, one column over.
+			return fmt.Errorf("technique: %q has unknown to_position %q", t.ID, t.ToPosition)
 		case t.Function != "" && !validFunctions[t.Function]:
 			// The column has no CHECK constraint (see migration 000028), so
 			// this is the only thing standing between a typo and a value no
@@ -122,6 +134,20 @@ var validFamilies = map[string]bool{
 //
 // Same duplication warning as validFamilies: this set is also an enum on the
 // Technique schema in contracts/public.openapi.yaml.
+// knownPositions is the `techniques.position` vocabulary — the destinations a
+// to_position may name. Derived from the library itself rather than hardcoded:
+// the set grew by one when leg entanglement was promoted, and a second list to
+// keep in step is a second list to forget.
+var knownPositions = map[string]bool{}
+
+func indexPositions(techniques []Technique) {
+	for _, t := range techniques {
+		if t.Position != "" {
+			knownPositions[t.Position] = true
+		}
+	}
+}
+
 var validFunctions = map[string]bool{
 	"advance": true, "reverse": true, "escape": true,
 	"control": true, "finish": true,
