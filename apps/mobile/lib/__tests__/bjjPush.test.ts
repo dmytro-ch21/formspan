@@ -25,8 +25,10 @@ const mockStart = jest.fn();
 const mockSets = jest.fn();
 const mockFinish = jest.fn();
 const mockPutDetail = jest.fn();
+const mockRename = jest.fn();
 
 jest.mock('../sessions', () => ({
+  renameSession: (...a: unknown[]) => mockRename(...a),
   startSession: (...a: unknown[]) => mockStart(...a),
   replaceSets: (...a: unknown[]) => mockSets(...a),
   finishSession: (...a: unknown[]) => mockFinish(...a),
@@ -83,6 +85,7 @@ beforeEach(() => {
   mockSets.mockReset().mockImplementation(async () => { calls.push('sets'); });
   mockFinish.mockReset().mockImplementation(async () => { calls.push('finish'); });
   mockPutDetail.mockReset().mockImplementation(async () => { calls.push('detail'); });
+  mockRename.mockReset().mockImplementation(async () => { calls.push('rename'); });
 });
 
 it('sends ended_at on the create, so the session lands complete in one request', async () => {
@@ -136,4 +139,33 @@ it('drops a corrupt reflection rather than failing the whole push', async () => 
   expect(mockPutDetail).not.toHaveBeenCalled();
   expect(calls).toContain('finish');
   expect(calls).toContain('mark-clean');
+});
+
+/**
+ * The name has to reach the server, and only the create used to carry it.
+ *
+ * `POST /v1/sessions` is ON CONFLICT DO NOTHING, so replaying a create does
+ * NOT apply a later rename. Before PATCH existed, renaming a synced session
+ * marked the row dirty, the push sent sets/finish/detail, and the CAS marked
+ * it clean — the new name never left the device and nothing reported a fault.
+ * The same silent-drop shape as the `completed` flag.
+ */
+describe('renaming a session that the server already holds', () => {
+  it('sends the name', async () => {
+    seed({ remote: 1, name: 'Tuesday no-gi open mat' });
+    await pushSession('u1', 's1', async () => 'tok');
+
+    expect(mockRename).toHaveBeenCalledWith(expect.anything(), 's1', 'Tuesday no-gi open mat');
+    expect(calls).toContain('mark-clean');
+  });
+
+  it('does NOT send it for a session the server has never seen', async () => {
+    // The create carries the name itself, so a second call would be a wasted
+    // request on the one path that is already two round trips.
+    seed({ remote: 0 });
+    await pushSession('u1', 's1', async () => 'tok');
+
+    expect(mockRename).not.toHaveBeenCalled();
+    expect(mockStart).toHaveBeenCalledTimes(1);
+  });
 });

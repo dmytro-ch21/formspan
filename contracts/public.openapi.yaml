@@ -2771,6 +2771,61 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+    patch:
+      summary: Rename a session
+      description: >
+        Changes the session's name and nothing else. PATCH rather than PUT
+        because the body is one field, not the whole session — a PUT would
+        imply that omitting `sets` should empty them.
+
+
+        The name is the only field a client may change after the fact.
+        `sport` decides which screen renders the session, the timestamps are
+        what training history counts, and sets have their own replace
+        endpoint.
+
+
+        Not-yours and does-not-exist both answer 404, deliberately
+        indistinguishable.
+      operationId: renameSession
+      parameters:
+        - name: sessionID
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 120
+                  description: >
+                    Trimmed server-side. Empty after trimming is rejected — a
+                    blank name renders as a gap in the history list with
+                    nothing to identify or tap.
+                  example: Tuesday no-gi open mat
+      responses:
+        "200":
+          description: The renamed session, with its volume summary
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionWithVolume" }
+        "400":
+          description: Name missing, blank or too long
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: No such session for this caller
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
     delete:
       summary: Delete a session
       operationId: deleteSession

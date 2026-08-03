@@ -20,6 +20,7 @@ import { pushSession, syncSessions } from '../sessionStore';
 const mockDel = jest.fn();
 const mockPull = jest.fn();
 jest.mock('../sessions', () => ({
+  renameSession: jest.fn(),
   deleteSession: (...a: unknown[]) => mockDel(...a),
   listSessions: (...a: unknown[]) => mockPull(...a),
   startSession: jest.fn(),

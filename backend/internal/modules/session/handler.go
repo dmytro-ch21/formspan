@@ -23,6 +23,10 @@ func NewHandler(repo Repository) *Handler { return &Handler{repo: repo} }
 // and each set is a statement in a batch.
 const maxSets = 500
 
+// maxNameLen bounds a session name. Long enough for "Tuesday no-gi open mat
+// with the comp team", short enough that the column is not an essay field.
+const maxNameLen = 120
+
 func writeErr(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, ErrNotFound):
@@ -480,6 +484,41 @@ func (h *Handler) Finish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s, err := h.repo.Finish(r.Context(), claims.UserID, r.PathValue("sessionID"), end)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"session": s, "volume": Summarise(s.Sets)})
+}
+
+type renameRequest struct {
+	Name string `json:"name"`
+}
+
+// Rename is PATCH rather than PUT: it changes one field and leaves the rest,
+// which is exactly what PATCH means. A PUT would imply the body is the whole
+// session and that omitting `sets` should empty them.
+func (h *Handler) Rename(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.ClaimsFromContext(r.Context())
+
+	var req renameRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&req); err != nil {
+		apihttp.WriteError(w, http.StatusBadRequest, "invalid_input", "Body must be valid JSON.")
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	// Refused rather than stored: a blank name renders as a gap in the history
+	// list with nothing to identify or tap.
+	if name == "" {
+		apihttp.WriteError(w, http.StatusBadRequest, "invalid_input", "Name is required.")
+		return
+	}
+	if len(name) > maxNameLen {
+		apihttp.WriteError(w, http.StatusBadRequest, "invalid_input", "Name is too long.")
+		return
+	}
+
+	s, err := h.repo.Rename(r.Context(), claims.UserID, r.PathValue("sessionID"), name)
 	if err != nil {
 		writeErr(w, r, err)
 		return

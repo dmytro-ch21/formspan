@@ -298,5 +298,8 @@ type Repository interface {
 	// "log another set" and "fix a typo" alike.
 	ReplaceSets(ctx context.Context, userID, sessionID string, sets []Set) (*Session, error)
 	Finish(ctx context.Context, userID, sessionID string, endedAt time.Time) (*Session, error)
+	// Rename changes only the name — see the implementation for why it is not
+	// a general Update.
+	Rename(ctx context.Context, userID, sessionID, name string) (*Session, error)
 	Delete(ctx context.Context, userID, id string) error
 }

@@ -17,6 +17,7 @@ import {
   deleteSession,
   listSessions as pullSessions,
   replaceSets as pushSets,
+  renameSession as pushRename,
   startSession as pushCreate,
   type LoggedSet,
   type Session,
@@ -328,6 +329,37 @@ export async function saveLocalBjjDetail(
 }
 
 /**
+ * Rename a session.
+ *
+ * BJJ sessions are named from their kind ("Class", "Rolling"), which is right
+ * as a default and wrong the moment it was actually a seminar, an open mat or
+ * a competition class. Marks the row dirty so the outbox carries it — the name
+ * is part of the session the server already stores, so this needs no new
+ * endpoint.
+ *
+ * Trimmed, and an empty result is refused rather than written: a session with
+ * a blank name renders as a gap in the history list with nothing to tap on.
+ */
+export async function renameLocalSession(
+  userID: string,
+  id: string,
+  name: string,
+): Promise<boolean> {
+  const trimmed = name.trim();
+  if (!trimmed) return false;
+  const db = await getDb();
+  await db.runAsync(
+    `UPDATE local_sessions SET name = ?, dirty = 1, updated_at = ?
+     WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+    trimmed,
+    new Date().toISOString(),
+    id,
+    userID,
+  );
+  return true;
+}
+
+/**
  * The locally-held reflection for a session, or null if there isn't one.
  *
  * Read from SQLite rather than the API so a session opened offline still
@@ -535,6 +567,10 @@ async function pushRow(
 
   const s = toSession(row);
   let remote = row.remote === 1;
+  // Captured BEFORE the create flips `remote`, because the create already
+  // carries the name — re-sending it would add a wasted round trip to the
+  // one path that is already two.
+  const wasRemote = remote;
 
   // Only until the server has acknowledged it. The create is idempotent, so
   // repeating it was harmless — but it doubled the cost of every keystroke
@@ -587,6 +623,14 @@ async function pushRow(
   // and kept because two independent guarantees is the right number for the
   // one field that decides whether a session counts.
   if (s.ended_at) await pushFinish(getToken, s.id, s.ended_at);
+
+  // The name, for a session the server already had.
+  //
+  // `POST /v1/sessions` is ON CONFLICT DO NOTHING, so a replayed create does
+  // NOT carry a later rename — without this the phone renamed locally, marked
+  // the row clean, and the change never left the device. Cheap enough to send
+  // unconditionally: the row is only here because something about it changed.
+  if (wasRemote) await pushRename(getToken, s.id, s.name);
 
   // The BJJ half, if this is one. After the session exists server-side,
   // same as the sets push and for the same reason: the server rejects it

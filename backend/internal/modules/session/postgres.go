@@ -788,6 +788,42 @@ func (r *PostgresRepository) ReplaceSets(ctx context.Context, userID, sessionID 
 	return r.Get(ctx, userID, sessionID)
 }
 
+// Rename changes only the session's name.
+//
+// Its own method rather than a general Update, because name is the only field
+// a client may change after the fact: sport decides which screen renders it,
+// started_at/ended_at are what history counts, and sets have their own
+// replace endpoint. A general PATCH would make all of those editable by
+// accident.
+//
+// The name defaults to the workout or the BJJ kind ("Class"), which is right
+// until the session was a seminar, a comp class or an open mat — and until
+// this existed the phone could rename locally, mark the row clean, and drop
+// the change on the floor without anything noticing.
+func (r *PostgresRepository) Rename(ctx context.Context, userID, sessionID, name string) (*Session, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("session: begin: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op once Commit succeeds
+
+	// Same ownership gate as Finish. Without it a client-generated id from
+	// another account is renameable, which is the IDOR this module has
+	// already had to close once.
+	if _, err := requireOwner(ctx, tx, userID, sessionID); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE sessions SET name = $2, updated_at = now() WHERE id = $1`,
+		sessionID, name); err != nil {
+		return nil, translatePgError(fmt.Errorf("session: rename: %w", err))
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("session: commit: %w", err)
+	}
+	return r.Get(ctx, userID, sessionID)
+}
+
 func (r *PostgresRepository) Finish(ctx context.Context, userID, sessionID string, endedAt time.Time) (*Session, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {

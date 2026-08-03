@@ -38,6 +38,7 @@ jest.mock('../workouts', () => ({
 const mockPushSets = jest.fn();
 const mockStartSession = jest.fn();
 jest.mock('../sessions', () => ({
+  renameSession: jest.fn(),
   startSession: (...a: unknown[]) => mockStartSession(...a),
   replaceSets: (...a: unknown[]) => mockPushSets(...a),
   finishSession: jest.fn(),
