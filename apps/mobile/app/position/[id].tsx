@@ -6,6 +6,7 @@ import { categoryBadge, positionBadge } from '@/components/LibraryTile';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { fetchPosition, techniquesInPosition, type Position } from '@/lib/positions';
+import { FUNCTION_ORDER, groupByFunction } from '@/lib/techniqueGraph';
 import { fetchTechniques, type TechniqueSummary } from '@/lib/techniques';
 import { useAuthToken } from '@/lib/useAuthToken';
 
@@ -57,6 +58,11 @@ import { useAuthToken } from '@/lib/useAuthToken';
  */
 const REQUEST_TIMEOUT_MS = 10_000;
 const TIMED_OUT = 'timed-out';
+
+/** A row is either a verb heading or a technique under it. */
+type ListRow =
+  | { kind: 'header'; id: string; label: string; count: number }
+  | { kind: 'technique'; id: string; technique: TechniqueSummary };
 
 export default function PositionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -172,11 +178,41 @@ export default function PositionScreen() {
   const [code, accent] = positionBadge(p.id);
   const related = techniquesInPosition(techniques, p);
 
+  // Grouped by what each technique DOES, not alphabetically.
+  //
+  // The whole point of the `function` column, and the first surface to read
+  // it. Flat, this is up to 124 names in one alphabetical run, which answers
+  // "what exists here" and not the question someone actually has standing in
+  // the position: from here I can advance, reverse, escape, control or
+  // finish — and these are the ways.
+  //
+  // Flattened into the FlatList rather than moving to a SectionList, because
+  // this list's virtualisation is deliberately tuned (see the props below)
+  // and a header row is cheaper than re-deriving that reasoning.
+  const rows: ListRow[] = groupByFunction(related).flatMap((g) => [
+    { kind: 'header' as const, id: `h-${g.fn}`, label: g.label, count: g.techniques.length },
+    ...g.techniques.map((t) => ({ kind: 'technique' as const, id: t.id, technique: t })),
+  ]);
+  // Movement fundamentals carry no function, so grouping drops them. Kept
+  // under their own heading rather than vanishing from a screen that
+  // previously listed them.
+  // Total, not `!t.function`: a value outside FUNCTION_ORDER would be in
+  // neither the groups nor this bucket, so it would vanish while the section
+  // header above still counted it — "· 45" over 44 rows. Unreachable today
+  // (the seed validates the five), free to make impossible.
+  const ungrouped = related.filter(
+    (t) => !FUNCTION_ORDER.includes(t.function as (typeof FUNCTION_ORDER)[number]),
+  );
+  if (ungrouped.length > 0) {
+    rows.push({ kind: 'header', id: 'h-other', label: 'Also here', count: ungrouped.length });
+    rows.push(...ungrouped.map((t) => ({ kind: 'technique' as const, id: t.id, technique: t })));
+  }
+
   return (
     <FlatList
       testID="position-detail"
-      data={related}
-      keyExtractor={(t) => t.id}
+      data={rows}
+      keyExtractor={(r) => r.id}
       contentContainerStyle={styles.list}
       // The 124-row case is why this is virtualised at all.
       //
@@ -212,7 +248,15 @@ export default function PositionScreen() {
           </View>
         </>
       }
-      renderItem={({ item }) => <TechniqueRow technique={item} />}
+      renderItem={({ item }) =>
+        item.kind === 'header' ? (
+          <Text style={styles.groupLabel} accessibilityRole="header">
+            {item.label} · {item.count}
+          </Text>
+        ) : (
+          <TechniqueRow technique={item.technique} />
+        )
+      }
     />
   );
 }
@@ -437,6 +481,18 @@ const styles = StyleSheet.create({
   sideBlock: { gap: 5 },
   sideLabel: { color: vola.lime, fontSize: 11, letterSpacing: 1.2, fontWeight: '800' },
 
+  // The verb headings inside the list. Distinct from edgeLabel, which names
+  // the whole section once in the header — these repeat down the list and so
+  // need top space to separate one group from the rows of the previous one.
+  groupLabel: {
+    color: vola.lime,
+    fontSize: 12,
+    letterSpacing: 1.2,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    marginTop: 22,
+    marginBottom: 6,
+  },
   edgeLabel: {
     color: vola.textMuted, // 3.96:1 at textDim — under AA. See cardTitle.
     fontSize: 11,

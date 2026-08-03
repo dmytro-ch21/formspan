@@ -1,5 +1,5 @@
 import { Image } from 'expo-image';
-import { useLocalSearchParams } from 'expo-router';
+import { Link, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View as RNView } from 'react-native';
 
@@ -10,9 +10,12 @@ import {
   executionSteps,
   fetchRulesets,
   fetchTechnique,
+  fetchTechniques,
   type Ruleset,
   type Technique,
+  type TechniqueSummary,
 } from '@/lib/techniques';
+import { buildTechniqueGraph, follows } from '@/lib/techniqueGraph';
 import { useAuthToken } from '@/lib/useAuthToken';
 
 /**
@@ -47,6 +50,18 @@ export default function TechniqueScreen() {
   const getToken = useAuthToken();
 
   const [technique, setTechnique] = useState<Technique | null>(null);
+  /**
+   * What FOLLOWS this technique.
+   *
+   * `setup_from` has always pointed the other way — "what is this set up
+   * from" — which is not a question anyone asks. Inverting it over the cached
+   * summary list turns the library into something you can walk forwards:
+   * from here, these are the next moves people actually make.
+   *
+   * The list is already fetched and cached for the Library, so this costs no
+   * request and works offline.
+   */
+  const [leadsTo, setLeadsTo] = useState<TechniqueSummary[]>([]);
   const [ruleset, setRuleset] = useState<Ruleset | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -84,6 +99,26 @@ export default function TechniqueScreen() {
     void load(ac.signal);
     return () => ac.abort();
   }, [load]);
+
+  // Best-effort and non-blocking: the screen's own content never waits on it,
+  // and offline it simply shows no "Leads to" rather than an error.
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    fetchTechniques(getToken)
+      .then((list) => {
+        if (!cancelled) setLeadsTo(follows(buildTechniqueGraph(list), id));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [id, getToken]);
+
+  const shown = new Set(leadsTo.map((n) => n.name.toLowerCase()));
+  const remainingNextMoves = (technique?.common_next_moves ?? []).filter(
+    (m) => !shown.has(m.toLowerCase()),
+  );
 
   if (loading) {
     return (
@@ -160,8 +195,44 @@ export default function TechniqueScreen() {
 
         {/* The graph. Grouped rather than scattered, because "what leads here
             and what follows" is one question, not three. */}
+        {/* Derived, and tappable — unlike the three prose lists below it.
+            Those are authored strings; this is the inverse of the same
+            `setup_from` edge, resolved to real entries, so each row can be
+            walked. That difference is the whole reason the section exists:
+            "what follows from here" is the question the library could not
+            answer despite having stored the data all along. */}
+        {leadsTo.length > 0 && (
+          <RNView style={styles.leadsTo}>
+            <Text style={styles.leadsToLabel} accessibilityRole="header">
+              Leads to
+            </Text>
+            {leadsTo.map((n) => (
+              <Link key={n.id} href={{ pathname: '/technique/[id]', params: { id: n.id } }} asChild>
+                <Pressable
+                  style={styles.leadRow}
+                  // "button", matching every other navigate-to-a-technique
+                  // control in the app. On iOS "link" announces as leaving
+                  // for a URL, which this does not do.
+                  accessibilityRole="button"
+                  accessibilityLabel={`${n.name}. ${n.category}`}
+                  testID={`leads-to-${n.id}`}
+                >
+                  <Text style={styles.leadName}>{n.name}</Text>
+                  <Text style={styles.leadMeta}>{n.category}</Text>
+                </Pressable>
+              </Link>
+            ))}
+          </RNView>
+        )}
+
         <Edges label="Set up from" items={t.setup_from} />
-        <Edges label="Common next moves" items={t.common_next_moves} />
+        {/* Minus whatever "Leads to" already showed. 72% of these strings
+            are verbatim repeats of a row rendered just above — same name,
+            tappable there and inert here, with nothing explaining the
+            difference. That overlap is good news about the edge data and bad
+            news on screen. What remains is the genuinely prose-only advice
+            ("Stabilize top position"), which is worth its own heading. */}
+        <Edges label="Common next moves" items={remainingNextMoves} />
         <Edges label="Common counters" items={t.common_counters} />
 
         {/* Deliberately last and deliberately quiet. An observation about where
@@ -445,6 +516,27 @@ const styles = StyleSheet.create({
   ruleNotes: { color: vola.textMuted, fontSize: 13, lineHeight: 19 },
 
   edgeBlock: { gap: 9 },
+  leadsTo: { marginTop: 24, gap: 2 },
+  // NOT edgeLabel: that is vola.textDim, which measures 3.95:1 on bg — under
+  // AA, and 11px/800 does not qualify as large text. The position screen
+  // already found and annotated this exact token. textMuted is 7.37:1.
+  leadsToLabel: {
+    color: vola.textMuted,
+    fontSize: 11,
+    letterSpacing: 1.2,
+    fontWeight: '800',
+  },
+  leadRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 13,
+    minHeight: 44,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: vola.line,
+  },
+  leadName: { flex: 1, fontSize: 15, color: vola.text, paddingRight: 12 },
+  leadMeta: { fontSize: 12, color: vola.textMuted },
   edgeLabel: { color: vola.textDim, fontSize: 11, letterSpacing: 1.2, fontWeight: '800' },
   edgeWrap: { gap: 7 },
   // Full-width rows rather than wrapped pills: technique names are long and

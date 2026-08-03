@@ -553,9 +553,17 @@ components:
 
         Aliases ARE included: the client searches locally, and "kesa gatame"
         must find "Scarf Hold".
+
+
+        `setup_from` is included too, which is what makes the library a
+        GRAPH rather than 466 isolated entries. It names what a technique
+        comes from; a client inverts it once over this list to get the far
+        more useful direction — what FOLLOWS from here. Detail-only, that
+        would cost one request per technique to walk a single hop. It adds
+        ~21 KB (+14%).
       required:
         [id, name, aliases, category, position, position_detail, gi_no_gi,
-         typical_belt, ibjjf_ruleset_id]
+         typical_belt, ibjjf_ruleset_id, setup_from]
       properties:
         id: { type: string }
         name: { type: string }
@@ -590,6 +598,16 @@ components:
           enum: [Both, "Gi Only", "No-Gi Only"]
         typical_belt: { type: string }
         ibjjf_ruleset_id: { type: string }
+        setup_from:
+          type: array
+          items: { type: string }
+          description: >
+            What this technique is commonly set up from, by NAME (matching
+            `name` or an entry in `aliases`), not by id. ~80% resolve to a
+            library entry; the rest name a concept the library has no node
+            for yet — "Underhook", "Crossface" — so a client should count
+            what it could not resolve rather than silently dropping it.
+          example: [De La Riva Guard Control]
 
     IBJJFRuleset:
       type: object

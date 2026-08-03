@@ -26,7 +26,7 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 const summaryColumns = `
 	t.id, t.name, t.aliases, t.category, COALESCE(t.function, ''),
 	t.position, t.position_detail,
-	t.gi_no_gi, t.typical_belt, COALESCE(t.ibjjf_ruleset_id, '')`
+	t.gi_no_gi, t.typical_belt, COALESCE(t.ibjjf_ruleset_id, ''), t.setup_from`
 
 const detailColumns = `
 	t.id, t.name, t.aliases, t.category, COALESCE(t.function, ''),
@@ -52,7 +52,7 @@ func scanSummary(row scannable) (*Summary, error) {
 	var s Summary
 	err := row.Scan(&s.ID, &s.Name, &s.Aliases, &s.Category, &s.Function,
 		&s.Position, &s.PositionDetail, &s.GiNoGi, &s.TypicalBelt,
-		&s.IBJJFRulesetID)
+		&s.IBJJFRulesetID, &s.SetupFrom)
 	if err != nil {
 		return nil, err
 	}
