@@ -5573,11 +5573,196 @@ that is *nearly* right, described by a comment that is confidently wrong.
 The reviewers were given the design intent, which is why they found the
 gap between what the code claimed and what it did rather than only what it
 did.
+## 2026-08-03 — Positions are nouns, techniques are verbs
+
+A taxonomy for the library, and the first half of implementing it. The idea
+is one sentence: **every technique is a verb applied at a noun.** A double
+leg and a berimbolo are not different in kind — one is *advance* at
+standing, the other is *advance* from De La Riva with an inversion. Once
+that is in the data, "complex" decomposes and the library becomes
+queryable in the way a deterministic rule engine will need.
+
+### What was already true, and what wasn't
+
+The nouns existed: `techniques.position` plus the ten-entry glossary from
+the position PR. What did not exist was a verb axis — and the reason is
+that `category` **already contains one, fused to a noun.** "Takedown"
+means advance-at-standing. "Pass" means advance-at-guard-top. "Sweep"
+means reverse-at-guard-bottom. The where half is recorded twice.
+
+Two columns holding the same fact can disagree, so the first thing checked
+was whether they already had. They had not: zero takedowns filed off
+standing, zero sweeps from a top position, zero passes from the bottom,
+across all 466 entries. That is what made this cheap — the verb could be
+*derived* rather than curated, and the check would have been much more
+expensive to run later.
+
+The cost of the fusion is that the library cannot answer its own central
+question. "Every way to advance from here" spans three categories;
+"every way to escape" spans two. After the change, each is one value —
+and the split really is cross-cutting: advancing from standing spans
+`Takedown, Transition`, from guard-top spans `Pass, Transition`.
+
+### The five verbs
+
+`advance` (takedowns, passes, back takes) · `reverse` (sweeps) · `escape`
+(pin escapes, submission defence, guard retention) · `control` (pins,
+rides, grip and frame systems) · `finish` (submissions).
+
+Eight of the nine categories map onto one verb each. `Transition` (76
+entries) was the only genuine work: it is not one verb. "X-Guard Back
+Take" is advance, "Butterfly Technical Stand-Up" is escape, "Side Control
+to North–South" is control. Classified by an explicit rule table rather
+than by feel, so the reasoning is reviewable and re-runnable.
+
+**`category` was kept, not replaced.** It is not wrong, it is colloquial —
+"Sweep" is the word a coach says out loud, and "reverse-at-guard-bottom"
+is not. It stays the display label; `function` is the queryable axis
+underneath. Replacing it would also have silently rewritten the belt
+filter and every client that groups by it, for nothing.
+
+### Four entries that have no verb, and were left that way
+
+Side Breakfall, Backward Breakfall, Forward Shoulder Roll, and Grappling
+Stance and Motion. These are movement fundamentals — library content, not
+techniques. They have no noun and no verb, and forcing them into one of
+the five would make the taxonomy assert something false. `function` is
+nullable for exactly this, and the test pins the count at four so a
+*fifth* unclassified entry fails loudly rather than joining a quiet second
+population.
+
+### Leg entanglements became their own noun
+
+The sharper of the two fixes. Modern grappling treats the ashi garami
+family as its own positional subsystem — guards for the legs — and the
+schema disagreed: all 26 entries were filed as `Guard - Bottom`, so a heel
+hook from the saddle resolved to the same position as a spider-guard
+sweep, and appeared on the Open Guard screen. `position_detail` had
+carried the distinction all along; the coarse axis the glossary and the
+tag stream both use could not express it.
+
+They are now `position = "Leg Entanglement"` with a glossary entry and a
+new family. The interesting part is what was deliberately *not* swept in:
+**"Judo Ashi-waza" is foot sweeps, not ashi garami** — same word, unrelated
+technique — and "Single-Leg Defense"/"Single-Leg Finish" are takedown
+work. All three read as leg-adjacent; matching is exact for that reason,
+and a test asserts each stays out by name.
+
+This moved a pinned count that a previous PR deliberately hardcoded: open
+guard was 150 techniques and is now 124, because the 26 left the family.
+That test failing was the system working — the count is pinned precisely
+so a change like this cannot pass unnoticed.
+
+### The file that looked dead and wasn't
+
+`techniques.additions.json` was deleted on the reasoning that its 16 records
+are byte-identical to their counterparts in `techniques.json` and no Go file
+embeds it. Both halves are true. The conclusion was wrong: **the importer
+reads it.** `scripts/import-exercise-catalog.py` merges it into every
+regenerated library, precisely so re-importing the sheet — a full
+replacement, not a patch — cannot silently drop the hand-authored
+bottom-position gap-fill that exists nowhere else. Deleting it turned that
+merge into a silent no-op, and a scenario in `functional-scenarios.md`
+("re-importing must not delete the 16 techniques") into something
+unsatisfiable. Restored.
+
+The wider version of that mistake was worse and is the reason this section
+exists. `seed.go` says `techniques.json` is *"generated from the authored
+spreadsheet — the spreadsheet is the authoring surface, this is the build
+artifact."* Hand-editing 462 `function` values and 26 positions into the
+artifact made that false without changing the sentence that asserts it: the
+next re-import would have reverted the entire taxonomy, quietly, and the
+comment would still have claimed everything was fine.
+
+So the rules moved into the pipeline rather than the sentence being softened.
+`import-exercise-catalog.py` now derives `function` from category and name
+(the same table used for the one-time pass, `Transition` and all) and applies
+the leg-entanglement position rule, with the same exact-match discipline —
+`ENTANGLEMENT_DETAILS` is a set, not a substring test, for the Judo Ashi-waza
+reason. Verified the only way worth verifying: running the derivation over
+the pre-taxonomy data reproduces the committed `techniques.json` **byte for
+byte across all 466 records**. The artifact is reproducible again, so the
+comment is true again, and the classification logic lives in the repo instead
+of a scratch script.
+
+### Review caught the change hiding 26 techniques
+
+The taxonomy work was right and the client work was not. Moving the
+entanglements out of the Guard family moved them out from under the **Guard
+filter chip** on both clients, and neither had a chip for their new home —
+so 26 techniques became reachable by typing and nothing else. Mobile's chip
+coverage went 465/466 → 439/466, web's 458/466 → 432/466, and web is worse
+because it has no position glossary at all, so there was no second route to
+them. Both clients would have rendered a glossary card advertising a
+position their own filter could not produce.
+
+The deeper finding is why that happened. The position vocabulary is copied
+into **four** client files and one backend map, enforced in none of them,
+and this PR updated one of the four. It had already drifted once the same
+way — North-South was added to the glossary and left off the chips — and
+that was also caught by a human reading a diff, which is not a mechanism.
+
+So there is now a mechanism: `positionVocabulary.test.ts` reads
+`positions.json` and all three hardcoded client arrays off disk and asserts
+they agree in both directions — no family the clients miss, no chip keyed on
+a family that does not exist (which filters to an empty list and reads as
+"nothing here" rather than as a bug). Deleting the leg-entanglement entry
+from the web file reproduces the exact defect review found. It lives in the
+mobile jest suite because that is the only one in the repo; a test in a
+slightly wrong app is a smaller problem than a filter that silently hides a
+quarter of the leg-lock library.
+
+Fixing this properly means one shared constant per app, or keying the chips
+on the glossary ids outright. Both are design work rather than a patch, so
+the test is the floor: hand-maintenance continues, but drift now fails in CI
+instead of in a gym.
+
+### Two guards that were right, and held there by nothing
+
+Review confirmed the three properties this change depends on are correct as
+written — and that two of them stayed correct only by luck, because no test
+would have noticed them breaking.
+
+The sharper one is the seed's `IS DISTINCT FROM` tuple, which decides whether
+a row updates at all. `function` was in it correctly. But removing it left
+the entire suite green while writing **zero** functions on the upgrade path —
+rows that already exist with the column NULL, which is exactly what deploying
+this migration produces. That is the `completed`-flag failure the project has
+already shipped once: a SET clause that looks right, a seed that logs "466
+upserted", and a value that never lands. `TestReseedPopulatesFunctionOnRows­
+ThatPredateTheColumn` now simulates that path and fails with the diagnostic
+rather than silently.
+
+The other: `validFunctions` is the only thing between a typo and a value no
+client can render, since there is deliberately no CHECK — and replacing the
+guard with `case false:` also left the suite green. `TestValidate_Rejects­
+BadContent` gained the case it was built for.
+
+Also dropped the `(position, function)` index this branch added. Measured on
+the seeded table it is never chosen, because no query supplies both: the
+axis is resolved client-side against the summary payload by design, and
+there is no `?function=` filter. Migration 000018 dropped an index from this
+same table for exactly that reason — "it reads as reassurance that search is
+indexed when it isn't" — and adding one back with no caller would have been
+the same mistake with a different name.
+
+### What this does not do
+
+**Nothing reads `function` yet.** No client filters on it, and the session
+tag stream still uses its own six-value vocabulary (`submission`, `sweep`,
+`pass`, `escape`, `takedown`, `control`) which fuses verb and noun exactly
+as `category` did. Aligning it is the natural next step and was kept
+separate on purpose: it changes a wire contract the installed phone build
+depends on, and this PR does not.
+
+The third axis of the taxonomy — the *mechanic* (inversion, back-step, leg
+drag) — is deliberately absent. It has no consumer, and unlike the other
+two, nothing currently depends on getting it right.
 
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
-- **Two position taxonomies now sit on one Library screen.** The filter chips are seven coarse families; the glossary is ten curated entries. Since the guard split they disagree in a visible way: a beginner can read the Closed Guard card, learn the distinction, and then find no chip that filters to those 37 techniques. Adding North-South closed the cheap half (a position the glossary advertised that no chip could reach). Keying the chips on the glossary's ten ids is the real answer and is design work, not a patch.
+- **Two position taxonomies now sit on one Library screen.** The filter chips are nine coarse families; the glossary is eleven curated entries. Since the guard split they disagree in a visible way: a beginner can read the Closed Guard card, learn the distinction, and then find no chip that filters to those 37 techniques. Adding North-South, and later Leg Entanglement, closed the cheap half each time (a position the glossary advertised that no chip could reach) — but doing it twice by hand is the evidence that hand-maintenance is the actual bug: the vocabulary is copied across four client files and one backend map, and the taxonomy PR updated one of the four until review caught it. Keying the chips on the glossary's ids, or a shared constant with a test asserting it matches positions.json, is the real answer and is design work, not a patch.
 
 
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.

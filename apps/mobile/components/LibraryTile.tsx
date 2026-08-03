@@ -101,7 +101,7 @@ export function patternBadge(pattern: string): readonly [string, string] {
  * nothing here, the three letters are the *only* differentiator, and keying on
  * family printed GRD twice (closed and open guard) and SDE twice (side control
  * and knee on belly) — two pairs of identical tiles sitting side by side in a
- * ten-card row. That breaks this file's own rule from the other direction:
+ * eleven-card row. That breaks this file's own rule from the other direction:
  * colour never carries meaning alone, so the code may never be ambiguous.
  */
 const POSITION: Record<string, string> = {
@@ -115,6 +115,9 @@ const POSITION: Record<string, string> = {
   'north-south': 'N-S',
   'back-control': 'BCK',
   turtle: 'TRT',
+  // 'ASH' for ashi garami rather than 'LEG': the row is scanned, and LEG
+  // reads as a body part next to ten position names.
+  'leg-entanglement': 'ASH',
 };
 
 export function positionBadge(id: string): readonly [string, string] {

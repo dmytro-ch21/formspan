@@ -72,6 +72,15 @@ export const LIVE_ROWS: { category: Category; label: string; scored: string; con
 /**
  * Position families, matching the technique library's own filter granularity
  * so a tag and a library filter mean the same thing by the same name.
+ *
+ * Keep this in step with the glossary's families. It is a hardcoded list
+ * rather than a fetch because the reflection wizard has to work with no
+ * signal, but that also means it can silently fall behind — when leg
+ * entanglement became its own position in the library, this list still
+ * offered only the seven it had, so "got swept from 50/50" had nowhere to go.
+ * North-South was missing for the same reason and is added here too — the
+ * wizard's familyOf() returns '' on no match, so a technique in an unlisted
+ * family records a tag with no position at all, silently.
  */
 export const POSITIONS = [
   'Guard',
@@ -79,6 +88,8 @@ export const POSITIONS = [
   'Side Control',
   'Mount',
   'Back',
+  'Leg Entanglement',
+  'North-South',
   'Turtle',
   'Standing',
 ] as const;

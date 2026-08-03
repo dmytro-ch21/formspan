@@ -32,7 +32,7 @@ import { useAuthToken } from '@/lib/useAuthToken';
  *    navigate. This is the payoff of the whole feature: read what side control
  *    is, then go straight to escaping it.
  * 4. **It is a FlatList, not a ScrollView.** That is not symmetry with the
- *    Library for its own sake — the Guard entries cross-link 187 techniques,
+ *    Library for its own sake — the Guard entries cross-link 161 techniques,
  *    and mounting ~900 native views to draw them stalls the screen a beginner
  *    opens first. `technique/[id]`'s ScrollView is safe only because its edge
  *    lists are 6-29 items. The prose rides along as the list header.
@@ -178,7 +178,7 @@ export default function PositionScreen() {
       data={related}
       keyExtractor={(t) => t.id}
       contentContainerStyle={styles.list}
-      // The 187-row case is why this is virtualised at all.
+      // The 124-row case is why this is virtualised at all.
       //
       // No removeClippedSubviews, deliberately, though the Library uses it: RN
       // documents it as able to drop content, and the shapes that trigger that

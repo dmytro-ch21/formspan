@@ -132,6 +132,21 @@
     "priorities": "Top: chest connection first, choke second. Keep your chest glued to their back — a gap is what lets them turn in and escape. The seatbelt matters more than the hooks: keep the choking arm over their shoulder, keep your head on the same side as your underhook so they cannot trap it, and stay behind them as they roll rather than ending up underneath. Do not chase the choke so hard that you lose the position; the position produces the choke on its own.\n\nBottom: protect the neck and get your shoulders to the mat. Two hands on the choking arm is not selfish, it is the whole defence. Move your hips to one side, clear one hook, and slide your shoulders down and around to that side to come out on top of their leg. Never turn toward the choking arm, and never sit up — sitting up hands them the finish."
   },
   {
+    "id": "leg-entanglement",
+    "name": "Leg Entanglement",
+    "aliases": [
+      "ashi garami",
+      "leg lock position",
+      "saddle",
+      "honey hole",
+      "411"
+    ],
+    "family": "Leg Entanglement",
+    "order_index": 85,
+    "description": "You have trapped one of your opponent's legs between your own, so that your legs do to their leg what a guard does to their whole body. That is the whole idea, and it is why this is its own position rather than a kind of guard: the unit you are controlling is a limb, not a torso, and every rule about posture and distance changes accordingly. The family runs from single-leg X and outside ashi, through the saddle (also called 411 or honey hole), to 50/50 and backside 50/50. You arrive from a seated or supine guard by entering on a leg, from a failed pass by the opponent stepping into you, or from a scramble where a leg is closer than a collar. Modern grappling treats it as a positional system with its own hierarchy, not as a trick, which is why the entries are catalogued here alongside the finishes.",
+    "priorities": "Attacker: control the hip before you reach for the foot. A leg you have isolated but whose hip can still turn is a leg that will spin out of every submission you try, so the order is entangle, kill the hip, then attack. Keep their free leg from getting between you and the trapped one — that leg is how every escape starts. Defender: hand-fight the foot, turn toward the trapped leg rather than away from it, and get your heel exposed as little as possible; running from a heel hook by rolling the wrong direction is how knees get hurt. In both roles, know your ruleset before you enter: heel hooks and reaping are legal in some competitions and grounds for disqualification in others, and this is the one position where that difference changes what you are allowed to practise."
+  },
+  {
     "id": "turtle",
     "name": "Turtle",
     "aliases": [

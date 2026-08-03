@@ -7,7 +7,7 @@ import type { TechniqueSummary } from './techniques';
  * One collator, built once — the same fix `library.tsx` documents.
  *
  * `String.prototype.localeCompare` re-enters ICU on every call. Open guard
- * cross-links 150 techniques, so sorting it is ~1,100 of those; a fresh
+ * cross-links 124 techniques, so sorting it is ~840 of those; a fresh
  * collator per comparison is what produced measurable lag on the Library's
  * merged list.
  */
@@ -19,7 +19,7 @@ const API_BASE = `${API_URL}/v1`;
 /**
  * The BJJ position glossary — what the library's techniques happen *inside* of.
  *
- * Sibling of `techniques.ts` and deliberately simpler than it. Ten entries at a
+ * Sibling of `techniques.ts` and deliberately simpler than it. Eleven entries at a
  * few KB total, so none of that module's three optimisations apply: no
  * summary/detail split (there is nothing to trim), no local search (a list of
  * ten does not need filtering), and the whole set is fetched at once.

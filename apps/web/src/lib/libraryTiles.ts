@@ -86,7 +86,11 @@ export function patternBadge(pattern: string): readonly [string, Accent] {
  * Exact keys ("Mount - Top") reached 274 of 466 techniques and excluded every
  * bottom and escape position — half the library, and the half a white belt
  * needs most. A chip labelled "Mount" that returns only Mount-Top is also a
- * label making a promise the filter doesn't keep. Families cover 458 of 466.
+ * label making a promise the filter doesn't keep. Families cover 465 of 466.
+ *
+ * Web has no position glossary, so unlike mobile there is no second route to a
+ * family with no chip — a missing entry here means those techniques are
+ * reachable by search alone.
  */
 export const POSITIONS = [
   { key: "Guard", label: "Guard" },
@@ -96,6 +100,8 @@ export const POSITIONS = [
   { key: "Side Control", label: "Side control" },
   { key: "Back", label: "Back" },
   { key: "Turtle", label: "Turtle" },
+  { key: "North-South", label: "North-south" },
+  { key: "Leg Entanglement", label: "Leg entanglement" },
 ] as const;
 
 /**
