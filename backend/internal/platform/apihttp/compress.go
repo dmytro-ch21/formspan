@@ -9,11 +9,13 @@ import (
 
 // Compress gzips responses that are worth gzipping.
 //
-// WHY: the technique library's list endpoint is ~175 KB of JSON and **17 KB
-// gzipped** — a 10x saving on the single largest thing this API serves, paid
-// on every cold app open. It came out of an audit that was arguing about
-// whether one field's +20 KB was affordable; compression makes that debate
-// almost irrelevant, and it applies to every endpoint rather than one column.
+// WHY: the reference-content endpoints dominate a cold app open, and they
+// compress by an order of magnitude — `/v1/exercises` 211.7 KB -> 12.6 KB,
+// `/v1/techniques` 164.2 KB -> 17.4 KB (measured against the seeded database;
+// see conditional.go for the full table). It came out of an audit that was
+// arguing about whether one field's +20 KB was affordable; compression makes
+// that debate almost irrelevant, and it applies to every endpoint rather than
+// one column.
 //
 // # WHY A SIZE THRESHOLD, AND WHY IT IS DEFERRED
 //
@@ -104,7 +106,16 @@ func (c *compressWriter) WriteHeader(status int) {
 	c.wroteHeader = true
 	// A handler that encoded its own body owns the encoding; wrapping it
 	// again produces a body no client can read and nothing reports it.
-	if c.Header().Get("Content-Encoding") != "" {
+	//
+	// A status that cannot carry a body is passed through for a subtler
+	// reason. RFC 9111 §4.3.4 has a cache copy a 304's headers onto the stored
+	// 200 it is validating — so a `Content-Encoding: gzip` stamped on an empty
+	// 304 gets grafted onto a stored *identity* body, and the client then
+	// tries to gunzip plaintext. Unreachable today (nothing emits a 304 but
+	// ConditionalGet, which writes zero bytes, so the threshold never trips),
+	// but 304s have only just entered this codebase's vocabulary and the
+	// failure would surface in someone else's cache, not in a test.
+	if c.Header().Get("Content-Encoding") != "" || !bodyAllowedForStatus(status) {
 		c.passthrough = true
 		c.ResponseWriter.WriteHeader(status)
 	}
@@ -160,9 +171,9 @@ func (c *compressWriter) Write(p []byte) (int, error) {
 	c.gz = gz
 
 	// Flush only the prefix that was buffered BEFORE this write, then hand p
-	// straight to the compressor. Appending p first meant a single 175 KB
-	// WriteJSON allocated a 175 KB throwaway copy — measured 255 KB/op vs
-	// 72 KB/op. Same bytes, same order.
+	// straight to the compressor. Appending p first meant a single large
+	// WriteJSON allocated a full-size throwaway copy — measured 255 KB/op vs
+	// 72 KB/op on a ~175 KB body. Same bytes, same order.
 	buffered := c.buf[:len(c.buf)-len(p)]
 	c.buf = nil
 	if len(buffered) > 0 {
@@ -192,4 +203,17 @@ func (c *compressWriter) close() {
 		}
 		c.buf = nil
 	}
+}
+
+// bodyAllowedForStatus mirrors net/http's unexported function of the same
+// name (RFC 9110 §6.4.1 / §15.4.5). Duplicated rather than imported because
+// the stdlib does not export it, and it is four lines.
+func bodyAllowedForStatus(status int) bool {
+	switch {
+	case status >= 100 && status <= 199:
+		return false
+	case status == http.StatusNoContent, status == http.StatusNotModified:
+		return false
+	}
+	return true
 }

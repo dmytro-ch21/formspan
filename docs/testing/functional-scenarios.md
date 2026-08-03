@@ -2618,3 +2618,93 @@ this is API-surface behaviour even though no endpoint changed.
 - **The access log still records the right status.** The header write is
   deferred past the handler returning; if that ordering breaks, every log line
   reports the wrong code while responses look fine.
+
+## Conditional GET (`internal/platform/apihttp`)
+
+- **A repeat request returns 304 with no body.** Fetch, keep the `ETag`, send
+  it back as `If-None-Match`. Assert zero bytes — that is the entire feature.
+- **A changed body returns 200 and a different ETag.** Otherwise clients pin
+  themselves to stale content forever.
+- **The ETag does not change with `Accept-Encoding`.** It is computed inside
+  the compression middleware for exactly this reason; if it moves, every
+  gzip-capable client is a permanent cache miss and the feature does nothing.
+- **Never 304 a write.** A conditional POST/PUT/PATCH/DELETE must proceed
+  normally — a 304 tells the client its write was a no-op.
+- **Never 304 an error.** A 404 or 500 must keep its status, its body, and
+  carry no ETag, or a client caches the failure.
+- **A 304 carries no `Content-Length`.** A declared length with no bytes makes
+  a client hang waiting for them. **Set it in the handler first** — a
+  `ResponseRecorder` never synthesises one, so asserting it is absent proves
+  nothing unless something put it there. Assert the 200 still has it, or the
+  test passes just as well against code that deletes it unconditionally.
+- **A handler's own `ETag` is honoured, not just echoed.** Set one in a
+  handler, send it back as `If-None-Match`, assert 304. Emitting a validator
+  and ignoring it is the failure that looks exactly like success: the client
+  sends it on every request and always gets the full payload. This is the seam
+  a `max(updated_at)` validator lands in.
+- **A handler's `ETag` set after its first `Write` still wins.** The header
+  write is deferred, so the tag is still in the map — and without an explicit
+  re-check it gets silently overwritten by a body hash. Assert the bytes
+  written before the tag appeared aren't lost either.
+- **Assert against the real middleware stack, not one the test assembles.**
+  `apihttp.Stack()` exists because the order test built its own
+  `Compress(ConditionalGet(...))` and so could only ever pass — the production
+  order in `cmd/api/main.go` was swapped and the whole suite stayed green.
+  Anything asserting composition must reach the shipped composition.
+- **Browser clients need the CORS headers.** `If-None-Match` in
+  `Access-Control-Allow-Headers`, `ETag` in `Access-Control-Expose-Headers`.
+  Neither affects iOS or Android, so a native-only test pass says nothing —
+  this needs a real cross-origin fetch from `apps/web`.
+- **A WEAK `ETag` from a handler must still revalidate.** Comparison for
+  If-None-Match is the weak one, so `W/` is stripped from **both** sides.
+  Stripping only the client's candidate passes every strong-ETag test and
+  silently breaks `max(updated_at)`-style validators, which must be weak
+  because they cannot promise byte-identity. Test the verbatim echo — that is
+  what a real client sends. And test that a *different* weak tag is still a
+  200, or the strip has become "any weak tag matches".
+- **A status that cannot carry a body is never gzipped.** RFC 9111 §4.3.4 has
+  a cache copy a 304's headers onto the stored 200 it validates, so
+  `Content-Encoding: gzip` on an empty 304 gets grafted onto a stored identity
+  body. The damage lands in someone else's cache, never in a response anyone
+  here would look at.
+- **`Cache-Control: no-store` opts a route out entirely** — no `ETag`, no
+  `304`, even against `If-None-Match: *`. `/v1/healthz` relies on it: a
+  constant body means a constant validator, so a prober would be answered
+  `304` for the life of the deployment while a checker asserting `200`
+  reported an outage that isn't happening.
+- **A handler-supplied validator must be user-scoped.** `Vary` does not
+  include `Authorization`, so a bare `max(updated_at)` over a shared table
+  would revalidate user B against user A's stored body. The body-hash default
+  cannot do this; nothing enforces it for a handler's own tag.
+- **The `Cache-Control` default reaches all four ETag paths** — handler tag set
+  before `WriteHeader`, mid-stream, after the last write, and the middleware's
+  own hash. The three handler paths commit the status line early, so the
+  header cannot be added afterwards and has to be set on each.
+- **The ETag comes with `Cache-Control: private, no-cache`.** Making responses
+  revalidatable invites intermediaries that were not there before, and almost
+  everything served is per-user data on an authenticated route.
+- **List endpoints stay bounded.** The identity body is buffered whole to hash
+  it, so an unbounded row count is an unbounded per-request allocation. Any
+  new list endpoint needs a real-database test that it caps — and that the cap
+  keeps the **newest** rows, since a flipped `ORDER BY` still passes a
+  count-only assertion while quietly answering with the table's prehistory.
+- **A bounded list needs a TOTAL `ORDER BY`, and the test needs a real tie.**
+  A cap on a non-unique sort key makes membership nondeterministic: which row
+  falls outside can change between identical requests, and the reordered array
+  hashes differently, so the ETag on that endpoint becomes a permanent cache
+  miss. Space every fixture row apart and the test cannot see any of it —
+  create rows that tie *across the cut*. Note a covering index whose columns
+  match the `ORDER BY` supplies the order too, so removing the SQL tiebreak
+  may not turn the test red; say that in the test rather than implying
+  coverage that isn't there.
+- **A cap over a MULTI-OWNER list must sort the caller's own rows first.**
+  `workout.List` mixes your workouts with every user's public ones, so a plain
+  alphabetical cap evicts across ownership — your own workout named "Z…"
+  disappears once 500 public "A…" ones sort ahead of it. A count-only
+  assertion sees none of this; the fixture needs the caller's row to sort
+  last by name.
+- **Distinguish outcome from mechanism.** Two guards that produce the same
+  status code can both be deleted one at a time with the suite still green,
+  because each covers for the other. If a guard exists for a reason the status
+  code cannot show (streaming instead of buffering, say), assert that reason
+  directly or write down that the test does not pin it.

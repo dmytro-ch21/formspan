@@ -67,6 +67,42 @@ func scanWorkout(row scannable) (*Workout, error) {
 // than its List is a classic way to leak rows.
 const visibleTo = `(owner_user_id = $1 OR visibility = 'public')`
 
+// maxWorkouts bounds the visible workout list.
+//
+// This is the one list on the platform whose size is driven by TOTAL USER
+// COUNT rather than by one athlete's history: `visibleTo` admits every user's
+// public workouts, so `?scope=shared` grows with the platform, and each row
+// then fans out through attachItems.
+//
+// It mattered enough on its own; apihttp.ConditionalGet made it structural.
+// That middleware buffers the whole identity body to hash it, so peak memory
+// per in-flight request is now bounded by the largest response the API can
+// produce — a claim that is only true if every list has a ceiling. This was
+// the last one without one.
+//
+// The caller's OWN rows sort first, and that is what makes the cap safe rather
+// than merely deterministic. `visibleTo` mixes your workouts with every user's
+// public ones, so a plain `ORDER BY name, id` evicts alphabetically across
+// ownership: once 500 public workouts sort ahead of it, your own workout named
+// "Z…" silently vanishes from the default list. Measured — 501 public rows and
+// the survivors were the first 500 by name, regardless of owner. Sorting the
+// caller's own rows first means the eviction lands on other people's content,
+// which is the only kind anyone can afford to lose.
+//
+// `IS NOT DISTINCT FROM`, not `=`. `owner_user_id` is NULLABLE — NULL is a
+// VOLA-authored official template (migration 000006), and the
+// `workouts_official_is_public` CHECK forces those public, so they are always
+// in the default list. `NULL = $1` is NULL, and `ORDER BY … DESC` is NULLS
+// FIRST, so `=` would have sorted every official template ABOVE the caller's
+// own — reintroducing the exact eviction this ordering exists to prevent, by
+// the one row class that outranks them. No official template exists yet, so
+// nothing was broken in practice; the comment claiming otherwise was the
+// dangerous part.
+//
+// `name, id` after it keeps the order total, so the cap's membership is stable
+// and the response hashes the same way twice.
+const maxWorkouts = 500
+
 func (r *PostgresRepository) List(ctx context.Context, userID string, f Filter) ([]Workout, error) {
 	where := []string{visibleTo}
 	args := []any{userID}
@@ -88,8 +124,10 @@ func (r *PostgresRepository) List(ctx context.Context, userID string, f Filter) 
 		where = append(where, fmt.Sprintf(`goal = $%d`, len(args)))
 	}
 
+	args = append(args, maxWorkouts)
 	rows, err := r.pool.Query(ctx, `SELECT `+workoutColumns+` FROM workouts WHERE `+
-		strings.Join(where, " AND ")+` ORDER BY name, id`, args...)
+		strings.Join(where, " AND ")+` ORDER BY (owner_user_id IS NOT DISTINCT FROM $1) DESC, name, id
+		LIMIT $`+fmt.Sprint(len(args)), args...)
 	if err != nil {
 		return nil, fmt.Errorf("workout: list: %w", err)
 	}
