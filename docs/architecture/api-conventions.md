@@ -87,3 +87,17 @@ correctness bug rather than a cosmetic one, and nobody needs a total.
 ## OpenAPI
 
 `contracts/public.openapi.yaml` is the source of truth for the wire contract — hand-maintained alongside the Go handlers, not generated, since the backend deliberately stays on stdlib `net/http` rather than a framework with reflection-based spec generation (matches the project's general preference for stdlib over added dependencies). CI lints it for structural validity on every push (`pnpm run lint:openapi`); it does not currently check that the spec matches the implementation — that's a manual discipline for now, worth automating (e.g. contract testing) if drift becomes a real problem.
+
+## Response compression
+
+Responses over 1 KB are gzipped when the client sends `Accept-Encoding: gzip`
+(`internal/platform/apihttp/compress.go`). Smaller ones are sent verbatim —
+gzip's header alone is 18 bytes, so compressing an error body makes it bigger.
+
+Every response carries `Vary: Accept-Encoding`, compressed or not. **Any
+middleware that varies must `Add` rather than `Set`** — `Vary` is a list, and
+`Set` silently drops whichever ran first, which is how a cache ends up serving
+a gzipped body to a client that cannot read it.
+
+Clients need no change: `fetch` and Go's `http.Client` both decompress
+transparently.

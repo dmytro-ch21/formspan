@@ -164,7 +164,7 @@ func main() {
 	recorder := health.NewRecorder(healthRepo, slowRequestAfter, logger)
 
 	logger.Info("api listening", "port", port, "slow_request_ms", slowRequestAfter.Milliseconds())
-	if err := http.ListenAndServe(":"+port, httplog.Middleware(logger, recorder.Observe)(withCORS(mux))); err != nil {
+	if err := http.ListenAndServe(":"+port, httplog.Middleware(logger, recorder.Observe)(apihttp.Compress(withCORS(mux)))); err != nil {
 		logger.Error("server exited", "err", err)
 		os.Exit(1)
 	}
@@ -192,7 +192,11 @@ func withCORS(next http.Handler) http.Handler {
 		origin := r.Header.Get("Origin")
 		if allowed[origin] {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Vary", "Origin")
+			// Add, not Set: apihttp.Compress also varies on Accept-Encoding,
+			// and Vary is a list. Set drops whichever middleware ran first,
+			// which would let a cache serve a gzipped body to a client that
+			// cannot read it — or the wrong origin's response.
+			w.Header().Add("Vary", "Origin")
 		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, traceparent")

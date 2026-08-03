@@ -5923,6 +5923,66 @@ Nothing reads `to_position` yet — no screen, no suggestion. That is the same
 foundation-before-feature order as `function`, which took a round of user
 feedback to justify. The difference is that `function` now has two surfaces
 reading it, so the pattern has at least been shown to close.
+## 2026-08-03 — Response compression
+
+`apihttp.Compress`, wired into the API's middleware chain. The technique
+library's list endpoint is ~175 KB of JSON and **~17 KB gzipped** — a 10x
+saving on the single largest thing this API serves, paid on every cold app
+open.
+
+It came out of a post-merge audit that was arguing about whether one field's
++20 KB was affordable. It was the right question and the wrong altitude: with
+compression that field costs ~3 KB, and the same middleware applies to every
+endpoint rather than one column. Worth remembering the next time a payload
+debate starts — check whether the transport is doing its job first.
+
+### Why it is not four lines
+
+**The size threshold has to be deferred.** Most responses here are tiny — an
+error body is ~60 bytes and gzip's header alone is 18, so compressing those
+makes them *bigger* and burns CPU. But the size is not knowable up front:
+handlers stream through `WriteJSON` and almost never set `Content-Length`.
+
+So the writer buffers, and only commits to gzip once the response is provably
+past 1 KB. Anything that finishes under it is written through verbatim — no
+`Content-Encoding`, no gzip framing. That deferral is the entire reason there
+is a state machine rather than a wrapper.
+
+Three things it gets right that are silent when wrong:
+
+- **`Content-Length` is deleted** when compression starts. It describes the
+  uncompressed body, and a response whose declared length disagrees with its
+  bytes makes clients truncate or hang rather than error.
+- **`Vary: Accept-Encoding` is set on every response**, compressed or not,
+  or a cache keying on the URL alone hands a gzipped body to a client that
+  cannot read it. It is `Add`, not `Set` — and `withCORS` was changed to
+  `Add` its `Vary: Origin` for the same reason. `Vary` is a list; `Set`
+  silently drops whichever middleware ran first.
+- **`Accept-Encoding` is parsed, not substring-matched.** "notgzip" contains
+  "gzip", and `gzip;q=0` means the client explicitly refuses it.
+
+Ten tests, all on the edges rather than the happy path: small bodies left
+alone, no double-encoding when a handler set its own `Content-Encoding`,
+status preserved, empty responses (204 and bare `WriteHeader`) neither
+hanging nor gaining framing.
+
+### Verified live, and one gap
+
+Wired into the real chain and confirmed end to end: a small 401 passes
+through uncompressed with `Vary` set, and `httplog` still records the correct
+status despite the header write being deferred past `ServeHTTP` — which was
+the interaction most likely to break quietly.
+
+**Not verified live: a large compressed response.** Every endpoint big enough
+to cross the threshold is behind `RequireAuth`, and no Clerk token was
+available. The 100 KB round trip is unit-tested, so this is inference from a
+test rather than an observation of the deployed path.
+
+### Not done
+
+No `ETag`/conditional GET. Reference content changes only on deploy and every
+row carries `updated_at`, so `max(updated_at)` is a ready-made validator —
+the natural next step, and a bigger saving still for repeat opens.
 
 ## Open items / known gaps as of this entry
 
