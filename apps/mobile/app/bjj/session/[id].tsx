@@ -11,6 +11,7 @@ import {
   LIVE_ROWS,
   describeRPE,
   rollingMinutes,
+  techniqueOutcomeCount,
   type SessionDetail,
   type Tag,
 } from '@/lib/bjjSession';
@@ -198,7 +199,21 @@ export default function BjjSessionScreen() {
   const kindLabel = detail ? (KINDS.find((k) => k.key === detail.kind)?.label ?? detail.kind) : '';
 
   const drilled = (detail?.tags ?? []).filter((t) => t.event === 'drilled');
-  const live = (detail?.tags ?? []).filter((t) => t.event === 'scored' || t.event === 'conceded');
+  // `scored` here is untagged only, mirroring the wizard's tagCount. The
+  // category grid is fed by the wizard's live step, which writes untagged
+  // rows; counting the drilled step's per-technique outcomes as well would
+  // make this screen report a bigger number than the wizard shows for the
+  // same session, with nothing to explain the gap.
+  //
+  // `conceded` is NOT filtered that way, and the asymmetry is deliberate. No
+  // screen in this app can author a technique-tagged conceded row — the API
+  // accepts one and removeDrilledTechnique goes out of its way to preserve
+  // one — so filtering it here would leave it with no display surface
+  // anywhere: saved, synced, and invisible. There is no editor for it to
+  // disagree with, so the grid is the honest place for it.
+  const live = (detail?.tags ?? []).filter(
+    (t) => t.event === 'conceded' || (!t.technique_id && t.event === 'scored'),
+  );
   const summary = detail
     ? [kindLabel, detail.gi === null ? null : detail.gi ? 'Gi' : 'No-gi', detail.academy || null]
         .filter(Boolean)
@@ -212,7 +227,7 @@ export default function BjjSessionScreen() {
     detail?.session_rpe != null ||
     detail?.gi != null;
   const nameOf = (t: Tag) =>
-    techniques.find((x) => x.id === t.technique_id)?.name ?? t.technique_id ?? '';
+    techniques.find((x) => x.id === t.technique_id)?.name ?? t.technique_id ?? 'Technique';
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.body} testID="bjj-session-screen">
@@ -286,11 +301,26 @@ export default function BjjSessionScreen() {
       {drilled.length > 0 && (
         <Section title="Drilled">
           <RNView style={styles.chips}>
-            {drilled.map((t, i) => (
-              <RNView key={`${t.technique_id}-${i}`} style={styles.chip}>
-                <Text style={styles.chipText}>{nameOf(t)}</Text>
-              </RNView>
-            ))}
+            {drilled.map((t, i) => {
+              // The funnel, read back. Without these two numbers `attempted`
+              // would be written by the wizard and displayed nowhere — which
+              // is the exact defect this whole feature exists to fix, so
+              // recreating it one screen along would be its own joke.
+              const tried = techniqueOutcomeCount(detail?.tags ?? [], t.technique_id ?? '', 'attempted');
+              const landed = techniqueOutcomeCount(detail?.tags ?? [], t.technique_id ?? '', 'scored');
+              return (
+                <RNView key={`${t.technique_id}-${i}`} style={styles.chip}>
+                  <Text style={styles.chipText}>{nameOf(t)}</Text>
+                  {tried + landed > 0 && (
+                    <Text style={styles.chipFunnel}>
+                      {tried > 0 && `${tried} tried`}
+                      {landed > 0 && tried > 0 ? ' · ' : ''}
+                      {landed > 0 && <Text style={styles.scored}>{landed} landed</Text>}
+                    </Text>
+                  )}
+                </RNView>
+              );
+            })}
           </RNView>
         </Section>
       )}
@@ -460,6 +490,10 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   chipText: { fontSize: 14, color: vola.text },
+  // The funnel numbers under the technique name. Muted by default because
+  // the technique is what the eye is scanning for; `landed` picks up the
+  // scored accent so the good half is findable at a glance.
+  chipFunnel: { fontSize: 12, color: vola.textMuted, marginTop: 2 },
 
   liveRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6 },
   liveLabel: { flex: 1, fontSize: 15, color: vola.text },

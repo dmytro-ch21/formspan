@@ -14,9 +14,13 @@ import { LibraryTile, categoryBadge } from '@/components/LibraryTile';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import {
+  FUNNEL_OUTCOMES,
   LIVE_ROWS,
   POSITIONS,
+  bumpTechniqueOutcome,
+  removeDrilledTechnique,
   tagCount,
+  techniqueOutcomeCount,
   type Category,
   type Event,
   type SessionDetail,
@@ -322,10 +326,7 @@ function DrilledStep({
   }
 
   function remove(techniqueID: string | null | undefined) {
-    onChange({
-      ...detail,
-      tags: detail.tags.filter((t) => !(t.event === 'drilled' && t.technique_id === techniqueID)),
-    });
+    onChange({ ...detail, tags: removeDrilledTechnique(detail.tags, techniqueID) });
   }
 
   return (
@@ -375,21 +376,80 @@ function DrilledStep({
       {drilled.length > 0 && (
         <>
           <Text style={styles.label}>Drilled today</Text>
-          <RNView style={styles.chips}>
-            {drilled.map((t) => (
-              <Pressable
-                key={t.technique_id ?? `${t.category}-${t.position}`}
-                onPress={() => remove(t.technique_id)}
-                style={styles.tagChip}
-                accessibilityRole="button"
-                accessibilityLabel={`Remove ${nameFor(all, t.technique_id)}`}
-                testID={`bjj-drilled-chip-${t.technique_id}`}
-              >
-                <Text style={styles.tagChipText}>{nameFor(all, t.technique_id)}</Text>
-                <Text style={styles.tagChipX}>×</Text>
-              </Pressable>
-            ))}
-          </RNView>
+          {drilled.map((t) => {
+            const name = nameFor(all, t.technique_id);
+            return (
+              <RNView key={t.technique_id ?? `${t.category}-${t.position}`} style={styles.drilledRow}>
+                <RNView style={styles.drilledHead}>
+                  <Text style={styles.drilledName} numberOfLines={2}>
+                    {name}
+                  </Text>
+                  <Pressable
+                    onPress={() => remove(t.technique_id)}
+                    style={styles.drilledRemove}
+                    hitSlop={12}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Remove ${name}`}
+                    testID={`bjj-drilled-chip-${t.technique_id}`}
+                  >
+                    <Text style={styles.tagChipX}>×</Text>
+                  </Pressable>
+                </RNView>
+                {/* The funnel's missing middle. Left at zero this still says
+                    something — "drilled, never tried live" is the finding,
+                    not an empty cell — so nothing here is required.
+
+                    Only for a row that names a technique. A drilled row can
+                    lose its id — migration 000025 sets it NULL when a
+                    technique is retired from the library, on purpose, so the
+                    athlete's record of having drilled it survives — and
+                    outcomes cannot attach to nothing. Rendering counters
+                    there would give two controls that look live, read 0
+                    forever, and tell VoiceOver they can be tapped. */}
+                {!!t.technique_id && (
+                <RNView style={styles.drilledOutcomes}>
+                  {FUNNEL_OUTCOMES.map((o) => (
+                    <Counter
+                      key={o.event}
+                      value={techniqueOutcomeCount(detail.tags, t.technique_id, o.event)}
+                      label={o.label}
+                      // Without the name, VoiceOver reads "Tried: 0 button,
+                      // Landed: 0 button, Tried: 0 button…" down the whole
+                      // list with nothing binding a pair to a technique. The
+                      // live grid gets away with the short label because its
+                      // row label sits in the same visual row.
+                      context={name}
+                      // `attempted` deliberately does NOT take the conceded
+                      // amber. Trying a drilled technique live is the exact
+                      // behaviour this feature exists to elicit, and this
+                      // would be the one place in the app where the palette
+                      // scolds something we want more of.
+                      tone={o.event === 'scored' ? 'scored' : 'neutral'}
+                      onAdd={() =>
+                        onChange({
+                          ...detail,
+                          tags: bumpTechniqueOutcome(detail.tags, t, o.event, 1),
+                        })
+                      }
+                      onRemove={() =>
+                        onChange({
+                          ...detail,
+                          tags: bumpTechniqueOutcome(detail.tags, t, o.event, -1),
+                        })
+                      }
+                      testID={`bjj-funnel-${t.technique_id}-${o.event}`}
+                    />
+                  ))}
+                </RNView>
+                )}
+              </RNView>
+            );
+          })}
+          <Text style={styles.footnote}>
+            Did you try any of it live? Tap to add, press and hold to take one back. “Tried” means
+            you went for it and it didn&apos;t land — so tried plus landed is how often you went for
+            it. Leaving these at zero is an answer too.
+          </Text>
         </>
       )}
     </RNView>
@@ -546,6 +606,7 @@ function LiveStep({
 function Counter({
   value,
   label,
+  context,
   tone,
   onAdd,
   onRemove,
@@ -553,7 +614,10 @@ function Counter({
 }: {
   value: number;
   label: string;
-  tone: 'scored' | 'conceded';
+  /** Prefixed to the accessibility label when the visible row label is not
+   *  adjacent — see the funnel counters. */
+  context?: string;
+  tone: 'scored' | 'conceded' | 'neutral';
   onAdd: () => void;
   onRemove: () => void;
   testID: string;
@@ -563,9 +627,17 @@ function Counter({
     <Pressable
       onPress={onAdd}
       onLongPress={onRemove}
-      style={[styles.counter, on && (tone === 'scored' ? styles.counterScored : styles.counterConceded)]}
+      style={[
+        styles.counter,
+        on &&
+          (tone === 'scored'
+            ? styles.counterScored
+            : tone === 'conceded'
+              ? styles.counterConceded
+              : styles.counterNeutral),
+      ]}
       accessibilityRole="button"
-      accessibilityLabel={`${label}: ${value}`}
+      accessibilityLabel={context ? `${context}, ${label}: ${value}` : `${label}: ${value}`}
       accessibilityHint="Tap to add one, press and hold to remove one"
       testID={testID}
     >
@@ -645,7 +717,16 @@ function familyOf(position: string): string {
 
 function nameFor(all: TechniqueSummary[], id: string | null | undefined): string {
   if (!id) return 'Technique';
-  return all.find((t) => t.id === id)?.name ?? 'Technique';
+  // Fall back to the ID before the placeholder. `fetchTechniques` caches only
+  // in module memory, so on a COLD OFFLINE launch — reopening a reflection at
+  // the gym, which is the flow this app exists for — `all` is empty and every
+  // row rendered as the same word "Technique". That makes the counters
+  // unbindable to a technique for a sighted user and turns the funnel
+  // counters' accessibility context into "Technique, Tried: 0" repeated down
+  // the list, which is exactly the ambiguity that context prop was added to
+  // remove. The ids are readable slugs (`armbar-from-guard`), so they are a
+  // genuinely useful last resort. Matches the read-back screen's `nameOf`.
+  return all.find((t) => t.id === id)?.name ?? id;
 }
 
 const styles = StyleSheet.create({
@@ -700,20 +781,28 @@ const styles = StyleSheet.create({
   resultName: { fontSize: 15, fontWeight: '600' },
   plus: { color: vola.lime, fontSize: 20, fontWeight: '700' },
 
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  tagChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+  // One drilled technique: its name, and the two funnel counters under it.
+  // Two lines rather than one row, because a name plus two counters plus a
+  // remove control on a 4.7" screen leaves the name about eight characters —
+  // and "Berimbolo to back take" truncated to "Berim…" is not a technique
+  // anyone can confirm they drilled.
+  drilledRow: {
     borderWidth: 1,
-    borderColor: vola.lime,
-    backgroundColor: vola.setDone,
-    borderRadius: 999,
-    paddingVertical: 9,
-    paddingHorizontal: 14,
-    minHeight: 44,
+    borderColor: vola.lineSoft,
+    borderRadius: 12,
+    padding: 10,
+    marginTop: 8,
+    gap: 8,
   },
-  tagChipText: { fontWeight: '600', fontSize: 13 },
+  drilledHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  drilledName: { flex: 1, fontWeight: '600', fontSize: 14 },
+  drilledRemove: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  drilledOutcomes: { flexDirection: 'row', gap: 8 },
   tagChipX: { color: vola.textMuted, fontSize: 15, fontWeight: '700' },
 
   row: { gap: 8, paddingRight: 20 },
@@ -759,6 +848,9 @@ const styles = StyleSheet.create({
   // and the tone should not scold. See the no-shame-messaging stance.
   counterScored: { borderColor: vola.lime, backgroundColor: vola.setDone },
   counterConceded: { borderColor: vola.warn, backgroundColor: vola.surfaceRaised },
+  // "Tried" is neither a win nor something that happened to you — it is the
+  // attempt, which is the thing being encouraged. Raised surface, no accent.
+  counterNeutral: { borderColor: vola.textMuted, backgroundColor: vola.surfaceRaised },
   counterValue: { fontSize: 20, fontWeight: '800', color: vola.textDim },
   counterValueOn: { color: vola.text },
   counterLabel: { fontSize: 10, color: vola.textDim },

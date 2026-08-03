@@ -6285,6 +6285,158 @@ and a `304` that keeps `Vary` while carrying no body, no `Content-Encoding`
 and no `Content-Length`. That closes the "never verified on the wire" thread
 the compression entry left open.
 
+## 2026-08-03 — The technique funnel had no middle
+
+Asked to track technique proficiency. The schema was built for it —
+`bjj_session_tags` records `event` (`drilled → attempted → scored`, plus
+`conceded`), `position` and `technique_id`, and migration 000025's own comment
+says the deferred features "are all pure reads over" it. The capture side had
+quietly stopped holding up its end:
+
+| funnel stage | captured before this |
+| --- | --- |
+| `drilled` | yes, with `technique_id` |
+| `attempted` | **never produced by anything** — a dead enum in `session.go:109` and `bjjSession.ts:45` alike |
+| `scored` / `conceded` | category + position only; the live grid filters technique-tagged rows *out* by design |
+
+So a per-technique proficiency view would have read "drilled 12 times" and
+nothing else, for every technique. The drop-off the design doc calls the most
+actionable number in the sport — "drilled 12 times, attempted 0 is a finding,
+not a statistic" — was structurally uncomputable. Confirmed against the
+database before writing any code: 4 tag rows, **0 carrying a technique**.
+
+This is the `completed`-flag failure inverted. There the field was written and
+never read; here the reader was deferred and the writer quietly stopped
+carrying the field. Same outcome — a column that looks populated in the schema
+and is empty in practice — and the same reason it survived: nothing fails when
+an optional field goes unwritten.
+
+### Where the counters went, and why not in the live grid
+
+On the **drilled step**, under each technique the athlete just named. The live
+grid was the obvious home and is the wrong one: it is a category×outcome grid
+with no technique in it, so putting the funnel there means a second technique
+search during the fastest screen in the flow. On the drilled step the
+candidate list is already on screen — the question "did you try any of it
+live?" costs one tap per answer.
+
+No new wizard step, so no extra Next tap. The J4 criterion (a full session
+logged in under a minute) is the number this design is ruthless about, and a
+step boundary is the most expensive thing you can add to a wizard.
+
+Left at zero the counters still say something: "drilled, never tried live" is
+the finding, not an empty cell. Nothing here is required.
+
+### Attempted and scored are disjoint, and the labels have to carry it
+
+Per the migration's own wording, `attempted` is "tried it live, it didn't
+land" — not "total tries". Went for it four times and hit one is
+`attempted: 3, scored: 1`. So attempts + scores is how often you went for it,
+and `scored / (attempted + scored)` is the hit rate. The copy says this
+explicitly, because the other reading is at least as natural and the two
+produce different numbers from the same taps.
+
+### The two surfaces have to partition the tag list
+
+`tagCount` already excluded technique-tagged rows, with a comment noting
+nothing could produce one yet "but the API accepts one, so a reflection
+authored elsewhere and read back would hit it". That foresight is what made
+this change safe on the wizard side — the live grid and the funnel now own
+disjoint halves of the tag list, so no event is displayed twice and every
+displayed event has a control that can change it.
+
+The **read-back screen had not been given the same treatment**, and this
+change would have broken it two ways: its live grid summed technique-tagged
+`scored` rows into the category totals, so it would have reported a bigger
+number than the wizard for the same session with nothing to explain the gap;
+and `attempted` appeared nowhere on it at all. The second one is the funnier
+failure — recreating the exact write-but-never-read defect this feature exists
+to fix, one screen along. Both fixed here: the grid mirrors `tagCount` for
+`scored`, and the Drilled section carries each technique's tried/landed
+numbers. Not for `conceded` — see below.
+
+### No backend change
+
+`Tag.Validate()` already accepted `attempted` with a `technique_id`, and the
+table already had the columns. The whole PR is `apps/mobile`. Worth recording
+because it is what the schema-first decision bought: the expensive half was
+done months ago, on purpose, and the feature landed as a pure client change.
+
+### What review caught, and it was the dangerous kind
+
+`removeDrilledTechnique` lost the `event === 'drilled'` guard the inline
+filter it replaced had carried, leaving the technique-id match as the only
+bound. A nullish id then matches every **untagged** row — and the API sends
+`"technique_id": null` on every one of them, because the Go field has no
+`omitempty`. So removing a drilled row that had lost its technique deleted the
+live grid's entire "You" column. Reachable, not theoretical: migration 000025
+sets `technique_id` NULL when a technique is retired from the library, on
+purpose, so the athlete's record of having drilled it survives. And
+`PUT /bjj/sessions/{id}` replaces the tag set wholesale, so it would have
+synced to the server and every other device.
+
+The test named for that exact property could not catch it. Its only untagged
+fixture row was `conceded`, which the guard excludes independently of the id
+match — replacing the whole function body with `filter(t => t.event ===
+'conceded')` kept it green. Every fixture in the file also omitted
+`technique_id` entirely (giving `undefined`, the locally-authored shape)
+rather than the `null` the API actually sends, which is where the bug lived.
+
+That is three in a row now — the conditional-GET order test, the activity
+LIMIT tie test, and this — where the test written to demonstrate a property
+was satisfied by something other than that property. The common shape: the
+fixture accidentally contains the value the broken code produces.
+
+One thing worth stating rather than papering over: with the nullish-id guard
+in place, the explicit `drilled | attempted | scored` allow-list is
+**equivalent** to `!== conceded`, since there are only four events. No test
+distinguishes them and none pretends to. It is written the long way so a fifth
+event cannot silently join the set this function deletes.
+
+Review also caught the read-back screen making a technique-tagged `conceded`
+row invisible everywhere — a row the delete path goes out of its way to
+preserve — and, because `hasAnyDetail` counted only what was displayed, a
+reflection holding nothing else would have rendered "No detail recorded" on
+the screen that exists because detail was being recorded and never shown. The
+grid now carries those rows: there is no editor for them to disagree with, so
+it is the honest place for them.
+
+### Gaps this leaves
+
+- **Nothing reads the funnel across sessions yet.** This is the capture half;
+  the web proficiency view is the next PR. Until it lands the athlete sees
+  per-session numbers only, which is thin justification for the taps.
+- **`conceded` still has no technique.** "They armbarred me" stays
+  category+position, so the *defensive* funnel does not exist. Deliberate for
+  now — the drilled list gives the offensive side a free candidate list and
+  the defensive side has no equivalent, so it would cost a search.
+- **The counters are only reachable through a drilled chip.** Hitting a
+  technique live that you did not drill today has nowhere to go except the
+  untagged live grid. Fine while the funnel's purpose is measuring the
+  drilled→attempted drop-off specifically; wrong if the goal becomes complete
+  per-technique history.
+- **The two displays partition the tag list; the evidence stream does not.**
+  Tap "Landed 1" on the armbar row and then "Submissions / Hit" once, for one
+  armbar, and two `scored` rows exist for a single real event — one
+  technique-tagged, one not. Each screen renders them correctly and
+  separately, so nothing looks wrong anywhere. The follow-up web view has to
+  pick a convention (technique-tagged rows are the specific record, untagged
+  the catch-all) rather than sum both, or the same armbar counts twice.
+  Recorded here so that lands as a known decision and not as a data bug
+  discovered later.
+- **A drilled row whose technique was retired gets no counters at all.** It
+  renders as a named row with no funnel, because outcomes cannot attach to
+  nothing. Correct, but it means retiring a library entry silently ends the
+  funnel for anyone mid-way through collecting on it.
+- **NOT VERIFIED ON A DEVICE.** `pnpm run verify` is green and the transforms
+  are mutation-tested, but nothing has drawn these rows: Expo Go 57.0.6
+  segfaults (`EXC_BAD_ACCESS` in `worklets::jsi_utils`) on both an iOS 17.2
+  iPhone 15 Pro and an iOS 26.5 iPhone 17 Pro. Confirmed unrelated to this
+  change by reproducing the identical crash on the app **root route**, which
+  this branch does not touch — so it is an Expo Go/simulator problem, not a
+  regression here, but the layout and VoiceOver behaviour are unconfirmed.
+
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
