@@ -72,6 +72,11 @@ function technique(over: Partial<TechniqueSummary> & { id: string; name: string 
     aliases: [],
     setup_from: [],
     category: 'Submission',
+    // Real fixtures carry one. Without this every test flowed through the
+    // "Also here" fallback, so deleting the grouping from the screen left the
+    // whole suite green — the exact shape this repo's testing note warns
+    // about.
+    function: 'finish',
     position: 'Guard - Bottom',
     position_detail: 'Closed Guard',
     gi_no_gi: 'Both',

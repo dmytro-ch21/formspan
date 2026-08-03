@@ -115,6 +115,7 @@ export async function fetchTechniques(
     position_detail: t.position_detail ?? '',
     typical_belt: t.typical_belt ?? '',
     ibjjf_ruleset_id: t.ibjjf_ruleset_id ?? '',
+    setup_from: t.setup_from ?? [],
   }));
   return summaryCache;
 }

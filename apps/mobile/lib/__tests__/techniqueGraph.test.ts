@@ -115,6 +115,29 @@ describe('the shipped library is actually connected', () => {
     expect(resolved / total).toBeGreaterThan(0.7);
   });
 
+  it('is acyclic, which is what makes "Leads to" safe to push-navigate', () => {
+    // The technique screen pushes /technique/[id] -> /technique/[id]. That is
+    // only bounded because the real edges form a DAG — measured: 0 cycles,
+    // longest walk 9 hops. Nothing enforced it, and it is a property of the
+    // DATA, not the code: one edit making Armbar set up from Triangle while
+    // Triangle sets up from Armbar turns the navigation stack unbounded.
+    const g = buildTechniqueGraph(library);
+    const state = new Map<string, 'open' | 'done'>();
+    const cycles: string[] = [];
+    const walk = (id: string) => {
+      if (state.get(id) === 'done') return;
+      if (state.get(id) === 'open') {
+        cycles.push(id);
+        return;
+      }
+      state.set(id, 'open');
+      for (const next of g.follows.get(id) ?? []) walk(next.id);
+      state.set(id, 'done');
+    };
+    for (const t of library) walk(t.id);
+    expect(cycles).toEqual([]);
+  });
+
   it('every function value is one the grouper renders', () => {
     // A sixth verb added to the backend without being added to FUNCTION_ORDER
     // would silently vanish from every position screen — present in the data,

@@ -6,7 +6,7 @@ import { categoryBadge, positionBadge } from '@/components/LibraryTile';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { fetchPosition, techniquesInPosition, type Position } from '@/lib/positions';
-import { groupByFunction } from '@/lib/techniqueGraph';
+import { FUNCTION_ORDER, groupByFunction } from '@/lib/techniqueGraph';
 import { fetchTechniques, type TechniqueSummary } from '@/lib/techniques';
 import { useAuthToken } from '@/lib/useAuthToken';
 
@@ -58,6 +58,11 @@ import { useAuthToken } from '@/lib/useAuthToken';
  */
 const REQUEST_TIMEOUT_MS = 10_000;
 const TIMED_OUT = 'timed-out';
+
+/** A row is either a verb heading or a technique under it. */
+type ListRow =
+  | { kind: 'header'; id: string; label: string; count: number }
+  | { kind: 'technique'; id: string; technique: TechniqueSummary };
 
 export default function PositionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -191,7 +196,13 @@ export default function PositionScreen() {
   // Movement fundamentals carry no function, so grouping drops them. Kept
   // under their own heading rather than vanishing from a screen that
   // previously listed them.
-  const ungrouped = related.filter((t) => !t.function);
+  // Total, not `!t.function`: a value outside FUNCTION_ORDER would be in
+  // neither the groups nor this bucket, so it would vanish while the section
+  // header above still counted it — "· 45" over 44 rows. Unreachable today
+  // (the seed validates the five), free to make impossible.
+  const ungrouped = related.filter(
+    (t) => !FUNCTION_ORDER.includes(t.function as (typeof FUNCTION_ORDER)[number]),
+  );
   if (ungrouped.length > 0) {
     rows.push({ kind: 'header', id: 'h-other', label: 'Also here', count: ungrouped.length });
     rows.push(...ungrouped.map((t) => ({ kind: 'technique' as const, id: t.id, technique: t })));
@@ -265,11 +276,6 @@ export default function PositionScreen() {
  * Saying "from the guard family" costs one word and stops the screen claiming
  * something it cannot know.
  */
-/** A row is either a verb heading or a technique under it. */
-type ListRow =
-  | { kind: 'header'; id: string; label: string; count: number }
-  | { kind: 'technique'; id: string; technique: TechniqueSummary };
-
 function sectionLabel(p: Position, count: number): string {
   // Two conditions, and both are about whether the list is honestly this
   // position's own.

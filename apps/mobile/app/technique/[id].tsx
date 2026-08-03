@@ -115,6 +115,11 @@ export default function TechniqueScreen() {
     };
   }, [id, getToken]);
 
+  const shown = new Set(leadsTo.map((n) => n.name.toLowerCase()));
+  const remainingNextMoves = (technique?.common_next_moves ?? []).filter(
+    (m) => !shown.has(m.toLowerCase()),
+  );
+
   if (loading) {
     return (
       <View style={styles.centre}>
@@ -198,15 +203,18 @@ export default function TechniqueScreen() {
             answer despite having stored the data all along. */}
         {leadsTo.length > 0 && (
           <RNView style={styles.leadsTo}>
-            <Text style={styles.edgeLabel} accessibilityRole="header">
+            <Text style={styles.leadsToLabel} accessibilityRole="header">
               Leads to
             </Text>
             {leadsTo.map((n) => (
               <Link key={n.id} href={{ pathname: '/technique/[id]', params: { id: n.id } }} asChild>
                 <Pressable
                   style={styles.leadRow}
-                  accessibilityRole="link"
-                  accessibilityLabel={`${n.name}. ${n.category}. Open it.`}
+                  // "button", matching every other navigate-to-a-technique
+                  // control in the app. On iOS "link" announces as leaving
+                  // for a URL, which this does not do.
+                  accessibilityRole="button"
+                  accessibilityLabel={`${n.name}. ${n.category}`}
                   testID={`leads-to-${n.id}`}
                 >
                   <Text style={styles.leadName}>{n.name}</Text>
@@ -218,7 +226,13 @@ export default function TechniqueScreen() {
         )}
 
         <Edges label="Set up from" items={t.setup_from} />
-        <Edges label="Common next moves" items={t.common_next_moves} />
+        {/* Minus whatever "Leads to" already showed. 72% of these strings
+            are verbatim repeats of a row rendered just above — same name,
+            tappable there and inert here, with nothing explaining the
+            difference. That overlap is good news about the edge data and bad
+            news on screen. What remains is the genuinely prose-only advice
+            ("Stabilize top position"), which is worth its own heading. */}
+        <Edges label="Common next moves" items={remainingNextMoves} />
         <Edges label="Common counters" items={t.common_counters} />
 
         {/* Deliberately last and deliberately quiet. An observation about where
@@ -503,6 +517,15 @@ const styles = StyleSheet.create({
 
   edgeBlock: { gap: 9 },
   leadsTo: { marginTop: 24, gap: 2 },
+  // NOT edgeLabel: that is vola.textDim, which measures 3.95:1 on bg — under
+  // AA, and 11px/800 does not qualify as large text. The position screen
+  // already found and annotated this exact token. textMuted is 7.37:1.
+  leadsToLabel: {
+    color: vola.textMuted,
+    fontSize: 11,
+    letterSpacing: 1.2,
+    fontWeight: '800',
+  },
   leadRow: {
     flexDirection: 'row',
     alignItems: 'center',
