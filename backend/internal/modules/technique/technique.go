@@ -58,9 +58,19 @@ type Ruleset struct {
 // library, and nothing else.
 //
 // The library is 466 techniques and the long prose fields dominate its size —
-// returning full rows from the list endpoint ships ~550 KB to draw a scrolling
-// list. This is ~70 KB. Aliases are included deliberately: the client searches
-// locally, and "kesa gatame" has to find "Scarf Hold".
+// returning full rows from the list endpoint ships ~485 KB to draw a scrolling
+// list. This is ~175 KB. Aliases are included deliberately: the client searches
+// locally, and "kesa gatame" has to find "Scarf Hold".//
+// The numbers, re-measured 2026-08-03 over the seeded 466: the summary list
+// is ~175 KB and full rows ~485 KB (~795 KB as Get returns them, since the
+// embedded ruleset is real payload). They were written as "~70 KB / ~550 KB"
+// and drifted 2.3x as the library grew and gained `function`, `setup_from`
+// and `to_position` — which matters because these figures ARE the argument
+// for the split, quoted in a schema description a client author reads.
+//
+// Worth knowing before optimising the payload further: the backend has no
+// response compression at all, and this list gzips to ~17 KB. One middleware
+// would dwarf any field-level saving here.
 type Summary struct {
 	ID       string   `json:"id"`
 	Name     string   `json:"name"`
