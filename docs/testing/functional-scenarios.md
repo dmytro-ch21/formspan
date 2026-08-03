@@ -2633,4 +2633,30 @@ this is API-surface behaviour even though no endpoint changed.
 - **Never 304 an error.** A 404 or 500 must keep its status, its body, and
   carry no ETag, or a client caches the failure.
 - **A 304 carries no `Content-Length`.** A declared length with no bytes makes
-  a client hang waiting for them.
+  a client hang waiting for them. **Set it in the handler first** — a
+  `ResponseRecorder` never synthesises one, so asserting it is absent proves
+  nothing unless something put it there. Assert the 200 still has it, or the
+  test passes just as well against code that deletes it unconditionally.
+- **A handler's own `ETag` is honoured, not just echoed.** Set one in a
+  handler, send it back as `If-None-Match`, assert 304. Emitting a validator
+  and ignoring it is the failure that looks exactly like success: the client
+  sends it on every request and always gets the full payload. This is the seam
+  a `max(updated_at)` validator lands in.
+- **A handler's `ETag` set after its first `Write` still wins.** The header
+  write is deferred, so the tag is still in the map — and without an explicit
+  re-check it gets silently overwritten by a body hash. Assert the bytes
+  written before the tag appeared aren't lost either.
+- **Assert against the real middleware stack, not one the test assembles.**
+  `apihttp.Stack()` exists because the order test built its own
+  `Compress(ConditionalGet(...))` and so could only ever pass — the production
+  order in `cmd/api/main.go` was swapped and the whole suite stayed green.
+  Anything asserting composition must reach the shipped composition.
+- **Browser clients need the CORS headers.** `If-None-Match` in
+  `Access-Control-Allow-Headers`, `ETag` in `Access-Control-Expose-Headers`.
+  Neither affects iOS or Android, so a native-only test pass says nothing —
+  this needs a real cross-origin fetch from `apps/web`.
+- **List endpoints stay bounded.** The identity body is buffered whole to hash
+  it, so an unbounded row count is an unbounded per-request allocation. Any
+  new list endpoint needs a real-database test that it caps — and that the cap
+  keeps the **newest** rows, since a flipped `ORDER BY` still passes a
+  count-only assertion while quietly answering with the table's prehistory.

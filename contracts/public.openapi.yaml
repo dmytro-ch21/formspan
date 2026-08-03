@@ -6,6 +6,15 @@ info:
     Public API for the VOLA mobile and web clients. See
     docs/architecture/api-conventions.md for the conventions this spec
     follows (versioning, error shape, auth, status codes).
+
+
+    Two behaviours are applied by response middleware and so are not
+    per-operation choices, even though OpenAPI can only express them
+    per-operation. Every GET returns a strong `ETag` and honours
+    `If-None-Match` with a `304` — both are documented on each GET below.
+    And any response over ~1 KB is gzipped when the client sends
+    `Accept-Encoding: gzip`; the `ETag` is computed from the *uncompressed*
+    body, so it does not change with the encoding a client asks for.
 servers:
   - url: http://localhost:8080/v1
     description: Local development
@@ -1749,7 +1758,36 @@ components:
           items:
             $ref: "#/components/schemas/AdminUserSummary"
 
+  headers:
+    ETag:
+      description: >
+        Strong validator for this exact response body (a truncated SHA-256,
+        base64url). Send it back as `If-None-Match` on the next request to get
+        a 304 instead of the payload. Applied by response middleware, so it is
+        present on every 200 from a GET, not just the ones listed here.
+      schema: { type: string }
+      example: '"9tK3xQwZ2sN4fRvB1cLmYg"'
+
+  parameters:
+    IfNoneMatch:
+      name: If-None-Match
+      in: header
+      required: false
+      description: >
+        An `ETag` from a previous response. If it still matches, the server
+        answers `304 Not Modified` with no body. Accepts a comma-separated
+        list and `*`.
+      schema: { type: string }
+
   responses:
+    NotModified:
+      description: >
+        The representation is unchanged since the `ETag` in `If-None-Match`.
+        No body, and deliberately no `Content-Length` or `Content-Type`.
+      headers:
+        ETag:
+          $ref: "#/components/headers/ETag"
+
     BadRequest:
       description: Malformed request body or a value that failed validation.
       content:
@@ -1787,6 +1825,8 @@ paths:
       summary: Liveness check
       operationId: getHealthz
       security: []
+      parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
       responses:
         "200":
           description: The API is up.
@@ -1794,11 +1834,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Healthz"
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+        "304":
+          $ref: "#/components/responses/NotModified"
 
   /me:
     get:
       summary: Return the authenticated caller's verified identity
       operationId: getMe
+      parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
       responses:
         "200":
           description: The verified caller.
@@ -1806,6 +1853,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Me"
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+        "304":
+          $ref: "#/components/responses/NotModified"
         "401":
           $ref: "#/components/responses/Unauthorized"
 
@@ -1813,6 +1865,8 @@ paths:
     get:
       summary: Get the authenticated caller's profile
       operationId: getProfile
+      parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
       responses:
         "200":
           description: The caller's profile.
@@ -1820,6 +1874,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Profile"
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+        "304":
+          $ref: "#/components/responses/NotModified"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -1879,6 +1938,8 @@ paths:
         Exists because a lifter who thinks in kilograms still faces a leg
         press marked in pounds, and converting in your head at the moment
         you're recording a number is exactly what this avoids.
+      parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
       responses:
         "200":
           description: Overrides only; exercises using the default are absent.
@@ -1893,6 +1954,11 @@ paths:
                     additionalProperties:
                       type: string
                       enum: [metric, imperial]
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+        "304":
+          $ref: "#/components/responses/NotModified"
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /profile/exercise-units/{exerciseID}:
@@ -1939,6 +2005,8 @@ paths:
         A discipline the caller has never toggled reports its registry default,
         so adding a discipline requires no backfill.
       operationId: listModules
+      parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
       responses:
         "200":
           description: All modules with the caller's enablement.
@@ -1946,6 +2014,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ModuleList"
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+        "304":
+          $ref: "#/components/responses/NotModified"
         "401":
           $ref: "#/components/responses/Unauthorized"
     patch:
@@ -1983,6 +2056,8 @@ paths:
     get:
       summary: List all server-controlled feature flags
       operationId: listFeatureFlags
+      parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
       responses:
         "200":
           description: All feature flags.
@@ -1990,6 +2065,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FlagList"
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+        "304":
+          $ref: "#/components/responses/NotModified"
         "401":
           $ref: "#/components/responses/Unauthorized"
 
@@ -1997,6 +2077,8 @@ paths:
     get:
       summary: List the authenticated caller's own activities
       operationId: listActivities
+      parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
       responses:
         "200":
           description: The caller's activities.
@@ -2004,6 +2086,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ActivityList"
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+        "304":
+          $ref: "#/components/responses/NotModified"
         "401":
           $ref: "#/components/responses/Unauthorized"
     post:
@@ -2034,6 +2121,7 @@ paths:
       summary: List the global exercise catalog
       operationId: listExercises
       parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
         - name: sport
           in: query
           required: false
@@ -2051,6 +2139,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ExerciseList"
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+        "304":
+          $ref: "#/components/responses/NotModified"
         "400":
           $ref: "#/components/responses/InvalidInput"
         "401":
@@ -2061,6 +2154,7 @@ paths:
       summary: Get one catalog entry by its slug
       operationId: getExercise
       parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
         - name: exerciseID
           in: path
           required: true
@@ -2073,6 +2167,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Exercise"
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+        "304":
+          $ref: "#/components/responses/NotModified"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -2083,6 +2182,7 @@ paths:
       summary: List the BJJ technique library
       operationId: listTechniques
       parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
         - name: position
           in: query
           schema: { type: string }
@@ -2107,6 +2207,11 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/TechniqueList" }
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+        "304":
+          $ref: "#/components/responses/NotModified"
         "400":
           description: Invalid filter value.
           content:
@@ -2125,12 +2230,19 @@ paths:
         library.
       tags: [Techniques]
       security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
       responses:
         "200":
           description: Every ruleset, ordered by id.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/IBJJFRulesetList" }
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+        "304":
+          $ref: "#/components/responses/NotModified"
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /techniques/positions:
@@ -2146,12 +2258,19 @@ paths:
         `detail_includes`/`detail_excludes` against its `position_detail`.
         Both steps are required — see those fields.
       tags: [Techniques]
+      parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
       responses:
         "200":
           description: Every position, ordered by order_index.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/PositionList" }
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+        "304":
+          $ref: "#/components/responses/NotModified"
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /techniques/positions/{positionID}:
@@ -2160,6 +2279,7 @@ paths:
       operationId: getPosition
       tags: [Techniques]
       parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
         - name: positionID
           in: path
           required: true
@@ -2171,6 +2291,11 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Position" }
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+        "304":
+          $ref: "#/components/responses/NotModified"
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
 
@@ -2179,6 +2304,7 @@ paths:
       summary: Get one technique
       operationId: getTechnique
       parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
         - name: techniqueID
           in: path
           required: true
@@ -2189,6 +2315,11 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Technique" }
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+        "304":
+          $ref: "#/components/responses/NotModified"
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
 
@@ -2202,12 +2333,19 @@ paths:
         a new account has no belt, and defaulting to white would put a rank on
         someone who has never trained.
       operationId: getBjjStanding
+      parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
       responses:
         "200":
           description: Rank and history.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/BjjStanding" }
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+        "304":
+          $ref: "#/components/responses/NotModified"
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /bjj/promotions:
@@ -2334,6 +2472,8 @@ paths:
         404 when the session has no BJJ detail — which includes a session of
         another sport, and a BJJ session logged as the three-tap floor before
         any reflection was added.
+      parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
       responses:
         "200":
           description: The stored detail.
@@ -2344,6 +2484,11 @@ paths:
                 required: [detail]
                 properties:
                   detail: { $ref: "#/components/schemas/BjjSessionDetail" }
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+        "304":
+          $ref: "#/components/responses/NotModified"
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
 
@@ -2352,6 +2497,7 @@ paths:
       summary: List workouts visible to the caller
       operationId: listWorkouts
       parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
         - name: scope
           in: query
           schema: { type: string, enum: [mine, shared] }
@@ -2368,6 +2514,11 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/WorkoutList" }
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+        "304":
+          $ref: "#/components/responses/NotModified"
         "401": { $ref: "#/components/responses/Unauthorized" }
     post:
       summary: Create a workout
@@ -2424,6 +2575,7 @@ paths:
       summary: Get one workout
       operationId: getWorkout
       parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
         - name: workoutID
           in: path
           required: true
@@ -2434,6 +2586,11 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Workout" }
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+        "304":
+          $ref: "#/components/responses/NotModified"
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404":
           $ref: "#/components/responses/NotFound"
@@ -2502,6 +2659,7 @@ paths:
       summary: List the caller's sessions, newest first
       operationId: listSessions
       parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
         - name: sport
           in: query
           schema: { type: string, enum: [strength, running, bjj] }
@@ -2551,6 +2709,11 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/SessionPage" }
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+        "304":
+          $ref: "#/components/responses/NotModified"
         "400":
           description: Invalid sport, limit, offset, date, timezone or search term.
           content:
@@ -2635,6 +2798,7 @@ paths:
         plank never reports a weight and a run never reports reps. Warm-ups
         and sets never marked done never count.
       parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
         - name: exercise_ids
           in: query
           schema: { type: string }
@@ -2659,6 +2823,11 @@ paths:
                   records:
                     type: array
                     items: { $ref: "#/components/schemas/ExerciseRecords" }
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+        "304":
+          $ref: "#/components/responses/NotModified"
         "400":
           description: Too many exercise_ids.
           content:
@@ -2670,12 +2839,19 @@ paths:
     get:
       summary: The exercises whose records show on the caller's profile
       operationId: getPinnedExercises
+      parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
       responses:
         "200":
           description: In the caller's chosen order. Empty means "no explicit choice".
           content:
             application/json:
               schema: { $ref: "#/components/schemas/PinnedExercises" }
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+        "304":
+          $ref: "#/components/responses/NotModified"
         "401": { $ref: "#/components/responses/Unauthorized" }
     put:
       summary: Replace the shortlist
@@ -2718,6 +2894,7 @@ paths:
         listing would quietly report the wrong total once history outgrows
         the page size.
       parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
         - name: from
           in: query
           required: true
@@ -2746,6 +2923,11 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/History" }
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+        "304":
+          $ref: "#/components/responses/NotModified"
         "400":
           description: Missing or malformed dates, unknown sport or timezone, or a range over five years.
           content:
@@ -2769,6 +2951,7 @@ paths:
         Scoped to the caller: this endpoint reads training history and returns
         only their own.
       parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
         - name: exercise_ids
           in: query
           required: true
@@ -2803,6 +2986,11 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/SuggestionList" }
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+        "304":
+          $ref: "#/components/responses/NotModified"
         "400":
           description: Missing `exercise_ids`, or more than 100 of them.
           content:
@@ -2815,6 +3003,7 @@ paths:
       summary: Get one session with its volume summary
       operationId: getSession
       parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
         - name: sessionID
           in: path
           required: true
@@ -2825,6 +3014,11 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/SessionWithVolume" }
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+        "304":
+          $ref: "#/components/responses/NotModified"
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404":
           description: >
@@ -3027,6 +3221,7 @@ paths:
         summary alone invites "12 errors" with no way to see them, and the list
         alone makes an operator count.
       parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
         - name: hours
           in: query
           description: Window to look back over. Defaults to 24, capped at 720.
@@ -3055,6 +3250,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthReport"
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+        "304":
+          $ref: "#/components/responses/NotModified"
         "400":
           $ref: "#/components/responses/InvalidInput"
         "401":
@@ -3072,6 +3272,8 @@ paths:
         no profile row and would otherwise be invisible to support. Capped at
         500, most-recently-trained first.
       operationId: adminListUsers
+      parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
       responses:
         "200":
           description: Known users.
@@ -3079,6 +3281,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AdminUserList"
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+        "304":
+          $ref: "#/components/responses/NotModified"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -3093,6 +3300,7 @@ paths:
         appears in no table, so a mistyped id reads as wrong rather than as an
         empty account.
       parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
         - name: userID
           in: path
           required: true
@@ -3105,6 +3313,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AdminUserDetail"
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+        "304":
+          $ref: "#/components/responses/NotModified"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -3121,6 +3334,7 @@ paths:
         Retained as the only read path for `activities` rows written before the
         in-app logging form was removed; nothing writes that table now.
       parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
         - name: userID
           in: path
           required: true
@@ -3133,6 +3347,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ActivityList"
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+        "304":
+          $ref: "#/components/responses/NotModified"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -3150,6 +3369,7 @@ paths:
         recorded one; this endpoint does not distinguish "no such user" from
         "no rank yet".
       parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
         - name: userID
           in: path
           required: true
@@ -3162,6 +3382,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/BjjStanding"
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+        "304":
+          $ref: "#/components/responses/NotModified"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":

@@ -114,8 +114,27 @@ would tell the client its write was a no-op.
 
 `ConditionalGet` runs **inside** `Compress` so the ETag is computed over the
 identity body — otherwise it would change with `Accept-Encoding` and every
-gzip-capable client would be a permanent cache miss.
+gzip-capable client would be a permanent cache miss. Both are composed by
+`apihttp.Stack()` rather than assembled at the call site, because the test
+that asserts this property has to be able to reach the real order: the first
+version built its own stack, so swapping the order in `main.go` left the
+whole suite green.
 
-This saves bandwidth, not database work: the query still runs. A validator
-derived from `max(updated_at)` would skip the query too, and is the natural
-next step.
+**A handler that sets its own `ETag` wins, and is honoured** — the middleware
+steps aside and answers `If-None-Match` against the handler's validator rather
+than emitting it and ignoring it. This is the seam a per-repository
+`max(updated_at)` validator drops into: it skips building the body as well,
+where the middleware only skips sending it.
+
+Browsers need two CORS headers for any of this: `If-None-Match` in
+`Access-Control-Allow-Headers` (it isn't safelisted, so the preflight rejects
+it otherwise) and `ETag` in `Access-Control-Expose-Headers` (JS cannot read a
+header it isn't exposed). Native clients are unaffected, which is exactly how
+this would go unnoticed.
+
+Two costs, both real. It saves **bandwidth, not database work** — the query
+still runs and the JSON is still marshalled, because the hash is of the
+finished body. And it **buffers**: the identity body is held whole to hash it,
+benchmarked at ~+344 KB per in-flight request on the largest response the API
+serves. That is why no list endpoint gets to be unbounded any more — peak
+memory is now bounded by the largest response that can be produced.

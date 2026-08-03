@@ -66,7 +66,8 @@ func (r *PostgresRepository) getOwnedByID(ctx context.Context, id, userID string
 func (r *PostgresRepository) ListByUser(ctx context.Context, userID string) ([]Activity, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, user_id, kind, occurred_at, notes, details, request_id, trace_id, created_at
-		FROM activities WHERE user_id = $1 ORDER BY occurred_at DESC`, userID)
+		FROM activities WHERE user_id = $1 ORDER BY occurred_at DESC
+		LIMIT $2`, userID, maxUserActivities)
 	if err != nil {
 		return nil, fmt.Errorf("activity: list: %w", err)
 	}
@@ -85,6 +86,21 @@ func (r *PostgresRepository) ListByUser(ctx context.Context, userID string) ([]A
 	}
 	return activities, nil
 }
+
+// maxUserActivities bounds the per-user activity list — the last unbounded
+// query in this module, and the only one both a user and an admin can reach.
+//
+// It was survivable while the response streamed straight out. It stopped being
+// survivable when apihttp.ConditionalGet started buffering the whole identity
+// body in order to hash it: an unbounded row count became an unbounded
+// server-side allocation, one per in-flight request, and the offline mobile
+// outbox appends to this table on every sync. Peak memory is now bounded by
+// the largest response the API can produce, so no endpoint gets to be
+// unbounded any more.
+//
+// `activities` is an append-only audit log read newest-first; nothing in
+// either client paginates it, so this is a ceiling rather than a page size.
+const maxUserActivities = 500
 
 // maxAdminUsers bounds the lookup list.
 //

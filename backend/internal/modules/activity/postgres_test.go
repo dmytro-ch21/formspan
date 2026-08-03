@@ -3,6 +3,7 @@ package activity
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -356,5 +357,70 @@ func TestPostgresRepository_ListUsers_StoredTogglesBeatDefaults(t *testing.T) {
 	}
 	if !got[offLabel] {
 		t.Fatalf("module %q was switched ON but is missing: %v", off, detail.User.Modules)
+	}
+}
+
+// ListByUser is reachable by both a user (self-scoped) and an admin, and until
+// this bound existed it returned every row an account had ever accumulated.
+// apihttp.ConditionalGet now buffers the whole response body to hash it, so an
+// unbounded row count is an unbounded allocation per in-flight request.
+//
+// Deliberately a real-database test, not a regex over the query string: a text
+// assertion proves the clause is present, not that Postgres honours it, and
+// "ORDER BY ... LIMIT" has a correctness half — the ceiling has to keep the
+// NEWEST rows, or an audit log silently starts answering with its own
+// prehistory.
+func TestListByUserIsBoundedAndKeepsTheNewest(t *testing.T) {
+	databaseURL := os.Getenv("TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("TEST_DATABASE_URL not set, skipping Postgres integration test")
+	}
+
+	ctx := context.Background()
+	pool, err := database.NewPool(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { pool.Close() })
+
+	userID := "test_user_activity_limit"
+	t.Cleanup(func() {
+		if _, err := pool.Exec(ctx, `DELETE FROM activities WHERE user_id = $1`, userID); err != nil {
+			t.Logf("cleanup: delete activities: %v", err)
+		}
+	})
+
+	// One past the ceiling, so the boundary itself is what's under test.
+	const total = maxUserActivities + 1
+	base := time.Now().Add(-time.Duration(total) * time.Hour).Truncate(time.Second).UTC()
+	repo := NewPostgresRepository(pool)
+	for i := 0; i < total; i++ {
+		if _, err := repo.Create(ctx, NewActivity{
+			ID:         fmt.Sprintf("test_activity_limit_%04d", i),
+			UserID:     userID,
+			Kind:       "bjj_session",
+			OccurredAt: base.Add(time.Duration(i) * time.Hour),
+			RequestID:  "req_limit",
+			TraceID:    "trace_limit",
+		}); err != nil {
+			t.Fatalf("create %d: %v", i, err)
+		}
+	}
+
+	activities, err := repo.ListByUser(ctx, userID)
+	if err != nil {
+		t.Fatalf("list by user: %v", err)
+	}
+	if len(activities) != maxUserActivities {
+		t.Fatalf("got %d activities, want the ceiling of %d", len(activities), maxUserActivities)
+	}
+	// The newest row must be in; the single oldest must be the one dropped.
+	if activities[0].ID != fmt.Sprintf("test_activity_limit_%04d", total-1) {
+		t.Errorf("newest row missing: first is %s", activities[0].ID)
+	}
+	for _, a := range activities {
+		if a.ID == "test_activity_limit_0000" {
+			t.Error("the ceiling dropped the newest rows instead of the oldest")
+		}
 	}
 }

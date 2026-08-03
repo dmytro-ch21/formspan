@@ -164,7 +164,7 @@ func main() {
 	recorder := health.NewRecorder(healthRepo, slowRequestAfter, logger)
 
 	logger.Info("api listening", "port", port, "slow_request_ms", slowRequestAfter.Milliseconds())
-	if err := http.ListenAndServe(":"+port, httplog.Middleware(logger, recorder.Observe)(apihttp.Compress(apihttp.ConditionalGet(withCORS(mux))))); err != nil {
+	if err := http.ListenAndServe(":"+port, httplog.Middleware(logger, recorder.Observe)(apihttp.Stack(withCORS(mux)))); err != nil {
 		logger.Error("server exited", "err", err)
 		os.Exit(1)
 	}
@@ -199,7 +199,11 @@ func withCORS(next http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, traceparent")
+		// `If-None-Match` is NOT a CORS-safelisted request header, so without it
+		// here the browser's preflight rejects every conditional request the
+		// fetch layer tries to make. The middleware would keep working for
+		// native clients and be dead code for the web app.
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, traceparent, If-None-Match")
 		// Response headers a browser is allowed to *read*.
 		//
 		// Without this the trace correlation is one-way: the clients send a
@@ -209,7 +213,12 @@ func withCORS(next http.Handler) http.Handler {
 		// invisible to the very code that would log them, which is most of the
 		// point of stamping them. Native clients are unaffected, so this is
 		// invisible until someone tries to surface a request id in the web app.
-		w.Header().Set("Access-Control-Expose-Headers", "traceparent, x-request-id")
+		//
+		// `ETag` is the same trap and the reason conditional GET needs it: the
+		// browser's own HTTP cache revalidates without any of this, but code
+		// that wants to hold a validator itself cannot read one it is not
+		// exposed. Note `Content-Encoding` is safelisted already.
+		w.Header().Set("Access-Control-Expose-Headers", "traceparent, x-request-id, ETag")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return

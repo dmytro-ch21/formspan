@@ -4980,6 +4980,16 @@ which looked like a fresh-migration bug for several minutes before `docker ps
 up -d` back to back: only the first one actually gets the port, and the
 second fails silently rather than erroring.
 
+### The contract said none of this
+
+`contracts/public.openapi.yaml` had no `304`, no `ETag`, no `If-None-Match`
+anywhere — the wire contract described an API that did not behave the way the
+API behaves. Fixed across all 29 GET operations via reusable
+`components/{headers,parameters,responses}` entries, plus a note in
+`info.description` covering both this and compression, since middleware-applied
+behaviour is not a per-operation choice even though OpenAPI can only express
+it per-operation.
+
 ### Verified live, not just typechecked
 
 Full CRUD walked end to end on a real iOS Simulator (empty state → add → edit
@@ -5986,13 +5996,25 @@ the natural next step, and a bigger saving still for repeat opens.
 ## 2026-08-03 — Conditional GET
 
 `apihttp.ConditionalGet`, the other half of the compression saving and the
-larger one for the case that actually recurs. Compression took the technique
-list from ~175 KB to ~17 KB; this takes the *repeat* fetch to a ~150-byte
-header exchange.
+larger one for the case that actually recurs. This takes the *repeat* fetch to
+a ~150-byte header exchange.
 
 Most of what this API serves on a cold open is reference content that changes
-only on deploy — the 466-technique library, the position glossary, the
-exercise catalog, the rulesets.
+only on deploy. Measured against the seeded database rather than estimated —
+the compression entry above had been quoting a guess, and it was wrong about
+which endpoint is biggest:
+
+| endpoint | rows | raw | gzip |
+| --- | --- | --- | --- |
+| `GET /v1/exercises` | 504 | 211.7 KB | 12.6 KB |
+| `GET /v1/techniques` | 466 | 164.2 KB | 17.4 KB |
+| `GET /v1/techniques/positions` | 11 | 16.6 KB | 5.7 KB |
+| `GET /v1/techniques/rulesets` | 25 | 15.8 KB | 1.9 KB |
+
+The **exercise catalog**, not the technique library, is the largest thing this
+API serves. Worth knowing before optimising the wrong endpoint — and a
+reminder that "~175 KB" survived two PRs' worth of doc comments without anyone
+measuring it.
 
 ### Why a body hash and not `max(updated_at)`
 
@@ -6004,17 +6026,74 @@ derived volume summary, the embedded ruleset object, a filter applied in SQL.
 A hash of the bytes about to be sent cannot disagree with what it describes.
 
 The cost is honest and worth stating: **this saves bandwidth, not database
-work.** The query still runs. For a 175 KB payload over a phone connection
-that is the dominant cost, and it is the half fixable without touching every
-module. Per-repository validators remain the next step, not a replacement.
+work.** The query still runs and the JSON is still marshalled, because the
+hash is of the finished body. Over a phone connection the bytes are the
+dominant cost, and they are the half fixable without touching every module.
 
-### The order is load-bearing
+Per-repository validators remain the next step, and the middleware now leaves
+a seam for them rather than foreclosing on it — see below.
+
+### The order is load-bearing, and the test that "pinned" it did not
 
 `ConditionalGet` sits **inside** `Compress`, so it hashes the identity body.
 Outside, the ETag would change with `Accept-Encoding` and every gzip-capable
-client — which is all of them — would be a permanent cache miss. A test
-pins that the plain and gzipped responses share one ETag, and that a 304
-comes back out through the compressor with no body and no gzip framing.
+client — which is all of them — would be a permanent cache miss.
+
+A test asserted exactly that: plain and gzipped responses share one ETag, and
+a 304 comes back out through the compressor with no body and no gzip framing.
+It could only ever pass. It built `Compress(ConditionalGet(handler))` **inside
+the test**, so it was asserting against an order it had just constructed
+itself — review swapped the real order in `cmd/api/main.go` and the entire
+backend suite stayed green.
+
+The fix is structural rather than a better assertion: `apihttp.Stack()` now
+owns the composition, `main.go` calls that, and the test exercises `Stack`.
+Assembly belongs somewhere a test can reach. **This is the sixth time this
+session a test passed for the wrong reason** — the recurring shape is an
+assertion that re-derives its own premise instead of reading the shipped one.
+
+### A handler's own ETag is now honoured, not just echoed
+
+The first version left a handler-supplied `ETag` alone — it emitted it and
+then ignored `If-None-Match` entirely. That is a validator that looks like it
+works: the client dutifully sends it back on every request and always gets the
+full payload. And it is precisely where a cheap `max(updated_at)` validator
+would have landed, so the intended next step would have arrived and silently
+done nothing.
+
+Now the middleware steps aside *and* answers the conditional request against
+the handler's validator. It also honours one set **after** the first `Write` —
+stdlib freezes headers there, but this middleware defers the header write, so
+the tag is still in the map and would otherwise have been silently overwritten
+by a body hash. `compress.go` already carried the same fix for
+`Content-Encoding`; this is the same bug in a second place.
+
+### Buffering made an unbounded list a memory question
+
+Hashing the body means holding it. Benchmarked at the size of the largest
+response above: 461 KB/op through `Compress` alone, 806 KB/op through both —
+roughly **+344 KB per in-flight request**.
+
+That is bounded by the largest response the API can produce, which turned an
+old latency smell into a real ceiling problem: `activity.ListByUser` had no
+`LIMIT` at all, was reachable by both a user and an admin, and reads a table
+the offline mobile outbox appends to on every sync. Now capped at 500,
+newest-first, with a real-database test that fails both when the `LIMIT` is
+removed and when the `ORDER BY` is flipped so the cap keeps the *oldest* rows
+instead — an audit log quietly answering with its own prehistory is the
+failure worth catching, and a regex over the query string would catch neither.
+
+### Browsers needed two CORS headers, natives needed none
+
+`If-None-Match` is not a CORS-safelisted request header, so without it in
+`Access-Control-Allow-Headers` the preflight rejects every conditional request
+`apps/web` makes. And `ETag` had to join `Access-Control-Expose-Headers` or JS
+cannot read the validator it is supposed to send back. Both were missing.
+
+The trap is that neither affects iOS or Android at all — the feature would
+have worked in every place it was tested and been dead code in the browser.
+Same shape as the `traceparent`/`x-request-id` exposure fix that sits three
+lines above it in `withCORS`.
 
 ### Scope, and the two things that would be bugs
 
@@ -6027,8 +6106,14 @@ GET and HEAD only, 200 only.
 
 Both are tested. Also: `*` matches, a comma list matches, a `W/`-prefixed
 echo matches (If-None-Match comparison is explicitly weak), a handler's own
-ETag is left alone, and a 304 carries no `Content-Length` — a declared length
+ETag is honoured, and a 304 carries no `Content-Length` — a declared length
 with no bytes behind it is what makes a client hang waiting for them.
+
+That last assertion was itself vacuous at first: a `ResponseRecorder` never
+synthesises a `Content-Length`, so "it is absent" proved nothing. The handler
+in the test now sets one explicitly, and the 200 is asserted to keep both
+headers so the test cannot pass by deleting them unconditionally. Every guard
+added here was mutation-checked — deleted, confirmed red, restored.
 
 ### Verified live
 

@@ -12,11 +12,18 @@ import (
 // changed.
 //
 // WHY: most of what this API serves on a cold open is reference content that
-// changes only on deploy — the 466-technique library, the position glossary,
-// the exercise catalog, the IBJJF rulesets. Compression already took the
-// technique list from ~175 KB to ~17 KB; this takes the *repeat* fetch to a
-// ~150-byte header exchange, which is the larger saving for the case that
-// actually recurs.
+// changes only on deploy. Measured against the seeded database:
+//
+//	GET /v1/exercises            (504)   211.7 KB -> 12.6 KB gzip
+//	GET /v1/techniques           (466)   164.2 KB -> 17.4 KB gzip
+//	GET /v1/techniques/positions  (11)    16.6 KB ->  5.7 KB gzip
+//	GET /v1/techniques/rulesets   (25)    15.8 KB ->  1.9 KB gzip
+//
+// Compression already took each of those down an order of magnitude; this
+// takes the *repeat* fetch to a ~150-byte header exchange, which is the larger
+// saving for the case that actually recurs. Note the catalog, not the
+// technique library, is the biggest of them — worth knowing before optimising
+// the wrong endpoint.
 //
 // WHY A BODY HASH RATHER THAN max(updated_at)
 //
@@ -28,10 +35,22 @@ import (
 // in SQL. A hash of the bytes that are actually about to be sent cannot
 // disagree with what it describes.
 //
-// The cost is honest: this saves BANDWIDTH, not database work. The query
-// still runs. For a 175 KB payload over a phone connection that is the
-// dominant cost, and it is the half that can be fixed without touching every
-// module. Per-repository validators are the next step, not a replacement.
+// The cost is honest, and it is two things.
+//
+// It saves BANDWIDTH, not database work — the query still runs and the JSON is
+// still marshalled, because the hash is of the finished body. Over a phone
+// connection the bytes are the dominant cost, and they are the half that can
+// be fixed without touching every module. A handler that CAN compute a cheap
+// validator should still set its own `ETag`; this middleware then steps aside
+// and honours it (see adoptHandlerETag), so per-repository validators are the
+// next step rather than something this forecloses.
+//
+// And it costs MEMORY: the identity body is held whole in order to hash it.
+// Benchmarked at the size of the largest response above (BenchmarkStack…),
+// gzip path: 461 KB/op with Compress alone, 806 KB/op with both — so roughly
+// +344 KB per in-flight request. That is bounded by the largest response the
+// API can produce, which is why an unbounded list endpoint is now a memory
+// question and not only a latency one.
 //
 // SCOPE: GET and HEAD only, and only 200 responses. A conditional request is
 // meaningless on a POST, and 304 on a 404 or 500 would cache a failure.
@@ -46,11 +65,16 @@ func ConditionalGet(next http.Handler) http.Handler {
 			return
 		}
 
-		cw := &conditionalWriter{ResponseWriter: w, status: http.StatusOK}
+		cw := &conditionalWriter{
+			ResponseWriter: w,
+			status:         http.StatusOK,
+			ifNoneMatch:    r.Header.Get("If-None-Match"),
+		}
 		next.ServeHTTP(cw, r)
 
-		// A handler that hijacked, streamed, or set its own ETag owns the
-		// response; nothing was buffered and there is nothing to do.
+		// The handler supplied its own validator and it was honoured inside
+		// WriteHeader — either 304'd there or streamed through. Nothing was
+		// buffered, so there is nothing left to decide.
 		if cw.passthrough {
 			return
 		}
@@ -115,8 +139,12 @@ type conditionalWriter struct {
 	status      int
 	wroteHeader bool
 	buf         bytes.Buffer
-	// passthrough means the handler took over: it set its own ETag, so
-	// second-guessing it would be wrong.
+	// ifNoneMatch is carried so a handler-supplied ETag can be honoured at
+	// WriteHeader time, before the write-through commits.
+	ifNoneMatch string
+	// passthrough means the handler supplied its own ETag, so this middleware
+	// steps aside rather than replacing a cheap validator with an expensive
+	// one.
 	passthrough bool
 }
 
@@ -126,9 +154,8 @@ func (c *conditionalWriter) WriteHeader(status int) {
 	}
 	c.wroteHeader = true
 	c.status = status
-	if c.Header().Get("ETag") != "" {
-		c.passthrough = true
-		c.ResponseWriter.WriteHeader(status)
+	if etag := c.Header().Get("ETag"); etag != "" {
+		c.adoptHandlerETag(etag)
 	}
 	// Otherwise held: whether this becomes a 304 is not yet known.
 }
@@ -137,10 +164,53 @@ func (c *conditionalWriter) Write(p []byte) (int, error) {
 	if !c.wroteHeader {
 		c.WriteHeader(http.StatusOK)
 	}
-	if c.passthrough {
-		return c.ResponseWriter.Write(p)
+	// Re-checked here, not only at WriteHeader. Because the real header write
+	// is deferred, a handler that sets ETag AFTER its first Write still lands
+	// in the header map in time to be honoured — stdlib would silently drop
+	// it, and this middleware would silently overwrite it with a hash of the
+	// body. Same class of bug compress.go carries a fix for on
+	// Content-Encoding.
+	if !c.passthrough {
+		if etag := c.Header().Get("ETag"); etag != "" {
+			c.adoptHandlerETag(etag)
+		}
 	}
-	return c.buf.Write(p)
+	if !c.passthrough {
+		return c.buf.Write(p)
+	}
+	// A 304 has no body; swallow whatever the handler still writes rather than
+	// appending it to a bodiless response.
+	if c.status == http.StatusNotModified {
+		return len(p), nil
+	}
+	return c.ResponseWriter.Write(p)
+}
+
+// adoptHandlerETag steps aside for a handler that supplied its own validator —
+// but HONOURS it rather than merely echoing it. Emitting a validator and then
+// ignoring If-None-Match would make it decorative, and a per-repository
+// `max(updated_at)` validator is exactly the thing that would land here and
+// silently do nothing.
+//
+// This is the point of no return: it commits the status line, so everything
+// after it streams straight through.
+func (c *conditionalWriter) adoptHandlerETag(etag string) {
+	c.passthrough = true
+	if c.status == http.StatusOK && matches(c.ifNoneMatch, etag) {
+		c.status = http.StatusNotModified
+		// 304 carries no body, and must not claim a length for bytes that
+		// will never arrive.
+		c.Header().Del("Content-Length")
+		c.Header().Del("Content-Type")
+		c.ResponseWriter.WriteHeader(http.StatusNotModified)
+		c.buf.Reset() // anything already written is discarded
+		return
+	}
+	c.ResponseWriter.WriteHeader(c.status)
+	if c.buf.Len() > 0 {
+		_, _ = c.ResponseWriter.Write(c.buf.Bytes())
+		c.buf.Reset()
+	}
 }
 
 // flush sends what was buffered, unchanged.
@@ -152,4 +222,18 @@ func (c *conditionalWriter) flush() {
 	if c.buf.Len() > 0 {
 		_, _ = c.ResponseWriter.Write(c.buf.Bytes())
 	}
+}
+
+// Stack composes the response middlewares in the one order that works, so
+// there is a single place to get it right and a single place to test it.
+//
+// ConditionalGet must be INSIDE Compress. Outside, it would hash the gzipped
+// body, the ETag would change with Accept-Encoding, and every gzip-capable
+// client — which is all of them — would be a permanent cache miss.
+//
+// This exists because the test asserting that property built its own stack
+// and therefore could only ever pass: swapping the order in main.go left the
+// whole suite green. Assembly belongs somewhere a test can reach.
+func Stack(next http.Handler) http.Handler {
+	return Compress(ConditionalGet(next))
 }
