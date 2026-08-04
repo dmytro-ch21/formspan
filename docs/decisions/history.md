@@ -8316,6 +8316,80 @@ delete the thing actually holding it up.
 Not verified: the glyphs at 11px and the ring on a real Android device. Both
 are computed, not observed.
 
+## 2026-08-04 — The web app gets the real logo, and the horizontal lockup does not survive losing its tagline
+
+`apps/mobile` got the real artwork earlier today; `apps/web` was still on
+stand-ins. Its sidebar inlined a hand-drawn checkmark — two rounded stroke
+segments on a `#42F58D`→`#B8FF2C` gradient — beside the string "VOLA" set in the
+display font, and `src/app/icon.png` was that same placeholder tick. `public/`
+still held the five Next.js starter SVGs (`next.svg`, `vercel.svg` and friends),
+referenced by nothing.
+
+### Inlined SVG, not two rasters, and the reason is light/dark
+
+The brand needs a light-ground and a dark-ground treatment, and the obvious
+shape is two image files plus a rule to pick one. Inlining the wordmark with
+`fill="currentColor"` avoids that entirely: the letters take the ambient text
+colour — measured `#10151F` on light and `#F3F6FA` on dark — with no query, no
+second asset, and no rule to keep in sync. The mark keeps its own three greens:
+it is a coloured object rather than an icon, and it reads on both grounds
+unchanged.
+
+**The first version of this entry justified that with a flash-of-wrong-logo
+argument, and review disproved it.** The claim was that a two-file rule would be
+wrong for one frame, because the theme is read from `localStorage`. It isn't:
+`ThemeScript` is a *blocking inline script in `<head>`*, so `data-theme` is set
+before the body is parsed, and a CSS rule keyed on it resolves before first
+paint. The reviewer went further and rendered the SSR HTML with every `<script>`
+stripped — both themes still paint correctly, which proves the colour resolution
+involves no JS at all.
+
+So the right reason to inline is the boring one: one asset instead of two, no
+rule to get wrong, and the colours come from the theme's own tokens rather than
+being baked into two files. Worth recording because the wrong reason was the
+more persuasive-sounding one, and it would have justified this pattern in places
+where it isn't warranted.
+
+### The horizontal lockup was tried first and was wrong
+
+This is the part worth keeping. The first attempt used
+`vola-horizontal-color.svg`'s proportions — mark beside wordmark, all ratios
+measured off the source rather than eyeballed, which felt like the careful
+thing to do. It looked bad, and the user said so: the tick towered over the
+letters.
+
+The measurement was right and the conclusion was wrong. In that lockup the mark
+is 4222 tall against a 1229-tall wordmark — 3.4× — and that is balanced **only
+because a line of tagline text sits under the letters**, filling the vertical
+space beside the tick. We drop the tagline everywhere. Remove it and those
+proportions are holding up nothing, so the mark simply dwarfs a single line of
+letters.
+
+The stacked lockup carries the same size relationship without needing the
+tagline, because the mark sits *above* the wordmark rather than beside it. So
+web now assembles the same stacked lockup `AnimatedSplash` builds on mobile,
+from the same ratios. **The general lesson: lifting proportions from artwork
+carries an assumption about what else is in the frame.** Faithful ratios plus a
+deleted element is not faithfulness.
+
+### Also
+
+`icon.png` and a new `apple-icon.png` are rendered from
+`assets/brand/app-icons/vola-app-icon-dark-1024.svg` — the same master
+`apps/mobile` uses, so the two apps cannot drift. The five starter SVGs are
+deleted after confirming zero references.
+
+### Gaps
+
+The lockup sources themselves (`vola-horizontal-color.svg`,
+`vola-stacked-color.svg`) still contain the tagline, so the next person to reach
+for one gets it and has to know to crop. Tagline-free variants in the kit would
+make the common case the easy one; not done here because it is a brand-kit
+decision rather than a web one.
+
+`apps/admin` has had none of this pass — it is still on whatever it was using,
+and it is the third app that will need the same components.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

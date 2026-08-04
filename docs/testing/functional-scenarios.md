@@ -3408,3 +3408,52 @@ JS and show up on a reload.
 - The Clerk token never reaches the browser: writes go through server actions,
   and `lib/api.ts` is `server-only`.
 
+
+## Brand marks in the app (web)
+
+Covers `apps/web/src/app/Brand.tsx`, the sidebar in `dashboard/layout.tsx`, the
+signed-out entry in `page.tsx`, and `icon.png` / `apple-icon.png`.
+
+Unlike mobile's, all of this **is** verifiable in a browser — the marks are
+inlined SVG, so they are in the DOM and can be asserted on directly rather than
+compared as pixels.
+
+### The lockup
+
+- Sidebar and signed-out entry both show the **stacked** lockup: mark above,
+  wordmark below, centred. Side-by-side means someone reinstated the horizontal
+  arrangement, which does not survive without the tagline.
+- No tagline anywhere. The lockup is exactly **7 paths** — three mark facets and
+  four letterforms — and **zero `<text>` elements**. An eighth path or any text
+  node means a source SVG was pulled in whole instead of cropped.
+- The wordmark is the artwork, not type: the A has no crossbar and the O is a
+  rounded rectangle.
+
+### Light and dark
+
+- Toggle the theme: the wordmark's computed `fill` follows the text colour
+  (`#10151F` light, `#F3F6FA` dark) while the mark's first path stays
+  `#D0E950` in both. Assert the computed style, not a screenshot — the whole
+  point is that one asset serves both.
+- Hard-reload on each theme: **no flash of the wrong colour**. This is what
+  choosing between two image files would have cost, so it is the regression to
+  watch if anyone swaps the inline SVG for `<Image>`.
+- Neither mark is themed by `prefers-color-scheme` — the app's own toggle wins,
+  so an OS set to dark and the app set to light must show the light treatment.
+
+### Accessibility
+
+- The sidebar link exposes one accessible name, **"VOLA — dashboard"**, and the
+  two SVGs are `aria-hidden`. Not "VOLA VOLA", and not an SVG announced as a
+  graphic.
+- The signed-out page still has an `h1` reading "VOLA" — visually hidden, but
+  present, so the page has a heading. Removing the `sr-only` heading because the
+  logo "says it" leaves the page with none.
+
+### Icons
+
+- `/icon.png` and `/apple-icon.png` serve the faceted mark on navy — no
+  wordmark, no lettering. Browser tab and iOS home-screen bookmark both.
+- Both are generated from `assets/brand/app-icons/vola-app-icon-dark-1024.svg`,
+  the same master `apps/mobile` renders from. If the two apps' icons ever differ
+  visually, one of them was hand-edited.
