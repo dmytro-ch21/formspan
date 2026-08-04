@@ -32,6 +32,16 @@ import { Icon } from '@/components/ui/Icon';
 import { sportColor, sportIcon, sportTint } from '@/components/ui/sport';
 import { useAccent } from '@/lib/AccentProvider';
 
+/**
+ * Room under the list for the floating New workout pill.
+ *
+ * 12pt padding twice, a 15pt line, and the 16pt it sits above the bottom, plus
+ * a little air. Only the `mine` scope shows the pill, but the padding is
+ * unconditional: switching scope would otherwise change the scroll extent and
+ * jump the list under the thumb.
+ */
+const FAB_CLEARANCE = 72;
+
 const SCOPES = [
   { key: 'mine', label: 'My workouts' },
   { key: 'shared', label: 'Shared' },
@@ -133,6 +143,17 @@ export default function WorkoutsScreen() {
       {/* "Plan", not "Workouts": this screen is now the week's plan *and* the
           templates it draws from, and the tab bar has always called it Plan. */}
       <ScreenHeader title="Plan" />
+      {/*
+        A segmented control on ONE track, not two filled buttons.
+
+        It used to be a pair of full-width pills whose selected half took the
+        accent as a solid fill — the same weight, colour and footprint as the
+        screen's primary action, sitting directly above it. Two lime slabs, and
+        neither one reading as more important than the other. A switch between
+        two views of the same list is not an action at all: it belongs in the
+        chrome, so it gets a recessed track and a raised thumb, and the accent
+        is left to mean "this button does something".
+      */}
       <View style={styles.scopeRow}>
         {SCOPES.map((s) => {
           const active = scope === s.key;
@@ -143,18 +164,19 @@ export default function WorkoutsScreen() {
                 setScope(s.key);
                 setLoading(true);
               }}
-              style={[
-                styles.scopeTab,
-                active && [
-                  styles.scopeTabActive,
-                  { backgroundColor: accent.accent, borderColor: accent.accent },
-                ],
-              ]}
-              accessibilityRole="button"
+              style={[styles.scopeTab, active && styles.scopeTabActive]}
+              accessibilityRole="tab"
               accessibilityState={{ selected: active }}
               testID={`workouts-scope-${s.key}`}
             >
-              <Text style={[styles.scopeText, active && styles.scopeTextActive]}>{s.label}</Text>
+              <Text
+                style={[
+                  styles.scopeText,
+                  active && [styles.scopeTextActive, { color: accent.accent }],
+                ]}
+              >
+                {s.label}
+              </Text>
             </Pressable>
           );
         })}
@@ -270,12 +292,17 @@ export default function WorkoutsScreen() {
 
       {scope === 'mine' && (
         <Pressable
-          style={[styles.fab, { backgroundColor: accent.accent }]}
+          style={({ pressed }) => [
+            styles.fab,
+            { backgroundColor: accent.accent },
+            pressed && styles.fabPressed,
+          ]}
           onPress={() => setComposing(true)}
           accessibilityRole="button"
           accessibilityLabel="New workout"
           testID="workouts-new"
         >
+          <Icon name="plus" size={16} color={accent.on} />
           <Text style={[styles.fabText, { color: accent.on }]}>New workout</Text>
         </Pressable>
       )}
@@ -512,20 +539,30 @@ export function Chip({
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  scopeRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingTop: 12 },
-  scopeTab: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: vola.line,
-    alignItems: 'center',
+  // One recessed track holding both segments, rather than two bordered pills
+  // with a gap between them. The 3pt padding is what insets the thumb.
+  scopeRow: {
+    flexDirection: 'row',
+    marginHorizontal: 16,
+    marginTop: 12,
+    padding: 3,
+    borderRadius: 12,
+    backgroundColor: vola.surface,
   },
-  scopeTabActive: {},
-  scopeText: { fontWeight: '600' },
-  scopeTextActive: { color: vola.navy },
+  scopeTab: { flex: 1, paddingVertical: 8, borderRadius: 9, alignItems: 'center' },
+  // A raised thumb, not an accent fill. The selected half used to take the
+  // accent as a solid background — the same colour, weight and footprint as
+  // the screen's primary action, sitting right above it. Switching between two
+  // views of one list is not an action; it belongs in the chrome, and the
+  // accent is left to mean "this button does something".
+  scopeTabActive: { backgroundColor: vola.surfaceRaised },
+  scopeText: { fontSize: 14, fontWeight: '600', color: vola.textMuted },
+  scopeTextActive: { fontWeight: '700' },
   loader: { marginTop: 32 },
-  list: { padding: 16, gap: 12, paddingBottom: TAB_BAR_CLEARANCE },
+  // TAB_BAR_CLEARANCE alone left the last row under the New workout pill —
+  // that is what put it on top of the planner's hint line. FAB_CLEARANCE is
+  // its height plus the 16pt it floats above the bottom.
+  list: { padding: 16, gap: 12, paddingBottom: TAB_BAR_CLEARANCE + FAB_CLEARANCE },
   // The list's own `gap` doesn't apply between a header and the first row, so
   // the spacing below the planner is the header's to own.
   planHeader: { gap: 18, marginBottom: 4 },
@@ -564,16 +601,35 @@ const styles = StyleSheet.create({
   emptyTitle: { fontSize: 17, fontWeight: '600' },
   muted: { color: vola.textMuted, fontSize: 13, textAlign: 'center' },
   error: { color: vola.danger, fontSize: 14, paddingHorizontal: 16, paddingTop: 10 },
+  // A compact pill in the corner, not a full-width slab.
+  //
+  // It was `left: 16, right: 16` with 16pt of vertical padding — an accent bar
+  // the width of the screen, which is the loudest thing an interface can do for
+  // what, on a screen already full of templates, is an occasional action. It
+  // also sat ON TOP of the planner's "long-press to remove" hint: the list
+  // reserved only `TAB_BAR_CLEARANCE` under its content and the bar needed
+  // roughly twice that. Both are fixed here — the pill is smaller, and
+  // `list.paddingBottom` now accounts for it.
   fab: {
     position: 'absolute',
-    left: 16,
     right: 16,
     bottom: 16,
-    borderRadius: 14,
-    paddingVertical: 16,
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 8,
+    borderRadius: 999,
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    // A flat pill on a dark ground cannot separate itself from a list that
+    // scrolls underneath it; the shadow is what says "this floats".
+    shadowColor: '#000',
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
   },
-  fabText: { color: vola.navy, fontWeight: '700', fontSize: 16 },
+  fabPressed: { opacity: 0.85 },
+  fabText: { color: vola.navy, fontWeight: '700', fontSize: 15 },
 
   // A Modal renders outside the navigator, so nothing paints behind it —
   // this is the one place a screen-level container has to set its own

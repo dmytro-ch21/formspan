@@ -3879,3 +3879,41 @@ carries a rename made without signal.
 - Upgrading an install with cached templates must not mark their names as
   owed — otherwise the first sync re-sends every one, including ownerless VOLA
   templates the server refuses.
+
+## The Plan screen's chrome (mobile, `app/(tabs)/workouts.tsx`)
+
+The scope switch and the New workout button. Mostly visual, but one of these is
+a real layout guarantee rather than a preference.
+
+### Happy path
+
+- The scope control shows both segments on one track; the selected one is
+  raised and its label takes the accent, the other is muted.
+- Tapping `Shared` loads other people's public templates; tapping
+  `My workouts` returns to your own. The selection survives leaving and
+  returning to the tab.
+- `New workout` opens the create sheet, and a workout created there appears in
+  the list without a manual refresh.
+
+### Edge cases & errors
+
+- **Scroll to the very end of the templates list: the last card must be fully
+  visible and not sit under the New workout pill.** This is the regression that
+  prompted the work — the button used to cover the planner's "long-press to
+  remove" hint permanently, at every scroll position, because the list reserved
+  less bottom padding than the floating button occupied. Worth asserting at
+  both extremes: an empty list, and a list long enough to scroll.
+- The bottom clearance must not change between scopes — `Shared` hides the
+  button, and if the padding went with it the list would jump under the
+  reader's thumb on every switch.
+- With no templates at all, the empty state is readable and the button does not
+  overlap it.
+
+### Accessibility
+
+- The two segments expose a selected state (they are tabs, not buttons that
+  happen to be highlighted), so a screen reader announces which view is active
+  rather than reading two identical labels.
+- The accent is on the selected segment's *text*, so the control does not rely
+  on a fill alone to say which is selected — and the New workout pill carries
+  both an icon and a label rather than an icon alone.
