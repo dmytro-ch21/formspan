@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   FlatList,
   Modal,
+  PixelRatio,
   Pressable,
   RefreshControl,
   StyleSheet,
@@ -35,12 +36,15 @@ import { useAccent } from '@/lib/AccentProvider';
 /**
  * Room under the list for the floating New workout pill.
  *
- * 12pt padding twice, a 15pt line, and the 16pt it sits above the bottom, plus
- * a little air. Only the `mine` scope shows the pill, but the padding is
- * unconditional: switching scope would otherwise change the scroll extent and
- * jump the list under the thumb.
+ * 12pt of padding twice, the label's line box, and the 16pt the pill sits above
+ * the bottom — plus air. **Derived from the font scale rather than fixed**,
+ * because the label grows with the system text size and the paddings do not: a
+ * constant 72 was measured to clear comfortably at default and through XXXL,
+ * and to re-create the very overlap this exists to fix from Accessibility Large
+ * upwards. Nothing in this app caps `maxFontSizeMultiplier`, so that ceiling is
+ * reachable by anyone who turns the setting up.
  */
-const FAB_CLEARANCE = 72;
+const FAB_CLEARANCE = 44 + 20 * PixelRatio.getFontScale();
 
 const SCOPES = [
   { key: 'mine', label: 'My workouts' },
@@ -144,15 +148,29 @@ export default function WorkoutsScreen() {
           templates it draws from, and the tab bar has always called it Plan. */}
       <ScreenHeader title="Plan" />
       {/*
-        A segmented control on ONE track, not two filled buttons.
+        A tab strip with an underline, not two filled buttons.
 
         It used to be a pair of full-width pills whose selected half took the
         accent as a solid fill — the same weight, colour and footprint as the
-        screen's primary action, sitting directly above it. Two lime slabs, and
-        neither one reading as more important than the other. A switch between
-        two views of the same list is not an action at all: it belongs in the
-        chrome, so it gets a recessed track and a raised thumb, and the accent
-        is left to mean "this button does something".
+        screen's primary action, sitting directly above it. Two accent slabs,
+        neither reading as more important than the other. Switching between two
+        views of one list is navigation, not an action, so the accent is left to
+        mean "this button does something".
+
+        **An underline rather than the raised thumb this first became.** That
+        version put `accent.ink` on `surfaceRaised`, and review measured the
+        blue theme at 4.37:1 — under the 4.5 the palette rule requires, on the
+        one surface `validate_palette.mjs` never checks (it asserts ink against
+        `surface` only, so the gate was green and blind). The label now sits on
+        the page ground, where the existing assertion already covers it: blue,
+        the worst case, is 5.15:1.
+
+        The bar also fixes what the thumb never did. `surfaceRaised` on
+        `surface` is a 1.09:1 step — invisible — so "which one is selected" was
+        carried by hue alone, and inverted on the blue and purple themes where
+        the selected label is *darker* than the unselected one. A bar that is
+        present or absent is not a colour at all, and as a non-text indicator it
+        clears 3:1 on every theme (purple, the worst, at 3.92).
       */}
       <View style={styles.scopeRow}>
         {SCOPES.map((s) => {
@@ -164,15 +182,31 @@ export default function WorkoutsScreen() {
                 setScope(s.key);
                 setLoading(true);
               }}
-              style={[styles.scopeTab, active && styles.scopeTabActive]}
-              accessibilityRole="tab"
+              style={[
+                styles.scopeTab,
+                active && [styles.scopeTabActive, { borderBottomColor: accent.accent }],
+              ]}
+              // `button`, not `tab`. RN maps "tab" to UIAccessibilityTraitNone
+              // on iOS — there is no per-tab trait — so VoiceOver would lose
+              // "button" and gain nothing, and outside a `tablist` Android
+              // still cannot say "1 of 2". `selected` below is what actually
+              // carries the state, on both platforms. Matches the app's other
+              // segmented control in `components/TrainingSummary.tsx`.
+              accessibilityRole="button"
               accessibilityState={{ selected: active }}
+              // The row is 34pt tall; this brings the target to the 44 the HIG
+              // asks for without changing the layout. The `Chip` in this same
+              // file already does exactly this.
+              hitSlop={{ top: 6, bottom: 6 }}
               testID={`workouts-scope-${s.key}`}
             >
               <Text
                 style={[
                   styles.scopeText,
-                  active && [styles.scopeTextActive, { color: accent.accent }],
+                  // `ink`, not `accent` — the palette defines `ink` as the
+                  // accent used as TEXT, and they differ on purple precisely
+                  // because the fill fails as type at 3.64:1.
+                  active && [styles.scopeTextActive, { color: accent.ink }],
                 ]}
               >
                 {s.label}
@@ -294,12 +328,14 @@ export default function WorkoutsScreen() {
         <Pressable
           style={({ pressed }) => [
             styles.fab,
-            { backgroundColor: accent.accent },
+            { backgroundColor: accent.accent, shadowColor: accent.accent },
             pressed && styles.fabPressed,
           ]}
           onPress={() => setComposing(true)}
           accessibilityRole="button"
           accessibilityLabel="New workout"
+          // 41.8pt tall at default text size, 2.2 under the HIG's 44.
+          hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
           testID="workouts-new"
         >
           <Icon name="plus" size={16} color={accent.on} />
@@ -539,23 +575,26 @@ export function Chip({
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  // One recessed track holding both segments, rather than two bordered pills
-  // with a gap between them. The 3pt padding is what insets the thumb.
+  // A tab strip: a hairline under the whole row, and a 2pt accent bar under
+  // whichever segment is selected. No fill on either.
   scopeRow: {
     flexDirection: 'row',
     marginHorizontal: 16,
-    marginTop: 12,
-    padding: 3,
-    borderRadius: 12,
-    backgroundColor: vola.surface,
+    marginTop: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: vola.line,
   },
-  scopeTab: { flex: 1, paddingVertical: 8, borderRadius: 9, alignItems: 'center' },
-  // A raised thumb, not an accent fill. The selected half used to take the
-  // accent as a solid background — the same colour, weight and footprint as
-  // the screen's primary action, sitting right above it. Switching between two
-  // views of one list is not an action; it belongs in the chrome, and the
-  // accent is left to mean "this button does something".
-  scopeTabActive: { backgroundColor: vola.surfaceRaised },
+  // The transparent border is load-bearing: without it the selected segment is
+  // 2pt taller than the other and the labels shift when you switch.
+  scopeTab: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+  },
+  // Colour set inline, from the accent.
+  scopeTabActive: {},
   scopeText: { fontSize: 14, fontWeight: '600', color: vola.textMuted },
   scopeTextActive: { fontWeight: '700' },
   loader: { marginTop: 32 },
@@ -621,10 +660,12 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 18,
     // A flat pill on a dark ground cannot separate itself from a list that
-    // scrolls underneath it; the shadow is what says "this floats".
-    shadowColor: '#000',
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
+    // scrolls underneath it. `shadowColor` is set INLINE to the accent, not to
+    // black: 35% black over this bg is a 1.02:1 step — literally invisible —
+    // and the accent instead reads as light coming off the pill. Same trick,
+    // and the same reasoning, as the one shadow in `TrainingCalendar`.
+    shadowOpacity: 0.45,
+    shadowRadius: 14,
     shadowOffset: { width: 0, height: 4 },
     elevation: 4,
   },

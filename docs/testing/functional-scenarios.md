@@ -3887,8 +3887,8 @@ a real layout guarantee rather than a preference.
 
 ### Happy path
 
-- The scope control shows both segments on one track; the selected one is
-  raised and its label takes the accent, the other is muted.
+- The scope control shows both segments under one hairline; the selected one
+  carries a 2pt accent bar and its label takes the accent, the other is muted.
 - Tapping `Shared` loads other people's public templates; tapping
   `My workouts` returns to your own. The selection survives leaving and
   returning to the tab.
@@ -3911,9 +3911,17 @@ a real layout guarantee rather than a preference.
 
 ### Accessibility
 
-- The two segments expose a selected state (they are tabs, not buttons that
-  happen to be highlighted), so a screen reader announces which view is active
-  rather than reading two identical labels.
-- The accent is on the selected segment's *text*, so the control does not rely
-  on a fill alone to say which is selected — and the New workout pill carries
-  both an icon and a label rather than an icon alone.
+- The two segments carry `accessibilityState={{ selected }}`, which is what
+  announces the active view — the role stays `button`, because React Native
+  maps `"tab"` to no trait at all on iOS, so it would cost the "button"
+  announcement and gain nothing outside a `tablist`.
+- Selection is carried by the presence of the underline, not by colour alone:
+  the bar is there or it is not. Worth checking with the blue and purple
+  accents specifically, where the selected label is *darker* than the
+  unselected one and hue alone would read backwards.
+- The New workout pill carries both an icon and a label, not an icon alone.
+- Both the segments and the pill are under 44pt tall and rely on `hitSlop` to
+  reach it — worth verifying by touch rather than by eye.
+- At Accessibility text sizes the pill grows; the bottom clearance is derived
+  from the font scale so the last list row should still clear it. This is the
+  case the original bug lived in, and it is the one least likely to be checked.

@@ -9275,10 +9275,23 @@ other, and no way to tell which one was the thing you press to *do* something.
 
 **The scope switch is chrome, not an action.** Choosing between two views of the
 same list is navigation; it does not deserve the colour reserved for "this
-button does something". It becomes a segmented control on one recessed track,
-with the selected half raised on `surfaceRaised` and the accent moved to its
-*text*. Same information, a fraction of the volume, and the accent now means one
-thing on this screen instead of two.
+button does something". It becomes a tab strip: a hairline under the row and a
+2pt accent bar under the selected half, with the label in `accent.ink`.
+
+**It was a raised thumb first, and review caught two things wrong with that.**
+Putting `accent.ink` on `surfaceRaised` measured **4.37:1** on the blue theme —
+under the 4.5 the palette rule requires, and on the one surface
+`validate_palette.mjs` never checks. It asserts `ink` against `surface` only, so
+the gate was green and structurally blind to it. Moving the label to the page
+ground puts it back under the existing assertion; blue, the worst case, is
+5.15:1.
+
+The second problem was worse and I had not seen it at all: `surfaceRaised` on
+`surface` is a **1.09:1** step. The "raised thumb" was invisible, so which
+segment was selected came down to hue alone — and on the blue and purple themes
+the selected label is *darker* than the unselected one, so the active segment
+read as the recessed one. A bar that is present or absent is not a colour, and
+as a non-text indicator it clears 3:1 on every theme (purple, the worst, 3.92).
 
 **The primary action becomes a compact pill in the corner.** `New workout` was
 `left: 16, right: 16` with 16pt of vertical padding — an accent bar the full
@@ -9315,6 +9328,19 @@ thumb.
   path then rolls back nothing. Left for its own change, with the note that a
   *caching* failure probably should not be a red banner over the athlete's plan
   at all.
+- **`validate_palette.mjs` checks `ink` against `surface` and nothing else.**
+  That is why a 4.37:1 label passed the gate. Any future component that puts
+  accent text on `surfaceRaised` — or on a card, or on any ground but the two
+  the validator knows — is unchecked in exactly the same way. Extending it to
+  every ground the palette actually renders on is the real fix; this change
+  only stopped standing on the hole.
+- **`FAB_CLEARANCE` is derived from the font scale, and that was a second
+  near-miss.** A fixed 72 clears at default and through XXXL but re-creates the
+  overlap from Accessibility Large upwards, because the label grows and the
+  paddings do not. Nothing in this app caps `maxFontSizeMultiplier`, so that is
+  reachable. It is `44 + 20 * PixelRatio.getFontScale()` now — but note the
+  Simulator run that verified the fix was at default size, so the large-text
+  behaviour is reasoned, not observed.
 - **The lint ratchet has no headroom, and this change nearly spent it twice.**
   Moving a `const` above the import block cost eleven `import/first` warnings in
   one edit — 66 against a limit of 55. It is worth knowing that the ratchet
