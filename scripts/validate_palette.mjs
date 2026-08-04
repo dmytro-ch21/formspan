@@ -310,6 +310,7 @@ function loadPalette() {
       accent: one('accent'), accentInk: one('accentInk'), accentOn: one('accentOn'),
       lime: one('lime'), green: one('green'), info: one('info'),
       warn: one('warn'), danger: one('danger'), gridRest: one('gridRest'),
+      tileHold: one('tileHold'),
       ramp: [...ramp[1].matchAll(/'(#[0-9A-Fa-f]{6})'/g)].map((m) => m[1]),
     },
     BELT: block('beltAccent'),
@@ -358,6 +359,20 @@ const sports = Object.entries(SPORTS);
 for (let i = 0; i < sports.length; i++) {
   for (let j = i + 1; j < sports.length; j++) {
     separation(`${sports[i][0]} vs ${sports[j][0]}`, sports[i][1], sports[j][1]);
+  }
+}
+
+// The Library tile intents. `components/LibraryTile.tsx` records that the
+// obvious one-hue-per-category scheme failed at ΔE 2.0 for a deuteranope, and
+// that these four clear every check — a claim that was measured by hand and,
+// until now, against a validator that did not exist.
+heading('Library tile intents — four hues carrying nine categories');
+const TILES = { attack: P.danger, advance: P.lime, defend: P.info, hold: P.tileHold };
+const tiles = Object.entries(TILES);
+for (const [name, hex] of tiles) ratio(`${name} on surface`, hex, S.surface, 4.5);
+for (let i = 0; i < tiles.length; i++) {
+  for (let j = i + 1; j < tiles.length; j++) {
+    separation(`${tiles[i][0]} vs ${tiles[j][0]}`, tiles[i][1], tiles[j][1]);
   }
 }
 

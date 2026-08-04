@@ -83,6 +83,19 @@ const palette = {
    */
   info: '#6BB6FF',
 
+  /**
+   * The Library tile's "staying put" intent — deliberately achromatic.
+   *
+   * Not `textMuted`, which is what it used to be. `LibraryTile` recorded that
+   * its four intents cleared every check at "worst adjacent pair ΔE 21.7 CVD";
+   * running them through `validate_palette.mjs` — the tool that comment tells
+   * you to use, and which did not exist when it was written — put
+   * defend-versus-hold at **14.7 for a protanope**, where a mid grey and a mid
+   * blue converge. This is the same idea a step darker, which separates on
+   * lightness instead: worst pair now 19.5.
+   */
+  tileHold: '#7C8798',
+
   warn: '#FFB020',
   danger: '#FF6B6B',
 

@@ -16,7 +16,7 @@ import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { PickSessionSheet } from '@/components/ui/PickSessionSheet';
 import { vola } from '@/constants/Colors';
-import { sportColor } from '@/components/ui/sport';
+import { sportColor, sportIcon, sportTint } from '@/components/ui/sport';
 import { useAccent } from '@/lib/AccentProvider';
 import {
   addDays,
@@ -416,6 +416,24 @@ export function WeekPlanner({
                         { backgroundColor: sportColor(p.sport) ?? accent.accent },
                       ]}
                     />
+                    {sportIcon(p.sport) && (
+                      <RNView
+                        style={[
+                          styles.entryBadge,
+                          {
+                            backgroundColor: sportTint(
+                              sportColor(p.sport) ?? accent.accent,
+                            ),
+                          },
+                        ]}
+                      >
+                        <Icon
+                          name={sportIcon(p.sport)!}
+                          size={15}
+                          color={sportColor(p.sport) ?? accent.accent}
+                        />
+                      </RNView>
+                    )}
                     <RNView style={styles.entryMain}>
                       <Text
                         style={[
@@ -660,7 +678,15 @@ const styles = StyleSheet.create({
   // The discipline's colour, matching the session rows on Today — set at the
   // call site because it varies per entry.
   entryRule: { width: 3, alignSelf: 'stretch' },
-  entryMain: { flex: 1, paddingVertical: 9, paddingLeft: 8, gap: 1 },
+  entryBadge: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 9,
+  },
+  entryMain: { flex: 1, paddingVertical: 9, gap: 1 },
   entrySport: { fontSize: 9, fontWeight: '700', letterSpacing: 0.9, color: vola.textDim },
   entryTitle: { fontSize: 14, fontWeight: '700' },
 

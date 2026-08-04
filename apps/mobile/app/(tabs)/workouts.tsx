@@ -28,6 +28,8 @@ import {
   type Workout,
 } from '@/lib/workouts';
 import { vola } from '@/constants/Colors';
+import { Icon } from '@/components/ui/Icon';
+import { sportColor, sportIcon, sportTint } from '@/components/ui/sport';
 import { useAccent } from '@/lib/AccentProvider';
 
 const SCOPES = [
@@ -217,23 +219,49 @@ export default function WorkoutsScreen() {
                 accessibilityLabel={`${item.name}, ${item.sport}, ${item.items.length} exercises`}
                 testID={`workout-${item.id}`}
               >
-                <View style={styles.cardHead}>
-                  <Text style={styles.cardTitle}>{item.name}</Text>
-                  {item.visibility === 'public' && (
-                    <Text
-                      style={[styles.badge, { color: accent.ink }]}
-                      testID={`workout-${item.id}-public`}
-                    >
-                      Shared
-                    </Text>
-                  )}
+                {/* The same two marks the Today screen's session rows use — a
+                    rule down the edge and a tinted disc — so a template and the
+                    session it becomes read as the same discipline. */}
+                <View
+                  style={[
+                    styles.cardRule,
+                    { backgroundColor: sportColor(item.sport) ?? accent.accent },
+                  ]}
+                />
+                {sportIcon(item.sport) && (
+                  <View
+                    style={[
+                      styles.cardBadge,
+                      { backgroundColor: sportTint(sportColor(item.sport) ?? accent.accent) },
+                    ]}
+                  >
+                    <Icon
+                      name={sportIcon(item.sport)!}
+                      size={18}
+                      color={sportColor(item.sport) ?? accent.accent}
+                    />
+                  </View>
+                )}
+
+                <View style={styles.cardBody}>
+                  <View style={styles.cardHead}>
+                    <Text style={styles.cardTitle}>{item.name}</Text>
+                    {item.visibility === 'public' && (
+                      <Text
+                        style={[styles.badge, { color: accent.ink }]}
+                        testID={`workout-${item.id}-public`}
+                      >
+                        Shared
+                      </Text>
+                    )}
+                  </View>
+                  <Text style={styles.cardMeta}>
+                    {labelFor(modules, item.sport)}
+                    {item.goal ? ` · ${GOALS.find((g) => g.key === item.goal)?.label}` : ''}
+                    {` · ${item.items.length} ${item.items.length === 1 ? 'exercise' : 'exercises'}`}
+                  </Text>
+                  {item.owner_user_id === null && <Text style={styles.muted}>VOLA template</Text>}
                 </View>
-                <Text style={styles.cardMeta}>
-                  {labelFor(modules, item.sport)}
-                  {item.goal ? ` · ${GOALS.find((g) => g.key === item.goal)?.label}` : ''}
-                  {` · ${item.items.length} ${item.items.length === 1 ? 'exercise' : 'exercises'}`}
-                </Text>
-                {item.owner_user_id === null && <Text style={styles.muted}>VOLA template</Text>}
               </Pressable>
             </Link>
           )}
@@ -502,13 +530,24 @@ const styles = StyleSheet.create({
   // the spacing below the planner is the header's to own.
   planHeader: { gap: 18, marginBottom: 4 },
   card: {
+    flexDirection: 'row',
+    alignItems: 'center',
     borderWidth: 1,
     borderColor: vola.line,
     borderRadius: 14,
-    padding: 14,
-    gap: 4,
     backgroundColor: vola.surface,
+    overflow: 'hidden',
   },
+  cardRule: { width: 3, alignSelf: 'stretch' },
+  cardBadge: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 12,
+  },
+  cardBody: { flex: 1, padding: 14, gap: 4 },
   cardHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   cardTitle: { fontSize: 17, fontWeight: '700', flexShrink: 1 },
   cardMeta: { fontSize: 13, color: vola.textMuted, textTransform: 'capitalize' },
