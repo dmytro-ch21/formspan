@@ -53,9 +53,10 @@ export function Icon({
      * A right-pointing chevron: one square corner, rotated.
      *
      * Two borders on a box beats two rotated rules here — the rules meet at a
-     * mitre only if their overlap is computed (see `ScreenHeader`'s wordmark,
-     * which does exactly that arithmetic), whereas a border corner is mitred
-     * by the layout engine for free.
+     * mitre only if their overlap is computed, whereas a border corner is
+     * mitred by the layout engine for free. (This used to cite `ScreenHeader`
+     * as the place doing that arithmetic; it no longer does any, having gone
+     * from a drawn stand-in wordmark to the real artwork as an image.)
      */
     case 'chevron': {
       const arm = size * 0.4;

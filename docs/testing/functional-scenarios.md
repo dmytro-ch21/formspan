@@ -3296,3 +3296,42 @@ codebase's other outboxes)
 - A refused plan that later succeeds clears its error.
 - Signing out and into another account on the same device shows none of the
   first account's plans and pushes none of them.
+
+## Brand marks in the app (mobile)
+
+Covers `components/ScreenHeader.tsx`, the icon entries in `app.json`, and the
+generated rasters in `apps/mobile/assets/images/`.
+
+**Mostly not testable in Expo Go.** The app icon is native — Expo Go shows its
+own icon regardless of project config — so every icon scenario below needs a
+real build (`expo run:ios --device` or EAS). The header scenarios are ordinary
+JS and show up on a reload.
+
+### The header
+
+- Every tab screen shows the drawn wordmark centred, and **no tick beside it**.
+  The tick appearing again means someone re-added the old lockup.
+- The wordmark is the artwork, not text: the A has no crossbar and the O is a
+  rounded rectangle. If the A has a crossbar, a font is being rendered.
+- It stays centred on the screen, not centred in the space left over by the
+  title — a long screen title must not push it off centre.
+- A screen reader announces it once, as "VOLA", with the header role. Not twice
+  (wrapper and image both labelled), and not as a filename.
+
+### The icons
+
+- Home screen after a real build: the faceted three-green tick on `#080B12`-ish
+  navy, **no wordmark and no lettering** — at home-screen size, letters that
+  small are mud.
+- No transparent corners on iOS. A 1024 icon with alpha is an App Store
+  rejection, so this is worth asserting on the artifact, not just by eye.
+- Android: the tick survives every launcher mask shape — circle, squircle,
+  rounded square — without a limb being cropped.
+- Android themed icons on: the monochrome layer renders as one solid tick
+  silhouette, not three separate facets with seams between them.
+
+### Regeneration
+
+- Editing `assets/brand/app-icons/*.svg` and re-rendering reproduces the shipped
+  PNGs. If it doesn't, the master and the raster have drifted and the master is
+  no longer the source of truth it claims to be.

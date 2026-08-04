@@ -1,16 +1,17 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" fill="none">
-
-
-<g transform="translate(190 180) scale(1.25)">
-
-<defs>
-  <linearGradient id="grad-android-adaptive-foreground" x1="120" y1="360" x2="410" y2="100" gradientUnits="userSpaceOnUse">
-    <stop stop-color="#42F58D"/>
-    <stop offset="1" stop-color="#B8FF2C"/>
-  </linearGradient>
-</defs>
-<path d="M120 270 L220 365 L405 135" stroke="url(#grad-android-adaptive-foreground)" stroke-width="58" stroke-linecap="round" stroke-linejoin="round"/>
-
-</g>
-
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Android adaptive foreground. Transparent, and the mark is 458px because the
+       guaranteed-visible region is a 66dp CIRCLE (radius 312.9px on this canvas),
+       not a square. Sizing to a square safe zone is the trap: the tick's longest
+       arm ends exactly at its own bounding box's top-right corner, so the corner
+       that overhangs a circular mask is the fullest point on the shape, not an
+       empty one. At 560px that tip sat 376px out and a circle mask amputated it;
+       458 lands it at ~307px, inside the circle with a few px of margin so an
+       antialiased edge is not resting on the guarantee.
+       Mark geometry is the real logo from logos/source/vola-mark-color.svg,
+       content box 4645x4185 at (1911,2141), placed at 458px wide and centred. -->
+  <g transform="translate(94.57 94.57) scale(0.09860065)">
+    <path fill="#D0E950" d="M1911 3801l1625 1128 3020 -2788 -2933 4185 -1712 -2525z"/>
+    <path fill="#9CC740" d="M3008 5418l401 -577 -1498 -1040 1097 1617z"/>
+    <path fill="#71912F" d="M3536 4929l-528 489 367 -600 161 111z"/>
+  </g>
 </svg>
