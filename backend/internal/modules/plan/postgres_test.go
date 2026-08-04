@@ -2,9 +2,9 @@ package plan
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/database"
@@ -269,8 +269,13 @@ func TestUpdateCanClearTheWorkoutButLeavesItWhenAbsent(t *testing.T) {
 	}
 
 	// Explicit null: cleared.
-	var null *string
-	cleared, err := repo.Update(ctx, user, made.ID, PlanUpdate{WorkoutID: &null})
+	//
+	// **Decoded from a real request body**, not hand-built. An earlier version
+	// constructed the PlanUpdate directly, which bypassed the JSON layer
+	// entirely — so it proved the SQL and could not fail when the decode
+	// collapsed "null" into "absent", which it did. The whole point of the
+	// three-state is the wire contract, so the test has to start at the wire.
+	cleared, err := repo.Update(ctx, user, made.ID, decodeUpdate(t, `{"workout_id":null}`))
 	if err != nil {
 		t.Fatalf("clear workout: %v", err)
 	}
@@ -278,6 +283,52 @@ func TestUpdateCanClearTheWorkoutButLeavesItWhenAbsent(t *testing.T) {
 		t.Errorf("workout_id = %v, want nil after an explicit null", *cleared.WorkoutID)
 	}
 }
+
+// decodeUpdate builds a PlanUpdate the way the handler does — through
+// encoding/json — so tests exercise the contract rather than the struct.
+func decodeUpdate(t *testing.T, body string) PlanUpdate {
+	t.Helper()
+	var req updateRequest
+	if err := json.Unmarshal([]byte(body), &req); err != nil {
+		t.Fatalf("decode %s: %v", body, err)
+	}
+	return PlanUpdate{
+		Day:       req.Day,
+		Sport:     req.Sport,
+		WorkoutID: req.WorkoutID,
+		Notes:     req.Notes,
+	}
+}
+
+// The three states, at the wire level, where the bug actually lived.
+func TestWorkoutIDThreeStateSurvivesJSON(t *testing.T) {
+	for _, tc := range []struct {
+		body      string
+		present   bool
+		wantValue *string
+	}{
+		{`{}`, false, nil},
+		{`{"notes":"x"}`, false, nil},
+		{`{"workout_id":null}`, true, nil},
+		{`{"workout_id":"w_1"}`, true, ptr("w_1")},
+	} {
+		var req updateRequest
+		if err := json.Unmarshal([]byte(tc.body), &req); err != nil {
+			t.Fatalf("%s: %v", tc.body, err)
+		}
+		if req.WorkoutID.Present != tc.present {
+			t.Errorf("%s: Present = %v, want %v", tc.body, req.WorkoutID.Present, tc.present)
+		}
+		switch {
+		case tc.wantValue == nil && req.WorkoutID.Value != nil:
+			t.Errorf("%s: Value = %q, want nil", tc.body, *req.WorkoutID.Value)
+		case tc.wantValue != nil && (req.WorkoutID.Value == nil || *req.WorkoutID.Value != *tc.wantValue):
+			t.Errorf("%s: Value = %v, want %q", tc.body, req.WorkoutID.Value, *tc.wantValue)
+		}
+	}
+}
+
+func ptr(s string) *string { return &s }
 
 // Deleting a template must not delete the days planned around it — the plan
 // degrades to its discipline, which is still true and still startable.
@@ -295,6 +346,14 @@ func TestDeletingAWorkoutKeepsThePlan(t *testing.T) {
 		 VALUES ($1, $2, 'strength', 'Doomed')`, workoutID, user); err != nil {
 		t.Fatalf("seed workout: %v", err)
 	}
+	// Registered even though the test deletes this row itself: if the test
+	// fails before that point the row survives and every later run fails on a
+	// duplicate key, which is a suite that only passes once. Observed.
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), `DELETE FROM workouts WHERE id = $1`, workoutID); err != nil {
+			t.Logf("cleanup workout: %v", err)
+		}
+	})
 
 	wid := workoutID
 	if _, err := repo.Create(ctx, user, NewPlan{
@@ -316,6 +375,47 @@ func TestDeletingAWorkoutKeepsThePlan(t *testing.T) {
 	}
 }
 
+// The enumeration oracle, closed. This is the third time this bug class has
+// been closed in this codebase (workout write paths, then sessions, now
+// plans), so it gets a test that names it.
+func TestCannotReferenceAnotherUsersPrivateWorkout(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const mine, theirs = "plan_oracle_mine", "plan_oracle_theirs"
+	cleanupPlans(t, pool, mine)
+
+	const victimWorkout = "plan_oracle_private_workout"
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO workouts (id, owner_user_id, sport, name, visibility)
+		 VALUES ($1, $2, 'strength', 'Push Day A', 'private')`, victimWorkout, theirs); err != nil {
+		t.Fatalf("seed victim workout: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), `DELETE FROM workouts WHERE id = $1`, victimWorkout); err != nil {
+			t.Logf("cleanup workout: %v", err)
+		}
+	})
+
+	wid := victimWorkout
+	_, visible := repo.Create(ctx, mine, NewPlan{
+		ID: "plan_oracle_1", Day: "2026-08-04", Sport: "strength", WorkoutID: &wid,
+	})
+
+	missing := "plan_oracle_no_such_workout"
+	_, absent := repo.Create(ctx, mine, NewPlan{
+		ID: "plan_oracle_2", Day: "2026-08-04", Sport: "strength", WorkoutID: &missing,
+	})
+
+	if !errors.Is(visible, ErrInvalidInput) {
+		t.Fatalf("referencing another user's private workout = %v, want ErrInvalidInput", visible)
+	}
+	// THE POINT: the two must be indistinguishable, or the endpoint is an
+	// oracle for guessable workout ids ("push-day-a").
+	if visible.Error() != absent.Error() {
+		t.Errorf("distinguishable errors:\n  not-yours: %v\n  no-such:   %v", visible, absent)
+	}
+}
+
 func TestInvalidInput(t *testing.T) {
 	repo, pool := newTestRepo(t)
 	ctx := context.Background()
@@ -333,16 +433,25 @@ func TestInvalidInput(t *testing.T) {
 		}
 	})
 
-	t.Run("unknown sport is rejected by the CHECK", func(t *testing.T) {
-		_, err := repo.Create(ctx, user, NewPlan{
+	t.Run("an unknown sport reaches the database, by design", func(t *testing.T) {
+		// There is deliberately NO sport CHECK on `plans` — migration 000021
+		// removed the equivalent from sessions and workouts because a CHECK
+		// listing the values is the per-discipline migration cost the registry
+		// exists to remove. The vocabulary is enforced at the handler by
+		// `discipline.ValidSport`, and `registry_sports_test.go` is the
+		// tripwire that every registry sport can actually be written.
+		//
+		// So this asserts the *absence* of the constraint: an unknown sport is
+		// stored rather than rejected here. If someone re-adds the CHECK, this
+		// goes red and points at the reason.
+		p, err := repo.Create(ctx, user, NewPlan{
 			ID: "plan_bad_2", Day: "2026-08-04", Sport: "quidditch",
 		})
-		if !errors.Is(err, ErrInvalidInput) {
-			t.Fatalf("err = %v, want ErrInvalidInput", err)
+		if err != nil {
+			t.Fatalf("err = %v, want the row to be accepted at this layer", err)
 		}
-		// The Postgres message must not leak — it names constraints and values.
-		if strings.Contains(err.Error(), "plans_sport_valid") {
-			t.Errorf("err leaks the constraint name: %v", err)
+		if p.Sport != "quidditch" {
+			t.Errorf("sport = %q, want it stored verbatim", p.Sport)
 		}
 	})
 

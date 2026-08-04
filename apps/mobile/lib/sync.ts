@@ -192,6 +192,23 @@ export function request(reason: string): void {
   void run(reason);
 }
 
+/**
+ * The most actionable classification across both outboxes.
+ *
+ * `offline` outranks everything — if the server could not be reached at all,
+ * that is the fact worth acting on. `transient` outranks `permanent` because
+ * it is the one that must keep the retry ladder alive: a run containing both
+ * a doomed row and a retryable one still has work to come back for.
+ */
+function rankKind(
+  a: SyncErrorKind | undefined,
+  b: SyncErrorKind | undefined,
+): SyncErrorKind | undefined {
+  if (a === 'offline' || b === 'offline') return 'offline';
+  if (a === 'transient' || b === 'transient') return 'transient';
+  return a ?? b;
+}
+
 async function run(reason: string): Promise<void> {
   if (!creds || running) return;
   const { userID, getToken } = creds;
@@ -217,11 +234,21 @@ async function run(reason: string): Promise<void> {
       // Merged so one failing half cannot be masked by the other succeeding.
       // Both surfaces — the pending count and the error banner — describe the
       // whole outbox, not one table of it.
+      //
+      // `errorKind` is RANKED, not `??`-ed. With `??` the classification is
+      // order-dependent and sessions always win, so a permanently-refused
+      // session — which stays dirty with a `last_error` indefinitely — would
+      // report `permanent` forever and `retry = kind !== 'permanent'` below
+      // would stop retrying a plan that failed on a perfectly retryable 5xx.
+      // It would also claim `online: true` while the device was offline, if
+      // the offline half happened to be the plans. Both modules define a
+      // precedence for exactly this; discarding it at the merge point undoes
+      // the work.
       const result = {
         failed: sessionResult.failed + planResult.failed,
         deferred: sessionResult.deferred + planResult.deferred,
         error: sessionResult.error ?? planResult.error,
-        errorKind: sessionResult.errorKind ?? planResult.errorKind,
+        errorKind: rankKind(sessionResult.errorKind, planResult.errorKind),
       };
 
       // The account may have changed while this ran.

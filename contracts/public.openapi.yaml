@@ -2456,8 +2456,10 @@ paths:
               schema: { $ref: "#/components/schemas/PlanList" }
         "400":
           description: >
-            A missing or malformed date, a backwards range, or a range wider
-            than 400 days.
+            A missing or malformed date, a backwards range, or a range longer
+            than 400 days counted inclusively (so 1 Jan to 4 Feb the following
+            year is the widest accepted). A `day` carrying a time — a full
+            RFC3339 timestamp — is rejected here rather than truncated.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }

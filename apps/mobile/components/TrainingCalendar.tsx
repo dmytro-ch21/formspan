@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, View as RNView } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
@@ -133,21 +133,38 @@ export function TrainingCalendar({
   const [anchor, setAnchor] = useState(() => new Date(now.getFullYear(), now.getMonth(), 1));
   const [selected, setSelected] = useState<string | null>(null);
   /**
-   * A wider read, taken only when the month opens.
+   * A wider read, for the month sheet.
    *
-   * The Today screen hands us its own list, which is capped at the most recent
-   * 30 — plenty for a week and **not** enough to colour a month honestly. A
-   * grid that silently omitted older days would claim rest days that were
-   * trained, so the month view loads its own window rather than decorating a
-   * list it knows is truncated.
+   * The caller hands us its own list, capped at the most recent 30 — plenty
+   * for a week and **not** enough to colour a month honestly. A grid that
+   * silently omitted older days would claim rest days that were trained, which
+   * is the fabricated-zero this codebase refuses everywhere else.
+   *
+   * **Merged with the caller's list rather than replacing it**, and re-read
+   * whenever `anchor` moves. Both halves of that matter and both were wrong:
+   *
+   *  - Replacing meant that once the sheet had been opened, this stale array
+   *    shadowed the live `sessions` prop for the rest of the screen's life —
+   *    so finishing a session and returning to Today left the week strip's dot
+   *    unlit while the Today screen right above it showed the session.
+   *  - Loading once per *opening* meant paging back with the arrows kept
+   *    showing the most recent 200 sessions, so a month far enough back
+   *    reported 0 sessions and 0 days for a month that was trained.
    */
-  const [monthSessions, setMonthSessions] = useState<Session[] | null>(null);
+  const [monthSessions, setMonthSessions] = useState<Session[]>([]);
 
   const week = useMemo(() => weekOf(now), [now]);
   const todayKey = dayString(now);
 
-  // The month view's own data when it has loaded, the caller's otherwise.
-  const pool = monthSessions ?? sessions;
+  // Both lists, de-duplicated by id, with the CALLER's copy winning — it is
+  // the live one, re-read on focus and after every sync, while the month read
+  // is a snapshot taken when the sheet opened.
+  const pool = useMemo(() => {
+    if (monthSessions.length === 0) return sessions;
+    const byId = new Map(monthSessions.map((s) => [s.id, s]));
+    for (const s of sessions) byId.set(s.id, s);
+    return Array.from(byId.values());
+  }, [monthSessions, sessions]);
 
   const byDay = useMemo(() => {
     const map = new Map<string, Session[]>();
@@ -170,20 +187,48 @@ export function TrainingCalendar({
     return map;
   }, [planned]);
 
-  const openMonth = useCallback(async () => {
+  const openMonth = useCallback(() => {
     setAnchor(new Date(now.getFullYear(), now.getMonth(), 1));
     setSelected(todayKey);
     setMonthOpen(true);
-    if (!userId) return;
-    try {
-      // 200 covers any realistic month, including two-a-days.
-      setMonthSessions(await listLocalSessions(userId, 200));
-    } catch {
-      // Falls back to the caller's list. The grid is then only as complete as
-      // that list — acceptable because it can only ever *under*-report, and
-      // the alternative is an empty month.
-    }
-  }, [now, todayKey, userId]);
+  }, [now, todayKey]);
+
+  /**
+   * Load the sessions covering the month being browsed — re-run when the
+   * arrows move it, not once per opening.
+   *
+   * `listLocalSessions` returns the most recent N, so a fixed read can only
+   * ever describe recent months. Paging back far enough with that made the
+   * grid and the totals report zero for a month that was trained. The limit
+   * therefore scales with how far back the anchor is: enough rows to reach
+   * that month, capped so an idle scroll into 2019 cannot ask for everything.
+   */
+  useEffect(() => {
+    if (!monthOpen || !userId) return;
+    let alive = true;
+
+    const monthsBack = Math.max(
+      0,
+      (now.getFullYear() - anchor.getFullYear()) * 12 + (now.getMonth() - anchor.getMonth()),
+    );
+    // ~15 sessions/month is a generous training week; +200 keeps the recent
+    // window as complete as it was before.
+    const limit = Math.min(2000, 200 + monthsBack * 15);
+
+    listLocalSessions(userId, limit)
+      .then((rows) => {
+        if (alive) setMonthSessions(rows);
+      })
+      .catch(() => {
+        // Falls back to the caller's list. The grid is then only as complete
+        // as that list — it can only ever under-report, and the alternative is
+        // an empty month.
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [monthOpen, userId, anchor, now]);
 
   const grid = useMemo(() => monthGrid(anchor), [anchor]);
 

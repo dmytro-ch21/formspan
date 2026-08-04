@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"unicode/utf8"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/auth"
@@ -15,6 +16,12 @@ type Handler struct {
 }
 
 func NewHandler(repo Repository) *Handler { return &Handler{repo: repo} }
+
+// maxBody bounds a request before it is buffered. A plan is a handful of short
+// fields, and `MaxNotesLen` is only checked after a full decode — so without
+// this the notes limit is enforced against something already in memory. Same
+// 8 KiB `health` and `session` use.
+const maxBody = 8 << 10
 
 func writeErr(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
@@ -70,8 +77,11 @@ type createRequest struct {
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
 
+	// Bounded before the whole body is buffered — a plan is a handful of short
+	// fields, and `MaxNotesLen` is only checked after a full decode. Same limit
+	// `health` and `session` use.
 	var req createRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody)).Decode(&req); err != nil {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
 		return
 	}
@@ -96,7 +106,10 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "unknown sport")
 		return
 	}
-	if len(req.Notes) > MaxNotesLen {
+	// Runes, not bytes: the CHECK is `char_length(notes) <= 500`, so counting
+	// bytes rejects a 300-character Cyrillic or emoji note the database would
+	// have accepted. `session.maxNameLen` already uses RuneCountInString.
+	if utf8.RuneCountInString(req.Notes) > MaxNotesLen {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "notes are too long")
 		return
 	}
@@ -115,17 +128,14 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	apihttp.WriteJSON(w, http.StatusCreated, p)
 }
 
-// updateRequest uses double pointers for the nullable fields so "absent" and
-// "explicitly null" stay distinguishable — see PlanUpdate.
-//
-// json.Decoder leaves an absent field as nil and sets a present `null` to a
-// non-nil pointer holding nil, which is exactly the distinction needed to tell
-// "don't touch the template" from "clear the template".
+// updateRequest carries `workout_id` as an OptionalWorkoutID so "absent" and
+// "explicitly null" stay distinguishable — see the type's own comment for why
+// a `**string` cannot do this, and for the silent no-op it caused.
 type updateRequest struct {
-	Day       *string  `json:"day"`
-	Sport     *string  `json:"sport"`
-	WorkoutID **string `json:"workout_id"`
-	Notes     *string  `json:"notes"`
+	Day       *string           `json:"day"`
+	Sport     *string           `json:"sport"`
+	WorkoutID OptionalWorkoutID `json:"workout_id"`
+	Notes     *string           `json:"notes"`
 }
 
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
@@ -133,7 +143,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("planID")
 
 	var req updateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody)).Decode(&req); err != nil {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
 		return
 	}
@@ -147,7 +157,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "unknown sport")
 		return
 	}
-	if req.Notes != nil && len(*req.Notes) > MaxNotesLen {
+	if req.Notes != nil && utf8.RuneCountInString(*req.Notes) > MaxNotesLen {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "notes are too long")
 		return
 	}

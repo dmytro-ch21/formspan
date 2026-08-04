@@ -175,29 +175,30 @@ export async function planSession(
 /**
  * Remove one planned entry.
  *
- * **A tombstone when the server has seen it, a hard delete when it hasn't.**
- * Deleting a row the server knows about would leave the server's copy alive
- * and the next pull would write it straight back — the resurrection the
- * sessions module already learned about the hard way. A row that has never
- * been pushed has nothing to tell anyone, so it simply goes.
+ * **ALWAYS a tombstone — never a hard delete here**, however certain we look
+ * that the server has not seen the row. `deleteLocalSession` in `sessionStore`
+ * makes the same unconditional choice, and this function briefly did not,
+ * which was a bug:
  *
- * `remote` is read inside this function rather than trusted from a caller,
- * but the *decision* is re-checked in the push path too: `remote` is only
- * fully trustworthy inside the serialised sync.
+ *   1. a sync is mid-flight, awaiting `createRemotePlan` for this row, which
+ *      still reads `remote = 0` because that flag is only set once the create
+ *      RESOLVES;
+ *   2. the athlete taps Remove, reads `remote = 0`, and hard-deletes;
+ *   3. the create lands — its `SET remote = 1` and the CAS both match zero
+ *      rows and raise nothing;
+ *   4. the pull, in the same run, finds no tombstone (a hard delete leaves
+ *      none) and no local row, so both the `buried` and `dirty` guards are
+ *      vacuous, and it re-inserts the plan.
+ *
+ * The plan the athlete just deleted reappears seconds later. The window is the
+ * whole duration of a network round trip, which on a phone is not small.
+ *
+ * The hard delete still exists — in `pushRow`, INSIDE the serialised sync,
+ * where `remote` is finally trustworthy and no create can be in flight. That
+ * is the only place the question can be answered correctly.
  */
 export async function unplanSession(userId: string, id: string): Promise<void> {
   const db = await getDb();
-  const row = await db.getFirstAsync<{ remote: number }>(
-    `SELECT remote FROM planned_sessions WHERE id = ? AND user_id = ?`,
-    id,
-    userId,
-  );
-  if (!row) return;
-
-  if (row.remote === 0) {
-    await db.runAsync(`DELETE FROM planned_sessions WHERE id = ? AND user_id = ?`, id, userId);
-    return;
-  }
   const now = new Date().toISOString();
   await db.runAsync(
     `UPDATE planned_sessions SET deleted_at = ?, updated_at = ?, dirty = 1
@@ -291,6 +292,19 @@ export function syncPlans(userId: string, getToken: TokenGetter): Promise<PlanSy
 const PULL_BEFORE_DAYS = 45;
 const PULL_AFTER_DAYS = 120;
 
+/**
+ * Whether `a` is at or before `b`, comparing instants rather than strings.
+ *
+ * An unparseable timestamp returns false — "do not treat this as stale" — so a
+ * malformed value can never be the reason a pull is skipped.
+ */
+function olderOrSame(a: string, b: string): boolean {
+  const ta = Date.parse(a);
+  const tb = Date.parse(b);
+  if (Number.isNaN(ta) || Number.isNaN(tb)) return false;
+  return ta <= tb;
+}
+
 function pullWindow(now: Date): { from: string; to: string } {
   const from = new Date(now);
   from.setDate(from.getDate() - PULL_BEFORE_DAYS);
@@ -351,7 +365,38 @@ async function runSync(userId: string, getToken: TokenGetter): Promise<PlanSyncR
   }
 
   try {
-    const remote = await fetchPlans(getToken, pullWindow(new Date()));
+    // ONE window, computed once and used for both the fetch and the sweep
+    // below.
+    //
+    // These were two independent `pullWindow(new Date())` calls. If local
+    // midnight fell between them the sweep's window sat a day ahead of the one
+    // actually fetched, so its last day had never been asked about — and every
+    // clean plan on that day was absent from the response, absent from
+    // `pushedThisRun`, and deleted. Deleting on evidence you did not request is
+    // the wrong shape for the most destructive operation in this module.
+    const window = pullWindow(new Date());
+    const remote = await fetchPlans(getToken, window);
+
+    // **Prove the response is this user's before reading ANY of it.**
+    //
+    // `getToken` follows the *current* Clerk user, while this run holds the
+    // `userId` it started with, and `setSyncIdentity` does not abort a run in
+    // flight. So an account switch mid-run hands us user B's plans while every
+    // write below is scoped to user A. Two separate harms, which is why this
+    // guards the whole reconciliation and not just the sweep: the loop would
+    // ADOPT B's plans into A's account (it inserts with the local `userId`),
+    // and the sweep would then delete all of A's real plans as "missing".
+    //
+    // The same check covers a 200 whose body is not the shape we expect, since
+    // `fetchPlans` turns that into `[]` — otherwise indistinguishable from
+    // "the server has nothing", which empties the table.
+    //
+    // Abandoning the pull is always safe: stale local rows are cosmetic and
+    // the next good sync fixes them. A wrongly-deleted plan is not
+    // recoverable, and a plan adopted from another account is a privacy leak.
+    if (remote.some((r) => r.user_id !== userId)) {
+      return result;
+    }
     // Ids this device has deleted but hasn't managed to tell the server about.
     // The server still lists them, so without this the pull writes each one
     // straight back — the exact resurrection tombstones exist to stop.
@@ -359,6 +404,16 @@ async function runSync(userId: string, getToken: TokenGetter): Promise<PlanSyncR
 
     for (const r of remote) {
       if (buried.has(r.id)) continue;
+      // Anything this run pushed is skipped, and that covers DELETES as well
+      // as creates — a successful delete removes the tombstone, so `buried` no
+      // longer knows about it and the row is gone locally, which makes both
+      // guards below vacuous. A server that still lists it (a lagging read
+      // replica, or a list query that raced the delete's commit) would then be
+      // re-inserted as a brand new plan.
+      //
+      // Same principle as the sweep's use of this set: our own write, which we
+      // watched succeed, is newer information than any list we fetch.
+      if (pushedThisRun.has(r.id)) continue;
       const local = await db.getFirstAsync<{ dirty: number; updated_at: string }>(
         `SELECT dirty, updated_at FROM planned_sessions WHERE id = ? AND user_id = ?`,
         r.id,
@@ -368,10 +423,33 @@ async function runSync(userId: string, getToken: TokenGetter): Promise<PlanSyncR
       if (local?.dirty === 1) continue;
       // Refuse to go backwards: if the local row is newer than the copy we
       // fetched, this snapshot is stale and writing it would erase whatever
-      // landed in between. The push side guards its own version of this with a
-      // CAS on `updated_at`; the pull side needs the same check.
-      if (local && local.updated_at > r.updated_at) continue;
+      // landed in between.
+      //
+      // Compared as INSTANTS, not strings. Local writes are
+      // `toISOString()` (always `Z`, always three fraction digits); the
+      // server's is Go RFC3339Nano, which trims trailing zeros from the
+      // fraction — so `.1Z` vs `.15Z` compares wrong lexicographically ('Z'
+      // sorts above '5'), and a non-UTC offset would sort below every digit
+      // and turn this into "refuse every pull".
+      if (local && olderOrSame(r.updated_at, local.updated_at)) continue;
 
+      // NOTE: this WHERE is the one guard in this function the suite cannot
+      // pin by mutation — it is a backstop for an interleaving (a user write
+      // landing between the SELECT above and this statement) that the test
+      // harness cannot orchestrate, and the two JS guards above already cover
+      // every state a test can construct. Deleting it turns nothing red. It
+      // stays because the race is real on a device, and because the failure it
+      // prevents is permanent and silent.
+      //
+      // The two guards above are re-stated in the UPDATE's own WHERE, because
+      // the read above and this write are separate round trips and a user
+      // write can interleave between them. Two outcomes if it does, both bad
+      // and one permanent: a row tombstoned in the gap gets `dirty = 0` while
+      // `deleted_at` stays set, which makes it invisible to every read, to the
+      // push, to the sweep and to the pending count — gone from the phone and
+      // alive on the server, forever; and a row edited in the gap is marked
+      // already-sent and never pushed. Moving the checks into the statement
+      // makes the read and the write one operation.
       await db.runAsync(
         `INSERT INTO planned_sessions
            (id, user_id, day, sport, workout_id, notes, created_at, updated_at, dirty, remote)
@@ -384,7 +462,9 @@ async function runSync(userId: string, getToken: TokenGetter): Promise<PlanSyncR
            updated_at = excluded.updated_at,
            dirty = 0,
            remote = 1,
-           last_error = NULL`,
+           last_error = NULL
+         WHERE planned_sessions.dirty = 0
+           AND planned_sessions.deleted_at IS NULL`,
         r.id,
         userId,
         r.day,
@@ -404,8 +484,10 @@ async function runSync(userId: string, getToken: TokenGetter): Promise<PlanSyncR
     // invisible. Scoped to the pulled window and to rows that are clean and
     // `remote` — a dirty row is a local edit in flight, and a `remote = 0` row
     // was never on the server to be missing from its response.
+    //
+    // The response was proven to be this user's before the pull loop above ran
+    // — see the guard right after `fetchPlans`.
     const seen = new Set(remote.map((r) => r.id));
-    const window = pullWindow(new Date());
     const local = await db.getAllAsync<{ id: string }>(
       `SELECT id FROM planned_sessions
         WHERE user_id = ? AND dirty = 0 AND remote = 1 AND deleted_at IS NULL
@@ -505,7 +587,15 @@ async function pushRow(
     `UPDATE planned_sessions SET dirty = 0 WHERE id = ? AND user_id = ?
      -- Only if nothing changed underneath us mid-push, or we would mark a
      -- newer edit as already sent and silently drop it.
-     AND updated_at = ?`,
+     AND updated_at = ?
+     -- And never on a row that became a TOMBSTONE while this push was in
+     -- flight. updated_at is millisecond-resolution ISO text, so a delete
+     -- landing in the same millisecond as the snapshot produces an identical
+     -- string and the CAS above matches -- marking the tombstone as already
+     -- sent. The delete is then never pushed: the plan is gone from the phone
+     -- and alive on the server forever, with pending reading zero so nothing
+     -- ever retries. Observed in a test, not theorised.
+     AND deleted_at IS NULL`,
     row.id,
     userId,
     row.updated_at,

@@ -124,14 +124,70 @@ describe('the outbox flags', () => {
 });
 
 describe('deleting', () => {
-  test('a plan the server has never seen is dropped with NO server call', async () => {
+  test('a plan the server has never seen is dropped in the sync, with NO server call', async () => {
     const p = await planSession(USER, '2026-08-05', 'strength', null);
 
     await unplanSession(USER, p.id);
 
-    expect(await row(p.id)).toBeNull();
+    // Tombstoned, not hard-deleted — see `unplanSession` for the race that
+    // makes the hard delete unsafe outside the serialised sync. It is already
+    // invisible to every screen.
+    expect((await row(p.id))?.deleted_at).not.toBeNull();
+    expect(await plannedFor(USER, '2026-08-05')).toHaveLength(0);
+
+    await syncPlans(USER, getToken);
+
+    // The sync makes the decision, where `remote` is finally trustworthy: the
+    // server never saw it, so there is nothing to tell anyone.
     expect(mockDelete).not.toHaveBeenCalled();
+    expect(await row(p.id)).toBeNull();
     expect(await countPendingPlans(USER)).toBe(0);
+  });
+
+  test('deleting DURING an in-flight create does not resurrect the plan', async () => {
+    // The race that made the hard-delete branch unsafe. `remote` is only set
+    // once `createRemotePlan` RESOLVES, so a delete landing mid-flight used to
+    // read `remote = 0`, hard-delete, leave no tombstone — and the pull in the
+    // same run would re-insert the plan the athlete had just removed.
+    const p = await planSession(USER, '2026-08-05', 'strength', null);
+
+    // The delete is fired from INSIDE the create's await, which is the only
+    // way to land it in the window. Doing it after `syncPlans(...)` returns a
+    // promise does not work: the push loop's SELECT has not run yet, so the
+    // delete simply wins and no create is ever in flight — the first version
+    // of this test made exactly that mistake and proved nothing.
+    mockCreate.mockImplementationOnce(async () => {
+      await unplanSession(USER, p.id);
+    });
+
+    await syncPlans(USER, getToken);
+
+    // The create succeeded, so the server HAS the plan and the device must
+    // still have something that will tell it to delete it. With a hard delete
+    // there would be no tombstone, the server copy would be orphaned, and the
+    // pull would bring it back as a brand new plan.
+    expect(await plannedFor(USER, '2026-08-05')).toHaveLength(0);
+    expect(await countPendingPlans(USER)).toBe(1);
+
+    // The server still lists it — the delete has not been sent yet.
+    mockFetch.mockResolvedValueOnce([
+      {
+        id: p.id,
+        user_id: USER,
+        day: '2026-08-05',
+        sport: 'strength',
+        workout_id: null,
+        notes: '',
+        created_at: '2026-08-01T10:00:00.000Z',
+        updated_at: '2026-08-01T10:00:00.000Z',
+      },
+    ]);
+    await syncPlans(USER, getToken);
+
+    // Deleted server-side, gone locally, and never resurrected in between.
+    expect(mockDelete).toHaveBeenCalledWith(getToken, p.id);
+    expect(await plannedFor(USER, '2026-08-05')).toHaveLength(0);
+    expect(await row(p.id)).toBeNull();
   });
 
   test('a plan the server HAS seen becomes a tombstone, then is pushed', async () => {
@@ -249,10 +305,15 @@ describe('pulling', () => {
     // Fail the push so the row stays dirty through the pull.
     mockCreate.mockRejectedValueOnce(new Error('network'));
 
-    await syncPlans(USER, getToken);
+    const result = await syncPlans(USER, getToken);
 
     const [plan] = await plannedFor(USER, '2026-08-05');
     expect(plan.day).toBe('2026-08-05');
+    // `pulled` is what the dirty guard uniquely controls: the upsert's own
+    // `WHERE planned_sessions.dirty = 0` also refuses the write, so asserting
+    // only on the day passes with this guard deleted. Counting it as skipped
+    // is what pins the guard rather than its backstop.
+    expect(result.pulled).toBe(0);
   });
 
   test('a stale snapshot does not move a newer local row backwards', async () => {
@@ -342,7 +403,7 @@ describe('pulling', () => {
       },
     ]);
 
-    await syncPlans(USER, getToken);
+    const result = await syncPlans(USER, getToken);
 
     expect(await plannedFor(USER, '2026-08-05')).toHaveLength(0);
     const after = await db.getFirstAsync<{ day: string; sport: string; notes: string }>(
@@ -350,6 +411,11 @@ describe('pulling', () => {
       p.id,
     );
     expect(after).toMatchObject({ day: '2026-08-05', sport: 'strength', notes: '' });
+    // `pulled` is what the tombstone guard uniquely controls. The upsert's own
+    // WHERE also refuses to write a buried row, so asserting only on the row's
+    // contents passes with the guard deleted — the two mask each other. This
+    // counts the row as skipped rather than merely unchanged.
+    expect(result.pulled).toBe(0);
   });
 
   test('a plan deleted elsewhere disappears locally', async () => {
@@ -376,6 +442,40 @@ describe('pulling', () => {
 
     expect(await plannedFor(USER, '2026-08-05')).toHaveLength(1);
     expect(await row(p.id)).toMatchObject({ dirty: 1, remote: 0 });
+  });
+});
+
+describe('the sweep refuses to act on a response it cannot trust', () => {
+  test("another account's plans never trigger the sweep", async () => {
+    // `getToken` follows the CURRENT Clerk user while the run holds the one it
+    // started with, and `setSyncIdentity` does not abort a run in flight. So an
+    // account switch mid-run returns user B's plans while the sweep is scoped
+    // to user A — none of A's ids appear in the response, and without this
+    // check every one of A's plans in the window is deleted.
+    const mine = await planSession(USER, '2026-08-05', 'strength', null);
+    await syncPlans(USER, getToken); // clean + remote
+
+    mockFetch.mockResolvedValueOnce([
+      {
+        id: 'someone-elses-plan',
+        user_id: 'a-different-account',
+        day: '2026-08-06',
+        sport: 'bjj',
+        workout_id: null,
+        notes: '',
+        created_at: '2026-08-01T10:00:00.000Z',
+        updated_at: '2026-08-01T10:00:00.000Z',
+      },
+    ]);
+
+    await syncPlans(USER, getToken);
+
+    // Survived. A stale local row is cosmetic and the next good sync fixes it;
+    // a wrongly-deleted plan is not recoverable.
+    expect(await row(mine.id)).not.toBeNull();
+    expect(await plannedFor(USER, '2026-08-05')).toHaveLength(1);
+    // And the foreign row was not adopted into this account either.
+    expect(await row('someone-elses-plan')).toBeNull();
   });
 });
 

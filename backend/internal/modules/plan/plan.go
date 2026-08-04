@@ -14,6 +14,7 @@ package plan
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 )
@@ -63,17 +64,51 @@ type NewPlan struct {
 	Notes     string
 }
 
+// OptionalWorkoutID is a `workout_id` that can be absent, explicitly null, or
+// set — three states, which a pointer cannot carry.
+//
+// **A `**string` does NOT work here, despite looking like it should.** For a
+// settable pointer field `encoding/json` handles a literal `null` by calling
+// `SetZero()` on the field itself, so `{"workout_id": null}` and `{}` both
+// leave the outer pointer nil and are indistinguishable. That was the first
+// implementation, and it made "clear the template" a silent no-op — the exact
+// failure the three-state design exists to prevent. Verified against the
+// stdlib rather than reasoned about.
+//
+// A named type with its own UnmarshalJSON works because `encoding/json`
+// documents that it calls Unmarshaler **including when the input is a JSON
+// null**, which is the one hook that can observe the difference.
+type OptionalWorkoutID struct {
+	// Present is true when the key appeared in the body at all.
+	Present bool
+	// Value is nil when the key appeared as an explicit null.
+	Value *string
+}
+
+func (o *OptionalWorkoutID) UnmarshalJSON(b []byte) error {
+	o.Present = true
+	if string(b) == "null" {
+		o.Value = nil
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	o.Value = &s
+	return nil
+}
+
 // PlanUpdate is a partial update — nil fields are left unchanged.
 //
-// WorkoutID is a **double pointer** because it has three states, not two:
-// absent (leave it alone), set (point at this template), and explicitly null
-// (clear it, the day is now planned as a bare discipline). A single pointer
-// collapses the last two, so clearing a template would be indistinguishable
-// from not mentioning it — and the clear would silently do nothing.
+// WorkoutID has three states rather than two: absent (leave it alone), set
+// (point at this template), and explicitly null (clear it, so the day is
+// planned as a bare discipline). See OptionalWorkoutID for why it is a named
+// type and not a pointer-to-pointer.
 type PlanUpdate struct {
 	Day       *string
 	Sport     *string
-	WorkoutID **string
+	WorkoutID OptionalWorkoutID
 	Notes     *string
 }
 

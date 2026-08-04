@@ -6199,6 +6199,112 @@ not pulled back on a fresh install. Blocked plans are recorded on the row but
 `blockedRows()` — the repair screen — still only reads sessions and workouts,
 so a permanently-refused plan has nowhere to be surfaced yet.
 
+## 2026-08-04 — What `/pre-merge` caught on the plans work
+
+Seven blocking findings across the two reviewers, on a change whose check
+suite was entirely green. Recorded because the pattern is the argument for the
+gate: none of these were compile errors, and none of the 279 tests noticed.
+
+### The security one, for the third time
+
+`plan.Create`/`Update` passed `workout_id` straight through, guarded only by
+the bare foreign key. So a caller could reference **any** workout id — the two
+outcomes are distinguishable (a visible id inserts and returns 201, an unknown
+one trips the FK and returns 400), which makes the endpoint an enumeration
+oracle for other people's private templates, with the plan row then persisting
+a pointer into their data.
+
+`session.assertWorkoutUsable` exists precisely for this and its comment says
+the bug "came back through a different door". This was a third door. Ported
+verbatim, plus the sport-agreement check it also carries, and
+`TestCannotReferenceAnotherUsersPrivateWorkout` now asserts the two errors are
+byte-identical — the property that actually matters.
+
+### `**string` cannot express three states
+
+The whole `workout_id` three-state design rested on a comment claiming
+`encoding/json` leaves an absent field nil and sets an explicit `null` to a
+non-nil pointer holding nil. **It does not.** For a settable pointer field the
+decoder calls `SetZero()` on a literal null, so `{}` and `{"workout_id":null}`
+are identical and "clear the template" was a silent no-op.
+
+Replaced with `OptionalWorkoutID`, a named type whose `UnmarshalJSON` observes
+the difference — the documented hook, since `encoding/json` calls Unmarshaler
+*including* for JSON null.
+
+The test that was supposed to prove this built the `PlanUpdate` struct
+directly, bypassing the decoder entirely. It proved the SQL and could not fail.
+It now decodes from a request body, and there is a table test over all four
+input shapes.
+
+### A CHECK that undid migration 000021
+
+`plans` carried `CHECK (sport IN (...))` with a comment saying it mirrored
+`sessions_sport_valid` — a constraint dropped in 000021 precisely because a
+CHECK listing the values *is* the per-discipline migration cost the registry
+exists to remove. The existing tripwire could not catch it: it only writes
+sessions and workouts. Constraint dropped, and the tripwire extended with a
+plan half.
+
+### Four data-loss defects in the mobile outbox
+
+- **`unplanSession` hard-deleted when `remote = 0`**, which is racy: `remote`
+  is only set once the create *resolves*, so a delete landing mid-flight left
+  no tombstone, and the pull in the same run re-inserted the plan the athlete
+  had just removed. Now always tombstones; the hard delete lives in `pushRow`,
+  inside the serialised sync, which is the only place the question can be
+  answered.
+- **The sweep computed its window separately from the fetch.** Two
+  `new Date()` calls: cross local midnight between them and the sweep deletes
+  on a day the server was never asked about.
+- **The sweep trusted whoever the response belonged to.** `getToken` follows
+  the *current* Clerk user while the run holds the one it started with, and
+  `setSyncIdentity` does not abort a run in flight — so an account switch
+  mid-run would adopt user B's plans into user A's account *and* delete all of
+  A's real ones as "missing". The guard now covers the whole reconciliation,
+  not just the sweep; that widening was itself found by the test written for
+  the narrow version.
+- **`TrainingCalendar` froze its session pool.** `monthSessions` was loaded
+  once per sheet opening and then permanently shadowed the live `sessions`
+  prop, so paging back reported *zero sessions for a month that was trained* —
+  a fabricated zero — and a session finished after opening the sheet never lit
+  its dot. Now merged with the caller's list (caller wins) and re-read when the
+  anchor moves.
+
+### Two more the fixes' own tests then found
+
+Writing the race test surfaced that **a successful delete removes the
+tombstone**, so a lagging server list would re-insert the plan; the pull now
+consults `pushedThisRun` for deletes as well as creates.
+
+And the push's compare-and-swap could match a row that had become a tombstone
+mid-push — `updated_at` is millisecond ISO text, so a delete in the same
+millisecond produces an identical string. The CAS cleared `dirty` on the
+tombstone, so the delete was never pushed: gone from the phone, alive on the
+server, `pending` reading zero so nothing retried. Fixed with
+`AND deleted_at IS NULL`.
+
+### Smaller, taken
+
+`errorKind` was merged across the two outboxes with `??` rather than the
+precedence both modules define, so a permanently-refused session suppressed the
+retry ladder for a plan that failed on a retryable 5xx. Timestamps were
+compared as strings across two formatters that disagree about trailing
+fraction zeros. Notes were length-checked in bytes against a `char_length`
+constraint. `List` was bounded by days but not rows, and its `ORDER BY` had no
+total order. Bodies were unbounded. `DROP TABLE` had no `IF EXISTS`. One
+integration test left a workout behind on failure, so the suite only passed
+once — now `t.Cleanup`ed and verified with `-count=2`.
+
+### On mutation testing
+
+Every guard in the sync path was re-checked by deleting it and confirming
+exactly one test goes red. That exposed three tests passing for the wrong
+reason — each masked by a neighbouring guard — which were rewritten to assert
+`result.pulled` (the thing only that guard controls) rather than the row's
+contents. One guard, the UPSERT's own `WHERE`, is honestly documented as *not*
+mutation-pinned: it backstops an interleaving the harness cannot orchestrate.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

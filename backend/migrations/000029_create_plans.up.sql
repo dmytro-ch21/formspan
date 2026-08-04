@@ -50,9 +50,22 @@ CREATE TABLE plans (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-    -- Mirrors `sessions_sport_valid`. Kept in step with the discipline
-    -- registry by hand, as that constraint already is.
-    CONSTRAINT plans_sport_valid CHECK (sport IN ('strength', 'running', 'bjj')),
+    -- NO CHECK on `sport`, deliberately.
+    --
+    -- An earlier draft carried `CHECK (sport IN ('strength','running','bjj'))`
+    -- with a comment claiming it mirrored `sessions_sport_valid`. That
+    -- constraint has not existed since migration 000021, which dropped it and
+    -- `workouts_sport_valid` precisely because a CHECK listing the values IS
+    -- the migration-per-discipline cost that work existed to remove. A fifth
+    -- discipline would pass every Go validator and then fail every INSERT,
+    -- surfacing as a misleading 400.
+    --
+    -- The vocabulary is owned by `internal/platform/discipline` and enforced
+    -- at the handler by `discipline.ValidSport`, which is the same decision
+    -- 000021 made for sessions and workouts. `registry_sports_test.go` is the
+    -- tripwire: it writes a plan for every sport in the registry, so a
+    -- discipline the database would reject fails there rather than in
+    -- production.
     CONSTRAINT plans_notes_len CHECK (char_length(notes) <= 500)
 );
 
