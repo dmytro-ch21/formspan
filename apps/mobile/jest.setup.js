@@ -9,8 +9,6 @@
  * the behaviour under test.
  */
 
-/* eslint-disable @typescript-eslint/no-require-imports */
-
 // Required at module scope, NOT inside the hook below. Importing RNTL
 // registers its own cleanup hooks, and doing that from inside a running test
 // throws "Hooks cannot be defined inside tests" — which failed every

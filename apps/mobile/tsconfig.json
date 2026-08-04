@@ -3,9 +3,13 @@
   "compilerOptions": {
     // The cheapest possible guard against the exact bug that shipped: a hook
     // imported and never called, next to a useState nothing ever updated, so
-    // the "Track effort" setting silently did nothing. apps/mobile has no
-    // ESLint, and typecheck alone was blind to both. These two flags catch
-    // that class without adding a dependency or a second lint config.
+    // the "Track effort" setting silently did nothing.
+    //
+    // These predate this app having a linter, and they STAY authoritative now
+    // that it does: `@typescript-eslint/no-unused-vars` also runs, but only as
+    // a warning under the backlog rules in eslint.config.mjs, while these are
+    // hard errors in `typecheck:mobile`. tsc wins, deliberately — an unused
+    // local is the shape of a wire someone forgot to connect.
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "strict": true,

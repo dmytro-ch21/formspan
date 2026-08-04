@@ -8597,6 +8597,102 @@ rank, and the estimate-versus-measurement split on a record. Five guards were
 mutated to confirm the assertions go red when the code they cover changes,
 including the timezone one above.
 
+## 2026-08-04 — One hook in the wrong place, and the linter that was never there
+
+Opening a BJJ class from Today → Recents was a black screen and "Something
+went wrong":
+
+	Rendered more hooks than during the previous render.
+
+One `useMemo` sat below the screen's two early returns. React matches hooks
+positionally, so the loading render — which returns the spinner before reaching
+it — called one fewer hook than every render after the load resolved. The
+reading half of BJJ logging, which exists precisely because the feature shipped
+write-only once, was unreachable again.
+
+### The fix is one line. The finding is that nothing was checking.
+
+`apps/mobile` **had no linter at all.** `verify` ran `lint:web` and
+`lint:admin`; the mobile app got `typecheck:mobile` and `test:mobile` and
+nothing else. `react-hooks/rules-of-hooks` catches this exact defect by name,
+and nothing else can: hook order is a RUNTIME property, so the typechecker is
+structurally blind to it, and `lib/__tests__/` is deliberately not component
+tests.
+
+The app with the most stateful screens in the repo was the one app not being
+linted. `eslint-config-expo` now runs over it, wired into `verify` and into
+CI's mobile job — the rule this file already states, that a check added to one
+must be added to the other.
+
+### 55 warnings, on purpose, and a ratchet
+
+Turning lint on for the first time on thirty never-linted screens surfaced 55
+findings — measured, after review caught three different numbers written in
+three places, none of which matched what `eslint` printed. One was the crash.
+The rest are real but not crashes: 24 `react-hooks/refs` (refs read or written
+during render) and 15 `set-state-in-effect` (cascading renders) dominate.
+
+`rules-of-hooks` is an **error**; everything else is a **warning**. Folding
+fifty-odd unrelated edits into a one-line crash fix would make the fix
+unreviewable, and switching the rules off would throw the information away.
+
+But "the backlog stays visible" is not true of a passing CI job that nobody
+reads, and this branch proved it: **it added two warnings without anyone
+noticing**, which is exactly how a soft limit rots. So the script carries
+`--max-warnings=55`. The count is now a ratchet — clearing findings means
+lowering it, and adding one fails the gate and forces a deliberate decision.
+Neither `apps/web` nor `apps/admin` does this; it is a new convention here
+because this is the app with a documented backlog.
+
+`rules-of-hooks` is also not the only error. v7's recommended set errors on
+`purity`, `set-state-in-render`, `immutability` and several more that this
+config leaves alone — they report zero today, so new code can fail on a rule
+nobody named. That is intended, and now written down.
+
+### One thing the review corrected about the config
+
+The `@typescript-eslint/*` findings are left alone, and the first version of
+this entry gave the wrong reason: "flat config only lets a config object change
+a rule whose plugin it registers". That is contradicted three lines up in the
+config itself, where `react-hooks/*` rules registered by `eslint-config-expo`
+are overridden without trouble.
+
+The real constraint is narrower and worth having right: `eslint-config-expo`
+registers the React plugins **globally** but registers `@typescript-eslint`
+only for TypeScript globs. So a rules block naming one of its rules has to be
+`files`-scoped to those globs — an unscoped one fails to LOAD the entire config
+the moment a `.js` file is linted, rather than lowering a severity. Tested both
+directions.
+
+### Two guards, because they catch different things
+
+- **The lint rule** catches the class, statically, before the code runs.
+- **`app/__tests__/bjjSessionScreen.test.tsx`** catches this screen at runtime.
+  It renders through the LOADING TRANSITION deliberately: the mocks resolve on
+  a later tick so the loading branch genuinely renders first. Asserting only on
+  the settled state would pass against the broken code, because by then the
+  hook count is consistent again.
+
+  Verified by reverting the fix — the test reports React's own diagnostic,
+  named to the component: "React has detected a change in the order of Hooks
+  called by BjjSessionScreen."
+
+  A second assertion checks the technique row still renders, so "made the crash
+  go away" (an early `return null`) cannot pass for "made the screen work".
+
+### Gaps this leaves
+
+- **53 warnings outstanding**, listed above. `react-hooks/refs` in particular
+  is worth a pass of its own; reading a ref during render is the kind of thing
+  that works until it doesn't.
+- **Not verified on a device.** Metro was already serving the primary checkout,
+  and the component test is the stronger guard anyway — but nobody has opened a
+  real class from Recents on a phone since the fix.
+- **The other screens were not audited by hand.** The linter now covers them,
+  which is the point, but it reports zero `rules-of-hooks` violations today
+  rather than anyone having read all thirty.
+
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

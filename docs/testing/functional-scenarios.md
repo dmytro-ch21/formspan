@@ -3594,3 +3594,18 @@ Covers `components/BjjRankHeader.tsx`, `components/TrainingSummary.tsx`,
   UUID to the athlete.
 - Tapping a row opens that exercise; VoiceOver announces the lift, the headline
   record, the evidence set and any secondary records as one utterance.
+
+## Reading a BJJ session back (mobile, regression)
+
+- **Open a class from Today → Recents.** It must render, not crash. This was a
+  black screen and "Something went wrong" — one `useMemo` below an early
+  return, so the loading render called one fewer hook than every render after.
+- Any test for this must render through the **loading transition**, not just
+  the settled state: assert the spinner first, then the loaded content.
+  Asserting only on the end state passes against the bug, because by then the
+  hook count is consistent again.
+- Assert something the hoisted memo produces — the technique rows — so that an
+  early `return null` cannot pass for a fix.
+- `pnpm run lint:mobile` must fail on a hook after an early return. That rule
+  is the guard for the class; the component test is the guard for the screen.
+
