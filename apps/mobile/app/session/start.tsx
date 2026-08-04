@@ -1,6 +1,6 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { request as requestSync } from '@/lib/sync';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
@@ -28,7 +28,13 @@ import { listWorkouts, summariseTargets, type Sport, type Workout } from '@/lib/
  */
 export default function StartSessionScreen() {
   const { modules } = useModules();
-  const { sport } = useLocalSearchParams<{ sport: Sport }>();
+  // `workout` arrives only from a planned day on the Today screen: the plan
+  // already names the template, so re-asking which one would make "start
+  // today's session" a two-step chooser again.
+  const { sport, workout: plannedWorkoutId } = useLocalSearchParams<{
+    sport: Sport;
+    workout?: string;
+  }>();
   const getToken = useAuthToken();
   const { userId } = useAuth();
   const { units } = useUnits();
@@ -66,6 +72,31 @@ export default function StartSessionScreen() {
   useEffect(() => {
     load();
   }, [load]);
+
+  /**
+   * Auto-start the planned template, once the list it lives in has loaded.
+   *
+   * `autoStarted` is a ref rather than state deliberately: `begin` sets
+   * `starting`, which re-renders, and a state guard read in the same effect
+   * would be stale on that pass — the session would be created twice, with
+   * two different client ids, and both would sync.
+   *
+   * Falls through to the normal chooser when the id matches nothing. That is
+   * a reachable state, not a defensive flourish: a plan can outlive the
+   * template it points at (there is no foreign key, by design), and silently
+   * starting *something else* would be worse than asking.
+   */
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (autoStarted.current || loading || !plannedWorkoutId) return;
+    const planned = workouts.find((w) => w.id === plannedWorkoutId);
+    if (!planned) return;
+    autoStarted.current = true;
+    begin(planned);
+    // `begin` is redeclared every render and is not a dependency worth
+    // stabilising here — the ref is what makes this run once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, plannedWorkoutId, workouts]);
 
   async function begin(workout: Workout | null) {
     if (starting || !sport || !userId) return;

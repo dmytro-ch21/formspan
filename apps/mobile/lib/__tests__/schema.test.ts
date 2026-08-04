@@ -13,7 +13,7 @@ import { migratedFixture, openFixture } from './support/sqlite';
 it('a fresh install ends up at the current schema version', async () => {
   const db = await migratedFixture();
   const row = db.raw.prepare('PRAGMA user_version').get() as { user_version: number };
-  expect(row.user_version).toBe(13);
+  expect(row.user_version).toBe(15);
 });
 
 it('local_sessions has the tombstone column', async () => {
@@ -38,6 +38,64 @@ it('local_sessions can hold a BJJ reflection', async () => {
   expect(bjj?.notnull).toBe(0);
 });
 
+it('a v13 device gets the week-plan table', async () => {
+  // The path a real upgrader takes, and the one that actually broke: while
+  // this was being built, a hot reload re-ran `migrate()` after the version
+  // was bumped but before the CREATE existed, so the device stamped v14 with
+  // no table and every "Add" tapped into `no such table: planned_sessions`.
+  // A shipped build cannot split those two edits — but nothing proved the
+  // upgrade branch created the table until this did.
+  const db = await migratedFixture();
+  db.raw.exec('PRAGMA user_version = 13');
+  db.raw.exec('DROP TABLE planned_sessions');
+
+  await migrate(db as never);
+
+  const row = db.raw
+    .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'planned_sessions'`)
+    .get();
+  expect(row).toEqual({ name: 'planned_sessions' });
+});
+
+it('a v14 plan is OWED to the server, not assumed to be there', async () => {
+  // v14 shipped `planned_sessions` as a local-only table — there was no
+  // /v1/plans yet — so every plan an early adopter made has never been sent
+  // anywhere. `dirty = 1, remote = 0` is the honest default.
+  //
+  // Deliberately the OPPOSITE of the workout_cache v9 ALTERs, which default
+  // `dirty = 0, remote = 1` because those rows came FROM the server. Getting
+  // this backwards would strand every existing plan with nothing to push it —
+  // the same class of mistake as the v9 note below, inverted.
+  //
+  // A v14-SHAPED table specifically: on a fresh install these columns come
+  // from CREATE TABLE, so the fresh-install test cannot see a wrong ALTER
+  // default at all.
+  const db = openFixture();
+  db.raw.exec(`
+    CREATE TABLE planned_sessions (
+      id TEXT PRIMARY KEY NOT NULL, user_id TEXT NOT NULL, day TEXT NOT NULL,
+      sport TEXT NOT NULL, workout_id TEXT, created_at TEXT NOT NULL);
+    INSERT INTO planned_sessions VALUES
+      ('p1','u1','2026-08-05','strength',NULL,'2026-08-01T00:00:00Z');
+    PRAGMA user_version = 14;
+  `);
+
+  await migrate(db as never);
+
+  const row = db.raw
+    .prepare('SELECT dirty, remote, deleted_at, notes, updated_at FROM planned_sessions')
+    .get();
+  expect(row).toEqual({
+    dirty: 1,
+    remote: 0,
+    deleted_at: null,
+    notes: '',
+    // Backfilled from created_at, so the push-side compare-and-swap has
+    // something to compare against rather than an empty string.
+    updated_at: '2026-08-01T00:00:00Z',
+  });
+});
+
 it('re-running migrate on the SAME database is idempotent', async () => {
   // The scenario this guards is a crash between DDL and the version stamp:
   // same database, old `user_version`, branches replayed against a schema
@@ -49,7 +107,7 @@ it('re-running migrate on the SAME database is idempotent', async () => {
   db.raw.exec('PRAGMA user_version = 0');
 
   await expect(migrate(db as never)).resolves.toBeUndefined();
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 13 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 15 });
 });
 
 it('upgrades a v6-shaped database by adding the column', async () => {
@@ -83,7 +141,7 @@ it('upgrades a v6-shaped database by adding the column', async () => {
   const cols = (db.raw.prepare('PRAGMA table_info(local_sessions)').all() as { name: string }[])
     .map((c) => c.name);
   expect(cols).toContain('deleted_at');
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 13 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 15 });
 });
 
 it('upgrades a v7-shaped database by adding the ownership columns', async () => {
@@ -104,7 +162,7 @@ it('upgrades a v7-shaped database by adding the ownership columns', async () => 
   const cols = (db.raw.prepare('PRAGMA table_info(workout_cache)').all() as { name: string }[])
     .map((c) => c.name);
   expect(cols).toEqual(expect.arrayContaining(['owner_user_id', 'visibility']));
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 13 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 15 });
 });
 
 it('an upgraded row is backfilled as owned by the athlete it is filed under', async () => {

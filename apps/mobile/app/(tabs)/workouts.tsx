@@ -15,6 +15,8 @@ import {
 
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
 import { Text, View } from '@/components/Themed';
+import { SectionHeader } from '@/components/ui/Section';
+import { WeekPlanner } from '@/components/WeekPlanner';
 import { enabledSports, labelFor, moduleFor } from '@/lib/modules';
 import { useModules } from '@/lib/ModulesProvider';
 import { useAuthToken } from '@/lib/useAuthToken';
@@ -124,7 +126,9 @@ export default function WorkoutsScreen() {
 
   return (
     <View style={styles.container} testID="workouts-screen">
-      <ScreenHeader title="Workouts" />
+      {/* "Plan", not "Workouts": this screen is now the week's plan *and* the
+          templates it draws from, and the tab bar has always called it Plan. */}
+      <ScreenHeader title="Plan" />
       <View style={styles.scopeRow}>
         {SCOPES.map((s) => {
           const active = scope === s.key;
@@ -167,6 +171,21 @@ export default function WorkoutsScreen() {
                 load();
               }}
             />
+          }
+          // Inside the list rather than pinned above it, so the planner
+          // scrolls away and the templates get the full screen when you are
+          // browsing them. The Library's permanently-pinned ~300pt header is
+          // the counter-example this avoids.
+          //
+          // `mine` only: the shared tab is a browse surface over other
+          // people's templates, and your own week has no business on it.
+          ListHeaderComponent={
+            scope === 'mine' ? (
+              <View style={styles.planHeader}>
+                <WeekPlanner userId={userId ?? null} modules={modules} />
+                <SectionHeader label="Templates" />
+              </View>
+            ) : null
           }
           ListEmptyComponent={
             error || !everLoaded ? null : (
@@ -451,6 +470,9 @@ const styles = StyleSheet.create({
   scopeTextActive: { color: vola.navy },
   loader: { marginTop: 32 },
   list: { padding: 16, gap: 12, paddingBottom: TAB_BAR_CLEARANCE },
+  // The list's own `gap` doesn't apply between a header and the first row, so
+  // the spacing below the planner is the header's to own.
+  planHeader: { gap: 18, marginBottom: 4 },
   card: {
     borderWidth: 1,
     borderColor: vola.line,

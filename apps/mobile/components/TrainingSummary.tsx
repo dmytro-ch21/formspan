@@ -4,6 +4,7 @@ import { ActivityIndicator, Pressable, StyleSheet, View as RNView } from 'react-
 import { useFocusEffect } from 'expo-router';
 
 import { Text, View } from '@/components/Themed';
+import { StatValue } from '@/components/ui/Stat';
 import { vola } from '@/constants/Colors';
 import {
   buildGrid,
@@ -196,7 +197,11 @@ function Tile({ label, value, change }: { label: string; value: string; change: 
   return (
     <View style={styles.tile}>
       <Text style={styles.tileLabel}>{label}</Text>
-      <Text style={styles.tileValue}>{value}</Text>
+      {/* Same numeral treatment as the Today screen's week row — units set
+          smaller than the figures. Two screens showing "1h 41m" in two
+          different ways is the sort of drift that makes an app feel assembled
+          rather than designed. */}
+      <StatValue value={value} size={21} />
       <Text style={styles.tileDelta}>
         {value === '—' || rounded === null
           ? ' '
@@ -390,7 +395,6 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.8,
   },
-  tileValue: { fontSize: 21, fontWeight: '800' },
   tileDelta: { fontSize: 11, color: vola.textMuted },
 
   grid: { flexDirection: 'row', gap: GAP },

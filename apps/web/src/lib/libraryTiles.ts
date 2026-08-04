@@ -88,9 +88,12 @@ export function patternBadge(pattern: string): readonly [string, Accent] {
  * needs most. A chip labelled "Mount" that returns only Mount-Top is also a
  * label making a promise the filter doesn't keep. Families cover 465 of 466.
  *
- * Web has no position glossary, so unlike mobile there is no second route to a
- * family with no chip — a missing entry here means those techniques are
- * reachable by search alone.
+ * A family missing from this list is now worse than search-only: the glossary
+ * row on the same screen advertises the position with a card, so the reader is
+ * told it exists and given no way to filter to it. That has happened twice —
+ * North-South, then Leg Entanglement — which is why
+ * `positionVocabulary.test.ts` checks this array against `positions.json`
+ * rather than trusting a diff to be read.
  */
 export const POSITIONS = [
   { key: "Guard", label: "Guard" },
@@ -110,6 +113,44 @@ export const POSITIONS = [
  */
 export function inPositionFamily(position: string, family: string): boolean {
   return position === family || position.startsWith(`${family} - `);
+}
+
+/**
+ * Glossary tiles, keyed on the position's own id — NOT on its family.
+ *
+ * All of them take the achromatic `hold`, deliberately: these are reference
+ * reading rather than a thing you do, and a hue from this palette would imply
+ * an intent (attacking, defending) that a position does not have. Every
+ * position is both, depending on which end of it you are on.
+ *
+ * Which is exactly why the code must be per-position. With colour carrying
+ * nothing here the three letters are the *only* differentiator, and keying on
+ * family prints GRD twice (closed and open guard) and SDE twice (side control
+ * and knee on belly) — two pairs of identical tiles side by side in one row.
+ *
+ * Kept byte-identical to mobile's table in `components/LibraryTile.tsx`, and
+ * both are checked against `positions.json` by `positionVocabulary.test.ts`:
+ * a twelfth position added to the glossary without a code here renders as
+ * "POS", which looks deliberate rather than missing.
+ */
+const POSITION_CODE: Record<string, string> = {
+  standing: "STD",
+  "closed-guard": "CLG",
+  "open-guard": "OPN",
+  "half-guard": "HLF",
+  "side-control": "SDE",
+  "knee-on-belly": "KOB",
+  mount: "MNT",
+  "north-south": "N-S",
+  "back-control": "BCK",
+  turtle: "TRT",
+  // 'ASH' for ashi garami rather than 'LEG': the row is scanned, and LEG
+  // reads as a body part next to ten position names.
+  "leg-entanglement": "ASH",
+};
+
+export function positionBadge(id: string): readonly [string, Accent] {
+  return [POSITION_CODE[id] ?? "POS", "hold"];
 }
 
 /**

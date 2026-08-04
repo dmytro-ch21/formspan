@@ -903,6 +903,57 @@ components:
           type: array
           items: { $ref: "#/components/schemas/Workout" }
 
+    Plan:
+      type: object
+      description: >
+        One intended session on one day — the third leg of a distinction the
+        API already half-drew. A Workout is the template (what a session looks
+        like), a Session is what happened, and a Plan is what was *meant* to
+        happen and when. A template has no date and a session is the actual,
+        so neither can say what Tuesday was for.
+
+        A plan is an intention and is never reconciled against a session:
+        a planned day can be trained twice, ignored, or trained with something
+        else, and all three are ordinary. Adherence is therefore a query over
+        both resources, computed when asked, not a status on this one.
+      required: [id, user_id, day, sport, workout_id, notes, created_at, updated_at]
+      properties:
+        id: { type: string }
+        user_id: { type: string }
+        day:
+          type: string
+          format: date
+          description: >
+            A calendar date, `YYYY-MM-DD` — never a timestamp. "Tuesday's
+            session" is a claim about the athlete's own calendar, and an
+            instant would slide the plan across a day boundary the moment they
+            travel. A timestamp here is rejected rather than truncated.
+          example: "2026-08-04"
+        sport:
+          type: string
+          enum: [strength, running, bjj]
+        workout_id:
+          type: string
+          nullable: true
+          description: >
+            The template this day is planned around, or null when the day is
+            planned as a bare discipline — "Tuesday is BJJ" is a complete plan,
+            and mat sessions have no template at all.
+
+            Becomes null if the template is later deleted: the plan degrades to
+            its discipline rather than disappearing.
+        notes: { type: string, maxLength: 500 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    PlanList:
+      type: object
+      required: [plans]
+      properties:
+        plans:
+          type: array
+          items: { $ref: "#/components/schemas/Plan" }
+
     LoggedSet:
       type: object
       description: >
@@ -2786,6 +2837,149 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+
+  /plans:
+    get:
+      summary: List planned sessions in a day range
+      operationId: listPlans
+      description: >
+        `from` and `to` are required and inclusive at both ends — the callers
+        ask in whole weeks and whole months, and both name their last day.
+
+        Deliberately not defaulted to "this week": a default would make the
+        commonest client bug (forgetting the range) look like an empty calendar
+        rather than a mistake, and the two are indistinguishable in the
+        response.
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date }
+          example: "2026-08-03"
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date }
+          example: "2026-08-09"
+      responses:
+        "200":
+          description: The caller's plans, oldest first; insertion order within a day.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PlanList" }
+        "400":
+          description: >
+            A missing or malformed date, a backwards range, or a range longer
+            than 400 days counted inclusively (so 1 Jan to 4 Feb the following
+            year is the widest accepted). A `day` carrying a time — a full
+            RFC3339 timestamp — is rejected here rather than truncated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      summary: Plan a session on a day
+      operationId: createPlan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, day, sport]
+              properties:
+                id:
+                  type: string
+                  description: >
+                    Client-generated, and required — the same contract sessions
+                    and activities use. It is what makes an offline plan
+                    syncable idempotently: the device fixes the id before the
+                    server sees the row, so a retried push conflicts rather
+                    than creating a second plan.
+                day: { type: string, format: date, example: "2026-08-04" }
+                sport: { type: string, enum: [strength, running, bjj] }
+                workout_id:
+                  type: string
+                  nullable: true
+                  description: Omit or null to plan the day as a bare discipline.
+                notes: { type: string, maxLength: 500 }
+      responses:
+        "201":
+          description: The created plan.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Plan" }
+        "400":
+          description: >
+            A missing id, a `day` that is not a calendar date, an unknown
+            sport, an unknown workout, or notes over 500 characters.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409":
+          description: The id is already in use.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /plans/{planID}:
+    patch:
+      summary: Change a planned session
+      operationId: updatePlan
+      description: >
+        Partial — omitted fields are left alone. `workout_id` is three-state:
+        omit it to leave the template, send an id to set it, and send an
+        explicit `null` to clear it so the day becomes a bare discipline.
+        Without that distinction, clearing a template would be
+        indistinguishable from not mentioning it.
+      parameters:
+        - name: planID
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                day: { type: string, format: date }
+                sport: { type: string, enum: [strength, running, bjj] }
+                workout_id: { type: string, nullable: true }
+                notes: { type: string, maxLength: 500 }
+      responses:
+        "200":
+          description: The updated plan.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Plan" }
+        "400":
+          description: Invalid input.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      summary: Remove a planned session
+      operationId: deletePlan
+      description: >
+        Clears the intention only — nothing logged is affected. A plan someone
+        else owns is reported as 404 rather than 403: ids are client-generated
+        and guessable, so another user's plan must be indistinguishable from
+        one that does not exist.
+      parameters:
+        - name: planID
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: Removed. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /workouts/{workoutID}:
     get:

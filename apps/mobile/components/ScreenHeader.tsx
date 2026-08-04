@@ -1,3 +1,4 @@
+import { Image } from 'expo-image';
 import { StyleSheet, View as RNView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -38,10 +39,10 @@ export function ScreenHeader({ title, action }: { title: string; action?: React.
       <View style={styles.row}>
         <Text style={styles.title}>{title}</Text>
         <RNView style={styles.wordmark} pointerEvents="none">
+          <Mark />
           <Text style={styles.wordmarkText} accessibilityLabel="VOLA" accessibilityRole="header">
-            VOL
+            VOLA
           </Text>
-          <Chevron />
         </RNView>
         {/* Before `action`, so a screen's own control stays in the corner it
             has always been in. The chip is silent unless there is something
@@ -54,19 +55,33 @@ export function ScreenHeader({ title, action }: { title: string; action?: React.
 }
 
 /**
- * The A, as a bare chevron — no crossbar.
+ * The brand tick, from the designed logo kit.
  *
- * Drawn from two rotated rules rather than set as a glyph: the Greek lambda
- * renders at a different weight and width to the rest of the wordmark in
- * most faces, so "VOLΛ" comes out visibly mismatched. Two strokes match the
- * text's weight exactly because that weight is a number we choose.
+ * **This replaced a drawn substitute, and the substitute was the odd one
+ * out.** The header used to set "VOL" and then draw its own chevron from two
+ * rotated rules to stand in for the A — a workaround from before a real mark
+ * existed, with arithmetic in this file to make the two strokes mitre. The
+ * actual logo is a faceted tick in three greens (`#D0E950`, `#9CC740`,
+ * `#71912F`) sitting *before* the wordmark, not inside it, so the wordmark is
+ * now simply "VOLA".
+ *
+ * A PNG rather than the SVG it was drawn as: this app has no
+ * `react-native-svg` (see `Belt.tsx` and `ui/Icon.tsx` for why), and unlike
+ * those two the mark is genuinely un-drawable from views — it is overlapping
+ * filled polygons, not rules and circles. Exported from
+ * `assets/brand/logos/source/vola-mark-color.png`, trimmed to its content box
+ * and squared, so it is regenerable rather than hand-cropped.
  */
-function Chevron() {
+function Mark() {
   return (
-    <RNView style={styles.chevron} accessible={false}>
-      <RNView style={[styles.stroke, styles.strokeLeft]} />
-      <RNView style={[styles.stroke, styles.strokeRight]} />
-    </RNView>
+    <Image
+      source={require('@/assets/images/vola-mark.png')}
+      style={styles.mark}
+      contentFit="contain"
+      // Decorative: the wordmark beside it already carries the header label.
+      alt=""
+      accessible={false}
+    />
   );
 }
 
@@ -86,22 +101,10 @@ const styles = StyleSheet.create({
     letterSpacing: 3,
     color: vola.text,
   },
-  // Width is derived, not guessed. Each stroke rotates about its own centre,
-  // so a 12pt leg at 22° carries its top end 12/2 * sin(22°) ≈ 2.25pt inward
-  // from a centre inset 2pt from the edge. The two apexes meet when the box
-  // is 2 * (2 + 2.25) = 8.5pt wide; 9 gives them a hair of overlap so the
-  // join reads as solid rather than as two strokes that nearly touch.
-  chevron: { width: 9, height: 12, marginLeft: 2, marginBottom: 1 },
-  stroke: {
-    position: 'absolute',
-    width: 2,
-    height: 12,
-    borderRadius: 1,
-    backgroundColor: vola.text,
-    top: 0,
-  },
-  strokeLeft: { left: 1, transform: [{ rotate: '22deg' }] },
-  strokeRight: { right: 1, transform: [{ rotate: '-22deg' }] },
+  // Wider than tall: the source mark is 550×496, and `contain` letterboxes
+  // inside whatever box it is given, so a square one would leave the tick
+  // floating in dead space to either side.
+  mark: { width: 20, height: 18, marginRight: 7 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

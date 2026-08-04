@@ -20,6 +20,7 @@ import (
 	"github.com/dmytro-ch21/vola/backend/internal/modules/exercise"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/featureflag"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/health"
+	"github.com/dmytro-ch21/vola/backend/internal/modules/plan"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/profile"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/session"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/technique"
@@ -76,6 +77,7 @@ func main() {
 	techniqueHandler := technique.NewHandler(techniqueRepo)
 	techniqueContentHandler := technique.NewContentHandler(techniqueRepo)
 	sessionHandler := session.NewHandler(session.NewPostgresRepository(pool))
+	planHandler := plan.NewHandler(plan.NewPostgresRepository(pool))
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/healthz", handleHealthz)
@@ -149,6 +151,16 @@ func main() {
 	mux.Handle("POST /v1/sessions/{sessionID}/finish", verifier.RequireAuth(http.HandlerFunc(sessionHandler.Finish)))
 	mux.Handle("PATCH /v1/sessions/{sessionID}", verifier.RequireAuth(http.HandlerFunc(sessionHandler.Rename)))
 	mux.Handle("DELETE /v1/sessions/{sessionID}", verifier.RequireAuth(http.HandlerFunc(sessionHandler.Delete)))
+
+	// The training plan — what the athlete INTENDS to train, as opposed to
+	// /v1/workouts (the template) and /v1/sessions (what happened). Kept a
+	// separate resource rather than a field on either, because it is the only
+	// one of the three that is dated *and* not yet performed; see the module
+	// doc comment and migration 000029.
+	mux.Handle("GET /v1/plans", verifier.RequireAuth(http.HandlerFunc(planHandler.List)))
+	mux.Handle("POST /v1/plans", verifier.RequireAuth(http.HandlerFunc(planHandler.Create)))
+	mux.Handle("PATCH /v1/plans/{planID}", verifier.RequireAuth(http.HandlerFunc(planHandler.Update)))
+	mux.Handle("DELETE /v1/plans/{planID}", verifier.RequireAuth(http.HandlerFunc(planHandler.Delete)))
 	mux.Handle("GET /v1/workouts", verifier.RequireAuth(http.HandlerFunc(workoutHandler.List)))
 	mux.Handle("POST /v1/workouts", verifier.RequireAuth(http.HandlerFunc(workoutHandler.Create)))
 	mux.Handle("GET /v1/workouts/{workoutID}", verifier.RequireAuth(http.HandlerFunc(workoutHandler.Get)))

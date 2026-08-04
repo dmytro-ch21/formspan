@@ -6,13 +6,17 @@ import { useAuth } from "@clerk/nextjs";
 import {
   executionSteps,
   getBjjStanding,
+  getPosition,
   getTechnique,
   listExercises,
+  listPositions,
   listRulesets,
   listTechniques,
   pickImage,
   searchTechniques,
+  techniquesInPosition,
   type Exercise,
+  type Position,
   type Ruleset,
   type Technique,
   type TechniqueSummary,
@@ -27,6 +31,7 @@ import {
   categoryBadge,
   inPositionFamily,
   patternBadge,
+  positionBadge,
   POSITIONS,
   type Accent,
 } from "@/lib/libraryTiles";
@@ -95,8 +100,13 @@ type Row =
   | { kind: "exercise"; key: string; name: string; ex: Exercise }
   | { kind: "technique"; key: string; name: string; t: TechniqueSummary };
 
+// Positions carry an id rather than the object, like techniques and unlike
+// exercises: the panel resolves it, so a deep link or a stale card can't put a
+// half-populated entry on screen.
 type Selection =
-  { kind: "exercise"; ex: Exercise } | { kind: "technique"; id: string };
+  | { kind: "exercise"; ex: Exercise }
+  | { kind: "technique"; id: string }
+  | { kind: "position"; id: string };
 
 export default function LibraryPage() {
   const { modules, known } = useModules();
@@ -181,6 +191,10 @@ export default function LibraryPage() {
   const [techniques, setTechniques] = useState<TechniqueSummary[]>([]);
   const [rulesets, setRulesets] = useState<Map<string, Ruleset>>(new Map());
   const [techniquesFailed, setTechniquesFailed] = useState(false);
+  // No `positionsFailed` counterpart. The glossary is an extra here — if it
+  // does not load the row is absent, which is quieter and more honest than an
+  // error about content the reader never asked for.
+  const [positions, setPositions] = useState<Position[]>([]);
 
   const [selected, setSelected] = useState<Selection | null>(null);
   const [everLoaded, setEverLoaded] = useState(false);
@@ -232,6 +246,7 @@ export default function LibraryPage() {
     if (!wantsTechniques) {
       setTechniques([]);
       setTechniquesFailed(false);
+      setPositions([]);
       return;
     }
     techniqueAbortRef.current?.abort();
@@ -248,6 +263,18 @@ export default function LibraryPage() {
       setTechniques(list);
       setRulesets(rs);
       setTechniquesFailed(false);
+
+      // After the two that matter, and deliberately swallowed. The glossary is
+      // an extra on this screen; it must never be the reason the Library shows
+      // an error, and the "BJJ techniques couldn't load" banner must not fire
+      // for it. Guarded on the controller for the same reason the outer catch
+      // is — a superseded request resolving late would otherwise blank the row.
+      try {
+        const list = await listPositions(getToken, ac.signal);
+        if (techniqueAbortRef.current === ac) setPositions(list);
+      } catch {
+        if (techniqueAbortRef.current === ac) setPositions([]);
+      }
     } catch {
       // A supersede is not a failure; a timeout is. The only way to tell them
       // apart is whether this controller is still the current one.
@@ -477,6 +504,63 @@ export default function LibraryPage() {
             ))}
           </div>
         )}
+
+        {/* The glossary — the one row here that is reading rather than
+            filtering.
+
+            Last, and below every chip row, because that is the boundary it
+            marks: everything above narrows the grid, this opens a panel. It
+            sits under three rows of near-identical pills, so it carries a
+            heading and uses cards rather than chips; without that separation
+            the four rows read as one broken control. */}
+        {usesPosition(sport, modules) && positions.length > 0 && (
+          <div className="flex flex-col gap-2 border-t border-line-soft pt-3">
+            {/* `eyebrow` already carries the colour — every other section
+                label on this page uses it bare, and matching them is the point:
+                this is a heading over content, not a control. */}
+            <h2 className="eyebrow">New to BJJ? Start with the positions</h2>
+            <ul className="flex flex-wrap gap-2">
+              {positions.map((p) => {
+                const [code, accent] = positionBadge(p.id);
+                const cls = ACCENT_CLASS[accent];
+                const active =
+                  selected?.kind === "position" && selected.id === p.id;
+                return (
+                  <li key={p.id}>
+                    <button
+                      type="button"
+                      aria-pressed={active}
+                      // The verb is load-bearing. Visually a card and a chip
+                      // are obviously different things; to a screen reader
+                      // this row and the filter row above it are both just
+                      // "Guard, button". "Read about" is what says which one
+                      // narrows the grid and which one opens a description.
+                      aria-label={`Read about ${p.name}`}
+                      onClick={() =>
+                        setSelected(
+                          active ? null : { kind: "position", id: p.id },
+                        )
+                      }
+                      className={`flex items-center gap-2 rounded-card border px-2.5 py-2 text-left transition-colors ${
+                        active
+                          ? "border-lime bg-surface-raised"
+                          : "border-line bg-surface hover:bg-surface-hover"
+                      }`}
+                    >
+                      <span
+                        aria-hidden
+                        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded border text-[0.625rem] font-bold tracking-wide ${cls.tile} ${cls.text}`}
+                      >
+                        {code}
+                      </span>
+                      <span className="text-sm font-medium">{p.name}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
       </div>
 
       {error && (
@@ -596,6 +680,20 @@ export default function LibraryPage() {
             key={selected.id}
             id={selected.id}
             name={nameById.get(selected.id) ?? "Loading…"}
+            onClose={() => setSelected(null)}
+          />
+        )}
+        {selected?.kind === "position" && (
+          <PositionPanel
+            key={selected.id}
+            id={selected.id}
+            // Always known — the panel only opens from a card this list drew,
+            // so the shell never shows a placeholder title.
+            name={
+              positions.find((p) => p.id === selected.id)?.name ?? "Loading…"
+            }
+            techniques={techniques}
+            onSelectTechnique={(id) => setSelected({ kind: "technique", id })}
             onClose={() => setSelected(null)}
           />
         )}
@@ -776,6 +874,191 @@ function ExercisePanel({
         </p>
       )}
     </PanelShell>
+  );
+}
+
+/**
+ * A position, explained — the other half of the library.
+ *
+ * Techniques are what you do; these are what you do it in. "Armbar from Closed
+ * Guard" is unreadable to someone who has never been in a closed guard, and
+ * until now nothing in the app said what one was.
+ *
+ * Deliberately the same shell, sections and measurements as TechniquePanel:
+ * the two are peers in this grid and reading one after the other should not
+ * feel like changing app. Three differences, each earned:
+ *
+ * 1. No step list. A technique is a sequence; a position is a state, and
+ *    numbering "keep your elbows in" as step 3 of 5 invents an order.
+ * 2. No legality card — positions are not IBJJF-restricted, techniques are.
+ * 3. The cross-linked techniques ARE clickable, unlike this panel's `Edges`
+ *    lists. There the names are prose that mostly resolves to nothing; here
+ *    every row came out of the library the grid already holds.
+ */
+function PositionPanel({
+  id,
+  name,
+  techniques,
+  onSelectTechnique,
+  onClose,
+}: {
+  id: string;
+  /** Known from the card that opened this, so the shell never says "Loading…". */
+  name: string;
+  techniques: TechniqueSummary[];
+  onSelectTechnique: (id: string) => void;
+  onClose: () => void;
+}) {
+  const { getToken } = useAuth();
+  const [p, setP] = useState<Position | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    const ac = new AbortController();
+    getPosition(getToken, id, ac.signal)
+      .then(setP)
+      .catch(() => {
+        if (!ac.signal.aborted) setFailed(true);
+      });
+    return () => ac.abort();
+  }, [getToken, id]);
+
+  if (failed) {
+    return (
+      <PanelShell title="Couldn't load" onClose={onClose}>
+        <p className="text-sm text-text-muted">
+          This position couldn&apos;t be loaded. Check your connection and
+          select it again.
+        </p>
+      </PanelShell>
+    );
+  }
+
+  if (!p) {
+    return (
+      <PanelShell title={name} onClose={onClose}>
+        <div
+          className="h-24 animate-pulse rounded-lg bg-surface-hover"
+          role="status"
+          aria-label="Loading position details"
+        />
+      </PanelShell>
+    );
+  }
+
+  const [code, accent] = positionBadge(p.id);
+  const related = techniquesInPosition(techniques, p);
+
+  return (
+    <PanelShell
+      title={p.name}
+      eyebrow={
+        <p className={`eyebrow ${ACCENT_CLASS[accent].text}`}>
+          {code} · Position
+        </p>
+      }
+      onClose={onClose}
+    >
+      {p.aliases.length > 0 && (
+        <p className="text-sm text-text-muted">
+          Also called {p.aliases.join(" · ")}
+        </p>
+      )}
+
+      {p.description && <Section title="What it is">{p.description}</Section>}
+      {p.priorities && <Priorities text={p.priorities} />}
+
+      {related.length > 0 && (
+        <div className="flex flex-col gap-1.5 border-t border-line-soft pt-4">
+          <p className="eyebrow">{scopeLabel(p, related.length)}</p>
+          <ul className="flex flex-col gap-1.5">
+            {related.map((t) => {
+              const [tCode, tAccent] = categoryBadge(t.category);
+              return (
+                <li key={t.id}>
+                  <button
+                    type="button"
+                    onClick={() => onSelectTechnique(t.id)}
+                    className="flex w-full items-center gap-2.5 rounded-lg border border-line-soft bg-surface-hover px-3 py-2 text-left transition-colors hover:border-line hover:bg-surface-raised"
+                  >
+                    <span
+                      aria-hidden
+                      className={`shrink-0 rounded border px-1.5 py-0.5 text-[0.625rem] font-bold tracking-wide ${ACCENT_CLASS[tAccent].tile} ${ACCENT_CLASS[tAccent].text}`}
+                    >
+                      {tCode}
+                    </span>
+                    <span className="text-xs leading-snug">{t.name}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+    </PanelShell>
+  );
+}
+
+/**
+ * Name the scope when the list is not the position's own.
+ *
+ * `family` is coarse, so Knee on Belly borrows Side Control's list entirely —
+ * no technique carries that position. Saying "TECHNIQUES FROM HERE" over
+ * borrowed rows is the panel stating something false to the reader least able
+ * to check it, which is exactly who this feature is for.
+ *
+ * A detail filter means the list IS the position's own: closed and open guard
+ * share the Guard family but each narrows it to their own techniques. And
+ * `startsWith` rather than equality because Back Control's family is "Back" —
+ * an artefact of the rows saying "Back - Top (Back Control)", not a broader
+ * scope; nothing else maps to it.
+ */
+function scopeLabel(p: Position, count: number): string {
+  const scoped =
+    p.detail_includes.length > 0 || p.detail_excludes.length > 0;
+  const own =
+    scoped || p.name.toLowerCase().startsWith(p.family.toLowerCase());
+  return `Techniques from ${own ? "here" : `the ${p.family} family`} · ${count}`;
+}
+
+/**
+ * Priorities, split by player.
+ *
+ * Authored as one or two paragraphs; where there are two they are labelled
+ * ("Bottom: …" / "Top: …") because every position is someone's good news and
+ * someone else's problem. Pulling the label out lets a reader find their own
+ * half at a glance instead of reading both.
+ *
+ * Detected rather than stored in its own column: the split is not universal —
+ * standing has no top or bottom — and a schema insisting on two sides would
+ * force empty or duplicated prose on the entries that have one.
+ */
+function Priorities({ text }: { text: string }) {
+  const paragraphs = text
+    .split(/\n\s*\n/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  return (
+    <div className="flex flex-col gap-3 border-t border-line-soft pt-4">
+      <p className="eyebrow">What matters here</p>
+      {paragraphs.map((para, i) => {
+        // Only a short leading word or two counts as a label. Without the
+        // bound, any sentence containing a colon loses its first clause to a
+        // heading — standing's opening sentence has one at offset 56.
+        const m = /^([A-Z][A-Za-z\s-]{0,14}):\s+([\s\S]+)$/.exec(para);
+        return m ? (
+          <div key={i} className="flex flex-col gap-1">
+            <p className="eyebrow text-lime">{m[1]}</p>
+            <p className="text-sm leading-relaxed text-text-muted">{m[2]}</p>
+          </div>
+        ) : (
+          <p key={i} className="text-sm leading-relaxed text-text-muted">
+            {para}
+          </p>
+        );
+      })}
+    </div>
   );
 }
 
