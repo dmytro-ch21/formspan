@@ -44,6 +44,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -54,7 +55,7 @@ import (
 )
 
 func main() {
-	logger := httplog.New()
+	logger := httplog.For("exportcontent")
 
 	var (
 		seedOut = flag.String("seed", "internal/modules/technique/techniques.json",
@@ -91,45 +92,23 @@ func main() {
 		return
 	}
 
+	alreadyDeployed, err := idsIn(*seedOut)
+	if err != nil {
+		logger.Error("export: read the seed file", "err", err)
+		os.Exit(1)
+	}
 	if err := refuseSheetOwned(*seedOut, *addOut, authored); err != nil {
 		logger.Error("export: refused", "err", err)
 		os.Exit(1)
 	}
 
-	// Both files or neither. A half-written export is the state this command
-	// exists to prevent: content in the additions file but not the deploy
-	// survives a re-import and is missing from production, and the reverse
-	// survives the deploy and is deleted by the next import.
-	writes := []struct {
-		what string
-		path string
-	}{
-		{"seed", *seedOut},
-		{"additions", *addOut},
-	}
-	type pending struct {
-		path             string
-		merged           []entry
-		added, updated   int
-		what             string
-		totalAfterMerged int
-	}
-	var staged []pending
-	for _, w := range writes {
-		merged, added, updated, err := mergeInto(w.path, authored)
-		if err != nil {
-			logger.Error("export: merge", "file", w.what, "err", err)
-			os.Exit(1)
-		}
-		staged = append(staged, pending{w.path, merged, added, updated, w.what, len(merged)})
-	}
-	for _, s := range staged {
-		if err := writeJSON(s.path, s.merged); err != nil {
-			logger.Error("export: write", "file", s.what, "err", err)
-			os.Exit(1)
-		}
-		logger.Info("export: wrote", "file", s.what, "path", s.path,
-			"added", s.added, "updated", s.updated, "total", s.totalAfterMerged)
+	// Written through one function so the two-file invariant has somewhere to be
+	// tested. It previously lived inline in main(), which meant deleting the
+	// techniques.json write left the entire suite green — the exact regression
+	// this command's second revision exists to fix, invisible to its own tests.
+	if err := run(*seedOut, *addOut, authored, logger); err != nil {
+		logger.Error("export: write", "err", err)
+		os.Exit(1)
 	}
 
 	if !*adopt {
@@ -137,15 +116,123 @@ func main() {
 			"once these files are committed and deployed, or the deploy will not own them")
 		return
 	}
-	ids := make([]string, 0, len(authored))
-	for _, t := range authored {
-		ids = append(ids, t.ID)
+	// Only ids the seed file ALREADY carried before this run touched it. An id
+	// this export just added is by definition not committed, let alone deployed,
+	// so adopting it hands content to a release that cannot reseed it and that
+	// the console will no longer let anyone edit — the precise state the two
+	// commands exist to keep apart. Without this, `-adopt` run for Monday's
+	// batch also adopts the technique authored on Wednesday and written to the
+	// file seconds earlier.
+	ids := adoptable(alreadyDeployed, authored)
+	if len(ids) == 0 {
+		logger.Info("export: nothing to adopt — every authored row is new to the " +
+			"seed file this run, so none of it is deployed yet; commit and deploy, then re-run")
+		return
+	}
+	if skipped := len(authored) - len(ids); skipped > 0 {
+		logger.Info("export: some rows were not adopted because this run is the "+
+			"first to write them; commit and deploy, then re-run", "skipped", skipped)
 	}
 	if err := repo.AdoptAsSeeded(ctx, ids); err != nil {
 		logger.Error("export: adopt", "err", err)
 		os.Exit(1)
 	}
 	logger.Info("export: adopted; the deploy now owns these rows", "count", len(ids))
+}
+
+// run merges the authored rows into BOTH catalog files and writes them.
+//
+// Both files or neither, as far as that is achievable across two files: every
+// merge is staged before any write, so a parse error in the second cannot leave
+// the first rewritten. A write failure after that is bounded — main() exits
+// before -adopt, the database still holds the only authoritative copy, and
+// re-running re-derives both files from it.
+//
+// techniques.json is written FIRST on purpose. If the second write fails, the
+// half-state is "in the deploy artifact but not the additions record", which the
+// next spreadsheet re-import cleans up by deleting the entry. The reverse
+// half-state is a phantom: content the deploy never carries, which nothing
+// removes and nobody can edit.
+func run(seedPath, additionsPath string, authored []technique.Technique, logger *slog.Logger) error {
+	type staged struct {
+		what   string
+		path   string
+		merged []entry
+		added  int
+		upd    int
+	}
+	var plan []staged
+	for _, f := range []struct{ what, path string }{
+		{"seed", seedPath},
+		{"additions", additionsPath},
+	} {
+		merged, added, upd, err := mergeInto(f.path, authored)
+		if err != nil {
+			return fmt.Errorf("%s: %w", f.what, err)
+		}
+		// The file is what go:embed bakes into the binary. An invalid entry here
+		// fails SeedData() and takes the whole seed down on the next deploy —
+		// far from the operator who could still fix it.
+		for _, t := range authored {
+			if err := technique.ValidateFields(t); err != nil {
+				return fmt.Errorf("%s: %q would not seed: %w", f.what, t.ID, err)
+			}
+		}
+		plan = append(plan, staged{f.what, f.path, merged, added, upd})
+	}
+	for _, p := range plan {
+		if err := writeJSON(p.path, p.merged); err != nil {
+			return fmt.Errorf("%s: %w", p.what, err)
+		}
+		logger.Info("export: wrote", "file", p.what, "path", p.path,
+			"added", p.added, "updated", p.upd, "total", len(p.merged))
+	}
+	// Read back rather than trust the writes: one guard for a half write, a
+	// silent dedupe, and a broken two-file invariant at once.
+	//
+	// Deliberately redundant. Removing the CALL leaves the suite green, because
+	// every state it catches has its own test and the writes above are correct —
+	// it earns its place at runtime, on a filesystem that lied, not in the test
+	// matrix. verifyContains itself is tested.
+	for _, p := range plan {
+		if err := verifyContains(p.path, authored); err != nil {
+			return fmt.Errorf("%s: %w", p.what, err)
+		}
+	}
+	return nil
+}
+
+// verifyContains re-reads a written file and confirms it carries every id the
+// export just put in it.
+func verifyContains(path string, authored []technique.Technique) error {
+	have, err := idsIn(path)
+	if err != nil {
+		return fmt.Errorf("verify: %w", err)
+	}
+	for _, t := range authored {
+		if !have[t.ID] {
+			return fmt.Errorf("%q is missing from %s after writing it", t.ID, filepath.Base(path))
+		}
+	}
+	return nil
+}
+
+// adoptable narrows the authored rows to those the seed file ALREADY carried
+// before this run touched it.
+//
+// An id this export just added is not committed, let alone deployed, so
+// adopting it hands content to a release that cannot reseed it and that the
+// console will no longer let anyone edit. Without this, `-adopt` intended for
+// last week's batch also adopts the technique authored an hour ago and written
+// to the file seconds earlier.
+func adoptable(alreadyDeployed map[string]bool, authored []technique.Technique) []string {
+	ids := make([]string, 0, len(authored))
+	for _, t := range authored {
+		if alreadyDeployed[t.ID] {
+			ids = append(ids, t.ID)
+		}
+	}
+	return ids
 }
 
 // refuseSheetOwned rejects any authored id the SPREADSHEET owns.
@@ -226,28 +313,37 @@ func mergeInto(path string, authored []technique.Technique) (
 		if id == "" {
 			return nil, 0, 0, fmt.Errorf("%s holds an entry with no id", path)
 		}
-		if _, dup := byID[id]; !dup {
-			order = append(order, id)
+		if _, dup := byID[id]; dup {
+			// Keeping the last occurrence would DELETE the other on the next
+			// write — the "content with no other copy" loss this command exists
+			// to prevent, committed by the command. techniques.json cannot reach
+			// this state (validate() rejects duplicate ids) but the additions
+			// file has no such check.
+			return nil, 0, 0, fmt.Errorf("%s holds two entries with id %q", path, id)
 		}
+		order = append(order, id)
 		byID[id] = e
 	}
+	// Existing entries keep the file's own order. NEITHER file is in id order —
+	// techniques.json is in spreadsheet order and the additions file inverts at
+	// index 2 — so re-sorting would be the whole-file rewrite this function
+	// exists to avoid. An earlier version sorted "if the file is already
+	// sorted", which was dead code that read as a live rule.
+	//
+	// New ids are appended, sorted among themselves, so the output does not
+	// depend on the order the database happened to return them in.
+	var fresh []string
 	for _, t := range authored {
 		if _, exists := byID[t.ID]; exists {
 			updated++
 		} else {
 			added++
-			order = append(order, t.ID)
+			fresh = append(fresh, t.ID)
 		}
 		byID[t.ID] = entryOf(t)
 	}
-
-	// Sorted by id so a re-export with no changes is byte-identical. NOT the
-	// file's existing order: techniques.json is generated in spreadsheet order,
-	// so sorting it here would be the whole-file rewrite this function exists to
-	// avoid — see readEntries, which keeps the file's own order for that reason.
-	if isSorted(existing) {
-		sort.Strings(order)
-	}
+	sort.Strings(fresh)
+	order = append(order, fresh...)
 
 	merged = make([]entry, 0, len(order))
 	for _, id := range order {
@@ -256,26 +352,25 @@ func mergeInto(path string, authored []technique.Technique) (
 	return merged, added, updated, nil
 }
 
-// isSorted reports whether a file is already in id order, which decides whether
-// a merge may reorder it. The additions file is sorted and stays sorted;
-// techniques.json is in spreadsheet order and must keep it, or every export
-// rewrites all 466 entries.
-func isSorted(entries []entry) bool {
-	for i := 1; i < len(entries); i++ {
-		if entries[i-1].id() > entries[i].id() {
-			return false
-		}
-	}
-	return true
-}
-
 // The key order both files are written in. Not alphabetical — it is the order
 // the Python importer emits, and matching it is what keeps an exported entry
 // visually consistent with its 481 neighbours.
 //
-// `function` and `to_position` are the only optional keys, matching the data:
-// to_position is absent on 317 of 466 entries, and absent means "not recorded",
-// which migration 000029 is explicit is a different fact from any value.
+// The two interior slots are load-bearing and were wrong in the first version,
+// which appended both to the end. Measured against the shipped file: 462 of 466
+// entries put `function` between `category` and `position`, and 149 put
+// `to_position` between `position_detail` and `gi_no_gi`. That is not a style
+// preference — `apply_taxonomy` inserts `function` after `category` and
+// `carry_to_position` rebuilds each record to place `to_position` after
+// `position_detail` (scripts/import-exercise-catalog.py), so appending them
+// instead means the next spreadsheet re-import silently relocates both keys on
+// every entry this command wrote, producing exactly the whole-file diff this
+// design exists to prevent.
+//
+// `function` and `to_position` are also the only OPTIONAL keys, matching the
+// data: to_position is absent on 317 of 466 entries, and absent means "not
+// recorded", which migration 000029 is explicit is a different fact from any
+// value.
 //
 // Everything else is ALWAYS written, empty string and empty list included. This
 // is not cosmetic: aliases, setup_from, common_counters and common_next_moves
@@ -284,10 +379,10 @@ func isSorted(entries []entry) bool {
 // UpsertAll's transaction, so a single exported technique with no aliases takes
 // the ENTIRE seed down — every technique, not just its own row.
 var keyOrder = []string{
-	"id", "name", "aliases", "category", "position", "position_detail",
-	"gi_no_gi", "typical_belt", "description", "when_to_use", "setup_from",
-	"common_next_moves", "common_counters", "video_reference", "source_notes",
-	"ibjjf_ruleset_id", "function", "to_position",
+	"id", "name", "aliases", "category", "function", "position",
+	"position_detail", "to_position", "gi_no_gi", "typical_belt", "description",
+	"when_to_use", "setup_from", "common_next_moves", "common_counters",
+	"video_reference", "source_notes", "ibjjf_ruleset_id",
 }
 
 // entryOf renders a technique in the catalog files' shape.

@@ -18,7 +18,17 @@ import (
 // New returns the base structured logger (JSON to stdout), tagged with the
 // service name so multi-service log aggregation can filter by it later.
 func New() *slog.Logger {
-	return slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", "api")
+	return For("api")
+}
+
+// For is New for something that is not the API. The tag is the whole point of
+// New — filtering by service — so a CLI borrowing it and reporting itself as
+// "api" makes the field a lie in exactly the aggregation it exists to serve.
+//
+// Not a `.With("service", …)` on top of New: slog appends rather than replaces,
+// so that emits the key twice.
+func For(service string) *slog.Logger {
+	return slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", service)
 }
 
 type ctxKey string

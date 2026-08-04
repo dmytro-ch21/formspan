@@ -2597,6 +2597,21 @@ own, so none of them is redundant with "the FK exists".
 - The diff for one new technique is **one entry**, in the file's own key order.
   A whole-file reorder is the failure: Go sorts map keys, the files are written
   in semantic order, and 482 reordered entries bury the change.
+- **`function` and `to_position` sit in their interior slots** — after `category`
+  and after `position_detail` respectively, which is where 462 and 149 of the
+  shipped entries put them. Appending them to the end seeds and renders fine and
+  is invisible until the next spreadsheet re-import relocates them on every
+  entry the export wrote. Assert the order as a SUBSEQUENCE across entries: an
+  index-for-index check against an entry that omits both optional keys passes
+  whatever the order is, and that is what pinned the wrong one in place.
+- **Neither file is in id order**, so a merge must not sort. Existing entries
+  keep their position; new ids append. Assert an existing entry did not move.
+- **`-adopt` must not adopt what the same run just wrote.** Author a technique,
+  run the export, and adopt in one go: the new id stays `source='admin'`,
+  because it is in the file but not in any deploy. Only ids the seed file
+  carried beforehand are eligible.
+- **A duplicate id in a catalog file is refused, not deduped.** Keeping the last
+  deletes the other on the next write.
 - The exported file **actually seeds**. Run `cmd/seed` from it and count the
   rows; a file that is pretty but unloadable is worse than a noisy one.
 - An entry with no aliases writes `"aliases": []`, never an absent key. Absent

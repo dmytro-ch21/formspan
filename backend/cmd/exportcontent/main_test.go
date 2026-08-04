@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -156,8 +158,6 @@ func TestTheTwoOptionalKeysAreOmittedWhenEmpty(t *testing.T) {
 }
 
 func TestEntryKeysAreWrittenInTheFilesOwnOrder(t *testing.T) {
-	// Not alphabetical, and not the struct's field order — the order the Python
-	// importer emits, so an exported entry reads like its 481 neighbours.
 	got := entryOf(technique.Technique{ID: "x", Name: "X", Function: "advance", ToPosition: "Mount - Top"})
 	var gotKeys []string
 	for _, p := range got {
@@ -166,22 +166,96 @@ func TestEntryKeysAreWrittenInTheFilesOwnOrder(t *testing.T) {
 	if strings.Join(gotKeys, ",") != strings.Join(keyOrder, ",") {
 		t.Errorf("key order:\n  got:  %v\n  want: %v", gotKeys, keyOrder)
 	}
+}
 
-	// And it is the order the real file uses, not just the order this file
-	// declares — otherwise both could drift from the data together.
-	real, err := readEntries(additionsFile)
-	if err != nil {
-		t.Fatalf("read additions: %v", err)
+// The order has to match the DATA, not just this file's own constant —
+// otherwise both drift together and the diff stays broken while the test stays
+// green. Checked as a SUBSEQUENCE per entry, because `function` and
+// `to_position` are optional and an index-for-index comparison against an entry
+// that omits them is what pinned the wrong order in place: the first version
+// appended both to the end, and this test enforced it.
+func TestKeyOrderMatchesEveryEntryInTheShippedCatalog(t *testing.T) {
+	rank := make(map[string]int, len(keyOrder))
+	for i, k := range keyOrder {
+		rank[k] = i
 	}
-	var realKeys []string
-	for _, p := range real[0] {
-		realKeys = append(realKeys, p.Key)
-	}
-	for i, k := range realKeys {
-		if keyOrder[i] != k {
-			t.Errorf("keyOrder[%d] = %q but the shipped file has %q", i, keyOrder[i], k)
+	for _, path := range []string{seedFile, additionsFile} {
+		entries, err := readEntries(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		checked := 0
+		for _, e := range entries {
+			last, lastKey := -1, ""
+			for _, p := range e {
+				r, known := rank[p.Key]
+				if !known {
+					t.Errorf("%s: %s has key %q that keyOrder does not list",
+						filepath.Base(path), e.id(), p.Key)
+					continue
+				}
+				if r < last {
+					t.Errorf("%s: %s writes %q after %q, but keyOrder has them the other way",
+						filepath.Base(path), e.id(), p.Key, lastKey)
+				}
+				last, lastKey = r, p.Key
+			}
+			checked++
+		}
+		if checked == 0 {
+			t.Errorf("%s: nothing checked", path)
 		}
 	}
+}
+
+// ...and specifically the two interior slots, named, because they are the ones
+// that were wrong and a subsequence check over entries that omit them passes
+// either way.
+func TestTheTwoOptionalKeysSitWhereTheCatalogPutsThem(t *testing.T) {
+	entries, err := readEntries(seedFile)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	seen := map[string]int{}
+	for _, e := range entries {
+		var keys []string
+		for _, p := range e {
+			keys = append(keys, p.Key)
+		}
+		for _, f := range []string{"function", "to_position"} {
+			i := indexOf(keys, f)
+			if i <= 0 || i+1 >= len(keys) {
+				continue
+			}
+			seen[f+"|"+keys[i-1]+"|"+keys[i+1]]++
+		}
+	}
+	// The placement the overwhelming majority of the catalog uses.
+	for _, want := range []string{
+		"function|category|position",
+		"to_position|position_detail|gi_no_gi",
+	} {
+		if seen[want] < 100 {
+			t.Fatalf("expected %q to be the dominant placement, saw it %d times "+
+				"— the catalog changed and keyOrder needs to follow", want, seen[want])
+		}
+	}
+	// And keyOrder agrees with it.
+	if indexOf(keyOrder, "function") != indexOf(keyOrder, "category")+1 {
+		t.Errorf("keyOrder puts %q after category, want immediately after", keyOrder[indexOf(keyOrder, "category")+1])
+	}
+	if indexOf(keyOrder, "to_position") != indexOf(keyOrder, "position_detail")+1 {
+		t.Errorf("keyOrder does not put to_position immediately after position_detail: %v", keyOrder)
+	}
+}
+
+func indexOf(xs []string, want string) int {
+	for i, x := range xs {
+		if x == want {
+			return i
+		}
+	}
+	return -1
 }
 
 // Go's encoder turns `&` into `\u0026` by default. Neither catalog file
@@ -414,4 +488,141 @@ func ids(entries []entry) []string {
 		out = append(out, e.id())
 	}
 	return out
+}
+
+// The invariant the whole second revision is about, and it had NO test: the
+// first version wrote only the additions file, and deleting the techniques.json
+// write from the loop left the entire suite green.
+func TestBothFilesGetTheEntryOrTheRunFails(t *testing.T) {
+	dir := t.TempDir()
+	seed := filepath.Join(dir, "techniques.json")
+	additions := filepath.Join(dir, "additions.json")
+	write(t, seed, `[{"id":"from-sheet","name":"Sheet","category":"Pass","position":"Other"}]`)
+	write(t, additions, `[]`)
+
+	authored := []technique.Technique{
+		{ID: "new-one", Name: "New One", Category: "Pass", Position: "Other", GiNoGi: "Both"},
+	}
+	if err := run(seed, additions, authored, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	for _, path := range []string{seed, additions} {
+		have, err := idsIn(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		if !have["new-one"] {
+			t.Errorf("%s does not carry the exported id — content in only one file "+
+				"is lost, by the deploy not having it or by the next re-import deleting it",
+				filepath.Base(path))
+		}
+	}
+	// ...and the sheet entry is still there, in both senses.
+	have, _ := idsIn(seed)
+	if !have["from-sheet"] {
+		t.Error("the generated catalog lost an entry")
+	}
+}
+
+// The file it writes is what go:embed bakes into the binary, so an entry that
+// cannot seed must fail here rather than on the next deploy.
+func TestRunRefusesAnEntryThatWouldNotSeed(t *testing.T) {
+	dir := t.TempDir()
+	seed := filepath.Join(dir, "techniques.json")
+	additions := filepath.Join(dir, "additions.json")
+	write(t, seed, `[]`)
+	write(t, additions, `[]`)
+
+	// Valid but for the function, which has no CHECK constraint in the schema —
+	// so this validation is the only thing between a typo and a value no client
+	// can render.
+	err := run(seed, additions, []technique.Technique{
+		{ID: "broken", Name: "Broken", Category: "Pass", Position: "Other",
+			GiNoGi: "Both", Function: "not-a-real-function"},
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err == nil {
+		t.Fatal("an entry that fails ValidateFields was written anyway")
+	}
+	if !strings.Contains(err.Error(), "broken") {
+		t.Errorf("the error does not name the offending id: %v", err)
+	}
+	// Nothing was written — a refusal must not leave a half-export behind.
+	raw, _ := os.ReadFile(seed)
+	if string(raw) != `[]` {
+		t.Errorf("the seed file was modified despite the refusal: %s", raw)
+	}
+}
+
+// Keeping the last of two entries sharing an id would DELETE the other on the
+// next write — the content loss this command exists to prevent, committed by
+// the command. techniques.json cannot reach this state (validate() rejects it);
+// the additions file has no such check.
+func TestADuplicateIDIsRefusedRatherThanSilentlyDeduped(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "additions.json")
+	write(t, path, `[{"id":"x","name":"First"},{"id":"x","name":"Second"}]`)
+	_, _, _, err := mergeInto(path, []technique.Technique{{ID: "y", Name: "Y"}})
+	if err == nil {
+		t.Fatal("a duplicate id was silently deduped — one of the two entries would be deleted")
+	}
+	if !strings.Contains(err.Error(), `"x"`) {
+		t.Errorf("the error does not name the duplicated id: %v", err)
+	}
+}
+
+func TestAdoptionSkipsWhatThisRunJustAdded(t *testing.T) {
+	// The technique exported last week, committed and deployed.
+	deployed := map[string]bool{"promoted-last-week": true}
+	authored := []technique.Technique{
+		{ID: "promoted-last-week"},
+		{ID: "authored-an-hour-ago"},
+	}
+	got := adoptable(deployed, authored)
+	if strings.Join(got, ",") != "promoted-last-week" {
+		t.Errorf("adopted %v — an id this run first wrote is not deployed, so "+
+			"adopting it hands content to a release that cannot reseed it", got)
+	}
+}
+
+// New entries append in id order, so the output does not depend on the order
+// the database happened to return the rows in.
+func TestAppendedOrderDoesNotDependOnTheQueryOrder(t *testing.T) {
+	run := func(authored []technique.Technique) []string {
+		path := filepath.Join(t.TempDir(), "additions.json")
+		write(t, path, `[{"id":"existing","name":"E"}]`)
+		merged, _, _, err := mergeInto(path, authored)
+		if err != nil {
+			t.Fatalf("merge: %v", err)
+		}
+		return ids(merged)
+	}
+	forward := run([]technique.Technique{{ID: "aaa"}, {ID: "zzz"}})
+	backward := run([]technique.Technique{{ID: "zzz"}, {ID: "aaa"}})
+	if strings.Join(forward, ",") != strings.Join(backward, ",") {
+		t.Errorf("order depends on the query: %v vs %v", forward, backward)
+	}
+	// ...and the existing entry keeps its position at the front.
+	if forward[0] != "existing" {
+		t.Errorf("the existing entry moved: %v", forward)
+	}
+}
+
+// The read-back guard's own logic. The call site is redundant by design — see
+// run() — but the check has to actually detect a missing id, or it is decoration
+// that would pass a half-written file straight through.
+func TestVerifyContainsDetectsAMissingID(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "catalog.json")
+	write(t, path, `[{"id":"present","name":"P"}]`)
+
+	authored := []technique.Technique{{ID: "present"}, {ID: "absent"}}
+	err := verifyContains(path, authored)
+	if err == nil {
+		t.Fatal("a file missing an exported id passed verification")
+	}
+	if !strings.Contains(err.Error(), "absent") {
+		t.Errorf("the error does not name the missing id: %v", err)
+	}
+	// ...and a file that has everything passes.
+	if err := verifyContains(path, []technique.Technique{{ID: "present"}}); err != nil {
+		t.Errorf("a complete file was rejected: %v", err)
+	}
 }
