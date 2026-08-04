@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/database"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -248,5 +249,94 @@ func TestKnownPositionsComesFromTheCatalog(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("the catalog's own position was not offered: %v", got)
+	}
+}
+
+func TestAdoptHandsRowsToTheDeployAndOnlyAdminOnes(t *testing.T) {
+	// Adoption is the last step of promotion: once the exported JSON is
+	// committed AND deployed, the file owns the content and the seeder must be
+	// able to update it. Before that the row is the only copy, which is why
+	// this is a separate command from the export.
+	repo, pool := contentFixture(t)
+	ctx := context.Background()
+
+	if _, err := repo.CreateTechnique(ctx, aTechnique("test-content-adopt", "Adopt Me")); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := repo.UpsertAll(ctx, []Technique{aTechnique("test-content-notmine", "Seeded")}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	authored, err := repo.AdminAuthored(ctx)
+	if err != nil {
+		t.Fatalf("admin authored: %v", err)
+	}
+	var sawAdmin, sawSeeded bool
+	for _, a := range authored {
+		if a.ID == "test-content-adopt" {
+			sawAdmin = true
+		}
+		if a.ID == "test-content-notmine" {
+			sawSeeded = true
+		}
+	}
+	if !sawAdmin {
+		t.Error("the admin row was not offered for export")
+	}
+	if sawSeeded {
+		t.Error("a seeded row was offered for export — it is already in the JSON")
+	}
+
+	// Adopt the admin row, and name the seeded one too: re-running adoption
+	// must not disturb rows the deploy already owns.
+	//
+	// Asserted on updated_at, not on source — setting source='seed' on a row
+	// that is already 'seed' is invisible in the value, so the earlier version
+	// of this test could not tell the scoped query from the unscoped one. The
+	// observable difference is the timestamp, and it matters: clients delta-sync
+	// on updated_at, so an unscoped adoption makes every named seeded technique
+	// look changed to every device.
+	var before time.Time
+	if err := pool.QueryRow(ctx,
+		`SELECT updated_at FROM techniques WHERE id = 'test-content-notmine'`).Scan(&before); err != nil {
+		t.Fatalf("read updated_at: %v", err)
+	}
+	if err := repo.AdoptAsSeeded(ctx, []string{"test-content-adopt", "test-content-notmine"}); err != nil {
+		t.Fatalf("adopt: %v", err)
+	}
+	var after time.Time
+	if err := pool.QueryRow(ctx,
+		`SELECT updated_at FROM techniques WHERE id = 'test-content-notmine'`).Scan(&after); err != nil {
+		t.Fatalf("read updated_at: %v", err)
+	}
+	if !after.Equal(before) {
+		t.Errorf("adoption touched a row the deploy already owns: updated_at moved %s -> %s — "+
+			"every client delta-syncing on this now re-fetches it", before, after)
+	}
+
+	var adopted, untouched string
+	_ = pool.QueryRow(ctx, `SELECT source FROM techniques WHERE id = 'test-content-adopt'`).Scan(&adopted)
+	_ = pool.QueryRow(ctx, `SELECT source FROM techniques WHERE id = 'test-content-notmine'`).Scan(&untouched)
+	if adopted != "seed" {
+		t.Errorf("adopted row source = %q, want seed", adopted)
+	}
+	if untouched != "seed" {
+		t.Errorf("already-seeded row source = %q", untouched)
+	}
+
+	// ...and the seeder can now update what it owns, which is the whole point.
+	renamed := aTechnique("test-content-adopt", "Renamed By The Deploy")
+	if err := repo.UpsertAll(ctx, []Technique{renamed}); err != nil {
+		t.Fatalf("re-seed: %v", err)
+	}
+	got, _ := repo.Get(ctx, "test-content-adopt")
+	if got.Name != "Renamed By The Deploy" {
+		t.Errorf("name = %q — adoption did not hand the row over", got.Name)
+	}
+
+	// And it is no longer editable in the console, which is correct: the JSON
+	// is the owner now.
+	if _, err := repo.UpdateTechnique(ctx, aTechnique("test-content-adopt", "Edited")); !errors.Is(err, ErrNotFound) {
+		t.Errorf("an adopted row is still console-editable: %v", err)
 	}
 }

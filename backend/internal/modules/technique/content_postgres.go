@@ -163,3 +163,49 @@ func scanContent(s scannable) (Technique, error) {
 	}
 	return t, nil
 }
+
+// AdminAuthored returns every console-authored technique, for the export.
+//
+// Ordered by id so the exported file is byte-stable across runs — a re-export
+// with no changes must produce no diff, or the review step the promotion path
+// depends on becomes noise nobody reads.
+func (r *PostgresRepository) AdminAuthored(ctx context.Context) ([]Technique, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT `+contentReturning+` FROM techniques WHERE source = 'admin' ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("technique: admin authored: %w", err)
+	}
+	defer rows.Close()
+	out := []Technique{}
+	for rows.Next() {
+		t, err := scanContent(rows)
+		if err != nil {
+			return nil, fmt.Errorf("technique: scan authored: %w", err)
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// AdoptAsSeeded hands rows to the deploy: once the exported JSON is committed
+// and released, the file is the owner and the seeder must be able to update
+// them.
+//
+// Separate from the export, and run after the deploy rather than with it. Flip
+// too early and the row is owned by a release that does not carry it — the
+// seeder skips ids it has never heard of, so the content survives, but it is no
+// longer editable in the console either. Stranded between two owners.
+func (r *PostgresRepository) AdoptAsSeeded(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	// Scoped to admin rows: adopting is a one-way move, and re-running it must
+	// not touch anything the deploy already owns.
+	_, err := r.pool.Exec(ctx,
+		`UPDATE techniques SET source = 'seed', updated_at = now()
+		 WHERE source = 'admin' AND id = ANY($1)`, ids)
+	if err != nil {
+		return fmt.Errorf("technique: adopt: %w", err)
+	}
+	return nil
+}

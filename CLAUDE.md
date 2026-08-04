@@ -131,6 +131,7 @@ more when they know which properties are load-bearing.
 docker compose up -d                       # local Postgres on :5432 (Colima-backed Docker, not Docker Desktop)
 cd backend && go run ./cmd/migrate up
 cd backend && go run ./cmd/seed             # reference content (exercise catalog) — idempotent, safe to re-run
+cd backend && go run ./cmd/exportcontent    # carry console-authored content back into techniques.additions.json
 pnpm run dev:api                            # :8080
 pnpm run dev:web                            # :3000
 pnpm run dev:mobile                          # Expo — Metro on :8081, press i/a/w for iOS Sim/Android/web

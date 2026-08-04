@@ -7125,6 +7125,77 @@ both mutations were checked separately.
   skipped**, so a JSON entry permanently shadowed by an admin row is invisible.
 
 
+## 2026-08-04 — The export, and the bug it uncovered
+
+`cmd/exportcontent` carries admin-authored rows back into the seed JSON, which
+is the half that makes console authoring more than a local convenience: without
+it, a technique added in staging exists only in staging's database.
+
+### It writes the additions file, not the catalog
+
+`techniques.json` is GENERATED — `scripts/import-exercise-catalog.py` builds it
+from a spreadsheet and merges `techniques.additions.json` in. Writing the
+generated file would be destroyed by the next import; the additions file exists
+precisely for content authored by hand, which is exactly what this is.
+
+It **merges** rather than replaces: that file predates the command and holds 16
+entries the console never wrote, so overwriting it would silently delete content
+with no other copy. Entries are matched by id, sorted by id, and empty values are
+omitted rather than written as `""` — migration 000029 is explicit that absent
+means "not recorded" and is a different fact from any value.
+
+A re-export with no changes is **byte-identical**. Without that the promotion
+path is unusable: every export is a noisy diff, so nobody reads the one review
+step standing between a typo and a permanent foreign key.
+
+### Export and adopt are two commands, deliberately
+
+`-adopt` flips exported rows to `source='seed'`, handing them to the deploy.
+It is separate because until the JSON is committed AND released, the database row
+is the only copy — flipping early leaves content owned by a deploy that does not
+carry it, editable by nobody. The order is: export, review, merge, deploy, adopt.
+
+Adoption is scoped to `source='admin'`, and the reason is not the value —
+setting `seed` on a row that is already `seed` is invisible — but `updated_at`.
+Clients delta-sync on it, so an unscoped adoption makes every named seeded
+technique look changed to every device. The first version of that test asserted
+on `source` and could not tell the two queries apart.
+
+### What testing it uncovered, which is the real story
+
+The first end-to-end run exported a **fully-populated** São Paulo Pass rather
+than the stub inserted. `sao-paulo-pass` — "São Paulo Pass", alias "Tozi pass",
+Guard - Top, with description and `to_position` — **has been in the catalog all
+along.** The test had flipped a real seeded row to `admin`; that was reverted.
+
+The technique was never missing. **The search cannot find it.**
+`searchTechniques` does `toLowerCase().includes(q)` with no diacritic folding:
+
+	"sao paulo"  -> not found
+	"sao"        -> not found
+	"são paulo"  -> found, but nobody types the tilde on a phone
+	"tozi"       -> found
+
+So the request that started this whole line of work — "the name is not in the
+list" — was a lookup bug, not missing content. And the content manager, useful
+as it is, would have made it worse: authoring a second São Paulo pass gives two
+ids for one technique, permanently, in training records. Exactly what that PR's
+design is most careful about, arrived at from the other direction.
+
+The fix is small and is the next piece of work: fold diacritics on both sides
+before comparing. `Slug`'s `foldASCII` map already does it and can be shared.
+
+### Gaps this leaves
+
+- **The console UI still does not exist**, so authoring is `curl` and the export
+  has little to carry.
+- **Exercises are not exported.** They have the `source` column and the seed
+  guard but no write path, so there is nothing to export yet.
+- **Adoption is all-or-nothing** — it takes the ids the export just wrote, with
+  no way to adopt a subset.
+- **Nothing verifies the exported JSON round-trips through the importer.** The
+  collision guard prevents the known failure, but the real check is running the
+  Python importer over the exported file, and that is not automated.
 ## 2026-08-04 — The technique was never missing; the search could not find it
 
 `searchTechniques` folded case and nothing else, so a query and the catalog

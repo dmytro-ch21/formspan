@@ -2582,6 +2582,33 @@ own, so none of them is redundant with "the FK exists".
 - The star column has an accessible name **naming the technique**; a column of
   identical "Working on" buttons is unusable otherwise.
 
+### Exporting authored content (`cmd/exportcontent`)
+
+**Happy path**
+
+- With no admin rows, the additions file is **byte-identical** afterwards — not
+  rewritten, not reformatted.
+- An authored technique appears in `techniques.additions.json`, and the 16
+  hand-authored entries that predate the command are **unaltered**.
+- A re-export with no changes produces a byte-identical file. The promotion path
+  depends on a readable diff.
+- `-adopt` flips the exported rows to `source='seed'`, after which the seeder can
+  update them and the console cannot.
+
+**Edge cases and errors**
+
+- It writes `techniques.additions.json`, never the generated `techniques.json` —
+  the importer rebuilds the latter and would destroy the export.
+- An id already in the generated catalog is **refused**, naming the ids. The
+  importer exits on "additions collide with sheet ids", far from here.
+- A malformed additions file is refused, not overwritten — a stray character
+  must not cost hand-authored content.
+- A missing file (or directory) is created rather than fatal.
+- Empty values are omitted, not written as `""`.
+- **Adoption must not touch `updated_at` on rows the deploy already owns.**
+  Assert the timestamp, not `source` — setting `seed` on a `seed` row is
+  invisible in the value, and clients delta-sync on the timestamp.
+
 ### Authoring the catalog (`/v1/admin/techniques`)
 
 **Happy path**
