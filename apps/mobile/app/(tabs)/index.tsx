@@ -13,6 +13,9 @@ import {
 
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
 import { Text, View } from '@/components/Themed';
+import { Image } from 'expo-image';
+
+import { BELT_HERO } from '@/components/BeltPhoto';
 import { Icon } from '@/components/ui/Icon';
 import { sportColor } from '@/components/ui/sport';
 import { PickSessionSheet } from '@/components/ui/PickSessionSheet';
@@ -632,6 +635,20 @@ export default function TodayScreen() {
                     </Text>
                   </View>
                   <Icon name="chevron" size={14} color={vola.textDim} />
+
+                  {/* Decoration, bleeding off the right edge. One belt on
+                      everyone's screen — it is the texture behind a session
+                      card, not a claim about the athlete's rank, and the card
+                      lays out identically without it. Hidden from assistive
+                      tech for the same reason. */}
+                  <Image
+                    source={BELT_HERO}
+                    style={styles.planHero}
+                    contentFit="cover"
+                    transition={0}
+                    accessibilityElementsHidden
+                    importantForAccessibility="no-hide-descendants"
+                  />
                 </Pressable>
               ))
             ) : (
@@ -880,6 +897,18 @@ const styles = StyleSheet.create({
   },
   planCardPressed: { backgroundColor: vola.surfaceHover },
   planRule: { width: 3, alignSelf: 'stretch', marginVertical: -14 },
+  // Behind the content, off the right edge, and faint: it is texture. At full
+  // strength it competes with the Log button, which is the one thing on this
+  // card anyone is meant to press.
+  planHero: {
+    position: 'absolute',
+    right: -30,
+    top: -20,
+    bottom: -20,
+    width: 190,
+    opacity: 0.22,
+    zIndex: -1,
+  },
   planMain: { flex: 1, gap: 2, marginLeft: 13 },
   // Colour set inline, from the discipline.
   planEyebrow: { fontSize: 10, fontWeight: '700', letterSpacing: 1 },

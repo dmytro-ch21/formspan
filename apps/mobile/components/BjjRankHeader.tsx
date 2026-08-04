@@ -2,7 +2,8 @@ import { useCallback, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View as RNView } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 
-import { Belt as BeltView, describeBelt } from '@/components/Belt';
+import { describeBelt } from '@/components/Belt';
+import { BeltPhoto } from '@/components/BeltPhoto';
 import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
@@ -124,8 +125,10 @@ export function BjjRankHeader({ getToken }: { getToken: TokenGetter }) {
       {({ pressed }) => (
         <View style={[styles.card, pressed && styles.pressed]}>
           {/* The belt spans the full width and leads, because at this size it
-              IS the heading — the words below it are the caption. */}
-          <BeltView
+              IS the heading — the words below it are the caption. The
+              photograph rather than the drawn belt: this is the one place the
+              belt is the subject and big enough to carry a render. */}
+          <BeltPhoto
             belt={rank.belt}
             stripes={rank.stripes}
             degree={rank.degree}
