@@ -48,40 +48,51 @@ function parse(value: string | null): AccentName {
 
 export function AccentProvider({ children }: { children: React.ReactNode }) {
   const { userId } = useAuth();
-  const [name, setName] = useState<AccentName>(DEFAULT_ACCENT);
-  const [ready, setReady] = useState(false);
+  /**
+   * The stored choice, **tagged with the account it was read for**.
+   *
+   * Derived rather than mirrored into separate `name`/`ready` state, for two
+   * reasons. The lint rule is the smaller one: setting state synchronously
+   * inside the effect (which the signed-out branch used to do) costs a second
+   * render pass on every mount.
+   *
+   * The tag is the real reason. Untagged, signing into a second account showed
+   * the *previous* account's accent until the new read resolved — a stale
+   * preference presented as the new user's, which is the same class of bug the
+   * `data`/`span` tagging in `TrainingSummary` exists to prevent.
+   */
+  const [stored, setStored] = useState<{ for: string; name: AccentName } | null>(null);
 
   useEffect(() => {
+    // Signed out: the auth screens are the only thing rendering, and they get
+    // the default. Nothing to read, and nothing to set.
+    if (!userId) return;
     let cancelled = false;
-    if (!userId) {
-      // Signed out: the auth screens are the only thing rendering, and they
-      // get the default rather than the previous account's choice.
-      setName(DEFAULT_ACCENT);
-      setReady(true);
-      return;
-    }
     readPref(userId, PREF_ACCENT)
       .then((v) => {
-        if (cancelled) return;
-        setName(parse(v));
-        setReady(true);
+        if (!cancelled) setStored({ for: userId, name: parse(v) });
       })
       .catch(() => {
         // A preference that cannot be read is a preference nobody set.
-        if (!cancelled) setReady(true);
+        if (!cancelled) setStored({ for: userId, name: DEFAULT_ACCENT });
       });
     return () => {
       cancelled = true;
     };
   }, [userId]);
 
+  const settled = !!userId && stored?.for === userId;
+  const name = settled ? stored!.name : DEFAULT_ACCENT;
+  const ready = !userId || settled;
+
   const choose = useCallback(
     async (next: AccentName) => {
+      if (!userId) return;
       // Applied before the write, not after: this is the one setting whose
       // whole point is being seen immediately, and a round trip to SQLite
       // before the colour moves reads as a laggy control.
-      setName(next);
-      if (userId) await writePref(userId, PREF_ACCENT, next);
+      setStored({ for: userId, name: next });
+      await writePref(userId, PREF_ACCENT, next);
     },
     [userId],
   );
