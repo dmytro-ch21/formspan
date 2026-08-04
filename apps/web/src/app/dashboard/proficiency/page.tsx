@@ -4,7 +4,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@clerk/nextjs";
 
 import {
+  getBjjFocus,
   getBjjProficiency,
+  MAX_BJJ_FOCUS,
+  setBjjFocus,
+  type BjjFocus,
   type BjjProficiency,
   type BjjProficiencySummary,
 } from "@/lib/api";
@@ -77,6 +81,22 @@ export default function ProficiencyPage() {
   const { getToken } = useAuth();
   const [rows, setRows] = useState<BjjProficiency[] | null>(null);
   const [summary, setSummary] = useState<BjjProficiencySummary | null>(null);
+  const [focus, setFocus] = useState<BjjFocus[]>([]);
+  // A refusal or a failed save, kept apart from `error`. Both used to render
+  // the same banner, whose headline reads "Couldn't load your funnel" and
+  // which offers a reload button — so starring a sixth technique, the one
+  // refusal guaranteed to happen, told the athlete the load had failed. It
+  // hadn't.
+  const [notice, setNotice] = useState<string | null>(null);
+  // Every save is stamped, and only the newest one's outcome is applied.
+  //
+  // Without this, two clicks inside one round trip diverge from the server in
+  // both directions: a stale SUCCESS can re-fill a star the athlete just
+  // cleared (responses do not have to complete in request order), and a stale
+  // ROLLBACK restores a snapshot that predates every later edit, emptying the
+  // panel while the server holds a full list. Both are ordinary — setting
+  // three focus techniques is one round trip's worth of clicking.
+  const saveSeq = useRef(0);
   const [error, setError] = useState<string | null>(null);
   const [bucket, setBucket] = useState<Bucket>("all");
   const [search, setSearch] = useState("");
@@ -87,12 +107,36 @@ export default function ProficiencyPage() {
     const c = new AbortController();
     abortRef.current = c;
     try {
-      const data = await getBjjProficiency(getToken, c.signal);
+      // allSettled, NOT all. These are two independent reads and the focus
+      // list is the secondary one — with Promise.all a 500 from it rejected
+      // the whole load, so the funnel went blank under a banner saying the
+      // funnel failed. A comment here used to claim this exact property while
+      // the code did the opposite.
+      const [proficiency, list] = await Promise.allSettled([
+        getBjjProficiency(getToken, c.signal),
+        getBjjFocus(getToken, c.signal),
+      ]);
       if (c.signal.aborted) return;
-      setRows(data.techniques);
-      setSummary(data.summary);
-      setError(null);
+
+      if (proficiency.status === "fulfilled") {
+        setRows(proficiency.value.techniques);
+        setSummary(proficiency.value.summary);
+      }
+      if (list.status === "fulfilled") setFocus(list.value);
+
+      // Only the primary read's failure blanks anything. A focus read that
+      // fails leaves the funnel readable and the stars simply unfilled, which
+      // is a better failure than an empty page.
+      if (proficiency.status === "rejected") {
+        const err = proficiency.reason;
+        setError(err instanceof Error ? err.message : String(err));
+        setRows((prev) => prev ?? []);
+      } else {
+        setError(null);
+      }
     } catch (err) {
+      // allSettled does not reject, so this is an abort or a bug rather than
+      // a failed request.
       if (c.signal.aborted) return;
       setError(err instanceof Error ? err.message : String(err));
       // Keep whatever was last loaded. An empty list is only right for the
@@ -110,6 +154,85 @@ export default function ProficiencyPage() {
     load();
     return () => abortRef.current?.abort();
   }, [load]);
+
+  const focusIDs = useMemo(() => new Set(focus.map((f) => f.technique_id)), [focus]);
+
+  /**
+   * The single writer. Optimistic, then reconciled with the server's list —
+   * which is necessary, because only the server knows each entry's real
+   * `started_on`.
+   *
+   * The sequence stamp is what makes that safe. `.then(setFocus)` alone lets a
+   * slow earlier response overwrite a newer local edit, and a per-click
+   * `previous` snapshot lets a late failure roll back past edits that already
+   * succeeded. Discarding every outcome but the newest one's fixes both, and
+   * leaves the last write the athlete made as the one that stands.
+   */
+  const save = useCallback(
+    (next: BjjFocus[]) => {
+      setNotice(null);
+      const previous = focus;
+      const seq = ++saveSeq.current;
+      setFocus(next);
+      setBjjFocus(
+        getToken,
+        next.map((f) => f.technique_id),
+      )
+        .then((stored) => {
+          if (seq !== saveSeq.current) return;
+          setFocus(stored);
+        })
+        .catch((err) => {
+          if (seq !== saveSeq.current) return;
+          setFocus(previous);
+          setNotice(err instanceof Error ? err.message : String(err));
+        });
+    },
+    [focus, getToken],
+  );
+
+  /**
+   * Toggling focus from the table, beside the numbers that justify it.
+   *
+   * Same pattern and the same reasoning as pinning on the Records page: on a
+   * wide screen the choice and the thing being chosen can sit side by side, so
+   * you decide what to work on *while looking at* the drop-off that says you
+   * should. That is the insights→focus loop the design doc describes, and it
+   * only works if the two are one screen rather than two.
+   */
+  const toggleFocus = useCallback(
+    (p: BjjProficiency) => {
+      const has = focusIDs.has(p.technique_id);
+      if (!has && focus.length >= MAX_BJJ_FOCUS) {
+        setNotice(
+          `A focus list is at most ${MAX_BJJ_FOCUS} — drop one first. Keeping it short is the point.`,
+        );
+        return;
+      }
+      const next = has
+        ? focus.filter((f) => f.technique_id !== p.technique_id)
+        : [
+            ...focus,
+            {
+              technique_id: p.technique_id,
+              name: p.name,
+              position: p.position,
+              category: p.category,
+              // Only the server knows the real one. Empty renders as nothing
+              // rather than as "0 weeks", which would read as a fact.
+              started_on: "",
+            },
+          ];
+      save(next);
+    },
+    [focus, focusIDs, save],
+  );
+
+  /** Remove from the panel, where there is no proficiency row to hand over. */
+  const dropFocus = useCallback(
+    (techniqueID: string) => save(focus.filter((f) => f.technique_id !== techniqueID)),
+    [focus, save],
+  );
 
   const shown = useMemo(() => {
     if (!rows) return [];
@@ -167,6 +290,15 @@ export default function ProficiencyPage() {
         </div>
       )}
 
+      {notice && (
+        <div
+          role="status"
+          className="rounded-card border border-line bg-surface px-4 py-3 text-sm text-text"
+        >
+          {notice}
+        </div>
+      )}
+
       {rows === null ? (
         <p className="text-sm text-text-muted">Loading…</p>
       ) : error && rows.length === 0 ? (
@@ -176,10 +308,19 @@ export default function ProficiencyPage() {
         // have.
         null
       ) : rows.length === 0 ? (
-        <EmptyState />
+        <>
+          {/* Before the empty state, not inside the rows branch. An athlete
+              with no evidence can still have a stored list — the phone is
+              reading it — and this is the only place it can be seen or
+              cleared. */}
+          {focus.length > 0 && <FocusPanel focus={focus} onDrop={dropFocus} />}
+          <EmptyState />
+        </>
       ) : (
         <>
           {summary && <Funnel summary={summary} />}
+
+          <FocusPanel focus={focus} onDrop={dropFocus} />
 
           <div className="flex flex-col gap-3">
             <div
@@ -231,7 +372,12 @@ export default function ProficiencyPage() {
               Nothing in this filter{search.trim() ? " matches that search" : ""}.
             </p>
           ) : (
-            <TechniqueTable rows={shown} total={rows.length} />
+            <TechniqueTable
+              rows={shown}
+              total={rows.length}
+              focusIDs={focusIDs}
+              onToggleFocus={toggleFocus}
+            />
           )}
         </>
       )}
@@ -313,7 +459,17 @@ function Funnel({ summary }: { summary: BjjProficiencySummary }) {
   );
 }
 
-function TechniqueTable({ rows, total }: { rows: BjjProficiency[]; total: number }) {
+function TechniqueTable({
+  rows,
+  total,
+  focusIDs,
+  onToggleFocus,
+}: {
+  rows: BjjProficiency[];
+  total: number;
+  focusIDs: Set<string>;
+  onToggleFocus: (p: BjjProficiency) => void;
+}) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[44rem] border-collapse text-sm">
@@ -327,6 +483,9 @@ function TechniqueTable({ rows, total }: { rows: BjjProficiency[]; total: number
         </caption>
         <thead>
           <tr className="border-b border-line text-left text-xs uppercase tracking-wider text-text-dim">
+            <th scope="col" className="w-10 py-2 pr-2 font-semibold">
+              <span className="sr-only">Working on</span>
+            </th>
             <th scope="col" className="py-2 pr-4 font-semibold">
               Technique
             </th>
@@ -358,6 +517,29 @@ function TechniqueTable({ rows, total }: { rows: BjjProficiency[]; total: number
                 key={p.technique_id}
                 className="border-b border-line-soft last:border-0"
               >
+                <td className="py-2.5 pr-2">
+                  <button
+                    type="button"
+                    onClick={() => onToggleFocus(p)}
+                    aria-pressed={focusIDs.has(p.technique_id)}
+                    // Names the technique, because a screen reader reading
+                    // down a column of "Working on" buttons has nothing to
+                    // bind each one to.
+                    aria-label={`Working on ${p.name}`}
+                    className={[
+                      // min-h/w 36px: px-1.5 py-1 on a 16px glyph lands on
+                      // exactly 24px, WCAG 2.2 SC 2.5.8's floor with no room
+                      // for font-metric variance, on this page's primary
+                      // interaction.
+                      "flex min-h-9 min-w-9 items-center justify-center rounded-control text-base leading-none transition-colors",
+                      focusIDs.has(p.technique_id)
+                        ? "text-lime"
+                        : "text-text-dim hover:text-text-muted",
+                    ].join(" ")}
+                  >
+                    {focusIDs.has(p.technique_id) ? "\u2605" : "\u2606"}
+                  </button>
+                </td>
                 <th
                   scope="row"
                   className="py-2.5 pr-4 text-left font-semibold"
@@ -415,6 +597,87 @@ function TechniqueTable({ rows, total }: { rows: BjjProficiency[]; total: number
       </p>
     </div>
   );
+}
+
+/**
+ * What you are working on, and how long you have been.
+ *
+ * Above the table on purpose: the design doc's loop is insights → focus →
+ * curricula, and the focus is the thing you act on. It also gives the phone's
+ * reflection wizard its one-tap rows, so this panel is the only place that
+ * list can be set.
+ */
+function FocusPanel({ focus, onDrop }: { focus: BjjFocus[]; onDrop: (id: string) => void }) {
+  if (focus.length === 0) {
+    return (
+      <section
+        aria-labelledby="focus-heading"
+        className="rounded-card border border-dashed border-line bg-surface p-5"
+      >
+        <h2 id="focus-heading" className="font-semibold">
+          Not working on anything specific
+        </h2>
+        <p className="mt-1 max-w-xl text-sm text-text-muted">
+          Star up to {MAX_BJJ_FOCUS} techniques below — ideally ones you have drilled and never
+          taken into a round. They become one-tap rows in the reflection on your phone, so you can
+          record whether they worked without searching the library mid-thought.
+        </p>
+      </section>
+    );
+  }
+  return (
+    <section
+      aria-labelledby="focus-heading"
+      className="rounded-card border border-line-soft bg-surface p-5"
+    >
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 id="focus-heading" className="font-semibold">
+          Working on
+        </h2>
+        <span className="text-xs text-text-muted">
+          {focus.length}/{MAX_BJJ_FOCUS} · one-tap on your phone
+        </span>
+      </div>
+      <ul className="mt-3 flex flex-col gap-2">
+        {focus.map((f) => (
+          <li key={f.technique_id} className="flex items-center gap-3">
+            <span className="min-w-0 flex-1 truncate text-sm font-semibold">{f.name}</span>
+            <span className="text-xs text-text-muted">{weeksOn(f.started_on)}</span>
+            <button
+              type="button"
+              onClick={() => onDrop(f.technique_id)}
+              // Contains the visible word, so "click Done" from speech input
+              // matches (WCAG 2.5.3 Label in Name), while still naming which
+              // row it belongs to.
+              aria-label={`Done with ${f.name}`}
+              className="rounded-control border border-line px-2 py-1 text-xs font-semibold text-text-muted hover:bg-surface-hover"
+            >
+              Done
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/**
+ * "3 weeks" — the whole reason `started_on` survives a re-save on the server.
+ *
+ * An empty string is the optimistic placeholder written before the server
+ * answers; it renders as nothing rather than as "0 weeks", which would be a
+ * number the athlete could read as real.
+ */
+function weeksOn(startedOn: string): string {
+  if (!startedOn) return "";
+  // Parsed as UTC midnight (the format the API sends) and compared in whole
+  // days, so a viewer's timezone cannot shift the count by one.
+  const started = Date.parse(`${startedOn}T00:00:00Z`);
+  if (Number.isNaN(started)) return "";
+  const days = Math.floor((Date.now() - started) / 86_400_000);
+  if (days < 7) return "this week";
+  const weeks = Math.floor(days / 7);
+  return `${weeks} week${weeks === 1 ? "" : "s"}`;
 }
 
 function EmptyState() {

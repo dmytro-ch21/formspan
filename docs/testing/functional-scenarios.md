@@ -2544,6 +2544,44 @@ own, so none of them is redundant with "the FK exists".
   and its timing still push and the row still settles clean.
 
 
+### Setting focus on the proficiency page
+
+- **Starring a technique adds it to the focus list and it survives a reload.**
+  The star, the panel above, and the stored list must agree at all times.
+- **Un-starring removes it**, as does "Done" in the panel — two controls, one
+  list.
+- **Starring a sixth technique refuses**, names the cap, and **does not fire a
+  request**. The server rejects it too; the UI message is a courtesy, not the
+  guard.
+- **A failed save puts the previous list back.** Optimistic update, so a
+  network failure must not leave a filled star next to a list that never
+  changed.
+- **Two rapid toggles settle with the UI matching the server**, in both
+  directions. Responses need not complete in request order: a stale success can
+  re-fill a star just cleared, and a stale rollback can restore a snapshot that
+  predates edits which already succeeded. Star then un-star inside one round
+  trip; and star two techniques where the first save fails and the second
+  succeeds.
+- **A failed focus read must not blank the funnel.** They are two independent
+  reads; the secondary one failing leaves the table readable with the stars
+  simply unfilled.
+- **A cap refusal is not presented as a load failure.** It must not appear
+  under the "Couldn't load your funnel" banner or beside a "Try again" button —
+  nothing failed to load.
+- The panel shows **weeks since `started_on`**, not since the last save —
+  reorder or add an entry and an existing one's count must not reset. That is
+  the property the column exists for and it is enforced server-side.
+- A newly starred technique shows **no** week count until the server answers,
+  never "0 weeks": the optimistic entry has no real `started_on` and a zero
+  would read as a fact.
+- **An empty list renders a first-class empty state**, not an empty box — it is
+  the default for every athlete who has not set one.
+- **A stored list is visible even with no proficiency rows at all.** The phone
+  is reading that list; an athlete whose evidence is empty must still be able
+  to see and clear it.
+- The star column has an accessible name **naming the technique**; a column of
+  identical "Working on" buttons is unusable otherwise.
+
 ### The focus list (`GET`/`PUT /v1/bjj/focus`)
 
 **Happy path**

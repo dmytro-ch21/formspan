@@ -792,6 +792,40 @@ export type BjjProficiencySummary = {
   landed: number;
 };
 
+/**
+ * One technique the athlete is deliberately working on.
+ *
+ * The list is short (max 5) and turns over every few weeks. It is what makes
+ * technique-level capture affordable on the phone: the reflection wizard shows
+ * these as one-tap rows instead of asking anyone to search 466 library entries
+ * mid-reflection.
+ */
+export type BjjFocus = {
+  technique_id: string;
+  name: string;
+  position: string;
+  category: string;
+  /** YYYY-MM-DD. When it JOINED the list — survives reordering and re-saves. */
+  started_on: string;
+};
+
+/** Matches the backend's maxFocus. The cap is the feature: twenty is the library again. */
+export const MAX_BJJ_FOCUS = 5;
+
+export function getBjjFocus(getToken: Token, signal?: AbortSignal): Promise<BjjFocus[]> {
+  return request<{ focus: BjjFocus[] }>(getToken, "/bjj/focus", {}, signal).then(
+    (r) => r.focus ?? [],
+  );
+}
+
+/** Replaces the list wholesale; array order is the athlete's own ranking. */
+export function setBjjFocus(getToken: Token, techniqueIDs: string[]): Promise<BjjFocus[]> {
+  return request<{ focus: BjjFocus[] }>(getToken, "/bjj/focus", {
+    method: "PUT",
+    body: JSON.stringify({ technique_ids: techniqueIDs }),
+  }).then((r) => r.focus ?? []);
+}
+
 export function getBjjProficiency(
   getToken: Token,
   signal?: AbortSignal,

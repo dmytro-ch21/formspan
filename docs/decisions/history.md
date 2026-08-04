@@ -6899,6 +6899,90 @@ inverted — hover text reading as an instruction to restore it.
   are mutation-tested, but nothing has drawn the new block.
 
 
+## 2026-08-03 — Setting the focus, beside the numbers that justify it
+
+The last piece of the three-PR arc. `/dashboard/proficiency` can now set the
+focus list, which is what makes the mobile collapse actually do anything —
+until this, the wizard's "Working on" block was absent for everyone because
+nothing could populate it.
+
+### Where it went, and why it is not its own screen
+
+A star per row in the proficiency table, plus a panel above it. Same pattern
+and the same reasoning as pinning on the Records page: on a wide screen the
+choice and the thing being chosen sit side by side, so you decide what to work
+on **while looking at the drop-off that says you should**. A technique showing
+"drilled 12, tried 0" is one click from becoming this month's focus.
+
+That adjacency is the design doc's insights→focus loop, and it only works if
+the two are one screen. A separate focus editor would make you remember the
+number rather than see it.
+
+Web, per the platform rule: choosing what to work on for the next few weeks is
+planning. The phone reads the list and never writes it.
+
+### `started_on` finally gets read
+
+The panel shows "3 weeks" per entry — the reason that column survives a re-save
+on the server, and until now stored and returned but **rendered** by nothing.
+It is parsed as UTC midnight and compared in whole days, so the count is
+globally consistent: identical everywhere at any instant. Not aligned to the
+viewer's calendar day — someone at UTC-8 sees it tick over at 16:00 on their
+day 6 — which is the right trade for a five-week granularity. The empty-string
+placeholder the optimistic update writes
+renders as nothing rather than as "0 weeks", which would be a number the
+athlete could read as real.
+
+### The cap is enforced in the UI as a refusal, not a silent truncation
+
+Starring a sixth technique sets an error naming the number and does not fire
+the request. The server rejects it too — this is the message, not the guard.
+
+### Three blocking findings, all in the plumbing rather than the idea
+
+**`Promise.all` did the opposite of the comment above it.** The comment
+promised "a failed focus read must not blank the funnel"; `Promise.all` rejects
+the moment either leg does. A 500 from the secondary read took the whole page
+down, under a banner saying the funnel had failed. `allSettled` now applies
+whichever leg resolved, and only the primary read's failure blanks anything.
+
+**Two saves in flight could leave the UI and the server disagreeing, in both
+directions.** Responses need not complete in request order, so a stale *success*
+could re-fill a star just cleared; and a per-click `previous` snapshot meant a
+late *failure* rolled back past edits that had already succeeded — emptying the
+panel while the server held a full list. Both reachable by ordinary clicking:
+setting three focus techniques is one round trip's worth. Every save is now
+stamped and only the newest outcome is applied, so the last write the athlete
+made is the one that stands. Both handlers were also collapsed into one writer,
+since two copies of this logic is how they drifted apart in the first place.
+
+**The cap refusal rendered under "Couldn't load your funnel."** `error` had
+become three channels — load failure, save failure, and the refusal — sharing
+one banner with a "Try again" button. So the one refusal guaranteed to happen
+told the athlete a load had failed that hadn't. Refusals and save failures now
+have their own quieter `role="status"` notice.
+
+### Gaps this leaves
+
+- **You can only focus on a technique you already have evidence for.** The
+  table lists what you have drilled or tried; something you have never touched
+  cannot be starred, so a coach saying "work on the berimbolo" has nowhere to
+  go until you have drilled it once. Adding a library search here is the
+  obvious follow-up and is deliberately not in this PR. The panel itself is now
+  rendered whenever a list exists, even with no evidence at all, so an athlete
+  can always see and clear what their phone is reading.
+- **No ordering control.** The list is the order techniques were starred, and
+  the API preserves whatever order it is sent — but nothing lets the athlete
+  rearrange it. Fine while the phone shows all five as equals; wrong once
+  anything treats the first entry as the primary focus.
+- **No rotation prompt.** The panel shows how many weeks; nothing suggests
+  rotating at four to six, which is the thing the number is for.
+- **Still not rendered.** Every class used was checked against the compiled
+  stylesheet — the defect that shipped two PRs ago was a class that did not
+  exist — but nothing has been seen on screen, because the page is behind Clerk
+  auth.
+
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
