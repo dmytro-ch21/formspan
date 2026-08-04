@@ -9134,6 +9134,75 @@ were mutation-checked: each goes red when the code it covers is broken.
   line that the button overlaps. That is the next item on the user's list.
 
 
+## 2026-08-04 — A workout template can be renamed, which needed a verb that did not exist
+
+"I can't edit the title of the Workout Templates" turned out not to be a
+missing button. `/v1/workouts/{id}` had `GET` and `DELETE`, `/items` had `PUT`,
+and **there was no third verb** — the name was fixed at creation, on every
+client, by the contract. The only correction available was to rebuild the
+template, which mints a new id and orphans every plan pointing at the old one.
+
+**`PATCH /v1/workouts/{workoutID}`, not a field on `PUT /items`.** Renaming and
+re-ordering happen at different moments. Folded together, correcting a typo
+would mean resending the whole item list — and a client holding a slightly
+stale copy would silently rewrite the workout while doing it. Keeping them
+apart also keeps the hot path cheap: the item list is written on a debounce as
+you edit, and a combined verb would put the name on every one of those writes.
+
+The handler mirrors the session module's rename exactly, including the two
+things that module got wrong first: a blank name is **refused rather than
+stored** (it renders as a gap in the template list with nothing to identify or
+tap, and every plan pointing at it loses its label too), and the length cap
+counts **runes, not bytes** — `len()` on a Go string would cap a Portuguese or
+Japanese name at a third of the published 120, in a product whose domain
+vocabulary is "kesa gatame" and "raspagem".
+
+The repository's ownership gate is the load-bearing part. Ids here are
+client-supplied, so without `requireOwner` any id you can guess is renameable —
+this module has already had to close that hole once. The test proves it against
+a **public** workout, so a stranger can genuinely read the row and the refusal
+has to come from the write gate rather than from invisibility; it then asserts
+the name did not move. Deleting the gate turns it red.
+
+**Offline, on mobile, with its own flag.** `workout_cache` gains `name_dirty`
+at schema v16, separate from `dirty`, because the two are cleared by different
+requests — `dirty` is owed to `PUT /items`, `name_dirty` to the new `PATCH`.
+One flag for both would make every item edit also PATCH the name. The migration
+defaults it to **0**, and that direction is the whole risk: every existing row's
+name is whatever the server already holds, so none is owed anything. Defaulting
+to 1 would make the first sync after upgrade re-send every cached template's
+name, including VOLA's own ownerless ones, which the server refuses with a 403
+the outbox would then hold forever. There is a test for exactly that.
+
+The push renames **before** replacing items. Both calls return the workout, and
+with the rename second a failure there leaves the server holding new items under
+the old name — the confusing half-state. This order fails the other way: the
+name lands, the items retry, the row stays dirty.
+
+**Both clients, because both own this.** Mobile gets the "tap to rename" row the
+BJJ session screen established — the name moves into the body, since a native
+header title is not a control and cannot be tapped. Web gets an editable `h1`,
+which stays an `h1` in both states so the page does not lose its only level-1
+landmark mid-edit; Escape abandons, since a blur-to-save field otherwise offers
+no way out that does not write. Web has no offline store, so there the server IS
+the save and a refusal restores the old name rather than leaving a rename on
+screen that never happened.
+
+### Gaps this leaves
+
+- **Only the name.** `notes`, `goal` and `visibility` are still fixed at
+  creation. `PATCH` is the natural home for them and the shape already allows
+  it, but adding fields nobody asked for would have been speculative — the
+  request was the title.
+- **A rename does not renumber anything.** Sessions already logged from the
+  template keep the name they were started with, which is correct (they record
+  what happened) but means the history list and the template can disagree after
+  a rename. Nothing surfaces that.
+- **The web rename is not device-verified against a running backend** the way
+  the mobile one is; it typechecks and builds, and the API underneath it has
+  integration tests, but the browser flow was not exercised end to end here.
+
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

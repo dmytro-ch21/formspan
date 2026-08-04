@@ -172,6 +172,7 @@ func main() {
 	mux.Handle("POST /v1/workouts", verifier.RequireAuth(http.HandlerFunc(workoutHandler.Create)))
 	mux.Handle("GET /v1/workouts/{workoutID}", verifier.RequireAuth(http.HandlerFunc(workoutHandler.Get)))
 	mux.Handle("PUT /v1/workouts/{workoutID}/items", verifier.RequireAuth(http.HandlerFunc(workoutHandler.ReplaceItems)))
+	mux.Handle("PATCH /v1/workouts/{workoutID}", verifier.RequireAuth(http.HandlerFunc(workoutHandler.Rename)))
 	mux.Handle("DELETE /v1/workouts/{workoutID}", verifier.RequireAuth(http.HandlerFunc(workoutHandler.Delete)))
 	mux.Handle("GET /v1/admin/users", verifier.RequireAdmin(http.HandlerFunc(activityHandler.AdminListUsers)))
 	mux.Handle("GET /v1/admin/users/{userID}", verifier.RequireAdmin(http.HandlerFunc(activityHandler.AdminGetUser)))

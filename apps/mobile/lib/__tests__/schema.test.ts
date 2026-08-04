@@ -13,7 +13,7 @@ import { migratedFixture, openFixture } from './support/sqlite';
 it('a fresh install ends up at the current schema version', async () => {
   const db = await migratedFixture();
   const row = db.raw.prepare('PRAGMA user_version').get() as { user_version: number };
-  expect(row.user_version).toBe(15);
+  expect(row.user_version).toBe(16);
 });
 
 it('local_sessions has the tombstone column', async () => {
@@ -107,7 +107,7 @@ it('re-running migrate on the SAME database is idempotent', async () => {
   db.raw.exec('PRAGMA user_version = 0');
 
   await expect(migrate(db as never)).resolves.toBeUndefined();
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 15 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 16 });
 });
 
 it('upgrades a v6-shaped database by adding the column', async () => {
@@ -141,7 +141,7 @@ it('upgrades a v6-shaped database by adding the column', async () => {
   const cols = (db.raw.prepare('PRAGMA table_info(local_sessions)').all() as { name: string }[])
     .map((c) => c.name);
   expect(cols).toContain('deleted_at');
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 15 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 16 });
 });
 
 it('upgrades a v7-shaped database by adding the ownership columns', async () => {
@@ -162,7 +162,7 @@ it('upgrades a v7-shaped database by adding the ownership columns', async () => 
   const cols = (db.raw.prepare('PRAGMA table_info(workout_cache)').all() as { name: string }[])
     .map((c) => c.name);
   expect(cols).toEqual(expect.arrayContaining(['owner_user_id', 'visibility']));
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 15 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 16 });
 });
 
 it('an upgraded row is backfilled as owned by the athlete it is filed under', async () => {
@@ -254,4 +254,31 @@ it('an upgraded pref is NOT owed, and an upgraded exercise has no fabricated pay
   expect(db.raw.prepare('SELECT payload_json FROM exercise_cache').get()).toEqual({
     payload_json: null,
   });
+});
+
+it('workout_cache carries name_dirty on a fresh install', async () => {
+  const db = await migratedFixture();
+  const cols = db.raw.prepare(`PRAGMA table_info(workout_cache)`).all() as { name: string }[];
+  expect(cols.map((c) => c.name)).toContain('name_dirty');
+});
+
+it('upgrading an existing database does not mark every cached name as owed', async () => {
+  // The direction matters and is easy to get backwards. Every row already in
+  // `workout_cache` came FROM the server, so its name is what the server holds
+  // and none of them owes a PATCH. Defaulting to 1 would make the first sync
+  // after upgrade re-send every cached template's name — including VOLA's own
+  // ownerless ones, which the server refuses with a 403 that the outbox would
+  // then hold forever.
+  const db = await openFixture();
+  await migrate(db as never);
+  db.raw
+    .prepare(
+      `INSERT INTO workout_cache (id, user_id, sport, name, items_json, cached_at)
+       VALUES ('w1', 'u1', 'strength', 'Legs', '[]', '2026-08-04T00:00:00Z')`,
+    )
+    .run();
+  const row = db.raw
+    .prepare(`SELECT name_dirty FROM workout_cache WHERE id = 'w1'`)
+    .get() as { name_dirty: number };
+  expect(row.name_dirty).toBe(0);
 });

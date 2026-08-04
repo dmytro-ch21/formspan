@@ -225,6 +225,20 @@ export async function replaceItems(
   });
 }
 
+export async function renameWorkout(
+  getToken: TokenGetter,
+  id: string,
+  name: string,
+): Promise<Workout> {
+  // PATCH rather than a field on the items PUT: a rename must not have to
+  // resend the item list, or a client with a slightly stale copy silently
+  // rewrites the workout while correcting a typo.
+  return request<Workout>(getToken, `/workouts/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name }),
+  });
+}
+
 export async function deleteWorkout(
   getToken: TokenGetter,
   id: string,

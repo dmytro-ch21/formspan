@@ -9,6 +9,7 @@ import type { Workout, WorkoutItem } from './workouts';
 import {
   createWorkout,
   deleteWorkout,
+  renameWorkout,
   replaceItems,
 } from './workouts';
 import {
@@ -1332,6 +1333,36 @@ export async function saveLocalWorkoutItems(
 }
 
 /**
+ * Rename a workout template locally. Owed to the server afterwards.
+ *
+ * Trims and refuses a blank, so the local row can never hold something the
+ * server will reject — an outbox entry that is permanently invalid is worse
+ * than a refused edit, because nothing on the screen ever explains why the
+ * pending count will not go down.
+ *
+ * Returns false rather than throwing on a blank: the caller's response is to
+ * put the old name back and close the field, not to show an alert. A missing
+ * row still throws, because that one is genuinely surprising.
+ */
+export async function renameLocalWorkout(
+  userID: string,
+  id: string,
+  name: string,
+): Promise<boolean> {
+  const trimmed = name.trim();
+  if (trimmed === '') return false;
+  const db = await getDb();
+  const now = new Date().toISOString();
+  const r = await db.runAsync(
+    `UPDATE workout_cache SET name = ?, dirty = 1, name_dirty = 1, updated_at = ?
+     WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+    trimmed, now, id, userID,
+  );
+  if (r.changes === 0) throw new Error('This workout no longer exists on this device.');
+  return true;
+}
+
+/**
  * Delete a workout — a tombstone, same rules as sessions.
  *
  * Always marked, never hard-deleted here: deciding on `remote` at this point
@@ -1428,6 +1459,7 @@ type WorkoutRow = {
   items_json: string;
   visibility: string;
   remote: number;
+  name_dirty: number;
   deleted_at: string | null;
   updated_at: string;
 };
@@ -1498,10 +1530,21 @@ async function pushWorkoutRow(
     // remote deletion. Same guard sessions carry.
     throw new Error('This workout is corrupted on this device and was not synced.');
   }
+  // BEFORE the items, deliberately. Both calls return the workout, and if the
+  // rename went second a failure there would leave the server holding new
+  // items under the old name — the confusing half-state. This order fails the
+  // other way: the name lands, the items retry, and the row stays dirty.
+  //
+  // Guarded on the flag, not sent unconditionally: an ordinary item edit must
+  // not also PATCH the name, which is the extra request per debounced write
+  // that `local_sessions` already learned to avoid.
+  if (row.name_dirty === 1) {
+    await renameWorkout(getToken, row.id, row.name);
+  }
   await replaceItems(getToken, row.id, items);
 
   await db.runAsync(
-    `UPDATE workout_cache SET dirty = 0 WHERE id = ? AND user_id = ?
+    `UPDATE workout_cache SET dirty = 0, name_dirty = 0 WHERE id = ? AND user_id = ?
      -- Only if nothing changed underneath us mid-push, or we would mark a
      -- newer edit as already sent and silently drop it.
      AND updated_at = ?`,

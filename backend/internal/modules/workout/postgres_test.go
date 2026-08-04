@@ -419,3 +419,59 @@ func TestListCapDoesNotEvictTheCallersOwnWorkouts(t *testing.T) {
 		t.Error("the cap evicted the caller's own workout in favour of strangers' public ones")
 	}
 }
+
+// Rename is the third write verb, and it needs the same ownership gate the
+// other two have — the ids are client-supplied, so without it any id you can
+// guess is renameable. This module has already had to close that hole once.
+func TestRename_IsOwnerOnlyAndKeepsItems(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	cleanupWorkout(t, pool, "wk-rename-1")
+
+	if _, err := repo.Create(ctx, strengthWorkout("wk-rename-1", "user_owner", VisibilityPublic)); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// Public, so a stranger can READ it — the refusal has to come from the
+	// write gate, not from the row being invisible.
+	if _, err := repo.Get(ctx, "user_stranger", "wk-rename-1"); err != nil {
+		t.Fatalf("a public workout should be readable by a stranger: %v", err)
+	}
+	if _, err := repo.Rename(ctx, "user_stranger", "wk-rename-1", "Stolen"); !errors.Is(err, ErrForbidden) {
+		t.Errorf("a stranger renamed a public workout: %v", err)
+	}
+	// And the name genuinely did not move.
+	after, err := repo.Get(ctx, "user_owner", "wk-rename-1")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if after.Name == "Stolen" {
+		t.Error("the refused rename was written anyway")
+	}
+
+	before := after.Items
+	renamed, err := repo.Rename(ctx, "user_owner", "wk-rename-1", "Maestro Push Day")
+	if err != nil {
+		t.Fatalf("owner rename: %v", err)
+	}
+	if renamed.Name != "Maestro Push Day" {
+		t.Errorf("name = %q, want %q", renamed.Name, "Maestro Push Day")
+	}
+	// The whole point of a separate verb: renaming must not disturb the item
+	// list. Folded into ReplaceItems, a rename would have to resend it.
+	if len(renamed.Items) != len(before) {
+		t.Errorf("rename changed the item list: %d items, want %d", len(renamed.Items), len(before))
+	}
+	if renamed.UpdatedAt.Before(renamed.CreatedAt) {
+		t.Error("updated_at was not touched")
+	}
+}
+
+// A workout that does not exist must not be distinguishable from one that
+// exists and is not yours — same reasoning as TestPrivateWorkout_IsNotAnExistenceOracle.
+func TestRename_UnknownIDIsNotFound(t *testing.T) {
+	repo, _ := newTestRepo(t)
+	if _, err := repo.Rename(context.Background(), "user_a", "wk-does-not-exist", "X"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("err = %v, want ErrNotFound", err)
+	}
+}

@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/auth"
@@ -19,6 +21,11 @@ func NewHandler(repo Repository) *Handler { return &Handler{repo: repo} }
 // anything longer is a mistake or an attempt to make the database work for
 // nothing — each item is a statement in a batch.
 const maxItems = 200
+
+// maxNameLen bounds a template's name — the same 120 the session module uses,
+// because the two names are edited by the same people for the same reasons and
+// a template named longer than a session could name is an arbitrary surprise.
+const maxNameLen = 120
 
 // writeErr maps domain errors to the API's error contract in one place, so
 // every handler below reports the same situation the same way.
@@ -183,6 +190,49 @@ func (h *Handler) ReplaceItems(w http.ResponseWriter, r *http.Request) {
 	}
 
 	wk, err := h.repo.ReplaceItems(r.Context(), claims.UserID, r.PathValue("workoutID"), req.Items)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	apihttp.WriteJSON(w, http.StatusOK, wk)
+}
+
+type renameRequest struct {
+	Name string `json:"name"`
+}
+
+// Rename changes a template's name.
+//
+// Its own verb rather than a field on `PUT /items`, because renaming and
+// re-ordering happen at different moments: folding them together would make
+// correcting a typo require sending the whole item list back, and a client
+// that got that list slightly wrong would silently rewrite the workout.
+func (h *Handler) Rename(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.ClaimsFromContext(r.Context())
+
+	var req renameRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&req); err != nil {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	// Refused rather than stored: a blank name renders as a gap in the template
+	// list with nothing to identify or tap, and every plan pointing at it loses
+	// its label too.
+	if name == "" {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "name is required")
+		return
+	}
+	// Runes, not bytes — `len()` counts bytes, which would cap a Portuguese or
+	// Japanese name at a third of the published limit, in a product whose
+	// domain vocabulary is exactly those languages. Same constant and same
+	// reasoning as the session module's rename.
+	if utf8.RuneCountInString(name) > maxNameLen {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "name is too long")
+		return
+	}
+
+	wk, err := h.repo.Rename(r.Context(), claims.UserID, r.PathValue("workoutID"), name)
 	if err != nil {
 		writeErr(w, r, err)
 		return

@@ -34,6 +34,7 @@ import {
   cachedWorkouts,
   deleteLocalWorkout,
   dirtyWorkoutIDs,
+  renameLocalWorkout,
   saveLocalWorkoutItems,
   startLocalSession,
 } from '@/lib/sessionStore';
@@ -55,6 +56,8 @@ export default function WorkoutDetailScreen() {
   const [saving, setSaving] = useState(false);
   const [picking, setPicking] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [draftName, setDraftName] = useState('');
   const { units } = useUnits();
 
   // Compared against the loaded state so Save only appears when something
@@ -130,6 +133,32 @@ export default function WorkoutDetailScreen() {
   useEffect(() => {
     load();
   }, [load]);
+
+  /**
+   * Commit the name, or quietly abandon a blank one.
+   *
+   * Not folded into `save()`, which is item-shaped and only appears when the
+   * item list differs — a rename left the Save button inactive, so a combined
+   * flow would have needed the button live for one of two reasons and dirty
+   * for the other. The API keeps them apart for the same reason.
+   */
+  async function commitRename() {
+    if (!id || !userId) return;
+    const next = draftName.trim();
+    setRenaming(false);
+    if (next === '' || next === workout?.name) return;
+    try {
+      await renameLocalWorkout(userId, id, next);
+      // The local write is the rename; the push is an attempt. Same rule the
+      // items follow, so a plan renamed in a basement is renamed.
+      setWorkout((w) => (w ? { ...w, name: next } : w));
+      requestSync('workout-renamed');
+    } catch (err) {
+      setError(
+        `Couldn't rename on this device: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
 
   async function save() {
     if (saving || !id) return;
@@ -253,6 +282,64 @@ export default function WorkoutDetailScreen() {
       />
 
       <ScrollView contentContainerStyle={styles.scroll}>
+        {/*
+          The name, and the ability to change it.
+
+          It lives here rather than only in the navigation bar because a native
+          header title is not a control — it cannot be tapped, and until now
+          that was the whole reason a template named in a hurry on the gym
+          floor stayed that way. Rebuilding it was the only correction, and
+          that loses every plan pointing at the old id.
+
+          Shown read-only when the workout is not yours, on the same rule as
+          the item list: a VOLA template and another athlete's public one are
+          both view-only, and the API refuses the write either way.
+        */}
+        {renaming ? (
+          <View style={styles.renameRow}>
+            <TextInput
+              value={draftName}
+              onChangeText={setDraftName}
+              autoFocus
+              selectTextOnFocus
+              style={styles.renameInput}
+              placeholder="Workout name"
+              placeholderTextColor={vola.textMuted}
+              // Matches the server's maxNameLen. A longer name is a permanent
+              // 400, and a permanent rejection on the push path strands the
+              // row in the outbox with nothing on screen explaining why.
+              maxLength={120}
+              returnKeyType="done"
+              onSubmitEditing={commitRename}
+              accessibilityLabel="Workout name"
+              testID="workout-name-input"
+            />
+            <Pressable
+              onPress={commitRename}
+              hitSlop={12}
+              accessibilityRole="button"
+              testID="workout-name-save"
+            >
+              <Text style={styles.renameAction}>Done</Text>
+            </Pressable>
+          </View>
+        ) : canEdit ? (
+          <Pressable
+            onPress={() => {
+              setDraftName(workout.name);
+              setRenaming(true);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel={`${workout.name}. Rename this workout`}
+            testID="workout-rename"
+          >
+            <Text style={styles.title}>{workout.name}</Text>
+            <Text style={styles.renameHint}>Tap to rename</Text>
+          </Pressable>
+        ) : (
+          <Text style={styles.title}>{workout.name}</Text>
+        )}
+
         <Text style={styles.meta}>
           {workout.sport}
           {workout.goal ? ` · ${workout.goal}` : ''}
@@ -649,6 +736,19 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   centre: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   scroll: { padding: 16, gap: 12, paddingBottom: 48 },
+  title: { fontSize: 24, fontWeight: '800' },
+  renameHint: { fontSize: 12, color: vola.textMuted, marginTop: 2 },
+  renameRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  renameInput: {
+    flex: 1,
+    fontSize: 22,
+    fontWeight: '800',
+    color: vola.text,
+    borderBottomWidth: 1,
+    borderBottomColor: vola.lineSoft,
+    paddingVertical: 4,
+  },
+  renameAction: { fontSize: 16, fontWeight: '700', color: vola.lime },
   meta: { color: vola.textMuted, fontSize: 13, textTransform: 'capitalize' },
   readonly: {
     fontSize: 13,

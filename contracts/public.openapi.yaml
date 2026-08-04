@@ -3066,6 +3066,55 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404":
           $ref: "#/components/responses/NotFound"
+    patch:
+      summary: Rename a workout (owner only)
+      operationId: renameWorkout
+      description: >
+        Changes the name and nothing else. Its own verb rather than a field on
+        PUT /items, because renaming and re-ordering happen at different
+        moments — folded together, correcting a typo would mean resending the
+        whole item list, and a client that got that list slightly wrong would
+        silently rewrite the workout. A blank name is refused rather than
+        stored: it renders as a gap in the template list with nothing to
+        identify or tap, and every plan pointing at it loses its label too.
+      parameters:
+        - name: workoutID
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  # Counted in Unicode code points, not bytes — the domain
+                  # vocabulary here is Portuguese and Japanese.
+                  maxLength: 120
+                  example: Maestro Push Day
+      responses:
+        "200":
+          description: The renamed workout, items untouched.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Workout" }
+        "400":
+          description: Missing, blank or over-long name.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: Visible to you, but not yours to change.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404": { $ref: "#/components/responses/NotFound" }
     delete:
       summary: Delete a workout (owner only)
       operationId: deleteWorkout

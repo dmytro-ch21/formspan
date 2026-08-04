@@ -3824,3 +3824,52 @@ decides when the shown week is corrected.
 - Every grid cell speaks its full date plus "today" and/or "planned" — a cell
   that reads out as a bare number tells a screen reader nothing, and the dot is
   the whole content of that grid.
+
+## Renaming a workout template (`PATCH /v1/workouts/{id}`, mobile + web)
+
+The name was fixed at creation until this existed — there was no verb for it.
+These cover the new endpoint, its ownership gate, and the offline flag that
+carries a rename made without signal.
+
+### Happy path
+
+- Open a workout you own, tap/click the title, type a new name, confirm — the
+  title updates, and it is still the new name after a reload.
+- The item list is unchanged by a rename: the same exercises in the same order,
+  with the same targets.
+- Plans pointing at that template show the new name (they resolve it from the
+  cache on each read rather than storing a copy).
+- Web: Enter commits, blur commits, **Escape abandons** and leaves the old name.
+- Mobile: renaming offline updates the row immediately; the change reaches the
+  server on the next sync, and the pending count returns to zero afterwards.
+
+### Edge cases & errors
+
+- A blank or whitespace-only name is refused, and the old name stays. On mobile
+  it is refused *locally* — it must never enter the outbox, or the pending
+  count never reaches zero and nothing on screen explains why.
+- Leading/trailing whitespace is trimmed, so the stored name matches what the
+  server stores.
+- A name of exactly 120 characters is accepted; 121 is refused. Counted in
+  **code points**, so 120 Japanese or accented characters must be accepted —
+  a byte-based cap would refuse at roughly 40.
+- Renaming a workout deleted from another device reports honestly rather than
+  silently succeeding.
+- Web: a server refusal restores the previous name rather than leaving the new
+  one on screen.
+- An ordinary item edit must NOT also send a rename — worth asserting at the
+  request level, since it is one extra request per debounced keystroke.
+- After a rename AND an item edit, the rename is sent first: the reverse leaves
+  the server holding new items under the old name.
+
+### Auth / security
+
+- A workout you can SEE but do not own (a VOLA template, or another athlete's
+  public one) offers no rename control, and `PATCH` refuses it with 403 if
+  called directly — the ids are client-supplied, so the gate is the only thing
+  standing between a guessed id and someone else's template.
+- A workout id that does not exist returns 404, and must not be
+  distinguishable from one that exists and is not yours.
+- Upgrading an install with cached templates must not mark their names as
+  owed — otherwise the first sync re-sends every one, including ownerless VOLA
+  templates the server refuses.

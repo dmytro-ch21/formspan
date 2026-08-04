@@ -113,6 +113,14 @@ const CREATE_WORKOUT_CACHE = `
     -- time, which is the ordinary state while you edit one.
     dirty INTEGER NOT NULL DEFAULT 0,
     remote INTEGER NOT NULL DEFAULT 1,
+    -- 1 while this row's NAME has not reached the server.
+    --
+    -- Separate from 'dirty' because the two are cleared by different requests:
+    -- 'dirty' is owed to PUT /items, this is owed to PATCH /workouts/{id}. One
+    -- flag for both would make every item edit also PATCH the name, which is
+    -- the extra request per debounced write that local_sessions already
+    -- learned to avoid.
+    name_dirty INTEGER NOT NULL DEFAULT 0,
     -- Set when deleted here; the row survives until the server agrees. Same
     -- tombstone rules as sessions, for the same reason: a hard delete leaves
     -- nothing carrying the intent when the push fails.
@@ -223,7 +231,7 @@ const CREATE_PLANNED = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 15;
+const SCHEMA_VERSION = 16;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -542,6 +550,22 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     await db.execAsync(
       `UPDATE planned_sessions SET updated_at = created_at WHERE updated_at = '';`,
     );
+  }
+
+  if (current < 16) {
+    // v15 -> v16: a workout template's name becomes editable.
+    //
+    // Until now the name was fixed at creation — the API had no verb for it
+    // (`PUT /items`, `DELETE`, and nothing else), so a template named in a
+    // hurry on the gym floor stayed that way and the only correction was to
+    // rebuild it and lose every plan pointing at it.
+    //
+    // Defaults to 0, and that direction matters: every existing row's name is
+    // whatever the server already holds, so none of them is owed a PATCH.
+    // Defaulting to 1 would make the first sync after upgrade re-send every
+    // cached template's name — including VOLA's own ownerless ones, which the
+    // server would refuse with a 403 the outbox would then have to hold.
+    await addColumnIfMissing(db, 'workout_cache', 'name_dirty', 'INTEGER NOT NULL DEFAULT 0');
   }
 
   await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION};`);
