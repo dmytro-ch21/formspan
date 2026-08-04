@@ -1810,6 +1810,25 @@ components:
         tried_live: { type: integer, description: How many were ever taken into a live round. }
         landed: { type: integer, description: How many ever worked live. }
 
+    Focus:
+      type: object
+      description: >
+        One technique the athlete is deliberately working on. The list is short
+        by design (at most 5) and turns over every few weeks.
+      required: [technique_id, name, position, category, started_on]
+      properties:
+        technique_id: { type: string, example: armbar-from-guard }
+        name: { type: string, example: Armbar from Guard }
+        position: { type: string, example: Guard - Bottom }
+        category: { type: string, example: Submission }
+        started_on:
+          type: string
+          format: date
+          description: >
+            When this technique JOINED the list. Preserved across re-saves, so
+            reordering or adding an entry does not reset it — it is what makes
+            "you have been on this five weeks, consider rotating" answerable.
+
   headers:
     ETag:
       description: >
@@ -2464,6 +2483,79 @@ paths:
         "204": { description: Removed. }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+
+  /bjj/focus:
+    get:
+      summary: The techniques the athlete is currently working on
+      operationId: getBjjFocus
+      description: >
+        Read by the reflection wizard, which surfaces these as one-tap chips in
+        the live grid so recording an outcome for one IS the grid row rather
+        than a second row beside it. That is why the list exists: it collapses
+        two capture paths for the same event into one.
+      parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
+      responses:
+        "200":
+          description: The caller's focus list, in their own order.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [focus]
+                properties:
+                  focus:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Focus"
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+        "304":
+          $ref: "#/components/responses/NotModified"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    put:
+      summary: Replace the focus list
+      operationId: setBjjFocus
+      description: >
+        Replaces the list wholesale, so a retry after a partial failure
+        converges rather than duplicating. Array order is the athlete's own
+        ranking and is preserved. An empty array clears the list, which is a
+        normal thing to do at the end of a block. At most 5 techniques, no
+        repeats; every id must exist in the library.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [technique_ids]
+              properties:
+                technique_ids:
+                  type: array
+                  maxItems: 5
+                  items: { type: string }
+                  example: [armbar-from-guard, triangle-from-guard]
+      responses:
+        "200":
+          description: >
+            The stored list, read back — it carries the library names and each
+            entry's started_on, which the client cannot know.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [focus]
+                properties:
+                  focus:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Focus"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /bjj/proficiency:
     get:

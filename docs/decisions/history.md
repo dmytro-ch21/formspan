@@ -6647,6 +6647,101 @@ and ran the whole backend suite against it green.
   automate. Worth a look before it is trusted.
 
 
+## 2026-08-03 — The focus list, and unbuilding a redundancy
+
+Raised by the user, and correct: the reflection wizard had started asking for
+the same thing twice. The drilled step captured tried/landed *per technique*;
+the live grid captured scored/conceded *per category*. Hit one armbar and there
+were two places to record it.
+
+The previous PR met this by writing a **convention** — technique-tagged rows
+are the specific record, untagged the catch-all — and teaching the query which
+to read. That was papering over it. Two capture paths for one event means the
+model is wrong, not the query.
+
+### What the data is actually for
+
+Laying the deferred features against what each one needs makes the answer
+obvious:
+
+| feature | needs |
+| --- | --- |
+| position heatmap ("where do I get stuck") | position + outcome. **No technique.** |
+| gap detection | position graph + which edges have evidence |
+| technique funnel | technique + stage |
+| gameplan | curation over the above |
+
+The design doc's own model is positions-as-nodes, techniques-as-edges, and an
+edge already knows its position — a technique row carries one. So the category
+grid and the technique funnel are **not two datasets. They are one dataset at
+two resolutions.** You capture low-resolution always, and high-resolution only
+where it earns its cost.
+
+### The asymmetry that decides where technique detail goes
+
+Position/category outcomes are cheap — a 5×2 grid of taps, no typing — and feed
+the two highest-value questions in the sport. Technique-level data is expensive:
+naming one means searching 466 entries. Across the whole library that data is
+mostly noise; across the three-to-five things you are actually developing it is
+the most valuable evidence in the system.
+
+So technique capture stops being a search step and becomes **a short focus
+list**, surfaced as one-tap chips inside the same grid. A focus technique's chip
+*is* the row. There is no second place to record it, and the redundancy is gone
+structurally rather than by convention.
+
+This is the design doc's own "focus mode" — the tier it calls highest-leverage
+and cheapest to build. Building it collapses the redundancy instead of managing
+it, and it is the thing curricula later drop into with no new plumbing, since a
+curriculum step is just a pre-authored focus.
+
+### `started_on`, and the edit that would have destroyed it
+
+The column exists so "you have been on this five weeks, consider rotating" is
+answerable. Which makes the obvious implementation wrong: `SetFocus` replaces
+the list wholesale, and a delete-then-insert would re-stamp every entry with
+today's date on **every reorder** — the most ordinary edit there is. The clock
+would reset constantly and nothing would report it.
+
+So the write upserts on `(user_id, technique_id)` updating `position` **only**,
+then prunes what is no longer listed. A test backdates an entry 35 days,
+re-saves the list with a new technique in front of it, and asserts the old
+entry's date survived while the new one starts today. The delete-first
+implementation passes every other test in the file and fails that one.
+
+### Cap of five, and the cap is the feature
+
+A focus list holding twenty techniques is the library again, and would put the
+wizard straight back to searching. Coaches structure development a few things at
+a time; the constant enforces that rather than describing it.
+
+### Two honest notes on what this leaves
+
+- **`drilled` counts across the library are near-worthless long-run.** What you
+  drilled is a record of your coach's curriculum, not your development — you did
+  not choose it. Its only real job is being the denominator in the drop-off.
+  Worth keeping for focus techniques; it should stop being the funnel's entry
+  point, which is the next PR.
+- **Nothing captures who you rolled with**, and it is probably the highest-value
+  missing axis. "Landed a triangle" against a fresh white belt and against a
+  brown belt are the same row today. One tap per session — mostly higher / same
+  / lower — would multiply the meaning of every outcome already recorded. The
+  design doc names it ("hit-live vs a same-rank partner") and nothing implements
+  it.
+
+### Gaps this leaves
+
+- **Backend only.** Nothing sets or reads a focus list yet — the web authoring
+  surface and the mobile capture collapse are the next two PRs, and the
+  redundancy stays until the second of them lands.
+- **No rotation prompt.** `started_on` is stored and returned; nothing reads it
+  to suggest rotating.
+- **No focus history.** Removing a technique from the list deletes the row, so
+  "what was I working on in June" is not answerable. Deliberate for now — the
+  evidence in `bjj_session_tags` survives regardless, which is the part that
+  matters.
+
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

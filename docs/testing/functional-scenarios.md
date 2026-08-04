@@ -2520,6 +2520,44 @@ own, so none of them is redundant with "the FK exists".
   and its timing still push and the row still settles clean.
 
 
+### The focus list (`GET`/`PUT /v1/bjj/focus`)
+
+**Happy path**
+
+- `PUT` replaces wholesale: saving `[c, a]` then `[a, b]` leaves exactly `a, b`.
+  Merge semantics would make removing a technique impossible.
+- **Array order is the athlete's ranking and comes back unchanged.** Assert with
+  a list that is neither alphabetical nor id-order, or a `ORDER BY technique_id`
+  passes by accident.
+- The response carries library `name`/`position`/`category`, so a client renders
+  the list without a second fetch.
+
+**Edge cases and errors**
+
+- **A re-save must NOT reset `started_on`.** The property the column exists for.
+  Backdate an entry, re-save the list with a new technique in front of it, and
+  assert the old entry's date survived while the new one is today. A
+  delete-then-insert implementation passes every other scenario here and fails
+  only this one — and it fails silently in production, resetting the rotation
+  clock on every reorder.
+- An **empty array clears the list** — finishing a block is normal and must be
+  expressible. Returns `[]`, never `null`.
+- More than 5 techniques → 400, and the message names the number, because the
+  cap is the feature rather than a limit.
+- A repeated technique → 400. Without the check the primary key silently
+  collapses it and the client's list and the stored one disagree about length.
+- An unknown technique id → 400 (not 500), **and the whole save rolls back** —
+  a partially applied list leaves the athlete with one they never asked for.
+- An empty-string id → 400.
+
+**Auth and security**
+
+- Self-scoped, no path parameter. Another athlete's list must never be readable.
+- **A save must not prune anyone else's list.** Seed two athletes, replace one's
+  list, assert the other's is untouched — the delete is the easiest place to
+  drop a `user_id` and the easiest to not notice.
+- Unauthenticated → 401.
+
 ### The technique funnel, read back (`GET /v1/bjj/proficiency`, `/dashboard/proficiency`)
 
 **Happy path**

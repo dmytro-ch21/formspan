@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/auth"
@@ -171,4 +172,85 @@ func (h *ProficiencyHandler) List(w http.ResponseWriter, r *http.Request) {
 		// numbers cannot disagree with the list under them.
 		"summary": SummariseProficiency(rows),
 	})
+}
+
+// FocusHandler serves the athlete's current working set.
+type FocusHandler struct {
+	repo FocusRepository
+}
+
+func NewFocusHandler(repo FocusRepository) *FocusHandler {
+	return &FocusHandler{repo: repo}
+}
+
+// Get is self-scoped: the caller's own list.
+func (h *FocusHandler) Get(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.ClaimsFromContext(r.Context())
+
+	list, err := h.repo.Focus(r.Context(), claims.UserID)
+	if err != nil {
+		apihttp.WriteInternal(w, r, "bjj", err)
+		return
+	}
+	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"focus": list})
+}
+
+type focusRequest struct {
+	TechniqueIDs []string `json:"technique_ids"`
+}
+
+// Set replaces the list wholesale.
+func (h *FocusHandler) Set(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.ClaimsFromContext(r.Context())
+
+	var body focusRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxFocusBody)).Decode(&body); err != nil {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "malformed request body")
+		return
+	}
+	if len(body.TechniqueIDs) > maxFocus {
+		// Names the number rather than just refusing. The cap is the feature —
+		// a list of twenty is the library again — so the message should say
+		// what the rule is.
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"a focus list is at most "+strconv.Itoa(maxFocus)+" techniques")
+		return
+	}
+	// Duplicates would be silently collapsed by the primary key, leaving the
+	// client's list and the stored one disagreeing about length with nothing
+	// reporting it.
+	seen := make(map[string]bool, len(body.TechniqueIDs))
+	for _, id := range body.TechniqueIDs {
+		if id == "" {
+			apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+				"technique_ids must not contain an empty id")
+			return
+		}
+		if seen[id] {
+			apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+				"technique_ids must not repeat a technique")
+			return
+		}
+		seen[id] = true
+	}
+
+	if err := h.repo.SetFocus(r.Context(), claims.UserID, body.TechniqueIDs); err != nil {
+		if errors.Is(err, ErrInvalidInput) {
+			apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+				"technique_ids must all name a technique in the library")
+			return
+		}
+		apihttp.WriteInternal(w, r, "bjj", err)
+		return
+	}
+
+	// Read back rather than echoing the request: the response carries the
+	// library names and each entry's started_on, which the client needs and
+	// only the database knows.
+	list, err := h.repo.Focus(r.Context(), claims.UserID)
+	if err != nil {
+		apihttp.WriteInternal(w, r, "bjj", err)
+		return
+	}
+	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"focus": list})
 }
