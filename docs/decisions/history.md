@@ -9263,6 +9263,101 @@ screen that never happened.
   integration tests, but the browser flow was not exercised end to end here.
 
 
+## 2026-08-04 — The Plan screen's chrome stops shouting, and the button stops sitting on the text
+
+Three complaints about one screen — "My workouts / Shared on top is rough and
+ugly", "New Workout is too bold", "we need more graceful design" — and they turn
+out to be one problem: **everything on this screen was drawn at the same
+weight.** The scope switch was two full-width pills whose selected half took the
+accent as a solid fill, sitting directly above a full-width accent slab. Two
+lime bars, one above the other, neither reading as more important than the
+other, and no way to tell which one was the thing you press to *do* something.
+
+**The scope switch is chrome, not an action.** Choosing between two views of the
+same list is navigation; it does not deserve the colour reserved for "this
+button does something". It becomes a tab strip: a hairline under the row and a
+2pt accent bar under the selected half, with the label in `accent.ink`.
+
+**It was a raised thumb first, and review caught two things wrong with that.**
+Putting `accent.ink` on `surfaceRaised` measured **4.37:1** on the blue theme —
+under the 4.5 the palette rule requires, and on the one surface
+`validate_palette.mjs` never checks. It asserts `ink` against `surface` only, so
+the gate was green and structurally blind to it. Moving the label to the page
+ground puts it back under the existing assertion; blue, the worst case, is
+5.15:1.
+
+The second problem was worse and I had not seen it at all: `surfaceRaised` on
+`surface` is a **1.09:1** step. The "raised thumb" was invisible, so which
+segment was selected came down to hue alone — and on the blue and purple themes
+the selected label is *darker* than the unselected one, so the active segment
+read as the recessed one. A bar that is present or absent is not a colour, and
+as a non-text indicator it clears 3:1 on every theme (purple, the worst, 3.92).
+
+**The primary action becomes a compact pill in the corner.** `New workout` was
+`left: 16, right: 16` with 16pt of vertical padding — an accent bar the full
+width of the display, which is the loudest thing an interface can do, for what
+is (on a screen already listing your templates) an occasional action. It keeps
+the accent, because it *is* the primary action, but at the size of one.
+
+### The bug hiding underneath the complaint
+
+The full-width bar **sat on top of the planner's "Long-press a planned session
+to remove it" hint**, which is why the screen read as cluttered rather than
+merely loud. The list reserved `TAB_BAR_CLEARANCE` (28pt) below its content
+while the floating bar occupied roughly 68 — so the last ~40pt of scrollable
+content could never be seen at any scroll position. That is a layout bug, not a
+style preference, and no amount of restyling would have fixed it; the list now
+reserves `TAB_BAR_CLEARANCE + FAB_CLEARANCE`, verified on the Simulator by
+scrolling to the end and confirming the final card clears the pill.
+
+The clearance is unconditional even though only the `mine` scope shows the
+pill — otherwise switching scope changes the scroll extent under the reader's
+thumb.
+
+### Gaps this leaves
+
+- **An intermittent SQLite error was seen on this screen and is NOT fixed here.**
+  "Calling the 'execAsync' function has failed → Caused by: cannot rollback - no
+  transaction is active", rendered in the screen's own error slot. It appeared
+  once and did not reproduce; it also reproduces nothing about this change,
+  which touches only `StyleSheet` entries. The likely cause is that
+  `expo-sqlite` shares one connection while `lib/sessionStore.ts` has two
+  `withTransactionAsync` blocks (`cacheWorkouts` and `cacheExercises`) that the
+  Plan and Library screens can enter concurrently — the inner BEGIN is a no-op,
+  the first COMMIT ends the transaction for both, and the second block's error
+  path then rolls back nothing. Left for its own change, with the note that a
+  *caching* failure probably should not be a red banner over the athlete's plan
+  at all.
+- **`validate_palette.mjs` checks `ink` against `surface` and nothing else.**
+  That is why a 4.37:1 label passed the gate. Any future component that puts
+  accent text on `surfaceRaised` — or on a card, or on any ground but the two
+  the validator knows — is unchecked in exactly the same way. Extending it to
+  every ground the palette actually renders on is the real fix; this change
+  only stopped standing on the hole.
+- **A second review round found the font-scale fix was itself half a fix.**
+  `PixelRatio.getFontScale()` is a snapshot of `Dimensions`, so reading it into
+  a module-level `const` freezes it at bundle load — and iOS does not restart
+  the JS bundle when you change the text size and come back. The exact person
+  the formula existed for would have kept the old clearance until the next cold
+  start. It reads `useWindowDimensions().fontScale` now. The same pass caught
+  that the formula is linear in *one* line box, and that at the largest sizes
+  "New workout" is wider than the screen — so the label is `numberOfLines={1}`,
+  which is what keeps the arithmetic true rather than merely tidy.
+- **`FAB_CLEARANCE` is derived from the font scale, and that was a second
+  near-miss.** A fixed 72 clears at default and through XXXL but re-creates the
+  overlap from Accessibility Large upwards, because the label grows and the
+  paddings do not. Nothing in this app caps `maxFontSizeMultiplier`, so that is
+  reachable. It is `44 + 20 * PixelRatio.getFontScale()` now — but note the
+  Simulator run that verified the fix was at default size, so the large-text
+  behaviour is reasoned, not observed.
+- **The lint ratchet has no headroom, and this change nearly spent it twice.**
+  Moving a `const` above the import block cost eleven `import/first` warnings in
+  one edit — 66 against a limit of 55. It is worth knowing that the ratchet
+  catches formatting accidents, not just new code smells.
+- The `Shared` scope still has no empty state distinct from "nobody has
+  published anything", which is a content problem the restyle does not touch.
+
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

@@ -3879,3 +3879,49 @@ carries a rename made without signal.
 - Upgrading an install with cached templates must not mark their names as
   owed — otherwise the first sync re-sends every one, including ownerless VOLA
   templates the server refuses.
+
+## The Plan screen's chrome (mobile, `app/(tabs)/workouts.tsx`)
+
+The scope switch and the New workout button. Mostly visual, but one of these is
+a real layout guarantee rather than a preference.
+
+### Happy path
+
+- The scope control shows both segments under one hairline; the selected one
+  carries a 2pt accent bar and its label takes the accent, the other is muted.
+- Tapping `Shared` loads other people's public templates; tapping
+  `My workouts` returns to your own. The selection survives leaving and
+  returning to the tab.
+- `New workout` opens the create sheet, and a workout created there appears in
+  the list without a manual refresh.
+
+### Edge cases & errors
+
+- **Scroll to the very end of the templates list: the last card must be fully
+  visible and not sit under the New workout pill.** This is the regression that
+  prompted the work — the button used to cover the planner's "long-press to
+  remove" hint permanently, at every scroll position, because the list reserved
+  less bottom padding than the floating button occupied. Worth asserting at
+  both extremes: an empty list, and a list long enough to scroll.
+- The bottom clearance must not change between scopes — `Shared` hides the
+  button, and if the padding went with it the list would jump under the
+  reader's thumb on every switch.
+- With no templates at all, the empty state is readable and the button does not
+  overlap it.
+
+### Accessibility
+
+- The two segments carry `accessibilityState={{ selected }}`, which is what
+  announces the active view — the role stays `button`, because React Native
+  maps `"tab"` to no trait at all on iOS, so it would cost the "button"
+  announcement and gain nothing outside a `tablist`.
+- Selection is carried by the presence of the underline, not by colour alone:
+  the bar is there or it is not. Worth checking with the blue and purple
+  accents specifically, where the selected label is *darker* than the
+  unselected one and hue alone would read backwards.
+- The New workout pill carries both an icon and a label, not an icon alone.
+- Both the segments and the pill are under 44pt tall and rely on `hitSlop` to
+  reach it — worth verifying by touch rather than by eye.
+- At Accessibility text sizes the pill grows; the bottom clearance is derived
+  from the font scale so the last list row should still clear it. This is the
+  case the original bug lived in, and it is the one least likely to be checked.
