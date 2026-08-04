@@ -137,6 +137,15 @@ pnpm run dev:mobile                          # Expo — Metro on :8081, press i/
 pnpm run dev:admin                          # :3001 (or next available port — runs alongside apps/web)
 ```
 
+**Backend tests run with `-p 1`** (`test:api` and CI both). `go test ./...`
+runs packages in PARALLEL against ONE shared database, and several tests assert
+global counts — `SELECT count(*) FROM techniques` and friends. The moment a
+second package's fixtures seed library rows, those counts include them:
+measured 3 failures in 6 concurrent runs. Scoping each assertion was tried and
+abandoned — there are seven in one file alone, and every future one would have
+to remember. If you add a test that seeds shared reference data, `-p 1` is what
+is keeping it from breaking somebody else's package.
+
 The backend integration tests need `TEST_DATABASE_URL` and **skip silently without it** — for a long stretch that meant a green local `go test ./...` proved nothing and they only genuinely ran in CI. Point it at a separate database from `DATABASE_URL`:
 
 ```bash

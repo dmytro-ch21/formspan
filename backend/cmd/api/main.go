@@ -67,6 +67,7 @@ func main() {
 	bjjHandler := bjj.NewHandler(bjjRepo)
 	bjjSessionHandler := bjj.NewSessionHandler(bjjRepo)
 	bjjProficiencyHandler := bjj.NewProficiencyHandler(bjjRepo)
+	bjjFocusHandler := bjj.NewFocusHandler(bjjRepo)
 	featureFlagHandler := featureflag.NewHandler(featureflag.NewPostgresRepository(pool))
 	activityHandler := activity.NewHandler(activity.NewPostgresRepository(pool))
 	exerciseHandler := exercise.NewHandler(exercise.NewPostgresRepository(pool), os.Getenv("MEDIA_BASE_URL"))
@@ -94,6 +95,11 @@ func main() {
 	// The technique funnel, read across every session. Under /v1/bjj because
 	// it is discipline-scoped evidence, not a property of the account.
 	mux.Handle("GET /v1/bjj/proficiency", verifier.RequireAuth(http.HandlerFunc(bjjProficiencyHandler.List)))
+	// What the athlete is deliberately working on. Read by the reflection
+	// wizard (mobile) and set from the analytical surface (web), per the
+	// platform split: choosing a focus for the next few weeks is planning.
+	mux.Handle("GET /v1/bjj/focus", verifier.RequireAuth(http.HandlerFunc(bjjFocusHandler.Get)))
+	mux.Handle("PUT /v1/bjj/focus", verifier.RequireAuth(http.HandlerFunc(bjjFocusHandler.Set)))
 
 	mux.Handle("GET /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Get)))
 	mux.Handle("POST /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Create)))
