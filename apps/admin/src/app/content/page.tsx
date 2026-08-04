@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { listAuthoredTechniques } from "@/lib/api";
 import { formatUTC } from "@/lib/format";
+import { AdminMasthead } from "../AdminMasthead";
 
 /**
  * The techniques this console owns.
@@ -16,30 +17,19 @@ export default async function ContentPage() {
 
   return (
     <div className="min-h-screen w-full">
-      <header className="flex w-full items-center justify-between border-b border-border bg-card px-10 py-5">
-        <div className="flex items-center gap-4">
-          <h1 className="font-barlow-condensed text-[17px] font-bold tracking-[0.1em] uppercase">
-            Content
-          </h1>
-          <span className="text-[13px] text-text-secondary">
-            {techniques.length} authored here
-          </span>
-        </div>
-        <nav className="flex items-center gap-5 text-[13px] text-text-secondary">
-          <Link href="/users" className="underline">
-            Users
-          </Link>
-          <Link href="/health" className="underline">
-            Health
-          </Link>
+      <AdminMasthead
+        title="Content"
+        section="content"
+        meta={`${techniques.length} authored here`}
+        action={
           <Link
             href="/content/new"
             className="rounded-[10px] bg-accent-dark px-4 py-2 font-semibold text-page no-underline"
           >
             New technique
           </Link>
-        </nav>
-      </header>
+        }
+      />
 
       <main className="flex flex-col gap-6 px-10 py-8">
         <p className="max-w-3xl rounded-lg border border-border bg-card px-4 py-3 text-[13px] text-text-secondary">

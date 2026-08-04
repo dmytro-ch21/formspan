@@ -2,6 +2,8 @@
 
 import { useEffect } from "react";
 
+import { VolaLockup } from "./Brand";
+
 /**
  * Error boundary for every admin screen's backend calls. Without this, each
  * failure mode (API down, 401 on an expired token, 403 from an
@@ -15,6 +17,12 @@ import { useEffect } from "react";
  * no boundary at all, so every read on them — the authored list, the ownership
  * check, the positions vocabulary — crashed to the default page. The write path
  * reports its own failures inside the form; this is for the reads around it.
+ *
+ * Branded, and for the same reason as `NotAuthorized`: this replaces the whole
+ * page, masthead included, so without the lockup the likeliest failure in the
+ * console is the one screen that doesn't look like it belongs to it. Inert
+ * rather than a link home — "Try again" is the way out of here, and a logo
+ * linking to a route that is currently throwing is a loop.
  */
 export default function AdminError({
   error,
@@ -32,6 +40,13 @@ export default function AdminError({
 
   return (
     <main className="flex min-h-screen flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+      {/* Named on the wrapper — the primitives are unconditionally
+          `aria-hidden`, so a standalone lockup has no accessible name and no
+          way to be given one from outside. */}
+      <span role="img" aria-label="VOLA Admin" className="mb-2">
+        <VolaLockup width={104} />
+      </span>
+
       <h1 className="font-barlow-condensed text-2xl font-bold tracking-[0.06em] uppercase">
         Couldn&apos;t load admin data
       </h1>

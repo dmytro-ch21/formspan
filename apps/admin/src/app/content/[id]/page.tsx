@@ -1,7 +1,7 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { ApiError, getTechnique, listAuthoredTechniques, listPositions } from "@/lib/api";
+import { AdminMasthead } from "../../AdminMasthead";
 import { updateTechniqueAction } from "../actions";
 import { TechniqueForm } from "../TechniqueForm";
 
@@ -49,17 +49,11 @@ export default async function EditTechniquePage({
 
     return (
       <div className="min-h-screen w-full">
-        <header className="flex w-full items-center justify-between border-b border-border bg-card px-10 py-5">
-          <div className="flex items-center gap-4">
-            <h1 className="font-barlow-condensed text-[17px] font-bold tracking-[0.1em] uppercase">
-              {seeded.name}
-            </h1>
-            <code className="font-mono text-[12px] text-text-secondary">{seeded.id}</code>
-          </div>
-          <Link href="/content" className="text-[13px] text-text-secondary underline">
-            Back to content
-          </Link>
-        </header>
+        <AdminMasthead
+          title={seeded.name}
+          meta={<code className="font-mono text-[12px]">{seeded.id}</code>}
+          back={{ href: "/content", label: "Back to content" }}
+        />
         <main className="max-w-4xl px-10 py-8">
           <div className="flex flex-col gap-3 rounded-lg border border-danger-border bg-danger-bg px-5 py-4 text-[13px] text-danger-text">
             <p>
@@ -83,17 +77,11 @@ export default async function EditTechniquePage({
 
   return (
     <div className="min-h-screen w-full">
-      <header className="flex w-full items-center justify-between border-b border-border bg-card px-10 py-5">
-        <div className="flex items-center gap-4">
-          <h1 className="font-barlow-condensed text-[17px] font-bold tracking-[0.1em] uppercase">
-            {technique.name}
-          </h1>
-          <code className="font-mono text-[12px] text-text-secondary">{technique.id}</code>
-        </div>
-        <Link href="/content" className="text-[13px] text-text-secondary underline">
-          Back to content
-        </Link>
-      </header>
+      <AdminMasthead
+        title={technique.name}
+        meta={<code className="font-mono text-[12px]">{technique.id}</code>}
+        back={{ href: "/content", label: "Back to content" }}
+      />
 
       <main className="max-w-4xl px-10 py-8">
         <TechniqueForm

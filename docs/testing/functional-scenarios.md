@@ -3460,15 +3460,18 @@ compared as pixels.
 
 ## Brand marks in the app (admin)
 
-Covers `apps/admin/src/app/Brand.tsx`, the signed-out entry in `page.tsx`, and
+Covers `apps/admin/src/app/Brand.tsx`, the signed-out entry in `page.tsx`, the
+shared `AdminMasthead.tsx` and `NotAuthorized.tsx`, `error.tsx`, and
 `icon.png` / `apple-icon.png`.
 
-**Only the signed-out entry is branded today, and that is deferred work rather
-than a finished state.** `/users`, `/content`, `/health` and their children each
-render their own copy of an identical masthead — six in total — and none carries
-the mark, nor do the three "Not authorized" screens or `error.tsx`. Branding
-them means extracting a shared `<AdminMasthead>` first. So a scenario expecting
-a logo there is asserting something not yet built, **not** something ruled out.
+**Every full-screen surface in this console is branded now** — the deferral
+recorded here previously is closed. The six duplicated mastheads are one
+`<AdminMasthead>` rendered by each page, the three "Not authorized" screens are
+one `<NotAuthorized>`, and `error.tsx` carries the lockup too. The identity is
+deliberately **not** the same artwork everywhere: the mark alone in the
+masthead bar, the stacked lockup on centred full-page surfaces, and the lockup
+plus an "ADMIN" qualifier only on the signed-out entry. A scenario asserting
+one uniform treatment is asserting the opposite of the design.
 
 ### The entry screen
 
@@ -3492,6 +3495,79 @@ a logo there is asserting something not yet built, **not** something ruled out.
   because the lockup "says it" leaves the console's entry with no heading.
 - "Admin" is 4.5:1 or better against the page. It uses `text-button-text`, not
   `text-text-secondary` — the latter is 4.41:1 at this size and weight.
+
+### The masthead
+
+Every signed-in screen: `/users`, `/users/{id}`, `/content`, `/content/new`,
+`/content/{id}` (both its branches) and `/health`.
+
+- The faceted mark sits at the far left of the header on **all** of them,
+  followed by a vertical rule, then the page's title. It is the mark alone —
+  no wordmark. A stacked lockup here roughly doubles the header's height, so
+  finding one means someone swapped the primitive without re-measuring the bar.
+- The mark links to `/users`, not `/`. Signed in, `/` only redirects there, and
+  a masthead logo should not cost a round trip to do it.
+- Its accessible name is on the **link** ("VOLA Admin, user lookup"), because
+  both brand primitives are unconditionally `aria-hidden`. The `svg` itself
+  must stay `aria-hidden="true"` and expose nothing.
+- The mark keeps its own three greens rather than `currentColor` — it renders
+  identically against the header's `bg-card` and would against any other
+  ground. Three `path` elements, no more.
+- **Every screen has exactly one `h1`, and it is the masthead's title.**
+  `/users/{id}` is the regression to watch: its title used to be a `<span>`, so
+  that page had no heading at all while looking like it did.
+- `content/[id]` renders a masthead on **both** branches — the editable form and
+  the seeded dead-end. A change that brands only one is easy to miss, since
+  reaching the second needs the id of a technique the console does not own.
+
+### The masthead's navigation
+
+- Top-level screens show **all three** destinations, not two. The current one is
+  present and marked `aria-current="page"`; it is not omitted. A nav whose
+  contents change as you move is the older behaviour and a regression.
+- Exactly one link per header carries `aria-current`, and it matches the screen.
+- The current link is styled by weight/colour and the others by underline — but
+  the assertion belongs on `aria-current`, not the class. Colour and weight
+  alone never carried this fact, which is why the attribute is there.
+- Detail screens (`/users/{id}`, `/content/new`, `/content/{id}`) show their
+  single up-link *instead of* the three destinations, and no `aria-current`.
+  That up-link is **not** inside a `nav` — one link is not a navigation
+  landmark, and a landmark labelled "Console" that holds only "Back to content"
+  promises destinations it doesn't have. So the count of navigation landmarks
+  on a detail screen is zero, not one.
+- `/content` additionally shows the "New technique" action after the nav.
+
+### "Not authorized"
+
+Reached by signing in as an account whose Clerk id is absent from
+`ADMIN_USER_IDS`, on any of `/users`, `/content`, `/health`.
+
+- All three routes render the **same** screen — it is one component now. Copy
+  drift between them means someone reintroduced a local copy.
+- The stacked lockup sits above the heading, named `VOLA Admin` on a wrapper
+  with `role="img"`. It is **not** a link: the only route to offer leads back to
+  the one that just refused.
+- No "ADMIN" qualifier here, unlike the signed-out entry. The `h1` is
+  "Not authorized"; a second line of display type above it competes with it.
+- **The offending id is followed by a space**: it reads "user_2xYz… isn't on the
+  admin allowlist", never "user_2xYz…isn't". That defect shipped in all three
+  copies, and nothing but reading the rendered page catches it — no typecheck,
+  no lint, no test. Assert on rendered text, not on the JSX.
+- The `<UserButton />` is still present, so a wrong-account sign-in is
+  recoverable from this screen.
+
+### The error boundary
+
+Reached whenever an admin read fails — a stopped API, an expired token, or an
+`ADMIN_USER_IDS` mismatch between this app and the backend.
+
+- It replaces the **whole** page, masthead included, so the lockup on it is what
+  keeps the screen looking like part of the console. Named the same way as
+  `NotAuthorized`'s, and equally inert — "Try again" is the way out, and a logo
+  linking to a route that is currently throwing is a loop.
+- The three messages still key off the status: 403 names the two
+  `ADMIN_USER_IDS` copies, 401 says sign out and back in, anything else points
+  at `NEXT_PUBLIC_API_URL`.
 
 ### Icons
 
