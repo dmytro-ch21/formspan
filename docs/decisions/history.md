@@ -7976,12 +7976,117 @@ reason — each masked by a neighbouring guard — which were rewritten to asser
 contents. One guard, the UPSERT's own `WHERE`, is honestly documented as *not*
 mutation-pinned: it backstops an interleaving the harness cannot orchestrate.
 
+## 2026-08-04 — The app writes its own name on open
+
+The splash was a placeholder nobody had drawn for VOLA: a gradient tick, on a
+navy that was not even the app's navy. `#0B1220` against a `#080B12` ground, so
+the first screen stepped a shade darker the moment it mounted — the kind of seam
+that reads as *wrong* without anyone being able to name it. It is now the real
+wordmark, and it arrives one letter at a time.
+
+### The wordmark had to be extracted before it could be used
+
+The brand kit ships lockups, not a wordmark. `vola-stacked-color.svg` is mark
+plus "VOLA" plus tagline, and no file contained only the name. The four
+letterforms are their own `<g>` in the Corel export, so the wordmark is that
+group lifted out and re-cropped to the letters' true bounding box — **bezier
+extrema included, not just anchor points**, or the crop is short wherever a
+curve bulges past its control points.
+
+Two traps on the way out, both silent. The root sets `fill-rule: evenodd` but
+the letter class overrides it to `nonzero`; take the root's value and the O
+loses its counter. And the wordmark is white, so on its own it is invisible
+against every default background a preview will composite it against — which
+is why there is a black variant beside it in `assets/brand/logos/source/` that
+nothing in the app uses.
+
+### The native splash carries no image, and that is the whole trick
+
+A native splash cannot animate. The OS shows it before any JS exists, so
+whatever it draws is a *finished frame*. Put the wordmark on it and the launch
+reads as logo → blank → logo being written, which is worse than either half
+alone. So `app.json` now configures nothing but `backgroundColor` (the plugin
+handles a missing `image` explicitly — it removes the imageset and returns), and
+`AnimatedSplash` opens on that same bare `#080B12` field. The handover has
+nothing to give it away whichever frame it lands on; `SplashScreen.setOptions({
+fade: true })` is belt and braces over an already-invisible join.
+
+This does undo, deliberately, the thing that was asked for first — a static
+wordmark splash. It is one four-line revert in `app.json` if the writing ever
+stops being worth it.
+
+### Wiped, not stroked
+
+"Writes letter by letter" suggests a pen travelling down each glyph. There is no
+pen available: the wordmark is a set of **filled outlines**, and a filled
+outline has no centreline to travel down. The honest alternatives were tracing
+each glyph's *perimeter* with `strokeDashoffset` — which needs `react-native-svg`
+this app deliberately does not have (see `ScreenHeader`'s `Mark()` and
+`ui/Icon.tsx`), and which outlines the O's counter too — or uncovering each
+letter left-to-right. It uncovers: a rectangle in the background colour shrinks
+onto its own right edge. On a solid ground the rectangle does not exist, and the
+letter simply appears to have been written.
+
+The four curtains are cut at the **midpoint of each gap**, not at the glyph
+edges, so they tile the strip with no seam. Cut on the edges instead and every
+join is a place a half-pixel of rounding shows the next letter arriving early.
+
+### Nothing animates that the JS thread has to compute
+
+Every animated property is `opacity` or `transform`, which is what lets all of
+it run with `useNativeDriver`. This is not a micro-optimisation: the obvious way
+to write a wipe is to animate the covering view's `width`, `width` cannot use
+the native driver, and a JS-driven animation stutters exactly when the JS thread
+is busy — during fonts, Clerk, and the SQLite migrations, i.e. during precisely
+the launch the splash exists to cover.
+
+Everything positional is a ratio measured off `vola-stacked-color.svg` in its
+own coordinate space rather than eyeballed, so the finished frame *is* the
+stacked lockup minus its tagline, and a re-export moves the splash instead of
+leaving it drifting from the brand.
+
+### It holds rather than lifting onto a blank screen
+
+`RootLayoutNav` used to `return null` until Clerk resolved. The splash now
+covers that gap and — this is the load-bearing part — takes a `ready` prop and
+waits for it. An animation that simply plays and exits would fade onto the blank
+screen it replaced, on exactly the slow cold starts where it matters. With
+Reduce Motion on, the assembled lockup and the fade still happen; only the
+assembly is skipped. Reduce Motion is a request not to be moved, not a request
+to be shown nothing.
+
+### What Expo Go can and cannot show you
+
+`npx expo config --type public --json` reports **no `splash` key at all** —
+since SDK 54 the `expo-splash-screen` plugin writes native launch assets at
+prebuild and puts nothing in the manifest, and Expo Go renders from the
+manifest. So the native half of this is invisible in Expo Go and only appears in
+a dev or EAS build. The JS half plays everywhere, which is what made it
+verifiable at all.
+
+Verified by relaunching (`xcrun simctl openurl <udid> "exp://127.0.0.1:8081/--/"`)
+and taking back-to-back `simctl io screenshot` frames, then classifying them by
+pixel signature to find the ones that matter. Captured frames show V-O-L-A
+uncovering in order, the mark landing above the finished wordmark, and the fade
+into Today. Worth reusing: a ~1.7s animation is not catchable by taking one
+screenshot and hoping.
+
+### Gaps this leaves
+
+`vola-mark.png` was regenerated at 1024px from the brand source — same
+squared-and-centred convention `ScreenHeader` already relies on, and an aspect
+within 0.05% of the artwork rather than 1.4% off — so the header got sharper as
+a side effect nobody asked for. `splash-icon.png` is now referenced by nothing
+and was left in place rather than deleted.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
 - **Two position taxonomies now sit on one Library screen.** The filter chips are nine coarse families; the glossary is eleven curated entries. Since the guard split they disagree in a visible way: a beginner can read the Closed Guard card, learn the distinction, and then find no chip that filters to those 37 techniques. Adding North-South, and later Leg Entanglement, closed the cheap half each time (a position the glossary advertised that no chip could reach) — but doing it twice by hand is the evidence that hand-maintenance is the actual bug: the vocabulary is copied across four client files and one backend map, and the taxonomy PR updated one of the four until review caught it. Keying the chips on the glossary's ids, or a shared constant with a test asserting it matches positions.json, is the real answer and is design work, not a patch.
 
 
+- **The opening animation's native half is unverified.** The JS animation is Simulator-confirmed, but the bare `#080B12` native launch screen it hands over from cannot be seen in Expo Go at all (the plugin writes native assets at prebuild and leaves the manifest empty). Nothing proves the two grounds match until someone runs a dev or EAS build; if they don't, the join flashes on every cold start.
+- **`assets/brand/logos/` still holds four placeholder lockups** built from Arial text and a hand-drawn checkmark, dating from before the real artwork existed. The genuine Corel exports now sit one level down in `logos/source/`, so the top-level directory is the stale one — anything that reads from it (the web app has not been re-pointed) silently gets the stand-in logo.
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.
 - Functional test suite not yet passing — blocked on applying the `--hostname` fix to `tests/functional/support/start-stack.mjs` (the user's own in-progress file — not something to edit unilaterally).
 - No Railway `api` or `web` services exist yet, only Postgres — `railway/*.toml` configs are ready but unconnected.
