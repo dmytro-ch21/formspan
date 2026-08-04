@@ -42,7 +42,7 @@ export default async function EditExercisePage({
 
     return (
       <div className="min-h-screen w-full">
-        <ContentNav title={seeded.name} subtitle={seeded.id} />
+        <ContentNav title={seeded.name} subtitle={seeded.id} current="exercises" />
         <main className="max-w-4xl px-10 py-8">
           <div className="flex flex-col gap-3 rounded-lg border border-danger-border bg-danger-bg px-5 py-4 text-[13px] text-danger-text">
             <p>
@@ -66,7 +66,7 @@ export default async function EditExercisePage({
 
   return (
     <div className="min-h-screen w-full">
-      <ContentNav title={exercise.name} subtitle={exercise.id} />
+      <ContentNav title={exercise.name} subtitle={exercise.id} current="exercises" />
       <main className="max-w-4xl px-10 py-8">
         <ExerciseForm
           mode="edit"

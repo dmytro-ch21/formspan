@@ -16,6 +16,7 @@ export default async function ExerciseContentPage() {
   return (
     <div className="min-h-screen w-full">
       <ContentNav
+        current="exercises"
         title="Exercises"
         subtitle={`${exercises.length} authored here`}
         action={{ href: "/content/exercises/new", label: "New exercise" }}

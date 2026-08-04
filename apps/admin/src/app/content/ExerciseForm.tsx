@@ -141,8 +141,6 @@ export function ExerciseForm({
   const shown: Partial<Exercise> =
     result.status === "error" ? result.values : (initial ?? {});
 
-  const hasMedia = (initial?.media ?? []).filter((m) => !m.is_default).length;
-
   return (
     <form action={submit} className="flex flex-col gap-6">
       {result.status === "error" && (
@@ -350,12 +348,16 @@ export function ExerciseForm({
       {mode === "edit" && (
         <Section title="Media">
           <p className="text-[12px] text-text-secondary">
-            {hasMedia > 0
-              ? `${hasMedia} asset${hasMedia === 1 ? "" : "s"} attached.`
-              : "No assets attached."}{" "}
             Media is not editable here — it lives in object storage with no upload path from
-            this console. Saving cannot clear it: the write simply does not carry the field,
-            so anything a deploy attaches survives every edit made here.
+            this console. Saving cannot clear it: the write does not carry the field, so
+            anything a deploy attaches survives every edit made here.
+          </p>
+          <p className="text-[12px] text-text-muted">
+            Whether this exercise has any is deliberately not stated. The admin list does not
+            select media, so a count here would always read zero — including for a row a
+            deploy has attached assets to, which is a reachable state while it is exported but
+            not yet adopted. Saying nothing beats stating a fact from data this screen does
+            not have.
           </p>
         </Section>
       )}

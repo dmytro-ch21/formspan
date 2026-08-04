@@ -205,6 +205,10 @@ func (h *ContentHandler) write(
 			"an exercise with that name already exists — ids are derived from the name")
 		return
 	case errors.Is(err, ErrInvalidInput):
+		// A conduit from the repository straight to the client, and safe only
+		// because nothing there wraps ErrInvalidInput today. If a pg-error
+		// mapping is ever added (technique's does, for its ruleset foreign key),
+		// the message it carries must stay prose — never the driver's text.
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, err.Error())
 		return
 	case errors.Is(err, ErrNotFound):

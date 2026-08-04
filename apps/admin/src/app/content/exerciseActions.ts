@@ -38,10 +38,7 @@ function text(value: FormDataEntryValue | null): string {
  * The whole form, every field, on every save.
  *
  * `media` is deliberately absent — the request type has no such field, which is
- * what guarantees an edit cannot clear media a deploy added. `is_unilateral` is
- * read from the checkbox's presence: an unchecked box sends nothing, so `false`
- * is the honest reading here, and the API's pointer-typed field means an
- * explicit `false` is still distinguishable from an omitted one.
+ * what guarantees an edit cannot clear media a deploy added.
  */
 function bodyFrom(form: FormData): ExerciseWrite {
   return {
@@ -53,7 +50,12 @@ function bodyFrom(form: FormData): ExerciseWrite {
     secondary_muscles: lines(form.get("secondary_muscles")),
     equipment: lines(form.get("equipment")),
     load_type: text(form.get("load_type")),
-    is_unilateral: form.get("is_unilateral") === "on",
+    // `has`, not `=== "on"`. An unchecked box sends nothing, so presence IS the
+    // value — and comparing to the browser's default string breaks silently the
+    // moment someone adds a `value` attribute for styling, writing false for
+    // every checked box with no error anywhere. It also makes this action, which
+    // is a POST endpoint in its own right, agree with a non-browser caller.
+    is_unilateral: form.has("is_unilateral"),
     instructions: text(form.get("instructions")),
   };
 }

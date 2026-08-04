@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/dmytro-ch21/vola/backend/internal/platform/discipline"
 )
 
 // Handler-layer tests. The technique module shipped three defects in this exact
@@ -381,10 +383,39 @@ func TestVocabulariesAreTheOnesValidationUses(t *testing.T) {
 	if len(body.Sports) == 0 {
 		t.Error("no sports offered")
 	}
+	for _, sp := range body.Sports {
+		if !discipline.ValidSport(sp) {
+			t.Errorf("offered sport %q that the validator rejects", sp)
+		}
+	}
+	if len(body.Sports) != len(discipline.SportKeys()) {
+		t.Errorf("offered %d sports, the registry has %d",
+			len(body.Sports), len(discipline.SportKeys()))
+	}
 }
 
 func TestMalformedBodyIsRefused(t *testing.T) {
 	if rec := post(t, NewContentHandler(newFakeRepo()), `{"name":`); rec.Code != http.StatusBadRequest {
 		t.Errorf("status %d, want 400", rec.Code)
+	}
+}
+
+// The third of the three defects this file exists to prevent. The id is DERIVED
+// from the name and permanent — a foreign key in workout items and logged sets —
+// so unbounded, a long name either fails on Postgres's btree limit or, worse,
+// succeeds and mints an id nobody can take back.
+func TestAnUnboundedNameIsRefused(t *testing.T) {
+	long := strings.Repeat("a", maxNameLen+1)
+	rec := post(t, NewContentHandler(newFakeRepo()),
+		`{"name":"`+long+`","sport":"strength","movement_pattern":"squat","load_type":"reps"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status %d, want 400 for a %d-character name: %s", rec.Code, len(long), rec.Body)
+	}
+	// ...and a name at the bound is fine, so the check is not off by one in the
+	// direction that rejects real content. The longest shipped name is 63 chars.
+	ok := strings.Repeat("a", maxNameLen)
+	if rec := post(t, NewContentHandler(newFakeRepo()),
+		`{"name":"`+ok+`","sport":"strength","movement_pattern":"squat","load_type":"reps"}`); rec.Code != http.StatusOK {
+		t.Errorf("a name exactly at the bound was refused: %d %s", rec.Code, rec.Body)
 	}
 }

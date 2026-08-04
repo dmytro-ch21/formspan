@@ -21,7 +21,13 @@ export function OwnershipNote({ catalog, file }: { catalog: string; file: string
       <br />
       The rest of the library — everything from the spreadsheet — is owned by the deploy and is
       not editable here. Changing one of those means editing{" "}
-      <code className="font-mono">{file}</code> and releasing.
+      <code className="font-mono">{file}</code> and releasing —{" "}
+      <strong className="text-text">
+        and that edit survives only until the next spreadsheet import
+      </strong>
+      , which regenerates the file wholesale. A durable change to a sheet-sourced row means
+      changing the sheet. Only the <code className="font-mono">*.additions.json</code> files
+      survive an import, which is why the export writes both.
     </p>
   );
 }

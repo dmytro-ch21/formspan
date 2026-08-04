@@ -103,39 +103,11 @@ func main() {
 		return
 	}
 
-	catalogs := []catalog{
-		{
-			what: "techniques", seedPath: *techSeed, additionsPath: *techAdd,
-			entries: mapEntries(techniques, techniqueEntryOf),
-			ids:     idsOfTechniques(techniques),
-			validate: func() error {
-				for _, t := range techniques {
-					if err := technique.ValidateFields(t); err != nil {
-						return fmt.Errorf("%q would not seed: %w", t.ID, err)
-					}
-				}
-				return nil
-			},
-		},
-		{
-			what: "exercises", seedPath: *exSeed, additionsPath: *exAdd,
-			entries: mapEntries(exercises, exerciseEntryOf),
-			ids:     idsOfExercises(exercises),
-			// `media` is the file's, not the database's: the write path cannot
-			// author it and AdminAuthored does not select it, so re-exporting an
-			// exercise a deploy later gave media to would reset it to `[]` and
-			// delete the only record of an asset still sitting in the bucket.
-			preserve: []string{"media"},
-			validate: func() error {
-				for _, e := range exercises {
-					if err := exercise.ValidateForWrite(e); err != nil {
-						return fmt.Errorf("%q would not seed: %w", e.ID, err)
-					}
-				}
-				return nil
-			},
-		},
-	}
+	catalogs := catalogsFor(
+		filePaths{*techSeed, *techAdd, *exSeed, *exAdd},
+		techniques, techRepo.AdoptAsSeeded,
+		exercises, exRepo.AdoptAsSeeded,
+	)
 
 	// Every id the seed files ALREADY carried, captured before any write.
 	// Adoption is scoped to these: an id this run first wrote is not committed,
@@ -182,14 +154,12 @@ func main() {
 		if len(ids) == 0 {
 			continue
 		}
-		var err error
-		switch c.what {
-		case "techniques":
-			err = techRepo.AdoptAsSeeded(ctx, ids)
-		case "exercises":
-			err = exRepo.AdoptAsSeeded(ctx, ids)
+		if c.adopt == nil {
+			logger.Error("export: adopt", "catalog", c.what, "err",
+				fmt.Errorf("no adopt function — refusing to report an adoption that did not happen"))
+			os.Exit(1)
 		}
-		if err != nil {
+		if err := c.adopt(ctx, ids); err != nil {
 			logger.Error("export: adopt", "catalog", c.what, "err", err)
 			os.Exit(1)
 		}
@@ -200,6 +170,59 @@ func main() {
 	if !adoptedAny {
 		logger.Info("export: nothing to adopt — every authored row is new to the " +
 			"seed files this run, so none of it is deployed yet; commit and deploy, then re-run")
+	}
+}
+
+// filePaths is the four files an export touches.
+type filePaths struct{ techSeed, techAdditions, exSeed, exAdditions string }
+
+// catalogsFor builds what the export runs over.
+//
+// Extracted from main() because main() has no test, and the wiring here is
+// load-bearing in two places that are invisible from inside run(): which
+// catalog preserves `media`, and which repository each catalog adopts against.
+// The first version of these tests built their own catalogs, so deleting either
+// wiring from main() left the whole suite green — which is the same shape of
+// gap this command has now shipped twice.
+func catalogsFor(
+	p filePaths,
+	techniques []technique.Technique,
+	adoptTechniques func(context.Context, []string) error,
+	exercises []exercise.Exercise,
+	adoptExercises func(context.Context, []string) error,
+) []catalog {
+	return []catalog{
+		{
+			what: "techniques", seedPath: p.techSeed, additionsPath: p.techAdditions,
+			entries: mapEntries(techniques, techniqueEntryOf),
+			ids:     idsOfTechniques(techniques),
+			adopt:   adoptTechniques,
+			// Nothing to preserve: contentReturning selects every technique
+			// column, so no key in techniques.json is the file's alone.
+			validate: func() error {
+				for _, t := range techniques {
+					if err := technique.ValidateFields(t); err != nil {
+						return fmt.Errorf("%q would not seed: %w", t.ID, err)
+					}
+				}
+				return nil
+			},
+		},
+		{
+			what: "exercises", seedPath: p.exSeed, additionsPath: p.exAdditions,
+			entries:  mapEntries(exercises, exerciseEntryOf),
+			ids:      idsOfExercises(exercises),
+			adopt:    adoptExercises,
+			preserve: exercisePreserve,
+			validate: func() error {
+				for _, e := range exercises {
+					if err := exercise.ValidateForWrite(e); err != nil {
+						return fmt.Errorf("%q would not seed: %w", e.ID, err)
+					}
+				}
+				return nil
+			},
+		},
 	}
 }
 
@@ -244,6 +267,11 @@ type catalog struct {
 	// preserve names keys whose existing value in the FILE wins over the
 	// exported one. See mergeInto.
 	preserve []string
+	// adopt hands this catalog's rows to the deploy. A field rather than a
+	// switch on `what`: the switch had no default, so a catalog whose name
+	// matched neither case logged a successful adoption having adopted nothing,
+	// and swapping the two repositories survived the entire suite.
+	adopt func(context.Context, []string) error
 	// validate checks every row would actually seed, and runs INSIDE run()
 	// before anything is written.
 	//
@@ -587,6 +615,21 @@ var exerciseKeyOrder = []string{
 	"is_unilateral", "instructions", "media",
 }
 
+// exercisePreserve names the keys the FILE owns rather than the database.
+//
+// Declared here rather than inline in main() because it is load-bearing and
+// main() has no test: deleting it leaves the whole suite green, and the
+// consequence is a real DELETE. `upsertMedia`'s prune is NOT scoped to
+// `source = 'seed'` the way the exercise upsert above it is, so re-seeding an
+// entry whose JSON says `"media": []` removes that exercise's `exercise_media`
+// rows even when the row itself is admin-owned and correctly skipped. Verified
+// against Postgres: 1 media row before, 0 after.
+//
+// So carryOver is the only thing between a re-export and losing the record of
+// an asset still sitting in the bucket. It is referenced by both main() and the
+// test for exactly the reason `validate` is a field on the catalog.
+var exercisePreserve = []string{"media"}
+
 // exerciseEntryOf renders an exercise in exercises.json's shape.
 //
 // `media` is written as `[]` and then, on a re-export, replaced by whatever the
@@ -611,7 +654,15 @@ func exerciseEntryOf(e exercise.Exercise) entry {
 	}
 	var out entry
 	for _, k := range exerciseKeyOrder {
-		raw, err := rawJSON(values[k])
+		v, ok := values[k]
+		if !ok {
+			// A key added to exerciseKeyOrder with no matching value would
+			// otherwise emit `null` — and for the three TEXT[] NOT NULL columns
+			// that is the "one entry takes the whole seed transaction down"
+			// failure this file warns about elsewhere.
+			panic(fmt.Sprintf("exportcontent: exerciseKeyOrder has %q with no value", k))
+		}
+		raw, err := rawJSON(v)
 		if err != nil {
 			// Only reachable if a string, bool or []string fails to marshal,
 			// which encoding/json does not do.

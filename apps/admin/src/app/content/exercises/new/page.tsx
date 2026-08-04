@@ -13,7 +13,7 @@ export default async function NewExercisePage() {
 
   return (
     <div className="min-h-screen w-full">
-      <ContentNav title="New exercise" />
+      <ContentNav title="New exercise" current="exercises" />
       <main className="max-w-4xl px-10 py-8">
         <p className="mb-6 max-w-2xl text-[13px] text-text-secondary">
           Search the catalog first — 504 entries is enough that a variation you have in mind is

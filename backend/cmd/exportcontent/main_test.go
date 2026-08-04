@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -502,6 +503,7 @@ func techniqueCatalog(seed, additions string, authored []technique.Technique) ca
 		what: "techniques", seedPath: seed, additionsPath: additions,
 		entries: mapEntries(authored, techniqueEntryOf),
 		ids:     idsOfTechniques(authored),
+		adopt:   func(context.Context, []string) error { return nil },
 		validate: func() error {
 			for _, t := range authored {
 				if err := technique.ValidateFields(t); err != nil {
@@ -659,7 +661,8 @@ func exerciseCatalog(seed, additions string, authored []exercise.Exercise) catal
 		what: "exercises", seedPath: seed, additionsPath: additions,
 		entries:  mapEntries(authored, exerciseEntryOf),
 		ids:      idsOfExercises(authored),
-		preserve: []string{"media"},
+		adopt:    func(context.Context, []string) error { return nil },
+		preserve: exercisePreserve,
 		validate: func() error {
 			for _, e := range authored {
 				if err := exercise.ValidateForWrite(e); err != nil {
@@ -881,6 +884,11 @@ func TestACatalogWithNoValidatorIsRefused(t *testing.T) {
 
 // Every shipped addition must stay re-exportable, or the first update to one is
 // refused as spreadsheet-owned.
+//
+// VACUOUS TODAY, deliberately kept: exercises.additions.json is `[]`, so the
+// loop has nothing to check and refuseSheetOwned returns immediately. It starts
+// covering something the moment content is exported, which is exactly when it
+// would begin to matter — but it is not coverage now, and reads like it is.
 func TestEveryShippedExerciseAdditionIsStillExportable(t *testing.T) {
 	entries, err := readEntries(exerciseAdditionsFile)
 	if err != nil {
@@ -892,5 +900,95 @@ func TestEveryShippedExerciseAdditionIsStillExportable(t *testing.T) {
 	}
 	if err := refuseSheetOwned(exerciseSeedFile, exerciseAdditionsFile, ids); err != nil {
 		t.Errorf("the shipped exercise additions cannot be re-exported: %v", err)
+	}
+}
+
+// The WIRING, not the mechanism.
+//
+// `TestReExportingDoesNotWipeMediaTheFileAlreadyHas` passes "media" to
+// mergeInto as a literal, so it proves carryOver works and says nothing about
+// whether the exercise catalog asks for it. The first version of this test
+// built its own catalog and had the same blind spot — deleting `preserve` from
+// main() stayed green. It goes through `catalogsFor`, which is what main uses.
+//
+// This matters more than a normal wiring test because the failure is a DELETE:
+// `upsertMedia`'s prune is not scoped to `source = 'seed'`, so a re-seed of an
+// entry whose JSON says `"media": []` removes that exercise's media rows even
+// though the row itself is admin-owned and correctly skipped.
+func TestTheExerciseCatalogActuallyAsksToPreserveMedia(t *testing.T) {
+	dir := t.TempDir()
+	p := filePaths{
+		techSeed:      filepath.Join(dir, "techniques.json"),
+		techAdditions: filepath.Join(dir, "techniques.additions.json"),
+		exSeed:        filepath.Join(dir, "exercises.json"),
+		exAdditions:   filepath.Join(dir, "exercises.additions.json"),
+	}
+	const withMedia = `[{"id":"jefferson-curl","name":"Jefferson Curl","media":[{"kind":"demo","storage_key":"exercises/jc/demo.mp4"}]}]`
+	write(t, p.exSeed, withMedia)
+	write(t, p.exAdditions, withMedia)
+
+	noop := func(context.Context, []string) error { return nil }
+	cats := catalogsFor(p, nil, noop,
+		[]exercise.Exercise{anExercise("jefferson-curl", "Jefferson Curl (edited)")}, noop)
+
+	var ex catalog
+	for _, c := range cats {
+		if c.what == "exercises" {
+			ex = c
+		}
+	}
+	if err := run(ex, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	for _, path := range []string{p.exSeed, p.exAdditions} {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		if !strings.Contains(string(raw), "exercises/jc/demo.mp4") {
+			t.Errorf("%s lost its media on re-export — the next re-seed would DELETE "+
+				"the exercise_media rows for an asset still in the bucket:\n%s",
+				filepath.Base(path), raw)
+		}
+		if !strings.Contains(string(raw), "Jefferson Curl (edited)") {
+			t.Errorf("%s did not take the edit", filepath.Base(path))
+		}
+	}
+}
+
+// ...and the technique catalog must NOT preserve anything, or an edit to a
+// field the file already holds would be silently discarded.
+func TestTheTechniqueCatalogPreservesNothing(t *testing.T) {
+	noop := func(context.Context, []string) error { return nil }
+	for _, c := range catalogsFor(filePaths{}, nil, noop, nil, noop) {
+		if c.what == "techniques" && len(c.preserve) != 0 {
+			t.Errorf("the technique catalog preserves %v — contentReturning selects "+
+				"every technique column, so nothing is the file's alone", c.preserve)
+		}
+	}
+}
+
+// Each catalog must adopt against its OWN repository. The switch this replaced
+// had no default, so swapping the two — adopting exercises against the
+// techniques table — survived the entire suite.
+func TestEachCatalogAdoptsAgainstItsOwnRepository(t *testing.T) {
+	var got []string
+	record := func(name string) func(context.Context, []string) error {
+		return func(context.Context, []string) error {
+			got = append(got, name)
+			return nil
+		}
+	}
+	cats := catalogsFor(filePaths{}, nil, record("techniques"), nil, record("exercises"))
+	for _, c := range cats {
+		if c.adopt == nil {
+			t.Fatalf("the %s catalog has no adopt function", c.what)
+		}
+		if err := c.adopt(context.Background(), []string{"x"}); err != nil {
+			t.Fatalf("adopt: %v", err)
+		}
+		if got[len(got)-1] != c.what {
+			t.Errorf("the %s catalog adopted against %q", c.what, got[len(got)-1])
+		}
 	}
 }
