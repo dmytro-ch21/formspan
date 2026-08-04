@@ -9027,6 +9027,88 @@ ownership check.
 
 
 
+## 2026-08-04 — The Plan tab gets a week you can move, and four `startOfWeek`s become one
+
+The Plan tab's calendar was pinned to the current week with **no navigation of
+any kind** — no arrows, no month, no way to reach any other week. You could not
+plan next week, which is most of what a planner is for. `lib/plan.ts`'s
+`listPlannedBetween` already took an arbitrary range, so the gap was entirely in
+the UI.
+
+**The request was "make it like Today's calendar"; that was deliberately not
+done literally.** Today's `TrainingCalendar` is a 7-across grid of dots, and
+`WeekPlanner`'s own header comment already records why this screen is rows
+instead: a 45pt column cannot hold "Maestro Push Day", so a grid degrades every
+planned day to a coloured dot and the calendar stops saying *what* you planned.
+Today's calendar answers "did I train?"; Plan has to answer "with what?". So
+what was taken from Today is the **navigation**, not the shape:
+
+- A month title (`AUGUST ⌄`) that opens a month grid, and a `‹ ›` stepper that
+  moves a week at a time.
+- The month grid is a **jump target only** — tap any day and that day's week
+  loads into the rows, which stay the day representation. Its cells carry a dot
+  and nothing else, which is precisely why it cannot replace them.
+- A `Today` pill, shown only when you are away from the current week, since it
+  is also the only thing telling you that you have navigated at all.
+
+**Two controls that both wanted a chevron.** The first cut read `‹ AUGUST › ›`
+— the title's disclosure and the next-week arrow, two identical right-chevrons
+side by side doing entirely different things. Grouping the stepper on the right
+and rotating the title's chevron down is what makes them readable; it was only
+obvious on the Simulator, not in the code.
+
+**`refreshedAnchor` snaps a *past* week forward on focus, and leaves a future
+one alone.** A past anchor can only be the clock moving, so correcting it is
+what stops a tab left open overnight from planning into last week — the same
+staleness `now` was already guarded against. A future anchor was chosen
+deliberately, and resetting it every time the tab lost focus would make planning
+two weeks out a fight.
+
+**The bug that rule nearly caused.** `refresh` depends on the anchor, so the
+first version's `useFocusEffect(..., [refresh])` re-ran on *every navigation* —
+and the snap then fired against the week just chosen, bouncing any past week
+straight back to today. The whole left half of the month grid was dead. The fix
+is that the focus effect holds `[]` and does not read the anchor, with the data
+read split into its own effect keyed on a `reloadAt` counter. Both directions
+are now Simulator-verified: a past week loads and stays, a future week survives
+a tab switch, and a plan made on 10 August lands where it was made.
+
+**Four copies of `startOfWeek` became one.** `lib/plan.ts`,
+`components/TrainingCalendar.tsx` and `app/(tabs)/index.tsx` each had their own,
+and the month grid would have made a fifth. They now live in a new pure
+`lib/calendar.ts` with `monthGrid`, `addDays`, `weekDays` and `refreshedAnchor`,
+which `TrainingCalendar` also adopts — so the two calendars genuinely share one
+implementation rather than two that happen to agree today. It deliberately holds
+no data, so a test for a grid shape needs no database. Three of the copies were
+identical, which is the problem and not the reassurance: Monday-first is a
+decision about what a week *is* in this product, and four places to change it
+means three places to forget. `lib/history.ts` keeps its own, and is not a fifth
+copy — it takes and returns a `YYYY-MM-DD` string because it works over rows
+already keyed by day.
+
+**A test that passed against the broken implementation.** `addDays` uses
+`setDate` rather than `+ n * 86400000` because a day is not 24 hours on the two
+DST boundaries a year. The first test for that used 25 October — Europe's
+changeover — and the suite runs pinned to `America/Los_Angeles`, so it held
+under the millisecond version and proved nothing. Rewritten onto 1 November
+(25 hours) and 8 March (23 hours), it fails as it should. All four new guards
+were mutation-checked: each goes red when the code it covers is broken.
+
+### Gaps this leaves
+
+- **The month grid does not show what kind of session is planned.** Every
+  planned day gets the same lime dot, where Today's calendar distinguishes done
+  from planned. Two-a-days and a strength/BJJ split are both invisible there.
+  Acceptable for a jump target; wrong if it ever becomes something people read.
+- **The grid's dots do not react to a sync while it is open.** They are loaded
+  when it opens and when its month changes; the rows behind it are the live
+  surface. A plan arriving mid-open shows up on the next open.
+- **Plans are still local-only**, unchanged by this work — see `lib/plan.ts`.
+- **The screen below the calendar is untouched and still rough**: the
+  My workouts / Shared tabs, the very heavy `New workout` button, and the hint
+  line that the button overlaps. That is the next item on the user's list.
+
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

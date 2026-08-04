@@ -14,7 +14,8 @@ import { Stat, StatRow } from '@/components/ui/Stat';
 import { TrainingCalendar } from '@/components/TrainingCalendar';
 import { vola } from '@/constants/Colors';
 import { formatDuration } from '@/lib/history';
-import { dayString, listPlannedBetween, weekDays, type PlannedSession } from '@/lib/plan';
+import { dayString, startOfWeek, weekDays } from '@/lib/calendar';
+import { listPlannedBetween, type PlannedSession } from '@/lib/plan';
 import { formatElapsed } from '@/lib/rest';
 import type { LoggedSet, Session } from '@/lib/sessions';
 import { cachedWorkouts, listLocalSessions } from '@/lib/sessionStore';
@@ -42,21 +43,6 @@ function workingSets(s: Session): number {
   return s.sets.filter(isWorkingSet).length;
 }
 
-/**
- * Monday 00:00 in the device's own timezone.
- *
- * Monday because a training week is a training block and every programme
- * anyone writes starts one on a Monday. Local rather than UTC for the same
- * reason the history endpoint takes a `tz`: "this week" is a claim about the
- * athlete's calendar, not the server's.
- */
-function startOfWeek(now: Date): Date {
-  const d = new Date(now);
-  d.setHours(0, 0, 0, 0);
-  // getDay() is 0 on Sunday, which is 6 days into the week, not -1.
-  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
-  return d;
-}
 
 type WeekSummary = {
   sessions: number;

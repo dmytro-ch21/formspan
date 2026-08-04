@@ -2,6 +2,7 @@ import { randomUUID } from 'expo-crypto';
 import type * as SQLite from 'expo-sqlite';
 
 import { ApiError, isNotFound, isOffline, isPermanentRejection } from '@/lib/apiError';
+import { dayString } from '@/lib/calendar';
 import { getDb } from '@/lib/db';
 import {
   createPlan as createRemotePlan,
@@ -51,38 +52,6 @@ type Row = {
   remote: number;
   deleted_at: string | null;
 };
-
-/**
- * A `Date` as the local calendar day it falls on.
- *
- * Built from the local getters rather than `toISOString()`, which converts to
- * UTC first — so for anyone west of Greenwich an evening session lands on
- * tomorrow's date, and the plan they made for Tuesday shows up on Monday.
- */
-export function dayString(d: Date): string {
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${d.getFullYear()}-${m}-${day}`;
-}
-
-/** Monday 00:00 local — the same week boundary the Today screen uses. */
-export function startOfWeek(now: Date): Date {
-  const d = new Date(now);
-  d.setHours(0, 0, 0, 0);
-  // getDay() is 0 on Sunday, which is six days into the week, not minus one.
-  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
-  return d;
-}
-
-/** The seven `Date`s of the week containing `now`, Monday first. */
-export function weekDays(now: Date): Date[] {
-  const monday = startOfWeek(now);
-  return Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(monday);
-    d.setDate(d.getDate() + i);
-    return d;
-  });
-}
 
 function rowToPlan(r: {
   id: string;

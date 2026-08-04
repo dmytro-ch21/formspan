@@ -1,12 +1,4 @@
-import {
-  dayString,
-  listPlannedBetween,
-  planSession,
-  plannedFor,
-  startOfWeek,
-  unplanSession,
-  weekDays,
-} from '../plan';
+import { listPlannedBetween, planSession, plannedFor, unplanSession } from '../plan';
 import { migratedFixture, type FixtureDb } from './support/sqlite';
 
 /**
@@ -59,52 +51,6 @@ beforeEach(async () => {
   mockFixture = db;
 });
 
-describe('dayString', () => {
-  test('is the LOCAL calendar day, not the UTC one', () => {
-    // 22:30 local on the 4th. `toISOString()` would roll this to the 5th for
-    // anyone east of UTC and keep the 4th west of it — so an evening session
-    // would land on the wrong day depending on where the athlete lives. The
-    // local getters cannot do that.
-    const evening = new Date(2026, 7, 4, 22, 30, 0);
-    expect(dayString(evening)).toBe('2026-08-04');
-
-    const earlyMorning = new Date(2026, 7, 4, 0, 15, 0);
-    expect(dayString(earlyMorning)).toBe('2026-08-04');
-  });
-
-  test('zero-pads, so keys sort lexicographically', () => {
-    expect(dayString(new Date(2026, 0, 9))).toBe('2026-01-09');
-    // The whole reason the range query can use >= and <= on strings.
-    expect('2026-01-09' < '2026-01-10').toBe(true);
-  });
-});
-
-describe('startOfWeek', () => {
-  test('anchors to Monday, including when today IS Sunday', () => {
-    // Sunday 9 August 2026. The naive `getDay() - 1` gives -1 here and lands
-    // on the *next* Monday, which reports next week's training as this week's.
-    const sunday = new Date(2026, 7, 9, 12, 0, 0);
-    expect(dayString(startOfWeek(sunday))).toBe('2026-08-03');
-  });
-
-  test('a Monday is its own week start', () => {
-    const monday = new Date(2026, 7, 3, 12, 0, 0);
-    expect(dayString(startOfWeek(monday))).toBe('2026-08-03');
-  });
-
-  test('weekDays spans Monday to Sunday inclusive', () => {
-    const days = weekDays(new Date(2026, 7, 5, 9, 0, 0)).map(dayString);
-    expect(days).toEqual([
-      '2026-08-03',
-      '2026-08-04',
-      '2026-08-05',
-      '2026-08-06',
-      '2026-08-07',
-      '2026-08-08',
-      '2026-08-09',
-    ]);
-  });
-});
 
 describe('planned_sessions', () => {
   test('the migration creates the table', async () => {
