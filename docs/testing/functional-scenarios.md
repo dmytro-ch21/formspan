@@ -3685,3 +3685,21 @@ Covers `components/BjjRankHeader.tsx`, `components/TrainingSummary.tsx`,
 - `pnpm run lint:mobile` must fail on a hook after an early return. That rule
   is the guard for the class; the component test is the guard for the screen.
 
+## Session summary figures (mobile, `components/ui/Stat`)
+
+- **The unit is smaller than its figure.** `480kg` reads as one quantity when
+  the `kg` is ~62% the size and a step quieter, and as two things when it isn't.
+- **A thousands separator stays inside the figure.** `12,450kg` must not split
+  on the comma — that renders the `,` small and muted in the middle of a number.
+- **A long figure shrinks; a short one does not.** Pounds run an order of
+  magnitude longer than kilos (`553.7k lb`), and a row where one stat is smaller
+  than its neighbours is the reported "truncates and looks ugly". Assert both
+  directions, or a ladder that always shrinks passes.
+- **The em dash is not a unit.** A missing figure holds a number's worth of
+  space at full size rather than collapsing the column.
+- Each stat announces as `"<value> <label>"` — ungrouped, VoiceOver reads the
+  number and the word as two unrelated stops.
+- **No screen should carry its own copy of this.** The session summary did, and
+  it used `adjustsFontSizeToFit`, which the shared component deliberately avoids
+  because it measures after layout and is unreliable across nested `Text` runs.
+
