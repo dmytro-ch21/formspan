@@ -25,8 +25,12 @@ export class ApiError extends Error {
   constructor(
     public readonly status: number,
     path: string,
+    /** The backend's error code — the part of the shape that is contractual. */
+    public readonly code = "",
+    /** The backend's own message, when it sent one worth showing. */
+    public readonly detail = "",
   ) {
-    super(`API responded ${status} for ${path}`);
+    super(detail || `API responded ${status} for ${path}`);
     this.name = "ApiError";
   }
 }
@@ -40,7 +44,7 @@ export class ApiError extends Error {
  * `cache: "no-store"` because admin views must show current state, never a
  * stale render of someone's account.
  */
-async function adminFetch<T>(path: string): Promise<T> {
+async function adminFetch<T>(path: string, init?: { method: string; body: unknown }): Promise<T> {
   const { getToken } = await auth();
   const token = await getToken();
   if (!token) {
@@ -50,19 +54,48 @@ async function adminFetch<T>(path: string): Promise<T> {
   }
 
   const res = await fetch(`${API_BASE}${path}`, {
+    method: init?.method ?? "GET",
     headers: {
       Authorization: `Bearer ${token}`,
       // Correlates this admin read with the API's structured logs, same as
       // apps/web and apps/mobile already do for their own calls.
       traceparent: traceparent(newTraceId()),
+      ...(init ? { "Content-Type": "application/json" } : {}),
     },
+    body: init ? JSON.stringify(init.body) : undefined,
     cache: "no-store",
   });
 
   if (!res.ok) {
-    throw new ApiError(res.status, path);
+    throw await apiErrorFrom(res, path);
   }
   return res.json() as Promise<T>;
+}
+
+/**
+ * Reads the backend's `{error:{code,message}}` body so a write can show the
+ * operator what was actually wrong.
+ *
+ * The messages here are worth surfacing verbatim rather than replacing with a
+ * generic one: content authoring has eighteen fields, and the API deliberately
+ * names the offending value and the legal set ("position %q is not one the
+ * library uses — pick one of: …"). Swallowing that means opening the source to
+ * find out which field was rejected.
+ *
+ * Branch on `code`, never on `message` — the codes are the contract, the
+ * messages are not.
+ */
+async function apiErrorFrom(res: Response, path: string): Promise<ApiError> {
+  try {
+    const body = (await res.json()) as { error?: { code?: string; message?: string } };
+    if (body?.error?.message) {
+      return new ApiError(res.status, path, body.error.code ?? "", body.error.message);
+    }
+  } catch {
+    // A non-JSON body (a proxy's HTML 502, say) is not worth failing over —
+    // fall through to the status-only error.
+  }
+  return new ApiError(res.status, path);
 }
 
 export async function listUsers(): Promise<AdminUserSummary[]> {
@@ -185,4 +218,125 @@ export async function fetchHealth(opts: { hours?: number; userID?: string } = {}
   if (opts.userID) params.set("user_id", opts.userID);
   const qs = params.toString();
   return adminFetch<HealthReport>(`/admin/health${qs ? `?${qs}` : ""}`);
+}
+
+/**
+ * A technique as the catalog stores it.
+ *
+ * snake_case throughout, matching the wire and the Postgres columns 1:1 — see
+ * docs/architecture/api-conventions.md. No camelCase mapping layer on purpose:
+ * a second set of names is a second thing to keep in step with eighteen fields.
+ */
+export type Technique = {
+  id: string;
+  name: string;
+  aliases: string[];
+  category: string;
+  /** advance | reverse | escape | control | finish, or empty. */
+  function?: string;
+  position: string;
+  position_detail: string;
+  /** Where it LEAVES you. Empty means not recorded, never "goes nowhere". */
+  to_position?: string;
+  gi_no_gi: string;
+  typical_belt: string;
+  description: string;
+  when_to_use: string;
+  setup_from: string[];
+  common_next_moves: string[];
+  common_counters: string[];
+  video_reference: string;
+  source_notes: string;
+  ibjjf_ruleset_id: string;
+  /**
+   * "admin" for everything the admin list returns.
+   *
+   * Only populated on `/admin/techniques` — the public `GET /techniques/{id}`
+   * does not select it and the contract does not promise it there. Do not
+   * derive ownership from this field on a technique read the public way: it
+   * comes back undefined, which reads as "not admin" and marks everything
+   * deploy-owned. Use membership of `listAuthoredTechniques()` instead.
+   */
+  source?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+/**
+ * The techniques the console owns.
+ *
+ * Not the whole catalog: PATCH refuses a seeded row, so the other 466 would be
+ * rows that 409 when clicked. The screen says where those live instead.
+ */
+export async function listAuthoredTechniques(): Promise<Technique[]> {
+  const data = await adminFetch<{ techniques: Technique[] }>("/admin/techniques");
+  return data.techniques;
+}
+
+/**
+ * The position vocabulary, DERIVED server-side from the catalog rather than
+ * listed here.
+ *
+ * A hardcoded copy is how the editor's dropdown and the validator drift apart,
+ * and the failure that follows is the quiet kind: a technique filed under a
+ * position no filter matches renders fine and returns nothing forever.
+ */
+export async function listPositions(): Promise<string[]> {
+  const data = await adminFetch<{ positions: string[] }>("/admin/techniques/positions");
+  return data.positions;
+}
+
+/**
+ * One technique, full detail, from the public read path.
+ *
+ * Note the shape difference, which is easy to get wrong and fails silently:
+ * this endpoint returns the technique at the TOP LEVEL, while the admin write
+ * endpoints wrap theirs in `{ "technique": … }`. Reading `.technique` here
+ * yields undefined rather than an error, so the edit page rendered a 404 for
+ * an id that plainly exists — caught in the browser, not by the typechecker,
+ * because the assertion was the lie.
+ */
+export async function getTechnique(id: string): Promise<Technique> {
+  return adminFetch<Technique>(`/techniques/${encodeURIComponent(id)}`);
+}
+
+/**
+ * The admin-writable surface.
+ *
+ * `id` and `source` are absent deliberately, matching the backend's own
+ * request type: the id is derived from the name at creation and immutable
+ * after, because it is already a foreign key in athletes' training records.
+ */
+export type TechniqueWrite = Omit<
+  Technique,
+  "id" | "source" | "created_at" | "updated_at"
+>;
+
+export async function createTechnique(body: TechniqueWrite): Promise<Technique> {
+  const data = await adminFetch<{ technique: Technique }>("/admin/techniques", {
+    method: "POST",
+    body,
+  });
+  return data.technique;
+}
+
+/**
+ * PATCH is a partial update on the wire, but this console always sends the
+ * whole form.
+ *
+ * That is deliberate and it is the safe direction: the form is populated from
+ * the stored row, so every field it sends is either unchanged or edited on
+ * purpose. Sending only the dirty fields would be smaller and would reintroduce
+ * the failure the backend's pointer-typed request exists to survive — a form
+ * that omits `description` erasing the prose.
+ */
+export async function updateTechnique(
+  id: string,
+  body: TechniqueWrite,
+): Promise<Technique> {
+  const data = await adminFetch<{ technique: Technique }>(
+    `/admin/techniques/${encodeURIComponent(id)}`,
+    { method: "PATCH", body },
+  );
+  return data.technique;
 }

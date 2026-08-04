@@ -25,9 +25,14 @@ export default async function UserLookupPage() {
             {users.length} known to the API
           </span>
         </div>
-        <Link href="/health" className="text-[13px] text-text-secondary underline">
-          Health
-        </Link>
+        <nav className="flex items-center gap-5 text-[13px] text-text-secondary">
+          <Link href="/content" className="underline">
+            Content
+          </Link>
+          <Link href="/health" className="underline">
+            Health
+          </Link>
+        </nav>
       </header>
 
       <main className="px-10 py-8">

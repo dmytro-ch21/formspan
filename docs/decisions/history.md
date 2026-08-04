@@ -8164,6 +8164,102 @@ alone because a splash master implies a design decision about what the native
 splash shows, and that decision is currently "nothing" — regenerating them
 would be inventing an answer to a question nobody has asked yet.
 
+## 2026-08-04 — The console that makes authoring real
+
+`cmd/exportcontent` landed with nothing to carry: authoring a technique meant
+`curl`. `apps/admin` now has `/content` — list, create, edit — so the loop that
+started with "the pass we did today is not in the list" is finally end to end.
+
+### One new endpoint, and why the public list could not serve this
+
+`GET /v1/admin/techniques` returns admin-authored rows only. The console can
+edit nothing else — `PATCH` refuses a seeded row, because the JSON owns those
+and an edit would be reverted by the next deploy — so listing the whole catalog
+would offer 466 rows of which a handful are actionable.
+
+The public `GET /techniques` cannot answer it: `Summary` carries no `source`,
+and adding one would put the string "seed" on 466 entries of every client's
+catalog to serve one admin screen. `AdminAuthored` already existed on the
+repository for the export, so it moved onto the `ContentRepository` interface
+and both read it — one definition of "what the console owns" rather than two
+queries that can disagree about which rows the export will carry.
+
+### Ownership is membership of that list, not a field
+
+The edit screen first read `technique.source !== "admin"` from the public
+detail endpoint, which marked **everything** deploy-owned — including the row
+the console had just written. `GET /techniques/{id}` does not select `source`,
+and the contract does not promise it there. So ownership is decided by
+membership of the authored list, which is the same definition the list screen
+and the export use and cannot drift from either.
+
+Three states, all reachable by typing a URL: in the list → the form; not in it
+but real → the seeded explanation, naming the file to edit and the deploy to
+run; 404 → not found. A seeded id gets an explanation rather than a form,
+because a save button that always fails is worse than no save button.
+
+### Category is the one place the console is stricter than the API
+
+`ValidateFields` deliberately does not constrain `category` — the vocabulary is
+still settling — but `derive_function` in the importer exits on anything outside
+its nine. Before the console existed, authored content never reached the
+importer. Now it does, so the field is a `<select>` of exactly those nine. This
+closes the coupling recorded as a gap on the export entry: a technique filed as
+"Guard Pass" seeds, renders and exports perfectly, then breaks the next
+spreadsheet re-import long after anyone connects the two.
+
+### What browser verification caught that nothing else would have
+
+Three defects, all of which typechecked, linted and built clean:
+
+1. **The response shape.** The public detail endpoint returns the technique at
+   the top level; the admin write endpoints wrap theirs in `{"technique": …}`.
+   Reading `.technique` from the former yields `undefined`, not an error, so the
+   edit page rendered a 404 for an id that plainly exists. The type assertion
+   was the lie, so the typechecker agreed with it.
+2. **React 19 resets a form after its action completes.** A rejected save wiped
+   all seventeen fields — the console told you the name was taken and threw away
+   the paragraph of prose in the same render. The action now hands the
+   submission back and the form re-seeds its defaults from it.
+3. **Selects did not come back with the rest.** Text inputs pick up a changed
+   `defaultValue` on re-render; a `<select>` does not, because React marks the
+   matching option at mount. Every text field restored correctly while category,
+   position and belt fell back to the placeholder — the half-restore is worse
+   than none, because it looks like it worked. Each select now carries a `key`
+   derived from its own value, so only an error render remounts it.
+
+### Server actions are their own endpoints
+
+`assertAdmin` runs inside both actions rather than relying on the layout above
+them. A server action is a POST endpoint the router exposes independently of the
+page it was declared beside: nothing about sitting in a gated route segment
+protects it, and a caller who never loads the page can invoke it. The backend's
+`RequireAdmin` is the real boundary and would reject them, but a write path
+gated by coincidence is one refactor from being gated by nothing. The allowlist
+moved to `lib/admin.ts` so `/users`, `/content` and the actions share it.
+
+### Gaps this leaves
+
+- **Exercises still have no write path.** They carry the `source` column and the
+  seed guard, so the schema is ready, but there is no endpoint and therefore no
+  screen. "Add a technique or exercise for any module" was the original ask;
+  this is half of it.
+- **No delete.** Authoring a technique with a typo in the name means a dead id
+  that cannot be removed from the console, only edited. Deliberate for now —
+  the id is a foreign key in training records, so deleting one is a data
+  question, not a CRUD gap — but the answer is currently "ask a developer".
+- **No confirmation that a name is nearly taken.** The console warns in prose to
+  search first, and the API refuses an exact id collision, but "Knee Cut Pass"
+  and "Knee-Cut Pass" slug identically while "Knee Cut Guard Pass" does not.
+  Nothing surfaces the near-miss.
+- **The form is unvalidated beyond `required` and the API.** A `setup_from`
+  naming a technique that does not exist is accepted, and the graph edge simply
+  points nowhere. The seeder validates those cross-references; this path does
+  not reach that check until export.
+- **Not verified against staging.** Everything here ran against local Postgres
+  with a real Clerk session.
+
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

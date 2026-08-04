@@ -132,6 +132,7 @@ func main() {
 	// reference content that every athlete's library and every training record
 	// points at.
 	mux.Handle("GET /v1/admin/techniques/positions", verifier.RequireAdmin(http.HandlerFunc(techniqueContentHandler.Positions)))
+	mux.Handle("GET /v1/admin/techniques", verifier.RequireAdmin(http.HandlerFunc(techniqueContentHandler.List)))
 	mux.Handle("POST /v1/admin/techniques", verifier.RequireAdmin(http.HandlerFunc(techniqueContentHandler.Create)))
 	mux.Handle("PATCH /v1/admin/techniques/{techniqueID}", verifier.RequireAdmin(http.HandlerFunc(techniqueContentHandler.Update)))
 	mux.Handle("GET /v1/sessions", verifier.RequireAuth(http.HandlerFunc(sessionHandler.List)))

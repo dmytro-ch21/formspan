@@ -3335,3 +3335,59 @@ JS and show up on a reload.
 - Editing `assets/brand/app-icons/*.svg` and re-rendering reproduces the shipped
   PNGs. If it doesn't, the master and the raster have drifted and the master is
   no longer the source of truth it claims to be.
+
+## Content authoring in the admin console (`apps/admin` `/content`)
+
+### Happy path
+
+- The list shows **only admin-authored** techniques, not the catalog. Seed the
+  library, author one, and assert the list has exactly one row — 466 seeded
+  entries must not appear, because the edit path refuses every one of them.
+- Creating a technique returns a **derived id** and the screen shows the real
+  one from the API, not only the typed preview. "Cabeçada Counter" →
+  `cabecada-counter`, accents folded.
+- The new technique is immediately visible in `GET /v1/techniques` and on the
+  phone. That immediacy is the point of the feature.
+- Editing changes only what was edited. Change `typical_belt` alone and assert
+  the description, aliases, `setup_from`, `function` and `to_position` are all
+  still there — a console that sends partial bodies erases prose it never
+  displayed, which is the failure the API's pointer-typed request exists to
+  survive.
+- The position dropdown comes from `GET /v1/admin/techniques/positions`, not a
+  hardcoded list. Add a position to the catalog and it appears without a
+  frontend change; that is what stops a technique being filed under a position
+  no filter matches.
+
+### Edge cases & errors
+
+- **A rejected save must not clear the form.** Submit a name that collides,
+  then assert every one of the seventeen fields still holds what was typed —
+  *including the selects*. React resets a form after its action, and the
+  selects and text inputs restore by different mechanisms, so a half-restore is
+  the likely regression and it looks like success.
+- The API's own message is shown verbatim: "a technique with that name already
+  exists — ids are derived from the name". Do not replace it with a generic
+  string; with eighteen fields, naming the offending one is the difference
+  between fixing it and guessing.
+- A name of only punctuation is refused ("must contain letters or digits") and
+  the id preview shows empty, so the cause is visible before submitting.
+- **A seeded id gets an explanation, not a form.** Visit `/content/knee-cut-pass`
+  and assert there is no save button and the copy names `techniques.json`. The
+  API would refuse the edit; a form that always fails is worse than none.
+- An id that exists nowhere is a real 404, distinct from the seeded case.
+- Category offers exactly the importer's nine. Anything else seeds and renders
+  fine and then breaks the next spreadsheet re-import.
+
+### Auth and security
+
+- `/content(.*)` is in the `proxy.ts` matcher, so a signed-out visitor gets the
+  sign-in prompt rather than the layout's own refusal.
+- A signed-in account **not** on `ADMIN_USER_IDS` gets "Not authorized".
+- **The server actions check the allowlist themselves.** Invoke the action
+  endpoint directly as a non-admin, without ever loading the page, and assert it
+  refuses — a server action is exposed independently of the route it was
+  declared beside, so the layout gate does not cover it. The backend's
+  `RequireAdmin` is the real boundary and must also refuse.
+- The Clerk token never reaches the browser: writes go through server actions,
+  and `lib/api.ts` is `server-only`.
+

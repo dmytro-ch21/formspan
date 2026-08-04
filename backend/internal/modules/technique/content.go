@@ -92,6 +92,17 @@ type ContentRepository interface {
 	// the handler can be faked — taking the concrete type is why the handler
 	// layer had no tests and shipped three defects.
 	Source(ctx context.Context, id string) (string, error)
+	// AdminAuthored returns every console-authored technique.
+	//
+	// The console needs it to list what it can edit, and nothing else can
+	// answer that: `Summary` carries no `source`, so the public list cannot
+	// tell a seeded entry from an authored one, and adding the field there
+	// would put 8 KB of "seed" on every client's list to serve one screen.
+	//
+	// cmd/exportcontent reads the same method for the same reason — one
+	// definition of "what the console owns", rather than a second query that
+	// can disagree with the first about which rows the export will carry.
+	AdminAuthored(ctx context.Context) ([]Technique, error)
 }
 
 // ValidateForWrite is every rule an admin-authored technique must pass.

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -50,6 +51,17 @@ func (f *fakeContentRepo) Source(_ context.Context, id string) (string, error) {
 		return "", ErrNotFound
 	}
 	return s, nil
+}
+
+func (f *fakeContentRepo) AdminAuthored(context.Context) ([]Technique, error) {
+	out := []Technique{}
+	for id, t := range f.stored {
+		if f.sources[id] == "admin" {
+			out = append(out, t)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
 }
 
 func (f *fakeContentRepo) CreateTechnique(_ context.Context, t Technique) (Technique, error) {
@@ -260,4 +272,52 @@ func TestANameThatSlugsToNothingIsRefusedAtTheHandler(t *testing.T) {
 		t.Errorf("a name that slugs to nothing = %d, want 400 — not a NOT NULL "+
 			"violation far from the cause", res.StatusCode)
 	}
+}
+
+// The console lists what it can EDIT, which is not the catalog. Listing all 466
+// would offer 466 rows of which a handful are actionable — UpdateTechnique
+// refuses a seeded row, so the rest are decoration that 409s when clicked.
+func TestListReturnsOnlyWhatTheConsoleCanEdit(t *testing.T) {
+	repo := newFakeRepo()
+	repo.stored["authored-one"] = Technique{ID: "authored-one", Name: "Authored One"}
+	repo.sources["authored-one"] = "admin"
+	repo.stored["knee-cut-pass"] = Technique{ID: "knee-cut-pass", Name: "Knee Cut Pass"}
+	repo.sources["knee-cut-pass"] = "seed"
+
+	rec := httptest.NewRecorder()
+	NewContentHandler(repo).List(rec, httptest.NewRequest(http.MethodGet, "/v1/admin/techniques", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200: %s", rec.Code, rec.Body)
+	}
+	var body struct {
+		Techniques []Technique `json:"techniques"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Techniques) != 1 || body.Techniques[0].ID != "authored-one" {
+		t.Errorf("got %d techniques (%v), want just the admin-authored one",
+			len(body.Techniques), idsOf(body.Techniques))
+	}
+}
+
+// An empty result is `[]`, never `null`. A console mapping over null throws
+// where an empty state should render, and "you have not authored anything yet"
+// is the first thing a new operator sees.
+func TestListWithNothingAuthoredIsAnEmptyArray(t *testing.T) {
+	rec := httptest.NewRecorder()
+	NewContentHandler(newFakeRepo()).List(rec, httptest.NewRequest(http.MethodGet, "/v1/admin/techniques", nil))
+
+	if got := rec.Body.String(); !strings.Contains(got, `"techniques":[]`) {
+		t.Errorf("body %s, want an empty array", got)
+	}
+}
+
+func idsOf(ts []Technique) []string {
+	out := make([]string, 0, len(ts))
+	for _, t := range ts {
+		out = append(out, t.ID)
+	}
+	return out
 }
