@@ -8390,6 +8390,78 @@ decision rather than a web one.
 `apps/admin` has had none of this pass — it is still on whatever it was using,
 and it is the third app that will need the same components.
 
+## 2026-08-04 — The admin console gets the same marks, and the second copy is a deliberate one
+
+Third and last app. `apps/admin` was still on `src/app/icon.png` as the
+placeholder tick and rendered "VOLA Admin" as type in Barlow Condensed on its
+signed-out entry. It now shows the stacked lockup with "Admin" set beneath it,
+and its favicon and apple-icon are byte-identical to `apps/web`'s — both
+rendered from `assets/brand/app-icons/vola-app-icon-dark-1024.svg`, which is
+also what `apps/mobile` uses.
+
+### Only the entry screen was branded, and that is a deferral rather than a
+### complete pass
+
+The first draft of this entry claimed `apps/admin` has "no shell masthead" and
+that the signed-out entry is therefore the only place a logo belongs. Review
+checked the route tree and that is wrong. What admin lacks is a **shared layout
+owning a masthead**; the masthead itself exists **six times over** — an
+identical `<header className="… border-b border-border bg-card px-10 py-5">`
+in `users/page.tsx`, `users/[id]/page.tsx`, `content/page.tsx`,
+`content/new/page.tsx`, `content/[id]/page.tsx` (twice) and `health/page.tsx`.
+The three `layout.tsx` files really are pure authorization gates, so the
+reasoning about *why* there is no shared home for it was right; the conclusion
+drawn from it was too strong.
+
+That matters because the web pass immediately before this one branded **both**
+the signed-out entry and the signed-in shell. Admin got the entry only, so
+against that precedent this is incomplete. Two further unbranded full-page
+surfaces exist as well: the three identical "Not authorized" screens, and
+`error.tsx` — whose own comment notes the 403 case is the likeliest in
+practice.
+
+Branding six duplicated headers means extracting an `<AdminMasthead>` first,
+which is a component refactor rather than an artwork pass, so it is **deferred
+and tracked**, not absent. The distinction is the point: the original wording
+would have told the next person there was nothing left to consider.
+
+### "Admin" stays type, and is not part of the lockup
+
+The old heading read "VOLA Admin" as one string, which invites folding the
+qualifier into the wordmark. It shouldn't be: "Admin" says *which console you
+are looking at*, not what the brand is, and the brand kit has no such lockup.
+It sits under the wordmark in condensed caps with wide tracking — related to
+the mark, clearly not part of it.
+
+### The duplication is deliberate
+
+`apps/admin/src/app/Brand.tsx` is a copy of `apps/web`'s. Both apps are separate
+Next projects with no package between them, and the workspace's `packages/*`
+glob is declared but empty, so a shared `@vola/brand` was available as an
+option. It was **not** taken, because the direction already agreed for killing
+this duplication is a *generator* — a script that reads `logos/source/*.svg` and
+emits one module per app, with CI failing on `git diff --exit-code`. That makes
+drift a red build rather than something review has to catch, and it covers
+`apps/mobile` too, which a runtime React package never could (it needs
+`react-native-svg`, which that app deliberately does not have). Introducing a
+package now would cut across that plan to reach the same end state.
+
+The cost is stated in the file rather than left implicit: both copies carry a
+comment saying that changing one means changing the other. That is a weak
+guarantee and is meant to be temporary.
+
+### Gaps
+
+Two copies of the path data now exist (web, admin) plus a third copy of the
+lockup *ratios* in `apps/mobile`'s `AnimatedSplash`. Nothing enforces that they
+agree. The generator is the fix and is tracked separately, along with the
+brand kit's top-level placeholder logos.
+
+`apps/admin` has no dark theme at all — one `--color-accent-dark` token, no
+`data-theme`, no `prefers-color-scheme`, no `dark:` utilities. The wordmark's
+`currentColor` therefore buys nothing here today; it costs nothing either, and
+it means the console is already correct if a dark mode ever lands.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

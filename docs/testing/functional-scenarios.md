@@ -3457,3 +3457,58 @@ compared as pixels.
 - Both are generated from `assets/brand/app-icons/vola-app-icon-dark-1024.svg`,
   the same master `apps/mobile` renders from. If the two apps' icons ever differ
   visually, one of them was hand-edited.
+
+## Brand marks in the app (admin)
+
+Covers `apps/admin/src/app/Brand.tsx`, the signed-out entry in `page.tsx`, and
+`icon.png` / `apple-icon.png`.
+
+**Only the signed-out entry is branded today, and that is deferred work rather
+than a finished state.** `/users`, `/content`, `/health` and their children each
+render their own copy of an identical masthead — six in total — and none carries
+the mark, nor do the three "Not authorized" screens or `error.tsx`. Branding
+them means extracting a shared `<AdminMasthead>` first. So a scenario expecting
+a logo there is asserting something not yet built, **not** something ruled out.
+
+### The entry screen
+
+- Signed out at `/`: the stacked lockup with **"ADMIN"** in condensed caps
+  beneath it. Not "VOLA Admin" as a single typed string, and "Admin" is not part
+  of the artwork.
+- The lockup is the same 7 paths as web's — three mark facets, four letterforms,
+  no tagline.
+- Signed in: `/` redirects to `/users` and the entry screen is never seen, so
+  every scenario here starts signed out.
+
+### Accessibility
+
+- One accessible name: the `h1` carries `aria-label="VOLA Admin"` and *contains*
+  the lockup and the word "Admin", so a linear pass announces it once. It must
+  not announce as "VOLA Admin … Admin" — that stutter is what the earlier
+  `sr-only`-duplicate arrangement produced, because the visible "Admin" stayed
+  exposed alongside a hidden heading saying the same thing.
+- The visible content is the heading. Replacing it with a hidden heading plus
+  decorative graphics reintroduces the stutter; removing the heading entirely
+  because the lockup "says it" leaves the console's entry with no heading.
+- "Admin" is 4.5:1 or better against the page. It uses `text-button-text`, not
+  `text-text-secondary` — the latter is 4.41:1 at this size and weight.
+
+### Icons
+
+- `/icon.png` and `/apple-icon.png` serve the faceted mark on navy.
+- They are **byte-identical to `apps/web`'s** — same master, same render. If
+  they ever differ, one app's icons were regenerated and the other's weren't,
+  which is the drift this whole pass exists to remove.
+
+### The copies must agree
+
+- `apps/admin/src/app/Brand.tsx` and `apps/web/src/app/Brand.tsx` are duplicates
+  pending a generator. This is enforced, not remembered: `pnpm run
+  check:brand-copies` compares both files from the `import type` line onward and
+  fails on any difference. It runs in `verify` and in CI's admin job.
+- The check must **fail** when the copies differ — mutate one file by a single
+  character and confirm it goes red. A drift check that cannot go red is the
+  same class of thing as the zero-assertion test this repo already deleted once.
+- It must also fail, not pass, if its comparison anchor disappears. A file
+  restructure that removes the `import type` line should error loudly rather
+  than silently comparing nothing.

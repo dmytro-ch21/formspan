@@ -23,7 +23,8 @@
     "lint:admin": "pnpm --filter admin lint",
     "typecheck:admin": "pnpm --filter admin exec tsc --noEmit",
     "build:admin": "pnpm --filter admin build",
-    "verify": "pnpm run fmt:api && pnpm run vet:api && pnpm run build:api && pnpm run lint:openapi && pnpm run test:mobile && pnpm run typecheck:mobile && pnpm run lint:web && pnpm run typecheck:web && pnpm run lint:admin && pnpm run typecheck:admin"
+    "verify": "pnpm run fmt:api && pnpm run vet:api && pnpm run build:api && pnpm run lint:openapi && pnpm run test:mobile && pnpm run typecheck:mobile && pnpm run check:brand-copies && pnpm run lint:web && pnpm run typecheck:web && pnpm run lint:admin && pnpm run typecheck:admin",
+    "check:brand-copies": "node scripts/check-brand-copies.mjs"
   },
   "devDependencies": {
     "@redocly/cli": "^2.41.0"
