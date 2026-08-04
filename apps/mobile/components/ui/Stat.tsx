@@ -27,15 +27,51 @@ import { vola } from '@/constants/Colors';
 /** Digits, with the separators that belong inside a figure. */
 const FIGURES = /([\d]+(?:[.,][\d]+)*)/;
 
+/**
+ * How much to shrink a figure so it still fits its column.
+ *
+ * Three stats share a row, so each gets about a third of the screen. Most
+ * figures are short ("3", "1h 41m") and want the full size; a few are not, and
+ * the long ones arrive precisely when the span is widest — a year of training
+ * is "312h" or "251.1t", and pounds run an order of magnitude longer again at
+ * "553.7k lb". At size 26 that overflowed into the neighbouring stat.
+ *
+ * A ladder rather than `adjustsFontSizeToFit`: that prop measures after layout
+ * and is unreliable across nested `Text` runs, which is exactly what this
+ * component renders (figures at one size, units at another). Deriving the size
+ * from the string length is deterministic, identical on both platforms, and
+ * cannot disagree with itself between the two runs.
+ *
+ * Counted in characters rather than measured, so it is approximate by design —
+ * it errs toward shrinking slightly early, which costs nothing, rather than
+ * late, which clips.
+ *
+ * **Opt-in, via `fit`.** `StatValue` renders on six screens, most of which give
+ * a figure as much room as it wants; applied to all of them, "100kg" and
+ * "102.5kg" came out at two different sizes in adjacent rows of the same card.
+ * The ladder belongs where the column is fixed and narrow.
+ */
+function fitSize(value: string, base: number): number {
+  const n = value.length;
+  if (n <= 6) return base;
+  if (n <= 8) return Math.round(base * 0.85);
+  if (n <= 10) return Math.round(base * 0.72);
+  return Math.round(base * 0.62);
+}
+
 export function StatValue({
   value,
-  size = 26,
+  size: requested = 26,
   color = vola.text,
+  fit = false,
 }: {
   value: string;
   size?: number;
   color?: string;
+  /** Shrink long figures to fit a fixed narrow column. See `fitSize`. */
+  fit?: boolean;
 }) {
+  const size = fit ? fitSize(value, requested) : requested;
   const unitSize = Math.round(size * 0.62);
 
   if (value === '—') {
@@ -78,18 +114,20 @@ export function Stat({
   value,
   change,
   size,
+  fit,
 }: {
   label: string;
   value: string;
   change?: number | null;
   size?: number;
+  fit?: boolean;
 }) {
   const rounded = change == null ? null : Math.round(change);
   // Grouped, or VoiceOver reads the figure and its label as two unrelated
   // stops with nothing connecting them.
   return (
     <RNView style={styles.stat} accessible accessibilityLabel={`${value} ${label}`}>
-      <StatValue value={value} size={size} />
+      <StatValue value={value} size={size} fit={fit} />
       <Text style={styles.label}>{label}</Text>
       {rounded != null && rounded !== 0 && (
         <Text style={styles.delta}>

@@ -3,7 +3,7 @@ import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet } from 'react-native';
 
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
-import { BjjRankCard } from '@/components/BjjRankCard';
+import { BjjRankHeader } from '@/components/BjjRankHeader';
 import { RecordsCard } from '@/components/RecordsCard';
 import { TrainingSummary } from '@/components/TrainingSummary';
 import { Text, View } from '@/components/Themed';
@@ -119,6 +119,12 @@ export default function YouScreen() {
           </Text>
         ) : (
           <>
+            {/* The belt leads for a ranked grappler — see BjjRankHeader for
+                why it is a masthead rather than a card. It owns the no-rank
+                case too, as a single quiet row, so this is the only place the
+                standing is fetched. */}
+            {bjjEnabled && <BjjRankHeader getToken={getToken} />}
+
             <Text style={styles.name}>{profile?.display_name || 'Add your name'}</Text>
             {!profile?.display_name && (
               <Text style={styles.muted}>Tap Edit to tell VOLA who you are.</Text>
@@ -133,8 +139,6 @@ export default function YouScreen() {
                 they're the payoff for the logging above, and the thing people
                 actually open this tab to look at. */}
             <RecordsCard getToken={getToken} units={profile?.unit_system ?? 'metric'} />
-
-            {bjjEnabled && <BjjRankCard getToken={getToken} />}
 
             <Text style={styles.sectionLabel}>Profile</Text>
             <View style={styles.card}>

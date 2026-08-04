@@ -4,6 +4,8 @@ import { ActivityIndicator, Pressable, StyleSheet, View as RNView } from 'react-
 import { useFocusEffect, useRouter } from 'expo-router';
 
 import { Text, View } from '@/components/Themed';
+import { Medal } from '@/components/ui/Medal';
+import { StatValue } from '@/components/ui/Stat';
 import { vola } from '@/constants/Colors';
 import { cachedExercises } from '@/lib/sessionStore';
 import {
@@ -13,7 +15,7 @@ import {
   RECORD_LABEL,
   type ExerciseRecords,
 } from '@/lib/records';
-import { formatDistance, formatWeight, type UnitSystem } from '@/lib/units';
+import type { UnitSystem } from '@/lib/units';
 
 /**
  * Personal records, on the profile.
@@ -61,9 +63,6 @@ export function RecordsCard({
     }, [getToken]),
   );
 
-  const fmtWeight = (kg: number) => formatWeight(kg, units);
-  const fmtDistance = (m: number) => formatDistance(m, units);
-
   return (
     <>
       <RNView style={styles.head}>
@@ -93,40 +92,84 @@ export function RecordsCard({
           </Text>
         </View>
       ) : (
-        records.map((er) => (
-          <Pressable
-            key={er.exercise_id}
-            onPress={() => router.push(`/exercise/${er.exercise_id}`)}
-            accessibilityRole="button"
-            accessibilityLabel={`${names.get(er.exercise_id) ?? er.exercise_id} records`}
-            testID={`record-${er.exercise_id}`}
-          >
-            <View style={styles.card}>
-              <RNView style={styles.cardHead}>
-                <Text style={styles.name}>{names.get(er.exercise_id) ?? er.exercise_id}</Text>
-                {er.records.some((r) => r.is_recent) && (
-                  // The one thing worth interrupting a scan for: this is new.
-                  <Text style={styles.badge}>NEW</Text>
-                )}
-              </RNView>
-              <RNView style={styles.values}>
-                {er.records.map((r) => (
-                  <RNView key={r.kind} style={styles.value}>
-                    <Text style={styles.valueLabel}>{RECORD_LABEL[r.kind]}</Text>
-                    <Text style={styles.valueNumber}>
-                      {formatRecord(r, fmtWeight, fmtDistance)}
-                    </Text>
-                    {/* The set behind it. A number you can check beats one you
-                        have to trust — same rule as the suggestions. */}
-                    <Text style={styles.evidence}>
-                      {describeEvidence(r, fmtWeight) || '—'}
-                    </Text>
-                  </RNView>
-                ))}
-              </RNView>
-            </View>
-          </Pressable>
-        ))
+        <View style={styles.list}>
+          {records.map((er, i) => {
+            // The headline record is the first the API returns; the rest ride
+            // along on one line beneath. Two records per lift answer different
+            // questions (see the file header), so neither is dropped — but one
+            // of them is what you would say out loud, and that is the one that
+            // gets the size.
+            const [primary, ...rest] = er.records;
+            // The API only groups an exercise that has at least one record, so
+            // this is unreachable today — but the code it replaced was total
+            // (a `.map`), TypeScript will not flag the destructure, and there
+            // is no error boundary above this: a loosened contract would take
+            // the whole You tab down rather than drop one row.
+            if (!primary) return null;
+            const fresh = er.records.some((r) => r.is_recent);
+            const name = names.get(er.exercise_id) ?? er.exercise_id;
+            const evidence = describeEvidence(primary, units);
+
+            return (
+              <Pressable
+                key={er.exercise_id}
+                onPress={() => router.push(`/exercise/${er.exercise_id}`)}
+                accessibilityRole="button"
+                accessibilityLabel={[
+                  name,
+                  `${RECORD_LABEL[primary.kind]} ${formatRecord(primary, units)}`,
+                  evidence,
+                  ...rest.map(
+                    (r) => `${RECORD_LABEL[r.kind]} ${formatRecord(r, units)}`,
+                  ),
+                  fresh ? 'set in the last 30 days' : null,
+                ]
+                  .filter(Boolean)
+                  .join('. ')}
+                testID={`record-${er.exercise_id}`}
+                style={({ pressed }) => [
+                  styles.row,
+                  // One card of rows rather than a card per lift: five records
+                  // used to be five bordered boxes down the screen, which is a
+                  // lot of chrome for five numbers.
+                  i > 0 && styles.rowDivided,
+                  pressed && styles.rowPressed,
+                ]}
+              >
+                <Medal tier={fresh ? 'gold' : 'silver'} />
+
+                <RNView style={styles.main}>
+                  <Text style={styles.name} numberOfLines={1}>
+                    {name}
+                  </Text>
+                  <Text style={styles.evidence} numberOfLines={1}>
+                    {/* The word, not just the medal. A gold-versus-silver disc
+                        is a convention someone has to learn, and this row used
+                        to say "NEW" outright — the badge is the decoration and
+                        this is the fact. */}
+                    {fresh && <Text style={styles.fresh}>New · </Text>}
+                    {[
+                      evidence || null,
+                      ...rest.map(
+                        (r) =>
+                          `${RECORD_LABEL[r.kind]} ${formatRecord(r, units)}`,
+                      ),
+                    ]
+                      .filter(Boolean)
+                      .join(' · ') || '—'}
+                  </Text>
+                </RNView>
+
+                <RNView style={styles.value}>
+                  <StatValue value={formatRecord(primary, units)} size={19} />
+                  <Text style={styles.valueLabel}>
+                    {RECORD_LABEL[primary.kind].toUpperCase()}
+                  </Text>
+                </RNView>
+              </Pressable>
+            );
+          })}
+        </View>
       )}
     </>
   );
@@ -153,29 +196,30 @@ const styles = StyleSheet.create({
     backgroundColor: vola.surface,
     padding: 14,
     gap: 10,
+    marginTop: 4,
   },
-  cardHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  name: { fontSize: 15, fontWeight: '700', flexShrink: 1 },
-  badge: {
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.8,
-    color: vola.bg,
-    backgroundColor: vola.lime,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 999,
+  list: {
+    borderWidth: 1,
+    borderColor: vola.line,
+    borderRadius: 14,
+    backgroundColor: vola.surface,
+    marginTop: 4,
     overflow: 'hidden',
   },
-  values: { flexDirection: 'row', flexWrap: 'wrap', gap: 16 },
-  value: { gap: 1, minWidth: 96 },
-  valueLabel: {
-    fontSize: 10,
-    color: vola.textDim,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
   },
-  valueNumber: { fontSize: 20, fontWeight: '800' },
-  evidence: { fontSize: 11, color: vola.textMuted },
+  rowDivided: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: vola.line },
+  rowPressed: { backgroundColor: vola.surfaceHover },
+  main: { flex: 1, gap: 1 },
+  name: { fontSize: 15, fontWeight: '700' },
+  evidence: { fontSize: 12, color: vola.textMuted },
+  fresh: { color: vola.lime, fontWeight: '700' },
+  value: { alignItems: 'flex-end', gap: 1 },
+  valueLabel: { fontSize: 9, fontWeight: '700', letterSpacing: 0.8, color: vola.textDim },
   muted: { color: vola.textMuted, fontSize: 13 },
 });

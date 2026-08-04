@@ -47,7 +47,7 @@
     "build:ios": "eas build --platform ios --profile preview",
     "build:ios:prod": "eas build --platform ios --profile production",
     "submit:ios": "eas submit --platform ios --latest",
-    "test": "jest",
+    "test": "TZ=America/Los_Angeles jest",
     "test:watch": "jest --watch"
   },
   "private": true

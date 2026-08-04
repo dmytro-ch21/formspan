@@ -3512,3 +3512,85 @@ a logo there is asserting something not yet built, **not** something ruled out.
 - It must also fail, not pass, if its comparison anchor disappears. A file
   restructure that removes the `import type` line should error loudly rather
   than silently comparing nothing.
+
+## The You tab: belt masthead, training spans, records (mobile)
+
+Covers `components/BjjRankHeader.tsx`, `components/TrainingSummary.tsx`,
+`components/RecordsCard.tsx`, `components/ui/Medal.tsx`, `lib/history.ts` and
+`lib/records.ts`.
+
+### The belt masthead
+
+- BJJ on **and** a rank recorded: the masthead renders at the top of the tab,
+  above the display name — the belt drawn full-width, then "YOUR RANK" and the
+  belt's name, then the facts row.
+- BJJ on and **no** rank: one quiet row, "No rank recorded yet", which navigates
+  to `/bjj`. Not a full-height masthead, and **not two cards** — assert only one
+  `/bjj/standing` request fires for the screen. Two components fetching it was
+  the bug this replaced.
+- BJJ off: no masthead and no placeholder at all.
+- **The facts come from the awarding promotion, not the rank.** Record two
+  promotions at the same belt/stripes/degree with different dates and academies;
+  the masthead shows the *later-dated* one. Add an undated duplicate and assert
+  the dated one still wins.
+- Edit the promotion a rank was derived from so nothing matches it any more: the
+  belt still renders, with no facts invented.
+- A promotion with no academy and no date shows neither label — no "School: —".
+- **Dates render as the day that was typed.** Record `2024-03-12` with the
+  device in a UTC-negative zone (America/Los_Angeles) and assert it does not
+  render as 11 March.
+- Nothing truncates. "Gracie Barra Kyiv" wraps rather than becoming
+  "Gracie Barra…", and the promotion date never loses its year.
+- VoiceOver reads the masthead as one utterance — name then each labelled fact —
+  not six fragments.
+
+### The training spans
+
+- All four of `1W / 1M / 6M / 1Y` are offered, and each refetches.
+- **Nothing overflows the card at any span.** Assert the grid's rendered width
+  is ≤ the card's inner width on 1Y — the failure this replaced was silent, with
+  three quarters of the year off-screen and no scroll.
+- Shape flips with the span: 1W and 1M lay out seven-across with weekday
+  letters; 6M and 1Y lay out weeks-across with none. The letters must never head
+  a heatmap column, where they would label a week.
+- Switching span while a request is in flight must not show the previous span's
+  totals under the new span's label — the numbers are tagged with the span they
+  were fetched for.
+- The streak is computed over its own fixed year window. Log one session a week
+  for 12 weeks and assert the streak reads the same on every span — a streak
+  that equals the span length is a function of the control, not the training.
+
+### The weekly volume chart
+
+- **Exactly seven bars, always** — including a week with nothing logged, and a
+  week with a single session.
+- The count is the current week regardless of the selected span: assert the bars
+  do not change when the span does.
+- Days later in the week than today are dimmed, not drawn as zero. On a Tuesday,
+  Thursday must not look like a session that was missed.
+- A day with training but no tonnage (a BJJ session under a volume axis) draws a
+  visible bar, not nothing.
+- The header reads "day N of 7", where N is today's position Monday-first — 7 on
+  a Sunday, 1 on a Monday.
+
+### The stat tiles
+
+- A year of training does not overlap its neighbour. Assert `312h` and not
+  `312h 45m`, and that the figure shrinks on long strings rather than clipping.
+- `formatDuration` keeps minutes right up to 99h 59m and drops them from 100h.
+- A metric with no data shows an em dash at full size, not a collapsed row.
+
+### Records
+
+- One card of divided rows, not a card per lift.
+- **The medal tier tracks `is_recent`**: gold for a record set in the last 30
+  days, silver otherwise, and the gold carries a star so the tiers survive
+  greyscale.
+- The estimated 1RM renders as a whole display unit (`74kg`), never
+  `74.48kg` — an estimate rendered to two decimals reads as a measurement. The
+  heaviest lift beside it keeps its real decimals.
+- A record whose exercise is missing from the cached catalog renders its name,
+  not its slug — and if the catalog is genuinely absent, it must not render a
+  UUID to the athlete.
+- Tapping a row opens that exercise; VoiceOver announces the lift, the headline
+  record, the evidence set and any secondary records as one utterance.

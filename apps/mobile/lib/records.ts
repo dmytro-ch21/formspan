@@ -1,5 +1,6 @@
 import { newTraceId, traceparent } from './trace';
 import { netFetch } from './authedFetch';
+import { formatDistance, formatEstimate, formatWeight, type UnitSystem } from './units';
 import type { TokenGetter } from './useAuthToken';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
@@ -96,16 +97,25 @@ export async function setPinned(
   return b.exercise_ids ?? [];
 }
 
-/** Formats a record in the unit its kind is actually measured in. */
-export function formatRecord(
-  r: PersonalRecord,
-  fmtWeight: (kg: number) => string,
-  fmtDistance: (m: number) => string,
-): string {
+/**
+ * Formats a record in the unit its kind is actually measured in.
+ *
+ * The two weight kinds are deliberately not formatted the same way. A heaviest
+ * lift is a measurement — 62.55kg is what was on the bar, and the decimals are
+ * real. An estimated 1RM is a rep-max curve's output, and rendering it as
+ * "74.48kg" invites reading a modelled number as a measured one; `units` keeps
+ * that distinction in one place, as `formatEstimate`.
+ *
+ * Takes the unit system rather than formatter callbacks: with the estimate
+ * split out, a caller passing its own `fmtWeight` would have had to know which
+ * kinds are estimates to route them correctly — which is this function's job.
+ */
+export function formatRecord(r: PersonalRecord, u: UnitSystem): string {
   switch (r.kind) {
     case 'heaviest_weight':
+      return formatWeight(r.value, u);
     case 'estimated_1rm':
-      return fmtWeight(r.value);
+      return formatEstimate(r.value, u);
     case 'most_reps':
       return `${Math.round(r.value)}`;
     case 'longest_time': {
@@ -114,14 +124,19 @@ export function formatRecord(
       return m > 0 ? `${m}m${s % 60 ? ` ${s % 60}s` : ''}` : `${s}s`;
     }
     case 'furthest_distance':
-      return fmtDistance(r.value);
+      return formatDistance(r.value, u);
   }
 }
 
-/** "5 × 100kg · 2 RIR" — the set behind the number, so it can be checked. */
-export function describeEvidence(r: PersonalRecord, fmtWeight: (kg: number) => string): string {
+/**
+ * "5 × 100kg · 2 RIR" — the set behind the number, so it can be checked.
+ *
+ * The weight here is `formatWeight`, not `formatEstimate`, whatever kind of
+ * record it evidences: this is the set that was logged.
+ */
+export function describeEvidence(r: PersonalRecord, u: UnitSystem): string {
   const bits: string[] = [];
-  if (r.reps != null && r.weight_kg != null) bits.push(`${r.reps} × ${fmtWeight(r.weight_kg)}`);
+  if (r.reps != null && r.weight_kg != null) bits.push(`${r.reps} × ${formatWeight(r.weight_kg, u)}`);
   else if (r.reps != null) bits.push(`${r.reps} reps`);
   if (r.rir != null) bits.push(`${r.rir} RIR`);
   else if (r.rpe != null) bits.push(`RPE ${r.rpe}`);

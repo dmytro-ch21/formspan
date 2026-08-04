@@ -113,15 +113,30 @@ export function startOfWeek(key: string): string {
 }
 
 /**
- * Two spans, not five.
+ * The periods the consistency grid offers.
  *
- * Web offers 4 weeks / 3 months / a year because a desk is where you compare
- * blocks. On a phone the useful horizons are "this block" and "the last few
- * months"; a year of squares at this width is a texture, not information.
+ * `label` is for the segmented control, where four options share one row —
+ * "6 months" does not fit and "6M" does. `blurb` and `pick` are for prose,
+ * where an abbreviation reads like a stock ticker.
+ *
+ * They are two fields rather than one because `spanRange` snaps to week
+ * boundaries, and **the shortest span is the one the snap is visible in**: on a
+ * Monday, `1w` covers a single day. "Nothing logged in the last week" would
+ * then be a claim about seven days made from one, so the shortest span says
+ * "this week" — which is exactly what it means — while the others keep the
+ * rolling phrasing that matches what they actually fetch.
+ *
+ * Counted in whole weeks because of that same snap: the grid is columns of
+ * seven, so a period ending mid-week renders a stub column and every span reads
+ * as ramp-up-then-collapse whatever actually happened. 4 / 26 / 52 are the
+ * nearest whole weeks to a month, six months and a year — deliberately
+ * approximate, and the labels say the round number an athlete thinks in.
  */
 export const SPANS = [
-  { key: '4w', label: '4 weeks', weeks: 4 },
-  { key: '12w', label: '12 weeks', weeks: 12 },
+  { key: '1w', label: '1W', blurb: 'this week', pick: 'this week', weeks: 1 },
+  { key: '1m', label: '1M', blurb: 'in the last month', pick: 'the last month', weeks: 4 },
+  { key: '6m', label: '6M', blurb: 'in the last 6 months', pick: 'the last 6 months', weeks: 26 },
+  { key: '1y', label: '1Y', blurb: 'in the last year', pick: 'the last year', weeks: 52 },
 ] as const;
 
 export type SpanKey = (typeof SPANS)[number]['key'];
@@ -148,22 +163,44 @@ export function streakRange(to = today()): { from: string; to: string } {
   return { from: addDays(startOfWeek(to), -51 * 7), to };
 }
 
-export type WeekBucket = { start: string; tonnageKg: number; minutes: number; sessions: number };
+export type DayBucket = {
+  /** YYYY-MM-DD. */
+  date: string;
+  tonnageKg: number;
+  minutes: number;
+  sessions: number;
+  /** False for days later in the week than today — not yet trained OR rested. */
+  elapsed: boolean;
+};
 
-/** Weekly rollup of days the server already summed. No volume rule here. */
-export function byWeek(from: string, to: string, days: HistoryDay[]): WeekBucket[] {
-  const buckets = new Map<string, WeekBucket>();
-  for (let w = startOfWeek(from); w <= to; w = addDays(w, 7)) {
-    buckets.set(w, { start: w, tonnageKg: 0, minutes: 0, sessions: 0 });
-  }
-  for (const d of days) {
-    const b = buckets.get(startOfWeek(d.date));
-    if (!b) continue;
-    b.tonnageKg += d.tonnage_kg;
-    b.minutes += d.duration_seconds / 60;
-    b.sessions += d.sessions;
-  }
-  return [...buckets.values()];
+/**
+ * The current week as seven days, Monday first — always seven, never fewer.
+ *
+ * The volume chart used to draw one bar per week across the whole span, which
+ * stopped working the moment the span could be a year: 52 bars in ~340pt is
+ * two pixels each, and the chart became a texture. Seven fixed columns say
+ * something a 52-bar smear cannot — *which days* of this week you trained, and
+ * how much is left of it.
+ *
+ * Days that have not happened yet are marked `elapsed: false` rather than
+ * omitted or zeroed. A Thursday rendered as a zero bar on Tuesday reads as a
+ * missed session; the chart draws no bar at all for those days, so absence
+ * means "not yet" and any mark means a day that was measured.
+ */
+export function thisWeek(days: HistoryDay[], to = today()): DayBucket[] {
+  const byDate = new Map(days.map((d) => [d.date, d]));
+  const monday = startOfWeek(to);
+  return Array.from({ length: 7 }, (_, i) => {
+    const date = addDays(monday, i);
+    const d = byDate.get(date);
+    return {
+      date,
+      tonnageKg: d?.tonnage_kg ?? 0,
+      minutes: (d?.duration_seconds ?? 0) / 60,
+      sessions: d?.sessions ?? 0,
+      elapsed: date <= to,
+    };
+  });
 }
 
 /** Columns of seven, Monday first, covering whole weeks across [from, to]. */
@@ -214,8 +251,15 @@ export function weekStreak(days: HistoryDay[], from = today()): number {
   return n;
 }
 
-/** Whether this period is better described by load or by time on the mat. */
-export function loadMetric(days: HistoryDay[]): 'volume' | 'time' {
+/**
+ * Whether these days are better described by load or by time on the mat.
+ *
+ * Deliberately takes the days it will describe, not the whole fetched period.
+ * Handed a year, it answers for the year — so a week of pure BJJ inside a year
+ * that contains lifting gets a volume axis, every bar goes to zero, and the
+ * chart's meaning changes because of a control three cards above it.
+ */
+export function loadMetric(days: { tonnage_kg: number }[]): 'volume' | 'time' {
   return days.some((d) => d.tonnage_kg > 0) ? 'volume' : 'time';
 }
 
@@ -223,6 +267,12 @@ export function formatDuration(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds));
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);
+  // Past 100 hours the minutes are noise AND the longest part of the string.
+  // A year of training reads "312h", not "312h 45m" — nobody states a year at
+  // minute precision, and the four extra characters are what pushed the figure
+  // out of a third-width tile. The threshold is where the hours reach three
+  // digits, so the rendered width stops growing rather than growing forever.
+  if (h >= 100) return `${h}h`;
   if (h > 0) return m > 0 ? `${h}h ${m}m` : `${h}h`;
   return `${m}m`;
 }
