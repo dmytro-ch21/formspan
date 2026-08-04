@@ -7131,22 +7131,70 @@ both mutations were checked separately.
 is the half that makes console authoring more than a local convenience: without
 it, a technique added in staging exists only in staging's database.
 
-### It writes the additions file, not the catalog
+### It writes BOTH files, and the first version wrote only one
 
-`techniques.json` is GENERATED — `scripts/import-exercise-catalog.py` builds it
-from a spreadsheet and merges `techniques.additions.json` in. Writing the
-generated file would be destroyed by the next import; the additions file exists
-precisely for content authored by hand, which is exactly what this is.
+This is the correction review forced, and it is the whole design.
 
-It **merges** rather than replaces: that file predates the command and holds 16
-entries the console never wrote, so overwriting it would silently delete content
-with no other copy. Entries are matched by id, sorted by id, and empty values are
-omitted rather than written as `""` — migration 000029 is explicit that absent
-means "not recorded" and is a different fact from any value.
+`techniques.json` is the **deploy artifact**: `//go:embed` bakes it into the
+binary, `SeedData()` returns it, `cmd/seed` writes it to the database.
+`techniques.additions.json` is the **record of non-spreadsheet content**:
+`scripts/import-exercise-catalog.py` rebuilds `techniques.json` from a
+spreadsheet and merges this file back in.
 
-A re-export with no changes is **byte-identical**. Without that the promotion
-path is unusable: every export is a noisy diff, so nobody reads the one review
-step standing between a typo and a permanent foreign key.
+All 16 existing additions are in both files. That is the invariant, not an
+accident — and the first version of this command missed it, writing only the
+additions file because the generated-file warning is the loud one. Content
+landing in only one is lost by a different route each time:
+
+- **additions only** — the deploy does not carry it. `-adopt` then hands the row
+  to a release that cannot reseed it, so the next fresh environment simply does
+  not have the technique, and nobody can edit it either: the console refuses
+  seeded rows, and no seed owns it.
+- **techniques.json only** — the next spreadsheet re-import deletes it, silently,
+  because the sheet is a full replacement rather than a patch.
+
+So the export writes both, merging rather than replacing: both files hold
+content this command never wrote — 16 hand-authored additions, and 466 generated
+entries — so overwriting either destroys content with no other copy.
+
+### Empty arrays, and the seed transaction they take down
+
+The first version omitted empty values, and a test asserted it as correct. It
+was a data-loss bug with a wide blast radius.
+
+`aliases`, `setup_from`, `common_counters` and `common_next_moves` are
+`TEXT[] NOT NULL`. An omitted key unmarshals to a nil slice, pgx encodes a nil
+slice as NULL, and the insert runs inside `UpsertAll`'s transaction. So one
+exported technique with no aliases fails the **entire seed** — all 467
+techniques, not just its own row. Reproduced against real Postgres:
+
+	null value in column "aliases" of relation "techniques"
+	violates not-null constraint (SQLSTATE 23502)
+
+Every entry in both shipped files already writes `[]` and `""` explicitly; the
+export now matches. `function` and `to_position` stay optional, because they
+genuinely are — `to_position` is absent on 317 of 466 entries and migration
+000029 is explicit that absent means "not recorded", a different fact from any
+value.
+
+### The diff has to be readable, and key order is what breaks it
+
+A re-export with no changes is **byte-identical**, and so is a re-serialisation
+of the untouched files. Without that the promotion path is unusable: the one
+review step standing between a typo and a permanent foreign key is a whole-file
+rewrite nobody reads.
+
+The threat is not formatting, it is **key order**. Go marshals a map with its
+keys sorted; both files are written by Python in semantic order (`id`, `name`,
+`aliases`, `category`, …). Reading into `map[string]any` therefore reorders every
+key of all 482 entries on the first export. The files are now read and written
+through an ordered key/value type, and the test asserts byte-identity against the
+real shipped files rather than a fixture — a fixture would only prove the code
+agrees with itself.
+
+Sorting is also conditional on the file already being sorted. The additions file
+is in id order and stays there; `techniques.json` is in spreadsheet order, and
+sorting it would be exactly the 466-entry rewrite this is avoiding.
 
 ### Export and adopt are two commands, deliberately
 
@@ -7193,9 +7241,18 @@ before comparing. `Slug`'s `foldASCII` map already does it and can be shared.
   guard but no write path, so there is nothing to export yet.
 - **Adoption is all-or-nothing** — it takes the ids the export just wrote, with
   no way to adopt a subset.
-- **Nothing verifies the exported JSON round-trips through the importer.** The
-  collision guard prevents the known failure, but the real check is running the
-  Python importer over the exported file, and that is not automated.
+- **Nothing verifies the exported JSON round-trips through the PYTHON importer.**
+  The Go side is now verified end to end — export against a real database, then
+  `cmd/seed` from the exported file, 467 upserted, `aliases = {}` — but running
+  `scripts/import-exercise-catalog.py` over the result needs the spreadsheet and
+  is not automated. The collision guard prevents the known failure mode.
+- **The collision rule is about ownership, not existence.** An id in
+  `techniques.json` but not in the additions file belongs to the sheet, and an
+  edit to it would be reverted by the next import — so it is refused. An id in
+  both is ours, already promoted once, and re-exporting it is the normal update
+  path. A rule of "refuse anything already seeded" would have refused every
+  legitimate update, which is what the first version did.
+
 ## 2026-08-04 — The technique was never missing; the search could not find it
 
 `searchTechniques` folded case and nothing else, so a query and the catalog

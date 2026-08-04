@@ -2586,10 +2586,22 @@ own, so none of them is redundant with "the FK exists".
 
 **Happy path**
 
-- With no admin rows, the additions file is **byte-identical** afterwards — not
-  rewritten, not reformatted.
-- An authored technique appears in `techniques.additions.json`, and the 16
-  hand-authored entries that predate the command are **unaltered**.
+- With no admin rows, **both** files are byte-identical afterwards — not
+  rewritten, not reformatted. Assert this against the real shipped files, not a
+  fixture: the property is "matches what Python wrote", and a fixture only
+  proves the code agrees with itself.
+- An authored technique appears in **both** `techniques.json` (the deploy
+  artifact, embedded and seeded) and `techniques.additions.json` (the record the
+  importer merges back in). One without the other is lost — the deploy will not
+  carry it, or the next re-import deletes it.
+- The diff for one new technique is **one entry**, in the file's own key order.
+  A whole-file reorder is the failure: Go sorts map keys, the files are written
+  in semantic order, and 482 reordered entries bury the change.
+- The exported file **actually seeds**. Run `cmd/seed` from it and count the
+  rows; a file that is pretty but unloadable is worse than a noisy one.
+- An entry with no aliases writes `"aliases": []`, never an absent key. Absent
+  unmarshals to nil, pgx sends NULL, the column is `TEXT[] NOT NULL`, and the
+  insert is inside a transaction — so one such entry fails the entire seed.
 - A re-export with no changes produces a byte-identical file. The promotion path
   depends on a readable diff.
 - `-adopt` flips the exported rows to `source='seed'`, after which the seeder can
@@ -2597,14 +2609,21 @@ own, so none of them is redundant with "the FK exists".
 
 **Edge cases and errors**
 
-- It writes `techniques.additions.json`, never the generated `techniques.json` —
-  the importer rebuilds the latter and would destroy the export.
-- An id already in the generated catalog is **refused**, naming the ids. The
-  importer exits on "additions collide with sheet ids", far from here.
+- An id the **spreadsheet** owns — present in `techniques.json` but not in the
+  additions file — is refused, naming the ids. The next import would revert the
+  edit, and the importer exits on "additions collide with sheet ids", both far
+  from here. An id in **both** files is ours and must be allowed: that is the
+  normal update path, and every one of the 16 shipped additions is in that
+  state, so a rule of "refuse anything already seeded" refuses all of them.
+- Ampersands and angle brackets survive **unescaped**. Go escapes them by
+  default; neither catalog file contains one today, so nothing exercises this
+  until someone types "Over-Under & Stack Pass" into the console.
 - A malformed additions file is refused, not overwritten — a stray character
   must not cost hand-authored content.
 - A missing file (or directory) is created rather than fatal.
-- Empty values are omitted, not written as `""`.
+- Only `function` and `to_position` are omitted when empty — everything else is
+  written explicitly. `to_position` is absent on 317 of 466 entries and absent
+  means "not recorded", which is a different fact from any value.
 - **Adoption must not touch `updated_at` on rows the deploy already owns.**
   Assert the timestamp, not `source` — setting `seed` on a `seed` row is
   invisible in the value, and clients delta-sync on the timestamp.

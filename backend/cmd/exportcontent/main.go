@@ -7,26 +7,39 @@
 // production never learns about it, and nothing reviews an id that becomes a
 // permanent foreign key in athletes' training records.
 //
-// # WHICH FILE, AND WHY IT MATTERS
+// # WHICH FILES, AND WHY BOTH
 //
-// It writes `techniques.additions.json`, NOT `techniques.json`. The latter is
-// GENERATED — `scripts/import-exercise-catalog.py` builds it from a spreadsheet
-// and merges the additions file in — so anything written there is destroyed by
-// the next import. The additions file exists precisely for content authored by
-// hand rather than by the sheet, which is exactly what this is.
+// It writes TWO files, because they mean two different things and content that
+// lands in only one of them is lost by a different route each time:
+//
+//   - techniques.json is the DEPLOY ARTIFACT. It is what `//go:embed` bakes
+//     into the binary, what SeedData() returns, and what `cmd/seed` writes to
+//     the database. Content that is not here is not in the deploy — so
+//     -adopt would hand the row to a release that cannot reseed it, and the
+//     next fresh environment simply would not have the technique.
+//
+//   - techniques.additions.json is the record of content NOT from the
+//     spreadsheet. `scripts/import-exercise-catalog.py` rebuilds
+//     techniques.json from the sheet and merges this file in. Content that is
+//     not here is deleted by the next re-import, silently, because the sheet
+//     is a full replacement rather than a patch.
+//
+// All 16 existing additions are present in both files. That is the invariant
+// this command maintains, not an accident to be tidied up.
 //
 // USAGE
 //
-//	go run ./cmd/exportcontent                # write the file, touch nothing else
+//	go run ./cmd/exportcontent                # write both files, touch nothing else
 //	go run ./cmd/exportcontent -adopt         # ...and hand the rows to the deploy
 //
 // The two steps are separate on purpose. Until the JSON is committed AND
-// deployed, the database row is the only copy, so `-adopt` before that would
+// deployed, the database row is the only copy, so -adopt before that would
 // leave content owned by a deploy that does not carry it yet. The intended
 // order is: export, review the diff, merge, deploy, then adopt.
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -44,8 +57,12 @@ func main() {
 	logger := httplog.New()
 
 	var (
-		out   = flag.String("out", "internal/modules/technique/techniques.additions.json", "additions file to write")
-		adopt = flag.Bool("adopt", false, "after writing, mark the exported rows source='seed' — only once the JSON is deployed")
+		seedOut = flag.String("seed", "internal/modules/technique/techniques.json",
+			"the deploy artifact — embedded in the binary and seeded to the database")
+		addOut = flag.String("additions", "internal/modules/technique/techniques.additions.json",
+			"the non-spreadsheet record — merged back in by the importer")
+		adopt = flag.Bool("adopt", false,
+			"after writing, mark the exported rows source='seed' — only once the JSON is deployed")
 	)
 	flag.Parse()
 
@@ -69,38 +86,55 @@ func main() {
 		os.Exit(1)
 	}
 	if len(authored) == 0 {
-		logger.Info("export: nothing authored in the console; file untouched", "out", *out)
+		logger.Info("export: nothing authored in the console; files untouched",
+			"seed", *seedOut, "additions", *addOut)
 		return
 	}
 
-	// The additions file is MERGED INTO the generated techniques.json by
-	// `scripts/import-exercise-catalog.py`, which exits on "additions collide
-	// with sheet ids". So an id present in both files breaks the importer —
-	// far from here, and long after the export looked like it worked.
-	//
-	// A hard error rather than a skip: skipping would silently drop content
-	// that has no other copy, which is the failure this whole command exists
-	// to prevent.
-	if err := refuseCollisions(authored); err != nil {
+	if err := refuseSheetOwned(*seedOut, *addOut, authored); err != nil {
 		logger.Error("export: refused", "err", err)
 		os.Exit(1)
 	}
 
-	merged, added, updated, err := mergeInto(*out, authored)
-	if err != nil {
-		logger.Error("export: merge", "err", err)
-		os.Exit(1)
+	// Both files or neither. A half-written export is the state this command
+	// exists to prevent: content in the additions file but not the deploy
+	// survives a re-import and is missing from production, and the reverse
+	// survives the deploy and is deleted by the next import.
+	writes := []struct {
+		what string
+		path string
+	}{
+		{"seed", *seedOut},
+		{"additions", *addOut},
 	}
-	if err := writeJSON(*out, merged); err != nil {
-		logger.Error("export: write", "err", err)
-		os.Exit(1)
+	type pending struct {
+		path             string
+		merged           []entry
+		added, updated   int
+		what             string
+		totalAfterMerged int
 	}
-	logger.Info("export: wrote additions", "out", *out,
-		"added", added, "updated", updated, "total", len(merged))
+	var staged []pending
+	for _, w := range writes {
+		merged, added, updated, err := mergeInto(w.path, authored)
+		if err != nil {
+			logger.Error("export: merge", "file", w.what, "err", err)
+			os.Exit(1)
+		}
+		staged = append(staged, pending{w.path, merged, added, updated, w.what, len(merged)})
+	}
+	for _, s := range staged {
+		if err := writeJSON(s.path, s.merged); err != nil {
+			logger.Error("export: write", "file", s.what, "err", err)
+			os.Exit(1)
+		}
+		logger.Info("export: wrote", "file", s.what, "path", s.path,
+			"added", s.added, "updated", s.updated, "total", s.totalAfterMerged)
+	}
 
 	if !*adopt {
 		logger.Info("export: rows are still source='admin' — re-run with -adopt " +
-			"once this file is committed and deployed, or the deploy will not own them")
+			"once these files are committed and deployed, or the deploy will not own them")
 		return
 	}
 	ids := make([]string, 0, len(authored))
@@ -114,66 +148,81 @@ func main() {
 	logger.Info("export: adopted; the deploy now owns these rows", "count", len(ids))
 }
 
-// refuseCollisions rejects any authored id the GENERATED catalog already
-// holds.
+// refuseSheetOwned rejects any authored id the SPREADSHEET owns.
 //
-// Unreachable through the API today — the write path 409s on a duplicate id,
-// seeded or not — so this guards the case where a row was made `admin` by hand
-// or by a future import that adopts an id already in use.
-func refuseCollisions(authored []technique.Technique) error {
-	generated, err := technique.SeedData()
+// An id in techniques.json but not in techniques.additions.json came from the
+// sheet, and `scripts/import-exercise-catalog.py` regenerates those from the
+// sheet on every run — so an admin edit to one would be silently reverted by
+// the next import, long after the export looked like it worked. The importer
+// also exits on "additions collide with sheet ids", so writing it to the
+// additions file breaks the import outright.
+//
+// A hard error rather than a skip: skipping would silently drop content that
+// has no other copy, which is the failure this whole command exists to prevent.
+func refuseSheetOwned(seedPath, additionsPath string, authored []technique.Technique) error {
+	seeded, err := idsIn(seedPath)
 	if err != nil {
-		return fmt.Errorf("read the generated catalog: %w", err)
+		return err
 	}
-	inSheet := make(map[string]bool, len(generated))
-	for _, t := range generated {
-		inSheet[t.ID] = true
+	ours, err := idsIn(additionsPath)
+	if err != nil {
+		return err
 	}
 	var clashes []string
 	for _, t := range authored {
-		if inSheet[t.ID] {
+		if seeded[t.ID] && !ours[t.ID] {
 			clashes = append(clashes, t.ID)
 		}
 	}
 	if len(clashes) > 0 {
 		sort.Strings(clashes)
 		return fmt.Errorf(
-			"these ids are already in the generated techniques.json, so exporting them "+
-				"would break the importer (\"additions collide with sheet ids\"): %v — "+
-				"they are marked source='admin' but the sheet owns them; fix the source "+
-				"column or rename the technique", clashes)
+			"these ids are owned by the spreadsheet (present in %s but not %s), so the next "+
+				"import would revert any edit to them and would refuse the additions file "+
+				"outright: %v — edit the sheet and re-import, or give the technique a new id",
+			filepath.Base(seedPath), filepath.Base(additionsPath), clashes)
 	}
 	return nil
 }
 
-// mergeInto folds the exported techniques into the existing additions file.
+func idsIn(path string) (map[string]bool, error) {
+	entries, err := readEntries(path)
+	if err != nil {
+		return nil, err
+	}
+	ids := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		ids[e.id()] = true
+	}
+	return ids, nil
+}
+
+// mergeInto folds the exported techniques into an existing catalog file.
 //
-// MERGE, not replace. The additions file is also hand-edited — it predates this
-// command by months and holds 16 entries the console never wrote — so
-// overwriting it would silently delete authored content that has no other copy.
-// Existing entries are matched by id and replaced; everything else is kept.
+// MERGE, not replace. Both files hold content this command never wrote — the
+// additions file predates it by months, and techniques.json is 466 entries
+// generated from the spreadsheet — so overwriting either would destroy content
+// that has no other copy.
 //
-// The result is sorted by id so a re-export with no changes produces a
-// byte-identical file. That reproducibility is a property this repo has paid
-// for before: without it every export is a noisy diff and nobody reads them.
+// Entries are matched by id and replaced; everything else is kept BYTE FOR
+// BYTE, key order included. That is what makes the diff reviewable: without it
+// the first export reorders every key of all 482 entries (Go marshals a map
+// with its keys sorted, the files are written in semantic order) and buries the
+// one real change in a whole-file rewrite. Nobody reads that diff, and the
+// review step is the only thing standing between a typo and a permanent
+// foreign key in athletes' training records.
 func mergeInto(path string, authored []technique.Technique) (
-	merged []map[string]any, added, updated int, err error,
+	merged []entry, added, updated int, err error,
 ) {
-	existing := []map[string]any{}
-	raw, readErr := os.ReadFile(path)
-	switch {
-	case readErr == nil:
-		if err := json.Unmarshal(raw, &existing); err != nil {
-			return nil, 0, 0, fmt.Errorf("parse %s: %w", path, err)
-		}
-	case !os.IsNotExist(readErr):
-		return nil, 0, 0, fmt.Errorf("read %s: %w", path, readErr)
+	existing, err := readEntries(path)
+	if err != nil {
+		return nil, 0, 0, err
 	}
 
-	byID := make(map[string]map[string]any, len(existing)+len(authored))
+	byID := make(map[string]entry, len(existing)+len(authored))
 	order := make([]string, 0, len(existing)+len(authored))
 	for _, e := range existing {
-		id, _ := e["id"].(string)
+		id := e.id()
 		if id == "" {
 			return nil, 0, 0, fmt.Errorf("%s holds an entry with no id", path)
 		}
@@ -192,80 +241,244 @@ func mergeInto(path string, authored []technique.Technique) (
 		byID[t.ID] = entryOf(t)
 	}
 
-	sort.Strings(order)
-	merged = make([]map[string]any, 0, len(order))
+	// Sorted by id so a re-export with no changes is byte-identical. NOT the
+	// file's existing order: techniques.json is generated in spreadsheet order,
+	// so sorting it here would be the whole-file rewrite this function exists to
+	// avoid — see readEntries, which keeps the file's own order for that reason.
+	if isSorted(existing) {
+		sort.Strings(order)
+	}
+
+	merged = make([]entry, 0, len(order))
 	for _, id := range order {
 		merged = append(merged, byID[id])
 	}
 	return merged, added, updated, nil
 }
 
-// entryOf renders a technique in the additions file's shape.
+// isSorted reports whether a file is already in id order, which decides whether
+// a merge may reorder it. The additions file is sorted and stays sorted;
+// techniques.json is in spreadsheet order and must keep it, or every export
+// rewrites all 466 entries.
+func isSorted(entries []entry) bool {
+	for i := 1; i < len(entries); i++ {
+		if entries[i-1].id() > entries[i].id() {
+			return false
+		}
+	}
+	return true
+}
+
+// The key order both files are written in. Not alphabetical — it is the order
+// the Python importer emits, and matching it is what keeps an exported entry
+// visually consistent with its 481 neighbours.
 //
-// Empty strings and empty lists are OMITTED, matching how the hand-authored
-// entries are written — carrying `"to_position": ""` would be a lie, because
-// migration 000029 is explicit that absent means "not recorded" and is a
-// different fact from any value.
-func entryOf(t technique.Technique) map[string]any {
-	e := map[string]any{"id": t.ID, "name": t.Name}
-	str := func(k, v string) {
-		if v != "" {
-			e[k] = v
-		}
+// `function` and `to_position` are the only optional keys, matching the data:
+// to_position is absent on 317 of 466 entries, and absent means "not recorded",
+// which migration 000029 is explicit is a different fact from any value.
+//
+// Everything else is ALWAYS written, empty string and empty list included. This
+// is not cosmetic: aliases, setup_from, common_counters and common_next_moves
+// are `TEXT[] NOT NULL` columns, an omitted key unmarshals to a nil slice, and
+// pgx encodes a nil slice as NULL. Seeding one is a not-null violation inside
+// UpsertAll's transaction, so a single exported technique with no aliases takes
+// the ENTIRE seed down — every technique, not just its own row.
+var keyOrder = []string{
+	"id", "name", "aliases", "category", "position", "position_detail",
+	"gi_no_gi", "typical_belt", "description", "when_to_use", "setup_from",
+	"common_next_moves", "common_counters", "video_reference", "source_notes",
+	"ibjjf_ruleset_id", "function", "to_position",
+}
+
+// entryOf renders a technique in the catalog files' shape.
+func entryOf(t technique.Technique) entry {
+	values := map[string]any{
+		"id":                t.ID,
+		"name":              t.Name,
+		"aliases":           orEmpty(t.Aliases),
+		"category":          t.Category,
+		"position":          t.Position,
+		"position_detail":   t.PositionDetail,
+		"gi_no_gi":          t.GiNoGi,
+		"typical_belt":      t.TypicalBelt,
+		"description":       t.Description,
+		"when_to_use":       t.WhenToUse,
+		"setup_from":        orEmpty(t.SetupFrom),
+		"common_next_moves": orEmpty(t.CommonNextMoves),
+		"common_counters":   orEmpty(t.CommonCounters),
+		"video_reference":   t.VideoReference,
+		"source_notes":      t.SourceNotes,
+		"ibjjf_ruleset_id":  t.IBJJFRulesetID,
 	}
-	list := func(k string, v []string) {
-		if len(v) > 0 {
-			e[k] = v
-		}
+	if t.Function != "" {
+		values["function"] = t.Function
 	}
-	list("aliases", t.Aliases)
-	str("category", t.Category)
-	str("position", t.Position)
-	str("position_detail", t.PositionDetail)
-	str("gi_no_gi", t.GiNoGi)
-	str("typical_belt", t.TypicalBelt)
-	str("description", t.Description)
-	str("when_to_use", t.WhenToUse)
-	list("setup_from", t.SetupFrom)
-	list("common_next_moves", t.CommonNextMoves)
-	list("common_counters", t.CommonCounters)
-	str("video_reference", t.VideoReference)
-	str("source_notes", t.SourceNotes)
-	str("ibjjf_ruleset_id", t.IBJJFRulesetID)
-	str("function", t.Function)
-	str("to_position", t.ToPosition)
+	if t.ToPosition != "" {
+		values["to_position"] = t.ToPosition
+	}
+
+	var e entry
+	for _, k := range keyOrder {
+		v, ok := values[k]
+		if !ok {
+			continue
+		}
+		raw, err := rawJSON(v)
+		if err != nil {
+			// Only reachable if a string or []string fails to marshal, which
+			// encoding/json does not do.
+			panic(fmt.Sprintf("exportcontent: marshal %q: %v", k, err))
+		}
+		e = append(e, pair{Key: k, Val: raw})
+	}
 	return e
 }
 
-// writeJSON matches the file's existing formatting: two-space indent, a
-// trailing newline, and NO HTML escaping — Go's encoder turns `&` into
-// `&` by default, which would rewrite unrelated entries on the first
-// export and bury the real change in the diff.
-func writeJSON(path string, v any) error {
+// orEmpty turns a nil slice into an empty one, so it serialises as `[]` rather
+// than `null`. See keyOrder for what a `null` costs.
+func orEmpty(v []string) []string {
+	if v == nil {
+		return []string{}
+	}
+	return v
+}
+
+// pair is one key and its raw value; entry is an ordered object.
+//
+// The files are read and written through this rather than map[string]any
+// because a Go map has no order and marshals its keys sorted, which would
+// rewrite every entry in both files on the first export.
+type pair struct {
+	Key string
+	Val json.RawMessage
+}
+
+type entry []pair
+
+func (e entry) id() string {
+	for _, p := range e {
+		if p.Key == "id" {
+			var s string
+			if err := json.Unmarshal(p.Val, &s); err != nil {
+				return ""
+			}
+			return s
+		}
+	}
+	return ""
+}
+
+func (e *entry) UnmarshalJSON(b []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(b))
+	tok, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	if d, ok := tok.(json.Delim); !ok || d != '{' {
+		return fmt.Errorf("expected a JSON object, got %v", tok)
+	}
+	out := entry{}
+	for dec.More() {
+		keyTok, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		key, ok := keyTok.(string)
+		if !ok {
+			return fmt.Errorf("expected a string key, got %v", keyTok)
+		}
+		var raw json.RawMessage
+		if err := dec.Decode(&raw); err != nil {
+			return err
+		}
+		out = append(out, pair{Key: key, Val: raw})
+	}
+	if _, err := dec.Token(); err != nil { // the closing brace
+		return err
+	}
+	*e = out
+	return nil
+}
+
+func (e entry) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	buf.WriteByte('{')
+	for i, p := range e {
+		if i > 0 {
+			buf.WriteByte(',')
+		}
+		key, err := rawJSON(p.Key)
+		if err != nil {
+			return nil, err
+		}
+		buf.Write(key)
+		buf.WriteByte(':')
+		buf.Write(p.Val)
+	}
+	buf.WriteByte('}')
+	return buf.Bytes(), nil
+}
+
+// rawJSON marshals a value WITHOUT Go's default HTML escaping, which turns `&`
+// into `&`. The catalog files are written by Python with
+// ensure_ascii=False, so escaping here would rewrite every entry containing an
+// ampersand and bury the real change.
+func rawJSON(v any) (json.RawMessage, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return json.RawMessage(bytes.TrimRight(buf.Bytes(), "\n")), nil
+}
+
+// readEntries parses a catalog file, keeping each entry's key order. A missing
+// file is an empty list, not an error — the additions file may not exist yet.
+func readEntries(path string) ([]entry, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []entry{}, nil
+		}
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	var entries []entry
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	return entries, nil
+}
+
+// writeJSON matches the files' existing formatting: two-space indent, a
+// trailing newline, and no HTML escaping — byte-for-byte what
+// `json.dumps(indent=2, ensure_ascii=False)` produces, so re-serialising an
+// untouched entry is a no-op in the diff.
+//
+// Written to a temp file in the same directory and renamed, so an error partway
+// through cannot leave a truncated catalog behind.
+func writeJSON(path string, entries []entry) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	var buf []byte
-	{
-		f, err := os.CreateTemp(filepath.Dir(path), ".export-*.json")
-		if err != nil {
-			return err
-		}
-		defer os.Remove(f.Name())
-		enc := json.NewEncoder(f)
-		enc.SetIndent("", "  ")
-		enc.SetEscapeHTML(false)
-		if err := enc.Encode(v); err != nil {
-			f.Close()
-			return err
-		}
-		if err := f.Close(); err != nil {
-			return err
-		}
-		buf, err = os.ReadFile(f.Name())
-		if err != nil {
-			return err
-		}
+	f, err := os.CreateTemp(filepath.Dir(path), ".export-*.json")
+	if err != nil {
+		return err
 	}
-	return os.WriteFile(path, buf, 0o644)
+	defer os.Remove(f.Name()) // no-op once the rename succeeds
+
+	enc := json.NewEncoder(f)
+	enc.SetIndent("", "  ")
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(entries); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(f.Name(), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), path)
 }
