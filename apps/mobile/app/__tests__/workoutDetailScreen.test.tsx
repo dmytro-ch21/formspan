@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react-native';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 
 import WorkoutDetailScreen from '../workout/[id]';
 import type { Workout } from '@/lib/workouts';
@@ -62,11 +62,14 @@ jest.mock('@/lib/sessionStore', () => ({
   cachedWorkouts: (...a: unknown[]) => mockCachedWorkouts(...a),
   dirtyWorkoutIDs: (...a: unknown[]) => mockDirtyWorkoutIDs(...a),
   deleteLocalWorkout: jest.fn(),
+  renameLocalWorkout: (...a: unknown[]) => mockRenameLocal(...a),
   saveLocalWorkoutItems: jest.fn(async () => {}),
   startLocalSession: jest.fn(),
   cacheExercises: jest.fn(async () => {}),
   cachedExercises: jest.fn(async () => []),
 }));
+
+const mockRenameLocal = jest.fn((..._a: unknown[]): Promise<boolean> => Promise.resolve(true));
 
 const mockGetWorkout = jest.fn((..._a: unknown[]): Promise<unknown> => Promise.resolve(null));
 jest.mock('@/lib/workouts', () => ({
@@ -127,6 +130,8 @@ const plan = (name: string, over: Partial<Workout> = {}): Workout => ({
 beforeEach(() => {
   mockFetchExercises.mockClear();
   mockCachedWorkouts.mockReset();
+  mockRenameLocal.mockReset();
+  mockRenameLocal.mockResolvedValue(true);
   mockGetWorkout.mockReset();
   mockDirtyWorkoutIDs.mockReset().mockResolvedValue(new Set<string>());
 });
@@ -179,4 +184,78 @@ it('does not treat a failed refresh as an error when a cached copy is showing', 
 
   await screen.findByLabelText('Start a session from Cached Plan');
   expect(screen.queryByText(/Network request failed/)).toBeNull();
+});
+
+/**
+ * Renaming, at the screen.
+ *
+ * The store and the migration are covered elsewhere; what only exists here is
+ * which branch renders and whether the commit path reaches the store at all. A
+ * review caught the Done button silently eating its first tap (RN spends it
+ * dismissing the keyboard unless `keyboardShouldPersistTaps` is set) — a defect
+ * with no possible SQLite-level test, and one that hides on the Simulator,
+ * where a hardware keyboard means the soft keyboard is never up.
+ */
+describe('renaming', () => {
+  const openEditor = async () => {
+    mockCachedWorkouts.mockResolvedValue([plan('Legs')]);
+    mockGetWorkout.mockResolvedValue(plan('Legs'));
+    render(<WorkoutDetailScreen />);
+    await waitFor(() => expect(screen.getByTestId('workout-rename')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('workout-rename'));
+    await waitFor(() => expect(screen.getByTestId('workout-name-input')).toBeTruthy());
+  };
+
+  it('writes the new name to the store', async () => {
+    await openEditor();
+    fireEvent.changeText(screen.getByTestId('workout-name-input'), 'Legs B');
+    fireEvent.press(screen.getByTestId('workout-name-save'));
+
+    await waitFor(() => expect(mockRenameLocal).toHaveBeenCalledTimes(1));
+    expect(mockRenameLocal.mock.calls[0][2]).toBe('Legs B');
+  });
+
+  it('commits on blur and closes the field', async () => {
+    // Losing focus is the other way out — before `onBlur` the heading stayed
+    // replaced by an unfocused field holding an uncommitted draft, with Done
+    // the only exit.
+    //
+    // NOT a test of `commitRename`'s re-entrancy guard, though an earlier
+    // version of this claimed to be. The pair that guard exists for — Done
+    // pressed while the field still has focus, so blur and the press both
+    // land — cannot be staged here, because the first blur unmounts the
+    // button. Firing blur twice does not substitute: the second event hits a
+    // detached node, so it passes with the guard deleted. Verified by
+    // mutation, which is the only reason it is not still written that way.
+    await openEditor();
+    const input = screen.getByTestId('workout-name-input');
+    fireEvent.changeText(input, 'Legs B');
+    fireEvent(input, 'blur');
+
+    await waitFor(() => expect(mockRenameLocal).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId('workout-name-input')).toBeNull();
+  });
+
+  it('does not write a blank name', async () => {
+    await openEditor();
+    fireEvent.changeText(screen.getByTestId('workout-name-input'), '   ');
+    fireEvent.press(screen.getByTestId('workout-name-save'));
+
+    await waitFor(() => expect(screen.queryByTestId('workout-name-input')).toBeNull());
+    expect(mockRenameLocal).not.toHaveBeenCalled();
+  });
+
+  it("offers no rename control on a workout that is not yours, but still shows its name", async () => {
+    // A VOLA template. The API refuses the write, so the affordance must not
+    // be there — and the name still has to render, or the screen loses its
+    // heading entirely for every shared and official template.
+    const official = plan('VOLA Full Body', { owner_user_id: null, visibility: 'public' });
+    mockCachedWorkouts.mockResolvedValue([official]);
+    mockGetWorkout.mockResolvedValue(official);
+    render(<WorkoutDetailScreen />);
+
+    await waitFor(() => expect(screen.getByTestId('workout-readonly')).toBeTruthy());
+    expect(screen.queryByTestId('workout-rename')).toBeNull();
+    expect(screen.getAllByText('VOLA Full Body').length).toBeGreaterThan(0);
+  });
 });

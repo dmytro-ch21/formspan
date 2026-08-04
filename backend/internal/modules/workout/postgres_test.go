@@ -449,7 +449,7 @@ func TestRename_IsOwnerOnlyAndKeepsItems(t *testing.T) {
 		t.Error("the refused rename was written anyway")
 	}
 
-	before := after.Items
+	before := after
 	renamed, err := repo.Rename(ctx, "user_owner", "wk-rename-1", "Maestro Push Day")
 	if err != nil {
 		t.Fatalf("owner rename: %v", err)
@@ -459,19 +459,40 @@ func TestRename_IsOwnerOnlyAndKeepsItems(t *testing.T) {
 	}
 	// The whole point of a separate verb: renaming must not disturb the item
 	// list. Folded into ReplaceItems, a rename would have to resend it.
-	if len(renamed.Items) != len(before) {
-		t.Errorf("rename changed the item list: %d items, want %d", len(renamed.Items), len(before))
+	if len(renamed.Items) != len(before.Items) {
+		t.Errorf("rename changed the item list: %d items, want %d", len(renamed.Items), len(before.Items))
 	}
-	if renamed.UpdatedAt.Before(renamed.CreatedAt) {
-		t.Error("updated_at was not touched")
+	// Against the PRE-RENAME value, not against CreatedAt. Both columns default
+	// to now() and Postgres now() is transaction time, so straight after the
+	// insert they are identical and `UpdatedAt.Before(CreatedAt)` can never be
+	// true — the assertion that was here passed with `updated_at = now()`
+	// deleted from the UPDATE, which is exactly the mutation it claimed to catch.
+	if !renamed.UpdatedAt.After(before.UpdatedAt) {
+		t.Errorf("updated_at was not touched: %v then %v", before.UpdatedAt, renamed.UpdatedAt)
 	}
 }
 
 // A workout that does not exist must not be distinguishable from one that
 // exists and is not yours — same reasoning as TestPrivateWorkout_IsNotAnExistenceOracle.
 func TestRename_UnknownIDIsNotFound(t *testing.T) {
-	repo, _ := newTestRepo(t)
-	if _, err := repo.Rename(context.Background(), "user_a", "wk-does-not-exist", "X"); !errors.Is(err, ErrNotFound) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	if _, err := repo.Rename(ctx, "user_a", "wk-does-not-exist", "X"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("err = %v, want ErrNotFound", err)
+	}
+
+	// The half that actually matters, and which the unknown-id case alone does
+	// not cover: someone else's PRIVATE workout must answer the same way an
+	// absent one does. ErrForbidden here would confirm the id exists, turning
+	// the endpoint into an enumeration oracle over other people's templates.
+	// (A PUBLIC one is different on purpose — you can already see it, so the
+	// honest answer is "not yours", and TestRename_IsOwnerOnlyAndKeepsItems
+	// pins that.)
+	cleanupWorkout(t, pool, "wk-rename-private")
+	if _, err := repo.Create(ctx, strengthWorkout("wk-rename-private", "user_owner", VisibilityPrivate)); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := repo.Rename(ctx, "user_stranger", "wk-rename-private", "X"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("a stranger's private workout leaked its existence: err = %v, want ErrNotFound", err)
 	}
 }

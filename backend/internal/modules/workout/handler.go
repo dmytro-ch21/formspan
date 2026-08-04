@@ -121,8 +121,21 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "too many items")
 		return
 	}
+	// Trimmed and capped on the SAME rules as Rename.
+	//
+	// It was neither before, which made the endpoint's own argument false of
+	// the data: a review pointed out that `POST` happily stored "   " and a
+	// 5000-rune name (the column is plain TEXT with no CHECK), so the "renders
+	// as a gap in the list with nothing to tap" harm that Rename refuses was
+	// fully reachable through create — and a template created with a 5000-rune
+	// name could never be renamed to anything comparable.
+	req.Name = strings.TrimSpace(req.Name)
 	if req.ID == "" || req.Name == "" {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "id and name are required")
+		return
+	}
+	if utf8.RuneCountInString(req.Name) > maxNameLen {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "name is too long")
 		return
 	}
 	if !ValidSport(req.Sport) {
@@ -208,8 +221,6 @@ type renameRequest struct {
 // correcting a typo require sending the whole item list back, and a client
 // that got that list slightly wrong would silently rewrite the workout.
 func (h *Handler) Rename(w http.ResponseWriter, r *http.Request) {
-	claims, _ := auth.ClaimsFromContext(r.Context())
-
 	var req renameRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&req); err != nil {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
@@ -229,6 +240,23 @@ func (h *Handler) Rename(w http.ResponseWriter, r *http.Request) {
 	// reasoning as the session module's rename.
 	if utf8.RuneCountInString(name) > maxNameLen {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "name is too long")
+		return
+	}
+
+	// Read at the point of use and CHECKED, unlike the `claims, _ :=` its
+	// siblings here open with.
+	//
+	// It is not the auth boundary — `RequireAuth` is, and it makes this branch
+	// unreachable in production. It is a backstop against the route being wired
+	// without that middleware, which `claims, _ :=` turns into a nil dereference
+	// and a 500 rather than a 401. It also makes the handler testable: the rune
+	// cap above is the property most likely to regress and had no coverage at
+	// all, because a test could not get past a nil-claims panic to prove that a
+	// 120-rune multibyte name is ACCEPTED — and accepting it is what a
+	// byte-counting `len()` would break, not the refusal of 121.
+	claims, ok := auth.ClaimsFromContext(r.Context())
+	if !ok {
+		apihttp.WriteError(w, http.StatusUnauthorized, apihttp.CodeUnauthorized, "missing bearer token")
 		return
 	}
 

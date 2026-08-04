@@ -369,18 +369,63 @@ describe('renaming a workout', () => {
     expect(await countPendingWorkouts('u1')).toBe(0);
   });
 
-  it('renames BEFORE replacing the items', async () => {
-    // Both calls return the workout. With the rename second, a failure there
-    // leaves the server holding new items under the old name — the confusing
-    // half-state. This order fails the other way: the name lands, the items
-    // retry, and the row stays dirty.
+  it('does NOT send the item list — the whole reason PATCH exists', async () => {
+    // The bug this replaced: `renameLocalWorkout` set `dirty` as well, and the
+    // push sent `replaceItems` unconditionally. So renaming re-uploaded
+    // `items_json` from the cache — and the cache can be stale, because the
+    // detail screen reads the server's copy into React state without writing it
+    // back. Add an exercise on the web, rename on the phone, and the phone's
+    // older list silently replaced the server's.
+    await cached();
+    await renameLocalWorkout('u1', 'w1', 'Renamed');
+
+    await syncSessions('u1', token);
+
+    expect(mockRename).toHaveBeenCalledTimes(1);
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+
+  it('replaces the items BEFORE renaming, when both are owed', async () => {
+    // Matches `pushRow` for sessions, whose order was settled by a real
+    // incident. A PERMANENTLY refused name sent first aborts the row before the
+    // items go out, and every retry replays the same doomed request — so the
+    // item edits never land at all. Sent last, a refused rename leaves the
+    // items delivered and the row dirty, which the next pass corrects.
     await cached();
     await renameLocalWorkout('u1', 'w1', 'Renamed');
     await saveLocalWorkoutItems('u1', 'w1', []);
 
     await syncSessions('u1', token);
 
-    expect(order.indexOf('workout:rename')).toBeLessThan(order.indexOf('workout:items'));
+    expect(order.indexOf('workout:items')).toBeLessThan(order.indexOf('workout:rename'));
+  });
+
+  it('a rename still counts as pending, and still blocks the pull', async () => {
+    // `dirty` is no longer set by a rename, so every "is this row owed
+    // anything" query has to test `name_dirty` too. Miss one and the sync
+    // either never carries the rename, or reports zero pending while it does.
+    await cached();
+    await renameLocalWorkout('u1', 'w1', 'Renamed');
+    expect(await countPendingWorkouts('u1')).toBe(1);
+
+    // The pull must not overwrite the unsynced name with the server's old one.
+    await cacheWorkouts('u1', [serverWorkout({ id: 'w1', name: 'Legs' })]);
+    expect((await cachedWorkouts('u1'))[0].name).toBe('Renamed');
+  });
+
+  it('a workout created AND renamed offline sends the name once, not twice', async () => {
+    // The create already carries the new name, so a PATCH behind it re-sends
+    // the same string. Sessions guard this with `wasRemote`.
+    const w = await createLocalWorkout('u1', {
+      name: 'Push day', sport: 'strength', goal: null, visibility: 'private',
+    });
+    await renameLocalWorkout('u1', w.id, 'Pull day');
+
+    await syncSessions('u1', token);
+
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+    expect(mockCreate.mock.calls[0][1]).toMatchObject({ name: 'Pull day' });
+    expect(mockRename).not.toHaveBeenCalled();
   });
 
   it('does NOT PATCH the name for an ordinary item edit', async () => {

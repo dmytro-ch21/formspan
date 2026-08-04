@@ -402,6 +402,10 @@ func (r *PostgresRepository) Rename(ctx context.Context, userID, workoutID, name
 	if _, err := requireOwner(ctx, tx, userID, workoutID); err != nil {
 		return nil, err
 	}
+	// No owner predicate here, and that is safe ONLY because `requireOwner`
+	// above holds `SELECT ... FOR UPDATE` on this row for the rest of the
+	// transaction. Move the gate outside the tx, or swap it for a non-locking
+	// read, and this silently becomes a race with nothing failing.
 	if _, err := tx.Exec(ctx,
 		`UPDATE workouts SET name = $2, updated_at = now() WHERE id = $1`,
 		workoutID, name); err != nil {

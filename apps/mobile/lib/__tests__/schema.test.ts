@@ -262,23 +262,59 @@ it('workout_cache carries name_dirty on a fresh install', async () => {
   expect(cols.map((c) => c.name)).toContain('name_dirty');
 });
 
-it('upgrading an existing database does not mark every cached name as owed', async () => {
-  // The direction matters and is easy to get backwards. Every row already in
-  // `workout_cache` came FROM the server, so its name is what the server holds
-  // and none of them owes a PATCH. Defaulting to 1 would make the first sync
-  // after upgrade re-send every cached template's name — including VOLA's own
-  // ownerless ones, which the server refuses with a 403 that the outbox would
-  // then hold forever.
-  const db = await openFixture();
-  await migrate(db as never);
+it('upgrading a v15-shaped database does not mark every cached name as owed', async () => {
+  // The DIRECTION is the whole risk, and this has to take the real upgrade
+  // path to prove anything. An earlier version of this test used
+  // `openFixture()` + `migrate()` — a blank database at v0, i.e. a FRESH
+  // INSTALL — so it only ever exercised the CREATE statement, which already
+  // declares the column. Deleting the entire `if (current < 16)` branch left
+  // it green, which is exactly the "passes for the wrong reason" this suite
+  // exists to catch. A review found it; the v6/v7 tests above had the right
+  // idiom all along.
+  //
+  // The full v15 shape, not just the table under test: a real device at v15
+  // has every earlier table, and `migrate` skips the branches that created
+  // them, so a one-table fixture makes a later `addColumnIfMissing` throw
+  // "no such table" for a reason no device could hit.
+  const db = openFixture();
+  db.raw.exec(`
+    CREATE TABLE local_sessions (
+      id TEXT PRIMARY KEY NOT NULL, user_id TEXT NOT NULL, workout_id TEXT,
+      sport TEXT NOT NULL, name TEXT NOT NULL, started_at TEXT NOT NULL,
+      ended_at TEXT, notes TEXT NOT NULL DEFAULT '',
+      sets_json TEXT NOT NULL DEFAULT '[]', dirty INTEGER NOT NULL DEFAULT 1,
+      remote INTEGER NOT NULL DEFAULT 0, deleted_at TEXT,
+      updated_at TEXT NOT NULL, name_dirty INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT, bjj_json TEXT);
+    CREATE TABLE workout_cache (
+      id TEXT PRIMARY KEY NOT NULL, user_id TEXT NOT NULL, sport TEXT NOT NULL,
+      name TEXT NOT NULL, goal TEXT, items_json TEXT NOT NULL DEFAULT '[]',
+      owner_user_id TEXT, visibility TEXT NOT NULL DEFAULT 'private',
+      dirty INTEGER NOT NULL DEFAULT 0, remote INTEGER NOT NULL DEFAULT 1,
+      deleted_at TEXT, updated_at TEXT NOT NULL DEFAULT '',
+      last_error TEXT, cached_at TEXT NOT NULL);
+    PRAGMA user_version = 15;
+  `);
+  // A row that came FROM the server, which is what every v15 row is.
   db.raw
     .prepare(
       `INSERT INTO workout_cache (id, user_id, sport, name, items_json, cached_at)
        VALUES ('w1', 'u1', 'strength', 'Legs', '[]', '2026-08-04T00:00:00Z')`,
     )
     .run();
+
+  await migrate(db as never);
+
+  const cols = (db.raw.prepare('PRAGMA table_info(workout_cache)').all() as { name: string }[])
+    .map((c) => c.name);
+  expect(cols).toContain('name_dirty');
+  // 0, not 1. Its name is whatever the server already holds, so it owes no
+  // PATCH. Defaulting to 1 would make the first sync after upgrade re-send
+  // every cached template's name — including VOLA's ownerless ones, which the
+  // server refuses with a 403 the outbox would then hold forever.
   const row = db.raw
     .prepare(`SELECT name_dirty FROM workout_cache WHERE id = 'w1'`)
     .get() as { name_dirty: number };
   expect(row.name_dirty).toBe(0);
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 16 });
 });

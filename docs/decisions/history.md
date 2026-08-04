@@ -9190,6 +9190,66 @@ screen that never happened.
 
 ### Gaps this leaves
 
+- **The review found a test that could not fail, and two properties with no
+  test at all.** The `updated_at` assertion was `renamed.UpdatedAt.Before(
+  renamed.CreatedAt)` — both columns default to `now()`, and Postgres `now()`
+  is transaction time, so straight after an insert they are identical and that
+  comparison can never be true. Deleting `updated_at = now()` from the UPDATE
+  left it green. It now compares against the pre-rename value and goes red.
+  Separately, the two rules the endpoint publishes — blank refused, cap counted
+  in runes — lived entirely in the handler, which had no tests, so swapping
+  `utf8.RuneCountInString` for `len` left the whole suite passing. There is a
+  handler test now, and the case that catches that swap is the **accepting**
+  one: under a byte cap, 120 Japanese runes are 360 bytes and get refused,
+  while 121 is still refused for the wrong reason — so a test asserting only
+  "121 → 400" passes against the exact bug it was written for.
+- **`Create` was not holding the invariant `Rename` publishes.** `POST` stored
+  `"   "` and a 5000-rune name happily (the column is plain `TEXT`, no CHECK),
+  so the "renders as a gap in the list with nothing to tap" harm this endpoint
+  refuses was fully reachable through creation — and a template created with a
+  5000-rune name could never be renamed to anything comparable. Both paths now
+  trim and cap on the same rules.
+- **The client review found the data-loss bug this endpoint exists to prevent,
+  reintroduced in the client.** `renameLocalWorkout` set `dirty` as well as
+  `name_dirty`, and the push called `replaceItems` unconditionally — so a
+  rename re-uploaded `items_json` from the cache. And the cache can be stale:
+  the detail screen reads the server's copy into React state without ever
+  writing it back. Add an exercise on the web, open the workout on the phone,
+  rename it, and the phone's older list silently replaced the server's, with no
+  signal anywhere. `dirty` now means only "the items are owed"; every "is this
+  row owed anything" query tests both flags through one shared `workoutOwed`
+  fragment, so the next flag cannot be added to the push loop but forgotten in
+  the pending count.
+- **The push order was flipped to items-first, rename-last**, matching the
+  session module — whose ordering was settled by a real incident and which this
+  branch had reasoned its way out of. Rename-first sounds safer (it avoids "new
+  items under the old name") but that state is transient and self-correcting,
+  while a *permanently* refused rename sent first aborts the row before the
+  items go out, so every retry replays the same doomed request and the item
+  edits never land at all. That is not hypothetical: an app deployed ahead of
+  the API gets 405 here, which the client classifies as permanent.
+- **A migration test that tested the wrong thing.** The v16 test was named
+  "upgrading an existing database" but built its fixture with `openFixture()` +
+  `migrate()` — a blank database at v0, i.e. a *fresh install*. So it exercised
+  the `CREATE TABLE`, which already declares the column, and deleting the whole
+  `if (current < 16)` branch left it green. It now hand-builds a v15-shaped
+  database the way the v6 and v7 tests already did. Both mutations (deleting the
+  branch, and flipping the default to 1) now turn it red.
+- **Two Tailwind classes on the web input were not tokens at all.**
+  `border-border` and `focus:border-accent` generated no CSS — `globals.css`
+  defines `--color-line` and `--color-lime`, not those — so the underline fell
+  back to `currentColor` and, worse, `outline-none` suppressed the base
+  `:focus-visible` outline with nothing replacing it. The focused field was
+  visually identical to the unfocused one, a WCAG 2.4.7 failure on a control
+  whose entire job is text entry. **Nothing in `verify` can catch an undefined
+  Tailwind colour** — lint and typecheck both pass on it, which is worth
+  remembering the next time a class name is invented rather than copied.
+- **Mobile's Done button ate its first tap.** The `ScrollView` lacked
+  `keyboardShouldPersistTaps="handled"`, so React Native spent the first tap
+  outside the focused input dismissing the keyboard and the button never saw
+  it. Ten other screens already set it. It hides on the Simulator, where a
+  hardware keyboard means the soft keyboard is never up — which is exactly how
+  it survived the device verification above.
 - **Only the name.** `notes`, `goal` and `visibility` are still fixed at
   creation. `PATCH` is the natural home for them and the shape already allows
   it, but adding fields nobody asked for would have been speculative — the

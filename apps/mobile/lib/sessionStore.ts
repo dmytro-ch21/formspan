@@ -902,7 +902,7 @@ async function runSync(
   // that is perfectly fine and report it as doomed. So the order is load
   // bearing, and so is the deferral below.
   const dirtyWorkouts = await db.getAllAsync<WorkoutRow>(
-    `SELECT * FROM workout_cache WHERE user_id = ? AND dirty = 1 ORDER BY updated_at`,
+    `SELECT * FROM workout_cache WHERE user_id = ? AND ${workoutOwed} ORDER BY updated_at`,
     userID,
   );
   for (const w of dirtyWorkouts) {
@@ -1087,7 +1087,8 @@ export async function cacheWorkouts(userID: string, list: Workout[]): Promise<vo
          -- local_sessions, and for the same reason: the pull skips these
          -- rows anyway, but relying on every caller to remember is how the
          -- session store nearly lost a delete.
-         WHERE workout_cache.dirty = 0 AND workout_cache.deleted_at IS NULL`,
+         WHERE workout_cache.dirty = 0 AND workout_cache.name_dirty = 0
+           AND workout_cache.deleted_at IS NULL`,
         w.id,
         userID,
         w.sport,
@@ -1333,6 +1334,16 @@ export async function saveLocalWorkoutItems(
 }
 
 /**
+ * A workout row still owes the server something.
+ *
+ * `dirty` is the item list; `name_dirty` is the name; a tombstone sets `dirty`.
+ * Written once and reused, because the failure mode of adding a third flag to
+ * the push loop but not to the pending count is a sync that never finishes
+ * with nothing on screen explaining why.
+ */
+const workoutOwed = '(dirty = 1 OR name_dirty = 1)';
+
+/**
  * Rename a workout template locally. Owed to the server afterwards.
  *
  * Trims and refuses a blank, so the local row can never hold something the
@@ -1354,7 +1365,19 @@ export async function renameLocalWorkout(
   const db = await getDb();
   const now = new Date().toISOString();
   const r = await db.runAsync(
-    `UPDATE workout_cache SET name = ?, dirty = 1, name_dirty = 1, updated_at = ?
+    // `name_dirty` ONLY — deliberately NOT `dirty`.
+    //
+    // `dirty` means "the item list is owed to PUT /items", and setting it here
+    // made a rename re-send `items_json` — which is exactly the silent rewrite
+    // this endpoint was added to prevent. It is reachable: the detail screen
+    // fetches the server's copy into React state but never writes it back to
+    // the cache, so add an exercise on the web, open the workout on the phone,
+    // rename it, and the push replaces the server's list with the phone's older
+    // one. The new exercise is gone with no signal anywhere.
+    //
+    // Every "is this row owed anything" query therefore has to test BOTH flags;
+    // they are listed at `workoutOwed` below.
+    `UPDATE workout_cache SET name = ?, name_dirty = 1, updated_at = ?
      WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
     trimmed, now, id, userID,
   );
@@ -1425,7 +1448,7 @@ export async function deleteLocalWorkout(userID: string, id: string): Promise<vo
 export async function dirtyWorkoutIDs(userID: string): Promise<Set<string>> {
   const db = await getDb();
   const rows = await db.getAllAsync<{ id: string }>(
-    `SELECT id FROM workout_cache WHERE user_id = ? AND dirty = 1`,
+    `SELECT id FROM workout_cache WHERE user_id = ? AND ${workoutOwed}`,
     userID,
   );
   return new Set(rows.map((r) => r.id));
@@ -1445,7 +1468,7 @@ export async function unsyncedWorkoutIDs(userID: string): Promise<Set<string>> {
 export async function countPendingWorkouts(userID: string): Promise<number> {
   const db = await getDb();
   const row = await db.getFirstAsync<{ n: number }>(
-    `SELECT COUNT(*) AS n FROM workout_cache WHERE user_id = ? AND dirty = 1`,
+    `SELECT COUNT(*) AS n FROM workout_cache WHERE user_id = ? AND ${workoutOwed}`,
     userID,
   );
   return row?.n ?? 0;
@@ -1459,6 +1482,7 @@ type WorkoutRow = {
   items_json: string;
   visibility: string;
   remote: number;
+  dirty: number;
   name_dirty: number;
   deleted_at: string | null;
   updated_at: string;
@@ -1509,6 +1533,13 @@ async function pushWorkoutRow(
     return;
   }
 
+  // Captured BEFORE the create below, because the guard on the rename needs to
+  // know whether the workout already existed server-side. Reading `row.remote`
+  // afterwards is no good — and neither is re-reading the row, which is what an
+  // earlier attempt did: the DB was updated but the in-memory `row` still said
+  // `name_dirty = 1`, so the PATCH went out anyway.
+  const wasRemote = row.remote === 1;
+
   if (row.remote === 0) {
     await createWorkout(getToken, {
       id: row.id,
@@ -1530,18 +1561,30 @@ async function pushWorkoutRow(
     // remote deletion. Same guard sessions carry.
     throw new Error('This workout is corrupted on this device and was not synced.');
   }
-  // BEFORE the items, deliberately. Both calls return the workout, and if the
-  // rename went second a failure there would leave the server holding new
-  // items under the old name — the confusing half-state. This order fails the
-  // other way: the name lands, the items retry, and the row stays dirty.
+  // Each call guarded by its own flag. An ordinary item edit must not also
+  // PATCH the name (the extra request per debounced write `local_sessions`
+  // learned to avoid), and — the one that actually loses data — a rename must
+  // not PUT an item list it may hold a stale copy of.
+  if (row.dirty === 1) {
+    await replaceItems(getToken, row.id, items);
+  }
+
+  // The rename goes LAST, matching `pushRow` for sessions, whose ordering was
+  // settled by a real incident. The first cut here did the opposite, reasoning
+  // that a failed rename after a successful item push leaves "new items under
+  // the old name". It does — but that state is transient, the row stays dirty,
+  // and the next pass fixes it. Rename-first trades it for a worse one: a
+  // PERMANENTLY refused name aborts the row before the items go out, so every
+  // retry replays the same doomed request and the item edits never land at all.
+  // That is not hypothetical — an app deployed ahead of the API gets 405 on
+  // this route, which `isPermanentStatus` classifies as permanent.
   //
-  // Guarded on the flag, not sent unconditionally: an ordinary item edit must
-  // not also PATCH the name, which is the extra request per debounced write
-  // that `local_sessions` already learned to avoid.
-  if (row.name_dirty === 1) {
+  // `wasRemote` matters: a workout created offline and renamed before its first
+  // push is CREATED with the new name already, so a PATCH behind it re-sends the
+  // same string. Sessions carry the identical guard.
+  if (wasRemote && row.name_dirty === 1) {
     await renameWorkout(getToken, row.id, row.name);
   }
-  await replaceItems(getToken, row.id, items);
 
   await db.runAsync(
     `UPDATE workout_cache SET dirty = 0, name_dirty = 0 WHERE id = ? AND user_id = ?

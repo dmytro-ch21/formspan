@@ -69,6 +69,7 @@ export default function WorkoutEditorPage({
   const [starting, setStarting] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState("");
+  const renameButtonRef = useRef<HTMLButtonElement | null>(null);
   const { units } = useUnits();
   const abortRef = useRef<AbortController | null>(null);
 
@@ -95,9 +96,14 @@ export default function WorkoutEditorPage({
     if (!workout) return;
     const next = draftName.trim();
     setRenaming(false);
+    // The input unmounts here, and without this focus lands on <body> — a
+    // keyboard user editing the title would have to tab from the top of the
+    // document to get back to it (WCAG 2.4.3). Deferred a frame so the button
+    // it targets exists.
+    requestAnimationFrame(() => renameButtonRef.current?.focus());
     if (next === "" || next === workout.name) return;
     const previous = workout.name;
-    setWorkout({ ...workout, name: next });
+    setWorkout((w) => (w ? { ...w, name: next } : w));
     try {
       const updated = await renameWorkout(getToken, workout.id, next);
       setWorkout(updated);
@@ -304,7 +310,7 @@ export default function WorkoutEditorPage({
                 // something that is a guaranteed 400.
                 maxLength={120}
                 aria-label="Workout name"
-                className="w-full border-b border-border bg-transparent font-display text-4xl font-bold outline-none focus:border-accent"
+                className="w-full border-b border-line bg-transparent font-display text-4xl font-bold outline-none focus:border-lime"
                 data-testid="workout-name-input"
               />
             ) : canEdit ? (
@@ -314,7 +320,8 @@ export default function WorkoutEditorPage({
                   setDraftName(workout.name);
                   setRenaming(true);
                 }}
-                className="rounded text-left hover:text-text-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                ref={renameButtonRef}
+                className="rounded text-left hover:text-text-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lime"
                 aria-label={`${workout.name}. Rename this workout`}
                 data-testid="workout-rename"
               >

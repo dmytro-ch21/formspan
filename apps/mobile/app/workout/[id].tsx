@@ -143,12 +143,21 @@ export default function WorkoutDetailScreen() {
    * for the other. The API keeps them apart for the same reason.
    */
   async function commitRename() {
-    if (!id || !userId) return;
+    // Re-entrancy guard: `onBlur` and the Done button both land here when Done
+    // is pressed while the field has focus, and without this the rename is
+    // written twice — the second one re-dirtying a row the first just queued.
+    if (!renaming || !id || !userId) return;
     const next = draftName.trim();
     setRenaming(false);
     if (next === '' || next === workout?.name) return;
     try {
-      await renameLocalWorkout(userId, id, next);
+      // The boolean is OBSERVED, not discarded. The blank check above makes
+      // `false` unreachable today, but the optimistic `setWorkout` below runs
+      // regardless — so if that check were ever relaxed the screen would show
+      // a name the store refused to write. The BJJ rename this is modelled on
+      // branches on it for the same reason.
+      if (!(await renameLocalWorkout(userId, id, next))) return;
+      setError(null);
       // The local write is the rename; the push is an attempt. Same rule the
       // items follow, so a plan renamed in a basement is renamed.
       setWorkout((w) => (w ? { ...w, name: next } : w));
@@ -281,7 +290,16 @@ export default function WorkoutDetailScreen() {
         }}
       />
 
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        // Without this, RN's default ("never") spends the first tap outside a
+        // focused TextInput on dismissing the keyboard and the child never
+        // sees it — so the visible "Done" beside the rename field does nothing
+        // on first press. Ten other screens in this app already set it. Note
+        // it hides on the Simulator: with a hardware keyboard attached the
+        // soft keyboard is not up, and the tap works first time.
+        keyboardShouldPersistTaps="handled"
+      >
         {/*
           The name, and the ability to change it.
 
@@ -311,6 +329,12 @@ export default function WorkoutDetailScreen() {
               maxLength={120}
               returnKeyType="done"
               onSubmitEditing={commitRename}
+              // Dismissing the keyboard by tapping away used to leave the
+              // heading replaced by an unfocused field holding an uncommitted
+              // draft, with Done the only exit. Committing on blur matches
+              // web; the guard at the top of `commitRename` keeps Done from
+              // firing it twice.
+              onBlur={commitRename}
               accessibilityLabel="Workout name"
               testID="workout-name-input"
             />

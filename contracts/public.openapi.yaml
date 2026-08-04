@@ -3093,9 +3093,16 @@ paths:
                 name:
                   type: string
                   minLength: 1
-                  # Counted in Unicode code points, not bytes — the domain
-                  # vocabulary here is Portuguese and Japanese.
                   maxLength: 120
+                  description: >
+                    Counted in CHARACTERS (Unicode code points), not bytes —
+                    the domain vocabulary here is Portuguese and Japanese, and
+                    a byte cap would refuse a legal name at roughly a third of
+                    this limit. Trimmed server-side; empty after trimming is
+                    rejected. Says this in `description` rather than a YAML
+                    comment because a comment reaches no generator, no SDK and
+                    no rendered docs — the sibling session rename already
+                    publishes the same facts this way.
                   example: Maestro Push Day
       responses:
         "200":
