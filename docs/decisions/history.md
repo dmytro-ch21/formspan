@@ -7056,6 +7056,45 @@ into the seed JSON, review the diff, and deploy. Promotion is the existing
 pipeline, the seed artifacts stay reproducible, and the one permanent thing —
 the id — gets read by a human before it is in anyone's training record.
 
+### What review caught — three defects, all in the layer that could not be tested
+
+**PATCH was a full replace while the contract promised partial.** `TechniqueWrite`
+marks four fields required and the method is `PATCH`, so a client author is told
+in writing the other fourteen are optional — and a console form posting only the
+edited field silently erased the rest. Omitting `description` wiped the prose.
+Every field is a pointer now, so absent is distinguishable from empty and
+clearing a field stays expressible.
+
+**Both writes returned `0001-01-01T00:00:00Z`.** `created_at`/`updated_at` were
+missing from the returning projection — well-formed enough to satisfy a schema
+validator and to render as "Created 1 Jan 0001".
+
+**An unbounded name minted a permanent id.** A ~3000-character incompressible
+name 500'd on Postgres's btree limit; a compressible 4000-character one
+*succeeded* and minted a 4000-character id that is now a foreign key in training
+records. The longest name in the shipped catalog is 41 characters, so a 200-cap
+rejects nothing real and guards the seeder too. Given this feature's own premise
+— the id outlives everything and cannot be taken back — an unbounded permanent
+id was the one input that must not have been accepted.
+
+All three were handler-layer, and **the handler could not be tested**: the
+constructor took `*PostgresRepository` rather than the interface, unlike every
+other module here. Taking the interface cost three lines and the layer now has
+nine tests.
+
+### The guard with zero coverage
+
+The exercises half of the seed guard had none — deleting
+`WHERE exercises.source = 'seed' AND` left the *entire* backend suite green. It
+is inert today because there is no exercise write path, which is exactly why it
+would still have been untested when one lands and makes it load-bearing. It now
+has the same test the techniques half does.
+
+Also worth recording: the timestamps fix is in SQL, so the handler test cannot
+see it — the fake repository supplies its own timestamps and stays green with
+the projection broken. That assertion lives in the integration test instead, and
+both mutations were checked separately.
+
 ### Gaps this leaves
 
 - **The export does not exist yet.** Until it does, admin content lives only in
@@ -7070,9 +7109,20 @@ the id — gets read by a human before it is in anyone's training record.
 - **No delete.** Deliberate: a technique with training records pointing at it
   cannot be removed without deciding what happens to them, and that is a real
   design question rather than a missing endpoint.
-- **Handler-level validation is untested**, matching the rest of the repo,
-  which has no handler tests. The repository and validator rules are covered;
-  the request decoding and the 409-vs-404 explanation are not.
+- **Two techniques whose names slug identically can never both exist**, and
+  there is no escape hatch — "Kimura (from Guard)" and "Kimura from Guard"
+  collide, and the only recourse is naming it something you did not want.
+  Auto-appending `-2` would be worse: it makes a permanent id depend on
+  insertion order. An optional server-validated `id_suffix` is the likely
+  answer, and is not in this PR.
+- **`source` is on the write response but not on any read path**, so the console
+  cannot render an "editable" badge without attempting a PATCH and reading the
+  409. Worth adding to the detail projection before the UI PR.
+- **The merged row is re-validated on update**, so a stored technique that fails
+  current validation cannot be edited until its data is fixed. Defensible, and
+  not obvious — it surfaced when a test fixture was incomplete.
+- **`cmd/seed` still logs "466 upserted" regardless of how many rows the guard
+  skipped**, so a JSON entry permanently shadowed by an admin row is invisible.
 
 
 ## Open items / known gaps as of this entry

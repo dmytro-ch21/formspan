@@ -2,7 +2,6 @@ package technique
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -20,9 +19,6 @@ import (
 // against it, it is a permanent reference in their training record — so ids are
 // generated once and never change, and a typo is not something a later edit can
 // take back. That single fact drives most of the rules below.
-
-// ErrIDImmutable is returned when an update tries to move a technique's id.
-var ErrIDImmutable = errors.New("technique: id cannot be changed")
 
 // slugUnsafe is everything that is not a lowercase letter, digit or hyphen.
 var slugUnsafe = regexp.MustCompile(`[^a-z0-9]+`)
@@ -88,6 +84,14 @@ type ContentRepository interface {
 	// technical standup) and a second list to maintain is a second list to
 	// forget.
 	KnownPositions(ctx context.Context) ([]string, error)
+	// GetTechnique reads the current row, so a partial update can overlay onto
+	// it rather than replacing it.
+	GetTechnique(ctx context.Context, id string) (Technique, error)
+	// Source reports where a technique came from, so a refusal can explain
+	// itself rather than 404 at an id that plainly exists. On the interface so
+	// the handler can be faked — taking the concrete type is why the handler
+	// layer had no tests and shipped three defects.
+	Source(ctx context.Context, id string) (string, error)
 }
 
 // ValidateForWrite is every rule an admin-authored technique must pass.

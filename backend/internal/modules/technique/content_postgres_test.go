@@ -72,6 +72,15 @@ func TestCreateWritesAnAdminRowThatSeedingCannotTouch(t *testing.T) {
 	if created.Source != "admin" {
 		t.Fatalf("source = %q, want admin", created.Source)
 	}
+	// The projection omitted created_at/updated_at, so every write returned
+	// 0001-01-01T00:00:00Z — well-formed enough to satisfy a schema validator
+	// and to render as "Created 1 Jan 0001". Only an integration test can see
+	// this: the handler's fake repository supplies its own timestamps, so the
+	// handler-level test stays green with the SQL broken.
+	if created.CreatedAt.IsZero() || created.UpdatedAt.IsZero() {
+		t.Errorf("zero timestamps from the write projection: %v / %v",
+			created.CreatedAt, created.UpdatedAt)
+	}
 
 	// A seed that happens to carry the same id, with different content.
 	clash := aTechnique("test-content-sao-paulo", "Something The Seed Thinks")

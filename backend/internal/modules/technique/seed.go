@@ -5,7 +5,6 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"strings"
 )
 
 // Generated from the authored spreadsheet by
@@ -97,6 +96,14 @@ func ValidateFields(t Technique) error {
 		return fmt.Errorf("technique: entry %q has no id", t.Name)
 	case t.Name == "" || t.Category == "" || t.Position == "":
 		return fmt.Errorf("technique: %q needs name, category, and position", t.ID)
+	case len(t.Name) > maxNameLen || len(t.ID) > maxNameLen:
+		// The id is DERIVED from the name and is permanent — a foreign key in
+		// training records. Unbounded, a long name either 500s on Postgres's
+		// btree limit (incompressible) or, worse, SUCCEEDS and mints a
+		// 4000-character id nobody can take back. The longest name in the
+		// shipped catalog is 41 characters, so this rejects nothing real, and
+		// it guards the seeder as well as the console.
+		return fmt.Errorf("technique: %q name is too long (max %d)", t.ID, maxNameLen)
 	case !validGiNoGi[t.GiNoGi]:
 		return fmt.Errorf("technique: %q has unknown gi_no_gi %q", t.ID, t.GiNoGi)
 	case t.Function != "" && !validFunctions[t.Function]:
@@ -109,17 +116,8 @@ func ValidateFields(t Technique) error {
 	return nil
 }
 
-// FamilyOf reduces "Half Guard - Bottom" to "Half Guard" — the prefix the
-// clients' filter chips match on. Duplicated in each client because they need
-// it offline; this is the server's copy and the one the validators use.
-func FamilyOf(position string) string {
-	for family := range validFamilies {
-		if position == family || strings.HasPrefix(position, family+" - ") {
-			return family
-		}
-	}
-	return ""
-}
+// maxNameLen bounds the name, and therefore the derived id.
+const maxNameLen = 200
 
 func validate(techniques []Technique) error {
 	// The `techniques.position` vocabulary — the destinations a to_position

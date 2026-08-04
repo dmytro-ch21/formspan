@@ -26,7 +26,7 @@ const contentReturning = `
 	typical_belt, description, setup_from, common_counters, when_to_use,
 	common_next_moves, video_reference, source_notes,
 	COALESCE(ibjjf_ruleset_id, ''), COALESCE(function, ''),
-	COALESCE(to_position, ''), source`
+	COALESCE(to_position, ''), source, created_at, updated_at`
 
 func (r *PostgresRepository) KnownPositions(ctx context.Context) ([]string, error) {
 	rows, err := r.pool.Query(ctx, `
@@ -123,6 +123,20 @@ func (r *PostgresRepository) UpdateTechnique(ctx context.Context, t Technique) (
 	return out, nil
 }
 
+// GetTechnique reads one row through the same projection the writes return, so
+// a partial update overlays onto exactly the shape it will write back.
+func (r *PostgresRepository) GetTechnique(ctx context.Context, id string) (Technique, error) {
+	row := r.pool.QueryRow(ctx, `SELECT `+contentReturning+` FROM techniques WHERE id = $1`, id)
+	t, err := scanContent(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Technique{}, ErrNotFound
+	}
+	if err != nil {
+		return Technique{}, fmt.Errorf("technique: get for update: %w", err)
+	}
+	return t, nil
+}
+
 // Source reports where a technique came from, so a refusal can explain itself
 // rather than 404 at an id that plainly exists.
 func (r *PostgresRepository) Source(ctx context.Context, id string) (string, error) {
@@ -143,7 +157,7 @@ func scanContent(s scannable) (Technique, error) {
 		&t.PositionDetail, &t.GiNoGi, &t.TypicalBelt, &t.Description,
 		&t.SetupFrom, &t.CommonCounters, &t.WhenToUse, &t.CommonNextMoves,
 		&t.VideoReference, &t.SourceNotes, &t.IBJJFRulesetID, &t.Function,
-		&t.ToPosition, &t.Source)
+		&t.ToPosition, &t.Source, &t.CreatedAt, &t.UpdatedAt)
 	if err != nil {
 		return Technique{}, err
 	}

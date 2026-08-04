@@ -19,6 +19,12 @@
 -- DEFAULT 'seed' is deliberate for the backfill: every row that exists today
 -- came from the JSON, and defaulting the other way would make the next seed
 -- skip the entire catalog.
+-- Both ALTERs take ACCESS EXCLUSIVE on catalog tables every client reads.
+-- Behind one long-running read on staging that queues everything else, so a
+-- ceiling is the difference between a slow migration and an outage. Matches
+-- 000028/000029, the two most recent ALTERs on this table.
+SET lock_timeout = '3s';
+
 ALTER TABLE techniques
     ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'seed'
         CONSTRAINT techniques_source_known CHECK (source IN ('seed', 'admin'));
