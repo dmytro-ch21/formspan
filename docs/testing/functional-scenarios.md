@@ -2964,3 +2964,37 @@ this is API-surface behaviour even though no endpoint changed.
   because each covers for the other. If a guard exists for a reason the status
   code cannot show (streaming instead of buffering, say), assert that reason
   directly or write down that the test does not pin it.
+
+## Searching the technique library (mobile Library tab, web `/dashboard/library`)
+
+- **An accented technique is findable by its ASCII spelling.** "sao paulo" must
+  find "São Paulo Pass". This was broken for months and looked like missing
+  content rather than a broken lookup — the response was to start building a
+  way to add the technique, which would have minted a duplicate id.
+- **And by its accented spelling**, so a Portuguese keyboard is not the thing
+  that breaks instead. Fold both the query and the haystack.
+- **The same for dashes, which is the bigger half.** All three of "north-south
+  pass", "north–south pass" and "north south pass" must find the same thing.
+  The catalog spells 16 names with U+2013, the keyboard offers the hyphen, and
+  people type neither — so every dash folds to a space. The position chip for
+  those techniques says "North-South" with a plain hyphen while the names use
+  the en dash, so the screen contradicts itself before search even runs.
+- **Position is searchable, not just name and aliases.** 37 half-guard
+  techniques are named nothing like "half guard" and are reachable only by
+  typing the position — assert on those specifically, or the case passes on
+  name matches and proves nothing.
+- Derive the cases from the catalog rather than hardcoding them — assert that
+  *every* entry whose name carries a combining mark is findable by its folded
+  form, so a future import is covered without anyone remembering.
+- Aliases still match ("tozi" → São Paulo Pass), and case still does not matter.
+- **A query must not match across two fields.** The haystack joins name,
+  aliases and position; without a separator a query spanning the seam returns a
+  technique that matches neither field.
+- Repeating a search returns the same result — the folded haystack is memoised,
+  and a stale or mis-keyed cache shows up as one query answering differently.
+- Misspellings are **out of scope**: "sao paolo" finds nothing, and the fix for
+  that is an alias, not fuzzy matching.
+- **A search that finds nothing says so.** The reflection wizard's picker
+  rendered blank space on zero results, which on that screen reads as "the
+  technique isn't in the library" — the misreading that started three PRs of
+  work. Assert the empty state names the query that failed.
