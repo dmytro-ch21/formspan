@@ -1,6 +1,8 @@
 import { render, screen, waitFor } from '@testing-library/react-native';
 
 import BjjSessionScreen from '../bjj/session/[id]';
+import type { SessionDetail } from '@/lib/bjjSession';
+import type { LocalSession } from '@/lib/sessionStore';
 
 /**
  * Opening a BJJ session from Today crashed.
@@ -28,12 +30,24 @@ import BjjSessionScreen from '../bjj/session/[id]';
  * because by then the hook count is consistent again.
  */
 
-// See workoutDetailScreen.test.tsx — the one-off cost of standing up the React
-// Native module graph under jest-expo blows past jest's 5s default on a cold
-// CI runner while passing locally.
+// The house default for component tests in this suite — all three siblings set
+// it, for the one-off cost of standing up the React Native module graph under
+// jest-expo on a cold runner. Note it does NOT govern the `waitFor` calls below,
+// which carry their own 1s budget; this measures at ~0.4s either way.
 jest.setTimeout(30_000);
 
-const session = {
+/*
+ * TYPED, because a jest.mock factory is untyped and every one of these fields
+ * was wrong before someone checked: `rpe` instead of `session_rpe` (so the RPE
+ * stat silently rendered its `—` fallback), a `kind` outside the four legal
+ * ones, tags with no `category` — which the "what happened live" section filters
+ * on, so it could never have rendered — and neither required `gi` nor `dirty`.
+ *
+ * The two assertions passed regardless, which is the point: an untyped fixture
+ * lets a test exercise fallback branches while reading as though it covers the
+ * real ones. The `mock` prefix is what lets a jest.mock factory close over them.
+ */
+const mockSession: LocalSession = {
   id: 's1',
   user_id: 'u1',
   workout_id: null,
@@ -45,28 +59,35 @@ const session = {
   sets: [],
   created_at: '2026-08-04T18:00:00Z',
   updated_at: '2026-08-04T19:30:00Z',
+  dirty: false,
 };
 
-const detail = {
-  kind: 'gi',
+const mockDetail: SessionDetail = {
+  kind: 'class',
+  gi: true,
   rounds: 5,
   round_minutes: 5,
-  rpe: 7,
+  session_rpe: 7,
+  academy: '',
   note: '',
+  body_note: '',
   tags: [
-    { event: 'drilled', technique_id: 'knee-cut-pass', position: 'Guard - Top', count: 1 },
-    { event: 'scored', technique_id: 'knee-cut-pass', position: 'Guard - Top', count: 2 },
+    { category: 'pass', event: 'drilled', position: 'Guard - Top', technique_id: 'knee-cut-pass', count: 1 },
+    { category: 'pass', event: 'scored', position: 'Guard - Top', technique_id: 'knee-cut-pass', count: 2 },
   ],
 };
 
-// Resolve on a later tick, so the screen genuinely renders its loading branch
-// first. Resolving synchronously would collapse the two renders into one and
-// the test would pass against the bug.
+// Resolve on a later tick. This DOCUMENTS the loading-then-loaded shape rather
+// than creating it: `load()` is an async function, so its setState calls can
+// never land in the initial synchronous render whatever the mocks return —
+// measured, the test still fails against the broken screen with plain
+// `Promise.resolve`. The two-render transition is structural. Keep the delay for
+// legibility; do not rely on it as the guard.
 const deferred = <T,>(value: T) => new Promise<T>((r) => setTimeout(() => r(value), 0));
 
 jest.mock('@/lib/sessionStore', () => ({
-  readLocalSession: jest.fn(() => deferred(session)),
-  readLocalBjjDetail: jest.fn(() => deferred(detail)),
+  readLocalSession: jest.fn(() => deferred(mockSession)),
+  readLocalBjjDetail: jest.fn(() => deferred(mockDetail)),
   saveLocalBjjDetail: jest.fn(async () => {}),
   renameLocalSession: jest.fn(async () => true),
   deleteLocalSession: jest.fn(async () => {}),
@@ -75,7 +96,7 @@ jest.mock('@/lib/sessionStore', () => ({
 
 jest.mock('@/lib/bjjSession', () => ({
   ...jest.requireActual('@/lib/bjjSession'),
-  getDetail: jest.fn(() => deferred(detail)),
+  getDetail: jest.fn(() => deferred(mockDetail)),
 }));
 
 jest.mock('@/lib/techniques', () => ({
@@ -97,20 +118,19 @@ jest.mock('@/lib/techniques', () => ({
   ),
 }));
 
+// NOTE: `useAuthToken` and `@clerk/clerk-expo` are deliberately NOT mocked here.
+// jest.setup.js already provides them, and its token getter is identity-STABLE
+// on purpose — its own comment explains that an unstable one turns any effect
+// depending on it into an infinite refetch loop, "which was three live bugs".
+// A local `useAuthToken: () => async () => 'token'` returns a fresh arrow per
+// render and reproduces exactly that: measured at 17 refetches in one test.
+
 jest.mock('@/lib/sync', () => ({
   request: jest.fn(),
   syncNow: jest.fn(async () => {}),
   useSyncState: () => ({
     syncing: false, pending: 0, deferred: 0, lastSyncAt: null, lastError: null, online: true,
   }),
-}));
-
-jest.mock('@/lib/useAuthToken', () => ({
-  useAuthToken: () => async () => 'token',
-}));
-
-jest.mock('@clerk/clerk-expo', () => ({
-  useAuth: () => ({ userId: 'u1' }),
 }));
 
 jest.mock('expo-router', () => {

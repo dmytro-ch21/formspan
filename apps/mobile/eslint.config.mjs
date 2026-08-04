@@ -47,31 +47,54 @@ export default defineConfig([
   },
   {
     rules: {
-      // THE rule this was added for. Anything it flags is a crash, not a smell.
+      /*
+       * `rules-of-hooks` is THE rule this was added for, and it is an error.
+       *
+       * It is not the only error, and that is worth stating: v7's recommended
+       * set also errors on `purity`, `set-state-in-render`, `immutability`,
+       * `static-components`, `preserve-manual-memoization` and others, none of
+       * which this file touches. They report zero today, so the gate is green —
+       * but new code CAN fail on a rule not named here. Intended, and written
+       * down so it is not a surprise.
+       */
       "react-hooks/rules-of-hooks": "error",
 
       /*
-       * Everything below is a WARNING on purpose, and this is a deliberate
-       * choice rather than a way to get to green.
+       * Turning lint on for the first time on thirty never-linted screens
+       * surfaced 55 findings; one was the crash. The rest are real but are not
+       * crashes, and folding fifty-odd unrelated edits into a one-line crash fix
+       * would make the fix unreviewable. Switching the rules off would throw the
+       * information away instead.
        *
-       * Turning lint on for the first time on a 30-screen app that has never
-       * had it surfaced 54 errors. None is a crash; the two large groups are
-       * `react-hooks/refs` (24 — refs touched during render) and
-       * `set-state-in-effect` (15 — cascading renders). Both are real and both
-       * are worth fixing, but folding 54 unrelated edits into a one-line crash
-       * fix would make the fix unreviewable, and the alternative — switching
-       * the rules off — throws the information away.
+       * So they warn, `--max-warnings` in package.json holds the line, and the
+       * backlog is visible on every run. Promote them a group at a time.
        *
-       * So they report, `verify` passes, and the backlog stays visible every
-       * time anyone runs it. Promote them to `error` as they are cleared, a
-       * group at a time. Do not add to them.
+       * These two are genuine downgrades — errors in eslint-config-expo:
        */
-      "react-hooks/refs": "warn",
-      "react-hooks/set-state-in-effect": "warn",
+      "react-hooks/refs": "warn", // 24 — refs read or written during render
+      "react-hooks/set-state-in-effect": "warn", // 15 — cascading renders
+      "react/no-unescaped-entities": "warn", // 1
+
+      /*
+       * These three are PINS, not downgrades: already `warn` upstream. Named so
+       * an upstream promotion to error cannot land as a surprise in an
+       * unrelated PR.
+       */
       "react-hooks/exhaustive-deps": "warn",
-      "react/no-unescaped-entities": "warn",
       "import/first": "warn",
       "import/no-duplicates": "warn",
+
+      /*
+       * The `@typescript-eslint/*` findings (6 require-imports in test mocks,
+       * 1 unused var, 1 redeclare) are NOT named here, and the reason is
+       * precise: eslint-config-expo registers the React plugins GLOBALLY but
+       * registers `@typescript-eslint` only for TypeScript globs. So a rules
+       * block naming one of its rules must be `files`-scoped to those globs; an
+       * unscoped block fails to LOAD the whole config the moment a `.js` file is
+       * linted ("could not find plugin"), rather than changing a severity.
+       *
+       * They are already warnings upstream, so they are simply left alone.
+       */
     },
   },
 ]);

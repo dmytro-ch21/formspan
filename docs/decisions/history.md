@@ -8624,23 +8624,45 @@ linted. `eslint-config-expo` now runs over it, wired into `verify` and into
 CI's mobile job — the rule this file already states, that a check added to one
 must be added to the other.
 
-### 53 warnings, on purpose
+### 55 warnings, on purpose, and a ratchet
 
-Turning lint on for the first time on thirty never-linted screens surfaced 54
-findings. One was the crash. The rest are real but not crashes — 24
-`react-hooks/refs` (refs touched during render) and 15
-`set-state-in-effect` (cascading renders) dominate.
+Turning lint on for the first time on thirty never-linted screens surfaced 55
+findings — measured, after review caught three different numbers written in
+three places, none of which matched what `eslint` printed. One was the crash.
+The rest are real but not crashes: 24 `react-hooks/refs` (refs read or written
+during render) and 15 `set-state-in-effect` (cascading renders) dominate.
 
-`rules-of-hooks` is an **error**; everything else is a **warning**. Folding 54
-unrelated edits into a one-line crash fix would make the fix unreviewable, and
-switching the rules off would throw the information away. So they report, the
-gate passes, and the backlog is visible on every run. Promote them a group at a
-time.
+`rules-of-hooks` is an **error**; everything else is a **warning**. Folding
+fifty-odd unrelated edits into a one-line crash fix would make the fix
+unreviewable, and switching the rules off would throw the information away.
 
-Three `@typescript-eslint/*` findings stay errors and were simply fixed: flat
-config only lets a config object change a rule whose plugin it registers, and
-that plugin lives inside `eslint-config-expo`'s own TypeScript block — naming
-them in an override fails to load the config rather than lowering a severity.
+But "the backlog stays visible" is not true of a passing CI job that nobody
+reads, and this branch proved it: **it added two warnings without anyone
+noticing**, which is exactly how a soft limit rots. So the script carries
+`--max-warnings=55`. The count is now a ratchet — clearing findings means
+lowering it, and adding one fails the gate and forces a deliberate decision.
+Neither `apps/web` nor `apps/admin` does this; it is a new convention here
+because this is the app with a documented backlog.
+
+`rules-of-hooks` is also not the only error. v7's recommended set errors on
+`purity`, `set-state-in-render`, `immutability` and several more that this
+config leaves alone — they report zero today, so new code can fail on a rule
+nobody named. That is intended, and now written down.
+
+### One thing the review corrected about the config
+
+The `@typescript-eslint/*` findings are left alone, and the first version of
+this entry gave the wrong reason: "flat config only lets a config object change
+a rule whose plugin it registers". That is contradicted three lines up in the
+config itself, where `react-hooks/*` rules registered by `eslint-config-expo`
+are overridden without trouble.
+
+The real constraint is narrower and worth having right: `eslint-config-expo`
+registers the React plugins **globally** but registers `@typescript-eslint`
+only for TypeScript globs. So a rules block naming one of its rules has to be
+`files`-scoped to those globs — an unscoped one fails to LOAD the entire config
+the moment a `.js` file is linted, rather than lowering a severity. Tested both
+directions.
 
 ### Two guards, because they catch different things
 

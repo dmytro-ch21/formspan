@@ -51,7 +51,7 @@
     "submit:ios": "eas submit --platform ios --latest",
     "test": "TZ=America/Los_Angeles jest",
     "test:watch": "jest --watch",
-    "lint": "eslint ."
+    "lint": "eslint . --max-warnings=55"
   },
   "private": true
 }
