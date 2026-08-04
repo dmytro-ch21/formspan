@@ -1,6 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, View as RNView } from 'react-native';
+import {
+  Alert,
+  AppState,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View as RNView,
+} from 'react-native';
 
 import { request as requestSync, useSyncState } from '@/lib/sync';
 
@@ -53,7 +61,10 @@ import { cachedWorkouts } from '@/lib/sessionStore';
  * in a single tap and then hands it back to the rows. Its cells carry a dot and
  * nothing else, which is exactly why it cannot replace them.
  *
- * Plans are local-only for now — see `lib/plan.ts`.
+ * Plans sync — `planned_sessions` joined the outbox at schema v15 and
+ * `lib/sync.ts` runs `syncPlans`. This comment said "local-only for now" long
+ * after that stopped being true, and the claim was carried into a history
+ * entry before a reviewer caught it.
  */
 export function WeekPlanner({
   userId,
@@ -82,8 +93,20 @@ export function WeekPlanner({
   const todayKey = dayString(now);
   const isCurrentWeek = days.some((d) => dayString(d) === todayKey);
 
+  // Bumped on every anchor change, and captured by each read. A read that
+  // resolves after the week moved is dropped rather than rendered.
+  //
+  // Reachable: tap + Add, pick a template, then tap the arrow while the write
+  // is in flight — `add()` calls the `refresh` of the render it was created
+  // in, which is issued LAST and so lands last, leaving week A's rows under
+  // week B's dates. It fails to an all-"Rest" week rather than to wrong plans,
+  // and stays that way until the next focus or sync.
+  const readSeq = useRef(0);
+
   const refresh = useCallback(async () => {
     if (!userId) return;
+    readSeq.current += 1;
+    const seq = readSeq.current;
     // The week on screen, NOT `new Date()`. This read was pinned to today, so
     // it was already the reason navigation could not work: every arrow would
     // have moved the rows and re-fetched this week's plans into them.
@@ -93,6 +116,7 @@ export function WeekPlanner({
         listPlannedBetween(userId, dayString(week[0]), dayString(week[6])),
         cachedWorkouts(userId),
       ]);
+      if (seq !== readSeq.current) return;
       setPlans(rows);
       // Resolved from the cache each read rather than stored on the plan, so a
       // renamed template shows its new name instead of a stale copy.
@@ -111,9 +135,12 @@ export function WeekPlanner({
    * whenever its month changes, rather than kept live: a jump target does not
    * need to react to a sync, and the rows behind it already do.
    */
+  const monthSeq = useRef(0);
   const loadMonth = useCallback(
     async (month: Date) => {
       if (!userId) return;
+      monthSeq.current += 1;
+      const seq = monthSeq.current;
       const cells = monthGrid(month).flat();
       try {
         const rows = await listPlannedBetween(
@@ -121,8 +148,12 @@ export function WeekPlanner({
           cells[0].key,
           cells[cells.length - 1].key,
         );
+        if (seq !== monthSeq.current) return;
         setMonthDays(new Set(rows.map((r) => r.day)));
       } catch {
+        // An unreadable month is a grid of bare dates — the dots are a hint,
+        // and the rows behind this sheet are the surface that must be right.
+        if (seq !== monthSeq.current) return;
         setMonthDays(new Set());
       }
     },
@@ -151,6 +182,23 @@ export function WeekPlanner({
       setReloadAt((n) => n + 1);
     }, []),
   );
+
+  // The same staleness arrives without a focus change when the app is
+  // foregrounded on the tab it was left on — leave it on Plan on Sunday night,
+  // reopen on Monday, and `useFocusEffect` never fires. Without this the snap
+  // above is a promise the code does not keep: `todayKey` stays yesterday, so
+  // `isPast` is computed against it and `+ Add` is offered on days already
+  // gone. Copied from the Today screen, which needed it for the same reason.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') return;
+      const today = new Date();
+      setNow(today);
+      setAnchor((a) => refreshedAnchor(a, today));
+      setReloadAt((n) => n + 1);
+    });
+    return () => sub.remove();
+  }, []);
 
   // Re-read when the week on screen changes, when the screen is focused, and
   // whenever a sync finishes. Without that last one the week is only as fresh
@@ -235,7 +283,7 @@ export function WeekPlanner({
       <RNView style={styles.head}>
         <Pressable
           onPress={openMonth}
-          hitSlop={10}
+          hitSlop={14}
           style={styles.monthButton}
           accessibilityRole="button"
           accessibilityLabel={`${weekLabel}, week of ${days[0].toLocaleDateString(undefined, {
@@ -255,11 +303,19 @@ export function WeekPlanner({
             the only thing telling you that you have navigated at all. */}
         {!isCurrentWeek && (
           <Pressable
-            onPress={() => setAnchor(new Date())}
-            hitSlop={10}
+            onPress={() => {
+              // `now` too, not just the anchor. Across a midnight boundary a
+              // stale `now` leaves `isCurrentWeek` false after the jump, so
+              // the pill stays up, no row is marked today, and tapping it
+              // again does nothing.
+              const today = new Date();
+              setNow(today);
+              setAnchor(today);
+            }}
+            hitSlop={14}
             style={styles.today}
             accessibilityRole="button"
-            accessibilityLabel="Back to this week"
+            accessibilityLabel="Today, back to this week"
             testID="plan-this-week"
           >
             <Text style={styles.todayText}>Today</Text>
@@ -376,8 +432,14 @@ export function WeekPlanner({
         userId={userId}
         title={
           planning
-            ? `Plan ${new Date(`${planning}T00:00:00`).toLocaleDateString(undefined, {
+            ? // The date, not just the weekday. "Plan Tuesday" could only mean
+              // this week's Tuesday before the calendar could move; it can now
+              // mean one five weeks out, and the confirmation has to match
+              // what was actually tapped.
+              `Plan ${new Date(`${planning}T00:00:00`).toLocaleDateString(undefined, {
                 weekday: 'long',
+                day: 'numeric',
+                month: 'short',
               })}`
             : 'Plan'
         }
@@ -395,6 +457,11 @@ export function WeekPlanner({
         presentationStyle="pageSheet"
         onRequestClose={() => setMonthOpen(false)}
       >
+        {/* Gated on `monthOpen`, not left to `Modal` to decide. JSX children
+            are evaluated by the parent before the modal renders, so the grid
+            was being built — and ~42 `toLocaleDateString` calls made for the
+            cell labels — on every render of a tab the athlete keeps open. */}
+        {monthOpen && (
         <View style={styles.sheet} lightColor={vola.bg} darkColor={vola.bg}>
           <RNView style={styles.sheetHead}>
             <Pressable
@@ -460,6 +527,11 @@ export function WeekPlanner({
                         setMonthOpen(false);
                       }}
                       accessibilityRole="button"
+                      // The highlight is the only thing saying "this is the
+                      // week behind the sheet", and a tint says nothing to a
+                      // screen reader — the same gap `TrainingCalendar` closes
+                      // with `selected` on its own cells.
+                      accessibilityState={{ selected: inShownWeek }}
                       // Every state is named rather than left to the dot,
                       // matching `TrainingCalendar` — a cell that reads out as
                       // a bare number tells a screen reader nothing about the
@@ -497,6 +569,7 @@ export function WeekPlanner({
             ))}
           </ScrollView>
         </View>
+        )}
       </Modal>
     </RNView>
   );
@@ -505,7 +578,10 @@ export function WeekPlanner({
 const styles = StyleSheet.create({
   wrap: { gap: 8 },
 
-  head: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingBottom: 2 },
+  // 16, not 10: the Today pill and the stepper each claim ~10-12pt of hitSlop
+  // into this gap, and the later-rendered stepper won the overlap — so a tap
+  // just right of "Today" fired "Previous week".
+  head: { flexDirection: 'row', alignItems: 'center', gap: 16, paddingBottom: 2 },
   // The icon set has one chevron, pointing right. Rotating is what gives the
   // pair a guaranteed-identical silhouette; a second asset would not.
   flip: { transform: [{ rotate: '180deg' }] },
@@ -605,7 +681,10 @@ const styles = StyleSheet.create({
   },
   gridCellShown: { backgroundColor: vola.surface },
   gridDate: { fontSize: 14, fontWeight: '600', fontVariant: ['tabular-nums'] },
-  gridSpill: { color: vola.textDim, opacity: 0.4 },
+  // 0.5, matching TrainingCalendar. It matters more here: there a spill cell
+  // only moves a selection, whereas this one navigates the week — and it is the
+  // natural way to reach a week straddling two months.
+  gridSpill: { color: vola.textDim, opacity: 0.5 },
   gridToday: { color: vola.lime, fontWeight: '800' },
   gridDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: 'transparent' },
   gridDotOn: { backgroundColor: vola.lime },

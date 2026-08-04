@@ -9096,6 +9096,20 @@ were mutation-checked: each goes red when the code it covers is broken.
 
 ### Gaps this leaves
 
+- **The review caught a false gap in this very entry.** An earlier draft
+  listed "plans are still local-only" here. They are not: `planned_sessions`
+  joined the outbox at schema v15, `lib/sync.ts` runs `syncPlans`, and this
+  component calls `requestSync('plan-added')` itself. The claim was copied from
+  `WeekPlanner`'s own header comment, which had been stale for some time — and
+  copying it into this log was the worse half, because this is the document
+  every future session is pointed at first. Both are corrected. Worth
+  remembering that a component comment is not a source: it records what was
+  true when someone last touched that file.
+- **The focus rule was focus-only, and the comment promised more.** The snap
+  runs on `useFocusEffect`, which does not fire when the app is foregrounded on
+  the tab it was left on — the exact overnight case the comment claimed to
+  cover. An `AppState` listener now mirrors the Today screen, which had needed
+  the same thing for the same reason.
 - **The month grid does not show what kind of session is planned.** Every
   planned day gets the same lime dot, where Today's calendar distinguishes done
   from planned. Two-a-days and a strength/BJJ split are both invisible there.
@@ -9103,7 +9117,18 @@ were mutation-checked: each goes red when the code it covers is broken.
 - **The grid's dots do not react to a sync while it is open.** They are loaded
   when it opens and when its month changes; the rows behind it are the live
   surface. A plan arriving mid-open shows up on the next open.
-- **Plans are still local-only**, unchanged by this work — see `lib/plan.ts`.
+- **One unexplained Expo Go crash, seen once and not reproduced.** During a
+  Fast Refresh reload mid-verification the app dropped to the home screen:
+  `EXC_BREAKPOINT`, a Swift `assertionFailure` inside
+  `ExpoFabricView.injectInitializer` under `RCTComponentViewFactory`. Native,
+  not a JS error. It is **not** the Hermes `EXC_BAD_ACCESS` this repo already
+  documents — the other seven reports from the same day all carry that
+  signature and this one does not, so it cannot be waved off as the known
+  one. A full repeat of the same interaction sequence, including opening and
+  closing the month sheet, produced no further crash. Most likely a dev-only
+  Fast Refresh remount racing Fabric view registration, but that is a guess,
+  and it is written down here rather than dropped so the next person who sees
+  it has a second data point.
 - **The screen below the calendar is untouched and still rough**: the
   My workouts / Shared tabs, the very heavy `New workout` button, and the hint
   line that the button overlaps. That is the next item on the user's list.

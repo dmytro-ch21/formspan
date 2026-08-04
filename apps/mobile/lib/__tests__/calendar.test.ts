@@ -62,6 +62,7 @@ describe('startOfWeek', () => {
     ]);
   });
 });
+
 describe('addDays', () => {
   test('rolls over a month end', () => {
     expect(dayString(addDays(new Date(2026, 7, 31), 1))).toBe('2026-09-01');

@@ -51,7 +51,6 @@ beforeEach(async () => {
   mockFixture = db;
 });
 
-
 describe('planned_sessions', () => {
   test('the migration creates the table', async () => {
     const row = await db.getFirstAsync<{ name: string }>(

@@ -43,7 +43,6 @@ function workingSets(s: Session): number {
   return s.sets.filter(isWorkingSet).length;
 }
 
-
 type WeekSummary = {
   sessions: number;
   volumeKg: number;
