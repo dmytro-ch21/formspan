@@ -172,6 +172,16 @@ export const PREF_BJJ_LAST_LOG = 'bjj_last_log';
  */
 export const PREF_MODULES = 'modules';
 
+/**
+ * The chosen accent — a device preference, never synced.
+ *
+ * Deliberately not `owed`: the accent is how this phone looks, not a fact about
+ * the athlete, and there is no server field for it. Someone signing in on a
+ * second device gets the default rather than an inherited colour, which is the
+ * right answer for a look-and-feel choice made on one screen.
+ */
+export const PREF_ACCENT = 'accent';
+
 
 /**
  * Timestamp of the first successful full seed, or absent if it never ran.

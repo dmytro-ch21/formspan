@@ -2,6 +2,7 @@ import { ClerkProvider, useAuth, useSignUp } from '@clerk/clerk-expo';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { clearSessionToken } from '@/lib/session';
 
+import { AccentProvider } from '@/lib/AccentProvider';
 import { ModulesProvider } from '@/lib/ModulesProvider';
 import { TrackEffortProvider } from '@/lib/TrackEffortProvider';
 import { setSyncIdentity, startSyncOrchestrator } from '@/lib/sync';
@@ -85,11 +86,16 @@ export default function RootLayout() {
       {/* Inside ClerkProvider because it keys on userId, and above the
           navigator because the tab bar is built from it. */}
       <ModulesProvider>
-        <UnitsProvider>
-          <TrackEffortProvider>
-            <RootLayoutNav />
-          </TrackEffortProvider>
-        </UnitsProvider>
+        {/* Above the navigator for the same reason ModulesProvider is: the tab
+            bar takes its colour from here, so a value that lands one render
+            late means the app comes up green and changes. */}
+        <AccentProvider>
+          <UnitsProvider>
+            <TrackEffortProvider>
+              <RootLayoutNav />
+            </TrackEffortProvider>
+          </UnitsProvider>
+        </AccentProvider>
       </ModulesProvider>
     </ClerkProvider>
   );
