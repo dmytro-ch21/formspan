@@ -30,11 +30,18 @@ import { formatVolume, type UnitSystem } from '@/lib/units';
  * would push the thing you came to do below the fold to answer a question you
  * ask once a week.
  *
- * **Two dot colours, and they are different facts.** Green is a session that
- * happened; lime is one that is planned. A single colour would make "I trained
- * Tuesday" and "I intend to train Tuesday" the same mark, which is the one
- * distinction a training calendar exists to draw. Where a day has both, the
- * session wins — what happened outranks what was intended.
+ * **Trained and planned are different facts, and the SHAPE says so.** A
+ * session that happened is a filled dot; one that is planned is a hollow ring.
+ * Colour agrees — green and lime — but does not carry it: the two measure
+ * 1.18:1 apart in greyscale, i.e. the same blob, so hue alone would make "I
+ * trained Tuesday" and "I intend to train Tuesday" indistinguishable to a
+ * colour-blind reader. That is the one distinction a training calendar exists
+ * to draw.
+ *
+ * Where a day has both, the session wins — what happened outranks what was
+ * intended. That is a rule about the DOT, which can only be one mark; the
+ * accessible labels name both states independently, because speech has no such
+ * limit and a both-day is exactly the day worth telling someone about.
  */
 
 type DayCell = { date: Date; key: string; inMonth: boolean };
@@ -250,11 +257,37 @@ export function TrainingCalendar({
     return { count, seconds, volumeKg, days: days.size };
   }, [pool, anchor]);
 
-  function dotFor(key: string): string | null {
+  /**
+   * The day's marker: what it means, and how it says so WITHOUT relying on
+   * hue.
+   *
+   * Green and lime are adjacent, and a 4pt dot is the least legible place in
+   * the app to be carrying a distinction by colour alone — a day trained is
+   * not a day planned, and those are the only two states this mark has. So the
+   * shape carries it too: **filled for what happened, a hollow ring for what
+   * is intended**. Same treatment as the web calendar's chips, so the mapping
+   * is learned once.
+   *
+   * Colour stays, because it is the fastest channel for anyone who can use it.
+   * It is simply no longer the only one.
+   */
+  function dotFor(key: string): { colour: string; filled: boolean } | null {
     // Done outranks planned — see the header comment.
-    if (byDay.has(key)) return vola.green;
-    if (plannedByDay.has(key)) return vola.lime;
+    if (byDay.has(key)) return { colour: vola.green, filled: true };
+    if (plannedByDay.has(key)) return { colour: vola.lime, filled: false };
     return null;
+  }
+
+  /** The style pair for a marker, or an invisible placeholder that holds the row's height. */
+  function dotStyle(d: { colour: string; filled: boolean } | null) {
+    if (!d) return null;
+    return d.filled
+      ? // No borderColor here: with no borderWidth it draws nothing, and the
+        // combination can take a different draw path on Android for no gain.
+        { backgroundColor: d.colour }
+      : // A ring: transparent centre, so the hole is the signal. Sized up a
+        // touch from the filled dot because a 4pt ring has no visible hole.
+        { backgroundColor: 'transparent', borderColor: d.colour, borderWidth: 1.5 };
   }
 
   return (
@@ -292,7 +325,11 @@ export function TrainingCalendar({
               accessibilityLabel={[
                 d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }),
                 isToday ? 'today' : null,
-                byDay.has(key) ? 'trained' : plannedByDay.has(key) ? 'planned' : null,
+                // Independent, not a ternary — a day that is both trained and
+                // planned must say both. The dot can only be one colour; the
+                // label has no such limit.
+                byDay.has(key) ? 'trained' : null,
+                plannedByDay.has(key) ? 'planned' : null,
               ]
                 .filter(Boolean)
                 .join(', ')}
@@ -314,7 +351,7 @@ export function TrainingCalendar({
               </RNView>
               {/* Always laid out, lit conditionally — an absent dot would let
                   the cells above it shift up on untrained days. */}
-              <RNView style={[styles.dot, dot != null && { backgroundColor: dot }]} />
+              <RNView style={[styles.dot, dotStyle(dot)]} />
             </RNView>
           );
         })}
@@ -417,11 +454,30 @@ export function TrainingCalendar({
                       onPress={() => setSelected(cell.key)}
                       accessibilityRole="button"
                       accessibilityState={{ selected: isSelected }}
-                      accessibilityLabel={cell.date.toLocaleDateString(undefined, {
-                        weekday: 'long',
-                        day: 'numeric',
-                        month: 'long',
-                      })}
+                      // The state is named, matching the week strip above.
+                      // Without it the dot is the only signal a month cell
+                      // carries, and a screen reader got the date and nothing
+                      // else — the same erasure the web calendar's cells had.
+                      //
+                      // Both states are listed INDEPENDENTLY rather than by a
+                      // ternary. "Done outranks planned" is a rule about the
+                      // dot, which can only be one colour; a spoken label has
+                      // no such constraint, and a ternary silently drops
+                      // "planned" on a day that is both — which is exactly the
+                      // day a reader most needs told, and which the web
+                      // calendar already names in full.
+                      accessibilityLabel={[
+                        cell.date.toLocaleDateString(undefined, {
+                          weekday: 'long',
+                          day: 'numeric',
+                          month: 'long',
+                        }),
+                        cell.key === todayKey ? 'today' : null,
+                        byDay.has(cell.key) ? 'trained' : null,
+                        plannedByDay.has(cell.key) ? 'planned' : null,
+                      ]
+                        .filter(Boolean)
+                        .join(', ')}
                       testID={`calendar-day-${cell.key}`}
                     >
                       <RNView
@@ -442,7 +498,7 @@ export function TrainingCalendar({
                         </Text>
                       </RNView>
                       <RNView
-                        style={[styles.dot, dot != null && { backgroundColor: dot }]}
+                        style={[styles.dot, dotStyle(dot)]}
                       />
                     </Pressable>
                   );
@@ -451,8 +507,8 @@ export function TrainingCalendar({
             ))}
 
             <RNView style={styles.legend}>
-              <Legend colour={vola.green} label="Trained" />
-              <Legend colour={vola.lime} label="Planned" />
+              <Legend filled label="Trained" colour={vola.green} />
+              <Legend filled={false} label="Planned" colour={vola.lime} />
             </RNView>
 
             <Text style={styles.sectionLabel}>
@@ -504,10 +560,23 @@ export function TrainingCalendar({
   );
 }
 
-function Legend({ colour, label }: { colour: string; label: string }) {
+/**
+ * Shows the ACTUAL marker, filled or ring, rather than a colour swatch.
+ *
+ * A legend of two coloured dots teaches only the colour — which is precisely
+ * the channel a colour-blind reader cannot use, so it taught them nothing.
+ */
+function Legend({ colour, filled, label }: { colour: string; filled: boolean; label: string }) {
   return (
     <RNView style={styles.legendItem}>
-      <RNView style={[styles.dot, { backgroundColor: colour }]} />
+      <RNView
+        style={[
+          styles.legendDot,
+          filled
+            ? { backgroundColor: colour }
+            : { backgroundColor: 'transparent', borderColor: colour, borderWidth: 2 },
+        ]}
+      />
       <Text style={styles.legendText}>{label}</Text>
     </RNView>
   );
@@ -625,7 +694,18 @@ const styles = StyleSheet.create({
   dateText: { fontSize: 15, fontWeight: '700', fontVariant: ['tabular-nums'] },
   dateTextToday: { color: vola.navy },
   dimmed: { color: vola.textDim, opacity: 0.5 },
-  dot: { width: 4, height: 4, borderRadius: 2, backgroundColor: 'transparent' },
+  // 8pt, not the original 4 and not the 6 this first grew to.
+  //
+  // The ring's hole IS the signal, and it has to survive a glance mid-workout
+  // at arm's length. At 6/1.5 the hole is 3pt — 25% of the marker's area, 9
+  // device pixels at 3x — which is perceivable in a screenshot and not much
+  // else. 8/1.5 gives a 5pt hole at 39% of the area, 15 device pixels.
+  //
+  // That sizing matters more here than the equivalent on web, because on
+  // mobile the SHAPE carries the whole distinction on its own: filled #42F58D
+  // and a #B8FF2C ring are 1.18:1 apart in greyscale, i.e. the same blob. Web
+  // has a ✓/○ glyph doing that job; this does not.
+  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: 'transparent' },
 
   expander: {
     flexDirection: 'row',
@@ -690,6 +770,10 @@ const styles = StyleSheet.create({
 
   legend: { flexDirection: 'row', gap: 16, justifyContent: 'center', paddingVertical: 12 },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  // Bigger than the in-grid marker on purpose. The grid's dot is sized for
+  // density; the legend's job is to teach the filled/ring distinction, so it
+  // is the one place the shape must be unmistakable beside 11pt text.
+  legendDot: { width: 12, height: 12, borderRadius: 6 },
   legendText: { fontSize: 11, color: vola.textDim },
 
   sectionLabel: {

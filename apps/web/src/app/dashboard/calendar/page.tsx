@@ -226,13 +226,46 @@ export default function CalendarPage() {
                   const isToday = day === todayKey;
                   const isSelected = day === selected;
 
+                  const trainedLabel = trained
+                    ? trained.sports.map((s) => labelForModule(modules, s)).join(", ") ||
+                      "Trained"
+                    : null;
+
                   return (
                     <button
                       key={day}
                       type="button"
                       onClick={() => setSelected(day)}
                       aria-pressed={isSelected}
-                      aria-label={formatDayLong(day)}
+                      // The chips are folded IN, because `aria-label` replaces
+                      // the accessible name entirely — it does not add to it.
+                      // With just the date here, a screen reader announced
+                      // "Tuesday, 4 August" and nothing about what was on the
+                      // day, so the cell's whole payload was invisible to
+                      // assistive tech. This is also the only place the two
+                      // layers are named in words rather than shown.
+                      aria-label={[
+                        formatDayLong(day),
+                        // `trained: a session` rather than `trained: Trained`,
+                        // which is what the chip's own fallback produces when a
+                        // day rolls up with no sport on it.
+                        trained
+                          ? `trained: ${
+                              trained.sports.length > 0 ? trainedLabel : "a session"
+                            }`
+                          : null,
+                        dayPlans.length > 0
+                          ? `planned: ${dayPlans
+                              .map(
+                                (p) =>
+                                  workoutName(p.workout_id) ??
+                                  labelForModule(modules, p.sport),
+                              )
+                              .join(", ")}`
+                          : null,
+                      ]
+                        .filter(Boolean)
+                        .join(". ")}
                       className={[
                         "flex min-h-24 flex-col gap-1 rounded-card border p-1.5 text-left transition",
                         isSelected
@@ -258,28 +291,17 @@ export default function CalendarPage() {
                         {/* What happened, first. The rollup is per-day, so a
                             day with two sessions is one chip naming both
                             disciplines rather than a fabricated split. */}
-                        {trained && (
-                          <span className="flex items-center gap-1 truncate rounded border border-green/40 bg-green/10 px-1 py-0.5 text-[11px] font-medium">
-                            <Dot className="bg-green" />
-                            <span className="truncate">
-                              {trained.sports
-                                .map((s) => labelForModule(modules, s))
-                                .join(", ") || "Trained"}
-                            </span>
-                          </span>
-                        )}
+                        {trainedLabel && <Chip kind="trained" label={trainedLabel} />}
 
                         {dayPlans.map((p) => (
-                          <span
+                          <Chip
                             key={p.id}
-                            className="flex items-center gap-1 truncate rounded border border-lime/40 bg-lime/10 px-1 py-0.5 text-[11px] font-medium"
-                          >
-                            <Dot className="bg-lime" />
-                            <span className="truncate">
-                              {workoutName(p.workout_id) ??
-                                labelForModule(modules, p.sport)}
-                            </span>
-                          </span>
+                            kind="planned"
+                            label={
+                              workoutName(p.workout_id) ??
+                              labelForModule(modules, p.sport)
+                            }
+                          />
                         ))}
                       </span>
                     </button>
@@ -289,13 +311,13 @@ export default function CalendarPage() {
             ))}
           </div>
 
-          <div className="mt-3 flex items-center gap-4 text-xs text-text-muted">
-            <span className="flex items-center gap-1.5">
-              <Dot className="bg-green" /> Trained
-            </span>
-            <span className="flex items-center gap-1.5">
-              <Dot className="bg-lime" /> Planned
-            </span>
+          {/* Real chips, not swatches. A legend of coloured dots teaches only
+              the colour — which is the channel a colour-blind reader cannot
+              use, so it taught them nothing. Showing the actual solid and
+              dashed treatments makes the legend teach what the cells show. */}
+          <div className="mt-3 flex items-center gap-3 text-xs text-text-muted">
+            <Chip kind="trained" label="Trained" />
+            <Chip kind="planned" label="Planned" />
             {!everLoaded && <span>Loading…</span>}
           </div>
         </section>
@@ -315,12 +337,69 @@ export default function CalendarPage() {
   );
 }
 
-function Dot({ className }: { className: string }) {
+/**
+ * One entry in a day cell: what was trained, or what is planned.
+ *
+ * **The two are never distinguished by colour alone.** Green and lime are
+ * adjacent hues, rendered here at 10% on a light ground, and a day that is
+ * both trained AND planned as the same discipline renders the same word twice
+ * — so for a colour-blind reader the two chips were literally identical. That
+ * is the one place this screen conflated the two layers it exists to keep
+ * apart, which made it worth fixing rather than noting.
+ *
+ * **The marker is a text glyph, not a coloured dot, and that is measured.**
+ * The first version of this fix used a filled dot for trained and a hollow
+ * ring for planned, which works on mobile (dark ground: 12.8:1 and 15.1:1) and
+ * fails here. On web's light default:
+ *
+ *   green dot on white        1.43:1
+ *   green border at 40%       1.19:1
+ *   lime border at 60%        1.95:1
+ *   chip text                18.28:1
+ *
+ * WCAG 1.4.11 wants 3:1 for a non-text control. So the trained chip's dot AND
+ * border were both effectively invisible — "solid versus dashed" was comparing
+ * an invisible border against a faint one, and a fix resting on it would have
+ * been a fix in name only. `globals.css` says exactly this in its own words:
+ * the brand green "is only legible as a *fill* against dark".
+ *
+ * The chip's text is the one channel with guaranteed contrast, so the meaning
+ * rides on it: **✓ for what happened, ○ for what is intended**, in the same
+ * ink as the label. Greyscale-safe by construction, and it survives any future
+ * change to the palette.
+ *
+ * **The glyph is the channel; the border and tint are reinforcement.** An
+ * earlier draft of this comment called them two channels "either of which is
+ * enough on its own", which measurement does not support: a 1px dash on an
+ * 11px chip is a sub-pixel cue that antialiasing degrades further, and it is
+ * reinforcement rather than an independent signal. Saying otherwise would
+ * invite someone to later drop the glyph on the strength of it.
+ *
+ * The borders now draw with the **ink** steps at near-full strength, because
+ * they have to clear 3:1 to be a signal at all: green-ink needs ≥70% alpha on
+ * white and lime needs ≥95%, so the old `/40` and `/60` were both invisible.
+ * The 10% fills stay as fills — they are decoration, not a signal, and are not
+ * held to that floor.
+ *
+ * The glyph is `aria-hidden`: the day button's own label names both layers in
+ * words, so announcing it would only repeat them.
+ */
+function Chip({ kind, label }: { kind: "trained" | "planned"; label: string }) {
+  const trained = kind === "trained";
   return (
     <span
-      aria-hidden="true"
-      className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${className}`}
-    />
+      className={[
+        "flex items-center gap-1 truncate rounded px-1 py-0.5 text-[11px] font-medium",
+        trained
+          ? "border border-green-ink/80 bg-green/10"
+          : "border border-dashed border-lime bg-lime/10",
+      ].join(" ")}
+    >
+      <span aria-hidden="true" className="shrink-0 leading-none text-text-muted">
+        {trained ? "✓" : "○"}
+      </span>
+      <span className="truncate">{label}</span>
+    </span>
   );
 }
 
