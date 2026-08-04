@@ -5,6 +5,7 @@ import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, TextInput,
 
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { useAccent } from '@/lib/AccentProvider';
 import {
   getDetail,
   KINDS,
@@ -52,6 +53,7 @@ function minutesBetween(startedAt: string, endedAt: string | null): number {
 }
 
 export default function BjjSessionScreen() {
+  const accent = useAccent();
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { userId } = useAuth();
@@ -274,7 +276,7 @@ export default function BjjSessionScreen() {
             testID="bjj-session-name-input"
           />
           <Pressable onPress={commitRename} hitSlop={10} accessibilityRole="button" testID="bjj-session-name-save">
-            <Text style={styles.renameAction}>Save</Text>
+            <Text style={[styles.renameAction, { color: accent.ink }]}>Save</Text>
           </Pressable>
         </RNView>
       ) : (
@@ -395,7 +397,7 @@ export default function BjjSessionScreen() {
         accessibilityRole="button"
         testID="bjj-session-edit-detail"
       >
-        <Text style={styles.ctaText}>
+        <Text style={[styles.ctaText, { color: accent.ink }]}>
           {drilled.length + live.length > 0 ? 'Edit detail' : 'Add detail'}
         </Text>
       </Pressable>
@@ -411,7 +413,7 @@ export default function BjjSessionScreen() {
           accessibilityRole="button"
           testID="bjj-session-finish"
         >
-          <Text style={styles.ctaText}>Finish this session</Text>
+          <Text style={[styles.ctaText, { color: accent.ink }]}>Finish this session</Text>
         </Pressable>
       )}
 
@@ -476,11 +478,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: vola.text,
     borderBottomWidth: 2,
-    borderBottomColor: vola.lime,
+    borderBottomColor: vola.accent,
     paddingVertical: 6,
     minHeight: 44,
   },
-  renameAction: { fontSize: 16, fontWeight: '700', color: vola.lime },
+  renameAction: { fontSize: 16, fontWeight: '700' },
 
   stats: { flexDirection: 'row', gap: 12, marginBottom: 12 },
   stat: {
@@ -543,7 +545,7 @@ const styles = StyleSheet.create({
     minHeight: 44,
     justifyContent: 'center',
   },
-  ctaText: { fontSize: 16, fontWeight: '700', color: vola.lime },
+  ctaText: { fontSize: 16, fontWeight: '700' },
   destructive: {
     marginTop: 12,
     paddingVertical: 16,

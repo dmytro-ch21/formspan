@@ -5,6 +5,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, TextInput } from 'react-nativ
 import { Belt as BeltView, describeBelt } from '@/components/Belt';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { useAccent } from '@/lib/AccentProvider';
 import {
   BELTS,
   MAX_DEGREE,
@@ -37,6 +38,7 @@ export function PromotionForm({
   /** Ignored once `initial` is set — editing shows the row's real values. */
   suggestedRank?: Rank;
 }) {
+  const accent = useAccent();
   const getToken = useAuthToken();
   const router = useRouter();
   // Same reasoning as the `/bjj` hub this form is reached from: a stale
@@ -141,7 +143,9 @@ export function PromotionForm({
           title: initial ? 'Edit promotion' : 'Add promotion',
           headerRight: () => (
             <Pressable onPress={save} disabled={saving} hitSlop={12} testID="promotion-save">
-              <Text style={styles.headerAction}>{saving ? 'Saving…' : 'Save'}</Text>
+              <Text style={[styles.headerAction, { color: accent.ink }]}>
+                {saving ? 'Saving…' : 'Save'}
+              </Text>
             </Pressable>
           ),
         }}
@@ -187,7 +191,13 @@ export function PromotionForm({
                   if (b === 'black') setStripes(0);
                   else setDegree(0);
                 }}
-                style={[styles.chip, selected && styles.chipActive]}
+                style={[
+                  styles.chip,
+                  selected && [
+                    styles.chipActive,
+                    { backgroundColor: accent.accent, borderColor: accent.accent },
+                  ],
+                ]}
                 accessibilityRole="radio"
                 accessibilityState={{ selected }}
                 testID={`promotion-belt-${b}`}
@@ -277,6 +287,7 @@ function Stepper({
   onChange: (n: number) => void;
   testID: string;
 }) {
+  const accent = useAccent();
   return (
     <View style={styles.field}>
       <Text style={styles.sectionLabel}>{label}</Text>
@@ -287,7 +298,13 @@ function Stepper({
             <Pressable
               key={n}
               onPress={() => onChange(n)}
-              style={[styles.stepperDot, selected && styles.stepperDotActive]}
+              style={[
+                styles.stepperDot,
+                selected && [
+                  styles.stepperDotActive,
+                  { backgroundColor: accent.accent, borderColor: accent.accent },
+                ],
+              ]}
               accessibilityRole="radio"
               accessibilityState={{ selected }}
               accessibilityLabel={`${n}`}
@@ -342,7 +359,7 @@ const styles = StyleSheet.create({
   centreTitle: { fontSize: 18, fontWeight: '700', textAlign: 'center' },
   centreMuted: { color: vola.textMuted, fontSize: 13, textAlign: 'center' },
   scroll: { padding: 20, gap: 8, paddingBottom: 48 },
-  headerAction: { color: vola.lime, fontWeight: '700', fontSize: 16 },
+  headerAction: { fontWeight: '700', fontSize: 16 },
   preview: { alignItems: 'center', gap: 10, marginBottom: 8 },
   previewLabel: { fontSize: 14, fontWeight: '600', color: vola.textMuted },
   field: { gap: 6 },
@@ -374,7 +391,7 @@ const styles = StyleSheet.create({
     minHeight: 44,
     justifyContent: 'center',
   },
-  chipActive: { backgroundColor: vola.lime, borderColor: vola.lime },
+  chipActive: {},
   chipText: { fontWeight: '600', color: vola.textMuted },
   chipTextActive: { color: vola.navy },
   stepperRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
@@ -387,7 +404,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  stepperDotActive: { backgroundColor: vola.lime, borderColor: vola.lime },
+  stepperDotActive: {},
   stepperText: { fontWeight: '700', color: vola.textMuted },
   stepperTextActive: { color: vola.navy },
   deleteRow: { marginTop: 24, alignItems: 'center', paddingVertical: 12 },

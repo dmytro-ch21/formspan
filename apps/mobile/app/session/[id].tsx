@@ -12,6 +12,7 @@ import { Text, View } from '@/components/Themed';
 import { Stat, StatRow } from '@/components/ui/Stat';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { vola } from '@/constants/Colors';
+import { useAccent } from '@/lib/AccentProvider';
 import { formatElapsed, readAutoRest, readRestSeconds, writeRestSeconds } from '@/lib/rest';
 import {
   distanceInputUnit,
@@ -73,6 +74,7 @@ import { getWorkout } from '@/lib/workouts';
  * would invite recording a number nobody actually judged.
  */
 export default function SessionScreen() {
+  const accent = useAccent();
   const { id } = useLocalSearchParams<{ id: string }>();
   const getToken = useAuthToken();
   const { userId } = useAuth();
@@ -655,7 +657,7 @@ export default function SessionScreen() {
                     accessibilityLabel={`Swap ${exercise?.name ?? 'this exercise'} for another`}
                     testID={`swap-${g.exerciseID}`}
                   >
-                    <Text style={styles.swapText}>Swap</Text>
+                    <Text style={[styles.swapText, { color: accent.ink }]}>Swap</Text>
                   </Pressable>
                 )}
                 {!finished && (
@@ -790,7 +792,7 @@ export default function SessionScreen() {
                             ),
                           );
                         }}
-                        style={styles.hintApply}
+                        style={[styles.hintApply, { backgroundColor: accent.accent }]}
                         accessibilityRole="button"
                         // Built from the numbers, not from `target`: screen
                         // readers announce "×" as "multiplication sign", which
@@ -820,7 +822,7 @@ export default function SessionScreen() {
                   accessibilityLabel={`Add another set of ${exercise?.name ?? 'this exercise'}`}
                   testID={`add-set-${g.exerciseID}`}
                 >
-                  <Text style={styles.addSetText}>+ Set</Text>
+                  <Text style={[styles.addSetText, { color: accent.ink }]}>+ Set</Text>
                 </Pressable>
               )}
             </View>
@@ -849,7 +851,7 @@ export default function SessionScreen() {
 
         {!finished ? (
           <Pressable
-            style={styles.finish}
+            style={[styles.finish, { backgroundColor: accent.accent }]}
             onPress={async () => {
               try {
                 await flush(); // the last set typed must land before the session closes
@@ -1082,6 +1084,7 @@ function SetRow({
   units: UnitSystem;
   showEffort: boolean;
 }) {
+  const accent = useAccent();
   const [open, setOpen] = useState(false);
   const measures: Measure[] = exercise ? measuresFor(exercise.load_type) : ['reps'];
   const typeShort = SET_TYPES.find((t) => t.key === set.set_type)?.short ?? '';
@@ -1217,7 +1220,13 @@ function SetRow({
               <Pressable
                 key={t.key}
                 onPress={() => onChange({ ...set, set_type: t.key as SetType })}
-                style={[styles.chip, set.set_type === t.key && styles.chipActive]}
+                style={[
+                  styles.chip,
+                  set.set_type === t.key && [
+                    styles.chipActive,
+                    { backgroundColor: accent.accent, borderColor: accent.accent },
+                  ],
+                ]}
                 accessibilityRole="button"
                 accessibilityState={{ selected: set.set_type === t.key }}
                 hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
@@ -1350,7 +1359,7 @@ const styles = StyleSheet.create({
     columnGap: 10,
   },
   groupName: { flex: 1, minWidth: 140, fontSize: 16, fontWeight: '700' },
-  swapText: { color: vola.lime, fontWeight: '600', fontSize: 14 },
+  swapText: { fontWeight: '600', fontSize: 14 },
   restChip: {
     borderWidth: 1,
     borderColor: vola.line,
@@ -1446,7 +1455,7 @@ const styles = StyleSheet.create({
     minHeight: 44,
     justifyContent: 'center',
   },
-  chipActive: { backgroundColor: vola.lime, borderColor: vola.lime },
+  chipActive: {},
   chipText: { fontSize: 13, fontWeight: '600', color: vola.textMuted },
   chipTextActive: { color: vola.navy },
   hintRow: {
@@ -1474,7 +1483,6 @@ const styles = StyleSheet.create({
   hintLast: { fontSize: 12, color: vola.textMuted, fontVariant: ['tabular-nums'] },
   hintReason: { fontSize: 12, color: vola.textMuted },
   hintApply: {
-    backgroundColor: vola.lime,
     borderRadius: 999,
     paddingVertical: 10,
     paddingHorizontal: 14,
@@ -1490,7 +1498,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     alignItems: 'center',
   },
-  addSetText: { fontWeight: '700', color: vola.lime },
+  addSetText: { fontWeight: '700' },
   primary: {
     backgroundColor: vola.surfaceRaised,
     borderRadius: 12,
@@ -1500,7 +1508,6 @@ const styles = StyleSheet.create({
   },
   primaryText: { fontWeight: '700', fontSize: 15 },
   finish: {
-    backgroundColor: vola.lime,
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: 'center',
