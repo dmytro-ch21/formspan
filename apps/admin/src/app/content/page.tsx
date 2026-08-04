@@ -19,7 +19,7 @@ export default async function ContentPage() {
   return (
     <div className="min-h-screen w-full">
       <AdminMasthead
-        title="Content"
+        title="Techniques"
         section="content"
         meta={`${techniques.length} authored here`}
         action={

@@ -31,6 +31,40 @@ func contentFixture(t *testing.T) (*PostgresRepository, context.Context, string)
 	return repo, ctx, id
 }
 
+// seededFixture creates a row the DEPLOY owns, and removes it afterwards.
+//
+// These tests used to reach for a real catalog id (`back-squat`) and skip if it
+// was missing. That passed locally only because cmd/seed had been run by hand —
+// CI runs `migrate up` and nothing else, so in CI the id did not exist, the
+// "refuses a seeded id" test created it instead of being refused, and the row it
+// leaked then broke the adoption test two functions later. Exactly the trap
+// CLAUDE.md records from the proficiency work.
+//
+// UpsertAll is what `cmd/seed` runs and does not name `source`, so the column
+// takes its `DEFAULT 'seed'` — this is a genuinely deploy-owned row, not a
+// hand-set flag.
+func seededFixture(t *testing.T, repo *PostgresRepository, ctx context.Context, id string) Exercise {
+	t.Helper()
+	t.Cleanup(func() {
+		_, _ = repo.pool.Exec(ctx, `DELETE FROM exercises WHERE id = $1`, id)
+	})
+	_, _ = repo.pool.Exec(ctx, `DELETE FROM exercises WHERE id = $1`, id)
+
+	row := authored(id)
+	row.Name = "Seeded " + id
+	if err := repo.UpsertAll(ctx, []Exercise{row}); err != nil {
+		t.Fatalf("seed fixture: %v", err)
+	}
+	stored, err := repo.GetExercise(ctx, id)
+	if err != nil {
+		t.Fatalf("read fixture back: %v", err)
+	}
+	if stored.Source != "seed" {
+		t.Fatalf("fixture has source %q, want seed — UpsertAll should leave the default", stored.Source)
+	}
+	return stored
+}
+
 func authored(id string) Exercise {
 	return Exercise{
 		ID: id, Name: "Zercher Squat", Sport: "strength",
@@ -79,25 +113,18 @@ func TestCreateWritesAnAdminRowThatSeedingCannotTouch(t *testing.T) {
 func TestUpdateRefusesASeededRow(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
-
-	// A real seeded row, from the embedded catalog the deploy owns.
-	seeded, err := repo.GetExercise(ctx, seedFixtureID)
-	if err != nil {
-		t.Skipf("%s not seeded in this database: %v", seedFixtureID, err)
-	}
-	if seeded.Source != "seed" {
-		t.Fatalf("%s has source %q — fixture assumption broken", seedFixtureID, seeded.Source)
-	}
+	const id = "test-seeded-row"
+	seeded := seededFixture(t, repo, ctx, id)
 
 	edited := seeded
 	edited.Name = "Edited In The Console"
-	_, err = repo.UpdateExercise(ctx, edited)
+	_, err := repo.UpdateExercise(ctx, edited)
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("update of a seeded row returned %v, want ErrNotFound", err)
 	}
 
 	// ...and nothing moved.
-	after, err := repo.GetExercise(ctx, seedFixtureID)
+	after, err := repo.GetExercise(ctx, id)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -135,9 +162,12 @@ func TestUpdateEditsAnAdminRow(t *testing.T) {
 func TestCreateRefusesAnIDTheCatalogAlreadyHas(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
+	const id = "test-already-seeded"
+	seededFixture(t, repo, ctx, id)
 
-	clash := authored(seedFixtureID)
-	_, err := repo.CreateExercise(ctx, clash)
+	// An admin row shadowing a seeded id is the collision that matters: the
+	// deploy's upsert would skip it, leaving the two to disagree forever.
+	_, err := repo.CreateExercise(ctx, authored(id))
 	if !errors.Is(err, ErrAlreadyExists) {
 		t.Fatalf("create over a seeded id returned %v, want ErrAlreadyExists", err)
 	}
@@ -176,12 +206,10 @@ func TestAdoptOnlyTouchesAdminRows(t *testing.T) {
 	if _, err := repo.CreateExercise(ctx, authored(id)); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	before, err := repo.GetExercise(ctx, seedFixtureID)
-	if err != nil {
-		t.Skipf("%s not seeded: %v", seedFixtureID, err)
-	}
+	const seededID = "test-untouched-by-adopt"
+	before := seededFixture(t, repo, ctx, seededID)
 
-	if err := repo.AdoptAsSeeded(ctx, []string{id, seedFixtureID}); err != nil {
+	if err := repo.AdoptAsSeeded(ctx, []string{id, seededID}); err != nil {
 		t.Fatalf("adopt: %v", err)
 	}
 
@@ -193,7 +221,7 @@ func TestAdoptOnlyTouchesAdminRows(t *testing.T) {
 		t.Errorf("source %q, want seed — the deploy should own it now", adopted.Source)
 	}
 
-	after, err := repo.GetExercise(ctx, seedFixtureID)
+	after, err := repo.GetExercise(ctx, seededID)
 	if err != nil {
 		t.Fatalf("get seeded: %v", err)
 	}

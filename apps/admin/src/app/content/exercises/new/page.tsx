@@ -1,5 +1,5 @@
 import { listExerciseVocabularies } from "@/lib/api";
-import { ContentNav } from "../../ContentNav";
+import { AdminMasthead } from "../../../AdminMasthead";
 import { ExerciseForm } from "../../ExerciseForm";
 import { createExerciseAction } from "../../exerciseActions";
 
@@ -13,7 +13,7 @@ export default async function NewExercisePage() {
 
   return (
     <div className="min-h-screen w-full">
-      <ContentNav title="New exercise" current="exercises" />
+      <AdminMasthead title="New exercise" back={{ href: "/content/exercises", label: "Back to exercises" }} />
       <main className="max-w-4xl px-10 py-8">
         <p className="mb-6 max-w-2xl text-[13px] text-text-secondary">
           Search the catalog first — 504 entries is enough that a variation you have in mind is

@@ -16,7 +16,7 @@ export default async function NewTechniquePage() {
 
   return (
     <div className="min-h-screen w-full">
-      <AdminMasthead title="New technique" back={{ href: "/content", label: "Back to content" }} />
+      <AdminMasthead title="New technique" back={{ href: "/content", label: "Back to techniques" }} />
 
       <main className="max-w-4xl px-10 py-8">
         <p className="mb-6 max-w-2xl text-[13px] text-text-secondary">

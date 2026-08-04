@@ -6,7 +6,7 @@ import {
   listAuthoredExercises,
   listExerciseVocabularies,
 } from "@/lib/api";
-import { ContentNav } from "../../ContentNav";
+import { AdminMasthead } from "../../../AdminMasthead";
 import { ExerciseForm } from "../../ExerciseForm";
 import { updateExerciseAction } from "../../exerciseActions";
 
@@ -42,7 +42,11 @@ export default async function EditExercisePage({
 
     return (
       <div className="min-h-screen w-full">
-        <ContentNav title={seeded.name} subtitle={seeded.id} current="exercises" />
+        <AdminMasthead
+          title={seeded.name}
+          meta={<code className="font-mono text-[12px]">{seeded.id}</code>}
+          back={{ href: "/content/exercises", label: "Back to exercises" }}
+        />
         <main className="max-w-4xl px-10 py-8">
           <div className="flex flex-col gap-3 rounded-lg border border-danger-border bg-danger-bg px-5 py-4 text-[13px] text-danger-text">
             <p>
@@ -66,7 +70,11 @@ export default async function EditExercisePage({
 
   return (
     <div className="min-h-screen w-full">
-      <ContentNav title={exercise.name} subtitle={exercise.id} current="exercises" />
+      <AdminMasthead
+        title={exercise.name}
+        meta={<code className="font-mono text-[12px]">{exercise.id}</code>}
+        back={{ href: "/content/exercises", label: "Back to exercises" }}
+      />
       <main className="max-w-4xl px-10 py-8">
         <ExerciseForm
           mode="edit"

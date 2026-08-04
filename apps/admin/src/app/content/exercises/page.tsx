@@ -2,7 +2,8 @@ import Link from "next/link";
 
 import { listAuthoredExercises } from "@/lib/api";
 import { formatUTC } from "@/lib/format";
-import { ContentNav, OwnershipNote } from "../ContentNav";
+import { AdminMasthead } from "../../AdminMasthead";
+import { OwnershipNote } from "../ContentNav";
 
 /**
  * The exercises this console owns.
@@ -15,11 +16,18 @@ export default async function ExerciseContentPage() {
 
   return (
     <div className="min-h-screen w-full">
-      <ContentNav
-        current="exercises"
+      <AdminMasthead
         title="Exercises"
-        subtitle={`${exercises.length} authored here`}
-        action={{ href: "/content/exercises/new", label: "New exercise" }}
+        section="exercises"
+        meta={`${exercises.length} authored here`}
+        action={
+          <Link
+            href="/content/exercises/new"
+            className="rounded-[10px] bg-accent-dark px-4 py-2 font-semibold text-page no-underline"
+          >
+            New exercise
+          </Link>
+        }
       />
       <main className="flex flex-col gap-6 px-10 py-8">
         <OwnershipNote catalog="Exercises" file="exercises.json" />

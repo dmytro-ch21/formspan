@@ -52,7 +52,7 @@ export default async function EditTechniquePage({
         <AdminMasthead
           title={seeded.name}
           meta={<code className="font-mono text-[12px]">{seeded.id}</code>}
-          back={{ href: "/content", label: "Back to content" }}
+          back={{ href: "/content", label: "Back to techniques" }}
         />
         <main className="max-w-4xl px-10 py-8">
           <div className="flex flex-col gap-3 rounded-lg border border-danger-border bg-danger-bg px-5 py-4 text-[13px] text-danger-text">
@@ -80,7 +80,7 @@ export default async function EditTechniquePage({
       <AdminMasthead
         title={technique.name}
         meta={<code className="font-mono text-[12px]">{technique.id}</code>}
-        back={{ href: "/content", label: "Back to content" }}
+        back={{ href: "/content", label: "Back to techniques" }}
       />
 
       <main className="max-w-4xl px-10 py-8">
