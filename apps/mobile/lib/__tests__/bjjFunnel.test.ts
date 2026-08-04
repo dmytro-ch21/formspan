@@ -13,9 +13,10 @@ import {
  * and only `drilled` was ever captured with a technique: the live grid records
  * category+position only, and nothing in either client produced an `attempted`
  * row at all. These transforms are what fills the gap, so what they must
- * guarantee is that the two halves of the tag list stay disjoint — the live
- * grid owns untagged rows, the drilled step owns technique-tagged ones — and
- * that removing a chip cannot strand evidence that is still saved and sent.
+ * guarantee is that the two halves of the tag list stay disjoint — the
+ * category grid owns untagged rows, the focus rows own technique-tagged ones —
+ * and that removing a drilled chip cannot strand evidence that is still saved
+ * and sent.
  */
 
 const armbar: Tag = {
@@ -157,8 +158,9 @@ describe('removeDrilledTechnique', () => {
   });
 
   it('leaves the live grid’s untagged rows alone', () => {
-    // Every event the function CAN delete, so the id match is the only thing
-    // that can spare them. The first version of this test used a single
+    // A spread of events including `drilled`, the only one the function can
+    // now delete — so for the rest, and for `drilled` on a different
+    // technique, the id match is the only thing sparing them. The first version of this test used a single
     // `conceded` row — which the event guard excludes on its own — so
     // replacing the whole body with `filter(t => t.event === 'conceded')`
     // kept it green and the named property was never exercised.

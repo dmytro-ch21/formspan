@@ -81,4 +81,34 @@ describe('focusRows', () => {
   it('returns [] for an athlete with no focus and no evidence', () => {
     expect(focusRows([], [])).toEqual([]);
   });
+
+  it('drops the position when the family list has fallen behind', () => {
+    // familyOf returns '' rather than echoing the input, and that is the whole
+    // reason this PR moved it into lib/. POSITIONS is a hardcoded copy of a
+    // growing set and has fallen behind twice; echoing "50/50 - Bottom"
+    // through would write a tag position no filter, heatmap or library chip
+    // recognises, where '' is at least an honest "not said".
+    //
+    // Untested until now, and it survived mutation against the entire suite.
+    const [row] = focusRows([focus('fifty-fifty-sweep', 'Sweep', 'Sweep', '50/50 - Bottom')], []);
+    expect(row.position).toBe('');
+  });
+
+  it('maps a category with no symmetric opposite to control, not to a guess', () => {
+    // The six tag categories are the ones with a genuine opposite. "Transition"
+    // has none, so it lands in `control` — honest, rather than inventing a
+    // seventh or silently filing it as a submission. Also untested until now.
+    const [row] = focusRows([focus('berimbolo', 'Berimbolo', 'Transition', 'Guard - Bottom')], []);
+    expect(row.category).toBe('control');
+  });
+
+  it('ignores a focus entry whose technique_id is empty', () => {
+    // The drilled step had an explicit guard for this, with a comment saying
+    // why, and it was deleted along with the counters rather than carried
+    // over. An empty id renders two counters that read 0 forever and cannot be
+    // tapped — bumpTechniqueOutcome returns early on a falsy id — while still
+    // announcing themselves to VoiceOver as buttons. Needs server drift; the
+    // contract marks the field required.
+    expect(focusRows([focus('', 'Nameless', 'Submission', 'Guard - Bottom')], [])).toEqual([]);
+  });
 });

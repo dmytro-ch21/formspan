@@ -97,36 +97,34 @@ export function familyOf(position: string): string {
 }
 
 /**
- * The live outcomes a drilled technique can have, and the middle of the
- * funnel.
- *
- * `drilled → attempted → scored` was designed into the schema from the first
- * migration, and then only the first stage was ever captured: the live grid
- * records category+position with no technique, and NOTHING in either client
- * ever produced an `attempted` row at all. So the drop-off the whole design
- * calls the most actionable number in the sport — "drilled 12 times,
- * attempted 0 in rolling" — could not be computed, because two of its three
- * stages did not exist at technique granularity.
- *
- * These two counters are the missing middle. They sit on the drilled step
- * rather than in the live grid because the candidate list is already on
- * screen there: the athlete has just named what they drilled, and the
- * question "did you try any of it live?" costs one tap per answer instead of
- * a second search.
- *
- * ATTEMPTED AND SCORED ARE DISJOINT, which the labels have to carry or the
- * numbers mean nothing. `attempted` is "went for it and it did not land"
- * (see the migration's own wording), not "total tries". Went for it four
- * times and hit one is `attempted: 3, scored: 1` — so attempts + scores is
- * how often you went for it, and scored/(attempted+scored) is the hit rate.
- */
-/**
  * Anything that can name a technique and supply its tag-vocabulary category
  * and position. A drilled `Tag` satisfies it; so does a focus entry once
  * `toCategory`/`familyOf` have been applied.
  */
 export type TechniqueRef = Pick<Tag, 'technique_id' | 'category' | 'position'>;
 
+/**
+ * The live outcomes a technique can have, and the middle of the funnel.
+ *
+ * `drilled → attempted → scored` was designed into the schema from the first
+ * migration, and for a long time only the first stage was captured: the live
+ * grid records category+position with no technique, and NOTHING ever produced
+ * an `attempted` row at all. So the drop-off the whole design calls the most
+ * actionable number in the sport could not be computed.
+ *
+ * These two counters are the missing middle. They live on the LIVE STEP, one
+ * row per focus technique, beside the category grid — not on the drilled step,
+ * where an earlier version put them and created a second place to record the
+ * same event. The focus list is what makes that affordable: it names three to
+ * five techniques up front, so recording one costs a tap instead of a search
+ * through 466 library entries.
+ *
+ * ATTEMPTED AND SCORED ARE DISJOINT, which the labels have to carry or the
+ * numbers mean nothing. `attempted` is "went for it and it did not land" (see
+ * the migration's own wording), not "total tries". Went for it four times and
+ * hit one is `attempted: 3, scored: 1` — so attempts + scores is how often you
+ * went for it, and scored/(attempted+scored) is the hit rate.
+ */
 export const FUNNEL_OUTCOMES: { event: Extract<Event, 'attempted' | 'scored'>; label: string }[] = [
   { event: 'attempted', label: 'Tried' },
   { event: 'scored', label: 'Landed' },
@@ -136,8 +134,10 @@ export const FUNNEL_OUTCOMES: { event: Extract<Event, 'attempted' | 'scored'>; l
  * How many live outcomes of one kind are recorded against a technique.
  *
  * The mirror of `tagCount` for the funnel: that one deliberately EXCLUDES
- * technique-tagged rows because the live grid cannot edit them, and this one
- * counts only technique-tagged rows for the same reason in reverse. The two
+ * technique-tagged rows because the CATEGORY GRID cannot edit them, and this
+ * one counts only technique-tagged rows for the same reason in reverse. Both
+ * grids are on the live step now, so the distinction is between the two
+ * halves of that screen rather than between two screens. The two
  * partition the tag list between them, so no event is displayed twice and
  * every displayed event has a control that can change it.
  */
@@ -193,14 +193,15 @@ export function bumpTechniqueOutcome(
 }
 
 /**
- * Drop a technique from the drilled list, and every live outcome recorded
- * against it.
+ * Drop a technique from the drilled list — and ONLY that.
  *
- * Not just the `drilled` row. The counters are only reachable through the
- * drilled chip, so leaving the attempted/scored rows behind would strand
- * evidence that is still saved and sent but no longer visible or editable
- * anywhere — the same "did I lose that?" failure the live grid's position
- * footnote exists to prevent, except here nothing would say so.
+ * This used to take the technique's `attempted`/`scored` rows with it, which
+ * was right while the drilled step owned the counters: leaving them behind
+ * stranded evidence with no control able to edit it. Live outcomes now come
+ * from the live step's focus rows, which are reachable whether or not the
+ * technique was drilled today, so nothing is stranded — and "I did not
+ * actually drill this" and "I did not hit this live" became different
+ * statements. Un-saying one must not un-say the other.
  */
 export function removeDrilledTechnique(tags: Tag[], techniqueID: string | null | undefined): Tag[] {
   // A nullish id matches every UNTAGGED row, and the API sends

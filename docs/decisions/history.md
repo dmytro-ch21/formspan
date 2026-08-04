@@ -6811,7 +6811,11 @@ should read. This removes the second path.
   else", which is the instruction: log each thing once, in the most specific
   row available.
 
-Net taps are *lower* than before, not higher, which was the constraint.
+Net taps are *lower* than before for the athlete who was double-recording, and
+unchanged for everyone else. For a technique drilled outside the focus list,
+per-technique live capture is simply gone — fewer taps because less is
+captured, which is a different claim and the deliberate trade: that data was
+the expensive half and mostly noise.
 
 ### The union, and why focus alone would have stranded rows
 
@@ -6846,11 +6850,40 @@ and getting them applied in only one of the two places would file a focus row's
 evidence under a different position from a drilled row's for the same
 technique — splitting it in half with no error anywhere. One test pins that.
 
+### What review caught
+
+**The "Everything else" heading escaped its conditional**, so every athlete
+today — nobody has a focus list — saw a single grid headed "EVERYTHING ELSE"
+with nothing for it to be else to.
+
+**And technique-tagged live outcomes had no display surface on the session
+read-back screen.** It keyed the whole Techniques section off the drilled list,
+so a technique tried live but not drilled showed nowhere. Reachable *today*,
+with no focus list in existence: remove a drilled chip and its
+`attempted`/`scored` rows deliberately survive — then `hasAnyDetail` went false
+and the screen rendered "No detail recorded" over data that exists. The
+write-but-never-read-back defect, third appearance, one screen along each time.
+Fixed by taking the same union the live step takes, so display and storage are
+the same set on both screens.
+
+Also: the two functions this PR promoted into `lib/` had their fallbacks
+entirely untested — `familyOf` returning `''` for an unknown family and
+`toCategory` defaulting to `control` both survived mutation against the whole
+suite. Those are exactly the branches the code calls dangerous, and the stated
+reason for the move is that a mis-applied translation splits evidence silently.
+Both now pinned.
+
+And `removeDrilledTechnique`'s JSDoc still described the behaviour this PR
+inverted — hover text reading as an instruction to restore it.
+
 ### Gaps this leaves
 
 - **Nothing sets a focus list yet.** The web authoring surface is still
-  unbuilt, so today the block renders empty for everyone and the live grid is
-  the whole capture surface. That is a strictly better place than before —
+  unbuilt, so for most athletes the block is *absent* — not empty; it is gated
+  on having rows — and the category grid is the whole capture surface. The
+  exception is anyone holding a reflection with technique-tagged outcomes from
+  the previous build: they get a "Working on" block of raw technique slugs,
+  because the live step does not fetch the library. That is a strictly better place than before —
   the redundancy is gone either way — but the technique funnel gets no new data
   until web lands.
 - **Choosing "the most specific row" is copy, not structure.** An athlete can

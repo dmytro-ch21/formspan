@@ -532,8 +532,14 @@ function LiveStep({
 
       {rows.length > 0 && (
         <>
-          <Text style={styles.label}>Working on</Text>
-          <RNView style={styles.gridHead}>
+          <Text style={styles.label} accessibilityRole="header">
+            Working on
+          </Text>
+          <RNView
+            style={styles.gridHead}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+          >
             <Text style={[styles.gridHeadCell, styles.gridHeadSpacer]} />
             <Text style={styles.gridHeadCell}>Tried</Text>
             <Text style={styles.gridHeadCell}>Landed</Text>
@@ -571,8 +577,16 @@ function LiveStep({
         </>
       )}
 
-      <Text style={styles.label}>Everything else</Text>
-      <RNView style={styles.gridHead}>
+      {rows.length > 0 && (
+        <Text style={styles.label} accessibilityRole="header">
+          Everything else
+        </Text>
+      )}
+      <RNView
+        style={styles.gridHead}
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+      >
         <Text style={[styles.gridHeadCell, styles.gridHeadSpacer]} />
         <Text style={styles.gridHeadCell}>You</Text>
         <Text style={styles.gridHeadCell}>Them</Text>
@@ -635,8 +649,11 @@ function Counter({
 }: {
   value: number;
   label: string;
-  /** Prefixed to the accessibility label when the visible row label is not
-   *  adjacent — see the funnel counters. */
+  /** Prefixed to the accessibility label. The focus rows use it because
+   *  adjacency is a VISUAL property — VoiceOver reads a run of "Tried: 0 /
+   *  Landed: 0" with nothing binding a pair to a technique. The category grid
+   *  below omits it because its row label ("Submissions") is already part of
+   *  the same announced row. */
   context?: string;
   tone: 'scored' | 'conceded' | 'neutral';
   onAdd: () => void;
@@ -776,10 +793,10 @@ const styles = StyleSheet.create({
   resultName: { fontSize: 15, fontWeight: '600' },
   plus: { color: vola.lime, fontSize: 20, fontWeight: '700' },
 
-  // One drilled technique: its name, and the two funnel counters under it.
-  // Two lines rather than one row, because a name plus two counters plus a
-  // remove control on a 4.7" screen leaves the name about eight characters —
-  // and "Berimbolo to back take" truncated to "Berim…" is not a technique
+  // One drilled technique: its name and a remove control. The funnel counters
+  // that used to sit under it moved to the live step, so this is now a plain
+  // row — kept bordered rather than made a pill because a full technique name
+  // wraps, and "Berimbolo to back take" truncated to "Berim…" is not something
   // anyone can confirm they drilled.
   drilledRow: {
     borderWidth: 1,
@@ -797,7 +814,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  drilledOutcomes: { flexDirection: 'row', gap: 8 },
   tagChipX: { color: vola.textMuted, fontSize: 15, fontWeight: '700' },
 
   row: { gap: 8, paddingRight: 20 },

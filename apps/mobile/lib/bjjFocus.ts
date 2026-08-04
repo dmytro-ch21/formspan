@@ -32,7 +32,14 @@ export type Focus = {
 };
 
 export function fetchFocus(getToken: TokenGetter, signal?: AbortSignal): Promise<Focus[]> {
-  return apiRequest<{ focus: Focus[] }>(getToken, '/bjj/focus', { signal }).then((r) => r.focus);
+  // `?? []` at the parse boundary: an older or drifted server omitting the
+  // field would otherwise hand `undefined` to focusRows, which throws
+  // "focus is not iterable" INSIDE a useMemo — taking down the wizard's render
+  // rather than degrading to no focus block. techniques.ts normalises for the
+  // same documented reason.
+  return apiRequest<{ focus: Focus[] }>(getToken, '/bjj/focus', { signal }).then(
+    (r) => r.focus ?? [],
+  );
 }
 
 /** A technique row in the live step: what to record against, and its label. */
@@ -55,6 +62,11 @@ export type FocusRow = TechniqueRef & { name: string };
 export function focusRows(focus: Focus[], tags: Tag[]): FocusRow[] {
   const byID = new Map<string, FocusRow>();
   for (const f of focus) {
+    // An empty id would draw two dead counters — 0 forever, untappable
+    // (bumpTechniqueOutcome bails on a falsy id) and still announced to
+    // VoiceOver as buttons. The drilled step guarded this; the guard was
+    // deleted along with its counters rather than carried across.
+    if (!f.technique_id) continue;
     byID.set(f.technique_id, {
       technique_id: f.technique_id,
       // Library vocabulary -> tag vocabulary, the same translation the drilled

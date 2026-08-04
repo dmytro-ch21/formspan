@@ -2454,7 +2454,8 @@ most of the value is in the floor working alone.
   `count > 0` CHECK, so the whole reflection would 400 on save because
   someone tapped once and undid it.
 - The attempted/scored rows **inherit `category` and `position` from the
-  drilled row**, not from a second derivation. `familyOf()` returns `''` for
+  source** — usually a focus entry, translated through `toCategory`/`familyOf`
+  — not from a second derivation. `familyOf()` returns `''` for
   a family the hardcoded POSITIONS list has fallen behind on — which has
   happened twice — so deriving it again could file the drilled row under
   "Half Guard" and the attempted row under nothing, splitting one technique's
@@ -2470,13 +2471,16 @@ most of the value is in the floor working alone.
   screen cannot author one, but the API accepts one, so a reflection authored
   elsewhere and read back can carry it; deleting someone's "they armbarred
   me" record because they removed a drilled chip is data loss.
-- **The live grid and the funnel must partition the tag list.** The grid owns
-  untagged rows, the drilled step owns technique-tagged ones. If either
+- **The category grid and the focus rows must partition the tag list.** The
+  grid owns untagged rows, the focus rows own technique-tagged ones. If either
   counts the other's, a number appears that its own control refuses to move
   and nothing explains why.
 - **The session read-back screen must agree with the wizard on `scored`**: its
-  grid excludes technique-tagged `scored` the same way, and the Drilled section
-  shows each technique's tried/landed instead. Getting the second half wrong
+  grid excludes technique-tagged `scored` the same way, and the **Techniques**
+  section shows each technique's tried/landed instead — keyed off *any*
+  technique with evidence, NOT off the drilled list. Keyed off drilled, a
+  technique tried live but not drilled shows nowhere, and a session holding
+  only such rows renders "No detail recorded" over data that exists. Getting the second half wrong
   recreates the exact write-but-never-read defect the funnel exists to fix.
 - **...but NOT on `conceded`, deliberately.** The read-back grid *includes*
   technique-tagged `conceded` rows. No screen in this app can author one, so
