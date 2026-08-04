@@ -92,6 +92,35 @@ type ContentRepository interface {
 	// the handler can be faked — taking the concrete type is why the handler
 	// layer had no tests and shipped three defects.
 	Source(ctx context.Context, id string) (string, error)
+	// AdminAuthored returns every console-authored technique.
+	//
+	// The console needs it to list what it can edit, and nothing else can
+	// answer that: `Summary` carries no `source`, so the public list cannot
+	// tell a seeded entry from an authored one, and adding the field there
+	// would put 8 KB of "seed" on every client's list to serve one screen.
+	//
+	// cmd/exportcontent reads the same method for the same reason — one
+	// definition of "what the console owns", rather than a second query that
+	// can disagree with the first about which rows the export will carry.
+	//
+	// DELIBERATELY UNCAPPED, and adding a LIMIT here would be silent data loss
+	// rather than a performance fix. The export MERGES rather than replaces, so
+	// truncation does not error anywhere: already-exported entries survive, the
+	// newest rows simply never reach techniques.json, `verifyContains` only
+	// checks the truncated slice so it passes, and `-adopt` then adopts only
+	// ids already in the file. The newest authored content would stay
+	// database-only and quietly miss the promotion path — exactly the loss
+	// cmd/exportcontent exists to prevent.
+	//
+	// Unbounded is safe because the set only grows one row at a time:
+	// CreateTechnique's INSERT is the ONLY code anywhere that writes
+	// source='admin' (UpsertAll never names the column, so bulk seeds and
+	// imports land as 'seed'), and AdoptAsSeeded only moves admin->seed. If a
+	// bulk authoring path is ever added, that invariant is what it breaks.
+	//
+	// If the HTTP surface ever needs a cap, it needs a SEPARATE method. The
+	// export cannot tolerate a truncated one.
+	AdminAuthored(ctx context.Context) ([]Technique, error)
 }
 
 // ValidateForWrite is every rule an admin-authored technique must pass.

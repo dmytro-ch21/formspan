@@ -1,23 +1,7 @@
 import { currentUser } from "@clerk/nextjs/server";
 import { UserButton } from "@clerk/nextjs";
 
-/**
- * Matches the backend's ADMIN_USER_IDS allowlist (auth.RequireAdmin) — one
- * admin-identity convention across the stack, keyed by Clerk user ID rather
- * than email so both sides check the same thing.
- *
- * This gate is defence in depth for the UI. The real security boundary is
- * the backend's own check: these screens only render data the API agreed to
- * return, and the API independently rejects non-admin callers.
- */
-function isAllowedAdmin(userId: string | undefined): boolean {
-  if (!userId) return false;
-  const allowlist = (process.env.ADMIN_USER_IDS ?? "")
-    .split(",")
-    .map((id) => id.trim())
-    .filter(Boolean);
-  return allowlist.includes(userId);
-}
+import { isAllowedAdmin } from "@/lib/admin";
 
 export default async function UsersLayout({
   children,

@@ -121,6 +121,40 @@ func (h *ContentHandler) Positions(w http.ResponseWriter, r *http.Request) {
 	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"positions": known})
 }
 
+// List serves the techniques the console owns.
+//
+// Deliberately NOT the whole catalog. The console can only edit admin-authored
+// rows — UpdateTechnique refuses a seeded one, because the JSON owns those and
+// an edit here is reverted by the next deploy — so listing all 466 would offer
+// 466 rows of which 16 are actionable. The screen says where the rest live
+// instead.
+//
+// Unbounded, like the export's read of the same set: this grows by hand, one
+// technique at a time, and a console that silently truncated its own content
+// would be worse than a slow one.
+func (h *ContentHandler) List(w http.ResponseWriter, r *http.Request) {
+	authored, err := h.repo.AdminAuthored(r.Context())
+	if err != nil {
+		apihttp.WriteInternal(w, r, "technique", err)
+		return
+	}
+	// `[]`, never `null`. A nil slice marshals to null and a console mapping
+	// over it throws where an empty state should render — and "nothing authored
+	// yet" is the first thing a new operator sees, plus the state every
+	// environment returns to after `-adopt` drains the set.
+	//
+	// Guaranteed HERE rather than in the repository. It was true there, but the
+	// test asserting it could not see it: review changed `out := []Technique{}`
+	// to `var out []Technique` in the Postgres implementation and the whole
+	// suite stayed green, because the fake independently hardcoded the same
+	// thing. Now the property belongs to the endpoint and holds for every
+	// implementer.
+	if authored == nil {
+		authored = []Technique{}
+	}
+	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"techniques": authored})
+}
+
 func (h *ContentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	body, ok := decodeTechnique(w, r)
 	if !ok {

@@ -57,9 +57,14 @@ export default async function HealthPage() {
           </h1>
           <span className="text-[13px] text-text-secondary">last {WINDOW_HOURS} hours</span>
         </div>
-        <Link href="/users" className="text-[13px] text-text-secondary hover:underline">
-          User Lookup
-        </Link>
+        <nav className="flex items-center gap-5 text-[13px] text-text-secondary">
+          <Link href="/users" className="hover:underline">
+            Users
+          </Link>
+          <Link href="/content" className="hover:underline">
+            Content
+          </Link>
+        </nav>
       </header>
 
       <main className="flex flex-col gap-8 px-10 py-8">

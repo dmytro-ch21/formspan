@@ -638,6 +638,22 @@ components:
           type: string
           enum: [Both, "Gi Only", "No-Gi Only"]
         typical_belt: { type: string }
+        source:
+          type: string
+          enum: [seed, admin]
+          description: >
+            Where this technique came from: `seed` means the deploy owns it (the
+            embedded JSON rewrites it on every release), `admin` means it was
+            authored in the console and the database owns it. Read-only — the
+            server sets it, so a client cannot promote its own row out of the
+            deploy's reach or demote a seeded one into it.
+
+
+            **Present only on `/admin/*` responses.** It is ABSENT from
+            `GET /techniques/{techniqueID}`, which does not select the column —
+            so do not derive ownership from it there. Its absence means "this
+            endpoint does not report provenance", never "not admin-authored".
+            Use membership of `GET /admin/techniques` instead.
         ibjjf_ruleset_id: { type: string }
         to_position:
           type: string
@@ -3674,6 +3690,45 @@ paths:
           $ref: "#/components/responses/Forbidden"
 
   /admin/techniques:
+    get:
+      summary: List the techniques the console can edit
+      operationId: listAuthoredTechniques
+      description: >
+        Every technique with `source: "admin"` — what the console owns and can
+        edit — and deliberately not the whole catalog. `PATCH` refuses a seeded
+        row, because the seed JSON owns those and an edit would be reverted by
+        the next deploy, so listing all of them would offer hundreds of rows of
+        which a handful are actionable.
+
+
+        This exists because the public `GET /techniques` cannot answer the
+        question: its `Summary` carries no `source`, and adding one would put
+        the string "seed" on every entry of every client's catalog to serve one
+        admin screen.
+
+
+        Unbounded. This set grows by hand, one technique at a time, and a
+        console that silently truncated its own content would be worse than a
+        slow one.
+      responses:
+        "200":
+          description: >
+            The authored techniques, ordered by id. `[]` when nothing has been
+            authored yet — an empty array, never null.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [techniques]
+                properties:
+                  techniques:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Technique"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
     post:
       summary: Create a technique from the admin console
       operationId: createTechnique

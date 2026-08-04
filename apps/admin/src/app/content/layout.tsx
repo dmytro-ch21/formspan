@@ -3,7 +3,15 @@ import { UserButton } from "@clerk/nextjs";
 
 import { isAllowedAdmin } from "@/lib/admin";
 
-export default async function HealthLayout({
+/**
+ * Same gate as `/users`, sharing the same allowlist helper.
+ *
+ * Defence in depth for the UI — the backend's RequireAdmin is the real
+ * boundary, and these screens only render what the API agreed to return. Note
+ * this layout does NOT protect the server actions in `actions.ts`: those are
+ * their own endpoints and check `assertAdmin` themselves.
+ */
+export default async function ContentLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
@@ -17,8 +25,8 @@ export default async function HealthLayout({
           Not authorized
         </h1>
         <p className="max-w-sm text-sm text-text-secondary">
-          {user?.id ?? "This account"} isn&apos;t on the admin allowlist. Ask an existing admin to
-          add it to <code>ADMIN_USER_IDS</code>.
+          {user?.id ?? "This account"} isn&apos;t on the admin allowlist. Ask an existing admin
+          to add it to <code>ADMIN_USER_IDS</code>.
         </p>
         <UserButton />
       </main>
