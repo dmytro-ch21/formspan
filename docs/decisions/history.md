@@ -6983,6 +6983,148 @@ have their own quieter `role="status"` notice.
   auth.
 
 
+## 2026-08-03 — Content stops needing a deploy
+
+Asked for after a class taught a pass — the São Paulo — whose name was not in
+the library, and there was no way to record it without opening a laptop.
+
+Two corrections framed the work. **Content never needed migrations**: those are
+schema, and adding a technique was always "edit `techniques.json`, commit,
+deploy, re-seed". Still a code round-trip, but not the treadmill it looked
+like. And **the seed was never going to fight admin rows**: `UpsertAll` for
+techniques and exercises does not delete ids it does not know about. What it
+*would* do is revert an admin edit to a row the JSON also knows, on every
+deploy, because a re-seed runs on every release.
+
+### The decision that shaped everything: ids are permanent
+
+`bjj_session_tags.technique_id` is a foreign key. A technique id is a reference
+in athletes' training records for as long as those records exist. So:
+
+- **ids are derived, never typed** — `Slug("São Paulo Pass")` → `sao-paulo-pass`,
+  with accents folded so it is not `s-o-paulo`.
+- **ids are immutable.** The update takes its id from the path, never the body.
+  Renaming the technique later leaves the id alone, which looks inconsistent
+  and is correct: an id that tracks the name is an id that changes.
+- **create is not an upsert.** A collision is a 409, because silently rewriting
+  the technique behind an existing id changes what somebody's history says
+  they did.
+
+### `source`, and what it buys
+
+One column, `seed` | `admin`, on `techniques` and `exercises` (migration
+000032). The seeder's upsert gained `WHERE source = 'seed'`, and that single
+clause is what allows a second writer to exist at all — without it every deploy
+silently reverts admin content.
+
+The reverse also had to hold, and is tested separately: the guard must not stop
+the seed updating *its own* rows, which would be a content freeze that looks
+exactly like "nothing changed".
+
+Admin edits are refused on seeded rows rather than allowed-then-reverted, and
+the refusal explains itself — a bare 404 at an id the console is displaying
+reads as a bug, when the real answer is "that one lives in the JSON".
+
+### One validator, not two
+
+`ValidateFields` was split out of the seeder's `validate()` and exported, so
+admin writes and the deploy apply the same rules. A position family or a
+function verb no client recognises is the worst data this catalog can hold: it
+writes, it renders, and it returns an empty list forever with nothing
+reporting a fault.
+
+Position is validated against **the catalog's own distinct values**, not a
+constant — the same choice `validate()` already makes for `to_position`. The
+first version of this hardcoded "must be a known family" and three existing
+tests immediately failed: the shipped library holds 16 distinct positions, and
+one of them is the literal "Other" (the technical standup, which happens from
+nowhere in particular). A rule invented from the shape of the data rather than
+read off it.
+
+### The two-writers hazard, demonstrated on day one
+
+The seed's upsert wraps three columns in `NULLIF($n, '')` — `ibjjf_ruleset_id`
+has a foreign key, and `function`/`to_position` are validated vocabularies
+where empty means "not recorded". The new INSERT did not, and failed the
+ruleset FK on the first test that ran. Exactly the divergence this feature has
+to avoid, surfacing before a line of UI existed.
+
+### How content reaches production
+
+Author live in an environment, then export the `source = 'admin'` rows back
+into the seed JSON, review the diff, and deploy. Promotion is the existing
+pipeline, the seed artifacts stay reproducible, and the one permanent thing —
+the id — gets read by a human before it is in anyone's training record.
+
+### What review caught — three defects, all in the layer that could not be tested
+
+**PATCH was a full replace while the contract promised partial.** `TechniqueWrite`
+marks four fields required and the method is `PATCH`, so a client author is told
+in writing the other fourteen are optional — and a console form posting only the
+edited field silently erased the rest. Omitting `description` wiped the prose.
+Every field is a pointer now, so absent is distinguishable from empty and
+clearing a field stays expressible.
+
+**Both writes returned `0001-01-01T00:00:00Z`.** `created_at`/`updated_at` were
+missing from the returning projection — well-formed enough to satisfy a schema
+validator and to render as "Created 1 Jan 0001".
+
+**An unbounded name minted a permanent id.** A ~3000-character incompressible
+name 500'd on Postgres's btree limit; a compressible 4000-character one
+*succeeded* and minted a 4000-character id that is now a foreign key in training
+records. The longest name in the shipped catalog is 41 characters, so a 200-cap
+rejects nothing real and guards the seeder too. Given this feature's own premise
+— the id outlives everything and cannot be taken back — an unbounded permanent
+id was the one input that must not have been accepted.
+
+All three were handler-layer, and **the handler could not be tested**: the
+constructor took `*PostgresRepository` rather than the interface, unlike every
+other module here. Taking the interface cost three lines and the layer now has
+nine tests.
+
+### The guard with zero coverage
+
+The exercises half of the seed guard had none — deleting
+`WHERE exercises.source = 'seed' AND` left the *entire* backend suite green. It
+is inert today because there is no exercise write path, which is exactly why it
+would still have been untested when one lands and makes it load-bearing. It now
+has the same test the techniques half does.
+
+Also worth recording: the timestamps fix is in SQL, so the handler test cannot
+see it — the fake repository supplies its own timestamps and stays green with
+the projection broken. That assertion lives in the integration test instead, and
+both mutations were checked separately.
+
+### Gaps this leaves
+
+- **The export does not exist yet.** Until it does, admin content lives only in
+  the environment it was authored in. That is the next PR and the thing that
+  makes this promotable rather than local.
+- **No admin UI.** This is the API and the data rules; the console screens are
+  a separate PR.
+- **Techniques only.** Exercises got the `source` column and the seed guard but
+  no write path — the shapes differ enough (position/category/function vs
+  sport/equipment/muscles) that one generic editor would be more machinery than
+  two content types earn.
+- **No delete.** Deliberate: a technique with training records pointing at it
+  cannot be removed without deciding what happens to them, and that is a real
+  design question rather than a missing endpoint.
+- **Two techniques whose names slug identically can never both exist**, and
+  there is no escape hatch — "Kimura (from Guard)" and "Kimura from Guard"
+  collide, and the only recourse is naming it something you did not want.
+  Auto-appending `-2` would be worse: it makes a permanent id depend on
+  insertion order. An optional server-validated `id_suffix` is the likely
+  answer, and is not in this PR.
+- **`source` is on the write response but not on any read path**, so the console
+  cannot render an "editable" badge without attempting a PATCH and reading the
+  409. Worth adding to the detail projection before the UI PR.
+- **The merged row is re-validated on update**, so a stored technique that fails
+  current validation cannot be edited until its data is fixed. Defensible, and
+  not obvious — it surfaced when a test fixture was incomplete.
+- **`cmd/seed` still logs "466 upserted" regardless of how many rows the guard
+  skipped**, so a JSON entry permanently shadowed by an admin row is invisible.
+
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

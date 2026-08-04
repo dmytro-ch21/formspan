@@ -2582,6 +2582,49 @@ own, so none of them is redundant with "the FK exists".
 - The star column has an accessible name **naming the technique**; a column of
   identical "Working on" buttons is unusable otherwise.
 
+### Authoring the catalog (`/v1/admin/techniques`)
+
+**Happy path**
+
+- Creating a technique returns it with a **derived id** — "São Paulo Pass" →
+  `sao-paulo-pass`, accents folded, not `s-o-paulo`.
+- It is immediately visible in `GET /v1/techniques`, on the phone's library and
+  as a tag target. That immediacy is the whole point of the feature.
+- Editing an admin-authored technique applies; the id does not move.
+
+**The property everything rests on**
+
+- **A re-seed must not touch an admin row.** Create one, run `cmd/seed` with a
+  JSON that carries the same id and different content, and assert the admin
+  content survives and `source` is still `admin`. Without this guard every
+  deploy silently reverts authored content, and a deploy happens on every
+  release.
+- **...and the seed must still update its own rows.** The inverse failure is a
+  content freeze that looks exactly like "nothing changed".
+
+**Edge cases and errors**
+
+- A duplicate id is a **409, never an upsert** — the id may already be a
+  foreign key in somebody's training record.
+- Editing a **seeded** technique is refused, and the message says to edit
+  `techniques.json` rather than 404ing at an id the console is displaying.
+- A position, function or gi_no_gi outside the catalog's vocabulary is a 400
+  naming the legal set. This is the worst data the table can hold: it writes,
+  it renders, and it returns nothing forever with no fault reported.
+- A name that slugs to nothing ("!!!") is a 400, not a NOT NULL violation far
+  from the cause.
+- `to_position` must resolve to a position the library uses, or the graph edge
+  points at nothing.
+- A body over 64 KB is rejected rather than read.
+
+**Auth and security**
+
+- `RequireAdmin` on every route — this writes shared reference content that
+  every athlete's library and every training record points at. A signed-in
+  non-admin gets 403, not 404.
+- `source` is server-set: a client cannot mark its own row `seed` (which would
+  hand it to the deploy) or a seeded row `admin`.
+
 ### The focus list (`GET`/`PUT /v1/bjj/focus`)
 
 **Happy path**

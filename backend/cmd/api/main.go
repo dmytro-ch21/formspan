@@ -72,7 +72,9 @@ func main() {
 	activityHandler := activity.NewHandler(activity.NewPostgresRepository(pool))
 	exerciseHandler := exercise.NewHandler(exercise.NewPostgresRepository(pool), os.Getenv("MEDIA_BASE_URL"))
 	workoutHandler := workout.NewHandler(workout.NewPostgresRepository(pool))
-	techniqueHandler := technique.NewHandler(technique.NewPostgresRepository(pool))
+	techniqueRepo := technique.NewPostgresRepository(pool)
+	techniqueHandler := technique.NewHandler(techniqueRepo)
+	techniqueContentHandler := technique.NewContentHandler(techniqueRepo)
 	sessionHandler := session.NewHandler(session.NewPostgresRepository(pool))
 
 	mux := http.NewServeMux()
@@ -123,6 +125,13 @@ func main() {
 	mux.Handle("GET /v1/techniques/positions", verifier.RequireAuth(http.HandlerFunc(techniqueHandler.Positions)))
 	mux.Handle("GET /v1/techniques/positions/{positionID}", verifier.RequireAuth(http.HandlerFunc(techniqueHandler.GetPosition)))
 	mux.Handle("GET /v1/techniques/{techniqueID}", verifier.RequireAuth(http.HandlerFunc(techniqueHandler.Get)))
+	// Authoring the catalog from the admin console, so adding a technique is
+	// not a deploy. Under /v1/admin and RequireAdmin — this writes shared
+	// reference content that every athlete's library and every training record
+	// points at.
+	mux.Handle("GET /v1/admin/techniques/positions", verifier.RequireAdmin(http.HandlerFunc(techniqueContentHandler.Positions)))
+	mux.Handle("POST /v1/admin/techniques", verifier.RequireAdmin(http.HandlerFunc(techniqueContentHandler.Create)))
+	mux.Handle("PATCH /v1/admin/techniques/{techniqueID}", verifier.RequireAdmin(http.HandlerFunc(techniqueContentHandler.Update)))
 	mux.Handle("GET /v1/sessions", verifier.RequireAuth(http.HandlerFunc(sessionHandler.List)))
 	mux.Handle("POST /v1/sessions", verifier.RequireAuth(http.HandlerFunc(sessionHandler.Create)))
 	// Registered before the {sessionID} pattern is irrelevant to net/http's

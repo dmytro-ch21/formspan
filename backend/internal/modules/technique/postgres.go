@@ -399,6 +399,13 @@ func (r *PostgresRepository) UpsertRulesets(ctx context.Context, rulesets []Rule
 	return nil
 }
 
+// The `source = 'seed'` guard is what lets a second writer exist at all.
+// Without it a deploy silently reverts every admin edit to a row the JSON also
+// knows about — and a re-seed runs on every deploy, so the revert would be
+// routine rather than rare. Admin-authored rows are `source = 'admin'` and this
+// upsert cannot touch them; an id collision between the two is refused at write
+// time in the admin handler rather than resolved here.
+//
 // The trailing WHERE keeps an unchanged row a true no-op, so updated_at
 // means "last content change" rather than "last deploy" — same reasoning as
 // the exercise catalog, and the same prerequisite for delta sync.
@@ -429,7 +436,7 @@ const upsertSQL = `
 		source_notes      = EXCLUDED.source_notes,
 		ibjjf_ruleset_id  = EXCLUDED.ibjjf_ruleset_id,
 		updated_at      = now()
-	WHERE (
+	WHERE techniques.source = 'seed' AND (
 		techniques.name, techniques.aliases, techniques.category,
 		techniques.position, techniques.position_detail, techniques.gi_no_gi,
 		techniques.typical_belt, techniques.description,

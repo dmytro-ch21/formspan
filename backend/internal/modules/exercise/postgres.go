@@ -205,7 +205,9 @@ const upsertSQL = `
 		is_unilateral     = EXCLUDED.is_unilateral,
 		instructions      = EXCLUDED.instructions,
 		updated_at        = now()
-	WHERE (
+	-- Scoped to seeded rows: a deploy must not revert admin-authored content.
+	-- See migration 000032 and the same guard on techniques.
+	WHERE exercises.source = 'seed' AND (
 		exercises.name, exercises.sport, exercises.movement_pattern,
 		exercises.movement_pattern_detail, exercises.primary_muscles, exercises.secondary_muscles,
 		exercises.equipment, exercises.load_type, exercises.is_unilateral,
