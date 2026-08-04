@@ -24,8 +24,15 @@ export type SaveResult =
    * the name was taken and simultaneously threw away the paragraph of prose
    * you had just written. Returning the submission lets the form re-seed its
    * defaults with it, so the reset restores rather than erases.
+   *
+   * `attempt` counts consecutive failures, so the form can re-key the alert: a
+   * second failure with the SAME message mutates nothing, so a screen reader
+   * stays silent and the only visual change is the button flicking through
+   * "Saving…". Counted here rather than in an effect — incrementing state
+   * inside one is a cascading render, and the action already receives the
+   * previous result, so it is free.
    */
-  | { status: "error"; message: string; values: TechniqueWrite };
+  | { status: "error"; message: string; values: TechniqueWrite; attempt: number };
 
 /**
  * Lists arrive from the form as one-per-line text.
@@ -84,6 +91,10 @@ function bodyFrom(form: FormData): TechniqueWrite {
  * alone means guessing which one. Branching is on `code`, never on the message.
  */
 function explain(err: unknown): string {
+  // The only write surface in this console. Without this, a Clerk
+  // misconfiguration or a bug in bodyFrom shows the operator "could not reach
+  // the API" and leaves nothing on the server to search for.
+  console.error("admin: technique write failed", err);
   if (err instanceof ApiError) {
     if (err.status === 401 || err.status === 403) {
       return "The API rejected this account. Check ADMIN_USER_IDS matches on both sides.";
@@ -99,7 +110,7 @@ function explain(err: unknown): string {
 }
 
 export async function createTechniqueAction(
-  _prev: SaveResult,
+  prev: SaveResult,
   form: FormData,
 ): Promise<SaveResult> {
   try {
@@ -111,13 +122,18 @@ export async function createTechniqueAction(
     revalidatePath("/content");
     return { status: "ok", id: saved.id, name: saved.name };
   } catch (err) {
-    return { status: "error", message: explain(err), values: bodyFrom(form) };
+    return {
+      status: "error",
+      message: explain(err),
+      values: bodyFrom(form),
+      attempt: (prev.status === "error" ? prev.attempt : 0) + 1,
+    };
   }
 }
 
 export async function updateTechniqueAction(
   id: string,
-  _prev: SaveResult,
+  prev: SaveResult,
   form: FormData,
 ): Promise<SaveResult> {
   try {
@@ -127,6 +143,11 @@ export async function updateTechniqueAction(
     revalidatePath(`/content/${id}`);
     return { status: "ok", id: saved.id, name: saved.name };
   } catch (err) {
-    return { status: "error", message: explain(err), values: bodyFrom(form) };
+    return {
+      status: "error",
+      message: explain(err),
+      values: bodyFrom(form),
+      attempt: (prev.status === "error" ? prev.attempt : 0) + 1,
+    };
   }
 }

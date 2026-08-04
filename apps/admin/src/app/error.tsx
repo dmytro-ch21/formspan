@@ -3,15 +3,20 @@
 import { useEffect } from "react";
 
 /**
- * Error boundary for the admin screens' backend calls. Without this, every
+ * Error boundary for every admin screen's backend calls. Without this, each
  * failure mode (API down, 401 on an expired token, 403 from an
  * ADMIN_USER_IDS mismatch) surfaces as Next's unstyled default error page.
  *
  * The 403 case is the most likely one in practice: this app's own gate and
  * the backend's RequireAdmin read separate copies of ADMIN_USER_IDS, so
  * they can drift — the UI lets you in and the API then refuses.
+ *
+ * Moved up from `users/` to cover the whole app. `/content` and `/health` had
+ * no boundary at all, so every read on them — the authored list, the ownership
+ * check, the positions vocabulary — crashed to the default page. The write path
+ * reports its own failures inside the form; this is for the reads around it.
  */
-export default function UsersError({
+export default function AdminError({
   error,
   reset,
 }: {

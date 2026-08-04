@@ -30,7 +30,12 @@ export class ApiError extends Error {
     /** The backend's own message, when it sent one worth showing. */
     public readonly detail = "",
   ) {
-    super(detail || `API responded ${status} for ${path}`);
+    // The status stays IN the message even when there is a detail. The error
+    // boundary detects 401/403 by substring — it receives a plain Error across
+    // the boundary, not this class — so replacing the message with the detail
+    // alone silently broke the ADMIN_USER_IDS-drift case, which is the most
+    // likely failure in practice. Callers that want clean copy read `detail`.
+    super(detail ? `API responded ${status} for ${path}: ${detail}` : `API responded ${status} for ${path}`);
     this.name = "ApiError";
   }
 }

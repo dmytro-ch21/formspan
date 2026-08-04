@@ -638,6 +638,22 @@ components:
           type: string
           enum: [Both, "Gi Only", "No-Gi Only"]
         typical_belt: { type: string }
+        source:
+          type: string
+          enum: [seed, admin]
+          description: >
+            Where this technique came from: `seed` means the deploy owns it (the
+            embedded JSON rewrites it on every release), `admin` means it was
+            authored in the console and the database owns it. Read-only — the
+            server sets it, so a client cannot promote its own row out of the
+            deploy's reach or demote a seeded one into it.
+
+
+            **Present only on `/admin/*` responses.** It is ABSENT from
+            `GET /techniques/{techniqueID}`, which does not select the column —
+            so do not derive ownership from it there. Its absence means "this
+            endpoint does not report provenance", never "not admin-authored".
+            Use membership of `GET /admin/techniques` instead.
         ibjjf_ruleset_id: { type: string }
         to_position:
           type: string

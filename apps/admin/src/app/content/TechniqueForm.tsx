@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import React, { useActionState, useState } from "react";
 import Link from "next/link";
 
 import type { Technique } from "@/lib/api";
@@ -43,9 +43,36 @@ const GI_NO_GI = ["Both", "Gi Only", "No-Gi Only"] as const;
  *  legality, which is a rule you can be disqualified for breaking. */
 const BELTS = ["White", "Blue", "Purple", "Brown", "Black"] as const;
 
+/**
+ * Renders the current value as an extra option when the vocabulary does not
+ * contain it.
+ *
+ * Without this a `<select>` falls back to its first non-disabled option, so a
+ * technique stored with a category this list has never heard of would display
+ * as something else entirely — and because the form always sends every field,
+ * the next save would write that substitution to the database. The API allows
+ * values the console does not offer (`ValidateFields` constrains `gi_no_gi` and
+ * `function` but deliberately not `category` or `typical_belt`), so this is
+ * reachable by anything that writes over the API directly.
+ *
+ * Showing it is the honest option: the operator sees what is actually stored
+ * and can decide, rather than having it quietly replaced.
+ */
+function withCurrent(options: readonly string[], current: string | undefined): string[] {
+  if (!current || options.includes(current)) return [...options];
+  return [current, ...options];
+}
+
 const inputClass =
   "w-full rounded-[10px] border border-border-strong bg-card px-3 py-2 text-[13.5px] text-text placeholder:text-text-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-dark";
 
+/**
+ * The hint carries the load-bearing semantics on this screen — "the id can
+ * never be changed afterwards", "empty means not recorded, never goes
+ * nowhere" — so it is wired to the control with `aria-describedby` rather than
+ * left as adjacent text. Without it a screen-reader user tabbing the form hears
+ * seventeen labels and none of the reasoning.
+ */
 function Field({
   label,
   hint,
@@ -57,6 +84,7 @@ function Field({
   htmlFor: string;
   children: React.ReactNode;
 }) {
+  const hintID = `${htmlFor}-hint`;
   return (
     <div className="flex flex-col gap-1.5">
       <label
@@ -65,8 +93,16 @@ function Field({
       >
         {label}
       </label>
-      {children}
-      {hint && <p className="text-[11.5px] text-text-secondary">{hint}</p>}
+      {hint
+        ? React.isValidElement<{ "aria-describedby"?: string }>(children)
+          ? React.cloneElement(children, { "aria-describedby": hintID })
+          : children
+        : children}
+      {hint && (
+        <p id={hintID} className="text-[11.5px] text-text-secondary">
+          {hint}
+        </p>
+      )}
     </div>
   );
 }
@@ -79,6 +115,62 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       </h2>
       {children}
     </section>
+  );
+}
+
+/**
+ * The name, and the id that follows from it.
+ *
+ * Its own component because the slug preview needs state and the parent must be
+ * able to reset that state by remounting — see the `key` at the call site.
+ */
+function NameField({
+  mode,
+  initialName,
+  storedID,
+}: {
+  mode: "create" | "edit";
+  initialName: string;
+  storedID?: string;
+}) {
+  const [name, setName] = useState(initialName);
+  return (
+    <>
+      <Field
+        label="Name"
+        htmlFor="name"
+        hint={
+          mode === "create"
+            ? "The id is derived from this and can never be changed afterwards — it becomes a foreign key in athletes' training records."
+            : "Renaming is safe: the id stays as it is, so existing training records keep pointing at this technique."
+        }
+      >
+        <input
+          id="name"
+          name="name"
+          required
+          maxLength={200}
+          defaultValue={initialName}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="São Paulo Pass"
+          className={inputClass}
+        />
+      </Field>
+
+      {mode === "create" ? (
+        <p className="text-[12px] text-text-secondary">
+          Id preview: <code className="font-mono text-text">{previewSlug(name) || "—"}</code>{" "}
+          <span className="text-text-muted">
+            (a preview — the API derives the real one, and it is shown after saving)
+          </span>
+        </p>
+      ) : (
+        <p className="text-[12px] text-text-secondary">
+          Id: <code className="font-mono text-text">{storedID}</code>{" "}
+          <span className="text-text-muted">(permanent)</span>
+        </p>
+      )}
+    </>
   );
 }
 
@@ -118,14 +210,22 @@ export function TechniqueForm({
   const shown: Partial<Technique> =
     result.status === "error" ? result.values : (initial ?? {});
 
-  const [name, setName] = useState(initial?.name ?? "");
-
   return (
     <form action={submit} className="flex flex-col gap-6">
       {result.status === "error" && (
         <p
+          key={result.attempt}
+          ref={(el) => {
+            // Focus on mount. The alert sits at the top of a seven-section form
+            // whose submit button is at the bottom, so without this a rejected
+            // save looks like nothing happened on a normal viewport. Re-keying
+            // on `attempt` remounts it, so an identical repeat re-announces
+            // and re-scrolls too.
+            el?.focus();
+          }}
+          tabIndex={-1}
           role="alert"
-          className="rounded-lg border border-danger-border bg-danger-bg px-4 py-3 text-[13px] text-danger-text"
+          className="rounded-lg border border-danger-border bg-danger-bg px-4 py-3 text-[13px] text-danger-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-danger-text"
         >
           {result.message}
         </p>
@@ -160,41 +260,18 @@ export function TechniqueForm({
       )}
 
       <Section title="Identity">
-        <Field
-          label="Name"
-          htmlFor="name"
-          hint={
-            mode === "create"
-              ? "The id is derived from this and can never be changed afterwards — it becomes a foreign key in athletes' training records."
-              : "Renaming is safe: the id stays as it is, so existing training records keep pointing at this technique."
-          }
-        >
-          <input
-            id="name"
-            name="name"
-            required
-            maxLength={200}
-            defaultValue={shown.name ?? ""}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="São Paulo Pass"
-            className={inputClass}
-          />
-        </Field>
-
-        {mode === "create" ? (
-          <p className="text-[12px] text-text-secondary">
-            Id preview:{" "}
-            <code className="font-mono text-text">{previewSlug(name) || "—"}</code>{" "}
-            <span className="text-text-muted">
-              (a preview — the API derives the real one, and it is shown after saving)
-            </span>
-          </p>
-        ) : (
-          <p className="text-[12px] text-text-secondary">
-            Id: <code className="font-mono text-text">{initial?.id}</code>{" "}
-            <span className="text-text-muted">(permanent)</span>
-          </p>
-        )}
+        <NameField
+          // Remounts when the outcome changes, which is what resets the slug
+          // preview after a successful create. React clears the input on reset
+          // but cannot clear component state, so without the key the form ends
+          // up showing an empty Name above "Id preview: sao-paulo-pass" — a
+          // state that lies. Keyed rather than reset in an effect, because
+          // setState inside one is a cascading render.
+          key={result.status === "ok" ? `saved-${result.id}` : `editing-${result.status}`}
+          mode={mode}
+          initialName={shown.name ?? ""}
+          storedID={initial?.id}
+        />
 
         <Field
           label="Aliases"
@@ -230,7 +307,7 @@ export function TechniqueForm({
               <option value="" disabled>
                 Pick one…
               </option>
-              {CATEGORIES.map((c) => (
+              {withCurrent(CATEGORIES, shown.category).map((c) => (
                 <option key={c} value={c}>
                   {c}
                 </option>
@@ -251,7 +328,7 @@ export function TechniqueForm({
               className={inputClass}
             >
               <option value="">— none —</option>
-              {FUNCTIONS.map((f) => (
+              {withCurrent(FUNCTIONS, shown.function).map((f) => (
                 <option key={f} value={f}>
                   {f}
                 </option>
@@ -268,7 +345,7 @@ export function TechniqueForm({
               defaultValue={shown.gi_no_gi ?? "Both"}
               className={inputClass}
             >
-              {GI_NO_GI.map((g) => (
+              {withCurrent(GI_NO_GI, shown.gi_no_gi).map((g) => (
                 <option key={g} value={g}>
                   {g}
                 </option>
@@ -289,7 +366,7 @@ export function TechniqueForm({
               className={inputClass}
             >
               <option value="">— none —</option>
-              {BELTS.map((b) => (
+              {withCurrent(BELTS, shown.typical_belt).map((b) => (
                 <option key={b} value={b}>
                   {b}
                 </option>
@@ -313,7 +390,7 @@ export function TechniqueForm({
               <option value="" disabled>
                 Pick one…
               </option>
-              {positions.map((p) => (
+              {withCurrent(positions, shown.position).map((p) => (
                 <option key={p} value={p}>
                   {p}
                 </option>
@@ -334,7 +411,7 @@ export function TechniqueForm({
               className={inputClass}
             >
               <option value="">— not recorded —</option>
-              {positions.map((p) => (
+              {withCurrent(positions, shown.to_position).map((p) => (
                 <option key={p} value={p}>
                   {p}
                 </option>

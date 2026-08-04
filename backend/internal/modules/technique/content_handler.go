@@ -138,6 +138,20 @@ func (h *ContentHandler) List(w http.ResponseWriter, r *http.Request) {
 		apihttp.WriteInternal(w, r, "technique", err)
 		return
 	}
+	// `[]`, never `null`. A nil slice marshals to null and a console mapping
+	// over it throws where an empty state should render — and "nothing authored
+	// yet" is the first thing a new operator sees, plus the state every
+	// environment returns to after `-adopt` drains the set.
+	//
+	// Guaranteed HERE rather than in the repository. It was true there, but the
+	// test asserting it could not see it: review changed `out := []Technique{}`
+	// to `var out []Technique` in the Postgres implementation and the whole
+	// suite stayed green, because the fake independently hardcoded the same
+	// thing. Now the property belongs to the endpoint and holds for every
+	// implementer.
+	if authored == nil {
+		authored = []Technique{}
+	}
 	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"techniques": authored})
 }
 

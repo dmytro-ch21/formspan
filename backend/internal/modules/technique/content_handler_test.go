@@ -304,14 +304,36 @@ func TestListReturnsOnlyWhatTheConsoleCanEdit(t *testing.T) {
 
 // An empty result is `[]`, never `null`. A console mapping over null throws
 // where an empty state should render, and "you have not authored anything yet"
-// is the first thing a new operator sees.
+// is the first thing a new operator sees — plus the state every environment
+// returns to after `-adopt` drains the set.
+//
+// The repository is deliberately made to return a NIL slice here. An earlier
+// version of this test used the ordinary fake, which hardcodes `[]` exactly
+// like the Postgres implementation does — so the assertion held no matter what
+// the handler did, and review demonstrated it by deleting the guarantee from
+// the repository and watching the suite stay green. The property is the
+// handler's now, and this is what proves it.
 func TestListWithNothingAuthoredIsAnEmptyArray(t *testing.T) {
 	rec := httptest.NewRecorder()
-	NewContentHandler(newFakeRepo()).List(rec, httptest.NewRequest(http.MethodGet, "/v1/admin/techniques", nil))
+	NewContentHandler(nilAuthoredRepo{newFakeRepo()}).
+		List(rec, httptest.NewRequest(http.MethodGet, "/v1/admin/techniques", nil))
 
-	if got := rec.Body.String(); !strings.Contains(got, `"techniques":[]`) {
+	got := rec.Body.String()
+	if strings.Contains(got, `"techniques":null`) {
+		t.Fatalf("body %s — a nil slice reached the wire as null", got)
+	}
+	if !strings.Contains(got, `"techniques":[]`) {
 		t.Errorf("body %s, want an empty array", got)
 	}
+}
+
+// nilAuthoredRepo is a repository that returns nil rather than an empty slice —
+// what any implementation that forgets the convention does, and what `var out
+// []Technique` produces.
+type nilAuthoredRepo struct{ *fakeContentRepo }
+
+func (nilAuthoredRepo) AdminAuthored(context.Context) ([]Technique, error) {
+	return nil, nil
 }
 
 func idsOf(ts []Technique) []string {

@@ -102,6 +102,24 @@ type ContentRepository interface {
 	// cmd/exportcontent reads the same method for the same reason — one
 	// definition of "what the console owns", rather than a second query that
 	// can disagree with the first about which rows the export will carry.
+	//
+	// DELIBERATELY UNCAPPED, and adding a LIMIT here would be silent data loss
+	// rather than a performance fix. The export MERGES rather than replaces, so
+	// truncation does not error anywhere: already-exported entries survive, the
+	// newest rows simply never reach techniques.json, `verifyContains` only
+	// checks the truncated slice so it passes, and `-adopt` then adopts only
+	// ids already in the file. The newest authored content would stay
+	// database-only and quietly miss the promotion path — exactly the loss
+	// cmd/exportcontent exists to prevent.
+	//
+	// Unbounded is safe because the set only grows one row at a time:
+	// CreateTechnique's INSERT is the ONLY code anywhere that writes
+	// source='admin' (UpsertAll never names the column, so bulk seeds and
+	// imports land as 'seed'), and AdoptAsSeeded only moves admin->seed. If a
+	// bulk authoring path is ever added, that invariant is what it breaks.
+	//
+	// If the HTTP surface ever needs a cap, it needs a SEPARATE method. The
+	// export cannot tolerate a truncated one.
 	AdminAuthored(ctx context.Context) ([]Technique, error)
 }
 
