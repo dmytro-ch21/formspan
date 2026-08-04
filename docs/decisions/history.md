@@ -6790,6 +6790,115 @@ remember. Both `test:api` and CI now run `go test -p 1`, which kills the class:
   matters.
 
 
+## 2026-08-03 — The capture collapse
+
+The redundancy the user spotted is now actually gone, rather than managed.
+
+Before this, one armbar could be recorded in two places: tried/landed **per
+technique** on the drilled step, and scored/conceded **per category** in the
+live grid. Two PRs ago that was met with a convention about which rows a query
+should read. This removes the second path.
+
+### What moved
+
+- **The drilled step gives up its counters.** It records what was covered and
+  nothing else — which is all it was ever good for. What you drilled is your
+  coach's curriculum, not your development; its only real job is being the
+  denominator in the drop-off.
+- **The live step gains a "Working on" block**, one row per focus technique,
+  Tried / Landed. One tap each, no search, because the focus list already named
+  them. Below it the category grid is unchanged and relabelled "Everything
+  else", which is the instruction: log each thing once, in the most specific
+  row available.
+
+Net taps are *lower* than before for the athlete who was double-recording, and
+unchanged for everyone else. For a technique drilled outside the focus list,
+per-technique live capture is simply gone — fewer taps because less is
+captured, which is a different claim and the deliberate trade: that data was
+the expensive half and mostly noise.
+
+### The union, and why focus alone would have stranded rows
+
+The block shows the focus list **plus any technique this session already has
+live evidence for**. Focus alone is not enough: drop a technique from the list
+on web after logging against it, and its `attempted`/`scored` rows stay in the
+session with no control able to edit them — saved, synced, invisible.
+
+That is exactly how the drilled-step counters stranded rows when a chip was
+removed, and repeating it one screen along would have defeated the point. The
+union keeps "what is displayed" and "what is stored" the same set. It is
+extracted as `focusRows()` rather than left in a `useMemo`, so it is testable
+without a renderer — and four mutations of it go red, including removing the
+union itself.
+
+### One property inverted on purpose
+
+`removeDrilledTechnique` used to take a technique's `attempted`/`scored` rows
+with it. That was right while the drilled step was the only place they could be
+authored. It is wrong now: live outcomes come from the focus rows, which are
+reachable whether or not the technique was drilled today. "I did not actually
+drill this" and "I did not hit this live" are different statements, and
+un-saying one must not un-say the other. The test that asserted the old
+behaviour now asserts the new one, and says why it flipped.
+
+### Two vocabulary helpers moved into `lib/`
+
+`toCategory` and `familyOf` were local to the reflection screen and are now
+needed by two modules. They are the translation from the library's vocabulary
+("Submission", "Guard - Bottom") to the tag vocabulary ("submission", "Guard"),
+and getting them applied in only one of the two places would file a focus row's
+evidence under a different position from a drilled row's for the same
+technique — splitting it in half with no error anywhere. One test pins that.
+
+### What review caught
+
+**The "Everything else" heading escaped its conditional**, so every athlete
+today — nobody has a focus list — saw a single grid headed "EVERYTHING ELSE"
+with nothing for it to be else to.
+
+**And technique-tagged live outcomes had no display surface on the session
+read-back screen.** It keyed the whole Techniques section off the drilled list,
+so a technique tried live but not drilled showed nowhere. Reachable *today*,
+with no focus list in existence: remove a drilled chip and its
+`attempted`/`scored` rows deliberately survive — then `hasAnyDetail` went false
+and the screen rendered "No detail recorded" over data that exists. The
+write-but-never-read-back defect, third appearance, one screen along each time.
+Fixed by taking the same union the live step takes, so display and storage are
+the same set on both screens.
+
+Also: the two functions this PR promoted into `lib/` had their fallbacks
+entirely untested — `familyOf` returning `''` for an unknown family and
+`toCategory` defaulting to `control` both survived mutation against the whole
+suite. Those are exactly the branches the code calls dangerous, and the stated
+reason for the move is that a mis-applied translation splits evidence silently.
+Both now pinned.
+
+And `removeDrilledTechnique`'s JSDoc still described the behaviour this PR
+inverted — hover text reading as an instruction to restore it.
+
+### Gaps this leaves
+
+- **Nothing sets a focus list yet.** The web authoring surface is still
+  unbuilt, so for most athletes the block is *absent* — not empty; it is gated
+  on having rows — and the category grid is the whole capture surface. The
+  exception is anyone holding a reflection with technique-tagged outcomes from
+  the previous build: they get a "Working on" block of raw technique slugs,
+  because the live step does not fetch the library. That is a strictly better place than before —
+  the redundancy is gone either way — but the technique funnel gets no new data
+  until web lands.
+- **Choosing "the most specific row" is copy, not structure.** An athlete can
+  still tap both their armbar row and Submissions/Hit for one armbar. Both
+  screens render that correctly and the proficiency read takes only the
+  technique-tagged row, so it does not double-count — but nothing prevents it.
+  Making it structural would mean the grid knowing which categories a focus
+  technique covers, which is more machinery than the problem currently earns.
+- **`conceded` still has no per-technique row.** "Which submission keeps
+  catching me" remains unanswerable at technique granularity. The defensive
+  funnel is the obvious next feature and the API side already accepts it.
+- **Not verified on a device.** `pnpm run verify` is green and the transforms
+  are mutation-tested, but nothing has drawn the new block.
+
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

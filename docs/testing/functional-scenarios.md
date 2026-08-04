@@ -2427,13 +2427,35 @@ most of the value is in the floor working alone.
 
 #### The technique funnel (`drilled → attempted → scored`)
 
-- Each drilled technique carries **Tried** and **Landed** counters. Tap
+- **The drilled step records what was covered and nothing else.** It has no
+  tried/landed counters — those moved to the live step, and a build where both
+  exist has reintroduced the redundancy this design removed.
+- **The live step's "Working on" block shows the focus list PLUS any technique
+  this session already has live evidence for.** Drop a technique from focus
+  after logging against it and its rows must still be editable; focus alone
+  would leave them saved, synced and invisible.
+- A technique in both focus and the session's tags appears **once**, labelled
+  with the library's name rather than its id.
+- **The vocabulary translation must be applied.** A focus entry carries
+  "Submission" / "Guard - Bottom"; its tags must be written as "submission" /
+  "Guard", or a focus row's evidence and a drilled row's for the same technique
+  file under different positions and split in half silently.
+- **Removing a drilled technique must NOT remove its live outcomes** — inverted
+  from the previous design, deliberately. The two are different statements now
+  that live outcomes have their own control.
+- With no focus set the block is absent entirely and the category grid is the
+  whole surface. That is the default state until the web authoring surface
+  ships, so it must be a first-class layout rather than an empty container.
+
+
+- Each **focus** technique carries **Tried** and **Landed** counters. Tap
   increments, long-press decrements, decrementing to zero removes the row
   rather than storing a zero — a zero-count row fails the backend's
   `count > 0` CHECK, so the whole reflection would 400 on save because
   someone tapped once and undid it.
 - The attempted/scored rows **inherit `category` and `position` from the
-  drilled row**, not from a second derivation. `familyOf()` returns `''` for
+  source** — usually a focus entry, translated through `toCategory`/`familyOf`
+  — not from a second derivation. `familyOf()` returns `''` for
   a family the hardcoded POSITIONS list has fallen behind on — which has
   happened twice — so deriving it again could file the drilled row under
   "Half Guard" and the attempted row under nothing, splitting one technique's
@@ -2442,21 +2464,23 @@ most of the value is in the floor working alone.
   didn't land", so four tries with one hit is `attempted: 3, scored: 1`. The
   copy has to say so — the cumulative reading is at least as natural and
   produces different numbers from the same taps.
-- Removing a drilled technique **removes its Tried/Landed rows too**. Leaving
-  them behind strands evidence that is still saved and sent while being
-  invisible and uneditable — the counters are only reachable through the
-  drilled row.
+- Removing a drilled technique **leaves its Tried/Landed rows alone.** They are
+  reachable from the live step's focus block whether or not the technique was
+  drilled today, so nothing is stranded and the two facts are independent.
 - ...but a **technique-tagged `conceded`** row survives that removal. This
   screen cannot author one, but the API accepts one, so a reflection authored
   elsewhere and read back can carry it; deleting someone's "they armbarred
   me" record because they removed a drilled chip is data loss.
-- **The live grid and the funnel must partition the tag list.** The grid owns
-  untagged rows, the drilled step owns technique-tagged ones. If either
+- **The category grid and the focus rows must partition the tag list.** The
+  grid owns untagged rows, the focus rows own technique-tagged ones. If either
   counts the other's, a number appears that its own control refuses to move
   and nothing explains why.
 - **The session read-back screen must agree with the wizard on `scored`**: its
-  grid excludes technique-tagged `scored` the same way, and the Drilled section
-  shows each technique's tried/landed instead. Getting the second half wrong
+  grid excludes technique-tagged `scored` the same way, and the **Techniques**
+  section shows each technique's tried/landed instead — keyed off *any*
+  technique with evidence, NOT off the drilled list. Keyed off drilled, a
+  technique tried live but not drilled shows nowhere, and a session holding
+  only such rows renders "No detail recorded" over data that exists. Getting the second half wrong
   recreates the exact write-but-never-read defect the funnel exists to fix.
 - **...but NOT on `conceded`, deliberately.** The read-back grid *includes*
   technique-tagged `conceded` rows. No screen in this app can author one, so

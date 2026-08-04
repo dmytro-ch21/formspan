@@ -21,12 +21,15 @@ import {
   removeDrilledTechnique,
   tagCount,
   techniqueOutcomeCount,
+  familyOf,
+  toCategory,
   type Category,
   type Event,
   type SessionDetail,
 } from '@/lib/bjjSession';
 import { readLocalBjjDetail, saveLocalBjjDetail } from '@/lib/sessionStore';
 import { request as requestSync } from '@/lib/sync';
+import { fetchFocus, focusRows, type Focus } from '@/lib/bjjFocus';
 import { fetchTechniques, searchTechniques, type TechniqueSummary } from '@/lib/techniques';
 import { useAuthToken } from '@/lib/useAuthToken';
 
@@ -234,7 +237,7 @@ export default function ReflectScreen() {
         {current.key === 'drilled' && (
           <DrilledStep detail={detail} onChange={persist} getToken={getToken} />
         )}
-        {current.key === 'live' && <LiveStep detail={detail} onChange={persist} />}
+        {current.key === 'live' && <LiveStep detail={detail} onChange={persist} getToken={getToken} />}
         {current.key === 'note' && <NoteStep detail={detail} onChange={persistSoon} />}
       </ScrollView>
 
@@ -395,60 +398,12 @@ function DrilledStep({
                     <Text style={styles.tagChipX}>×</Text>
                   </Pressable>
                 </RNView>
-                {/* The funnel's missing middle. Left at zero this still says
-                    something — "drilled, never tried live" is the finding,
-                    not an empty cell — so nothing here is required.
-
-                    Only for a row that names a technique. A drilled row can
-                    lose its id — migration 000025 sets it NULL when a
-                    technique is retired from the library, on purpose, so the
-                    athlete's record of having drilled it survives — and
-                    outcomes cannot attach to nothing. Rendering counters
-                    there would give two controls that look live, read 0
-                    forever, and tell VoiceOver they can be tapped. */}
-                {!!t.technique_id && (
-                <RNView style={styles.drilledOutcomes}>
-                  {FUNNEL_OUTCOMES.map((o) => (
-                    <Counter
-                      key={o.event}
-                      value={techniqueOutcomeCount(detail.tags, t.technique_id, o.event)}
-                      label={o.label}
-                      // Without the name, VoiceOver reads "Tried: 0 button,
-                      // Landed: 0 button, Tried: 0 button…" down the whole
-                      // list with nothing binding a pair to a technique. The
-                      // live grid gets away with the short label because its
-                      // row label sits in the same visual row.
-                      context={name}
-                      // `attempted` deliberately does NOT take the conceded
-                      // amber. Trying a drilled technique live is the exact
-                      // behaviour this feature exists to elicit, and this
-                      // would be the one place in the app where the palette
-                      // scolds something we want more of.
-                      tone={o.event === 'scored' ? 'scored' : 'neutral'}
-                      onAdd={() =>
-                        onChange({
-                          ...detail,
-                          tags: bumpTechniqueOutcome(detail.tags, t, o.event, 1),
-                        })
-                      }
-                      onRemove={() =>
-                        onChange({
-                          ...detail,
-                          tags: bumpTechniqueOutcome(detail.tags, t, o.event, -1),
-                        })
-                      }
-                      testID={`bjj-funnel-${t.technique_id}-${o.event}`}
-                    />
-                  ))}
-                </RNView>
-                )}
               </RNView>
             );
           })}
           <Text style={styles.footnote}>
-            Did you try any of it live? Tap to add, press and hold to take one back. “Tried” means
-            you went for it and it didn&apos;t land — so tried plus landed is how often you went for
-            it. Leaving these at zero is an answer too.
+            Just what was covered. Whether any of it worked live is recorded on the next step,
+            beside everything else that happened — so nothing gets logged twice.
           </Text>
         </>
       )}
@@ -475,11 +430,35 @@ function DrilledStep({
 function LiveStep({
   detail,
   onChange,
+  getToken,
 }: {
   detail: SessionDetail;
   onChange: (d: SessionDetail) => void;
+  getToken: ReturnType<typeof useAuthToken>;
 }) {
   const [position, setPosition] = useState('');
+  const [focus, setFocus] = useState<Focus[]>([]);
+
+  useEffect(() => {
+    const c = new AbortController();
+    fetchFocus(getToken, c.signal)
+      .then(setFocus)
+      // Silent, and deliberately. The focus rows are an accelerator, not a
+      // requirement — the category grid below is the whole capture surface on
+      // its own, and an error banner about a list the athlete may not even
+      // have set would be noise on the fastest screen in the flow.
+      .catch(() => {});
+    return () => c.abort();
+  }, [getToken]);
+
+  // Every technique with live evidence in THIS session, focused or not.
+  //
+  // Focus alone is not enough: drop a technique from the list on web after
+  // logging against it, and its rows would still be in the session with no
+  // control able to edit them — stranded exactly the way the old drilled-step
+  // counters stranded rows when a chip was removed. The union is what keeps
+  // "what is displayed" and "what is stored" the same set.
+  const rows = useMemo(() => focusRows(focus, detail.tags), [focus, detail.tags]);
 
   // Live tags recorded under some position other than the one on screen.
   //
@@ -551,7 +530,63 @@ function LiveStep({
         })}
       </ScrollView>
 
-      <RNView style={styles.gridHead}>
+      {rows.length > 0 && (
+        <>
+          <Text style={styles.label} accessibilityRole="header">
+            Working on
+          </Text>
+          <RNView
+            style={styles.gridHead}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+          >
+            <Text style={[styles.gridHeadCell, styles.gridHeadSpacer]} />
+            <Text style={styles.gridHeadCell}>Tried</Text>
+            <Text style={styles.gridHeadCell}>Landed</Text>
+          </RNView>
+          {rows.map((f) => (
+            <RNView key={f.technique_id} style={styles.gridRow}>
+              <Text style={styles.gridLabel} numberOfLines={2}>
+                {f.name}
+              </Text>
+              {FUNNEL_OUTCOMES.map((o) => (
+                <Counter
+                  key={o.event}
+                  value={techniqueOutcomeCount(detail.tags, f.technique_id, o.event)}
+                  label={o.label}
+                  context={f.name}
+                  // Tried is neither a win nor something done to you — it is
+                  // the attempt, which is the behaviour being encouraged.
+                  tone={o.event === 'scored' ? 'scored' : 'neutral'}
+                  onAdd={() =>
+                    onChange({ ...detail, tags: bumpTechniqueOutcome(detail.tags, f, o.event, 1) })
+                  }
+                  onRemove={() =>
+                    onChange({ ...detail, tags: bumpTechniqueOutcome(detail.tags, f, o.event, -1) })
+                  }
+                  testID={`bjj-focus-${f.technique_id}-${o.event}`}
+                />
+              ))}
+            </RNView>
+          ))}
+          <Text style={styles.footnote}>
+            The techniques you&apos;re working on. “Tried” means you went for it and it didn&apos;t
+            land, so tried plus landed is how often you went for it. Record it here rather than in the
+            grid below — one row per thing that happened.
+          </Text>
+        </>
+      )}
+
+      {rows.length > 0 && (
+        <Text style={styles.label} accessibilityRole="header">
+          Everything else
+        </Text>
+      )}
+      <RNView
+        style={styles.gridHead}
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+      >
         <Text style={[styles.gridHeadCell, styles.gridHeadSpacer]} />
         <Text style={styles.gridHeadCell}>You</Text>
         <Text style={styles.gridHeadCell}>Them</Text>
@@ -614,8 +649,11 @@ function Counter({
 }: {
   value: number;
   label: string;
-  /** Prefixed to the accessibility label when the visible row label is not
-   *  adjacent — see the funnel counters. */
+  /** Prefixed to the accessibility label. The focus rows use it because
+   *  adjacency is a VISUAL property — VoiceOver reads a run of "Tried: 0 /
+   *  Landed: 0" with nothing binding a pair to a technique. The category grid
+   *  below omits it because its row label ("Submissions") is already part of
+   *  the same announced row. */
   context?: string;
   tone: 'scored' | 'conceded' | 'neutral';
   onAdd: () => void;
@@ -689,32 +727,6 @@ function NoteStep({
 
 /* ── helpers ──────────────────────────────────────────────────────────── */
 
-/** Library category → tag vocabulary. Anything without a symmetric opposite
- *  lands in `control`, which is honest rather than inventing a seventh. */
-function toCategory(libraryCategory: string): Category {
-  switch (libraryCategory) {
-    case 'Submission':
-      return 'submission';
-    case 'Sweep':
-      return 'sweep';
-    case 'Pass':
-      return 'pass';
-    case 'Escape':
-      return 'escape';
-    case 'Takedown':
-      return 'takedown';
-    default:
-      return 'control';
-  }
-}
-
-/** "Half Guard - Bottom" → "Half Guard". Mirrors the Library's own family
- *  matching so a tag and a filter chip mean the same thing. */
-function familyOf(position: string): string {
-  const family = POSITIONS.find((p) => position === p || position.startsWith(`${p} - `));
-  return family ?? '';
-}
-
 function nameFor(all: TechniqueSummary[], id: string | null | undefined): string {
   if (!id) return 'Technique';
   // Fall back to the ID before the placeholder. `fetchTechniques` caches only
@@ -781,10 +793,10 @@ const styles = StyleSheet.create({
   resultName: { fontSize: 15, fontWeight: '600' },
   plus: { color: vola.lime, fontSize: 20, fontWeight: '700' },
 
-  // One drilled technique: its name, and the two funnel counters under it.
-  // Two lines rather than one row, because a name plus two counters plus a
-  // remove control on a 4.7" screen leaves the name about eight characters —
-  // and "Berimbolo to back take" truncated to "Berim…" is not a technique
+  // One drilled technique: its name and a remove control. The funnel counters
+  // that used to sit under it moved to the live step, so this is now a plain
+  // row — kept bordered rather than made a pill because a full technique name
+  // wraps, and "Berimbolo to back take" truncated to "Berim…" is not something
   // anyone can confirm they drilled.
   drilledRow: {
     borderWidth: 1,
@@ -802,7 +814,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  drilledOutcomes: { flexDirection: 'row', gap: 8 },
   tagChipX: { color: vola.textMuted, fontSize: 15, fontWeight: '700' },
 
   row: { gap: 8, paddingRight: 20 },

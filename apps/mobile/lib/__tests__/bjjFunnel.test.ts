@@ -13,9 +13,10 @@ import {
  * and only `drilled` was ever captured with a technique: the live grid records
  * category+position only, and nothing in either client produced an `attempted`
  * row at all. These transforms are what fills the gap, so what they must
- * guarantee is that the two halves of the tag list stay disjoint — the live
- * grid owns untagged rows, the drilled step owns technique-tagged ones — and
- * that removing a chip cannot strand evidence that is still saved and sent.
+ * guarantee is that the two halves of the tag list stay disjoint — the
+ * category grid owns untagged rows, the focus rows own technique-tagged ones —
+ * and that removing a drilled chip cannot strand evidence that is still saved
+ * and sent.
  */
 
 const armbar: Tag = {
@@ -132,24 +133,34 @@ describe('the live grid and the funnel partition the tag list', () => {
 });
 
 describe('removeDrilledTechnique', () => {
-  it('takes the technique’s live outcomes with it', () => {
-    // The counters are only reachable through the drilled chip, so orphaned
-    // attempted/scored rows would still be saved and sent while being
-    // invisible and uneditable — evidence the athlete cannot see or correct.
+  it('leaves the technique’s live outcomes alone', () => {
+    // INVERTED from what this asserted before, deliberately.
+    //
+    // While the drilled step owned the tried/landed counters, removing a chip
+    // had to take them with it or they became stranded — saved and sent with
+    // no control able to edit them. Live outcomes now come from the focus rows
+    // on the live step, which are reachable whether or not the technique was
+    // drilled today. So "I did not actually drill this" and "I did not hit
+    // this live" became different statements, and un-saying one must not
+    // un-say the other.
     let tags: Tag[] = [armbar, triangle];
     tags = bumpTechniqueOutcome(tags, armbar, 'attempted', 2);
     tags = bumpTechniqueOutcome(tags, armbar, 'scored', 1);
-    tags = bumpTechniqueOutcome(tags, triangle, 'scored', 1);
 
     const after = removeDrilledTechnique(tags, 'armbar-from-guard');
-    expect(after.some((t) => t.technique_id === 'armbar-from-guard')).toBe(false);
-    // and only that technique
-    expect(after.filter((t) => t.technique_id === 'triangle-from-guard')).toHaveLength(2);
+    if (after.some((t) => t.event === 'drilled' && t.technique_id === 'armbar-from-guard')) {
+      throw new Error('the drilled row survived');
+    }
+    expect(techniqueOutcomeCount(after, 'armbar-from-guard', 'attempted')).toBe(2);
+    expect(techniqueOutcomeCount(after, 'armbar-from-guard', 'scored')).toBe(1);
+    // and the other technique is untouched
+    expect(after.some((t) => t.technique_id === 'triangle-from-guard')).toBe(true);
   });
 
   it('leaves the live grid’s untagged rows alone', () => {
-    // Every event the function CAN delete, so the id match is the only thing
-    // that can spare them. The first version of this test used a single
+    // A spread of events including `drilled`, the only one the function can
+    // now delete — so for the rest, and for `drilled` on a different
+    // technique, the id match is the only thing sparing them. The first version of this test used a single
     // `conceded` row — which the event guard excludes on its own — so
     // replacing the whole body with `filter(t => t.event === 'conceded')`
     // kept it green and the named property was never exercised.
@@ -186,7 +197,7 @@ describe('removeDrilledTechnique', () => {
     expect(removeDrilledTechnique(serverShaped, '')).toEqual(serverShaped);
   });
 
-  it('keeps a technique-tagged conceded row, which this screen did not author', () => {
+  it('keeps every non-drilled row for that technique', () => {
     // "They armbarred me" is not something the drilled step can produce — but
     // the API accepts it, so a reflection authored elsewhere and read back can
     // carry one. Removing a drilled chip must not silently delete it.
