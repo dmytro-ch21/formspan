@@ -12,8 +12,11 @@ import { UnitsProvider } from '@/lib/UnitsProvider';
 import { useFonts } from 'expo-font';
 import { DarkTheme, Stack, ThemeProvider, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { StyleSheet, View } from 'react-native';
 import 'react-native-reanimated';
+
+import { AnimatedSplash } from '@/components/AnimatedSplash';
 
 import { tokenCache } from '@/lib/tokenCache';
 import { vola } from '@/constants/Colors';
@@ -41,6 +44,11 @@ export const unstable_settings = {
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
+
+// The native splash is a bare `#080B12` field (see app.json) and `AnimatedSplash`
+// opens on the same bare field, so the handover between them has nothing to give
+// it away whichever frame it lands on. The cross-fade is belt and braces.
+SplashScreen.setOptions({ fade: true, duration: 200 });
 
 const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
@@ -100,6 +108,7 @@ function RootLayoutNav() {
   const getToken = useAuthToken();
   const segments = useSegments();
   const router = useRouter();
+  const [splashDone, setSplashDone] = useState(false);
 
   // A sign-up that got as far as "account created, email not yet verified" and
   // was then interrupted — a killed app, a lost connection. Clerk keeps it on
@@ -175,14 +184,23 @@ function RootLayoutNav() {
     }
   }, [isLoaded, isSignedIn, hasPendingSignUp, segments, router]);
 
-  // Hold the UI until Clerk resolves, so the first frame isn't the wrong
-  // screen followed by a visible redirect.
-  if (!isLoaded) {
-    return null;
-  }
+  // Hold the UI until Clerk resolves, so the first frame isn't the wrong screen
+  // followed by a visible redirect. This used to `return null` outright; now the
+  // splash covers that gap instead of a blank screen doing it, and `ready` below
+  // is what keeps the splash from lifting off one.
+  return (
+    <View style={styles.root}>
+      {isLoaded ? <RootStack /> : null}
+      {splashDone ? null : (
+        <AnimatedSplash ready={isLoaded} onFinish={() => setSplashDone(true)} />
+      )}
+    </View>
+  );
+}
 
-  // Always dark, and carrying VOLA's own ground rather than React
-  // Navigation's default near-black — the app has one palette.
+// Always dark, and carrying VOLA's own ground rather than React Navigation's
+// default near-black — the app has one palette.
+function RootStack() {
   return (
     <ThemeProvider value={volaNavTheme}>
       <Stack
@@ -225,3 +243,10 @@ function RootLayoutNav() {
     </ThemeProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  // The splash is absolutely positioned over this, and until Clerk resolves
+  // there is nothing else in it — so it carries the background itself rather
+  // than letting a white root show through for those frames.
+  root: { flex: 1, backgroundColor: vola.bg },
+});

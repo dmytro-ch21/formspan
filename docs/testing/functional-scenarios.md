@@ -2555,3 +2555,50 @@ conflict story.
 - Both endpoints reject an unauthenticated request with 401.
 - The content is identical for every user: there is nothing user-scoped here,
   and no endpoint takes a user id.
+
+## The opening animation (mobile)
+
+Covers `components/AnimatedSplash.tsx` and the splash handover in
+`app/_layout.tsx`.
+
+**Not a screen anyone navigates to**, so there is no route to drive — every
+scenario below starts from a cold launch, and the only exit is the animation
+finishing. The native splash is a bare `#080B12` field with no image (app.json),
+which is the half that makes the letter-by-letter reveal possible; a native
+splash carrying the finished wordmark would show the logo, hide it, then write
+it again.
+
+### The sequence (happy path)
+
+- Cold launch → a bare `#080B12` field, then **V, O, L, A** uncovered
+  left-to-right in that order, then the mark lands above the finished wordmark,
+  then the whole lockup fades and Today is underneath it.
+- The ground never changes shade across the handover — the native splash, the
+  animation and the app all sit on the same `#080B12`. A step in brightness at
+  any of the three joins is the bug this is most likely to regress into.
+- The assembled lockup matches `vola-stacked-color.svg` minus its tagline:
+  mark centred above, same gap, same relative sizes.
+
+### It must not lift onto a blank screen
+
+- Throttle the network so Clerk takes several seconds → the animation plays
+  once and then **holds** the finished lockup until the app is ready. It must
+  not fade out onto an empty screen and it must not loop or replay.
+- Ready before the animation ends (warm launch) → the animation still completes;
+  being ready early shortens nothing.
+- Signed out → the fade lands on **sign-in**, not on a flash of the tab bar.
+
+### Accessibility
+
+- With **Reduce Motion** on, the finished lockup is shown immediately and still
+  fades — nothing writes itself, nothing scales. The splash must not simply
+  disappear, and must not animate anyway.
+- A screen reader announces the splash once, as "VOLA" — not as its separate
+  images, and not once per letter.
+
+### Edge cases
+
+- Background the app mid-animation and return → it does not resume into a
+  half-written wordmark or strand the user on a splash that never lifts.
+- Launch on the smallest supported width → the 240pt wordmark still clears the
+  screen edges with margin.
