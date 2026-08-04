@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dmytro-ch21/vola/backend/internal/modules/technique"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/database"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -69,6 +70,32 @@ func seedEvidence(
 // techID keeps the fixtures readable; `id` is taken by the package.
 func techID(s string) *string { return &s }
 
+// seedTechnique inserts a library row for the FK to satisfy.
+//
+// These tests originally used real catalog ids and passed locally while
+// failing in CI: `cmd/seed` had been run against the local `vola_test` by hand
+// and CI only runs `cmd/migrate up`. The dependency was on ambient database
+// state, not on anything the test was asserting — so it is gone. A fixture
+// that needs a technique now brings its own.
+func seedTechnique(t *testing.T, pool *pgxpool.Pool, id, name, category, position string) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO techniques (id, name, category, position)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name,
+			category = EXCLUDED.category, position = EXCLUDED.position`,
+		id, name, category, position); err != nil {
+		t.Fatalf("seed technique %s: %v", id, err)
+	}
+	t.Cleanup(func() {
+		// After the tag cleanup (LIFO), or the FK blocks the delete.
+		if _, err := pool.Exec(ctx, `DELETE FROM techniques WHERE id = $1`, id); err != nil {
+			t.Logf("cleanup technique %s: %v", id, err)
+		}
+	})
+}
+
 type tag = struct {
 	event       string
 	techniqueID *string
@@ -80,10 +107,12 @@ func TestListProficiencyFoldsTheFunnelAcrossSessions(t *testing.T) {
 	ctx := context.Background()
 
 	// Two catalog techniques that certainly exist (the seed runs in CI).
-	const armbar = "americana-mount"
-	const triangle = "aoki-lock"
+	const armbar = "test-fixture-armbar"
+	const triangle = "test-fixture-triangle"
 	older := time.Now().Add(-72 * time.Hour).Truncate(time.Second).UTC()
 	newer := time.Now().Add(-24 * time.Hour).Truncate(time.Second).UTC()
+	seedTechnique(t, pool, armbar, "Americana from Mount", "Submission", "Mount - Top")
+	seedTechnique(t, pool, triangle, "Triangle from Guard", "Submission", "Guard - Bottom")
 
 	seedEvidence(t, pool, userID, "prof-s1", older, []tag{
 		{"drilled", techID(armbar), 1},
@@ -144,7 +173,7 @@ func TestListProficiencyFoldsTheFunnelAcrossSessions(t *testing.T) {
 	if a.Sessions != 2 {
 		t.Errorf("armbar sessions = %d, want 2 — counts are worth less from one class", a.Sessions)
 	}
-	if a.Name == armbar || a.Name == "" {
+	if a.Name != "Americana from Mount" {
 		t.Errorf("armbar name = %q — expected the library's name, so the join is doing something", a.Name)
 	}
 	// Note the id fallback for a missing name is NOT covered, and cannot be:
@@ -171,11 +200,13 @@ func TestListProficiencyIsScopedToTheCaller(t *testing.T) {
 		}
 	})
 
+	seedTechnique(t, pool, "test-fixture-armbar", "Americana from Mount", "Submission", "Mount - Top")
+	seedTechnique(t, pool, "test-fixture-triangle", "Triangle from Guard", "Submission", "Guard - Bottom")
 	seedEvidence(t, pool, other, "prof-other", time.Now(), []tag{
-		{"drilled", techID("americana-mount"), 9},
+		{"drilled", techID("test-fixture-armbar"), 9},
 	})
 	seedEvidence(t, pool, userID, "prof-mine", time.Now(), []tag{
-		{"drilled", techID("aoki-lock"), 1},
+		{"drilled", techID("test-fixture-triangle"), 1},
 	})
 
 	rows, err := repo.ListProficiency(ctx, userID)
@@ -183,7 +214,7 @@ func TestListProficiencyIsScopedToTheCaller(t *testing.T) {
 		t.Fatalf("list proficiency: %v", err)
 	}
 	for _, p := range rows {
-		if p.TechniqueID == "americana-mount" {
+		if p.TechniqueID == "test-fixture-armbar" {
 			t.Fatalf("another user's evidence leaked into this athlete's funnel: %+v", p)
 		}
 	}
@@ -201,9 +232,11 @@ func TestListProficiencyOrderIsTotalAndStable(t *testing.T) {
 	// the result deterministic. Postgres gives no stable order for equal sort
 	// keys, and an unstable order here would re-hash the response on every
 	// request, turning this endpoint's ETag into a permanent cache miss.
+	seedTechnique(t, pool, "test-fixture-armbar", "Americana from Mount", "Submission", "Mount - Top")
+	seedTechnique(t, pool, "test-fixture-triangle", "Triangle from Guard", "Submission", "Guard - Bottom")
 	seedEvidence(t, pool, userID, "prof-tie", time.Now(), []tag{
-		{"drilled", techID("aoki-lock"), 7},
-		{"drilled", techID("americana-mount"), 7},
+		{"drilled", techID("test-fixture-triangle"), 7},
+		{"drilled", techID("test-fixture-armbar"), 7},
 	})
 
 	order := func(rows []Proficiency) string {
@@ -222,7 +255,7 @@ func TestListProficiencyOrderIsTotalAndStable(t *testing.T) {
 	}
 	// Tied on evidence, so id ascending decides — inserted triangle-first, so
 	// this also proves the order is not simply insertion order.
-	if got := order(first); got != "americana-mount,aoki-lock," {
+	if got := order(first); got != "test-fixture-armbar,test-fixture-triangle," {
 		t.Errorf("tie not broken by technique_id ascending: %s", got)
 	}
 	for i := 0; i < 5; i++ {
@@ -316,35 +349,23 @@ func TestSummaryIsFoldedFromTheSameRowsTheClientSees(t *testing.T) {
 	}
 }
 
-func TestTheLibraryStaysUnderTheProficiencyCap(t *testing.T) {
-	// The version of the LIMIT guard that can actually fail.
+func TestTheShippedLibraryStaysUnderTheProficiencyCap(t *testing.T) {
+	// Reads the EMBEDDED catalog, not the database, so it runs everywhere —
+	// including CI, which only migrates and never seeds. The first version
+	// queried `techniques` and skipped when empty, which meant it skipped in
+	// exactly the place it most needed to run.
 	//
-	// maxProficiencyRows cannot bind while the catalog is smaller than it —
-	// the GROUP BY is on technique_id and the FK caps the distinct count at the
-	// library size. The comment on the const says so; this asserts it. Grow the
-	// library past 500 without raising the cap and the funnel starts truncating
-	// silently, with the summary folding from the truncated rows and
-	// under-reporting in step. No error, no pagination, nothing to notice.
-	databaseURL := os.Getenv("TEST_DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("TEST_DATABASE_URL not set, skipping Postgres integration test")
-	}
-	ctx := context.Background()
-	pool, err := database.NewPool(ctx, databaseURL)
+	// maxProficiencyRows cannot bind while the catalog is smaller than it: the
+	// GROUP BY is on technique_id and the FK caps the distinct count at the
+	// library size. Grow the library past the cap without raising it and the
+	// funnel truncates silently — no error, no pagination, and the summary
+	// folds from the truncated rows so it under-reports in step.
+	catalog, err := technique.SeedData()
 	if err != nil {
-		t.Fatalf("connect: %v", err)
+		t.Fatalf("read embedded catalog: %v", err)
 	}
-	t.Cleanup(func() { pool.Close() })
-
-	var n int
-	if err := pool.QueryRow(ctx, `SELECT count(*)::int FROM techniques`).Scan(&n); err != nil {
-		t.Fatalf("count techniques: %v", err)
-	}
-	if n == 0 {
-		t.Skip("catalog not seeded")
-	}
-	if n >= maxProficiencyRows {
-		t.Fatalf("the library holds %d techniques and maxProficiencyRows is %d — "+
-			"the funnel now truncates silently. Raise the cap.", n, maxProficiencyRows)
+	if len(catalog) >= maxProficiencyRows {
+		t.Fatalf("the shipped library holds %d techniques and maxProficiencyRows is %d — "+
+			"the funnel now truncates silently. Raise the cap.", len(catalog), maxProficiencyRows)
 	}
 }

@@ -6603,6 +6603,27 @@ technique make the endpoint fail with "integer out of range" — durable data, s
 it stays broken for that athlete until the sessions are deleted. Now capped at
 1000, which constrains only nonsense.
 
+### And then CI found the one thing four reviewers could not
+
+The integration tests used real catalog ids (`americana-mount`, `aoki-lock`)
+and passed locally while failing in CI on a foreign-key violation. The reason
+is embarrassing and worth recording: I had run `cmd/seed` against my local
+`vola_test` earlier in the session, by hand, for unrelated reasons. **CI only
+runs `cmd/migrate up`.** So the tests were depending on ambient database state
+that had nothing to do with what they were asserting, and the local green was
+an artifact of my own shell history.
+
+Every fixture now seeds the technique rows it needs. And the guard on the
+library size stopped querying the database at all — it reads the *embedded*
+catalog via `technique.SeedData()`, so it runs everywhere instead of skipping
+in precisely the environment it most needed to run in. That first version was a
+silently-skipping test, which is the failure `CLAUDE.md` already records about
+`TEST_DATABASE_URL` reproduced inside a single test.
+
+Verified the fix the only way that means anything: created a fresh database,
+ran `migrate up` and *not* `seed`, confirmed `count(*) FROM techniques` is 0,
+and ran the whole backend suite against it green.
+
 ### Gaps this leaves
 
 - **`conceded` has a bucket but still no column.** The "Used on you" filter
