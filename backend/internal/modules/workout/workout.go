@@ -140,6 +140,11 @@ type Repository interface {
 	Create(ctx context.Context, in NewWorkout) (*Workout, error)
 	// ReplaceItems swaps the whole ordered list, owner-only.
 	ReplaceItems(ctx context.Context, userID, workoutID string, items []Item) (*Workout, error)
+	// Rename changes a workout's name, owner-only. Separate from ReplaceItems
+	// rather than folded into one update: the two are edited from different
+	// places at different times, and a combined call would make renaming a
+	// template require sending its whole item list back.
+	Rename(ctx context.Context, userID, workoutID, name string) (*Workout, error)
 	// Delete removes a workout, owner-only.
 	Delete(ctx context.Context, userID, id string) error
 }

@@ -5,6 +5,7 @@ import {
   createLocalWorkout,
   pushSession,
   deleteLocalWorkout,
+  renameLocalWorkout,
   saveLocalWorkoutItems,
   syncSessions,
 } from '../sessionStore';
@@ -27,9 +28,11 @@ jest.mock('expo-crypto', () => ({ randomUUID: () => `w-${++mockUuid}` }));
 const mockCreate = jest.fn();
 const mockReplace = jest.fn();
 const mockDeleteW = jest.fn();
+const mockRename = jest.fn();
 jest.mock('../workouts', () => ({
   createWorkout: (...a: unknown[]) => mockCreate(...a),
   replaceItems: (...a: unknown[]) => mockReplace(...a),
+  renameWorkout: (...a: unknown[]) => mockRename(...a),
   deleteWorkout: (...a: unknown[]) => mockDeleteW(...a),
   listWorkouts: jest.fn(),
   getWorkout: jest.fn(),
@@ -79,7 +82,10 @@ beforeEach(async () => {
   db = await migratedFixture();
   mockFixture = db;
   order.length = 0;
-  [mockCreate, mockReplace, mockDeleteW, mockPushSets, mockStartSession].forEach((m) => m.mockReset());
+  [mockCreate, mockReplace, mockRename, mockDeleteW, mockPushSets, mockStartSession].forEach((m) =>
+    m.mockReset(),
+  );
+  mockRename.mockImplementation(async () => void order.push('workout:rename'));
   mockCreate.mockImplementation(async () => void order.push('workout:create'));
   mockReplace.mockImplementation(async () => void order.push('workout:items'));
   mockDeleteW.mockImplementation(async () => void order.push('workout:delete'));
@@ -345,5 +351,110 @@ describe('a local write that matched nothing', () => {
     // Tombstoned rows are excluded by `deleted_at IS NULL`, so this is the
     // realistic version: deleted on the web, reconciled away mid-edit.
     await expect(saveLocalWorkoutItems('u1', 'w1', [])).rejects.toThrow(/no longer exists/);
+  });
+});
+
+describe('renaming a workout', () => {
+  const cached = async () =>
+    cacheWorkouts('u1', [serverWorkout({ id: 'w1', name: 'Legs' })]);
+
+  it('pushes the new name, and stops being owed', async () => {
+    await cached();
+    await renameLocalWorkout('u1', 'w1', 'Maestro Push Day');
+
+    await syncSessions('u1', token);
+
+    expect(mockRename).toHaveBeenCalledTimes(1);
+    expect(mockRename.mock.calls[0][2]).toBe('Maestro Push Day');
+    expect(await countPendingWorkouts('u1')).toBe(0);
+  });
+
+  it('does NOT send the item list — the whole reason PATCH exists', async () => {
+    // The bug this replaced: `renameLocalWorkout` set `dirty` as well, and the
+    // push sent `replaceItems` unconditionally. So renaming re-uploaded
+    // `items_json` from the cache — and the cache can be stale, because the
+    // detail screen reads the server's copy into React state without writing it
+    // back. Add an exercise on the web, rename on the phone, and the phone's
+    // older list silently replaced the server's.
+    await cached();
+    await renameLocalWorkout('u1', 'w1', 'Renamed');
+
+    await syncSessions('u1', token);
+
+    expect(mockRename).toHaveBeenCalledTimes(1);
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+
+  it('replaces the items BEFORE renaming, when both are owed', async () => {
+    // Matches `pushRow` for sessions, whose order was settled by a real
+    // incident. A PERMANENTLY refused name sent first aborts the row before the
+    // items go out, and every retry replays the same doomed request — so the
+    // item edits never land at all. Sent last, a refused rename leaves the
+    // items delivered and the row dirty, which the next pass corrects.
+    await cached();
+    await renameLocalWorkout('u1', 'w1', 'Renamed');
+    await saveLocalWorkoutItems('u1', 'w1', []);
+
+    await syncSessions('u1', token);
+
+    expect(order.indexOf('workout:items')).toBeLessThan(order.indexOf('workout:rename'));
+  });
+
+  it('a rename still counts as pending, and still blocks the pull', async () => {
+    // `dirty` is no longer set by a rename, so every "is this row owed
+    // anything" query has to test `name_dirty` too. Miss one and the sync
+    // either never carries the rename, or reports zero pending while it does.
+    await cached();
+    await renameLocalWorkout('u1', 'w1', 'Renamed');
+    expect(await countPendingWorkouts('u1')).toBe(1);
+
+    // The pull must not overwrite the unsynced name with the server's old one.
+    await cacheWorkouts('u1', [serverWorkout({ id: 'w1', name: 'Legs' })]);
+    expect((await cachedWorkouts('u1'))[0].name).toBe('Renamed');
+  });
+
+  it('a workout created AND renamed offline sends the name once, not twice', async () => {
+    // The create already carries the new name, so a PATCH behind it re-sends
+    // the same string. Sessions guard this with `wasRemote`.
+    const w = await createLocalWorkout('u1', {
+      name: 'Push day', sport: 'strength', goal: null, visibility: 'private',
+    });
+    await renameLocalWorkout('u1', w.id, 'Pull day');
+
+    await syncSessions('u1', token);
+
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+    expect(mockCreate.mock.calls[0][1]).toMatchObject({ name: 'Pull day' });
+    expect(mockRename).not.toHaveBeenCalled();
+  });
+
+  it('does NOT PATCH the name for an ordinary item edit', async () => {
+    // One flag for both would make every debounced item write also send the
+    // name — the extra request per keystroke that `local_sessions` already
+    // learned to avoid on the hottest write path in the app.
+    await cached();
+    await saveLocalWorkoutItems('u1', 'w1', []);
+
+    await syncSessions('u1', token);
+
+    expect(mockReplace).toHaveBeenCalledTimes(1);
+    expect(mockRename).not.toHaveBeenCalled();
+  });
+
+  it('refuses a blank name rather than queueing one the server will reject', async () => {
+    await cached();
+    expect(await renameLocalWorkout('u1', 'w1', '   ')).toBe(false);
+
+    await syncSessions('u1', token);
+
+    expect(mockRename).not.toHaveBeenCalled();
+    // And the row is untouched, not left dirty with a name it cannot send.
+    expect((await cachedWorkouts('u1'))[0].name).toBe('Legs');
+  });
+
+  it('trims, so the stored name matches what the server will store', async () => {
+    await cached();
+    await renameLocalWorkout('u1', 'w1', '  Legs B  ');
+    expect((await cachedWorkouts('u1'))[0].name).toBe('Legs B');
   });
 });

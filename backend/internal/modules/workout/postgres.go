@@ -382,6 +382,41 @@ func requireOwner(ctx context.Context, tx pgx.Tx, userID, workoutID string) (Spo
 	return "", ErrForbidden
 }
 
+// Rename changes a template's name and nothing else.
+//
+// The name was fixed at creation until this existed: `PUT /items` replaces the
+// item list, `DELETE` removes the whole template, and there was no third verb —
+// so a template named in a hurry on the gym floor stayed that way, and the only
+// way to correct it was to rebuild it and lose every plan pointing at it.
+func (r *PostgresRepository) Rename(ctx context.Context, userID, workoutID, name string) (*Workout, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("workout: begin: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op once Commit succeeds
+
+	// The same ownership gate ReplaceItems uses, and load-bearing for the same
+	// reason: ids are client-supplied here, so without it any id you can guess
+	// is renameable. `requireOwner` also refuses a public template you can see
+	// but do not own, with ErrForbidden rather than ErrNotFound.
+	if _, err := requireOwner(ctx, tx, userID, workoutID); err != nil {
+		return nil, err
+	}
+	// No owner predicate here, and that is safe ONLY because `requireOwner`
+	// above holds `SELECT ... FOR UPDATE` on this row for the rest of the
+	// transaction. Move the gate outside the tx, or swap it for a non-locking
+	// read, and this silently becomes a race with nothing failing.
+	if _, err := tx.Exec(ctx,
+		`UPDATE workouts SET name = $2, updated_at = now() WHERE id = $1`,
+		workoutID, name); err != nil {
+		return nil, translatePgError(fmt.Errorf("workout: rename: %w", err))
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("workout: commit: %w", err)
+	}
+	return r.Get(ctx, userID, workoutID)
+}
+
 func (r *PostgresRepository) ReplaceItems(ctx context.Context, userID, workoutID string, items []Item) (*Workout, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {

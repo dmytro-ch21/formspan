@@ -15,6 +15,7 @@ import {
   getWorkout,
   listExercises,
   pickImage,
+  renameWorkout,
   replaceItems,
   setsFromWorkout,
   startSession,
@@ -66,6 +67,9 @@ export default function WorkoutEditorPage({
   const [saving, setSaving] = useState(false);
   const [savedOnce, setSavedOnce] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [draftName, setDraftName] = useState("");
+  const renameButtonRef = useRef<HTMLButtonElement | null>(null);
   const { units } = useUnits();
   const abortRef = useRef<AbortController | null>(null);
 
@@ -73,6 +77,44 @@ export default function WorkoutEditorPage({
     workout !== null &&
     workout.owner_user_id !== null &&
     workout.owner_user_id === userId;
+
+  /**
+   * Commit the name, or quietly abandon a blank one.
+   *
+   * Kept apart from `save()`, which is item-shaped and only lights up when the
+   * item list differs — a rename leaves that comparison equal, so a combined
+   * flow would need one button live for two unrelated reasons. The API keeps
+   * the two verbs apart for the same reason.
+   *
+   * Unlike mobile there is no local-first write here: the web app has no
+   * offline store, so the server IS the save. That is also why the failure
+   * path restores the old name rather than leaving the new one on screen —
+   * showing a rename the server refused is the lie the mobile outbox exists
+   * to avoid.
+   */
+  async function commitRename() {
+    if (!workout) return;
+    const next = draftName.trim();
+    setRenaming(false);
+    // The input unmounts here, and without this focus lands on <body> — a
+    // keyboard user editing the title would have to tab from the top of the
+    // document to get back to it (WCAG 2.4.3). Deferred a frame so the button
+    // it targets exists.
+    requestAnimationFrame(() => renameButtonRef.current?.focus());
+    if (next === "" || next === workout.name) return;
+    const previous = workout.name;
+    setWorkout((w) => (w ? { ...w, name: next } : w));
+    try {
+      const updated = await renameWorkout(getToken, workout.id, next);
+      setWorkout(updated);
+      setError(null);
+    } catch (err) {
+      setWorkout((w) => (w ? { ...w, name: previous } : w));
+      setError(
+        `Couldn't rename: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
 
   const dirty = useMemo(
     () =>
@@ -241,8 +283,53 @@ export default function WorkoutEditorPage({
           >
             ← Workouts
           </Link>
+          {/*
+            The heading is the control when the workout is yours. A template
+            named in a hurry had no correction short of rebuilding it, which
+            loses every plan pointing at the old id.
+
+            It stays an `h1` in both states — swapping the heading for a bare
+            input on edit would take the page's only level-1 landmark away from
+            a screen reader mid-task.
+          */}
           <h1 className="mt-1 font-display text-4xl font-bold">
-            {workout.name}
+            {renaming ? (
+              <input
+                autoFocus
+                value={draftName}
+                onChange={(e) => setDraftName(e.target.value)}
+                onBlur={commitRename}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") commitRename();
+                  // Escape abandons rather than commits — the one way out
+                  // that does not write, which a blur-to-save field otherwise
+                  // does not offer.
+                  if (e.key === "Escape") setRenaming(false);
+                }}
+                // Matches the server's maxNameLen, so the field cannot hold
+                // something that is a guaranteed 400.
+                maxLength={120}
+                aria-label="Workout name"
+                className="w-full border-b border-line bg-transparent font-display text-4xl font-bold outline-none focus:border-lime"
+                data-testid="workout-name-input"
+              />
+            ) : canEdit ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setDraftName(workout.name);
+                  setRenaming(true);
+                }}
+                ref={renameButtonRef}
+                className="rounded text-left hover:text-text-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lime"
+                aria-label={`${workout.name}. Rename this workout`}
+                data-testid="workout-rename"
+              >
+                {workout.name}
+              </button>
+            ) : (
+              workout.name
+            )}
           </h1>
           <p className="mt-1 text-sm capitalize text-text-muted">
             {workout.sport}
