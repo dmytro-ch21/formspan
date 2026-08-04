@@ -8873,15 +8873,48 @@ all red — including reverting the ladder, which is the specific thing a future
 
 Verified on the Simulator against the real session, before and after.
 
+### What review caught, which was two new defects for one old one
+
+Both on the exact row the report was about:
+
+1. **The colon became a unit.** `FIGURES` treated `.` and `,` as inside-figure
+   but not `:`, so `2:39` rendered as two full-size figures either side of a
+   muted 14pt colon — and `1:23:45` did it twice. Worse than what it replaced.
+   The colon is now in the character class for the same reason the comma is:
+   a clock is one quantity.
+
+2. **The ladder was tuned for thirds and this row is quarters.** Measured, a
+   quarter-width slot has ~60pt of content against a third's ~90pt, and
+   `1:23:45`, `251.1t` and `12,450lb` all overflowed it at the three-column
+   sizes — `numberOfLines={1}` would have tail-truncated them. So the fix would
+   have swapped one truncation for another.
+
+   `StatRow` now tells its children how many they are; `fitSize` drops a rung at
+   four or more, and the slot gives back 12pt of horizontal padding. Verified by
+   forcing the worst realistic case — a 1h23 session, imperial, five-figure
+   volume — onto the Simulator and looking at it, rather than predicting it.
+
+The same review also found that `StatRow`'s `Array.isArray(children)` renders an
+empty slot for a SINGLE falsy child, which is exactly the shape the session's
+`{finished && <Stat/>}` gate has. It happened not to bite (four children, so the
+array branch), but it is now `Children.toArray` and there is a test.
+
 ### Gaps this leaves
 
-- **Two more private `Stat` copies remain**: `app/bjj/session/[id].tsx` and
-  `app/exercise/[id].tsx` each have their own. Neither was reported and neither
-  is obviously broken, but they are the same latent drift. Converge them when
-  one of them next gets touched.
-- **Not seen at a long volume on a device.** The ladder is unit-tested at
-  `553.7k lb`, and the screenshots were taken at 480kg because that is the data
-  on hand. Nobody has looked at a five-figure session in pounds.
+- **One more private `Stat` copy is worth converging**: `app/exercise/[id].tsx`
+  is the same shape and a near drop-in, but it is not broken — its values are
+  short, its column is ~96pt, and it has no `numberOfLines`, so a long value
+  wraps rather than clips. Cleanup, not a fix.
+  `app/bjj/session/[id].tsx` has a `Stat` too and it is **not** the same
+  component: its second prop is a prose caption ("min on the mat", "moderate"),
+  which `Stat` would uppercase with letter-spacing. Leaving it is correct.
+- **Still only seen on the Simulator, and only at values I forced.** The worst
+  case was rendered by hardcoding it, not by training for 83 minutes; real
+  device metrics (SF Pro Text vs the Core Text the review measured with) and
+  larger Dynamic Type settings are unverified.
+- **A row can still show three different sizes.** The ladder is per-stat, so a
+  long Time and a short Sets shrink independently. Harmonising would mean
+  `StatRow` taking the minimum across its children — a bigger change than this.
 - **The Today week-summary row and this one now share a component but not a
   size** — Today renders at the component default, this at 22. Deliberate (the
   session header is denser) but it is a number in two places.

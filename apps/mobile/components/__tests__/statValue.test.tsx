@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
 
-import { Stat, StatValue } from '../ui/Stat';
+import { Stat, StatRow, StatValue } from '../ui/Stat';
 
 /**
  * The figure/unit split, and the size ladder that keeps a long one in its
@@ -96,5 +96,69 @@ describe('Stat', () => {
     // stops with nothing connecting them.
     render(<Stat label="Volume" value="480kg" />);
     expect(screen.getByLabelText('480kg Volume')).toBeTruthy();
+  });
+});
+
+describe('the values the session summary actually shows', () => {
+  it('keeps a clock together', () => {
+    // `2:39` is one quantity. Split on the colon it rendered as two full-size
+    // figures either side of a muted 14pt `:` — worse than the problem this
+    // component was brought in to fix, and `1:23:45` did it twice.
+    for (const clock of ['2:39', '1:23:45']) {
+      const t = tree(<StatValue value={clock} size={22} />);
+      expect(strings(t)).toEqual([clock]);
+      expect(nested(t)).toHaveLength(0);
+    }
+  });
+
+  it('shrinks harder in a four-column row than a three', () => {
+    // The ladder was tuned for thirds (~90pt of content); the session summary
+    // is quarters (~60pt). `1:23:45`, `251.1t` and `12,450lb` all overflowed a
+    // quarter at the three-column sizes.
+    for (const value of ['1:23:45', '251.1t', '12,450lb', '553.7k lb']) {
+      const three = fontSize(tree(<StatValue value={value} size={22} fit slots={3} />))!;
+      const four = fontSize(tree(<StatValue value={value} size={22} fit slots={4} />))!;
+      expect(four).toBeLessThanOrEqual(three);
+    }
+    // ...and at least one of them genuinely moves, or the rung shift is inert.
+    expect(fontSize(tree(<StatValue value="251.1t" size={22} fit slots={4} />))!).toBeLessThan(
+      fontSize(tree(<StatValue value="251.1t" size={22} fit slots={3} />))!,
+    );
+  });
+
+  it('never shrinks below two-thirds, however long the value', () => {
+    // A floor, so a pathological string cannot render as unreadable specks.
+    const smallest = fontSize(tree(<StatValue value="1,234,567,890kg" size={22} fit slots={4} />))!;
+    expect(smallest).toBeGreaterThanOrEqual(Math.round(22 * 0.62));
+  });
+});
+
+describe('StatRow', () => {
+  it('does not render an empty slot for a single falsy child', () => {
+    // `<StatRow>{finished && <Stat/>}</StatRow>` is not an array, so the old
+    // Array.isArray form fell through to `[children]` and rendered one empty
+    // column. The session summary gates its Volume stat exactly this way.
+    const t = tree(<StatRow>{false}</StatRow>);
+    expect(nested(t)).toHaveLength(0);
+  });
+
+  it('tells its children how many columns they are sharing', () => {
+    // Four stats must shrink on the four-column ladder without every call site
+    // having to pass the count itself.
+    // Measured FIRST: `tree` unmounts, which would tear down the row's screen.
+    const solo = fontSize(tree(<StatValue value="251.1t" size={22} fit slots={3} />))!;
+
+    render(
+      <StatRow>
+        <Stat label="Time" value="1:23:45" size={22} fit />
+        <Stat label="Sets" value="12" size={22} fit />
+        <Stat label="Reps" value="96" size={22} fit />
+        <Stat label="Volume" value="251.1t" size={22} fit />
+      </StatRow>,
+    );
+    const inRow = StyleSheet.flatten(
+      screen.getByText('251.1t').props.style as never,
+    ) as { fontSize?: number };
+    expect(inRow.fontSize).toBeLessThan(solo);
   });
 });

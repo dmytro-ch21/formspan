@@ -3695,6 +3695,16 @@ Covers `components/BjjRankHeader.tsx`, `components/TrainingSummary.tsx`,
   magnitude longer than kilos (`553.7k lb`), and a row where one stat is smaller
   than its neighbours is the reported "truncates and looks ugly". Assert both
   directions, or a ladder that always shrinks passes.
+- **A clock is one figure.** `2:39` and `1:23:45` must not split on the colon —
+  that renders a muted 14pt `:` between full-size digits, which is worse than
+  the problem the component exists to fix. Same class as the comma.
+- **The ladder depends on how many stats share the row.** Four columns are ~a
+  third narrower than three, so the same value has to shrink further; assert a
+  four-column value comes out smaller than the same value at three, and that at
+  least one real case actually moves.
+- **A single falsy child renders no slot.** `<StatRow>{finished && <Stat/>}</StatRow>`
+  is not an array, so an `Array.isArray` check falls through and renders one
+  empty column.
 - **The em dash is not a unit.** A missing figure holds a number's worth of
   space at full size rather than collapsing the column.
 - Each stat announces as `"<value> <label>"` — ungrouped, VoiceOver reads the
