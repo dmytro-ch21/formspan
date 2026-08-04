@@ -8919,6 +8919,113 @@ array branch), but it is now `Children.toArray` and there is a test.
   size** — Today renders at the component default, this at 22. Deliberate (the
   session header is denser) but it is a number in two places.
 
+## 2026-08-04 — Exercises get the write path, and the export grows a second catalog
+
+"Add a technique or exercise for any module" was the original ask; techniques
+were half of it. `/v1/admin/exercises` and `/content/exercises` are the other
+half, and the export now carries both libraries.
+
+### Mirrored deliberately, not abstracted
+
+The exercise module's `content.go` / `content_postgres.go` / `content_handler.go`
+are the technique module's, adapted. Every hard-won property came across
+intact: pointer-per-field so PATCH is genuinely partial, `source = 'admin'` in
+the UPDATE's WHERE rather than a check in Go, the id derived once and never
+moved, `[]`-never-null guaranteed in the handler, the seeded-row refusal that
+explains itself.
+
+Not extracted into a shared generic. The two catalogs have different columns,
+different vocabularies and different nullability rules — techniques need
+`NULLIF` on three columns where empty is a distinct fact from absent, exercises
+have none — so the shared part would have been the comments.
+
+### The field that a plain bool cannot express
+
+`is_unilateral` is the reason the pointer-per-field rule is load-bearing here
+and not just inherited discipline: a plain `bool` cannot distinguish "not sent"
+from "false", so a form posting one edited field would silently flip every
+unilateral exercise to bilateral. There is a test for exactly that, and it goes
+red if the pointer is removed.
+
+### Media, and why an admin write cannot touch it
+
+Media lives in `exercise_media`, keyed by exercise id, and the write path does
+not name it — not in the request type, not in the UPDATE, not in the export's
+read. That is what makes authoring safe without an upload path: an exercise
+created here simply has none, and a later deploy can attach some without the
+console knowing or being able to clear it.
+
+The export needed one rule for this that techniques did not: `media` is the
+FILE's, not the database's. `AdminAuthored` does not select it, so every
+exported exercise carries `"media": []` — and re-exporting an exercise a deploy
+had given media to would otherwise reset it, deleting the only record of an
+asset still sitting in the bucket. `mergeInto` now takes a `preserve` list, and
+the exercise catalog passes `media`.
+
+### The trap the exercise catalog had and techniques did not
+
+`techniques.json` is generated from a spreadsheet **and merges
+`techniques.additions.json`**. `exercises.json` was generated from its
+spreadsheet and merged nothing. So shipping the write path alone would have
+meant every authored exercise was deleted by the next exercise re-import —
+silently, because the sheet is a full replacement rather than a patch.
+
+That is the same class of bug the export PR existed to fix, one catalog over.
+`exercises.additions.json` now exists and
+`scripts/import-exercise-catalog.py` merges it, refusing ids that collide with
+the sheet exactly as the technique path does.
+
+### The export became catalog-shaped
+
+`cmd/exportcontent` was technique-specific throughout. It now runs over a
+`catalog` — two files, the rendered rows, the keys the file owns, and a
+validator — with both libraries going through the same `run()`. One
+implementation because the invariant is the same and it is the invariant that
+is easy to get wrong: content in only one of the two files is lost, by the
+deploy not carrying it or by the next re-import deleting it.
+
+`validate` is a field on the catalog and runs INSIDE `run()`. It was briefly
+moved up into `main()` while generalising, which would have repeated this
+command's own history — main() has no test, and that is precisely how the
+two-file invariant shipped broken here once, invisible to its own suite. A
+catalog with no validator is refused rather than written unchecked.
+
+### Verified end to end
+
+Console → Postgres (`source=admin`) → `cmd/exportcontent` → a one-entry,
+19-line diff on `exercises.json` in the file's own key order → `cmd/seed` loads
+it (505 upserted). Editing `movement_pattern` alone left the other ten columns
+untouched, `is_unilateral` included. A seeded id renders the explanation rather
+than a form. "Zercher Squat" was refused as already taken, which was correct —
+it is in the shipped catalog, and the refusal is what stopped a duplicate id.
+
+Ten mutations run against the backend, all red — including one that only a real
+database could catch: deleting `AND source = 'admin'` from the UPDATE left the
+entire handler suite green, because the fake repository implements its own
+ownership check.
+
+### Gaps this leaves
+
+- **Still no delete, in either catalog.** An exercise authored with a typo in
+  the name is a dead id that can only be edited. Deliberate — the id is a
+  foreign key in workout items and logged sets, so removing one is a data
+  question rather than a CRUD gap — but the answer is currently "ask a
+  developer".
+- **No media upload.** The console can say an exercise has assets and cannot
+  add, replace or remove them.
+- **`movement_pattern` is a guess the console cannot check.** The dropdown is
+  the right sixteen, but nothing tells an operator that "isolation" is the
+  honest bucket for a single-joint movement rather than the nearest big lift.
+  Filing it wrong renders perfectly and is invisible to every cross-sport rule.
+- **Muscle and equipment names are free text.** They are what the library's
+  filters group on, so a new spelling makes its own bucket of one. The catalog
+  has 63 distinct muscles and 33 equipment values; neither is offered as a
+  vocabulary because neither is closed.
+- **The exercise importer merge is unrun.** The Go side is verified end to end,
+  but `scripts/import-exercise-catalog.py` needs the spreadsheet, so the merge
+  block is reasoned-and-mirrored rather than executed.
+
+
 
 ## Open items / known gaps as of this entry
 

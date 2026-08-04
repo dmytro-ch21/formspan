@@ -1,0 +1,113 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+
+import { assertAdmin } from "@/lib/admin";
+import {
+  ApiError,
+  createExercise,
+  updateExercise,
+  type ExerciseWrite,
+} from "@/lib/api";
+import type { SaveResult } from "./actions";
+
+type ExerciseResult = SaveResult<ExerciseWrite>;
+
+/**
+ * The exercise half of the write path. Same shape as `actions.ts`, and
+ * separate rather than generic because the two bodies share no fields — a
+ * `bodyFrom` that handled both would be a switch pretending to be a function.
+ *
+ * These are their own endpoints and check `assertAdmin` themselves. A server
+ * action is a POST the router exposes independently of the page it was declared
+ * beside, so neither `proxy.ts` nor the layout protects it.
+ */
+
+function lines(value: FormDataEntryValue | null): string[] {
+  return String(value ?? "")
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function text(value: FormDataEntryValue | null): string {
+  return String(value ?? "").trim();
+}
+
+/**
+ * The whole form, every field, on every save.
+ *
+ * `media` is deliberately absent — the request type has no such field, which is
+ * what guarantees an edit cannot clear media a deploy added. `is_unilateral` is
+ * read from the checkbox's presence: an unchecked box sends nothing, so `false`
+ * is the honest reading here, and the API's pointer-typed field means an
+ * explicit `false` is still distinguishable from an omitted one.
+ */
+function bodyFrom(form: FormData): ExerciseWrite {
+  return {
+    name: text(form.get("name")),
+    sport: text(form.get("sport")),
+    movement_pattern: text(form.get("movement_pattern")),
+    movement_pattern_detail: text(form.get("movement_pattern_detail")),
+    primary_muscles: lines(form.get("primary_muscles")),
+    secondary_muscles: lines(form.get("secondary_muscles")),
+    equipment: lines(form.get("equipment")),
+    load_type: text(form.get("load_type")),
+    is_unilateral: form.get("is_unilateral") === "on",
+    instructions: text(form.get("instructions")),
+  };
+}
+
+function explain(err: unknown): string {
+  console.error("admin: exercise write failed", err);
+  if (err instanceof ApiError) {
+    if (err.status === 401 || err.status === 403) {
+      return "The API rejected this account. Check ADMIN_USER_IDS matches on both sides.";
+    }
+    return err.detail || `The API responded ${err.status}.`;
+  }
+  if (err instanceof Error && err.message === "Not authorized.") {
+    return "Not authorized.";
+  }
+  return "Could not reach the API. Is it running?";
+}
+
+export async function createExerciseAction(
+  prev: ExerciseResult,
+  form: FormData,
+): Promise<ExerciseResult> {
+  try {
+    await assertAdmin();
+    const saved = await createExercise(bodyFrom(form));
+    revalidatePath("/content/exercises");
+    return { status: "ok", id: saved.id, name: saved.name };
+  } catch (err) {
+    return {
+      status: "error",
+      message: explain(err),
+      values: bodyFrom(form),
+      attempt: (prev.status === "error" ? prev.attempt : 0) + 1,
+    };
+  }
+}
+
+export async function updateExerciseAction(
+  id: string,
+  prev: ExerciseResult,
+  form: FormData,
+): Promise<ExerciseResult> {
+  try {
+    await assertAdmin();
+    const saved = await updateExercise(id, bodyFrom(form));
+    revalidatePath("/content/exercises");
+    revalidatePath(`/content/exercises/${id}`);
+    return { status: "ok", id: saved.id, name: saved.name };
+  } catch (err) {
+    return {
+      status: "error",
+      message: explain(err),
+      values: bodyFrom(form),
+      attempt: (prev.status === "error" ? prev.attempt : 0) + 1,
+    };
+  }
+}

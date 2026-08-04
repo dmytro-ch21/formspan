@@ -489,6 +489,21 @@ def main() -> None:
     # file the author might not even have to hand.
     if sys.argv[1] != "-":
         ex = convert_exercises(Path(sys.argv[1]))
+        # Exercises authored in the admin console rather than the spreadsheet.
+        # Merged here so re-importing the sheet cannot silently delete them —
+        # which it would, since the sheet is a full replacement rather than a
+        # patch. Same rule as the technique additions below; without it, the
+        # console's whole write path is content with a deploy-shaped expiry
+        # date.
+        extra_path = root / "backend/internal/modules/exercise/exercises.additions.json"
+        if extra_path.exists():
+            extra = json.loads(extra_path.read_text())
+            known = {x["id"] for x in ex}
+            dupes = [x["id"] for x in extra if x["id"] in known]
+            if dupes:
+                sys.exit(f"exercise additions collide with sheet ids: {dupes}")
+            ex.extend(extra)
+            print(f"exercise additions: {len(extra)} merged")
         dest = root / "backend/internal/modules/exercise/exercises.generated.json"
         dest.write_text(json.dumps(ex, indent=2, ensure_ascii=False) + "\n")
         print(f"exercises: {len(ex)} -> {dest.relative_to(root)}")

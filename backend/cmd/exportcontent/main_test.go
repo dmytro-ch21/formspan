@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dmytro-ch21/vola/backend/internal/modules/exercise"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/technique"
 )
 
@@ -101,7 +103,7 @@ func TestAnExportedEntryCanActuallyBeSeeded(t *testing.T) {
 		// every slice nil, every optional string empty — the shape the console
 		// produces for a technique someone typed a name into and saved.
 	}
-	raw, err := json.Marshal([]entry{entryOf(bare)})
+	raw, err := json.Marshal([]entry{techniqueEntryOf(bare)})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
@@ -134,7 +136,7 @@ func TestAnExportedEntryCanActuallyBeSeeded(t *testing.T) {
 // entries and absent means "not recorded", which migration 000029 is explicit
 // is a different fact from any value. Writing "" would be a lie.
 func TestTheTwoOptionalKeysAreOmittedWhenEmpty(t *testing.T) {
-	e := entryOf(technique.Technique{ID: "x", Name: "X"})
+	e := techniqueEntryOf(technique.Technique{ID: "x", Name: "X"})
 	keys := map[string]bool{}
 	for _, p := range e {
 		keys[p.Key] = true
@@ -145,7 +147,7 @@ func TestTheTwoOptionalKeysAreOmittedWhenEmpty(t *testing.T) {
 		}
 	}
 	// ...and present when they carry a value.
-	e = entryOf(technique.Technique{ID: "x", Name: "X", Function: "advance", ToPosition: "Mount - Top"})
+	e = techniqueEntryOf(technique.Technique{ID: "x", Name: "X", Function: "advance", ToPosition: "Mount - Top"})
 	keys = map[string]bool{}
 	for _, p := range e {
 		keys[p.Key] = true
@@ -158,13 +160,13 @@ func TestTheTwoOptionalKeysAreOmittedWhenEmpty(t *testing.T) {
 }
 
 func TestEntryKeysAreWrittenInTheFilesOwnOrder(t *testing.T) {
-	got := entryOf(technique.Technique{ID: "x", Name: "X", Function: "advance", ToPosition: "Mount - Top"})
+	got := techniqueEntryOf(technique.Technique{ID: "x", Name: "X", Function: "advance", ToPosition: "Mount - Top"})
 	var gotKeys []string
 	for _, p := range got {
 		gotKeys = append(gotKeys, p.Key)
 	}
-	if strings.Join(gotKeys, ",") != strings.Join(keyOrder, ",") {
-		t.Errorf("key order:\n  got:  %v\n  want: %v", gotKeys, keyOrder)
+	if strings.Join(gotKeys, ",") != strings.Join(techniqueKeyOrder, ",") {
+		t.Errorf("key order:\n  got:  %v\n  want: %v", gotKeys, techniqueKeyOrder)
 	}
 }
 
@@ -175,8 +177,8 @@ func TestEntryKeysAreWrittenInTheFilesOwnOrder(t *testing.T) {
 // that omits them is what pinned the wrong order in place: the first version
 // appended both to the end, and this test enforced it.
 func TestKeyOrderMatchesEveryEntryInTheShippedCatalog(t *testing.T) {
-	rank := make(map[string]int, len(keyOrder))
-	for i, k := range keyOrder {
+	rank := make(map[string]int, len(techniqueKeyOrder))
+	for i, k := range techniqueKeyOrder {
 		rank[k] = i
 	}
 	for _, path := range []string{seedFile, additionsFile} {
@@ -190,12 +192,12 @@ func TestKeyOrderMatchesEveryEntryInTheShippedCatalog(t *testing.T) {
 			for _, p := range e {
 				r, known := rank[p.Key]
 				if !known {
-					t.Errorf("%s: %s has key %q that keyOrder does not list",
+					t.Errorf("%s: %s has key %q that techniqueKeyOrder does not list",
 						filepath.Base(path), e.id(), p.Key)
 					continue
 				}
 				if r < last {
-					t.Errorf("%s: %s writes %q after %q, but keyOrder has them the other way",
+					t.Errorf("%s: %s writes %q after %q, but techniqueKeyOrder has them the other way",
 						filepath.Base(path), e.id(), p.Key, lastKey)
 				}
 				last, lastKey = r, p.Key
@@ -237,15 +239,15 @@ func TestTheTwoOptionalKeysSitWhereTheCatalogPutsThem(t *testing.T) {
 	} {
 		if seen[want] < 100 {
 			t.Fatalf("expected %q to be the dominant placement, saw it %d times "+
-				"— the catalog changed and keyOrder needs to follow", want, seen[want])
+				"— the catalog changed and techniqueKeyOrder needs to follow", want, seen[want])
 		}
 	}
-	// And keyOrder agrees with it.
-	if indexOf(keyOrder, "function") != indexOf(keyOrder, "category")+1 {
-		t.Errorf("keyOrder puts %q after category, want immediately after", keyOrder[indexOf(keyOrder, "category")+1])
+	// And techniqueKeyOrder agrees with it.
+	if indexOf(techniqueKeyOrder, "function") != indexOf(techniqueKeyOrder, "category")+1 {
+		t.Errorf("techniqueKeyOrder puts %q after category, want immediately after", techniqueKeyOrder[indexOf(techniqueKeyOrder, "category")+1])
 	}
-	if indexOf(keyOrder, "to_position") != indexOf(keyOrder, "position_detail")+1 {
-		t.Errorf("keyOrder does not put to_position immediately after position_detail: %v", keyOrder)
+	if indexOf(techniqueKeyOrder, "to_position") != indexOf(techniqueKeyOrder, "position_detail")+1 {
+		t.Errorf("techniqueKeyOrder does not put to_position immediately after position_detail: %v", techniqueKeyOrder)
 	}
 }
 
@@ -265,9 +267,9 @@ func indexOf(xs []string, want string) int {
 // and diverge from what the Python importer writes for the same content.
 func TestAmpersandsSurviveUnescaped(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "additions.json")
-	merged, _, _, err := mergeInto(path, []technique.Technique{
+	merged, _, _, err := mergeInto(path, mapEntries([]technique.Technique{
 		{ID: "x", Name: "Over-Under & Double Under", Description: "a < b > c"},
-	})
+	}, techniqueEntryOf))
 	if err != nil {
 		t.Fatalf("merge: %v", err)
 	}
@@ -296,9 +298,9 @@ func TestMergeKeepsHandAuthoredEntries(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "additions.json")
 	write(t, path, `[{"id":"hand-written","name":"By Hand","category":"Escape"}]`)
 
-	merged, added, updated, err := mergeInto(path, []technique.Technique{
+	merged, added, updated, err := mergeInto(path, mapEntries([]technique.Technique{
 		{ID: "from-console", Name: "From Console", Category: "Pass"},
-	})
+	}, techniqueEntryOf))
 	if err != nil {
 		t.Fatalf("merge: %v", err)
 	}
@@ -359,7 +361,7 @@ func TestAnUnsortedFileKeepsItsOrder(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "techniques.json")
 	write(t, path, `[{"id":"zebra","name":"Z"},{"id":"alpha","name":"A"}]`)
 
-	merged, _, _, err := mergeInto(path, []technique.Technique{{ID: "middle", Name: "M"}})
+	merged, _, _, err := mergeInto(path, mapEntries([]technique.Technique{{ID: "middle", Name: "M"}}, techniqueEntryOf))
 	if err != nil {
 		t.Fatalf("merge: %v", err)
 	}
@@ -374,9 +376,9 @@ func TestExportUpdatesAnEntryItPreviouslyWrote(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "additions.json")
 	write(t, path, `[{"id":"x","name":"Old Name","category":"Pass"}]`)
 
-	merged, added, updated, err := mergeInto(path, []technique.Technique{
+	merged, added, updated, err := mergeInto(path, mapEntries([]technique.Technique{
 		{ID: "x", Name: "New Name", Category: "Pass"},
-	})
+	}, techniqueEntryOf))
 	if err != nil {
 		t.Fatalf("merge: %v", err)
 	}
@@ -400,7 +402,7 @@ func TestRefusesAnIDTheSpreadsheetOwnsButNotOneOfOurOwn(t *testing.T) {
 	write(t, seed, `[{"id":"from-sheet","name":"Sheet"},{"id":"ours","name":"Ours"}]`)
 	write(t, additions, `[{"id":"ours","name":"Ours"}]`)
 
-	err := refuseSheetOwned(seed, additions, []technique.Technique{{ID: "from-sheet", Name: "Clash"}})
+	err := refuseSheetOwned(seed, additions, []string{"from-sheet"})
 	if err == nil {
 		t.Fatal("exporting a spreadsheet-owned id was allowed — the next import would revert it")
 	}
@@ -410,11 +412,11 @@ func TestRefusesAnIDTheSpreadsheetOwnsButNotOneOfOurOwn(t *testing.T) {
 
 	// An id in BOTH files is ours, already promoted once. Re-exporting it is the
 	// normal update path and must be allowed.
-	if err := refuseSheetOwned(seed, additions, []technique.Technique{{ID: "ours", Name: "Edited"}}); err != nil {
+	if err := refuseSheetOwned(seed, additions, []string{"ours"}); err != nil {
 		t.Errorf("re-exporting our own previously-promoted id was refused: %v", err)
 	}
 	// ...and a genuinely new id is fine.
-	if err := refuseSheetOwned(seed, additions, []technique.Technique{{ID: "brand-new"}}); err != nil {
+	if err := refuseSheetOwned(seed, additions, []string{"brand-new"}); err != nil {
 		t.Errorf("a new id was refused: %v", err)
 	}
 }
@@ -433,14 +435,14 @@ func TestEveryShippedAdditionIsStillExportable(t *testing.T) {
 	for _, e := range entries {
 		authored = append(authored, technique.Technique{ID: e.id()})
 	}
-	if err := refuseSheetOwned(seedFile, additionsFile, authored); err != nil {
+	if err := refuseSheetOwned(seedFile, additionsFile, idsOfTechniques(authored)); err != nil {
 		t.Errorf("the shipped additions cannot be re-exported: %v", err)
 	}
 }
 
 func TestAMissingAdditionsFileIsCreatedRatherThanFatal(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "additions.json")
-	merged, added, _, err := mergeInto(path, []technique.Technique{{ID: "x", Name: "X"}})
+	merged, added, _, err := mergeInto(path, mapEntries([]technique.Technique{{ID: "x", Name: "X"}}, techniqueEntryOf))
 	if err != nil {
 		t.Fatalf("merge into a missing file: %v", err)
 	}
@@ -457,7 +459,7 @@ func TestAnUnparseableFileIsRefusedNotOverwritten(t *testing.T) {
 	// stray character.
 	path := filepath.Join(t.TempDir(), "additions.json")
 	write(t, path, `[{"id":"broken",`)
-	if _, _, _, err := mergeInto(path, []technique.Technique{{ID: "x", Name: "X"}}); err == nil {
+	if _, _, _, err := mergeInto(path, mapEntries([]technique.Technique{{ID: "x", Name: "X"}}, techniqueEntryOf)); err == nil {
 		t.Error("a malformed file was silently replaced")
 	}
 	raw, _ := os.ReadFile(path)
@@ -468,7 +470,7 @@ func TestAnUnparseableFileIsRefusedNotOverwritten(t *testing.T) {
 
 func exportOnce(t *testing.T, path string, authored []technique.Technique) string {
 	t.Helper()
-	merged, _, _, err := mergeInto(path, authored)
+	merged, _, _, err := mergeInto(path, mapEntries(authored, techniqueEntryOf))
 	if err != nil {
 		t.Fatalf("merge: %v", err)
 	}
@@ -493,6 +495,24 @@ func ids(entries []entry) []string {
 // The invariant the whole second revision is about, and it had NO test: the
 // first version wrote only the additions file, and deleting the techniques.json
 // write from the loop left the entire suite green.
+// techniqueCatalog builds what main() builds, so a test exercises the same
+// wiring rather than a simplified stand-in.
+func techniqueCatalog(seed, additions string, authored []technique.Technique) catalog {
+	return catalog{
+		what: "techniques", seedPath: seed, additionsPath: additions,
+		entries: mapEntries(authored, techniqueEntryOf),
+		ids:     idsOfTechniques(authored),
+		validate: func() error {
+			for _, t := range authored {
+				if err := technique.ValidateFields(t); err != nil {
+					return fmt.Errorf("%q would not seed: %w", t.ID, err)
+				}
+			}
+			return nil
+		},
+	}
+}
+
 func TestBothFilesGetTheEntryOrTheRunFails(t *testing.T) {
 	dir := t.TempDir()
 	seed := filepath.Join(dir, "techniques.json")
@@ -503,7 +523,7 @@ func TestBothFilesGetTheEntryOrTheRunFails(t *testing.T) {
 	authored := []technique.Technique{
 		{ID: "new-one", Name: "New One", Category: "Pass", Position: "Other", GiNoGi: "Both"},
 	}
-	if err := run(seed, additions, authored, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+	if err := run(techniqueCatalog(seed, additions, authored), slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	for _, path := range []string{seed, additions} {
@@ -536,10 +556,10 @@ func TestRunRefusesAnEntryThatWouldNotSeed(t *testing.T) {
 	// Valid but for the function, which has no CHECK constraint in the schema —
 	// so this validation is the only thing between a typo and a value no client
 	// can render.
-	err := run(seed, additions, []technique.Technique{
+	err := run(techniqueCatalog(seed, additions, []technique.Technique{
 		{ID: "broken", Name: "Broken", Category: "Pass", Position: "Other",
 			GiNoGi: "Both", Function: "not-a-real-function"},
-	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	}), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err == nil {
 		t.Fatal("an entry that fails ValidateFields was written anyway")
 	}
@@ -560,7 +580,7 @@ func TestRunRefusesAnEntryThatWouldNotSeed(t *testing.T) {
 func TestADuplicateIDIsRefusedRatherThanSilentlyDeduped(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "additions.json")
 	write(t, path, `[{"id":"x","name":"First"},{"id":"x","name":"Second"}]`)
-	_, _, _, err := mergeInto(path, []technique.Technique{{ID: "y", Name: "Y"}})
+	_, _, _, err := mergeInto(path, mapEntries([]technique.Technique{{ID: "y", Name: "Y"}}, techniqueEntryOf))
 	if err == nil {
 		t.Fatal("a duplicate id was silently deduped — one of the two entries would be deleted")
 	}
@@ -576,7 +596,7 @@ func TestAdoptionSkipsWhatThisRunJustAdded(t *testing.T) {
 		{ID: "promoted-last-week"},
 		{ID: "authored-an-hour-ago"},
 	}
-	got := adoptable(deployed, authored)
+	got := adoptable(deployed, idsOfTechniques(authored))
 	if strings.Join(got, ",") != "promoted-last-week" {
 		t.Errorf("adopted %v — an id this run first wrote is not deployed, so "+
 			"adopting it hands content to a release that cannot reseed it", got)
@@ -589,7 +609,7 @@ func TestAppendedOrderDoesNotDependOnTheQueryOrder(t *testing.T) {
 	run := func(authored []technique.Technique) []string {
 		path := filepath.Join(t.TempDir(), "additions.json")
 		write(t, path, `[{"id":"existing","name":"E"}]`)
-		merged, _, _, err := mergeInto(path, authored)
+		merged, _, _, err := mergeInto(path, mapEntries(authored, techniqueEntryOf))
 		if err != nil {
 			t.Fatalf("merge: %v", err)
 		}
@@ -613,8 +633,7 @@ func TestVerifyContainsDetectsAMissingID(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "catalog.json")
 	write(t, path, `[{"id":"present","name":"P"}]`)
 
-	authored := []technique.Technique{{ID: "present"}, {ID: "absent"}}
-	err := verifyContains(path, authored)
+	err := verifyContains(path, []string{"present", "absent"})
 	if err == nil {
 		t.Fatal("a file missing an exported id passed verification")
 	}
@@ -622,7 +641,256 @@ func TestVerifyContainsDetectsAMissingID(t *testing.T) {
 		t.Errorf("the error does not name the missing id: %v", err)
 	}
 	// ...and a file that has everything passes.
-	if err := verifyContains(path, []technique.Technique{{ID: "present"}}); err != nil {
+	if err := verifyContains(path, []string{"present"}); err != nil {
 		t.Errorf("a complete file was rejected: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Exercises. The same invariants as techniques, plus one this catalog has and
+// that one does not: media the export cannot see.
+// ---------------------------------------------------------------------------
+
+const exerciseSeedFile = "../../internal/modules/exercise/exercises.json"
+const exerciseAdditionsFile = "../../internal/modules/exercise/exercises.additions.json"
+
+func exerciseCatalog(seed, additions string, authored []exercise.Exercise) catalog {
+	return catalog{
+		what: "exercises", seedPath: seed, additionsPath: additions,
+		entries:  mapEntries(authored, exerciseEntryOf),
+		ids:      idsOfExercises(authored),
+		preserve: []string{"media"},
+		validate: func() error {
+			for _, e := range authored {
+				if err := exercise.ValidateForWrite(e); err != nil {
+					return fmt.Errorf("%q would not seed: %w", e.ID, err)
+				}
+			}
+			return nil
+		},
+	}
+}
+
+func anExercise(id, name string) exercise.Exercise {
+	return exercise.Exercise{
+		ID: id, Name: name, Sport: "strength", MovementPattern: "squat",
+		LoadType: exercise.LoadTypeWeightReps,
+	}
+}
+
+// The load-bearing one, same as its technique counterpart: if re-serialising
+// the catalog is not a no-op, the first export rewrites all 504 entries and the
+// review step the promotion path depends on is a whole-file diff nobody reads.
+//
+// Run against the real shipped file, because the property is "matches what
+// Python wrote" and a fixture would only prove the code agrees with itself.
+func TestRewritingTheRealExerciseCatalogChangesNothing(t *testing.T) {
+	original, err := os.ReadFile(exerciseSeedFile)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	entries, err := readEntries(exerciseSeedFile)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("parsed an empty catalog — the test would prove nothing")
+	}
+
+	out := filepath.Join(t.TempDir(), "out.json")
+	if err := writeJSON(out, entries); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if string(got) != string(original) {
+		t.Errorf("re-serialising exercises.json is not a no-op — every export would "+
+			"rewrite the whole file.\n%s", firstDifference(string(original), string(got)))
+	}
+}
+
+// The key order has to match the DATA, not just this file's constant, or both
+// drift together and the diff stays broken while the test stays green.
+func TestExerciseKeyOrderMatchesTheShippedCatalog(t *testing.T) {
+	rank := make(map[string]int, len(exerciseKeyOrder))
+	for i, k := range exerciseKeyOrder {
+		rank[k] = i
+	}
+	entries, err := readEntries(exerciseSeedFile)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	for _, e := range entries {
+		last, lastKey := -1, ""
+		for _, p := range e {
+			r, known := rank[p.Key]
+			if !known {
+				t.Fatalf("%s has key %q that exerciseKeyOrder does not list", e.id(), p.Key)
+			}
+			if r < last {
+				t.Fatalf("%s writes %q after %q, but exerciseKeyOrder has them the other way",
+					e.id(), p.Key, lastKey)
+			}
+			last, lastKey = r, p.Key
+		}
+	}
+}
+
+// An exported exercise must actually be loadable. Media is written as `[]`, and
+// the list columns as `[]` rather than omitted — they are `TEXT[] NOT NULL`, so
+// an absent key unmarshals to nil, pgx sends NULL, and one such entry fails the
+// entire seed transaction.
+func TestAnExportedExerciseCanBeSeeded(t *testing.T) {
+	bare := exercise.Exercise{
+		ID: "x", Name: "X", Sport: "strength",
+		MovementPattern: "squat", LoadType: exercise.LoadTypeWeightReps,
+	}
+	raw, err := json.Marshal([]entry{exerciseEntryOf(bare)})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var back []exercise.Exercise
+	if err := json.Unmarshal(raw, &back); err != nil {
+		t.Fatalf("unmarshal as Exercise: %v", err)
+	}
+	if len(back) != 1 {
+		t.Fatalf("got %d exercises", len(back))
+	}
+	for _, c := range []struct {
+		name string
+		got  []string
+	}{
+		{"primary_muscles", back[0].PrimaryMuscles},
+		{"secondary_muscles", back[0].SecondaryMuscles},
+		{"equipment", back[0].Equipment},
+	} {
+		if c.got == nil {
+			t.Errorf("%s came back nil — pgx sends NULL and the NOT NULL column "+
+				"fails the whole seed transaction", c.name)
+		}
+	}
+	if back[0].Media == nil {
+		t.Error("media came back nil rather than an empty list")
+	}
+}
+
+// The rule this catalog needs and techniques do not.
+//
+// The write path cannot author media and AdminAuthored does not select it, so
+// every exported exercise carries `"media": []`. Re-exporting an exercise a
+// deploy later gave media to must NOT reset that — the bytes are still in the
+// bucket and this file is the only record of where.
+func TestReExportingDoesNotWipeMediaTheFileAlreadyHas(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "exercises.json")
+	write(t, path, `[{"id":"zercher-squat","name":"Zercher Squat","media":[{"kind":"demo","storage_key":"exercises/zercher/demo.mp4"}]}]`)
+
+	merged, added, updated, err := mergeInto(path,
+		mapEntries([]exercise.Exercise{anExercise("zercher-squat", "Zercher Squat (edited)")}, exerciseEntryOf),
+		"media")
+	if err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	if added != 0 || updated != 1 {
+		t.Fatalf("added=%d updated=%d, want 0/1", added, updated)
+	}
+	raw, err := json.Marshal(merged[0])
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), "exercises/zercher/demo.mp4") {
+		t.Errorf("media was wiped by the re-export: %s", raw)
+	}
+	// ...and the edit still landed.
+	if !strings.Contains(string(raw), "Zercher Squat (edited)") {
+		t.Errorf("the edit did not land: %s", raw)
+	}
+}
+
+// ...but a NEW entry gets `[]`, not a missing key — the file has `media` on all
+// 504 entries.
+func TestANewExerciseGetsAnEmptyMediaList(t *testing.T) {
+	raw, err := json.Marshal(exerciseEntryOf(anExercise("new-one", "New One")))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), `"media":[]`) {
+		t.Errorf("no empty media list: %s", raw)
+	}
+}
+
+func TestBothExerciseFilesGetTheEntry(t *testing.T) {
+	dir := t.TempDir()
+	seed := filepath.Join(dir, "exercises.json")
+	additions := filepath.Join(dir, "exercises.additions.json")
+	write(t, seed, `[{"id":"from-sheet","name":"Sheet"}]`)
+	write(t, additions, `[]`)
+
+	c := exerciseCatalog(seed, additions, []exercise.Exercise{anExercise("zercher-squat", "Zercher Squat")})
+	if err := run(c, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	for _, path := range []string{seed, additions} {
+		have, err := idsIn(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		if !have["zercher-squat"] {
+			t.Errorf("%s does not carry the exported id — an exercise in only one "+
+				"file is lost, by the deploy not having it or the next re-import deleting it",
+				filepath.Base(path))
+		}
+	}
+}
+
+func TestRunRefusesAnExerciseThatWouldNotSeed(t *testing.T) {
+	dir := t.TempDir()
+	seed := filepath.Join(dir, "exercises.json")
+	additions := filepath.Join(dir, "exercises.additions.json")
+	write(t, seed, `[]`)
+	write(t, additions, `[]`)
+
+	bad := anExercise("broken", "Broken")
+	bad.MovementPattern = "not-a-real-pattern"
+	err := run(exerciseCatalog(seed, additions, []exercise.Exercise{bad}),
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err == nil {
+		t.Fatal("an exercise that fails validation was written anyway")
+	}
+	raw, _ := os.ReadFile(seed)
+	if string(raw) != `[]` {
+		t.Errorf("the seed file was modified despite the refusal: %s", raw)
+	}
+}
+
+// A catalog with no validator must be refused rather than written unchecked —
+// the field is easy to forget when adding a third library.
+func TestACatalogWithNoValidatorIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	seed := filepath.Join(dir, "s.json")
+	write(t, seed, `[]`)
+	err := run(catalog{what: "unchecked", seedPath: seed, additionsPath: seed,
+		entries: mapEntries([]exercise.Exercise{anExercise("x", "X")}, exerciseEntryOf)},
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err == nil {
+		t.Fatal("a catalog with no validator was written")
+	}
+}
+
+// Every shipped addition must stay re-exportable, or the first update to one is
+// refused as spreadsheet-owned.
+func TestEveryShippedExerciseAdditionIsStillExportable(t *testing.T) {
+	entries, err := readEntries(exerciseAdditionsFile)
+	if err != nil {
+		t.Fatalf("read additions: %v", err)
+	}
+	ids := make([]string, 0, len(entries))
+	for _, e := range entries {
+		ids = append(ids, e.id())
+	}
+	if err := refuseSheetOwned(exerciseSeedFile, exerciseAdditionsFile, ids); err != nil {
+		t.Errorf("the shipped exercise additions cannot be re-exported: %v", err)
 	}
 }
