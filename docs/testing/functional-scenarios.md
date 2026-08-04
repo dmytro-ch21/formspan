@@ -3096,8 +3096,14 @@ assert anything about sync, and a second device is expected to show nothing.
 
 ### The calendar
 
-- Collapsed: today is filled; a **green** dot marks a day trained, a **lime**
-  dot a day planned. A day that is both shows green.
+- Collapsed: today is filled; a **filled** dot marks a day trained, a **hollow
+  ring** a day planned. A day that is both shows the filled dot — what happened
+  outranks what was intended.
+- **The shape, not the colour, is the distinction.** Green and lime are 1.18:1
+  apart in greyscale, so a screenshot with hue removed must still tell trained
+  from planned. Check the ring's hole is visible at arm's length, not just in a
+  screenshot — and on Android specifically, where border widths round.
+- Every marker clears 3:1 against its own ground in **both** themes.
 - `Week in review` expands to seven day rows; a trained day shows its
   duration/sets/volume and opens the session, a planned day shows "Planned"
   and is inert. An empty day says "No activity".
@@ -3224,8 +3230,19 @@ end of this section for the cross-device cases.
 
 ### The web calendar
 
-- The month grid shows green for days with logged sessions and lime for
-  planned days; a day with both shows both.
+- The month grid marks logged sessions with a **✓** chip and planned days with
+  an **○** chip; a day with both shows both, stacked.
+- **The glyph, not the colour, is the distinction** — the borders and tints are
+  reinforcement. With hue removed the two must still be tellable apart, and on
+  a day both trained and planned as the same discipline (two chips reading the
+  same word) that is the case worth checking.
+- Borders draw with the **ink** steps at near-full alpha because they must
+  clear 3:1: green-ink needs ≥70% on white, lime ≥95%. A regression to the old
+  `/40` and `/60` renders them invisible in light mode while still looking
+  deliberate in the source.
+- The day cell's accessible name includes **both** layers — `aria-label`
+  replaces the accessible name rather than adding to it, so a cell whose label
+  is only the date announces none of its contents.
 - Days spilling in from the neighbouring months are visible and dimmed, never
   blank, and carry their own marks.
 - `←`/`→` move the month and reload both layers; `Today` returns and selects

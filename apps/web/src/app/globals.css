@@ -79,6 +79,25 @@
   --c-info-ink: #1558c7;
   --c-danger-ink: #c0392b; /* already 4.69:1; kept as a token for symmetry */
 
+  /* Green's light step, and the reason it was missing is instructive.
+     `--c-green` is #42f58d in BOTH themes — the only hue here without a light
+     variant — because until now it was only ever used on the dark app, where
+     it measures 12.8:1. On white it is 1.43:1: invisible. Anything on the web
+     side that drew with it (the calendar's trained chip drew its border at
+     #42f58d/40 = 1.19:1) was drawing nothing at all.
+
+     5.33:1 against #ffffff and 4.93:1 against the page. Note it needs ~70%
+     alpha or more to stay above the 3:1 floor for a non-text graphic, so it is
+     used at full strength rather than the /40 the old border used.
+
+     Deliberately NOT a replacement for `--c-green`, and the hue is untouched:
+     the note above records that darkening a hue directly collapsed the
+     lime/danger separation for a protanope. This is a separate ink step, the
+     same shape as `--c-lime-ink`. It also does not need to be CVD-separable
+     from lime-ink, because where the two meet (the calendar) the meaning is
+     carried by a ✓/○ glyph and colour is reinforcement only. */
+  --c-green-ink: #1f7a4a;
+
   color-scheme: light;
 }
 
@@ -118,6 +137,9 @@
   --c-lime-ink: #b8ff2c;
   --c-info-ink: #6bb6ff;
   --c-danger-ink: #ff6b6b;
+  /* On dark, green already clears everything as-is (12.8:1 on `surface`), so
+     the ink step and the hue are the same value — exactly as lime-ink is here. */
+  --c-green-ink: #42f58d;
 
   color-scheme: dark;
 }
@@ -149,6 +171,7 @@
   --color-lime-ink: var(--c-lime-ink);
   --color-info-ink: var(--c-info-ink);
   --color-danger-ink: var(--c-danger-ink);
+  --color-green-ink: var(--c-green-ink);
 
   --font-display: var(--font-barlow-condensed), var(--font-barlow), system-ui;
   --font-body: var(--font-barlow), system-ui;

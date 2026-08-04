@@ -8259,6 +8259,62 @@ moved to `lib/admin.ts` so `/users`, `/content` and the actions share it.
 - **Not verified against staging.** Everything here ran against local Postgres
   with a real Clerk session.
 
+## 2026-08-04 — Green never got a light step, and a fix that measured worse than it looked
+
+The calendar distinguished a day *trained* from a day *planned* by hue alone.
+On a day that is both, and both the same discipline, the two chips rendered the
+identical word — "BJJ" above "BJJ" — separated only by mint versus olive at 10%
+opacity. Confirmed by looking at deployed staging, not inferred.
+
+### The first fix was a fix in name only
+
+Filled dot for trained, hollow ring for planned, solid border versus dashed.
+It reads well and it does not work, because `--c-green` is `#42f58d` in **both**
+themes — the only hue in `globals.css` without a light step, since until now it
+was only ever drawn on the dark app where it measures 12.8:1. On white:
+
+    green dot                 1.43:1
+    green border at 40%       1.19:1
+    lime border at 60%        1.95:1
+    chip text                18.28:1
+
+WCAG 1.4.11 wants 3:1 for a non-text graphic. So *both* new channels were
+invisible for the trained state, and "solid versus dashed" was comparing an
+invisible border against a faint one. `globals.css` already said so in its own
+words — the brand green "is only legible as a fill against dark" — which is
+the sort of note that only helps if you go and read it before shipping.
+
+### What landed
+
+- **`--c-green-ink`** (`#1f7a4a` light, `#42f58d` dark), the step lime already
+  had. The hue itself is untouched: the palette notes record that darkening a
+  hue directly collapsed the lime/danger separation for a protanope.
+- **Web's marker is a text glyph**, ✓ and ○, in the ink colour — 5.95:1 light,
+  6.85:1 dark, and greyscale-safe by construction because the two differ by
+  shape rather than colour. Borders now draw at near-full alpha, because they
+  need ≥70% (green-ink) and ≥95% (lime) to clear 3:1 at all.
+- **Mobile keeps filled-versus-ring**, which genuinely works on the dark ground
+  (12.8:1 and 15.1:1) — but the dot went 4pt → 8pt, because the *hole* is the
+  signal and at 6/1.5 it was 3pt: fine in a screenshot, not at arm's length
+  mid-workout. On mobile the shape carries 100% of the load, since the two
+  markers are 1.18:1 apart in greyscale.
+- **`aria-label` stopped erasing the cells.** It was the date alone, and
+  `aria-label` replaces the accessible name rather than adding to it, so the
+  chips were never announced. Both calendars now name both layers — and name
+  them *independently*, because a ternary silently dropped "planned" on a
+  both-day, which is the day a reader most needs told.
+
+### Worth keeping
+
+Two claims in comments were wrong in the same direction: that the border and
+marker were channels "either of which is enough on its own", and that the dot
+colours were the distinction. Both have been corrected to say what measurement
+supports — the glyph (web) and the shape (mobile) are the channel; colour is
+reinforcement. A comment that overstates a guarantee is an invitation to
+delete the thing actually holding it up.
+
+Not verified: the glyphs at 11px and the ring on a real Android device. Both
+are computed, not observed.
 
 ## Open items / known gaps as of this entry
 

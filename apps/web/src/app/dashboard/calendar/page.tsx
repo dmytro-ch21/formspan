@@ -246,7 +246,14 @@ export default function CalendarPage() {
                       // layers are named in words rather than shown.
                       aria-label={[
                         formatDayLong(day),
-                        trainedLabel ? `trained: ${trainedLabel}` : null,
+                        // `trained: a session` rather than `trained: Trained`,
+                        // which is what the chip's own fallback produces when a
+                        // day rolls up with no sport on it.
+                        trained
+                          ? `trained: ${
+                              trained.sports.length > 0 ? trainedLabel : "a session"
+                            }`
+                          : null,
                         dayPlans.length > 0
                           ? `planned: ${dayPlans
                               .map(
@@ -361,8 +368,18 @@ export default function CalendarPage() {
  * ink as the label. Greyscale-safe by construction, and it survives any future
  * change to the palette.
  *
- * The dashed border and the tint stay as reinforcement — they are the fastest
- * channel for anyone who can use them. They are simply no longer load-bearing.
+ * **The glyph is the channel; the border and tint are reinforcement.** An
+ * earlier draft of this comment called them two channels "either of which is
+ * enough on its own", which measurement does not support: a 1px dash on an
+ * 11px chip is a sub-pixel cue that antialiasing degrades further, and it is
+ * reinforcement rather than an independent signal. Saying otherwise would
+ * invite someone to later drop the glyph on the strength of it.
+ *
+ * The borders now draw with the **ink** steps at near-full strength, because
+ * they have to clear 3:1 to be a signal at all: green-ink needs ≥70% alpha on
+ * white and lime needs ≥95%, so the old `/40` and `/60` were both invisible.
+ * The 10% fills stay as fills — they are decoration, not a signal, and are not
+ * held to that floor.
  *
  * The glyph is `aria-hidden`: the day button's own label names both layers in
  * words, so announcing it would only repeat them.
@@ -374,8 +391,8 @@ function Chip({ kind, label }: { kind: "trained" | "planned"; label: string }) {
       className={[
         "flex items-center gap-1 truncate rounded px-1 py-0.5 text-[11px] font-medium",
         trained
-          ? "border border-green/40 bg-green/10"
-          : "border border-dashed border-lime/60 bg-lime/10",
+          ? "border border-green-ink/80 bg-green/10"
+          : "border border-dashed border-lime bg-lime/10",
       ].join(" ")}
     >
       <span aria-hidden="true" className="shrink-0 leading-none text-text-muted">
