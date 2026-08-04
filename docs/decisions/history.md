@@ -7125,6 +7125,216 @@ both mutations were checked separately.
   skipped**, so a JSON entry permanently shadowed by an admin row is invisible.
 
 
+## 2026-08-04 — The export, and the bug it uncovered
+
+`cmd/exportcontent` carries admin-authored rows back into the seed JSON, which
+is the half that makes console authoring more than a local convenience: without
+it, a technique added in staging exists only in staging's database.
+
+### It writes BOTH files, and the first version wrote only one
+
+This is the correction review forced, and it is the whole design.
+
+`techniques.json` is the **deploy artifact**: `//go:embed` bakes it into the
+binary, `SeedData()` returns it, `cmd/seed` writes it to the database.
+`techniques.additions.json` is the **record of non-spreadsheet content**:
+`scripts/import-exercise-catalog.py` rebuilds `techniques.json` from a
+spreadsheet and merges this file back in.
+
+All 16 existing additions are in both files. That is the invariant, not an
+accident — and the first version of this command missed it, writing only the
+additions file because the generated-file warning is the loud one. Content
+landing in only one is lost by a different route each time:
+
+- **additions only** — the deploy does not carry it. `-adopt` then hands the row
+  to a release that cannot reseed it, so the next fresh environment simply does
+  not have the technique, and nobody can edit it either: the console refuses
+  seeded rows, and no seed owns it.
+- **techniques.json only** — the next spreadsheet re-import deletes it, silently,
+  because the sheet is a full replacement rather than a patch.
+
+So the export writes both, merging rather than replacing: both files hold
+content this command never wrote — 16 hand-authored additions, and 466 generated
+entries — so overwriting either destroys content with no other copy.
+
+### Empty arrays, and the seed transaction they take down
+
+The first version omitted empty values, and a test asserted it as correct. It
+was a data-loss bug with a wide blast radius.
+
+`aliases`, `setup_from`, `common_counters` and `common_next_moves` are
+`TEXT[] NOT NULL`. An omitted key unmarshals to a nil slice, pgx encodes a nil
+slice as NULL, and the insert runs inside `UpsertAll`'s transaction. So one
+exported technique with no aliases fails the **entire seed** — all 467
+techniques, not just its own row. Reproduced against real Postgres:
+
+	null value in column "aliases" of relation "techniques"
+	violates not-null constraint (SQLSTATE 23502)
+
+Every entry in both shipped files already writes `[]` and `""` explicitly; the
+export now matches. `function` and `to_position` stay optional, because they
+genuinely are — `to_position` is absent on 317 of 466 entries and migration
+000029 is explicit that absent means "not recorded", a different fact from any
+value.
+
+### The diff has to be readable, and key order is what breaks it
+
+A re-export with no changes is **byte-identical**, and so is a re-serialisation
+of the untouched files. Without that the promotion path is unusable: the one
+review step standing between a typo and a permanent foreign key is a whole-file
+rewrite nobody reads.
+
+The threat is not formatting, it is **key order**. Go marshals a map with its
+keys sorted; both files are written by Python in semantic order (`id`, `name`,
+`aliases`, `category`, …). Reading into `map[string]any` therefore reorders every
+key of all 482 entries on the first export. The files are now read and written
+through an ordered key/value type, and the test asserts byte-identity against the
+real shipped files rather than a fixture — a fixture would only prove the code
+agrees with itself.
+
+**Neither file is in id order** — that was checked rather than assumed, after
+an earlier version sorted "only if the file is already sorted" and review
+pointed out the branch never fired. `techniques.json` inverts at index 1
+(`grappling-stance-motion` > `breakfall-backward`), the additions file at index
+2. So existing entries keep the file's own order, full stop, and new ids are
+appended sorted among themselves — which keeps the output independent of the
+order the database returned the rows in, without touching a single existing
+line.
+
+### Two keys in the wrong slot, and the test that held them there
+
+The first version appended `function` and `to_position` to the end of every
+entry it wrote. Measured against the shipped catalog, that is wrong for both:
+
+	462 of 466   function     sits between category and position
+	149 of 466   to_position  sits between position_detail and gi_no_gi
+
+And it is not cosmetic. `apply_taxonomy` inserts `function` right after
+`category`, and `carry_to_position` rebuilds each record to place `to_position`
+after `position_detail` — so the next spreadsheet re-import silently relocates
+both keys on every entry the export wrote, producing exactly the whole-file diff
+the ordered-writer exists to prevent.
+
+The test made it worse: it compared `keyOrder[i]` index-for-index against the
+additions file's first entry, which carries **neither** optional key. So the
+wrong order passed, and correcting the constant turned the test red. It now
+checks the order as a **subsequence** across every entry in both files, plus a
+second test naming the two interior slots specifically — because a subsequence
+check over entries that omit them passes either way.
+
+### Export and adopt are two commands, deliberately
+
+`-adopt` flips exported rows to `source='seed'`, handing them to the deploy.
+It is separate because until the JSON is committed AND released, the database row
+is the only copy — flipping early leaves content owned by a deploy that does not
+carry it, editable by nobody. The order is: export, review, merge, deploy, adopt.
+
+Adoption is scoped to `source='admin'`, and the reason is not the value —
+setting `seed` on a row that is already `seed` is invisible — but `updated_at`.
+Clients delta-sync on it, so an unscoped adoption makes every named seeded
+technique look changed to every device. The first version of that test asserted
+on `source` and could not tell the two queries apart.
+
+### What testing it uncovered, which is the real story
+
+The first end-to-end run exported a **fully-populated** São Paulo Pass rather
+than the stub inserted. `sao-paulo-pass` — "São Paulo Pass", alias "Tozi pass",
+Guard - Top, with description and `to_position` — **has been in the catalog all
+along.** The test had flipped a real seeded row to `admin`; that was reverted.
+
+The technique was never missing. **The search cannot find it.**
+`searchTechniques` does `toLowerCase().includes(q)` with no diacritic folding:
+
+	"sao paulo"  -> not found
+	"sao"        -> not found
+	"são paulo"  -> found, but nobody types the tilde on a phone
+	"tozi"       -> found
+
+So the request that started this whole line of work — "the name is not in the
+list" — was a lookup bug, not missing content. And the content manager, useful
+as it is, would have made it worse: authoring a second São Paulo pass gives two
+ids for one technique, permanently, in training records. Exactly what that PR's
+design is most careful about, arrived at from the other direction.
+
+The fix is small and is the next piece of work: fold diacritics on both sides
+before comparing. `Slug`'s `foldASCII` map already does it and can be shared.
+
+### The invariant with no test, which is how it shipped broken the first time
+
+Review deleted the `techniques.json` write from the export and the entire suite
+stayed green. Every test covered a pure function — `mergeInto`, `writeJSON`,
+`refuseSheetOwned`, `entryOf` — and the two-file invariant lived inline in
+`main()`, which had no coverage at all. That is the exact regression the second
+revision exists to fix, invisible to the tests written alongside the fix.
+
+The write now goes through `run(seedPath, additionsPath, authored, logger)` and
+a test asserts both files carry the exported id. Deleting either write is red.
+
+Three more came out of the same pass:
+
+- **`-adopt` adopted content it had just written.** It re-runs the export, then
+  adopted everything `AdminAuthored` returned — so adopting last week's batch
+  also adopted a technique authored an hour ago and written to the file seconds
+  earlier, handing it to a release that cannot reseed it and that the console
+  will no longer let anyone edit. It is now scoped to ids the seed file carried
+  **before** this run touched it, which is exactly "already committed and
+  deployed".
+- **A duplicate id in an existing file was silently deduped**, keeping the last
+  and deleting the other on the next write — the content loss this command
+  exists to prevent, committed by the command. `techniques.json` cannot reach
+  that state (`validate()` rejects it); the additions file had no such check.
+  Now refused by id.
+- **Nothing validated what was written.** The file is what `go:embed` bakes into
+  the binary, so an invalid `category` or `function` fails `SeedData()` on the
+  next deploy, far from the operator who could still fix it. `ValidateFields`
+  now runs before either write. It caught an incomplete test fixture of mine
+  immediately.
+
+### One place Go and Python disagree
+
+Verified with an adversarial corpus rather than assumed: en dash, em dash, CJK,
+non-BMP emoji, U+00A0, C1 controls, `\b`, `\f`, quotes, backslashes and nested
+arrays all round-trip identically between Go's encoder and Python's
+`json.dumps(indent=2, ensure_ascii=False)`.
+
+**U+2028 and U+2029 do not.** Go escapes them unconditionally —
+`SetEscapeHTML(false)` does not suppress it — where Python writes the raw
+character. Reachable by pasting prose from an editor that uses U+2028 as a soft
+line break. Consequence is a one-line cosmetic diff on the next re-import, and
+both forms parse identically, so it is recorded rather than fixed.
+
+### Gaps this leaves
+
+- **The console UI still does not exist**, so authoring is `curl` and the export
+  has little to carry.
+- **Exercises are not exported.** They have the `source` column and the seed
+  guard but no write path, so there is nothing to export yet.
+- **Adoption is still all-or-nothing within what is deployed** — it takes every
+  eligible id, with no way to adopt a subset of those.
+- **The adopt log counts what was requested, not `RowsAffected`.** A row adopted
+  concurrently makes it overstate.
+- **A category the console accepts can break the importer.** `ValidateFields`
+  deliberately does not constrain `category` ("this vocabulary is still
+  settling"), but `derive_function` in the importer exits on anything outside
+  its nine. Before this command console content never reached the importer; now
+  a technique filed as "Guard Pass" seeds, renders and exports fine, then breaks
+  the next re-import. Loud and recoverable, but it is a new coupling.
+- **`cmd/exportcontent` ships in the deployed API image.** The Dockerfile builds
+  `./cmd/...` wholesale, so a content-authoring CLI is now in the runtime image.
+  Existing behaviour, not a regression, but it is a choice rather than an
+  accident now.
+- **Nothing verifies the exported JSON round-trips through the PYTHON importer.**
+  The Go side is now verified end to end — export against a real database, then
+  `cmd/seed` from the exported file, 467 upserted, `aliases = {}` — but running
+  `scripts/import-exercise-catalog.py` over the result needs the spreadsheet and
+  is not automated. The collision guard prevents the known failure mode.
+- **The collision rule is about ownership, not existence.** An id in
+  `techniques.json` but not in the additions file belongs to the sheet, and an
+  edit to it would be reverted by the next import — so it is refused. An id in
+  both is ours, already promoted once, and re-exporting it is the normal update
+  path. A rule of "refuse anything already seeded" would have refused every
+  legitimate update, which is what the first version did.
+
 ## 2026-08-04 — The technique was never missing; the search could not find it
 
 `searchTechniques` folded case and nothing else, so a query and the catalog

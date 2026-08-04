@@ -2582,6 +2582,67 @@ own, so none of them is redundant with "the FK exists".
 - The star column has an accessible name **naming the technique**; a column of
   identical "Working on" buttons is unusable otherwise.
 
+### Exporting authored content (`cmd/exportcontent`)
+
+**Happy path**
+
+- With no admin rows, **both** files are byte-identical afterwards — not
+  rewritten, not reformatted. Assert this against the real shipped files, not a
+  fixture: the property is "matches what Python wrote", and a fixture only
+  proves the code agrees with itself.
+- An authored technique appears in **both** `techniques.json` (the deploy
+  artifact, embedded and seeded) and `techniques.additions.json` (the record the
+  importer merges back in). One without the other is lost — the deploy will not
+  carry it, or the next re-import deletes it.
+- The diff for one new technique is **one entry**, in the file's own key order.
+  A whole-file reorder is the failure: Go sorts map keys, the files are written
+  in semantic order, and 482 reordered entries bury the change.
+- **`function` and `to_position` sit in their interior slots** — after `category`
+  and after `position_detail` respectively, which is where 462 and 149 of the
+  shipped entries put them. Appending them to the end seeds and renders fine and
+  is invisible until the next spreadsheet re-import relocates them on every
+  entry the export wrote. Assert the order as a SUBSEQUENCE across entries: an
+  index-for-index check against an entry that omits both optional keys passes
+  whatever the order is, and that is what pinned the wrong one in place.
+- **Neither file is in id order**, so a merge must not sort. Existing entries
+  keep their position; new ids append. Assert an existing entry did not move.
+- **`-adopt` must not adopt what the same run just wrote.** Author a technique,
+  run the export, and adopt in one go: the new id stays `source='admin'`,
+  because it is in the file but not in any deploy. Only ids the seed file
+  carried beforehand are eligible.
+- **A duplicate id in a catalog file is refused, not deduped.** Keeping the last
+  deletes the other on the next write.
+- The exported file **actually seeds**. Run `cmd/seed` from it and count the
+  rows; a file that is pretty but unloadable is worse than a noisy one.
+- An entry with no aliases writes `"aliases": []`, never an absent key. Absent
+  unmarshals to nil, pgx sends NULL, the column is `TEXT[] NOT NULL`, and the
+  insert is inside a transaction — so one such entry fails the entire seed.
+- A re-export with no changes produces a byte-identical file. The promotion path
+  depends on a readable diff.
+- `-adopt` flips the exported rows to `source='seed'`, after which the seeder can
+  update them and the console cannot.
+
+**Edge cases and errors**
+
+- An id the **spreadsheet** owns — present in `techniques.json` but not in the
+  additions file — is refused, naming the ids. The next import would revert the
+  edit, and the importer exits on "additions collide with sheet ids", both far
+  from here. An id in **both** files is ours and must be allowed: that is the
+  normal update path, and every one of the 16 shipped additions is in that
+  state, so a rule of "refuse anything already seeded" refuses all of them.
+- Ampersands and angle brackets survive **unescaped**. Go escapes them by
+  default; neither catalog file contains one today, so nothing exercises this
+  until someone types "Over-Under & Stack Pass" into the console.
+- A malformed additions file is refused, not overwritten — a stray character
+  must not cost hand-authored content.
+- A missing file (or directory) is created rather than fatal.
+- Only `function` and `to_position` are omitted when empty — everything else is
+  written explicitly. `to_position` is absent on 317 of 466 entries and absent
+  means "not recorded", which is a different fact from any value.
+- **Adoption must not touch `updated_at` on rows the deploy already owns.**
+  Assert the timestamp, not `source` — setting `seed` on a `seed` row is
+  invisible in the value, and clients delta-sync on the timestamp.
+
 ### Authoring the catalog (`/v1/admin/techniques`)
 
 **Happy path**
