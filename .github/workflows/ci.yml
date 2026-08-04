@@ -120,6 +120,13 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck:admin
 
+      # apps/web and apps/admin hold deliberate copies of the brand components.
+      # A comment saying "change both" held for exactly one commit, so the
+      # invariant is enforced here instead. Lives in the admin job because that
+      # is where the second copy was introduced; it compares both files.
+      - name: Brand copies have not drifted
+        run: pnpm run check:brand-copies
+
       - name: Build
         run: pnpm run build:admin
 
