@@ -2,16 +2,16 @@ import { Link, useFocusEffect } from 'expo-router';
 import { useAuth } from '@clerk/clerk-expo';
 import { cachedWorkouts, cacheWorkouts, createLocalWorkout } from '@/lib/sessionStore';
 import { request as requestSync } from '@/lib/sync';
-import { useCallback, useRef, useState, useEffect } from 'react';
+import { useCallback, useMemo, useRef, useState, useEffect } from 'react';
 import {
   ActivityIndicator,
   FlatList,
   Modal,
-  PixelRatio,
   Pressable,
   RefreshControl,
   StyleSheet,
   TextInput,
+  useWindowDimensions,
 } from 'react-native';
 
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
@@ -39,12 +39,22 @@ import { useAccent } from '@/lib/AccentProvider';
  * 12pt of padding twice, the label's line box, and the 16pt the pill sits above
  * the bottom — plus air. **Derived from the font scale rather than fixed**,
  * because the label grows with the system text size and the paddings do not: a
- * constant 72 was measured to clear comfortably at default and through XXXL,
- * and to re-create the very overlap this exists to fix from Accessibility Large
- * upwards. Nothing in this app caps `maxFontSizeMultiplier`, so that ceiling is
- * reachable by anyone who turns the setting up.
+ * constant 72 was measured to clear at default and through XXXL, and to
+ * re-create the very overlap this exists to fix from Accessibility Large up.
+ *
+ * **Read live, not at module scope.** `PixelRatio.getFontScale()` is a snapshot
+ * of `Dimensions`, so a `const` here freezes at bundle load — and iOS does not
+ * restart the JS bundle when you change the text size and come back. The one
+ * person this formula exists for would have kept the old clearance until the
+ * next cold start. `useWindowDimensions` re-renders instead.
+ *
+ * The pill's label is `numberOfLines={1}`, which is what keeps this linear: at
+ * the very top of the range "New workout" no longer fits the screen width, and
+ * a second line would put the pill back over the list.
  */
-const FAB_CLEARANCE = 44 + 20 * PixelRatio.getFontScale();
+function fabClearance(fontScale: number): number {
+  return 44 + 20 * fontScale;
+}
 
 const SCOPES = [
   { key: 'mine', label: 'My workouts' },
@@ -68,6 +78,15 @@ export default function WorkoutsScreen() {
   const [composing, setComposing] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
+
+  // Unconditional across scopes even though only `mine` renders the pill. One
+  // constant beats a conditional here; the `shared` list simply ends ~100pt
+  // early, which is invisible next to the planner the header already drops.
+  const { fontScale } = useWindowDimensions();
+  const listPad = useMemo(
+    () => ({ paddingBottom: TAB_BAR_CLEARANCE + fabClearance(fontScale) }),
+    [fontScale],
+  );
 
   const load = useCallback(async () => {
     abortRef.current?.abort();
@@ -194,9 +213,14 @@ export default function WorkoutsScreen() {
               // segmented control in `components/TrainingSummary.tsx`.
               accessibilityRole="button"
               accessibilityState={{ selected: active }}
-              // The row is 34pt tall; this brings the target to the 44 the HIG
-              // asks for without changing the layout. The `Chip` in this same
-              // file already does exactly this.
+              // The laid-out row is ~38.7pt (20 padding + 2 border + a 16.7pt
+              // line box at 14pt) — NOT the 34 an earlier version of this
+              // comment claimed by counting `fontSize` as the line box. With
+              // `paddingVertical: 12` it is ~42.7, and the slop above it lands
+              // in the strip's own margin, which nothing else claims. The slop
+              // BELOW would fall inside the FlatList's frame and lose the
+              // hit-test to it, so the target is bought by padding rather than
+              // by depending on sibling order.
               hitSlop={{ top: 6, bottom: 6 }}
               testID={`workouts-scope-${s.key}`}
             >
@@ -228,7 +252,7 @@ export default function WorkoutsScreen() {
         <FlatList
           data={workouts}
           keyExtractor={(w) => w.id}
-          contentContainerStyle={styles.list}
+          contentContainerStyle={[styles.list, listPad]}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -339,7 +363,13 @@ export default function WorkoutsScreen() {
           testID="workouts-new"
         >
           <Icon name="plus" size={16} color={accent.on} />
-          <Text style={[styles.fabText, { color: accent.on }]}>New workout</Text>
+          {/* One line, always. At the largest accessibility sizes the label is
+              wider than the screen, and a second line makes the pill tall
+              enough to cover the list again — the bug this whole clearance
+              exists to prevent. */}
+          <Text numberOfLines={1} style={[styles.fabText, { color: accent.on }]}>
+            New workout
+          </Text>
         </Pressable>
       )}
 
@@ -588,7 +618,7 @@ const styles = StyleSheet.create({
   // 2pt taller than the other and the labels shift when you switch.
   scopeTab: {
     flex: 1,
-    paddingVertical: 10,
+    paddingVertical: 12,
     alignItems: 'center',
     borderBottomWidth: 2,
     borderBottomColor: 'transparent',
@@ -598,10 +628,10 @@ const styles = StyleSheet.create({
   scopeText: { fontSize: 14, fontWeight: '600', color: vola.textMuted },
   scopeTextActive: { fontWeight: '700' },
   loader: { marginTop: 32 },
-  // TAB_BAR_CLEARANCE alone left the last row under the New workout pill —
-  // that is what put it on top of the planner's hint line. FAB_CLEARANCE is
-  // its height plus the 16pt it floats above the bottom.
-  list: { padding: 16, gap: 12, paddingBottom: TAB_BAR_CLEARANCE + FAB_CLEARANCE },
+  // `paddingBottom` is applied at the call site, from the live font scale —
+  // TAB_BAR_CLEARANCE alone left the last row under the New workout pill, which
+  // is what put it on top of the planner's hint line.
+  list: { padding: 16, gap: 12 },
   // The list's own `gap` doesn't apply between a header and the first row, so
   // the spacing below the planner is the header's to own.
   planHeader: { gap: 18, marginBottom: 4 },
@@ -662,15 +692,24 @@ const styles = StyleSheet.create({
     // A flat pill on a dark ground cannot separate itself from a list that
     // scrolls underneath it. `shadowColor` is set INLINE to the accent, not to
     // black: 35% black over this bg is a 1.02:1 step — literally invisible —
-    // and the accent instead reads as light coming off the pill. Same trick,
-    // and the same reasoning, as the one shadow in `TrainingCalendar`.
+    // and the accent instead reads as light coming off the pill. Same trick as
+    // the one shadow in `TrainingCalendar` — including its `height: 0`, whose
+    // comment is explicit that an offset makes it "read as a drop shadow rather
+    // than light". Keeping 4 while taking the accent was the worst of both.
+    //
+    // On Android this is no longer elevation-only: RN 0.86 forwards
+    // `shadowColor` to `setOutlineSpotShadowColor` on API 28+, so the tint
+    // lands there too.
     shadowOpacity: 0.45,
     shadowRadius: 14,
-    shadowOffset: { width: 0, height: 4 },
+    shadowOffset: { width: 0, height: 0 },
     elevation: 4,
   },
   fabPressed: { opacity: 0.85 },
-  fabText: { color: vola.navy, fontWeight: '700', fontSize: 15 },
+  // No `color` here: the call site always sets it from `accent.on`, and a
+  // default that is never used is a wrong-colour bug waiting for the first
+  // caller who renders this without one.
+  fabText: { fontWeight: '700', fontSize: 15 },
 
   // A Modal renders outside the navigator, so nothing paints behind it —
   // this is the one place a screen-level container has to set its own

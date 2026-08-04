@@ -9334,6 +9334,15 @@ thumb.
   the validator knows — is unchecked in exactly the same way. Extending it to
   every ground the palette actually renders on is the real fix; this change
   only stopped standing on the hole.
+- **A second review round found the font-scale fix was itself half a fix.**
+  `PixelRatio.getFontScale()` is a snapshot of `Dimensions`, so reading it into
+  a module-level `const` freezes it at bundle load — and iOS does not restart
+  the JS bundle when you change the text size and come back. The exact person
+  the formula existed for would have kept the old clearance until the next cold
+  start. It reads `useWindowDimensions().fontScale` now. The same pass caught
+  that the formula is linear in *one* line box, and that at the largest sizes
+  "New workout" is wider than the screen — so the label is `numberOfLines={1}`,
+  which is what keeps the arithmetic true rather than merely tidy.
 - **`FAB_CLEARANCE` is derived from the font scale, and that was a second
   near-miss.** A fixed 72 clears at default and through XXXL but re-creates the
   overlap from Accessibility Large upwards, because the label grows and the
