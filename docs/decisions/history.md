@@ -7223,6 +7223,34 @@ The two apps share no package and mobile's has to work offline — the same
 reason the position vocabulary is duplicated four ways. Both carry a comment
 saying so.
 
+### The test that derived its cases from the fix instead of the defect
+
+Worth recording because it is this repo's recurring failure and it happened
+again, inside the PR whose whole point was that a false negative is invisible.
+
+The sweep started as "every entry whose fields change under the fold", guarded
+by `expect(count).toBeGreaterThan(15)`, with a comment claiming a no-op fold
+would empty the set and fail. Backwards: under an identity fold the predicate
+`fold(f) !== f.toLowerCase()` is true for anything containing a capital letter,
+so the set grew from 432 to all 466 and the test **passed**. The threshold was
+meaningless against 432 either way, and the loop always queried the *name*, so
+for the 197 entries that qualified only through an alias or a position it
+asserted "a technique is findable by its own name" — true with or without any
+folding.
+
+It now derives from the **defect**: for each searchable field the typed form is
+its folded spelling, and an entry counts if the *old* search would not have
+found it by that spelling. Three ids are named explicitly —
+`sao-paulo-pass`, `north-south-pass`, `rear-naked-choke` — one per fold step,
+so removing any step drops its id from the set, and an identity fold empties
+the set entirely.
+
+Ten mutations were run against the final version and all ten go red. The last
+one found a real hole: weakening the field separator from `\n` to a space was
+still green, because the fold collapses whitespace and the span query was glued
+with no space in it. A spaced variant closes it.
+
+
 ### Gaps this leaves
 
 - **Misspellings still miss.** "sao paolo" — which is how the request was

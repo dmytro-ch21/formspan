@@ -125,8 +125,13 @@ describe('searchTechniques against the real catalog', () => {
     // the query starts and whose position begins how it ends.
     const t = catalog.find((x) => x.aliases.length > 0);
     expect(t).toBeDefined();
-    const spanning = `${foldForSearch(t!.name)}${foldForSearch(t!.aliases[0])}`;
-    expect(searchTechniques(catalog, spanning).map((x) => x.id)).not.toContain(t!.id);
+    const glued = `${foldForSearch(t!.name)}${foldForSearch(t!.aliases[0])}`;
+    expect(searchTechniques(catalog, glued).map((x) => x.id)).not.toContain(t!.id);
+    // ...and with a space, which is the mutation the glued form misses: the
+    // fold collapses whitespace, so `.join(' ')` would put exactly one space
+    // where this query has one and the seam would silently reopen.
+    const spaced = `${foldForSearch(t!.name)} ${foldForSearch(t!.aliases[0])}`;
+    expect(searchTechniques(catalog, spaced).map((x) => x.id)).not.toContain(t!.id);
   });
 
   it('the memo caches the haystack, not the answer', () => {
@@ -142,30 +147,44 @@ describe('searchTechniques against the real catalog', () => {
     expect(again).toEqual(first);
   });
 
-  it('finds every entry that needs folding, by its folded spelling', () => {
-    // Derived from the FOLD rather than a hardcoded unicode range, over all
-    // three searchable fields \u2014 the previous range-based version matched
-    // one entry, the same one already asserted five ways above, and missed
-    // both the en dashes and Rear Naked Choke's accented aliases (which live
-    // in aliases, not name). Anything a future import adds is covered without
-    // anyone remembering to widen a character class.
-    const needsFolding = catalog.filter((t) =>
-      [t.name, ...t.aliases, t.position].some((f) => foldForSearch(f) !== f.toLowerCase()),
-    );
-    // Also the guard on the guard: if foldForSearch became a no-op this set is
-    // empty and the loop below would assert nothing.
-    expect(needsFolding.length).toBeGreaterThan(15);
+  it('finds every entry the unfolded search would have missed', () => {
+    // Derived from the DEFECT rather than from the fix. For each searchable
+    // field, the "typed" form is what a keyboard produces \u2014 its folded
+    // spelling \u2014 and an entry counts as missed if the OLD search (plain
+    // lowercase substring over the same three fields) would not have found it
+    // by that spelling. Every one of those must now be findable.
+    //
+    // The previous version derived the set from `fold(f) !== f.toLowerCase()`
+    // and claimed an empty set would fail it. Backwards: under an identity
+    // fold that predicate is true for anything containing a capital letter, so
+    // the set grew to all 466 and the test passed. Measured, not assumed.
+    const typedForms = (t: TechniqueSummary) =>
+      [t.name, ...t.aliases, t.position].map(foldForSearch).filter((f) => f.length > 0);
+    const unfoldedWouldFind = (t: TechniqueSummary, typed: string) =>
+      [t.name, ...t.aliases, t.position].some((f) => f.toLowerCase().includes(typed));
 
-    for (const t of needsFolding) {
-      const typed = foldForSearch(t.name);
-      expect(searchTechniques(catalog, typed).map((x) => x.id)).toContain(t.id);
+    const missed = catalog.filter((t) => typedForms(t).some((typed) => !unfoldedWouldFind(t, typed)));
+
+    // Named explicitly, one per fold step, so a collapsed or empty set cannot
+    // pass quietly: drop the diacritic strip and São Paulo leaves the set;
+    // drop the dash fold and North–South leaves it; make the fold an identity
+    // and the set empties entirely.
+    const ids = missed.map((t) => t.id);
+    expect(ids).toContain('sao-paulo-pass');
+    expect(ids).toContain('north-south-pass');
+    expect(ids).toContain('rear-naked-choke');
+
+    for (const t of missed) {
+      for (const typed of typedForms(t)) {
+        expect(searchTechniques(catalog, typed).map((x) => x.id)).toContain(t.id);
+      }
     }
   });
 
   it('searches position as well as name and aliases', () => {
     // Nothing else pins this: every other case queries a name or an alias, so
     // dropping position from the haystack left the whole suite green. It is a
-    // real entry point: 37 half-guard techniques are named nothing like
+    // real entry point — 37 half-guard techniques are named nothing like
     // "half guard" and are reachable by typing the position and no other way.
     const found = searchTechniques(catalog, 'half guard');
     // The load-bearing part: entries reached ONLY through their position,

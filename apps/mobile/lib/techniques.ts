@@ -239,6 +239,11 @@ export async function fetchRulesets(
  * searching. Measured over every name and alias in the catalog: folding to a
  * space finds everything folding to a hyphen finds, plus six more query forms,
  * and loses nothing.
+ *
+ * DUPLICATED in apps/web/src/lib/api.ts. The two apps share no package, and mobile
+ * needs its copy to work offline — the same reason the position vocabulary
+ * is duplicated four ways. Change one, change the other: nothing enforces it,
+ * `verify` runs no web tests, and a silent divergence here is invisible.
  */
 export function foldForSearch(value: string): string {
   return value
