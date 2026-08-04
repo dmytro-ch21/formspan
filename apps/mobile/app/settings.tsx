@@ -2,10 +2,12 @@ import { useAuth } from '@clerk/clerk-expo';
 import { clearSessionToken } from '@/lib/session';
 import { Stack, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, View as RNView } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
-import { vola } from '@/constants/Colors';
+import { accents, vola, type AccentName } from '@/constants/Colors';
+import { Icon } from '@/components/ui/Icon';
+import { useAccentChoice } from '@/lib/AccentProvider';
 import { useAuth as useClerkAuth } from '@clerk/clerk-expo';
 
 import { readAutoRest, writeAutoRest } from '@/lib/rest';
@@ -91,6 +93,7 @@ export default function SettingsScreen() {
           onPress={() => router.push('/settings/units')}
           testID="settings-units"
         />
+        <AccentRow />
         <Toggle
           label="Auto rest timer"
           hint="Start the countdown when you tick a set off."
@@ -128,6 +131,63 @@ export default function SettingsScreen() {
         per-sport defaults.
       </Text>
     </ScrollView>
+  );
+}
+
+/**
+ * The accent picker — swatches in the settings list, not a screen of its own.
+ *
+ * Units is a sub-screen and this deliberately is not. A unit system is a fact
+ * you set once and verify by reading a word; an accent is a *look*, and the
+ * only way to judge it is to see it applied. Tapping a swatch here recolours
+ * the tab bar two inches below and the section links above it, immediately —
+ * which is the entire decision, and a push-and-return would hide it behind a
+ * transition.
+ *
+ * **Selection is never carried by colour alone.** The chosen swatch takes a
+ * ring and a tick; the others take neither. That matters more here than
+ * anywhere else in the app, because the thing being chosen *is* colour, so a
+ * colour-coded selection marker is unreadable for exactly the people most
+ * likely to be choosing carefully.
+ */
+function AccentRow() {
+  const { name, choose } = useAccentChoice();
+
+  return (
+    <View style={styles.accentRow}>
+      <View style={styles.rowBody}>
+        <Text style={styles.rowLabel}>Accent</Text>
+        <Text style={styles.muted}>Buttons, links and the active tab.</Text>
+      </View>
+      <RNView
+        style={styles.swatches}
+        accessibilityRole="radiogroup"
+        accessibilityLabel="Accent colour"
+      >
+        {(Object.keys(accents) as AccentName[]).map((key) => {
+          const a = accents[key];
+          const on = key === name;
+          return (
+            <Pressable
+              key={key}
+              onPress={() => void choose(key)}
+              hitSlop={6}
+              accessibilityRole="radio"
+              accessibilityState={{ checked: on }}
+              accessibilityLabel={a.label}
+              testID={`accent-${key}`}
+              style={[
+                styles.swatch,
+                { backgroundColor: a.accent },
+                on && { borderColor: vola.text },
+              ]}
+            >
+              {on && <Icon name="check" size={13} color={a.on} strokeWidth={2.6} />}
+            </Pressable>
+          );
+        })}
+      </RNView>
+    </View>
   );
 }
 
@@ -236,6 +296,28 @@ const styles = StyleSheet.create({
   },
   rowDivided: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: vola.lineSoft },
   rowBody: { flex: 1, gap: 2 },
+
+  // Its own row shape rather than `Row`'s: the swatches need the full width
+  // under the label, not a value chip beside it.
+  accentRow: {
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    gap: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: vola.line,
+  },
+  swatches: { flexDirection: 'row', gap: 12 },
+  swatch: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    // Always bordered, transparent until chosen — so picking one does not
+    // shift the row by 2pt.
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
   rowLabel: { fontSize: 16, fontWeight: '600' },
   danger: { color: vola.danger },
   muted: { color: vola.textMuted, fontSize: 13 },
