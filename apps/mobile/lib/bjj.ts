@@ -46,6 +46,57 @@ export type Standing = {
   promotions: Promotion[];
 };
 
+/**
+ * The promotion that awarded the rank the athlete currently holds.
+ *
+ * `Standing.current` is a Rank — belt, stripes, degree — and carries no
+ * academy or date, because the server derives it as the *highest* recorded
+ * rank rather than the latest row. The school and the date live on the
+ * `Promotion` that granted it, so it has to be found by matching.
+ *
+ * Ties broken by the latest `promoted_on`, with undated promotions ranking
+ * last: a rank entered twice (a correction, a re-entry) should show the date
+ * the athlete most recently stated, and a dated record is better evidence than
+ * an undated one whatever order they were typed in.
+ *
+ * Returns null when nothing matches — reachable, since the rank can be derived
+ * from a promotion the athlete has since edited. The header then shows the
+ * belt alone rather than inventing a school.
+ */
+export function awardingPromotion(standing: Standing): Promotion | null {
+  const { current, promotions } = standing;
+  if (!current) return null;
+  const matches = promotions.filter(
+    (p) => p.belt === current.belt && p.stripes === current.stripes && p.degree === current.degree,
+  );
+  if (matches.length === 0) return null;
+  return matches.reduce((best, p) => {
+    if (!p.promoted_on) return best;
+    if (!best.promoted_on) return p;
+    return p.promoted_on > best.promoted_on ? p : best;
+  });
+}
+
+/**
+ * "12 Mar 2024" — a promotion is a date you remember, not a timestamp.
+ *
+ * Short month deliberately: spelled out, "12 March 2024" overruns a third of a
+ * phone's width and renders as "March 12, 20…", which loses the year — the one
+ * part of a promotion date anybody actually quotes.
+ */
+export function formatAwardDate(day: string): string {
+  // Parsed from parts rather than `new Date(day)`, which reads a bare
+  // YYYY-MM-DD as UTC midnight and renders as the previous day west of
+  // Greenwich — the same trap the plan module documents.
+  const [y, m, d] = day.split('-').map(Number);
+  if (!y || !m || !d) return day;
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
 export function getStanding(getToken: TokenGetter): Promise<Standing> {
   return apiRequest<Standing>(getToken, '/bjj/standing');
 }

@@ -8462,6 +8462,141 @@ brand kit's top-level placeholder logos.
 `currentColor` therefore buys nothing here today; it costs nothing either, and
 it means the console is already correct if a dark mode ever lands.
 
+## 2026-08-04 — The You tab gets a masthead, and four spans break every chart on it
+
+The You tab held a belt card, a two-span consistency grid, three tiles and a
+stack of record boxes, all at the same visual weight. The ask was for the belt
+to lead, for the grid to offer a week / month / six months / a year, and for the
+records to be compact and worth looking at. Only the first is a design change;
+the other two turned out to be a lesson in how a chart built for two spans
+fails at four.
+
+### The belt is the masthead now
+
+`BjjRankCard` sat below the training summary — one card among several. For a
+grappler the belt is not a fact about them, it is the thing the screen is
+*about*. It now leads the page full-width: the belt drawn large, "YOUR RANK"
+and its name beneath, then School / Promoted / At this rank as three labelled
+facts under a rule.
+
+Details that mattered more than they look:
+
+- **The school comes from the promotion, not the rank.** `Standing.current` is
+  derived server-side as the *highest* recorded rank and carries no academy or
+  date, so the awarding promotion has to be found by matching belt + stripes +
+  degree, breaking ties on the latest `promoted_on` with undated rows last.
+  Returns null when nothing matches — reachable, since the athlete can edit the
+  promotion the rank was derived from — and the header then shows the belt
+  alone rather than inventing a school.
+- **Each fact is omitted rather than shown empty.** A promotion may legitimately
+  have no academy and no date; "School: —" is furniture.
+- **The date is parsed from parts**, never `new Date('2024-03-12')`, which reads
+  a bare date as UTC midnight and renders as the previous day west of
+  Greenwich — the same trap `lib/plan.ts` documents.
+- On the device, two of the three facts truncated: a third of a phone is ~92pt,
+  and "March 12, 20…" had lost the year — the one part of a promotion date
+  anyone quotes. Short month plus two-line values fixed it.
+
+**`BjjRankCard` is deleted, not kept for the empty case.** Rendering both meant
+two components each fetching `/bjj/standing`: two requests for one fact, and
+they can disagree while one is in flight. The no-rank state is now one quiet row
+inside the header — a masthead saying "no rank yet" in 200pt of chrome would be
+the loudest thing on the screen saying nothing.
+
+### Four spans, and what broke
+
+`SPANS` went from two entries to `1W / 1M / 6M / 1Y`, and three separate things
+turned out to have been sized for the old pair.
+
+- **The consistency grid overflowed silently.** Weeks-as-columns at a fixed
+  13pt cell is 52 × 16 = 832pt inside a ~315pt card: three quarters of the year
+  ran off the right edge with no scroll and nothing to say so. The cell is now
+  derived from an `onLayout`-measured width, and the gap tightens as columns
+  multiply (3 → 2 → 1), because at 52 columns a 3pt gap is half the card.
+- **And the same fix made a month look broken the other way** — four columns of
+  16pt is 61pt of grid marooned in the same card. So the *shape* is per-span
+  too: five weeks or fewer lays out as a **calendar**, seven across with weekday
+  letters; more lays out as a **heatmap**, weeks across and days down. Filling
+  the width also proved wrong when actually looked at — at ~42pt a month is
+  twenty-eight chips the size of the Today screen's date buttons, and
+  twenty-seven grey ones shout over the one lime one that is the point of the
+  card. Capped at 30 and centred.
+- **The weekly volume chart stopped being readable at all.** A bar per week over
+  a year is 52 bars in ~315pt — a texture, at exactly the range someone picks to
+  answer "how much did I move". It is now always **seven bars, this week**, one
+  per day, deliberately *not* tied to the span control above it: the grid
+  answers "am I showing up, over months" and this answers "how is this week
+  going". A Thursday shown as a bar of any height on Tuesday reads as a session
+  you missed, so days that haven't happened yet draw **nothing** where a rest
+  day draws a stub — see below for why the first attempt at that was wrong.
+- **The Time figure overlapped its neighbour.** A year is "312h 45m", and at
+  size 26 in a third-width tile that runs into the next stat. Two fixes:
+  `formatDuration` drops minutes past 100 hours (nobody states a year at minute
+  precision, and it stops the rendered width growing), and `StatValue` shrinks
+  the figure on a length ladder. A ladder rather than `adjustsFontSizeToFit`,
+  which measures after layout and is unreliable across the nested `Text` runs
+  this component renders by design.
+
+### Records, compact
+
+Five records were five bordered boxes — a lot of chrome for five numbers. Now
+one card of divided rows: medal, name with the evidence and any secondary
+records beneath, and the headline figure right-aligned. The medal is drawn from
+Views (same no-`react-native-svg` rule as `ui/Icon` and `Belt`), and its tier
+means something — gold is `is_recent`, silver is a standing record — with a ★ on
+the gold so the tiers survive greyscale, since the two metals are only 1.26:1
+apart.
+
+One real bug fell out of reading the row on the device: the estimated 1RM
+rendered as "74.48kg". `formatEstimate` had existed for exactly this since the
+exercise screen, but `formatRecord` took a `fmtWeight` callback and routed both
+weight kinds through it. It now takes the `UnitSystem` and picks the formatter
+itself — a caller passing its own formatter would have had to know which kinds
+are estimates, which is this function's job.
+
+### What review caught, and both were the same mistake
+
+`/pre-merge`'s frontend reviewer found one blocking defect and, on the re-check,
+a second. They are worth recording together because they are the same error
+twice: **a distinction that exists in the code and not on the device.**
+
+- **The future bars were dimmed into invisibility.** The first version drew a
+  future day at 3% height in `lineSoft` and a rest day at 3% in `gridRest` —
+  1.7pt of one colour beside 1.7pt of another, 1.28:1 apart, on a ground
+  neither clears 1.5:1 against. The branch was correct and both read as blank,
+  which is exactly the "you missed Thursday" the branch existed to prevent. The
+  channel is now presence-versus-absence of a mark: a stub means a measured
+  zero, nothing means no data yet. The weekday letters carry it too, and stopped
+  using `opacity: 0.4` — which had taken `textDim` to 1.59:1. The elapsed days
+  step *up* to `textMuted` instead. The rest stub then went 4% → 7%, because at
+  2.2pt `bar`'s 3pt top radius renders it as a lens rather than a bar.
+- **The timezone test was a no-op that passed against the exact bug it
+  covered.** `formatAwardDate` parses from parts precisely so a bare
+  `YYYY-MM-DD` doesn't render as the previous day west of Greenwich, and the
+  test set `process.env.TZ = 'America/Los_Angeles'` in a `beforeAll` to prove
+  it. **Jest hands the sandbox a copied `process`**, so the assignment never
+  reaches the runtime, V8 is never notified, and the zone silently stays UTC —
+  where the bug is invisible and the buggy implementation passes all three
+  assertions. Fixed by setting the zone at process launch instead:
+  **`apps/mobile`'s `test` script is now `TZ=America/Los_Angeles jest`**, so the
+  whole mobile suite runs outside UTC, which is the condition these bugs
+  actually manifest under and the reason CI never catches them. The file also
+  carries a guard asserting `getTimezoneOffset() > 0`, so the configuration
+  cannot rot back into a no-op without going red. The full suite passed
+  unchanged under the new zone — nothing else had been depending on UTC.
+
+### Verification
+
+Every span, both grid shapes, the masthead with a real promotion, the medal row
+and the seven-bar week were checked on the iPhone 15 Pro Simulator — the grid
+overflow, the marooned month, the truncated facts and the two-decimal 1RM were
+all found by looking at it, not by reading it. Two test files are new
+(`history.test.ts`, `rankFacts.test.ts`) covering the pure maths and the two
+facts the screen *asserts about the athlete* — which promotion awarded the held
+rank, and the estimate-versus-measurement split on a record. Five guards were
+mutated to confirm the assertions go red when the code they cover changes,
+including the timezone one above.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
