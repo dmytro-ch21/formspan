@@ -6899,6 +6899,61 @@ inverted — hover text reading as an instruction to restore it.
   are mutation-tested, but nothing has drawn the new block.
 
 
+## 2026-08-03 — Setting the focus, beside the numbers that justify it
+
+The last piece of the three-PR arc. `/dashboard/proficiency` can now set the
+focus list, which is what makes the mobile collapse actually do anything —
+until this, the wizard's "Working on" block was absent for everyone because
+nothing could populate it.
+
+### Where it went, and why it is not its own screen
+
+A star per row in the proficiency table, plus a panel above it. Same pattern
+and the same reasoning as pinning on the Records page: on a wide screen the
+choice and the thing being chosen sit side by side, so you decide what to work
+on **while looking at the drop-off that says you should**. A technique showing
+"drilled 12, tried 0" is one click from becoming this month's focus.
+
+That adjacency is the design doc's insights→focus loop, and it only works if
+the two are one screen. A separate focus editor would make you remember the
+number rather than see it.
+
+Web, per the platform rule: choosing what to work on for the next few weeks is
+planning. The phone reads the list and never writes it.
+
+### `started_on` finally gets read
+
+The panel shows "3 weeks" per entry — the reason that column survives a re-save
+on the server, and until now stored and returned by nothing. It is parsed as
+UTC midnight and compared in whole days, so a viewer's timezone cannot shift
+the count; and the empty-string placeholder the optimistic update writes
+renders as nothing rather than as "0 weeks", which would be a number the
+athlete could read as real.
+
+### The cap is enforced in the UI as a refusal, not a silent truncation
+
+Starring a sixth technique sets an error naming the number and does not fire
+the request. The server rejects it too — this is the message, not the guard.
+
+### Gaps this leaves
+
+- **You can only focus on a technique you already have evidence for.** The
+  table lists what you have drilled or tried; something you have never touched
+  cannot be starred, so a coach saying "work on the berimbolo" has nowhere to
+  go until you have drilled it once. Adding a library search here is the
+  obvious follow-up and is deliberately not in this PR.
+- **No ordering control.** The list is the order techniques were starred, and
+  the API preserves whatever order it is sent — but nothing lets the athlete
+  rearrange it. Fine while the phone shows all five as equals; wrong once
+  anything treats the first entry as the primary focus.
+- **No rotation prompt.** The panel shows how many weeks; nothing suggests
+  rotating at four to six, which is the thing the number is for.
+- **Still not rendered.** Every class used was checked against the compiled
+  stylesheet — the defect that shipped two PRs ago was a class that did not
+  exist — but nothing has been seen on screen, because the page is behind Clerk
+  auth.
+
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

@@ -4,7 +4,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@clerk/nextjs";
 
 import {
+  getBjjFocus,
   getBjjProficiency,
+  MAX_BJJ_FOCUS,
+  setBjjFocus,
+  type BjjFocus,
   type BjjProficiency,
   type BjjProficiencySummary,
 } from "@/lib/api";
@@ -77,6 +81,7 @@ export default function ProficiencyPage() {
   const { getToken } = useAuth();
   const [rows, setRows] = useState<BjjProficiency[] | null>(null);
   const [summary, setSummary] = useState<BjjProficiencySummary | null>(null);
+  const [focus, setFocus] = useState<BjjFocus[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [bucket, setBucket] = useState<Bucket>("all");
   const [search, setSearch] = useState("");
@@ -87,10 +92,16 @@ export default function ProficiencyPage() {
     const c = new AbortController();
     abortRef.current = c;
     try {
-      const data = await getBjjProficiency(getToken, c.signal);
+      // Together: a failed focus read must not blank the funnel, and vice
+      // versa, but neither is worth a second round trip's latency.
+      const [data, list] = await Promise.all([
+        getBjjProficiency(getToken, c.signal),
+        getBjjFocus(getToken, c.signal),
+      ]);
       if (c.signal.aborted) return;
       setRows(data.techniques);
       setSummary(data.summary);
+      setFocus(list);
       setError(null);
     } catch (err) {
       if (c.signal.aborted) return;
@@ -110,6 +121,81 @@ export default function ProficiencyPage() {
     load();
     return () => abortRef.current?.abort();
   }, [load]);
+
+  const focusIDs = useMemo(() => new Set(focus.map((f) => f.technique_id)), [focus]);
+
+  /**
+   * Toggling focus from the table, beside the numbers that justify it.
+   *
+   * Same pattern and the same reasoning as pinning on the Records page: on a
+   * wide screen the choice and the thing being chosen can sit side by side, so
+   * you decide what to work on *while looking at* the drop-off that says you
+   * should. That is the insights→focus loop the design doc describes, and it
+   * only works if the two are one screen rather than two.
+   */
+  const toggleFocus = useCallback(
+    (p: BjjProficiency) => {
+      const has = focusIDs.has(p.technique_id);
+      if (!has && focus.length >= MAX_BJJ_FOCUS) {
+        setError(
+          `A focus list is at most ${MAX_BJJ_FOCUS} — drop one first. Keeping it short is the point.`,
+        );
+        return;
+      }
+      setError(null);
+      const nextIDs = has
+        ? focus.filter((f) => f.technique_id !== p.technique_id).map((f) => f.technique_id)
+        : [...focus.map((f) => f.technique_id), p.technique_id];
+
+      // Optimistic, with the real row put back on failure rather than leaving
+      // the star and the stored list disagreeing. The optimistic entry carries
+      // a placeholder started_on because only the server knows it — and the
+      // response replaces the whole list, so the placeholder never survives a
+      // success.
+      const previous = focus;
+      setFocus(
+        has
+          ? focus.filter((f) => f.technique_id !== p.technique_id)
+          : [
+              ...focus,
+              {
+                technique_id: p.technique_id,
+                name: p.name,
+                position: p.position,
+                category: p.category,
+                started_on: "",
+              },
+            ],
+      );
+      setBjjFocus(getToken, nextIDs)
+        .then(setFocus)
+        .catch((err) => {
+          setFocus(previous);
+          setError(err instanceof Error ? err.message : String(err));
+        });
+    },
+    [focus, focusIDs, getToken],
+  );
+
+  /** Remove from the panel, where there is no proficiency row to hand over. */
+  const dropFocus = useCallback(
+    (techniqueID: string) => {
+      setError(null);
+      const previous = focus;
+      const next = focus.filter((f) => f.technique_id !== techniqueID);
+      setFocus(next);
+      setBjjFocus(
+        getToken,
+        next.map((f) => f.technique_id),
+      )
+        .then(setFocus)
+        .catch((err) => {
+          setFocus(previous);
+          setError(err instanceof Error ? err.message : String(err));
+        });
+    },
+    [focus, getToken],
+  );
 
   const shown = useMemo(() => {
     if (!rows) return [];
@@ -181,6 +267,8 @@ export default function ProficiencyPage() {
         <>
           {summary && <Funnel summary={summary} />}
 
+          <FocusPanel focus={focus} onDrop={dropFocus} />
+
           <div className="flex flex-col gap-3">
             <div
               className="flex flex-wrap gap-2"
@@ -231,7 +319,12 @@ export default function ProficiencyPage() {
               Nothing in this filter{search.trim() ? " matches that search" : ""}.
             </p>
           ) : (
-            <TechniqueTable rows={shown} total={rows.length} />
+            <TechniqueTable
+              rows={shown}
+              total={rows.length}
+              focusIDs={focusIDs}
+              onToggleFocus={toggleFocus}
+            />
           )}
         </>
       )}
@@ -313,7 +406,17 @@ function Funnel({ summary }: { summary: BjjProficiencySummary }) {
   );
 }
 
-function TechniqueTable({ rows, total }: { rows: BjjProficiency[]; total: number }) {
+function TechniqueTable({
+  rows,
+  total,
+  focusIDs,
+  onToggleFocus,
+}: {
+  rows: BjjProficiency[];
+  total: number;
+  focusIDs: Set<string>;
+  onToggleFocus: (p: BjjProficiency) => void;
+}) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[44rem] border-collapse text-sm">
@@ -327,6 +430,9 @@ function TechniqueTable({ rows, total }: { rows: BjjProficiency[]; total: number
         </caption>
         <thead>
           <tr className="border-b border-line text-left text-xs uppercase tracking-wider text-text-dim">
+            <th scope="col" className="w-10 py-2 pr-2 font-semibold">
+              <span className="sr-only">Working on</span>
+            </th>
             <th scope="col" className="py-2 pr-4 font-semibold">
               Technique
             </th>
@@ -358,6 +464,25 @@ function TechniqueTable({ rows, total }: { rows: BjjProficiency[]; total: number
                 key={p.technique_id}
                 className="border-b border-line-soft last:border-0"
               >
+                <td className="py-2.5 pr-2">
+                  <button
+                    type="button"
+                    onClick={() => onToggleFocus(p)}
+                    aria-pressed={focusIDs.has(p.technique_id)}
+                    // Names the technique, because a screen reader reading
+                    // down a column of "Working on" buttons has nothing to
+                    // bind each one to.
+                    aria-label={`Working on ${p.name}`}
+                    className={[
+                      "rounded-control px-1.5 py-1 text-base leading-none transition-colors",
+                      focusIDs.has(p.technique_id)
+                        ? "text-lime"
+                        : "text-text-dim hover:text-text-muted",
+                    ].join(" ")}
+                  >
+                    {focusIDs.has(p.technique_id) ? "\u2605" : "\u2606"}
+                  </button>
+                </td>
                 <th
                   scope="row"
                   className="py-2.5 pr-4 text-left font-semibold"
@@ -415,6 +540,80 @@ function TechniqueTable({ rows, total }: { rows: BjjProficiency[]; total: number
       </p>
     </div>
   );
+}
+
+/**
+ * What you are working on, and how long you have been.
+ *
+ * Above the table on purpose: the design doc's loop is insights → focus →
+ * curricula, and the focus is the thing you act on. It also gives the phone's
+ * reflection wizard its one-tap rows, so this panel is the only place that
+ * list can be set.
+ */
+function FocusPanel({ focus, onDrop }: { focus: BjjFocus[]; onDrop: (id: string) => void }) {
+  if (focus.length === 0) {
+    return (
+      <section
+        aria-label="Working on"
+        className="rounded-card border border-dashed border-line bg-surface p-5"
+      >
+        <h2 className="font-semibold">Not working on anything specific</h2>
+        <p className="mt-1 max-w-xl text-sm text-text-muted">
+          Star up to {MAX_BJJ_FOCUS} techniques below — ideally ones you have drilled and never
+          taken into a round. They become one-tap rows in the reflection on your phone, so you can
+          record whether they worked without searching the library mid-thought.
+        </p>
+      </section>
+    );
+  }
+  return (
+    <section
+      aria-label="Working on"
+      className="rounded-card border border-line-soft bg-surface p-5"
+    >
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="font-semibold">Working on</h2>
+        <span className="text-xs text-text-muted">
+          {focus.length}/{MAX_BJJ_FOCUS} · one-tap on your phone
+        </span>
+      </div>
+      <ul className="mt-3 flex flex-col gap-2">
+        {focus.map((f) => (
+          <li key={f.technique_id} className="flex items-center gap-3">
+            <span className="flex-1 text-sm font-semibold">{f.name}</span>
+            <span className="text-xs text-text-muted">{weeksOn(f.started_on)}</span>
+            <button
+              type="button"
+              onClick={() => onDrop(f.technique_id)}
+              aria-label={`Stop working on ${f.name}`}
+              className="rounded-control border border-line px-2 py-1 text-xs font-semibold text-text-muted hover:bg-surface-hover"
+            >
+              Done
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/**
+ * "3 weeks" — the whole reason `started_on` survives a re-save on the server.
+ *
+ * An empty string is the optimistic placeholder written before the server
+ * answers; it renders as nothing rather than as "0 weeks", which would be a
+ * number the athlete could read as real.
+ */
+function weeksOn(startedOn: string): string {
+  if (!startedOn) return "";
+  // Parsed as UTC midnight (the format the API sends) and compared in whole
+  // days, so a viewer's timezone cannot shift the count by one.
+  const started = Date.parse(`${startedOn}T00:00:00Z`);
+  if (Number.isNaN(started)) return "";
+  const days = Math.floor((Date.now() - started) / 86_400_000);
+  if (days < 7) return "this week";
+  const weeks = Math.floor(days / 7);
+  return `${weeks} week${weeks === 1 ? "" : "s"}`;
 }
 
 function EmptyState() {
