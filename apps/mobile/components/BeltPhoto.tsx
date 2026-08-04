@@ -1,5 +1,11 @@
 import { Image } from 'expo-image';
-import { StyleSheet, View, type ImageSourcePropType } from 'react-native';
+import {
+  StyleSheet,
+  View,
+  type ImageSourcePropType,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
 
 import { MAX_DEGREE, MAX_STRIPES, type Belt } from '@/lib/bjj';
 
@@ -42,8 +48,9 @@ import { MAX_DEGREE, MAX_STRIPES, type Belt } from '@/lib/bjj';
  * All fractions of the image's *width*, so they survive any render size.
  *
  * `across` is deliberately narrower than the bar it was measured from (0.083 →
- * 0.062): a stripe sits *inside* the bar, and at the measured full width the
- * ends hung over both edges.
+ * 0.076): a stripe sits *inside* the bar, and at the measured full width the
+ * ends hung over both edges. It was 0.062 at first, which was clear of the
+ * edges and also visibly short of them.
  */
 const BAR = {
   cx: 0.7816,
@@ -52,7 +59,7 @@ const BAR = {
   /** Along the belt — the axis stripes are spaced down. */
   length: 0.1352,
   /** Across the belt — how long each stripe is. */
-  across: 0.062,
+  across: 0.076,
 };
 
 /** The render's own aspect, so a caller only ever passes a width. */
@@ -64,6 +71,7 @@ export function BeltPhoto({
   degree,
   width,
   label,
+  style,
 }: {
   belt: Belt;
   stripes: number;
@@ -71,6 +79,8 @@ export function BeltPhoto({
   width: number;
   /** The whole thing is one image to a screen reader; this is what it says. */
   label: string;
+  /** Placement is the caller's; the component only owns its own size. */
+  style?: StyleProp<ViewStyle>;
 }) {
   const height = width * ASPECT;
 
@@ -87,13 +97,18 @@ export function BeltPhoto({
   // A stripe's thickness is a fraction of the bar rather than a constant: the
   // bar has to hold six degrees on a black belt and four stripes elsewhere, so
   // a fixed pitch would overflow one or look sparse on the other.
+  //
+  // 0.6 of the pitch, not 0.42. At the size the card actually renders — a 215pt
+  // belt puts the bar at ~29pt — the first ratio drew 2pt marks that read as
+  // scratches rather than stripes. 0.6 leaves a gap just under half a stripe
+  // wide, which is about what a real belt shows.
   const slots = belt === 'black' ? MAX_DEGREE : MAX_STRIPES;
   const pitch = (BAR.length * width) / (slots + 1);
-  const thickness = Math.max(1.5, pitch * 0.42);
+  const thickness = Math.max(2, pitch * 0.6);
 
   return (
     <View
-      style={{ width, height }}
+      style={[{ width, height }, style]}
       accessible
       accessibilityRole="image"
       accessibilityLabel={label}
