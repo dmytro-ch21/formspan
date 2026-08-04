@@ -60,7 +60,12 @@ jobs:
         run: go run ./cmd/migrate up
 
       - name: Test
-        run: go test ./...
+        # -p 1: packages share ONE database, and several tests assert global
+        # counts (SELECT count(*) FROM techniques). Run in parallel, another
+        # package's fixtures are inside those counts. Latent on main and
+        # reproducible the moment a second package seeds library rows —
+        # measured 3 failures in 6 concurrent runs, 0 with -p 1.
+        run: go test -p 1 ./...
 
       - name: Build Docker image
         run: docker build -f Dockerfile -t vola-api:ci .

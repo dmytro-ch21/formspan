@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/database"
@@ -115,16 +116,21 @@ func TestReSavingAFocusListDoesNotResetStartedOn(t *testing.T) {
 			added = f
 		}
 	}
-	if !kept.StartedOn.Equal(before[0].StartedOn) {
+	if kept.StartedOn != before[0].StartedOn {
 		t.Errorf("started_on reset by a re-save: was %s, now %s — the rotation clock is destroyed "+
 			"by reordering, which is the most ordinary edit there is",
-			before[0].StartedOn.Format("2006-01-02"), kept.StartedOn.Format("2006-01-02"))
+			before[0].StartedOn, kept.StartedOn)
 	}
-	// ...and a genuinely new entry starts today, or the column means nothing
-	// in the other direction.
-	if !added.StartedOn.After(before[0].StartedOn) {
-		t.Errorf("a newly added technique got started_on %s, want today",
-			added.StartedOn.Format("2006-01-02"))
+	// ...and a genuinely new entry starts TODAY, asserted as equality rather
+	// than "after the backdated one" — that weaker form is satisfied by any
+	// date in the last five weeks, so an implementation stamping
+	// CURRENT_DATE - 30 would pass it.
+	var today string
+	if err := pool.QueryRow(ctx, `SELECT to_char(CURRENT_DATE, 'YYYY-MM-DD')`).Scan(&today); err != nil {
+		t.Fatalf("read today: %v", err)
+	}
+	if added.StartedOn != today {
+		t.Errorf("a newly added technique got started_on %s, want %s", added.StartedOn, today)
 	}
 }
 
@@ -209,4 +215,82 @@ func equalIDs(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func TestSetFocusTreatsNilAsEmptyRatherThanANoOp(t *testing.T) {
+	// nil and empty are different things to pgx: `[]string(nil)` binds as SQL
+	// NULL, and `technique_id <> ALL(NULL)` is NULL for every row — so the
+	// prune deleted nothing and a PUT with no body returned 200 having changed
+	// nothing, with a response body that looked right because it is a
+	// read-back of the untouched list.
+	//
+	// Exactly the failure the `<> ALL` choice was made to avoid; the NULL just
+	// moved from an element of the array to the array parameter. The handler
+	// rejects a missing field too, so this covers the repository's own guard.
+	repo, _, userID := focusFixture(t)
+	ctx := context.Background()
+
+	if err := repo.SetFocus(ctx, userID, []string{"test-focus-a", "test-focus-b"}); err != nil {
+		t.Fatalf("set focus: %v", err)
+	}
+	if err := repo.SetFocus(ctx, userID, nil); err != nil {
+		t.Fatalf("set focus nil: %v", err)
+	}
+	got, err := repo.Focus(ctx, userID)
+	if err != nil {
+		t.Fatalf("focus: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("a nil list left %v in place — the prune was a silent no-op", focusIDs(got))
+	}
+}
+
+func TestConcurrentSavesOfDifferentOrderingsDoNotDeadlock(t *testing.T) {
+	// The upsert takes one row lock per technique. Iterating in the ATHLETE's
+	// order means two devices saving the same techniques ranked differently
+	// take the same locks in opposite orders — measured at 23 deadlocks in 40
+	// rounds before the fix, each surfacing as a 500.
+	//
+	// SetFocus therefore iterates in technique_id order while keeping
+	// `position` from the original index, so every transaction takes locks in
+	// the same sequence and the stored ranking is unaffected.
+	repo, pool, userID := focusFixture(t)
+	ctx := context.Background()
+	const other = "test_user_bjj_focus_race"
+	t.Cleanup(func() {
+		if _, err := pool.Exec(ctx, `DELETE FROM bjj_focus WHERE user_id = $1`, other); err != nil {
+			t.Logf("cleanup race user: %v", err)
+		}
+	})
+
+	forward := []string{"test-focus-a", "test-focus-b", "test-focus-c"}
+	reverse := []string{"test-focus-c", "test-focus-b", "test-focus-a"}
+	// Pre-existing rows are the ones that collide: an uncommitted INSERT is
+	// invisible to the other transaction, so both users need the rows already.
+	if err := repo.SetFocus(ctx, userID, forward); err != nil {
+		t.Fatalf("prime: %v", err)
+	}
+
+	const rounds = 25
+	errs := make(chan error, rounds*2)
+	for i := 0; i < rounds; i++ {
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); errs <- repo.SetFocus(ctx, userID, forward) }()
+		go func() { defer wg.Done(); errs <- repo.SetFocus(ctx, userID, reverse) }()
+		wg.Wait()
+	}
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent save failed: %v", err)
+		}
+	}
+
+	// And the list is still coherent afterwards — one of the two orderings,
+	// not an interleaving of both.
+	got, _ := repo.Focus(ctx, userID)
+	if !equalIDs(focusIDs(got), forward) && !equalIDs(focusIDs(got), reverse) {
+		t.Errorf("concurrent saves interleaved into %v", focusIDs(got))
+	}
 }

@@ -14,7 +14,7 @@
     "fmt:api": "cd backend && test -z \"$(gofmt -l .)\" || { gofmt -l .; exit 1; }",
     "vet:api": "cd backend && go vet ./...",
     "build:api": "cd backend && go build -o bin/ ./cmd/...",
-    "test:api": "cd backend && go test ./...",
+    "test:api": "cd backend && go test -p 1 ./...",
     "lint:openapi": "redocly lint contracts/public.openapi.yaml --config .redocly.yaml",
     "dev:mobile": "pnpm --filter mobile start",
     "typecheck:mobile": "pnpm --filter mobile exec tsc --noEmit",

@@ -712,6 +712,12 @@ func TestReseedPopulatesFunctionOnRowsThatPredateTheColumn(t *testing.T) {
 
 	// Rewind to the state migration 000028 leaves behind: every row present,
 	// every function NULL.
+	//
+	// NOTE: this and the counts below assume this package owns every row in
+	// `techniques`. That holds only because the suite runs with `-p 1` — see
+	// ci.yml. Scoping each assertion instead was tried and abandoned: there are
+	// seven of them across this file, fixing one left the other six flaking,
+	// and every future assertion would have to remember.
 	if _, err := pool.Exec(ctx,
 		`UPDATE techniques SET function = NULL, updated_at = now() - interval '1 day'`,
 	); err != nil {

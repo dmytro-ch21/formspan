@@ -6729,8 +6729,56 @@ a time; the constant enforces that rather than describing it.
   design doc names it ("hit-live vs a same-rank partner") and nothing implements
   it.
 
+### Four things review caught, two of which were live bugs
+
+**A `PUT` with no body returned 200 and changed nothing.** `[]string(nil)` binds
+to pgx as SQL NULL, and `technique_id <> ALL(NULL)` is NULL for every row — so
+the prune deleted nothing, and the response *looked* right because it is a
+read-back of the untouched list. That is precisely the failure the `<> ALL`
+choice was made to avoid; the NULL just moved from an element of the array to
+the array parameter. Guarded twice now: the handler rejects an absent field
+(which also makes the contract's `required` true), and the repository
+normalises nil to empty.
+
+**Two devices reordering the same list deadlocked, 23 times in 40 rounds.** The
+upsert takes one row lock per technique and iterated in the *athlete's* order,
+so two saves of the same techniques ranked differently took the same locks in
+opposite orders. It now iterates in `technique_id` order while keeping
+`position` from the original index — same locks, same sequence, ranking
+untouched. Measured 0 in 40 after.
+
+**`started_on` went on the wire as `2026-08-04T00:00:00Z`** while the contract
+promised `format: date`. Worse than a spec mismatch: a midnight-UTC instant
+localises to the *previous day* for anyone west of UTC, on the one field whose
+job is "how many weeks has this been here". Now a formatted string, matching
+`Promotion.PromotedOn` one file over.
+
+### The suite was quietly parallel over a shared database
+
+The fixtures correctly bring their own library rows rather than depending on
+`cmd/seed` — that lesson from the last PR landed. But `go test ./...` runs
+packages **in parallel against one database**, and the technique package has
+seven assertions counting `techniques` globally. Another package's fixtures sit
+inside those counts.
+
+Latent on `main` (measured 0 failures in 6 runs there, a narrow window) and
+reproducible here: 3 in 6. Scoping each assertion was tried and abandoned —
+fixing one left the other six, and every future assertion would have to
+remember. Both `test:api` and CI now run `go test -p 1`, which kills the class:
+0 in 6 after.
+
 ### Gaps this leaves
 
+- **`started_on` is stamped from `CURRENT_DATE`, the server's date in UTC.** An
+  athlete adding a technique after ~8pm Eastern gets tomorrow's date. Cosmetic
+  at five-week granularity, but `/v1/sessions/history` already does calendar-day
+  work in the caller's timezone, so this is inconsistent with an established
+  convention.
+- **The four handler validations have no automated coverage** — the cap, the
+  duplicate check, the empty-id check, `MaxBytesReader`. There are no handler
+  tests anywhere in this repo, so this matches convention rather than breaking
+  it; worth naming because the cap in particular exists nowhere else, with no
+  database constraint behind it, so deleting the check would be silent.
 - **Backend only.** Nothing sets or reads a focus list yet — the web authoring
   surface and the mobile capture collapse are the next two PRs, and the
   redundancy stays until the second of them lands.

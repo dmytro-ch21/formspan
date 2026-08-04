@@ -2,7 +2,6 @@ package bjj
 
 import (
 	"context"
-	"time"
 )
 
 // Focus is one technique the athlete is deliberately working on.
@@ -31,7 +30,13 @@ type Focus struct {
 	// StartedOn is when this technique joined the list — the input to "you
 	// have been on this five weeks, consider rotating". Preserved across
 	// re-saves; see SetFocus.
-	StartedOn time.Time `json:"started_on"`
+	//
+	// A STRING, matching Promotion.PromotedOn, because the column is a DATE and
+	// a time.Time marshals it as a full RFC3339 instant — which contradicts the
+	// contract's `format: date` and, worse, renders as the PREVIOUS DAY for any
+	// athlete west of UTC once a client localises midnight-UTC. A bad look on a
+	// field whose whole job is "how many weeks has this been here".
+	StartedOn string `json:"started_on"`
 }
 
 // maxFocus bounds the list, and the bound is the feature.

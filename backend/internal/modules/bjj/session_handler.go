@@ -208,6 +208,15 @@ func (h *FocusHandler) Set(w http.ResponseWriter, r *http.Request) {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "malformed request body")
 		return
 	}
+	// Absent or null, as opposed to an empty array. `{}` and
+	// `{"technique_ids": null}` both decode to nil, and without this they were
+	// a 200 that changed nothing — the response even looked right, because it
+	// is a read-back of the untouched list. Clearing the list is spelled `[]`.
+	if body.TechniqueIDs == nil {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"technique_ids is required; send [] to clear the list")
+		return
+	}
 	if len(body.TechniqueIDs) > maxFocus {
 		// Names the number rather than just refusing. The cap is the feature —
 		// a list of twenty is the library again — so the message should say

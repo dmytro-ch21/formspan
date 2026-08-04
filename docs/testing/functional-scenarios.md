@@ -2549,6 +2549,15 @@ own, so none of them is redundant with "the FK exists".
 - An unknown technique id → 400 (not 500), **and the whole save rolls back** —
   a partially applied list leaves the athlete with one they never asked for.
 - An empty-string id → 400.
+- **`technique_ids` omitted entirely, or `null` → 400.** Both decode to a nil
+  slice, and before this was guarded they were a 200 that changed nothing —
+  with a response body that looked correct, because it is a read-back of the
+  untouched list. Clearing is spelled `[]`; absent is an error.
+- A body over 8 KB is rejected rather than read.
+- **Concurrent saves of the same techniques in different orders must not
+  deadlock.** The upsert takes a row lock per technique; iterating in the
+  athlete's ranking makes two devices take the same locks in opposite orders.
+  Two goroutines, one forward and one reversed, over ~25 rounds.
 
 **Auth and security**
 

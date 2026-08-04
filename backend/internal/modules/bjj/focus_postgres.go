@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -21,7 +23,12 @@ func (r *PostgresRepository) Focus(ctx context.Context, userID string) ([]Focus,
 		WHERE f.user_id = $1
 		-- The athlete's own order. technique_id makes it total, so two entries
 		-- sharing a position cannot swap between reads.
-		ORDER BY f.position, f.technique_id`, userID)
+		ORDER BY f.position, f.technique_id
+		-- The cap lives in the handler, which is the only writer today. This
+		-- puts the bound next to the thing it protects: history.md already
+		-- anticipates curricula writing pre-authored focus rows, and that would
+		-- be a second writer with no ceiling of its own.
+		LIMIT $2`, userID, maxFocus)
 	if err != nil {
 		return nil, fmt.Errorf("bjj: focus: %w", err)
 	}
@@ -30,10 +37,15 @@ func (r *PostgresRepository) Focus(ctx context.Context, userID string) ([]Focus,
 	// Non-nil so this marshals to [] rather than null.
 	out := []Focus{}
 	for rows.Next() {
-		var f Focus
-		if err := rows.Scan(&f.TechniqueID, &f.Name, &f.Position, &f.Category, &f.StartedOn); err != nil {
+		var (
+			f         Focus
+			startedOn time.Time
+		)
+		if err := rows.Scan(&f.TechniqueID, &f.Name, &f.Position, &f.Category, &startedOn); err != nil {
 			return nil, fmt.Errorf("bjj: scan focus: %w", err)
 		}
+		// Formatted here rather than left to encoding/json — see the field.
+		f.StartedOn = startedOn.Format(dateLayout)
 		out = append(out, f)
 	}
 	return out, rows.Err()
@@ -46,11 +58,40 @@ func (r *PostgresRepository) SetFocus(ctx context.Context, userID string, techni
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// nil is not the same as empty to pgx: `[]string(nil)` binds as SQL NULL,
+	// and `technique_id <> ALL(NULL)` is NULL for every row, so the prune below
+	// would delete nothing and a PUT with no body would return 200 having
+	// changed nothing. That is the exact failure the `<> ALL` choice was made
+	// to avoid — the NULL simply moved from an ELEMENT of the array to the
+	// array parameter itself. The handler also rejects a missing field, so this
+	// is the second of two guards rather than the only one.
+	if techniqueIDs == nil {
+		techniqueIDs = []string{}
+	}
+
+	// Lock in a canonical order, NOT the athlete's ranking.
+	//
+	// The upsert takes a row lock per id, so iterating in array order means two
+	// devices saving the same techniques ranked differently take the same locks
+	// in opposite orders. Measured before this: 23 deadlocks in 40 concurrent
+	// rounds, surfacing as a 500. Sorting the ITERATION while keeping `position`
+	// from the original index makes every transaction take locks in the same
+	// sequence — measured 0 in 40 — and leaves the stored ranking untouched.
+	type entry struct {
+		id       string
+		position int
+	}
+	ordered := make([]entry, len(techniqueIDs))
+	for i, id := range techniqueIDs {
+		ordered[i] = entry{id: id, position: i}
+	}
+	sort.Slice(ordered, func(a, b int) bool { return ordered[a].id < ordered[b].id })
+
 	// Upsert first, then delete what is no longer listed. NOT delete-then-
 	// insert, which is how `started_on` would be lost: the row would be gone
 	// and come back with today's date, silently resetting the rotation clock on
 	// every technique every time the athlete reorders the list.
-	for i, id := range techniqueIDs {
+	for _, e := range ordered {
 		_, err := tx.Exec(ctx, `
 			INSERT INTO bjj_focus (user_id, technique_id, position)
 			VALUES ($1, $2, $3)
@@ -60,7 +101,7 @@ func (r *PostgresRepository) SetFocus(ctx context.Context, userID string, techni
 			-- "you have been working on this since the last time you touched
 			-- the screen", which is worse than not having the column.
 			ON CONFLICT (user_id, technique_id)
-			DO UPDATE SET position = EXCLUDED.position`, userID, id, i)
+			DO UPDATE SET position = EXCLUDED.position`, userID, e.id, e.position)
 		if err != nil {
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == "23503" {
