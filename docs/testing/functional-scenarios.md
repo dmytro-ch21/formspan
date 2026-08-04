@@ -2556,6 +2556,74 @@ conflict story.
 - The content is identical for every user: there is nothing user-scoped here,
   and no endpoint takes a user id.
 
+## Planning a week, and starting what's planned (mobile)
+
+Covers `lib/plan.ts`, `components/WeekPlanner.tsx`,
+`components/TrainingCalendar.tsx`, `components/ui/PickSessionSheet.tsx`, and
+the plan-shaped lead card on Today.
+
+**Local-only for now** — plans live in the device's SQLite (`planned_sessions`,
+schema v14) and never reach the server, so none of these scenarios should
+assert anything about sync, and a second device is expected to show nothing.
+
+### Planning a day (happy path)
+
+- Plan tab → `+ Add` on a future day → pick a discipline with no template →
+  the day shows that discipline with a lime rule and "Planned".
+- `+ Add` → pick one of your workout templates → the day shows the template's
+  name, not the discipline's.
+- A day accepts more than one entry (lift in the morning, mat in the evening)
+  and shows both, in the order they were added.
+- Long-press a planned entry → confirm → it disappears, and **nothing logged
+  changes**. Removing a plan must never touch a session.
+- Renaming a template renames it wherever it is planned, without replanning —
+  the plan stores the id, not the name.
+
+### Today reads the plan back
+
+- Plan today, return to Today → the lead card names it and offers **Start**.
+- Start a planned day whose plan names a template → the session begins on that
+  template directly, with **no chooser in between**.
+- Start a planned day planned as a bare discipline → the normal chooser opens.
+- Plan a BJJ day → the card says **Log**, not Start, and goes to the BJJ log —
+  the same `logsAfterwards` predicate everything else uses.
+- Nothing planned → the dashed "Nothing planned for today" card, which routes
+  to Plan. `+ Start something` is present either way.
+- A session already in progress outranks the plan card entirely.
+
+### The calendar
+
+- Collapsed: today is filled; a **green** dot marks a day trained, a **lime**
+  dot a day planned. A day that is both shows green.
+- `Week in review` expands to seven day rows; a trained day shows its
+  duration/sets/volume and opens the session, a planned day shows "Planned"
+  and is inert. An empty day says "No activity".
+- Tapping the month name opens the month sheet; the arrows move both the grid
+  **and** the "so far" totals, which must never keep the previous month's
+  figures under a new month's heading.
+- Tapping a day in the grid shows that day's entries beneath it.
+- **The month grid must not under-report.** Log more than 30 sessions, then
+  open the month — days beyond the Today screen's 30-row list must still be
+  dotted. (The sheet loads its own wider window precisely for this.)
+
+### Edge cases & errors
+
+- Past days offer no `+ Add` and render "—" rather than "Rest": a day that has
+  gone cannot be planned.
+- A plan naming a template that is no longer cached degrades to its discipline
+  and still starts, via the chooser — it must not vanish or crash.
+- With every discipline disabled, the picker says so and offers the profile;
+  it must not render an empty sheet.
+- A day planned across a month boundary stays on the day it was planned for
+  when the device timezone changes — the plan stores a local date, not an
+  instant.
+
+### Auth & data separation
+
+- Signing in as a different account on the same device shows **none** of the
+  first account's plans (shared-device rule — every row is user-scoped).
+- Removing a plan while signed in as another account does nothing.
+
 ## The opening animation (mobile)
 
 Covers `components/AnimatedSplash.tsx` and the splash handover in
@@ -2602,3 +2670,126 @@ it again.
   half-written wordmark or strand the user on a splash that never lifts.
 - Launch on the smallest supported width → the 240pt wordmark still clears the
   screen edges with margin.
+
+## Plans API and the web calendar
+
+Covers `backend/internal/modules/plan`, `/v1/plans`, and
+`apps/web/src/app/dashboard/calendar`.
+
+Mobile now uses this endpoint too (schema v15) — see the sync scenarios at the
+end of this section for the cross-device cases.
+
+### `/v1/plans` (happy path)
+
+- `POST` with `{id, day, sport}` returns 201 and the plan, `workout_id` null.
+- `POST` with a `workout_id` returns it set.
+- `GET ?from=&to=` returns plans oldest first, insertion order within a day.
+- `PATCH` with only `{notes}` leaves `day`, `sport` and `workout_id` alone.
+- `PATCH` with `{"workout_id": null}` **clears** the template; omitting the key
+  entirely leaves it. These two must not behave the same.
+- `DELETE` returns 204 and the plan stops appearing in `GET`.
+
+### Range and dates
+
+- `from`/`to` are inclusive: a plan on `from` and one on `to` are both
+  returned; one on `to + 1 day` is not.
+- Missing `from` or `to` is 400 — **not** an empty list.
+- `to` before `from` is 400. A range over 400 days is 400.
+- `day: "2026-08-04T00:00:00Z"` is **rejected**, not truncated. Same for
+  `04/08/2026`.
+- A plan created for `2026-08-04` reads back as exactly `2026-08-04` from a
+  client in any timezone — run this from a UTC-negative offset, which is where
+  a timestamp round-trip would show up as the 3rd.
+
+### Auth and ownership
+
+- All four operations 401 without a bearer token.
+- `GET` never returns another user's plans.
+- `PATCH` and `DELETE` on another user's plan id return **404, not 403**, and
+  leave the row untouched.
+- `DELETE` of an id that never existed is 404, not 204.
+
+### Edge cases & errors
+
+- An unknown sport is 400 and the response must **not** contain
+  `plans_sport_valid` or any other constraint name.
+- An unknown `workout_id` is 400, not 500.
+- Notes over 500 characters are 400.
+- A duplicate `id` is 409 — the offline retry contract.
+- Deleting a workout that days are planned around leaves those plans, with
+  `workout_id` now null. They must not disappear.
+
+### The web calendar
+
+- The month grid shows green for days with logged sessions and lime for
+  planned days; a day with both shows both.
+- Days spilling in from the neighbouring months are visible and dimmed, never
+  blank, and carry their own marks.
+- `←`/`→` move the month and reload both layers; `Today` returns and selects
+  today.
+- Clicking a day selects it; the side panel shows that day's logged total and
+  its plans.
+- Adding a plan appears in the grid without a manual refresh; removing one
+  disappears from both.
+- Changing the discipline in the form resets the template select to "None" —
+  and must not flash the previous discipline's template for a frame.
+- With a discipline that has no templates, the select offers only "None" and
+  the plan still saves.
+- A failed create or delete surfaces the API's message and leaves the grid as
+  it was.
+- With every discipline disabled, the form says so rather than rendering an
+  empty select.
+
+### Plan sync (mobile ↔ server)
+
+Covers `lib/plan.ts`'s outbox and `lib/plansApi.ts`. Schema v15.
+
+**Round trip**
+
+- Plan a day on the phone → it appears in the web calendar after a sync.
+- Plan a day on the web → it appears on the phone's Plan tab and, if it is
+  today, as the Today lead card — **without leaving and re-entering the tab**
+  (the screens re-read on `lastSyncAt`).
+- Remove a plan on the web → it disappears from the phone.
+- Remove a plan on the phone → it disappears from the web.
+
+**Offline**
+
+- Airplane mode → plan three days → all three appear immediately and the
+  pending count rises. Restore the network → all three land, count returns to
+  zero, nothing duplicates.
+- Airplane mode → delete a synced plan → it disappears from every screen at
+  once, and the server is told when the network returns.
+- Force-quit between the local write and the sync → the plan survives and
+  still syncs.
+
+**Conflicts and ordering**
+
+- Edit the same plan on both devices → last write wins on `updated_at`; the
+  loser is not silently resurrected on the next pull.
+- A plan referencing a template that has not synced yet is **deferred**, not
+  failed — the pending count includes it, no error banner appears, and it goes
+  out once the template lands.
+- Deleting a plan whose template has not synced is **not** deferred.
+- A create whose response is lost retries and reconciles via 409 — it must not
+  create a second plan, and must not be reported as permanently failed.
+
+**The destructive edges** (each of these has already been a bug in this
+codebase's other outboxes)
+
+- A plan deleted on the phone must not be resurrected by the next pull.
+- A plan created on the phone must not be deleted by the same run's pull just
+  because the server's list did not echo it back yet.
+- A local edit still waiting to go out must not be overwritten by a pull, even
+  when the server's copy has a newer `updated_at`.
+- A plan the server has never seen must not be swept by the "deleted
+  elsewhere" pass.
+
+**Errors**
+
+- A permanently-refused plan (unknown sport, notes too long) records the
+  server's message and stops being retried; it must not grind forever.
+- A transient failure records **nothing** on the row.
+- A refused plan that later succeeds clears its error.
+- Signing out and into another account on the same device shows none of the
+  first account's plans and pushes none of them.

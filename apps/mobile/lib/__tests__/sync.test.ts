@@ -38,6 +38,18 @@ jest.mock('../sessionStore', () => ({
   countPendingWorkouts: jest.fn(async () => 0),
 }));
 
+// The third outbox, and the third time this mock has had to grow.
+//
+// `pending` is the SUM across all of them, so a missing count here throws
+// inside `refreshPending`'s own swallowing catch and leaves pending at 0 —
+// which silently stops the retry ladder and the foreground trigger. That is
+// exactly what happened when workouts joined the count (see the note above)
+// and it happened again when plans did. The two tests below are what catch it.
+jest.mock('../plan', () => ({
+  countPendingPlans: jest.fn(async () => 0),
+  syncPlans: jest.fn(async () => ({ pushed: 0, pulled: 0, failed: 0, deferred: 0 })),
+}));
+
 const mockSync = syncSessions as jest.MockedFunction<typeof syncSessions>;
 const mockCount = countPendingSessions as jest.MockedFunction<typeof countPendingSessions>;
 

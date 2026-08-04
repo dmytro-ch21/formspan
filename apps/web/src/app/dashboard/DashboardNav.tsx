@@ -38,6 +38,15 @@ const navItems: {
   needs?: (m: Module[]) => boolean;
 }[] = [
   { href: "/dashboard", label: "Today" },
+  // Between Today and Workouts on purpose: the calendar is what you open
+  // *after* seeing today and *before* editing a template — planning the week
+  // is the step between the two, and burying it under Workouts would make it
+  // look like a property of templates rather than the surface that uses them.
+  //
+  // Ungated. Planning needs a discipline to plan, but every athlete has at
+  // least the registry's defaults, and unlike Records there is no discipline
+  // for which a calendar is structurally empty.
+  { href: "/dashboard/calendar", label: "Calendar" },
   { href: "/dashboard/workouts", label: "Workouts" },
   { href: "/dashboard/sessions", label: "History" },
   {

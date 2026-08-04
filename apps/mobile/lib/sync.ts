@@ -3,6 +3,7 @@ import { AppState, type AppStateStatus } from 'react-native';
 
 import { isOffline } from './apiError';
 import { countPendingSessions, countPendingWorkouts, syncSessions } from './sessionStore';
+import { countPendingPlans, syncPlans } from './plan';
 import type { SyncErrorKind } from './sessionStore';
 import type { TokenGetter } from './useAuthToken';
 
@@ -162,11 +163,12 @@ function cancelTimer(): void {
 export async function refreshPending(): Promise<void> {
   if (!creds) return;
   try {
-    const [sessions, workouts] = await Promise.all([
+    const [sessions, workouts, plans] = await Promise.all([
       countPendingSessions(creds.userID),
       countPendingWorkouts(creds.userID),
+      countPendingPlans(creds.userID),
     ]);
-    emit({ pending: sessions + workouts });
+    emit({ pending: sessions + workouts + plans });
   } catch {
     // A failed count must not break anything; the number is advisory.
   }
@@ -200,7 +202,28 @@ async function run(reason: string): Promise<void> {
   running = (async () => {
     let retry = false;
     try {
-      const result = await syncSessions(userID, getToken);
+      const sessionResult = await syncSessions(userID, getToken);
+
+      // Plans AFTER sessions, and the order is load bearing.
+      //
+      // `syncSessions` is what pushes dirty workouts, and `plans.workout_id` is
+      // a real FK server-side — so a plan whose template has not landed is
+      // refused with a 4xx, which classifies as `permanent` and would make the
+      // orchestrator give up on a plan that is perfectly fine. Running plans
+      // second means `unsyncedWorkoutIDs` is accurate when the plan push reads
+      // it to decide what to defer.
+      const planResult = await syncPlans(userID, getToken);
+
+      // Merged so one failing half cannot be masked by the other succeeding.
+      // Both surfaces — the pending count and the error banner — describe the
+      // whole outbox, not one table of it.
+      const result = {
+        failed: sessionResult.failed + planResult.failed,
+        deferred: sessionResult.deferred + planResult.deferred,
+        error: sessionResult.error ?? planResult.error,
+        errorKind: sessionResult.errorKind ?? planResult.errorKind,
+      };
+
       // The account may have changed while this ran.
       if (creds?.userID !== userID) return;
 

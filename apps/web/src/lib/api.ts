@@ -1,6 +1,11 @@
 "use client";
 
 import { newTraceId, traceparent } from "@/lib/trace";
+// libraryTiles is imported for one pure predicate, not for presentation — it
+// has no imports of its own and no React. Reusing it keeps the family prefix
+// rule to one definition per app; the repo already carries three copies of it
+// and `positionVocabulary.test.ts` exists because they drift.
+import { inPositionFamily } from "@/lib/libraryTiles";
 import { formatWeight, type UnitSystem } from "@/lib/units";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
@@ -1144,6 +1149,133 @@ export async function listRulesets(
 }
 
 /**
+ * One entry in the BJJ position glossary — the nodes the techniques run
+ * between. Techniques are what you *do*; these are what you do it *in*.
+ *
+ * Eleven of them, a few KB total, so none of the technique library's
+ * optimisations apply: no summary/detail split, no local search, fetched whole.
+ */
+export type Position = {
+  id: string;
+  name: string;
+  aliases: string[];
+  /**
+   * The join key back to the library, prefix-matched against a summary's
+   * `position` — not compared. Note back control's family is `Back`.
+   */
+  family: string;
+  /**
+   * Narrow the family match by `position_detail`. Includes is a whitelist,
+   * excludes a blacklist applied after it; both empty means the whole family.
+   *
+   * BOTH must be applied — see {@link techniquesInPosition}.
+   */
+  detail_includes: string[];
+  detail_excludes: string[];
+  /** Pedagogical reading order. The server sorts by it; do not re-sort. */
+  order_index: number;
+  /** What the position is, and how you end up in it. */
+  description: string;
+  /** What each player is trying to do there. Both sides, split by a blank line. */
+  priorities: string;
+};
+
+/**
+ * Positions, fetched once. Failures are not cached, same reasoning as the
+ * technique cache above.
+ */
+let positionCache: Position[] | null = null;
+
+function normalisePosition(p: Position): Position {
+  return {
+    ...p,
+    aliases: p.aliases ?? [],
+    family: p.family ?? "",
+    detail_includes: p.detail_includes ?? [],
+    detail_excludes: p.detail_excludes ?? [],
+    order_index: p.order_index ?? 0,
+    description: p.description ?? "",
+    priorities: p.priorities ?? "",
+  };
+}
+
+export async function listPositions(
+  getToken: Token,
+  signal?: AbortSignal,
+): Promise<Position[]> {
+  if (positionCache) return positionCache;
+  const b = await request<{ positions: Position[] }>(
+    getToken,
+    "/techniques/positions",
+    {},
+    signal,
+  );
+  positionCache = (b.positions ?? []).map(normalisePosition);
+  return positionCache;
+}
+
+/**
+ * Served from the cached list when it is loaded, which it always is here: the
+ * panel only opens from a card the list rendered. The request is the fallback
+ * for a deep link, not the normal path.
+ */
+export async function getPosition(
+  getToken: Token,
+  id: string,
+  signal?: AbortSignal,
+): Promise<Position> {
+  const cached = positionCache?.find((p) => p.id === id);
+  if (cached) return cached;
+  return normalisePosition(
+    await request<Position>(
+      getToken,
+      `/techniques/positions/${encodeURIComponent(id)}`,
+      {},
+      signal,
+    ),
+  );
+}
+
+/**
+ * The techniques that happen in a position, resolved locally.
+ *
+ * This is why `family` exists and why there is no per-position endpoint: the
+ * Library already holds all 466 summaries, so the cross-link costs a filter
+ * rather than a request.
+ *
+ * Two axes, and applying only the first is the bug this shipped with once.
+ * `position` is coarse — every guard technique says "Guard - Bottom" — so
+ * family alone puts closed and open guard on the same 161 entries, and the
+ * Open Guard panel lists closed-guard material beneath a description saying
+ * the ankles are not locked. `position_detail` is what knows the difference.
+ */
+export function techniquesInPosition(
+  techniques: TechniqueSummary[],
+  position: Pick<Position, "family" | "detail_includes" | "detail_excludes">,
+): TechniqueSummary[] {
+  const {
+    family,
+    detail_includes: includes,
+    detail_excludes: excludes,
+  } = position;
+  if (!family) return [];
+  return techniques
+    .filter((t) => {
+      if (!inPositionFamily(t.position, family)) return false;
+      if (includes.length > 0 && !includes.includes(t.position_detail))
+        return false;
+      return !excludes.includes(t.position_detail);
+    })
+    .sort((a, b) => collator.compare(a.name, b.name));
+}
+
+/**
+ * One collator, built once — `localeCompare` re-enters ICU per call, and open
+ * guard alone sorts 124 entries.
+ */
+const collator = new Intl.Collator(undefined, { sensitivity: "base" });
+
+/**
  * Local search across name, aliases and position.
  *
  * Aliases matter more than they look: half this library is known by two names,
@@ -1316,4 +1448,94 @@ export async function setPinnedExercises(
     },
   );
   return b.exercise_ids ?? [];
+}
+
+/**
+ * A planned session — what the athlete INTENDS to train, and when.
+ *
+ * The third leg alongside `Workout` (the template) and `Session` (what
+ * happened). `day` is a bare `YYYY-MM-DD` and stays a string the whole way
+ * through: parsed into a Date it would gain a midnight and a zone, and
+ * `new Date("2026-08-04")` is parsed as **UTC**, so west of Greenwich it
+ * renders as the 3rd. Every date helper below therefore works on the string
+ * or on local Date parts, never on that constructor.
+ */
+export type Plan = {
+  id: string;
+  user_id: string;
+  day: string;
+  sport: Sport;
+  workout_id: string | null;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export async function listPlans(
+  getToken: Token,
+  range: { from: string; to: string },
+  signal?: AbortSignal,
+): Promise<Plan[]> {
+  const q = new URLSearchParams({ from: range.from, to: range.to });
+  const b = await request<{ plans: Plan[] }>(
+    getToken,
+    `/plans?${q}`,
+    {},
+    signal,
+  );
+  return b.plans ?? [];
+}
+
+export async function createPlan(
+  getToken: Token,
+  input: {
+    day: string;
+    sport: Sport;
+    workoutID: string | null;
+    notes?: string;
+  },
+): Promise<Plan> {
+  return request<Plan>(getToken, "/plans", {
+    method: "POST",
+    // Client-generated id, matching workouts and sessions — it keeps a retried
+    // create idempotent rather than producing a second plan.
+    body: JSON.stringify({
+      id: crypto.randomUUID(),
+      day: input.day,
+      sport: input.sport,
+      workout_id: input.workoutID,
+      notes: input.notes ?? "",
+    }),
+  });
+}
+
+/**
+ * Move or re-point a plan.
+ *
+ * `workoutID` is deliberately three-state, matching the endpoint: leave the
+ * key out to keep the current template, pass a string to set it, pass `null`
+ * to clear it. `undefined` here means "omit", which is why the body is built
+ * key by key rather than spread.
+ */
+export async function updatePlan(
+  getToken: Token,
+  id: string,
+  changes: { day?: string; sport?: Sport; workoutID?: string | null; notes?: string },
+): Promise<Plan> {
+  const body: Record<string, unknown> = {};
+  if (changes.day !== undefined) body.day = changes.day;
+  if (changes.sport !== undefined) body.sport = changes.sport;
+  if (changes.workoutID !== undefined) body.workout_id = changes.workoutID;
+  if (changes.notes !== undefined) body.notes = changes.notes;
+
+  return request<Plan>(getToken, `/plans/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deletePlan(getToken: Token, id: string): Promise<void> {
+  await request<void>(getToken, `/plans/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
 }

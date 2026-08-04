@@ -6,12 +6,20 @@ import { ActivityIndicator, AppState, Pressable, ScrollView, StyleSheet } from '
 
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
 import { Text, View } from '@/components/Themed';
+import { Icon } from '@/components/ui/Icon';
+import { PickSessionSheet } from '@/components/ui/PickSessionSheet';
+import { SectionHeader } from '@/components/ui/Section';
+import { SessionCard, type Metric } from '@/components/ui/SessionCard';
+import { Stat, StatRow } from '@/components/ui/Stat';
+import { TrainingCalendar } from '@/components/TrainingCalendar';
 import { vola } from '@/constants/Colors';
+import { formatDuration } from '@/lib/history';
+import { dayString, listPlannedBetween, weekDays, type PlannedSession } from '@/lib/plan';
 import { formatElapsed } from '@/lib/rest';
 import type { LoggedSet, Session } from '@/lib/sessions';
-import { listLocalSessions } from '@/lib/sessionStore';
-import { formatVolume } from '@/lib/units';
-import { enabledSports, type Module } from '@/lib/modules';
+import { cachedWorkouts, listLocalSessions } from '@/lib/sessionStore';
+import { formatVolume, type UnitSystem } from '@/lib/units';
+import { enabledSports, labelFor, type Module } from '@/lib/modules';
 import { useModules } from '@/lib/ModulesProvider';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
@@ -50,7 +58,27 @@ function startOfWeek(now: Date): Date {
   return d;
 }
 
-type WeekSummary = { sessions: number; volumeKg: number; days: number };
+type WeekSummary = {
+  sessions: number;
+  volumeKg: number;
+  /**
+   * Time trained, so the third stat can follow the data rather than the
+   * toggles — the registry's rule, and the web dashboard's `loadMetric` does
+   * the same thing for the same reason. An athlete with strength enabled who
+   * spent the week on the mat should read "3h 20m", not a flat "0kg", and
+   * "0kg" is the same fabricated-zero trap `describeSession` documents.
+   */
+  seconds: number;
+  /**
+   * The days trained, as `dayString` keys rather than just a count.
+   *
+   * The week strip needs to know *which* days and the stat row needs to know
+   * how many, and those two answers must come from one pass over one list —
+   * a strip lit on five days above a card reading "4 days" is the kind of
+   * contradiction that costs more trust than either number earns.
+   */
+  dayKeys: Set<string>;
+};
 
 /**
  * This week's training, computed from the local store rather than fetched.
@@ -62,15 +90,22 @@ type WeekSummary = { sessions: number; volumeKg: number; days: number };
  */
 function summariseWeek(sessions: Session[], now: Date): WeekSummary {
   const from = startOfWeek(now).getTime();
-  const days = new Set<string>();
+  const dayKeys = new Set<string>();
   let count = 0;
   let volumeKg = 0;
+  let seconds = 0;
 
   for (const s of sessions) {
     const started = new Date(s.started_at);
     if (started.getTime() < from) continue;
     count++;
-    days.add(started.toDateString());
+    dayKeys.add(dayString(started));
+    // Finished sessions only. An open one has no duration yet, and counting
+    // now-minus-start would make this week's total climb while the phone sits
+    // in a locker.
+    if (s.ended_at) {
+      seconds += (new Date(s.ended_at).getTime() - started.getTime()) / 1000;
+    }
     for (const set of s.sets) {
       // Weight × reps over working sets — the same rule the in-session header
       // uses, so the two can never report different numbers.
@@ -79,7 +114,56 @@ function summariseWeek(sessions: Session[], now: Date): WeekSummary {
       }
     }
   }
-  return { sessions: count, volumeKg, days: days.size };
+  return { sessions: count, volumeKg, seconds, dayKeys };
+}
+
+/** Weight × reps over a session's working sets. */
+function sessionVolume(s: Session): number {
+  let kg = 0;
+  for (const set of s.sets) {
+    if (isWorkingSet(set) && set.weight_kg != null && set.reps != null) {
+      kg += set.weight_kg * set.reps;
+    }
+  }
+  return kg;
+}
+
+/**
+ * The measures worth showing on a session's card.
+ *
+ * **Every chip is omitted rather than zeroed when its measure doesn't apply.**
+ * A BJJ session cannot legally hold a set (no BJJ exercises exist since
+ * migration 000019), so a "0 sets" chip on one is not a neutral default — it
+ * reads as an abandoned session, which is the same trap `describeSession`
+ * documents. Likewise a bodyweight session has no tonnage, and an unfinished
+ * one has no duration yet.
+ *
+ * The upshot is that a card can legitimately carry no chips at all, and that
+ * is the honest rendering — the card still shows its name, sport, date and
+ * state, which is everything actually known about it.
+ */
+function sessionMetrics(s: Session, mods: Module[], units: UnitSystem): Metric[] {
+  const out: Metric[] = [];
+
+  if (s.ended_at) {
+    const seconds = (new Date(s.ended_at).getTime() - new Date(s.started_at).getTime()) / 1000;
+    out.push({ icon: 'timer', value: formatDuration(seconds) });
+  }
+
+  if (!logsAfterwards(s.sport, mods)) {
+    const n = workingSets(s);
+    if (n > 0) out.push({ icon: 'layers', value: `${n} ${n === 1 ? 'set' : 'sets'}` });
+  }
+
+  const kg = sessionVolume(s);
+  if (kg > 0) out.push({ icon: 'barbell', value: formatVolume(kg, units) });
+
+  return out;
+}
+
+/** e.g. "Mon 28" — short enough to sit in a column down the right of the list. */
+function shortDay(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' });
 }
 
 /** e.g. "Thursday, 31 July" — orientation, not decoration. */
@@ -180,6 +264,26 @@ export default function TodayScreen() {
   const [syncError, setSyncError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [now, setNow] = useState(() => new Date());
+  const [picking, setPicking] = useState(false);
+  /**
+   * Today's plan, with each entry's template name resolved from the local
+   * workout cache.
+   *
+   * Resolved here rather than stored on the plan row: a template can be
+   * renamed, and a plan holding a stale copy of its name would show the old
+   * one until replanned. The name is presentation, the id is the fact.
+   */
+  const [todaysPlan, setTodaysPlan] = useState<
+    { id: string; sport: string; workoutId: string | null; workoutName: string | null }[]
+  >([]);
+  /**
+   * The whole visible week's plan, for the calendar's dots and day list.
+   *
+   * Read in the same pass as today's, from one query — the lead card and the
+   * calendar directly beneath it disagreeing about whether Thursday is planned
+   * would be the same contradiction the week strip and stat row already avoid.
+   */
+  const [weekPlan, setWeekPlan] = useState<PlannedSession[]>([]);
 
   const refreshSessions = useCallback(async () => {
     if (!userId) return;
@@ -208,10 +312,56 @@ export default function TodayScreen() {
     }
   }, [getToken, userId]);
 
+  /**
+   * Today's plan, re-read on focus so planning a day and coming straight back
+   * shows it — the exact flow the Plan tab's calendar is for.
+   */
+  const refreshPlan = useCallback(async () => {
+    if (!userId) return;
+    const days = weekDays(new Date());
+    const today = dayString(new Date());
+    try {
+      const [week, cached] = await Promise.all([
+        listPlannedBetween(userId, dayString(days[0]), dayString(days[6])),
+        cachedWorkouts(userId),
+      ]);
+      setWeekPlan(week);
+      const plans = week.filter((p) => p.day === today);
+      setTodaysPlan(
+        plans.map((p) => ({
+          id: p.id,
+          sport: p.sport,
+          workoutId: p.workoutId,
+          // Null when the plan names a template the cache no longer has. The
+          // card then renders the discipline alone, which is still true.
+          workoutName: cached.find((w) => w.id === p.workoutId)?.name ?? null,
+        })),
+      );
+    } catch {
+      // A plan that can't be read is a quieter screen, not a broken one — the
+      // unplanned state below is a safe thing to show.
+    }
+  }, [userId]);
+
+  /**
+   * Start what was planned.
+   *
+   * Routes on the SAME predicate as everything else that opens a session
+   * (`logsAfterwards`): a discipline that logs after the fact cannot hold a
+   * set, so sending it to the live set logger gives it a screen it can never
+   * fill. The workout id rides along so the chooser doesn't reappear for a
+   * day whose template is already decided.
+   */
   // Re-read the local list whenever a sync finishes. Without this the list is
   // only as fresh as the last focus, so a session logged on the web appeared
   // one focus late — and the sync this screen triggers on focus never showed
   // its own results.
+  //
+  // The plan is re-read alongside it, for exactly the same reason and now with
+  // a second source: a day planned on the web arrives through the plan pull,
+  // and this lead card is the whole point of that trip. Declared after
+  // `refreshPlan` rather than beside its sibling effects — a `useCallback` is
+  // a `const`, so referencing it earlier is a temporal-dead-zone error.
   useEffect(() => {
     if (!userId || lastSyncAt === null) return;
     let alive = true;
@@ -220,10 +370,26 @@ export default function TodayScreen() {
         if (alive) setSessions(rows);
       })
       .catch(() => {});
+    refreshPlan();
     return () => {
       alive = false;
     };
-  }, [lastSyncAt, userId]);
+  }, [lastSyncAt, userId, refreshPlan]);
+
+  const startPlanned = useCallback(
+    (p: { sport: string; workoutId: string | null }) => {
+      if (logsAfterwards(p.sport, modules)) {
+        router.push('/bjj/log');
+        return;
+      }
+      router.push(
+        p.workoutId
+          ? `/session/start?sport=${p.sport}&workout=${p.workoutId}`
+          : `/session/start?sport=${p.sport}`,
+      );
+    },
+    [modules, router],
+  );
 
   // On focus rather than on mount: coming back from a session should show its
   // new numbers, not the list as it was when the tab first rendered.
@@ -237,7 +403,8 @@ export default function TodayScreen() {
     useCallback(() => {
       setNow(new Date());
       refreshSessions();
-    }, [refreshSessions]),
+      refreshPlan();
+    }, [refreshSessions, refreshPlan]),
   );
 
   // The same staleness arrives without a focus change when the app is
@@ -363,17 +530,40 @@ export default function TodayScreen() {
               {activeIsStale ? 'UNFINISHED' : 'IN PROGRESS'}
             </Text>
             <Text style={styles.resumeTitle}>{active.name || active.sport}</Text>
-            <Text style={styles.resumeMeta}>
-              {activeIsStale
-                ? new Date(active.started_at).toLocaleDateString(undefined, {
-                    weekday: 'long',
-                    day: 'numeric',
-                    month: 'long',
-                  })
-                : formatElapsed((now.getTime() - new Date(active.started_at).getTime()) / 1000)}
-              {' · '}
-              {workingSets(active)} {workingSets(active) === 1 ? 'working set' : 'working sets'}
-            </Text>
+            {/* Chips rather than a dot-joined string, matching the session
+                cards below — the running clock is the most important number
+                on this screen and it should not have to be read out of a
+                sentence. Icons are decoration here: the Pressable's own
+                accessibilityLabel replaces all of this for a screen reader. */}
+            <View style={styles.resumeMetaRow}>
+              <View style={styles.chip}>
+                <Icon
+                  name={activeIsStale ? 'calendar' : 'timer'}
+                  size={13}
+                  color={vola.textMuted}
+                />
+                <Text style={styles.resumeMeta}>
+                  {activeIsStale
+                    ? new Date(active.started_at).toLocaleDateString(undefined, {
+                        weekday: 'long',
+                        day: 'numeric',
+                        month: 'long',
+                      })
+                    : formatElapsed((now.getTime() - new Date(active.started_at).getTime()) / 1000)}
+                </Text>
+              </View>
+              {/* Omitted, not zeroed, for a discipline that cannot hold a set —
+                  "0 working sets" on a mat session reads as abandoned. */}
+              {!logsAfterwards(active.sport, modules) && (
+                <View style={styles.chip}>
+                  <Icon name="layers" size={13} color={vola.textMuted} />
+                  <Text style={styles.resumeMeta}>
+                    {workingSets(active)}{' '}
+                    {workingSets(active) === 1 ? 'working set' : 'working sets'}
+                  </Text>
+                </View>
+              )}
+            </View>
             <View style={[styles.resumeAction, activeIsStale && styles.resumeActionStale]}>
               <Text
                 style={[styles.resumeActionText, activeIsStale && styles.resumeActionTextStale]}
@@ -384,41 +574,73 @@ export default function TodayScreen() {
           </Pressable>
         ) : (
           <View style={styles.startBlock}>
-            {/* From the registry, filtered to what this athlete actually
-                trains. This list used to be hardcoded to strength and running,
-                with a comment explaining that BJJ had been removed by hand —
-                three copies of the sport list existed elsewhere in this app,
-                all disagreeing. */}
-            {startable.map((s, i) => (
+            {/*
+              What today is FOR, before what you could do about it.
+
+              This replaced a stack of full-width filled buttons — one shouted
+              imperative per enabled discipline ("Start Strength", then "BJJ")
+              — which is a menu dressed as a primary action, and which got
+              louder the more disciplines an athlete turned on. The plan leads
+              now; starting something unplanned is still one press away, just
+              no longer the first thing the screen says.
+            */}
+            {todaysPlan.length > 0 ? (
+              todaysPlan.map((p) => (
+                <Pressable
+                  key={p.id}
+                  style={({ pressed }) => [styles.planCard, pressed && styles.planCardPressed]}
+                  onPress={() => startPlanned(p)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Start ${p.workoutName ?? labelFor(modules, p.sport)}, planned for today`}
+                  testID={`today-plan-${p.id}`}
+                >
+                  <View style={styles.planMain}>
+                    <Text style={styles.planEyebrow}>
+                      {labelFor(modules, p.sport).toUpperCase()}
+                    </Text>
+                    <Text style={styles.planTitle}>
+                      {p.workoutName ?? `${labelFor(modules, p.sport)} session`}
+                    </Text>
+                  </View>
+                  <View style={styles.planGo}>
+                    <Text style={styles.planGoText}>
+                      {logsAfterwards(p.sport, modules) ? 'Log' : 'Start'}
+                    </Text>
+                  </View>
+                </Pressable>
+              ))
+            ) : (
+              // Says what is true and offers the fix, rather than leaving a
+              // gap that reads as a screen that failed to load.
               <Pressable
-                key={s.key}
-                style={[styles.startButton, i > 0 && styles.startButtonSecondary]}
-                // BJJ logs rather than starts, and goes somewhere else
-                // entirely. On the mat you cannot touch a phone — sweaty
-                // hands, a mouthguard, six-minute rounds — so BJJ inverts
-                // the strength flow: zero interaction during the session,
-                // everything recalled straight after. Sending it to
-                // `/session/start` gave it a live set logger it can never
-                // legally hold a set in (there are no BJJ exercises since
-                // migration 000019), which is the shape this replaces.
-                onPress={() =>
-                  logsAfterwards(s.key, modules)
-                    ? router.push('/bjj/log')
-                    : router.push(`/session/start?sport=${s.key}`)
-                }
+                style={({ pressed }) => [styles.planEmpty, pressed && styles.planCardPressed]}
+                onPress={() => router.push('/(tabs)/workouts')}
                 accessibilityRole="button"
-                accessibilityLabel={
-                  logsAfterwards(s.key, modules) ? `Log a ${s.label} session` : `Start a ${s.label} session`
-                }
-                testID={`start-session-${s.key}`}
+                accessibilityLabel="Nothing planned for today. Plan your week."
+                testID="today-unplanned"
               >
-                <Text style={[styles.startText, i > 0 && styles.startTextSecondary]}>
-                  {/* NOT lowercased: the registry carries the label precisely so BJJ
-                      stays "BJJ". Lowercasing it renders "Start bjj". */}
-                  {i === 0 ? `${logsAfterwards(s.key, modules) ? 'Log' : 'Start'} ${s.label}` : s.label}
-                </Text>
+                <View style={styles.planMain}>
+                  <Text style={styles.planEmptyTitle}>Nothing planned for today</Text>
+                  <Text style={styles.planEmptyMeta}>Plan your week in Plan</Text>
+                </View>
+                <Icon name="chevron" size={16} color={vola.textDim} />
               </Pressable>
-            ))}
+            )}
+
+            {/* Deliberately quiet, and deliberately always present: a planned
+                day you don't feel like still needs a way out, and an unplanned
+                one is the common case early on. Outlined rather than filled so
+                it never competes with the plan above it. */}
+            <Pressable
+              style={({ pressed }) => [styles.startButton, pressed && styles.planCardPressed]}
+              onPress={() => setPicking(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Start something"
+              testID="start-something"
+            >
+              <Text style={styles.startText}>+ Start something</Text>
+            </Pressable>
+
             {/* Every discipline off is a reachable state — nothing stops a
                 user turning them all off — and the block rendered nothing at
                 all, which reads as a broken screen rather than a choice. */}
@@ -437,48 +659,59 @@ export default function TodayScreen() {
         )}
 
         {/* Momentum, not analytics. The You tab owns the real history surface;
-            this is the one number that changes how the next hour goes. */}
+            this is the week put where it can be read at a glance — collapsed
+            by default, opening to the week and then to the month only when
+            asked for. */}
+        <TrainingCalendar
+          now={now}
+          userId={userId ?? null}
+          sessions={sessions}
+          planned={weekPlan}
+          modules={modules}
+          units={units}
+          onOpenSession={(s) => router.push(sessionHref(s, modules))}
+        />
+
         {week.sessions > 0 && (
-          <View style={styles.weekCard} testID="week-summary">
-            <Text style={styles.eyebrow}>THIS WEEK</Text>
-            <View style={styles.statRow}>
+          <StatRow testID="week-summary">
+            <Stat label="Sessions" value={String(week.sessions)} />
+            <Stat label="Days" value={String(week.dayKeys.size)} />
+            {/* Whichever measure the week actually produced. Dash until the
+                unit is known, rather than a number in the wrong one: this used
+                to render kilograms for a moment to an athlete set to pounds,
+                and on a finished-session mount that moment is exactly when it
+                is read. */}
+            {week.volumeKg > 0 ? (
               <Stat
-                value={String(week.sessions)}
-                label={week.sessions === 1 ? 'session' : 'sessions'}
-              />
-              {/* Dash until the unit is known, rather than a number in the wrong
-                  one: this used to render kilograms for a moment to an athlete
-                  set to pounds, and on a finished-session mount that moment is
-                  exactly when it is read. */}
-              <Stat
+                label="Volume"
                 value={unitsReady ? formatVolume(week.volumeKg, units) : '—'}
-                label="volume"
               />
-              <Stat value={String(week.days)} label={week.days === 1 ? 'day' : 'days'} />
-            </View>
-          </View>
+            ) : (
+              <Stat
+                label="Time"
+                value={week.seconds > 0 ? formatDuration(week.seconds) : '—'}
+              />
+            )}
+          </StatRow>
         )}
 
         {recent.length > 0 && (
           <View style={styles.section}>
-            <Text style={styles.eyebrow}>RECENT</Text>
+            <SectionHeader label="Recent" />
             {recent.map((s) => (
-              <Pressable
+              <SessionCard
                 key={s.id}
-                style={styles.sessionRow}
+                name={s.name || s.sport}
+                sport={labelFor(modules, s.sport)}
+                when={shortDay(s.started_at)}
+                metrics={sessionMetrics(s, modules, units)}
+                complete={!!s.ended_at}
                 onPress={() => router.push(sessionHref(s, modules))}
-                accessibilityRole="button"
                 // Folds the meta line in, because the label replaces the
                 // children rather than adding to them.
                 accessibilityLabel={`${s.name || s.sport} session, ${describeSession(s, modules)}`}
                 testID={`session-${s.id}`}
-              >
-                <View style={styles.sessionMain}>
-                  <Text style={styles.sessionName}>{s.name || s.sport}</Text>
-                  <Text style={styles.muted}>{describeSession(s, modules)}</Text>
-                </View>
-                <Text style={styles.chevron}>›</Text>
-              </Pressable>
+              />
             ))}
           </View>
         )}
@@ -527,18 +760,21 @@ export default function TodayScreen() {
           </Text>
         )}
       </View>
-    </ScrollView>
-  );
-}
 
-function Stat({ value, label }: { value: string; label: string }) {
-  return (
-    // Grouped, or VoiceOver reads "3" and "sessions" as two disconnected
-    // stops with no relationship between them.
-    <View style={styles.stat} accessible accessibilityLabel={`${value} ${label} this week`}>
-      <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
-    </View>
+      <PickSessionSheet
+        visible={picking}
+        modules={modules}
+        userId={userId ?? null}
+        title="Start something"
+        onClose={() => setPicking(false)}
+        onPick={(pick) => {
+          // Closed before navigating: leaving the modal mounted over a push
+          // means coming back from the session lands on the sheet again.
+          setPicking(false);
+          startPlanned(pick);
+        }}
+      />
+    </ScrollView>
   );
 }
 
@@ -548,7 +784,6 @@ const styles = StyleSheet.create({
   container: { gap: 12, paddingBottom: TAB_BAR_CLEARANCE },
   body: { paddingHorizontal: 20, gap: 16 },
   date: { color: vola.textMuted, fontSize: 13, marginTop: -4 },
-  eyebrow: { color: vola.textDim, fontSize: 11, letterSpacing: 1.2, fontWeight: '700' },
 
   resumeCard: {
     backgroundColor: vola.surfaceRaised,
@@ -568,6 +803,8 @@ const styles = StyleSheet.create({
   resumeTitle: { fontSize: 22, fontWeight: '700' },
   // Tabular figures so a ticking clock doesn't shuffle the text beside it.
   resumeMeta: { color: vola.textMuted, fontSize: 14, fontVariant: ['tabular-nums'] },
+  resumeMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 2 },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   resumeAction: {
     marginTop: 12,
     backgroundColor: vola.lime,
@@ -578,49 +815,61 @@ const styles = StyleSheet.create({
   resumeActionText: { color: vola.navy, fontWeight: '700', fontSize: 16 },
 
   startBlock: { gap: 8 },
-  startButton: {
-    backgroundColor: vola.lime,
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
-  // Secondary sports are present but not competing: one primary action per
-  // screen, or there is no primary action.
-  startButtonSecondary: {
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: vola.line,
-    paddingVertical: 13,
-  },
-  startText: { color: vola.navy, fontWeight: '700', fontSize: 16 },
-  startTextSecondary: { color: vola.text, fontWeight: '600', fontSize: 15 },
 
-  weekCard: {
-    backgroundColor: vola.surface,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: vola.lineSoft,
-    padding: 16,
-    gap: 12,
-  },
-  statRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  stat: { flex: 1, gap: 2 },
-  statValue: { fontSize: 20, fontWeight: '700', fontVariant: ['tabular-nums'] },
-  statLabel: { color: vola.textDim, fontSize: 12 },
-
-  section: { gap: 2 },
-  sessionRow: {
+  // The planned day. A card rather than a filled button: it is a statement
+  // about today that happens to be actionable, and the lime is spent on the
+  // one word that is the action.
+  planCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: vola.lineSoft,
     gap: 12,
+    backgroundColor: vola.surface,
+    borderWidth: 1,
+    borderColor: vola.line,
+    borderRadius: 14,
+    paddingLeft: 16,
+    paddingRight: 12,
+    paddingVertical: 14,
   },
-  sessionMain: { flex: 1, gap: 2 },
-  sessionName: { fontWeight: '600', fontSize: 15 },
-  chevron: { color: vola.textDim, fontSize: 20 },
+  planCardPressed: { backgroundColor: vola.surfaceHover },
+  planMain: { flex: 1, gap: 2 },
+  planEyebrow: { fontSize: 10, fontWeight: '700', letterSpacing: 1, color: vola.textDim },
+  planTitle: { fontSize: 18, fontWeight: '700' },
+  planGo: {
+    backgroundColor: vola.lime,
+    borderRadius: 10,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+  },
+  planGoText: { color: vola.navy, fontWeight: '800', fontSize: 15 },
+
+  planEmpty: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderWidth: 1,
+    borderColor: vola.lineSoft,
+    borderStyle: 'dashed',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  planEmptyTitle: { fontSize: 15, fontWeight: '700', color: vola.textMuted },
+  planEmptyMeta: { fontSize: 12, color: vola.textDim },
+
+  // Outlined, never filled — see the comment at its call site.
+  startButton: {
+    borderWidth: 1,
+    borderColor: vola.line,
+    borderRadius: 12,
+    paddingVertical: 13,
+    alignItems: 'center',
+  },
+  startText: { color: vola.text, fontWeight: '600', fontSize: 15 },
+
+  // The cards space themselves; the header sits a touch closer to the first
+  // one than the gap between cards, so the label reads as belonging to them.
+  section: { gap: 8, marginTop: 4 },
 
   pendingRow: {
     flexDirection: 'row',
@@ -633,6 +882,5 @@ const styles = StyleSheet.create({
   syncError: { color: vola.danger, fontSize: 13, marginTop: -8 },
 
   errorText: { color: vola.danger, fontSize: 13 },
-  muted: { color: vola.textMuted, fontSize: 13 },
   empty: { color: vola.textMuted, fontSize: 14, lineHeight: 20 },
 });

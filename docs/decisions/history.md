@@ -5819,6 +5819,386 @@ Web has no BJJ session view — this is mobile only. Reading history back on a
 desk is squarely web's half under the platform rule, and it is the natural
 companion, but a working phone screen beat half of both.
 
+## 2026-08-03 — A shared UI kit for mobile, and the line between borrowing a look and borrowing a metric
+
+Prompted by four screenshots of a competitor training app the user liked the
+look of. The ask was explicitly provisional — "something that looks good while
+I test what we build" — so this is a visual pass, not a redesign.
+
+### What was taken, and what deliberately wasn't
+
+The reference's *anatomy* transfers: a week strip across the top, figures with
+their units set smaller than their digits, grouped rows with an icon and a
+right-aligned value, activity rows carrying a state rule and icon'd measures.
+All of it is layout and typography, and all of it works over data VOLA
+already has.
+
+Its *metrics* do not, and that is the whole line. HybridCharge, VO₂ max, HRV,
+sleep duration, skin temperature, calories, BPM, badges — VOLA collects none
+of them, and the web dashboard's own comment already refuses placeholder
+dials on the grounds that the home screen must never lie. Worth noting the
+reference agrees: its own core-metrics card renders `--` for the figures the
+device didn't capture. The honest pattern and the good-looking pattern were
+never actually in tension.
+
+### The kit
+
+`components/ui/` — `Icon`, `WeekStrip`, `Stat`/`StatValue`/`StatRow`,
+`SessionCard`, `SectionHeader`. Two decisions in it are load-bearing:
+
+**Icons are drawn from views, not SVG.** `Belt.tsx` already made this call and
+the reasoning holds: `react-native-svg` is a native dependency, so adding it
+costs a prebuild and a fresh device build for everyone. The geometry comes
+from `assets/brand/icons/*.svg` — `barbell` is a literal transcription of
+`workout.svg`, which is five straight strokes and nothing else.
+
+**`StatValue` splits on digit runs with a regex** rather than changing the
+formatters. `formatDuration`, `formatVolume` and `formatElapsed` each have
+their own rounding rules and callers elsewhere; reshaping three lib functions
+into a display type to save one regex would put presentation concerns where
+they don't belong. It also means the Today screen's third stat — chosen at
+runtime from what the athlete actually logged — needs no branch to render.
+
+### Today, rebuilt on it
+
+The week strip is **not interactive**, deliberately: the reference uses its
+strip as a day picker, and VOLA has no per-day screen to pick into. Day cells
+that highlight and then do nothing are worse than cells that never offered.
+Trained days get a dot, not a fill — lime means "act here" in this app and
+there is only one day you can act on.
+
+The strip's lit days and the stat row's count come from **one pass over one
+list** (`summariseWeek` now returns `dayKeys`, not a count). Five lit cells
+above a card reading "4 days" is the kind of quiet contradiction that costs
+more trust than either number earns.
+
+The third stat now follows the data rather than the toggles — volume when
+there is tonnage, time when there isn't. That is the registry's own rule and
+the web dashboard's `loadMetric` already did it; it also closes half of the
+"a BJJ-only athlete sees strength-shaped zeroes" gap listed below, for the
+Today screen at least. Session cards omit a measure rather than zeroing it,
+for the same reason `describeSession` does.
+
+### Two things found by running it
+
+**The tick was a chevron.** Drawn with `borderLeft` + `−45°`, both arms come
+out pointing upward — a symmetrical V, which inside a filled circle reads as
+a disclosure control on a card that doesn't expand. It is `borderBottom` +
+`borderRight` + `+45°`; the asymmetry *is* the glyph. Typecheck, lint and 241
+tests were all green with it wrong, which is the argument for looking at the
+screen.
+
+**Expo Go auto-upgraded itself and segfaulted the app.** See the CLAUDE.md
+gotcha added alongside this entry — it is environmental, predates this work
+(confirmed by reproducing it on a clean tree), and costs the whole session if
+misread as your own bug.
+
+### Still open
+
+Only Today and the You tab's tiles use the kit. Plan and Library still carry
+their own styles, and `apps/web` is untouched — it remains on its
+pre-design-system look. The mobile app also still has no `react-native-svg`,
+so any future icon has to be straight rules, a circle, or a rotated corner.
+
+## 2026-08-04 — The app learns what you intend to do, not just what you did
+
+Same session as the entry above, continuing from the user's reaction to it:
+the two full-width filled buttons at the top of Today ("Start Strength", then
+"BJJ") read as shouting, and the screen should lead with *the session you
+planned* instead.
+
+That is a bigger change than it sounds, because the app had no notion of a
+plan at all. It could record what happened and had no way to say what was
+meant to happen — so the only thing Today could offer was a menu.
+
+### The real logo lands
+
+`assets/brand/logos/source/` now holds the designed kit (a faceted tick in
+`#D0E950` / `#9CC740` / `#71912F`, plus horizontal and stacked lockups, mono
+and colour). The header's hand-drawn stand-in — "VOL" plus a chevron built
+from two rotated rules, with arithmetic in `ScreenHeader` to make them mitre —
+is gone; the mark sits before a plain "VOLA" wordmark, which is how the logo
+is actually drawn. A PNG, because unlike `Belt` and `ui/Icon` this one is
+overlapping filled polygons and genuinely cannot be drawn from views. It is
+exported from the SVG by a documented trim-and-square step, so it is
+regenerable rather than hand-cropped.
+
+### `planned_sessions`, and its one honest caveat
+
+A local SQLite table (schema v14) holding `(day, sport, workout_id?)`. Three
+decisions worth keeping:
+
+- **`day` is a `YYYY-MM-DD` local date, not a timestamp.** "Tuesday's session"
+  is a claim about the athlete's calendar; an instant slides across a day
+  boundary when they travel. The format is also what lets the range query use
+  string `>=` / `<=`.
+- **`workout_id` is nullable.** "Tuesday is BJJ" is a complete plan, and the
+  mat sessions this app is built around have no template at all. `sport` is
+  the required half.
+- **No foreign key to `workout_cache`.** That cache is refilled from the
+  server and its rows come and go; a constraint would delete the plan whenever
+  it was rebuilt. A plan whose template is missing degrades to its discipline.
+
+**The caveat: this is local-only, with no server table behind it.** Every
+other table in `db.ts` is an outbox for something the API owns. This one is
+not, so a plan made on the phone does not reach the web app — and the
+platform rule puts authoring on web. It was built this way because the
+alternative was leaving Today unable to say anything about the day; a `plans`
+module is the real answer and is the blocker for the web half (below).
+
+### Today, and the calendar behind it
+
+Today now leads with the planned session and a single lime **Start**;
+`+ Start something` is outlined, quiet, and always present, opening a
+`PickSessionSheet` that both Today and the Plan tab share. Starting a planned
+day passes `?workout=` to `/session/start`, which auto-begins it — the plan
+already named the template, so re-asking would make it a chooser again. It
+falls through to the normal chooser when the id matches nothing, which is
+reachable precisely because there is no foreign key.
+
+`TrainingCalendar` replaced the flat week strip with three states, cheapest
+first: collapsed (seven cells, dots), expanded (the week as a day list), and a
+month sheet behind the month name (grid, legend, month totals, and the tapped
+day's detail). The escalation is the point — a month grid pinned to Today
+would push the thing you came to do below the fold to answer a question you
+ask once a week.
+
+**Two dot colours, two different facts**: green for a session that happened,
+lime for one that is planned; where a day has both, what happened wins. And
+the month sheet **loads its own 200-row window** rather than colouring the
+Today screen's list, which is capped at 30 — a grid decorated from a truncated
+list would claim rest days that were trained.
+
+### Two bugs, both found by looking at the screen
+
+**The tick was a chevron** — see the entry above; typecheck, lint and 241
+tests were green with it wrong.
+
+**`no such table: planned_sessions`, with the version already stamped at 14.**
+Fast Refresh re-evaluates a changed module, which resets `db.ts`'s memoised
+`dbPromise` and re-runs `migrate()`. It did so on an intermediate save — after
+`SCHEMA_VERSION` was bumped, before the `CREATE` was written — so the device
+stamped v14 with no table and every Add tapped into a SQL error. A shipped
+build cannot split those two edits, so this is a dev artifact rather than a
+release risk; the fix on a device is to reset `user_version` and relaunch.
+`schema.test.ts` now covers the v13→v14 upgrade branch specifically, which is
+the assertion that would have caught it.
+
+### Still open — and what web is blocked on
+
+**Web planning needs a backend `plans` module first.** The user asked for "a
+more defined calendar and planning" on web, and it cannot be built honestly
+against a table that lives in one phone's SQLite. The module is also the right
+place for the questions this local version dodged: whether a plan may recur,
+whether it belongs to a block or programme, and what happens to a plan when
+the session that fulfils it is logged (today: nothing — a plan is an intention
+and is never reconciled, so a day can be trained twice and a plan can be
+ignored, which is deliberate but is a decision the server should ratify).
+
+Also open: the plan has no conflict story on a second device; the Plan tab's
+week is rows rather than a grid (a 45pt column cannot hold "Maestro Push Day");
+and past days are read-only in the planner, so you cannot backfill an
+intention you failed to record.
+
+## 2026-08-04 — Plans become a real resource, and web gets the calendar
+
+The follow-up the previous entry named as blocked. The phone's local
+`planned_sessions` proved the interaction was right; this gives it a server so
+the web app can see it and so planning stops being one device's private notes.
+
+### The shape, and the one decision everything else follows from
+
+`plans` is `(id, user_id, day, sport, workout_id?, notes)` — migration 000029,
+served at `/v1/plans` with list-by-range, create, patch and delete.
+
+**`day` is a DATE, not a timestamptz.** `sessions.started_at` is correctly a
+timestamp because it records a moment that occurred; a plan records a square on
+a calendar. Store it as an instant and "Tuesday's session" moves to Monday the
+first time the athlete flies east. This propagates all the way out: the Go
+type is a `string`, the projection is `to_char(day, 'YYYY-MM-DD')` rather than
+a scan into `time.Time`, the wire format is `YYYY-MM-DD`, and a timestamp sent
+to the API is **rejected rather than truncated**. Every one of those
+conversions was a chance to move the plan by a day, so none of them happen.
+
+**A plan is never reconciled against a session.** No `fulfilled_by`, no status
+column. "Does this session count as that plan" has no statable rule — same
+sport? same template? same day? — and inventing one would silently rewrite the
+athlete's own record of what they meant to do. A planned day can be trained
+twice, ignored, or trained with something else, and all three are ordinary.
+Adherence is therefore a *comparison the reader makes*, and later a query, not
+a status the write path has to keep true.
+
+Consequences worth stating: no unique constraint on `(user_id, day)`, because
+two-a-days are normal; `workout_id` is nullable, because "Tuesday is BJJ" is a
+complete plan and mat sessions have no template; and the FK is `ON DELETE SET
+NULL`, so deleting a template leaves the day planned as its discipline rather
+than erasing it.
+
+### API details that are easy to get wrong
+
+`from`/`to` are **required and inclusive**. Not defaulted to "this week": a
+default makes the commonest client bug — forgetting the range — look like an
+empty calendar rather than a mistake, and the response cannot tell them apart.
+The range is capped at 400 days so a caller cannot ask for a decade.
+
+`workout_id` on PATCH is **three-state**, and needs a double pointer in Go
+(`**string`) plus a `CASE WHEN $5` in the UPDATE rather than a bare COALESCE.
+Absent means leave it, a value sets it, an explicit `null` clears it. With a
+single pointer the last two collapse and "clear the template" silently does
+nothing.
+
+Every single-row operation is scoped by `user_id`, not just `id`, and a plan
+belonging to someone else returns **404 rather than 403** — ids are
+client-generated and guessable, so another user's plan must be
+indistinguishable from one that does not exist. This is the IDOR the reviewers
+have caught twice before in other modules; here it is covered by a test that
+asserts Get, Update and Delete all refuse across users *and* that the row is
+untouched afterwards.
+
+### Web: the calendar
+
+`/dashboard/calendar`, second in the rail — after Today, before Workouts,
+because planning the week is the step between seeing today and editing a
+template.
+
+A month grid with the two layers side by side: green chips for what was
+trained (from `/sessions/history`, the same per-day rollup the heatmap
+already uses — no new endpoint) and lime for what is planned. Two panes, matching
+the workout builder: the grid keeps its shape while the selected day's detail
+and its planning form sit beside it, because a dialog over the grid would hide
+the thing you are planning against.
+
+Two smaller notes. The **spill days** that square off the first and last weeks
+are dimmed, not blanked — a hole in the corner of a grid reads as a rendering
+fault. And the sport/template selects are **derived, not stored-then-corrected
+by an effect**: the effect version rendered a stale template for one frame when
+the discipline changed, which is exactly what `react-hooks/set-state-in-effect`
+exists to catch, and it did.
+
+### What was verified, and what was not
+
+Verified: 10 integration tests against real Postgres (range inclusivity,
+cross-user refusal on all three single-row ops, the three-state workout clear,
+`ON DELETE SET NULL`, duplicate-id conflict, two-a-days keeping insertion
+order, and that the Postgres constraint name never reaches the client). The up
+and down migrations both run. The three routes are wired and 401 without a
+token. `monthGrid` was checked against real calendar boundaries — a month that
+fits exactly four rows, one that needs six, a leap day, and normalisation from
+any day in the month.
+
+**Not verified: the calendar's interactive flow in a browser.** `/dashboard`
+is Clerk-gated and signing in needs credentials, so the furthest an automated
+check gets is the redirect to Clerk — which does at least prove the route
+exists and is protected. Build, typecheck and lint are green. Someone should
+click through it once while signed in before this is trusted.
+
+Also worth knowing for anyone running migrations locally: the dev `vola` and
+`vola_test` databases are both stamped at **version 32**, ahead of this
+branch's 29, from some newer branch whose files are not here. `migrate up`
+therefore fails on them. This work was verified against a throwaway database
+rather than by forcing their version backwards.
+
+### Still open
+
+Mobile still writes plans to its own local SQLite and does **not** yet talk to
+`/v1/plans` — so a plan made on the phone still does not reach web, and vice
+versa. Pointing `lib/plan.ts` at the API (through the existing outbox, with
+the `synced` flag the local table was designed to grow) is the next step and is
+what actually closes the loop.
+
+Beyond that: no recurrence, no notion of a block or programme, no conflict
+resolution across devices, and adherence is still only a comparison a human
+makes rather than a query anything computes.
+
+## 2026-08-04 — The plan loop closes: mobile joins the outbox
+
+`lib/plan.ts` now talks to `/v1/plans` through the same outbox every other
+local table uses. Schema v15 adds `notes`, `updated_at`, `dirty`, `remote`,
+`deleted_at` and `last_error` to `planned_sessions`, and `syncPlans` does a
+push-then-pull reconciliation alongside `syncSessions`.
+
+### The defaults on the upgrade are the interesting part
+
+v14 shipped the table local-only, so every plan an early adopter made has
+never been sent anywhere. The v15 ALTERs therefore default `dirty = 1,
+remote = 0` — **the opposite of the workout_cache v9 ALTERs**, which default
+`0 / 1` because those rows came *from* the server. Getting it backwards would
+strand every existing plan with nothing to push it, silently. There is a
+schema test on a v14-shaped table specifically, because on a fresh install
+these columns come from `CREATE TABLE` and the ALTER defaults are never
+exercised at all.
+
+### Ordering, and why plans go second
+
+The orchestrator runs `syncSessions` first, then `syncPlans`. `syncSessions`
+is what pushes dirty workouts, and `plans.workout_id` is a real FK
+server-side — so a plan whose template has not landed is refused with a 4xx,
+which classifies as `permanent` and would make the orchestrator give up on a
+plan that is perfectly fine. Running second means `unsyncedWorkoutIDs` is
+accurate when the plan push reads it to decide what to **defer** (held back,
+not counted as failed — the same distinction sessions already draw).
+
+A tombstone is never deferred by its template: deleting a plan does not depend
+on its workout existing, and holding the delete back would keep the plan on
+screen, and on the server, until an unrelated template synced.
+
+### One bug the tests caught, and two that mutation testing caught
+
+**The sweep deleted rows it had just pushed.** The pull ends by deleting
+local rows the server no longer lists — otherwise a plan removed on the web
+stays on the phone forever. But "not in the response" was also true of a row
+this very run had just created, whenever the list did not echo it back. The
+row vanished from under the athlete seconds after they planned it. Fixed by
+excluding ids pushed this run: our own write is newer information than any
+list we fetch.
+
+Then, running mutations over each pull guard, **two tests passed for the wrong
+reason** — the exact failure mode `apps/mobile/lib/__tests__` was created to
+stop:
+
+- the "never overwrites a local edit" test was actually being saved by the
+  *refuse-to-go-backwards* check, because the server snapshot's `updated_at`
+  was in the past. It now uses a future timestamp, so only the dirty guard can
+  save it.
+- the "tombstone is not resurrected" test was being saved by the dirty guard,
+  because every tombstone this module writes is also dirty. There is now a
+  second test that forces a *clean* tombstone and asserts the row is left
+  **entirely untouched** — the guard's only unique effect, since the upsert
+  does not clear `deleted_at` and visibility alone cannot distinguish them.
+
+All four pull guards (buried, dirty, backwards, just-pushed) are now
+individually mutation-verified: delete any one and exactly one test goes red.
+
+### Verified over real HTTP, and what is not
+
+Against a locally-run API on a real Postgres: the v15 migration applied on a
+real device with the correct `dirty = 1, remote = 0` defaults; `GET /v1/plans`
+returned 200 authenticated; and `POST /v1/plans` correctly returned 400 for a
+genuine FK violation, which the device classified as **permanent** and wrote
+to the row's `last_error`. That last one matters more than it looks: it
+exercises the whole push → error → classify → record chain over real HTTP, and
+it is the exact path that was dead code in `lib/workouts.ts` for a while
+because that module threw plain `Error`s instead of `ApiError`s.
+
+**Not verified on-device: a successful create landing a row in Postgres.**
+Expo Go kept crashing on launch (the `react-native-worklets` version skew
+already documented in CLAUDE.md), and the blocker is that environment rather
+than this code. Everything about the success path is covered by the 23 sync
+tests. It is worth one manual pass once the Expo Go/SDK versions are aligned.
+
+Note also that `apps/mobile/.env.local` points at **staging**, which does not
+have migration 000029 yet — so the plan sync will 404/400 there until the
+backend is deployed. Nothing on the phone will work against staging until it
+is.
+
+### Still open
+
+No conflict resolution beyond last-write-wins on `updated_at`. The pull window
+is fixed (45 days back, 120 forward), so a plan made a year out syncs but is
+not pulled back on a fresh install. Blocked plans are recorded on the row but
+`blockedRows()` — the repair screen — still only reads sessions and workouts,
+so a permanently-refused plan has nowhere to be surfaced yet.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

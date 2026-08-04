@@ -147,6 +147,54 @@ const CREATE_EXERCISE_CACHE = `
 `;
 
 /**
+ * The week's plan: what the athlete intends to train, and on which day.
+ *
+ * **An outbox, like every other table here** — as of v15. It shipped
+ * local-only for one version, before `/v1/plans` existed; the columns that
+ * make it syncable (`dirty`, `remote`, `deleted_at`, `updated_at`,
+ * `last_error`) were added by that migration and mean the same things they do
+ * on `local_sessions` and `workout_cache`.
+ *
+ * `day` is a local calendar date (`YYYY-MM-DD`), not a timestamp: "Tuesday's
+ * session" is a claim about the athlete's calendar, and storing an instant
+ * would slide the plan across a day boundary whenever they travel. The server
+ * column is a DATE for the same reason, so the string goes over the wire
+ * unchanged in both directions.
+ *
+ * `workout_id` is nullable so a day can be planned as a bare discipline —
+ * "Tuesday is BJJ" is a complete plan, and the mat sessions this app is built
+ * around have no template at all. `sport` is the required half, not the
+ * workout.
+ *
+ * No foreign key to `workout_cache`: that cache is refilled from the server
+ * and its rows come and go, so a constraint would delete the plan whenever the
+ * cache was rebuilt. A plan pointing at a workout that is no longer cached
+ * degrades to its sport alone rather than vanishing. (The *server* does have
+ * that FK, which is why the push path defers a plan whose workout has not
+ * landed yet — same dependency ordering sessions already have.)
+ *
+ * `updated_at` defaults to '' rather than a timestamp so the v15 backfill can
+ * find rows that predate it with `WHERE updated_at = ''`. Every insert sets it
+ * explicitly, so a fresh install never holds the empty string.
+ */
+const CREATE_PLANNED = `
+  CREATE TABLE IF NOT EXISTS planned_sessions (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL,
+    day TEXT NOT NULL,
+    sport TEXT NOT NULL,
+    workout_id TEXT,
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT '',
+    dirty INTEGER NOT NULL DEFAULT 1,
+    remote INTEGER NOT NULL DEFAULT 0,
+    deleted_at TEXT,
+    last_error TEXT
+  );
+`;
+
+/**
  * Current local schema version. Bump this and add a matching `if` in
  * `migrate()` whenever the local table shape changes.
  *
@@ -175,7 +223,7 @@ const CREATE_EXERCISE_CACHE = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 13;
+const SCHEMA_VERSION = 15;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -183,7 +231,8 @@ type LocalTable =
   | 'local_sessions'
   | 'prefs'
   | 'workout_cache'
-  | 'exercise_cache';
+  | 'exercise_cache'
+  | 'planned_sessions';
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
@@ -256,6 +305,7 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
   await db.execAsync(CREATE_EXERCISE_CACHE);
   await db.execAsync(CREATE_WORKOUT_CACHE);
   await db.execAsync(CREATE_PREFS);
+  await db.execAsync(CREATE_PLANNED);
   await db.execAsync(
     `CREATE INDEX IF NOT EXISTS activities_user_id_idx ON activities (user_id);`,
   );
@@ -446,6 +496,52 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     // and "this is a BJJ session with an empty reflection" are different
     // facts, and only the first should skip the detail push entirely.
     await addColumnIfMissing(db, 'local_sessions', 'bjj_json', 'TEXT');
+  }
+
+  if (current < 14) {
+    // v13 -> v14: the week gets a plan.
+    //
+    // Indexed on (user_id, day) because every read is either "what is on this
+    // day" or "what is in this week" — there is no query in `lib/plan.ts` that
+    // wants a user's plans in any other order.
+    await db.execAsync(CREATE_PLANNED);
+    await db.execAsync(
+      `CREATE INDEX IF NOT EXISTS planned_sessions_user_day_idx
+         ON planned_sessions (user_id, day);`,
+    );
+  }
+
+  if (current < 15) {
+    // v14 -> v15: the week plan joins the outbox.
+    //
+    // v14 shipped `planned_sessions` as a local-only table — there was no
+    // `/v1/plans` yet — so a plan made on the phone reached nothing. These are
+    // the columns that make it syncable, and they mean exactly what they mean
+    // on `local_sessions` and `workout_cache`.
+    //
+    // **The defaults are the opposite of the workout_cache v9 ALTERs, and
+    // deliberately so.** Those rows had come FROM the server, so they defaulted
+    // to `dirty = 0, remote = 1` — already there, nothing owed. Every v14 plan
+    // was created locally and has never been sent anywhere, so the honest
+    // default here is `dirty = 1, remote = 0`: owed, and unknown to the server.
+    // Getting this backwards would silently strand every plan an early adopter
+    // had already made, with nothing ever pushing them.
+    // `notes` too: the server's plan carries it, so a local row without it
+    // could not round-trip what the web app wrote.
+    await addColumnIfMissing(db, 'planned_sessions', 'notes', `TEXT NOT NULL DEFAULT ''`);
+    await addColumnIfMissing(db, 'planned_sessions', 'updated_at', `TEXT NOT NULL DEFAULT ''`);
+    await addColumnIfMissing(db, 'planned_sessions', 'dirty', 'INTEGER NOT NULL DEFAULT 1');
+    await addColumnIfMissing(db, 'planned_sessions', 'remote', 'INTEGER NOT NULL DEFAULT 0');
+    await addColumnIfMissing(db, 'planned_sessions', 'deleted_at', 'TEXT');
+    await addColumnIfMissing(db, 'planned_sessions', 'last_error', 'TEXT');
+
+    // Backfill, and independently idempotent — which the migration contract
+    // above requires of any data step, because a fresh install runs this
+    // branch too. `CREATE_PLANNED` defaults `updated_at` to '' and every
+    // insert sets it explicitly, so on a fresh install this matches nothing.
+    await db.execAsync(
+      `UPDATE planned_sessions SET updated_at = created_at WHERE updated_at = '';`,
+    );
   }
 
   await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION};`);

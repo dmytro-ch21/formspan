@@ -126,6 +126,42 @@ export function buildCalendar(
   return weeks;
 }
 
+/**
+ * The whole weeks covering a month, Monday-first.
+ *
+ * Lives here rather than in the calendar page because it is a pure date
+ * helper and its siblings are all here — `buildCalendar` does the same job for
+ * a heatmap's arbitrary range, this one for a single month.
+ *
+ * The rows include the neighbouring days that complete the first and last
+ * weeks. Those are real, visible cells and get their own marks; rendering them
+ * blank reads as a rendering fault rather than as another month, which is why
+ * the caller dims them instead of dropping them.
+ *
+ * `monthKey` may be any day in the month — it is normalised to the 1st.
+ */
+export function monthGrid(monthKey: string): string[][] {
+  const first = `${monthKey.slice(0, 7)}-01`;
+  // The last day of the month, by stepping back from the 1st of the next one:
+  // correct by construction, and no leap-year table.
+  const last = addDays(addMonths(first, 1), -1);
+
+  const start = startOfWeek(first);
+  const end = addDays(startOfWeek(last), 6);
+
+  const weeks: string[][] = [];
+  let cursor = start;
+  while (cursor <= end) {
+    const week: string[] = [];
+    for (let i = 0; i < 7; i++) {
+      week.push(cursor);
+      cursor = addDays(cursor, 1);
+    }
+    weeks.push(week);
+  }
+  return weeks;
+}
+
 export type WeekBucket = {
   /** Monday of the week, YYYY-MM-DD. */
   start: string;
