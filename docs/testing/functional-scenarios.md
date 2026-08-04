@@ -3685,3 +3685,31 @@ Covers `components/BjjRankHeader.tsx`, `components/TrainingSummary.tsx`,
 - `pnpm run lint:mobile` must fail on a hook after an early return. That rule
   is the guard for the class; the component test is the guard for the screen.
 
+## Session summary figures (mobile, `components/ui/Stat`)
+
+- **The unit is smaller than its figure.** `480kg` reads as one quantity when
+  the `kg` is ~62% the size and a step quieter, and as two things when it isn't.
+- **A thousands separator stays inside the figure.** `12,450kg` must not split
+  on the comma — that renders the `,` small and muted in the middle of a number.
+- **A long figure shrinks; a short one does not.** Pounds run an order of
+  magnitude longer than kilos (`553.7k lb`), and a row where one stat is smaller
+  than its neighbours is the reported "truncates and looks ugly". Assert both
+  directions, or a ladder that always shrinks passes.
+- **A clock is one figure.** `2:39` and `1:23:45` must not split on the colon —
+  that renders a muted 14pt `:` between full-size digits, which is worse than
+  the problem the component exists to fix. Same class as the comma.
+- **The ladder depends on how many stats share the row.** Four columns are ~a
+  third narrower than three, so the same value has to shrink further; assert a
+  four-column value comes out smaller than the same value at three, and that at
+  least one real case actually moves.
+- **A single falsy child renders no slot.** `<StatRow>{finished && <Stat/>}</StatRow>`
+  is not an array, so an `Array.isArray` check falls through and renders one
+  empty column.
+- **The em dash is not a unit.** A missing figure holds a number's worth of
+  space at full size rather than collapsing the column.
+- Each stat announces as `"<value> <label>"` — ungrouped, VoiceOver reads the
+  number and the word as two unrelated stops.
+- **No screen should carry its own copy of this.** The session summary did, and
+  it used `adjustsFontSizeToFit`, which the shared component deliberately avoids
+  because it measures after layout and is unreliable across nested `Text` runs.
+

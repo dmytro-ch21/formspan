@@ -1,3 +1,4 @@
+import { Children, cloneElement, isValidElement } from 'react';
 import { StyleSheet, View as RNView } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
@@ -24,8 +25,15 @@ import { vola } from '@/constants/Colors';
  * still occupies a number's worth of space rather than collapsing the row.
  */
 
-/** Digits, with the separators that belong inside a figure. */
-const FIGURES = /([\d]+(?:[.,][\d]+)*)/;
+/**
+ * Digits, with the separators that belong inside a figure.
+ *
+ * The colon is in here for the same reason the comma is: `2:39` is ONE
+ * quantity. Without it a session clock rendered `2` and `39` at full size
+ * either side of a muted 14pt `:`, which is worse than the problem this
+ * component was brought in to fix — and `1:23:45` did it twice.
+ */
+const FIGURES = /([\d]+(?:[.,:][\d]+)*)/;
 
 /**
  * How much to shrink a figure so it still fits its column.
@@ -51,12 +59,16 @@ const FIGURES = /([\d]+(?:[.,][\d]+)*)/;
  * "102.5kg" came out at two different sizes in adjacent rows of the same card.
  * The ladder belongs where the column is fixed and narrow.
  */
-function fitSize(value: string, base: number): number {
+function fitSize(value: string, base: number, slots: number): number {
   const n = value.length;
-  if (n <= 6) return base;
-  if (n <= 8) return Math.round(base * 0.85);
-  if (n <= 10) return Math.round(base * 0.72);
-  return Math.round(base * 0.62);
+  // A quarter-width column has roughly 60pt of content to play with against a
+  // third's ~90pt, so the same string needs to come down another rung. Measured
+  // against the values that actually occur: `1:23:45`, `251.1t` and `12,450lb`
+  // all overflowed a quarter at the three-column ladder.
+  const tight = slots >= 4 ? 1 : 0;
+  const rungs = [base, Math.round(base * 0.85), Math.round(base * 0.72), Math.round(base * 0.62)];
+  const rung = n <= 6 ? 0 : n <= 8 ? 1 : n <= 10 ? 2 : 3;
+  return rungs[Math.min(rung + tight, rungs.length - 1)];
 }
 
 export function StatValue({
@@ -64,14 +76,17 @@ export function StatValue({
   size: requested = 26,
   color = vola.text,
   fit = false,
+  slots = 3,
 }: {
   value: string;
   size?: number;
   color?: string;
   /** Shrink long figures to fit a fixed narrow column. See `fitSize`. */
   fit?: boolean;
+  /** How many stats share the row. Four columns are ~a third narrower. */
+  slots?: number;
 }) {
-  const size = fit ? fitSize(value, requested) : requested;
+  const size = fit ? fitSize(value, requested, slots) : requested;
   const unitSize = Math.round(size * 0.62);
 
   if (value === '—') {
@@ -115,19 +130,21 @@ export function Stat({
   change,
   size,
   fit,
+  slots,
 }: {
   label: string;
   value: string;
   change?: number | null;
   size?: number;
   fit?: boolean;
+  slots?: number;
 }) {
   const rounded = change == null ? null : Math.round(change);
   // Grouped, or VoiceOver reads the figure and its label as two unrelated
   // stops with nothing connecting them.
   return (
     <RNView style={styles.stat} accessible accessibilityLabel={`${value} ${label}`}>
-      <StatValue value={value} size={size} fit={fit} />
+      <StatValue value={value} size={size} fit={fit} slots={slots} />
       <Text style={styles.label}>{label}</Text>
       {rounded != null && rounded !== 0 && (
         <Text style={styles.delta}>
@@ -153,13 +170,18 @@ export function StatRow({
   children: React.ReactNode;
   testID?: string;
 }) {
-  const items = Array.isArray(children) ? children.filter(Boolean) : [children];
+  // `React.Children.toArray` rather than `Array.isArray`: a SINGLE conditional
+  // child (`{cond && <Stat/>}`) is not an array, so the old form rendered one
+  // empty slot when the condition was false.
+  const items = Children.toArray(children).filter(Boolean);
   return (
     <View style={styles.row} testID={testID}>
       {items.map((child, i) => (
-        <RNView key={i} style={styles.slot}>
+        <RNView key={i} style={[styles.slot, items.length >= 4 && styles.slotTight]}>
           {i > 0 && <RNView style={styles.divider} />}
-          {child}
+          {isValidElement<{ slots?: number }>(child)
+            ? cloneElement(child, { slots: items.length })
+            : child}
         </RNView>
       ))}
     </View>
@@ -191,6 +213,8 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   slot: { flex: 1, paddingHorizontal: 14, justifyContent: 'center' },
+  // Four columns need the 12pt back that padding was taking.
+  slotTight: { paddingHorizontal: 8 },
   divider: {
     position: 'absolute',
     left: 0,

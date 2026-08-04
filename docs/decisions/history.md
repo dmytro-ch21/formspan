@@ -8828,6 +8828,98 @@ letterboxes the tick by a few pixels rather than distorting it, and the
 generator that is meant to replace the hand-copied brand modules would take
 this with it.
 
+## 2026-08-04 — The session summary was a second copy of a component that already existed
+
+"The things done has volume that truncates and the overall that thing is ugly."
+Accurate on both counts, and the cause was the same one:
+
+	2:39      1       8      480kg
+	Time     Sets    Reps    Volume
+
+Four rigid `flex: 1` columns, three of them holding a single digit while the
+fourth carried a figure and its unit at the same size. The unit shrank the
+figure it belonged to, and at a real volume — pounds run an order of magnitude
+longer, so one session reads `553.7k lb` — `adjustsFontSizeToFit
+minimumFontScale={0.6}` dropped it to two-thirds the size of the `8` beside it.
+Three numbers at three sizes in one row.
+
+### It was already solved, one directory away
+
+`components/ui/Stat.tsx` has done this properly for months. It splits figures
+from units with a regex, sets units to 62% and a step quieter, and shrinks long
+figures with a deterministic **ladder keyed on string length** rather than
+`adjustsFontSizeToFit` — whose own comment explains why: that prop measures
+after layout and is unreliable across nested `Text` runs, which is exactly what
+a figure-plus-unit renders. `StatRow` adds hairline dividers, which is what
+makes several numbers read as one panel instead of three adjacent cards.
+
+Today and You have used it all along. That is why the same 480kg reads as
+**480**<sub>kg</sub> on Today and read as `480kg` on the session — one screen
+kept a private copy written before the shared one existed, and the private copy
+used the technique the shared one exists to avoid.
+
+So this deletes the copy. The session summary is now `StatRow` + `Stat … fit`,
+and the two screens agree.
+
+### Tested, because "looks nicer" is not a regression guard
+
+`components/__tests__/statValue.test.tsx` pins the four properties that make the
+difference: the unit is smaller than the figure, a thousands separator stays
+INSIDE the figure (split on the comma, the `,` renders small and muted
+mid-number), the ladder shrinks a long value and leaves a short one alone, and
+an em dash stays full size rather than being read as a unit. Six mutations run,
+all red — including reverting the ladder, which is the specific thing a future
+"simplify this" would reach for.
+
+Verified on the Simulator against the real session, before and after.
+
+### What review caught, which was two new defects for one old one
+
+Both on the exact row the report was about:
+
+1. **The colon became a unit.** `FIGURES` treated `.` and `,` as inside-figure
+   but not `:`, so `2:39` rendered as two full-size figures either side of a
+   muted 14pt colon — and `1:23:45` did it twice. Worse than what it replaced.
+   The colon is now in the character class for the same reason the comma is:
+   a clock is one quantity.
+
+2. **The ladder was tuned for thirds and this row is quarters.** Measured, a
+   quarter-width slot has ~60pt of content against a third's ~90pt, and
+   `1:23:45`, `251.1t` and `12,450lb` all overflowed it at the three-column
+   sizes — `numberOfLines={1}` would have tail-truncated them. So the fix would
+   have swapped one truncation for another.
+
+   `StatRow` now tells its children how many they are; `fitSize` drops a rung at
+   four or more, and the slot gives back 12pt of horizontal padding. Verified by
+   forcing the worst realistic case — a 1h23 session, imperial, five-figure
+   volume — onto the Simulator and looking at it, rather than predicting it.
+
+The same review also found that `StatRow`'s `Array.isArray(children)` renders an
+empty slot for a SINGLE falsy child, which is exactly the shape the session's
+`{finished && <Stat/>}` gate has. It happened not to bite (four children, so the
+array branch), but it is now `Children.toArray` and there is a test.
+
+### Gaps this leaves
+
+- **One more private `Stat` copy is worth converging**: `app/exercise/[id].tsx`
+  is the same shape and a near drop-in, but it is not broken — its values are
+  short, its column is ~96pt, and it has no `numberOfLines`, so a long value
+  wraps rather than clips. Cleanup, not a fix.
+  `app/bjj/session/[id].tsx` has a `Stat` too and it is **not** the same
+  component: its second prop is a prose caption ("min on the mat", "moderate"),
+  which `Stat` would uppercase with letter-spacing. Leaving it is correct.
+- **Still only seen on the Simulator, and only at values I forced.** The worst
+  case was rendered by hardcoding it, not by training for 83 minutes; real
+  device metrics (SF Pro Text vs the Core Text the review measured with) and
+  larger Dynamic Type settings are unverified.
+- **A row can still show three different sizes.** The ladder is per-stat, so a
+  long Time and a short Sets shrink independently. Harmonising would mean
+  `StatRow` taking the minimum across its children — a bigger change than this.
+- **The Today week-summary row and this one now share a component but not a
+  size** — Today renders at the component default, this at 22. Deliberate (the
+  session header is denser) but it is a number in two places.
+
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

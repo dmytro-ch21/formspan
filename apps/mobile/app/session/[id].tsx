@@ -9,6 +9,7 @@ import { SwipeToDelete } from '@/components/SwipeToDelete';
 
 import { RestTimerBar, useRestTimer } from '@/components/RestTimer';
 import { Text, View } from '@/components/Themed';
+import { Stat, StatRow } from '@/components/ui/Stat';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { vola } from '@/constants/Colors';
 import { formatElapsed, readAutoRest, readRestSeconds, writeRestSeconds } from '@/lib/rest';
@@ -545,10 +546,10 @@ export default function SessionScreen() {
             the API; they're real data for the trends screen, just not worth
             a permanent slot in a header read between sets. */}
         {volume && (
-          <View style={styles.summary}>
-            <Stat label="Time" value={formatElapsed(elapsed)} />
-            <Stat label="Sets" value={String(volume.working_sets)} />
-            <Stat label="Reps" value={String(volume.total_reps)} />
+          <StatRow testID="session-summary">
+            <Stat label="Time" value={formatElapsed(elapsed)} size={22} fit />
+            <Stat label="Sets" value={String(volume.working_sets)} size={22} fit />
+            <Stat label="Reps" value={String(volume.total_reps)} size={22} fit />
             {/* Volume is a result, not a readout. Mid-session it's a
                 number nobody acts on — you don't change the next set
                 because the running total crossed 1,500kg — so it appears
@@ -556,6 +557,8 @@ export default function SessionScreen() {
             {finished && (
               <Stat
                 label="Volume"
+                size={22}
+                fit
                 value={
                   unitsReady && volume.tonnage_kg > 0
                     ? formatVolume(volume.tonnage_kg, units)
@@ -563,7 +566,7 @@ export default function SessionScreen() {
                 }
               />
             )}
-          </View>
+          </StatRow>
         )}
 
         {error && (
@@ -1056,19 +1059,6 @@ function localVolume(sets: LoggedSet[]): Volume {
   return v;
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.stat}>
-      {/* Four-figure volume wrapped onto a second line and shoved its own
-          label out of the row; shrink to fit instead. */}
-      <Text style={styles.statValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
-        {value}
-      </Text>
-      <Text style={styles.statLabel}>{label}</Text>
-    </View>
-  );
-}
-
 function SetRow({
   index,
   ordinal,
@@ -1344,16 +1334,6 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   centre: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   scroll: { padding: 16, gap: 14, paddingBottom: 48 },
-  summary: {
-    flexDirection: 'row',
-    gap: 10,
-    backgroundColor: vola.surface,
-    borderRadius: 14,
-    padding: 14,
-  },
-  stat: { flex: 1, alignItems: 'center', gap: 2 },
-  statValue: { fontSize: 22, fontWeight: '700' },
-  statLabel: { fontSize: 11, color: vola.textDim, textAlign: 'center' },
   group: { gap: 8 },
   // Wraps rather than overflows: the header now carries up to six controls
   // (move up/down, rest, unit, swap, remove) beside a name that can be long
