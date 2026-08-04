@@ -154,6 +154,44 @@ export const accents = {
   orange: { label: 'Orange', accent: '#FF8A3D', ink: '#FF8A3D', on: '#080B12' },
 } as const;
 
+/**
+ * A discipline's colour — categorical, and **fixed regardless of the accent**.
+ *
+ * Same rule as the grid and the completed-set tint: the accent is chrome and
+ * moves with a preference, but a sport is a *category*, and a category whose
+ * colour depends on a setting is one nobody can learn. A Recent list mixes
+ * disciplines in one column, which is the whole reason these need to be
+ * distinguishable from each other — unlike `beltAccent`, where an athlete has
+ * exactly one belt and no two ever appear together.
+ *
+ * Validated pairwise under simulated colour blindness by
+ * `scripts/validate_palette.mjs`. That check is the point of the set: four
+ * hues that separate cleanly for you can collapse to two for a deuteranope,
+ * and a mat day then looks like a lifting day in the one view meant to tell
+ * them apart.
+ *
+ * The first attempt at this set was picked by eye and failed hard: BJJ's light
+ * purple and running's light blue measured **ΔE 4.7 for a deuteranope** while
+ * looking 21.9 apart to me. Purple-versus-blue is the classic red-green
+ * collapse, and a mat day would have been indistinguishable from a run in the
+ * one view meant to separate them. These four came out of a search that
+ * maximises the *worst* pair across all three CVD types; the tightest is now
+ * strength/running at 16.4.
+ *
+ * A consequence worth naming rather than discovering: on the purple theme, the
+ * BJJ colour and the accent sit near each other. That is harmless — one is a
+ * label, the other is a button — and it is the price of keeping categories
+ * stable while chrome moves.
+ */
+export const sportColors = {
+  strength: '#B8FF2C',
+  bjj: '#B06BFF',
+  running: '#7FD4FF',
+  nutrition: '#FF6B35',
+} as const;
+
+export type SportKey = keyof typeof sportColors;
+
 export type AccentName = keyof typeof accents;
 export type Accent = (typeof accents)[AccentName];
 

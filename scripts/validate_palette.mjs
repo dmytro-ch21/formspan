@@ -315,10 +315,11 @@ function loadPalette() {
     BELT: block('beltAccent'),
     BELT_ON: block('beltAccentOn'),
     ACCENTS: accentBlock(src),
+    SPORTS: block('sportColors'),
   };
 }
 
-const { S, P, BELT, BELT_ON, ACCENTS } = loadPalette();
+const { S, P, BELT, BELT_ON, ACCENTS, SPORTS } = loadPalette();
 
 heading('Text');
 ratio('text on surface', P.text, S.surface, 4.5);
@@ -348,6 +349,17 @@ ratio('ramp[0] on surface', P.ramp[0], S.surface, 3, 'The faintest trained day m
 separation('rest → ramp[0]', P.gridRest, P.ramp[0]);
 separation('ramp 0→1', P.ramp[0], P.ramp[1]);
 separation('ramp 1→2', P.ramp[1], P.ramp[2]);
+
+// Sports DO co-occur — a Recent list mixes them in one column — so unlike the
+// belts these must be distinguishable from each other, pairwise, under CVD.
+heading('Sport colours — categorical, and they share a list');
+for (const [name, hex] of Object.entries(SPORTS)) ratio(`${name} on surface`, hex, S.surface, 4.5);
+const sports = Object.entries(SPORTS);
+for (let i = 0; i < sports.length; i++) {
+  for (let j = i + 1; j < sports.length; j++) {
+    separation(`${sports[i][0]} vs ${sports[j][0]}`, sports[i][1], sports[j][1]);
+  }
+}
 
 heading('Belt accents — rank card only');
 for (const [belt, hex] of Object.entries(BELT)) {
