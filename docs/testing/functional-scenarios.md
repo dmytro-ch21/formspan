@@ -2556,6 +2556,18 @@ own, so none of them is redundant with "the FK exists".
 - **A failed save puts the previous list back.** Optimistic update, so a
   network failure must not leave a filled star next to a list that never
   changed.
+- **Two rapid toggles settle with the UI matching the server**, in both
+  directions. Responses need not complete in request order: a stale success can
+  re-fill a star just cleared, and a stale rollback can restore a snapshot that
+  predates edits which already succeeded. Star then un-star inside one round
+  trip; and star two techniques where the first save fails and the second
+  succeeds.
+- **A failed focus read must not blank the funnel.** They are two independent
+  reads; the secondary one failing leaves the table readable with the stars
+  simply unfilled.
+- **A cap refusal is not presented as a load failure.** It must not appear
+  under the "Couldn't load your funnel" banner or beside a "Try again" button —
+  nothing failed to load.
 - The panel shows **weeks since `started_on`**, not since the last save —
   reorder or add an entry and an existing one's count must not reset. That is
   the property the column exists for and it is enforced server-side.
@@ -2564,6 +2576,9 @@ own, so none of them is redundant with "the FK exists".
   would read as a fact.
 - **An empty list renders a first-class empty state**, not an empty box — it is
   the default for every athlete who has not set one.
+- **A stored list is visible even with no proficiency rows at all.** The phone
+  is reading that list; an athlete whose evidence is empty must still be able
+  to see and clear it.
 - The star column has an accessible name **naming the technique**; a column of
   identical "Working on" buttons is unusable otherwise.
 

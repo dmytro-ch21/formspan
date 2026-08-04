@@ -6924,9 +6924,12 @@ planning. The phone reads the list and never writes it.
 ### `started_on` finally gets read
 
 The panel shows "3 weeks" per entry — the reason that column survives a re-save
-on the server, and until now stored and returned by nothing. It is parsed as
-UTC midnight and compared in whole days, so a viewer's timezone cannot shift
-the count; and the empty-string placeholder the optimistic update writes
+on the server, and until now stored and returned but **rendered** by nothing.
+It is parsed as UTC midnight and compared in whole days, so the count is
+globally consistent: identical everywhere at any instant. Not aligned to the
+viewer's calendar day — someone at UTC-8 sees it tick over at 16:00 on their
+day 6 — which is the right trade for a five-week granularity. The empty-string
+placeholder the optimistic update writes
 renders as nothing rather than as "0 weeks", which would be a number the
 athlete could read as real.
 
@@ -6935,13 +6938,39 @@ athlete could read as real.
 Starring a sixth technique sets an error naming the number and does not fire
 the request. The server rejects it too — this is the message, not the guard.
 
+### Three blocking findings, all in the plumbing rather than the idea
+
+**`Promise.all` did the opposite of the comment above it.** The comment
+promised "a failed focus read must not blank the funnel"; `Promise.all` rejects
+the moment either leg does. A 500 from the secondary read took the whole page
+down, under a banner saying the funnel had failed. `allSettled` now applies
+whichever leg resolved, and only the primary read's failure blanks anything.
+
+**Two saves in flight could leave the UI and the server disagreeing, in both
+directions.** Responses need not complete in request order, so a stale *success*
+could re-fill a star just cleared; and a per-click `previous` snapshot meant a
+late *failure* rolled back past edits that had already succeeded — emptying the
+panel while the server held a full list. Both reachable by ordinary clicking:
+setting three focus techniques is one round trip's worth. Every save is now
+stamped and only the newest outcome is applied, so the last write the athlete
+made is the one that stands. Both handlers were also collapsed into one writer,
+since two copies of this logic is how they drifted apart in the first place.
+
+**The cap refusal rendered under "Couldn't load your funnel."** `error` had
+become three channels — load failure, save failure, and the refusal — sharing
+one banner with a "Try again" button. So the one refusal guaranteed to happen
+told the athlete a load had failed that hadn't. Refusals and save failures now
+have their own quieter `role="status"` notice.
+
 ### Gaps this leaves
 
 - **You can only focus on a technique you already have evidence for.** The
   table lists what you have drilled or tried; something you have never touched
   cannot be starred, so a coach saying "work on the berimbolo" has nowhere to
   go until you have drilled it once. Adding a library search here is the
-  obvious follow-up and is deliberately not in this PR.
+  obvious follow-up and is deliberately not in this PR. The panel itself is now
+  rendered whenever a list exists, even with no evidence at all, so an athlete
+  can always see and clear what their phone is reading.
 - **No ordering control.** The list is the order techniques were starred, and
   the API preserves whatever order it is sent — but nothing lets the athlete
   rearrange it. Fine while the phone shows all five as equals; wrong once
