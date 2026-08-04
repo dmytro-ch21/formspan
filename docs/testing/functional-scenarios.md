@@ -2964,3 +2964,23 @@ this is API-surface behaviour even though no endpoint changed.
   because each covers for the other. If a guard exists for a reason the status
   code cannot show (streaming instead of buffering, say), assert that reason
   directly or write down that the test does not pin it.
+
+## Searching the technique library (mobile Library tab, web `/dashboard/library`)
+
+- **An accented technique is findable by its ASCII spelling.** "sao paulo" must
+  find "São Paulo Pass". This was broken for months and looked like missing
+  content rather than a broken lookup — the response was to start building a
+  way to add the technique, which would have minted a duplicate id.
+- **And by its accented spelling**, so a Portuguese keyboard is not the thing
+  that breaks instead. Fold both the query and the haystack.
+- Derive the cases from the catalog rather than hardcoding them — assert that
+  *every* entry whose name carries a combining mark is findable by its folded
+  form, so a future import is covered without anyone remembering.
+- Aliases still match ("tozi" → São Paulo Pass), and case still does not matter.
+- **A query must not match across two fields.** The haystack joins name,
+  aliases and position; without a separator a query spanning the seam returns a
+  technique that matches neither field.
+- Repeating a search returns the same result — the folded haystack is memoised,
+  and a stale or mis-keyed cache shows up as one query answering differently.
+- Misspellings are **out of scope**: "sao paolo" finds nothing, and the fix for
+  that is an alias, not fuzzy matching.

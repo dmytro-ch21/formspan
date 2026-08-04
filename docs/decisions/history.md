@@ -7125,6 +7125,77 @@ both mutations were checked separately.
   skipped**, so a JSON entry permanently shadowed by an admin row is invisible.
 
 
+## 2026-08-04 — The technique was never missing; the search could not find it
+
+`searchTechniques` folded case and nothing else, so a query and the catalog
+compared as literally different strings whenever an accent was involved:
+
+	"sao paulo"  -> nothing
+	"sao"        -> nothing
+	"são paulo"  -> found, and nobody types the tilde on a phone
+	"tozi"       -> found, by alias
+
+`sao-paulo-pass` — "São Paulo Pass", alias "Tozi pass", Guard - Top, with a
+full description and a `to_position` — had been in the library the whole time.
+
+### How it surfaced, which is the part worth keeping
+
+Not from a bug report. It came out of **testing the content-export command**:
+the first end-to-end run exported a fully-populated São Paulo Pass rather than
+the stub that had just been inserted, because the test had flipped a real
+seeded row to `source='admin'`. The export was working; the surprise in its
+output was the finding.
+
+The request that started three PRs of work — admin authoring, so a technique
+seen in class could be added without a deploy — was a **lookup** bug. And the
+work would have made it worse: authoring a second São Paulo pass mints a second
+id for one technique, permanently, in every training record referencing either.
+That is the exact catastrophe the authoring PR's design is most careful about,
+reached from the direction the design does not defend.
+
+### The fix
+
+`foldForSearch` normalises NFD and strips U+0300–U+036F (the combining-marks
+block), so "ã" becomes "a" + a mark that is then dropped. Applied to both the
+query and the haystack, so a Portuguese keyboard is not the thing that breaks
+instead.
+
+`String.prototype.normalize` is not universal on Hermes, so it was verified in
+the binary that actually ships in the app rather than assumed from jest, which
+runs on Node: the framework carries the NFKC/NFKD form names and the "Invalid
+normalization form" error string alongside its other `String.prototype` errors.
+
+Folded haystacks are memoised in a `WeakMap` keyed on the technique object.
+Search runs per keystroke over 466 entries × name + aliases + position — around
+2000 `normalize` calls per character without it — and the catalog objects are
+immutable and module-cached, so the map invalidates itself when a refetch makes
+new ones. Fields are joined with a separator so a query cannot match across the
+seam between a name and a position.
+
+### Duplicated, deliberately
+
+`apps/mobile/lib/techniques.ts` and `apps/web/src/lib/api.ts` each have a copy.
+The two apps share no package and mobile's has to work offline — the same
+reason the position vocabulary is duplicated four ways. Both carry a comment
+saying so.
+
+### Gaps this leaves
+
+- **Misspellings still miss.** "sao paolo" — which is how the request was
+  actually written — finds nothing, because folding is not fuzzy matching.
+  The honest fix is an alias, not a distance metric: aliases already exist for
+  exactly this and are how "scarf hold" finds "Kesa-Gatame".
+- **Only 2 of 466 entries carry diacritics** today (this one and Rear Naked
+  Choke's "Mata leão" aliases), so the blast radius was small — but the test
+  derives its cases from the catalog rather than hardcoding them, so a future
+  import that adds accented names is covered without anyone remembering.
+- **Not verified on a device.** The unit tests run against the real shipped
+  `techniques.json`, and the Hermes check was made against the installed
+  binary, but nobody has typed "sao paulo" into the app.
+- **Nothing else that searches was audited.** The exercise catalog has its own
+  search, and if any of its 504 entries carry accents it has the same bug.
+
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

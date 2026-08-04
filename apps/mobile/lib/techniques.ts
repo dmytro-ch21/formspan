@@ -204,21 +204,59 @@ export async function fetchRulesets(
 }
 
 /**
- * Local search across name and aliases.
+ * Lowercase and strip diacritics, so what someone types on a phone matches
+ * what the library actually stores.
+ *
+ * This is not cosmetic. `sao-paulo-pass` — "São Paulo Pass" — has been in the
+ * catalog the whole time and was unfindable: a plain `toLowerCase().includes()`
+ * fails "sao paulo" against "São Paulo" because the strings genuinely differ,
+ * and nobody types the tilde on a phone keyboard. The technique looked missing,
+ * and the near-consequence was authoring a duplicate — two ids for one
+ * technique, permanently, in every training record that referenced either.
+ *
+ * NFD splits "ã" into "a" + U+0303 COMBINING TILDE; the range U+0300–U+036F is
+ * the combining-marks block, so removing it leaves the base letters. Hermes
+ * implements `String.prototype.normalize` (verified in the shipped binary — it
+ * carries the NFKC/NFKD form names and the "Invalid normalization form" error
+ * beside its other String.prototype errors), so this is safe on device, not
+ * only in jest's Node.
+ */
+export function foldForSearch(value: string): string {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+}
+
+/**
+ * Folded haystacks, cached per technique object.
+ *
+ * Search runs on every keystroke over the whole 466-entry library, and folding
+ * name + aliases + position each time is ~2000 normalize calls per character
+ * typed. The catalog objects are immutable and module-cached, so a WeakMap
+ * keyed on the object is both correct and free to invalidate — a refetch makes
+ * new objects and the old entries are collected.
+ */
+const foldedCache = new WeakMap<object, string>();
+
+function haystack(t: TechniqueSummary): string {
+  const hit = foldedCache.get(t);
+  if (hit !== undefined) return hit;
+  // One joined string rather than three comparisons: the separator stops a
+  // query spanning two fields ("armbar guard") from matching across the join.
+  const built = [foldForSearch(t.name), ...t.aliases.map(foldForSearch), foldForSearch(t.position)].join('\n');
+  foldedCache.set(t, built);
+  return built;
+}
+
+/**
+ * Local search across name, aliases and position.
  *
  * Aliases matter more than they look: half this library is known by two names,
  * and someone searching "scarf hold" will never find "Kesa-Gatame Escape"
  * without them.
  */
 export function searchTechniques(list: TechniqueSummary[], query: string): TechniqueSummary[] {
-  const q = query.trim().toLowerCase();
+  const q = foldForSearch(query.trim());
   if (!q) return list;
-  return list.filter(
-    (t) =>
-      t.name.toLowerCase().includes(q) ||
-      t.aliases.some((a) => a.toLowerCase().includes(q)) ||
-      t.position.toLowerCase().includes(q),
-  );
+  return list.filter((t) => haystack(t).includes(q));
 }
 
 /**

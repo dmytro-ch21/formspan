@@ -1230,14 +1230,52 @@ export function searchTechniques(
   list: TechniqueSummary[],
   query: string,
 ): TechniqueSummary[] {
-  const q = query.trim().toLowerCase();
+  const q = foldForSearch(query.trim());
   if (!q) return list;
-  return list.filter(
-    (t) =>
-      t.name.toLowerCase().includes(q) ||
-      t.aliases.some((a) => a.toLowerCase().includes(q)) ||
-      t.position.toLowerCase().includes(q),
-  );
+  return list.filter((t) => haystack(t).includes(q));
+}
+
+/**
+ * Lowercase and strip diacritics, so what someone types matches what the
+ * library actually stores.
+ *
+ * Not cosmetic. `sao-paulo-pass` — "São Paulo Pass" — had been in the catalog
+ * the whole time and was unfindable: a plain `toLowerCase().includes()` fails
+ * "sao paulo" against "São Paulo" because the strings genuinely differ. The
+ * technique looked missing, and the near-consequence was authoring a duplicate:
+ * two ids for one technique, permanently, in every training record referencing
+ * either.
+ *
+ * NFD splits "ã" into "a" + U+0303 COMBINING TILDE; U+0300–U+036F is the
+ * combining-marks block, so removing it leaves the base letters.
+ *
+ * DUPLICATED in apps/mobile/lib/techniques.ts. The two apps share no package,
+ * and mobile needs its copy to work offline — the same reason the position
+ * vocabulary is duplicated four ways. Change one, change the other.
+ */
+export function foldForSearch(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+/** Folded haystacks, cached per technique object — search runs per keystroke
+ *  over the whole 466-entry library. The catalog objects are immutable, so a
+ *  WeakMap keyed on them invalidates itself when a refetch makes new ones. */
+const foldedCache = new WeakMap<object, string>();
+
+function haystack(t: TechniqueSummary): string {
+  const hit = foldedCache.get(t);
+  if (hit !== undefined) return hit;
+  // Joined with a separator so a query cannot match across two fields.
+  const built = [
+    foldForSearch(t.name),
+    ...t.aliases.map(foldForSearch),
+    foldForSearch(t.position),
+  ].join("\n");
+  foldedCache.set(t, built);
+  return built;
 }
 
 /**
