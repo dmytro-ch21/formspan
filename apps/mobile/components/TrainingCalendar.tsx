@@ -7,7 +7,8 @@ import { Stat, StatRow } from '@/components/ui/Stat';
 import { vola } from '@/constants/Colors';
 import { formatDuration } from '@/lib/history';
 import { labelFor, type Module } from '@/lib/modules';
-import { dayString, type PlannedSession } from '@/lib/plan';
+import { dayString, monthGrid, weekDays } from '@/lib/calendar';
+import { type PlannedSession } from '@/lib/plan';
 import type { Session } from '@/lib/sessions';
 import { listLocalSessions } from '@/lib/sessionStore';
 import { formatVolume, type UnitSystem } from '@/lib/units';
@@ -43,56 +44,6 @@ import { formatVolume, type UnitSystem } from '@/lib/units';
  * accessible labels name both states independently, because speech has no such
  * limit and a both-day is exactly the day worth telling someone about.
  */
-
-type DayCell = { date: Date; key: string; inMonth: boolean };
-
-/** Monday 00:00 local. */
-function startOfWeek(now: Date): Date {
-  const d = new Date(now);
-  d.setHours(0, 0, 0, 0);
-  // getDay() is 0 on Sunday, which is six days into the week, not minus one.
-  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
-  return d;
-}
-
-function addDays(d: Date, n: number): Date {
-  const out = new Date(d);
-  out.setDate(out.getDate() + n);
-  return out;
-}
-
-/** The seven `Date`s of `now`'s week, Monday first. */
-function weekOf(now: Date): Date[] {
-  const monday = startOfWeek(now);
-  return Array.from({ length: 7 }, (_, i) => addDays(monday, i));
-}
-
-/**
- * Whole weeks covering a month — Monday-first, with the neighbouring days that
- * complete the first and last rows.
- *
- * The spill days are rendered dimmed rather than blank: a grid with holes in
- * its corners reads as a rendering fault, and the last days of the previous
- * month are genuinely part of the week you are looking at.
- */
-function monthGrid(anchor: Date): DayCell[][] {
-  const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
-  const start = startOfWeek(first);
-  const weeks: DayCell[][] = [];
-  let cursor = start;
-  // Six rows is the maximum a month can span (31 days starting on a Sunday);
-  // the loop stops early when a full row has already passed the month's end.
-  for (let w = 0; w < 6; w++) {
-    const row = Array.from({ length: 7 }, (_, i) => {
-      const date = addDays(cursor, i);
-      return { date, key: dayString(date), inMonth: date.getMonth() === anchor.getMonth() };
-    });
-    weeks.push(row);
-    cursor = addDays(cursor, 7);
-    if (cursor.getMonth() !== anchor.getMonth() && cursor > first) break;
-  }
-  return weeks;
-}
 
 /** Working, non-warm-up sets — the backend's own rule, mirrored. */
 function workingSets(s: Session): number {
@@ -160,7 +111,7 @@ export function TrainingCalendar({
    */
   const [monthSessions, setMonthSessions] = useState<Session[]>([]);
 
-  const week = useMemo(() => weekOf(now), [now]);
+  const week = useMemo(() => weekDays(now), [now]);
   const todayKey = dayString(now);
 
   // Both lists, de-duplicated by id, with the CALLER's copy winning — it is
@@ -434,7 +385,7 @@ export function TrainingCalendar({
 
           <ScrollView contentContainerStyle={styles.sheetBody}>
             <RNView style={styles.gridHead}>
-              {weekOf(now).map((d) => (
+              {weekDays(now).map((d) => (
                 <Text key={d.toISOString()} style={styles.gridHeadCell}>
                   {d.toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 3).toUpperCase()}
                 </Text>

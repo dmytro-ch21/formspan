@@ -3771,3 +3771,56 @@ handler suite no matter what the SQL says:
   `UpsertAll` with a different name, assert the admin row is unchanged.
 
 
+
+## Planning any week, not just this one (mobile, `components/WeekPlanner`)
+
+The Plan tab was pinned to the current week with no navigation. These cover the
+week stepper, the month grid used as a jump target, and the focus rule that
+decides when the shown week is corrected.
+
+### Happy path
+
+- The header shows the month of the displayed week and a `‹ ›` stepper; the
+  rows show Monday–Sunday of that week.
+- `›` advances one week: the rows show the next seven days **and the plans
+  shown are that week's**, not the current week's. (The read was pinned to
+  `new Date()`; a test that only checks the dates would pass against the bug.)
+- `‹` goes back a week, including across a month boundary and a year boundary.
+- Tapping the month title opens a month grid: spill days from the neighbouring
+  months are present and dimmed, today is marked, days holding a plan carry a
+  dot, and the week currently in the rows is highlighted.
+- Tapping any day in the grid closes it and loads that day's week into the
+  rows — including a day in a **past** week, and a day in a spill row belonging
+  to another month.
+- The grid's own `‹ ›` pages months without changing the rows behind it; closing
+  with `Done` leaves the rows on whatever week they were showing.
+- A day in a future week can be planned end to end: `+ Add` → pick a template →
+  the entry appears on that day, and is still there after leaving and returning
+  to the tab.
+- The `Today` pill appears only when the shown week is not the current one, and
+  returns to it.
+
+### Edge cases & errors
+
+- **A week spanning two months is labelled by its Thursday** (ISO 8601): the
+  week of 29 September–5 October reads "October", not "September".
+- **The year appears in the label only when it is not the current year** — so
+  navigating from December into January visibly changes the label.
+- **On focus, a past week snaps forward to the current one; a future week does
+  not.** Leave the tab on next week, return, and it is still next week. Leave it
+  on a past week, return, and it is the current week. This is `refreshedAnchor`;
+  covered by unit tests in `lib/__tests__/calendar.test.ts`, but the wiring —
+  which effect reads the anchor — is only observable here.
+- Past days offer no `+ Add` and render `—` rather than "Rest", on any week
+  reached by navigation, not just the current one.
+- A month with no plans at all shows a grid of bare dates and no dots.
+- February in a common year starting on a Monday renders **four** rows, not six
+  padded with a fortnight of foreign days.
+
+### Accessibility
+
+- The stepper buttons are named "Previous week" / "Next week"; the month title
+  names the month and says it opens the month view.
+- Every grid cell speaks its full date plus "today" and/or "planned" — a cell
+  that reads out as a bare number tells a screen reader nothing, and the dot is
+  the whole content of that grid.

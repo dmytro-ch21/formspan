@@ -1,21 +1,35 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
-import { Alert, Pressable, StyleSheet, View as RNView } from 'react-native';
+import {
+  Alert,
+  AppState,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View as RNView,
+} from 'react-native';
 
 import { request as requestSync, useSyncState } from '@/lib/sync';
 
 import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { PickSessionSheet } from '@/components/ui/PickSessionSheet';
-import { SectionHeader } from '@/components/ui/Section';
 import { vola } from '@/constants/Colors';
+import {
+  addDays,
+  addMonths,
+  dayString,
+  monthGrid,
+  refreshedAnchor,
+  startOfMonth,
+  weekDays,
+} from '@/lib/calendar';
 import { labelFor, type Module } from '@/lib/modules';
 import {
-  dayString,
   listPlannedBetween,
   planSession,
   unplanSession,
-  weekDays,
   type PlannedSession,
 } from '@/lib/plan';
 import { cachedWorkouts } from '@/lib/sessionStore';
@@ -40,7 +54,17 @@ import { cachedWorkouts } from '@/lib/sessionStore';
  * give the name the width it needs, and the Today screen's `TrainingCalendar`
  * already covers the at-a-glance shape.
  *
- * Plans are local-only for now — see `lib/plan.ts`.
+ * **The month grid is a jump target, not a second way to read the plan.** This
+ * screen was pinned to the current week and had no navigation at all, so you
+ * could not plan next week — the one thing a planner is for. The fix is a week
+ * you can move: the arrows step a week, and the month grid picks a distant one
+ * in a single tap and then hands it back to the rows. Its cells carry a dot and
+ * nothing else, which is exactly why it cannot replace them.
+ *
+ * Plans sync — `planned_sessions` joined the outbox at schema v15 and
+ * `lib/sync.ts` runs `syncPlans`. This comment said "local-only for now" long
+ * after that stopped being true, and the claim was carried into a history
+ * entry before a reviewer caught it.
  */
 export function WeekPlanner({
   userId,
@@ -55,18 +79,44 @@ export function WeekPlanner({
   // The day being planned, or null when the sheet is closed. Holding the day
   // here rather than a boolean is what lets one sheet serve all seven rows.
   const [planning, setPlanning] = useState<string | null>(null);
+  // Any day inside the week the rows are showing. Separate from `now`, which
+  // stays the real today — `isPast` and the today marker are claims about the
+  // actual date and must not move when you navigate away from this week.
+  const [anchor, setAnchor] = useState(() => new Date());
+  const [monthOpen, setMonthOpen] = useState(false);
+  // The month the grid is showing, which is not the anchor's month once you
+  // page through it looking for a week without picking one yet.
+  const [monthAnchor, setMonthAnchor] = useState(() => startOfMonth(new Date()));
+  const [monthDays, setMonthDays] = useState<Set<string>>(new Set());
 
-  const days = weekDays(now);
+  const days = useMemo(() => weekDays(anchor), [anchor]);
   const todayKey = dayString(now);
+  const isCurrentWeek = days.some((d) => dayString(d) === todayKey);
+
+  // Bumped on every anchor change, and captured by each read. A read that
+  // resolves after the week moved is dropped rather than rendered.
+  //
+  // Reachable: tap + Add, pick a template, then tap the arrow while the write
+  // is in flight — `add()` calls the `refresh` of the render it was created
+  // in, which is issued LAST and so lands last, leaving week A's rows under
+  // week B's dates. It fails to an all-"Rest" week rather than to wrong plans,
+  // and stays that way until the next focus or sync.
+  const readSeq = useRef(0);
 
   const refresh = useCallback(async () => {
     if (!userId) return;
-    const week = weekDays(new Date());
+    readSeq.current += 1;
+    const seq = readSeq.current;
+    // The week on screen, NOT `new Date()`. This read was pinned to today, so
+    // it was already the reason navigation could not work: every arrow would
+    // have moved the rows and re-fetched this week's plans into them.
+    const week = weekDays(anchor);
     try {
       const [rows, cached] = await Promise.all([
         listPlannedBetween(userId, dayString(week[0]), dayString(week[6])),
         cachedWorkouts(userId),
       ]);
+      if (seq !== readSeq.current) return;
       setPlans(rows);
       // Resolved from the cache each read rather than stored on the plan, so a
       // renamed template shows its new name instead of a stale copy.
@@ -75,26 +125,90 @@ export function WeekPlanner({
       // An unreadable plan is an empty week here, not an error banner — the
       // templates below it are the screen's main content and still work.
     }
-  }, [userId]);
+  }, [userId, anchor]);
 
-  // `now` is refreshed alongside, or a tab left open overnight keeps planning
-  // into last week — the same staleness the Today screen guards against.
-  useFocusEffect(
-    useCallback(() => {
-      setNow(new Date());
-      refresh();
-    }, [refresh]),
+  /**
+   * Which days of the open month hold a plan — the grid's only content.
+   *
+   * A separate read from `refresh`, over a different range, because the grid
+   * spans weeks the rows are not showing. It is loaded when the grid opens and
+   * whenever its month changes, rather than kept live: a jump target does not
+   * need to react to a sync, and the rows behind it already do.
+   */
+  const monthSeq = useRef(0);
+  const loadMonth = useCallback(
+    async (month: Date) => {
+      if (!userId) return;
+      monthSeq.current += 1;
+      const seq = monthSeq.current;
+      const cells = monthGrid(month).flat();
+      try {
+        const rows = await listPlannedBetween(
+          userId,
+          cells[0].key,
+          cells[cells.length - 1].key,
+        );
+        if (seq !== monthSeq.current) return;
+        setMonthDays(new Set(rows.map((r) => r.day)));
+      } catch {
+        // An unreadable month is a grid of bare dates — the dots are a hint,
+        // and the rows behind this sheet are the surface that must be right.
+        if (seq !== monthSeq.current) return;
+        setMonthDays(new Set());
+      }
+    },
+    [userId],
   );
 
-  // Re-read whenever a sync finishes. Without this the week is only as fresh
+  // `now` is refreshed on focus, or a tab left open overnight keeps planning
+  // into last week — the same staleness the Today screen guards against.
+  //
+  // The anchor is snapped forward only when it has fallen into a *past* week,
+  // which can only happen by time passing. A week you navigated to yourself is
+  // left alone: if it is still ahead, you chose it, and resetting every time
+  // the tab loses focus would make planning two weeks out a fight.
+  //
+  // **This must not depend on `refresh`, which changes with the anchor.** With
+  // `[refresh]` here the effect re-runs on every navigation and the snap fires
+  // against the week you just chose — so picking a past day in the month grid
+  // bounced instantly back to today, and the grid's whole left half was dead.
+  // The read is a separate effect below for exactly that reason.
+  const [reloadAt, setReloadAt] = useState(0);
+  useFocusEffect(
+    useCallback(() => {
+      const today = new Date();
+      setNow(today);
+      setAnchor((a) => refreshedAnchor(a, today));
+      setReloadAt((n) => n + 1);
+    }, []),
+  );
+
+  // The same staleness arrives without a focus change when the app is
+  // foregrounded on the tab it was left on — leave it on Plan on Sunday night,
+  // reopen on Monday, and `useFocusEffect` never fires. Without this the snap
+  // above is a promise the code does not keep: `todayKey` stays yesterday, so
+  // `isPast` is computed against it and `+ Add` is offered on days already
+  // gone. Copied from the Today screen, which needed it for the same reason.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') return;
+      const today = new Date();
+      setNow(today);
+      setAnchor((a) => refreshedAnchor(a, today));
+      setReloadAt((n) => n + 1);
+    });
+    return () => sub.remove();
+  }, []);
+
+  // Re-read when the week on screen changes, when the screen is focused, and
+  // whenever a sync finishes. Without that last one the week is only as fresh
   // as the last focus, so a plan made on the web lands in SQLite and stays
   // invisible until the tab is left and returned to — which is precisely the
   // "it synced but nothing changed" the sessions list already fixed.
   const { lastSyncAt } = useSyncState();
   useEffect(() => {
-    if (lastSyncAt === null) return;
     refresh();
-  }, [lastSyncAt, refresh]);
+  }, [refresh, reloadAt, lastSyncAt]);
 
   async function add(day: string, sport: string, workoutId: string | null) {
     if (!userId) return;
@@ -130,9 +244,109 @@ export function WeekPlanner({
     ]);
   }
 
+  /**
+   * The month a week belongs to, when it straddles two.
+   *
+   * ISO 8601's rule: the month holding the Thursday owns the week. Labelling by
+   * the Monday instead calls 29 September – 5 October "September" when six of
+   * its seven days are October.
+   */
+  const weekLabel = days[3].toLocaleDateString(undefined, {
+    month: 'long',
+    // The year only when it is not the current one — "AUGUST 2026" on every
+    // screen all year is noise, but a silent jump to next January is a trap.
+    ...(days[3].getFullYear() === now.getFullYear() ? {} : { year: 'numeric' }),
+  });
+
+  function openMonth() {
+    setMonthAnchor(startOfMonth(anchor));
+    loadMonth(startOfMonth(anchor));
+    setMonthOpen(true);
+  }
+
+  function stepMonth(n: number) {
+    const next = addMonths(monthAnchor, n);
+    setMonthAnchor(next);
+    loadMonth(next);
+  }
+
   return (
     <RNView style={styles.wrap} testID="week-planner">
-      <SectionHeader label="This week" />
+      {/*
+        Two controls, kept apart: the title opens the month, the pair on the
+        right steps a week. They were interleaved as `‹ AUGUST › ›` in the first
+        cut, which put two identical right-chevrons side by side with entirely
+        different jobs — the disclosure on the title and the next-week arrow.
+        Grouping the stepper and turning the title's chevron down is what makes
+        the two readable at a glance.
+      */}
+      <RNView style={styles.head}>
+        <Pressable
+          onPress={openMonth}
+          hitSlop={14}
+          style={styles.monthButton}
+          accessibilityRole="button"
+          accessibilityLabel={`${weekLabel}, week of ${days[0].toLocaleDateString(undefined, {
+            day: 'numeric',
+            month: 'long',
+          })}. Open the month to jump to another week.`}
+          testID="plan-open-month"
+        >
+          <Text style={styles.month}>{weekLabel.toUpperCase()}</Text>
+          <RNView style={styles.down}>
+            <Icon name="chevron" size={11} color={vola.textDim} />
+          </RNView>
+        </Pressable>
+
+        {/* Only when you are away from it — a "Today" that is always there is
+            a control that does nothing six days out of seven, and it is also
+            the only thing telling you that you have navigated at all. */}
+        {!isCurrentWeek && (
+          <Pressable
+            onPress={() => {
+              // `now` too, not just the anchor. Across a midnight boundary a
+              // stale `now` leaves `isCurrentWeek` false after the jump, so
+              // the pill stays up, no row is marked today, and tapping it
+              // again does nothing.
+              const today = new Date();
+              setNow(today);
+              setAnchor(today);
+            }}
+            hitSlop={14}
+            style={styles.today}
+            accessibilityRole="button"
+            accessibilityLabel="Today, back to this week"
+            testID="plan-this-week"
+          >
+            <Text style={styles.todayText}>Today</Text>
+          </Pressable>
+        )}
+
+        <RNView style={[styles.stepper, isCurrentWeek && styles.stepperAlone]}>
+          <Pressable
+            onPress={() => setAnchor(addDays(anchor, -7))}
+            hitSlop={12}
+            style={styles.step}
+            accessibilityRole="button"
+            accessibilityLabel="Previous week"
+            testID="plan-prev-week"
+          >
+            <RNView style={styles.flip}>
+              <Icon name="chevron" size={14} color={vola.text} />
+            </RNView>
+          </Pressable>
+          <Pressable
+            onPress={() => setAnchor(addDays(anchor, 7))}
+            hitSlop={12}
+            style={styles.step}
+            accessibilityRole="button"
+            accessibilityLabel="Next week"
+            testID="plan-next-week"
+          >
+            <Icon name="chevron" size={14} color={vola.text} />
+          </Pressable>
+        </RNView>
+      </RNView>
 
       <View style={styles.card}>
         {days.map((d, i) => {
@@ -218,8 +432,14 @@ export function WeekPlanner({
         userId={userId}
         title={
           planning
-            ? `Plan ${new Date(`${planning}T00:00:00`).toLocaleDateString(undefined, {
+            ? // The date, not just the weekday. "Plan Tuesday" could only mean
+              // this week's Tuesday before the calendar could move; it can now
+              // mean one five weeks out, and the confirmation has to match
+              // what was actually tapped.
+              `Plan ${new Date(`${planning}T00:00:00`).toLocaleDateString(undefined, {
                 weekday: 'long',
+                day: 'numeric',
+                month: 'short',
               })}`
             : 'Plan'
         }
@@ -230,12 +450,166 @@ export function WeekPlanner({
           if (day) add(day, pick.sport, pick.workoutId);
         }}
       />
+
+      <Modal
+        visible={monthOpen}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setMonthOpen(false)}
+      >
+        {/* Gated on `monthOpen`, not left to `Modal` to decide. JSX children
+            are evaluated by the parent before the modal renders, so the grid
+            was being built — and ~42 `toLocaleDateString` calls made for the
+            cell labels — on every render of a tab the athlete keeps open. */}
+        {monthOpen && (
+        <View style={styles.sheet} lightColor={vola.bg} darkColor={vola.bg}>
+          <RNView style={styles.sheetHead}>
+            <Pressable
+              onPress={() => stepMonth(-1)}
+              hitSlop={12}
+              accessibilityRole="button"
+              accessibilityLabel="Previous month"
+              testID="plan-month-prev"
+            >
+              <RNView style={styles.flip}>
+                <Icon name="chevron" size={16} color={vola.text} />
+              </RNView>
+            </Pressable>
+            <Text style={styles.sheetTitle}>
+              {monthAnchor.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}
+            </Text>
+            <Pressable
+              onPress={() => stepMonth(1)}
+              hitSlop={12}
+              accessibilityRole="button"
+              accessibilityLabel="Next month"
+              testID="plan-month-next"
+            >
+              <Icon name="chevron" size={16} color={vola.text} />
+            </Pressable>
+            <Pressable
+              onPress={() => setMonthOpen(false)}
+              hitSlop={12}
+              style={styles.sheetClose}
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+              testID="plan-month-close"
+            >
+              <Text style={styles.close}>Done</Text>
+            </Pressable>
+          </RNView>
+
+          <ScrollView contentContainerStyle={styles.sheetBody}>
+            <Text style={styles.sheetHint}>Pick a day to plan that week.</Text>
+
+            <RNView style={styles.gridHead}>
+              {days.map((d) => (
+                <Text key={d.toISOString()} style={styles.gridHeadCell}>
+                  {d.toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 3).toUpperCase()}
+                </Text>
+              ))}
+            </RNView>
+
+            {monthGrid(monthAnchor).map((row) => (
+              <RNView key={row[0].key} style={styles.gridRow}>
+                {row.map((cell) => {
+                  const isToday = cell.key === todayKey;
+                  const planned = monthDays.has(cell.key);
+                  // The week the rows are already showing, so the grid says
+                  // where you are rather than only where you could go.
+                  const inShownWeek = days.some((d) => dayString(d) === cell.key);
+                  return (
+                    <Pressable
+                      key={cell.key}
+                      style={[styles.gridCell, inShownWeek && styles.gridCellShown]}
+                      onPress={() => {
+                        setAnchor(cell.date);
+                        setMonthOpen(false);
+                      }}
+                      accessibilityRole="button"
+                      // The highlight is the only thing saying "this is the
+                      // week behind the sheet", and a tint says nothing to a
+                      // screen reader — the same gap `TrainingCalendar` closes
+                      // with `selected` on its own cells.
+                      accessibilityState={{ selected: inShownWeek }}
+                      // Every state is named rather than left to the dot,
+                      // matching `TrainingCalendar` — a cell that reads out as
+                      // a bare number tells a screen reader nothing about the
+                      // plan, which is the whole content of this grid.
+                      accessibilityLabel={[
+                        cell.date.toLocaleDateString(undefined, {
+                          weekday: 'long',
+                          day: 'numeric',
+                          month: 'long',
+                        }),
+                        isToday ? 'today' : null,
+                        planned ? 'planned' : null,
+                      ]
+                        .filter(Boolean)
+                        .join(', ')}
+                      testID={`plan-month-day-${cell.key}`}
+                    >
+                      <Text
+                        style={[
+                          styles.gridDate,
+                          !cell.inMonth && styles.gridSpill,
+                          isToday && styles.gridToday,
+                        ]}
+                      >
+                        {cell.date.getDate()}
+                      </Text>
+                      {/* Always rendered, so a dot appearing never shifts the
+                          row's height — the same placeholder trick the Today
+                          calendar's markers use. */}
+                      <RNView style={[styles.gridDot, planned && styles.gridDotOn]} />
+                    </Pressable>
+                  );
+                })}
+              </RNView>
+            ))}
+          </ScrollView>
+        </View>
+        )}
+      </Modal>
     </RNView>
   );
 }
 
 const styles = StyleSheet.create({
   wrap: { gap: 8 },
+
+  // 16, not 10: the Today pill and the stepper each claim ~10-12pt of hitSlop
+  // into this gap, and the later-rendered stepper won the overlap — so a tap
+  // just right of "Today" fired "Previous week".
+  head: { flexDirection: 'row', alignItems: 'center', gap: 16, paddingBottom: 2 },
+  // The icon set has one chevron, pointing right. Rotating is what gives the
+  // pair a guaranteed-identical silhouette; a second asset would not.
+  flip: { transform: [{ rotate: '180deg' }] },
+  down: { transform: [{ rotate: '90deg' }] },
+  monthButton: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  month: { fontSize: 13, fontWeight: '800', letterSpacing: 1.4 },
+  today: {
+    marginLeft: 'auto',
+    borderWidth: 1,
+    borderColor: vola.lineSoft,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+  },
+  todayText: { fontSize: 11, fontWeight: '700', color: vola.lime },
+  stepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: vola.lineSoft,
+    borderRadius: 999,
+    overflow: 'hidden',
+  },
+  // The Today pill takes the `marginLeft: auto` when it is there; without it
+  // the stepper needs its own, or it sits against the title.
+  stepperAlone: { marginLeft: 'auto' },
+  step: { paddingHorizontal: 12, paddingVertical: 5 },
+
   card: {
     backgroundColor: vola.surface,
     borderWidth: 1,
@@ -271,4 +645,47 @@ const styles = StyleSheet.create({
   entryTitle: { fontSize: 14, fontWeight: '700' },
 
   hint: { fontSize: 11, color: vola.textDim },
+
+  sheet: { flex: 1 },
+  sheetHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: vola.line,
+  },
+  sheetTitle: { fontSize: 16, fontWeight: '800' },
+  sheetClose: { marginLeft: 'auto' },
+  close: { fontSize: 14, fontWeight: '700', color: vola.lime },
+  sheetBody: { padding: 14, gap: 2 },
+  sheetHint: { fontSize: 12, color: vola.textDim, paddingBottom: 10 },
+
+  gridHead: { flexDirection: 'row', paddingBottom: 6 },
+  gridHeadCell: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    color: vola.textDim,
+  },
+  gridRow: { flexDirection: 'row' },
+  gridCell: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  gridCellShown: { backgroundColor: vola.surface },
+  gridDate: { fontSize: 14, fontWeight: '600', fontVariant: ['tabular-nums'] },
+  // 0.5, matching TrainingCalendar. It matters more here: there a spill cell
+  // only moves a selection, whereas this one navigates the week — and it is the
+  // natural way to reach a week straddling two months.
+  gridSpill: { color: vola.textDim, opacity: 0.5 },
+  gridToday: { color: vola.lime, fontWeight: '800' },
+  gridDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: 'transparent' },
+  gridDotOn: { backgroundColor: vola.lime },
 });
