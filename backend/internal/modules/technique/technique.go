@@ -26,6 +26,15 @@ import (
 
 var ErrNotFound = errors.New("technique: not found")
 
+// The module had only ErrNotFound while it was read-only. Authoring from the
+// admin console gave it a write path, and a write path needs to tell a bad
+// request apart from a collision — see internal/modules/profile for the
+// convention these follow.
+var (
+	ErrInvalidInput  = errors.New("technique: invalid input")
+	ErrAlreadyExists = errors.New("technique: already exists")
+)
+
 // Ruleset is one IBJJF competition ruling, shared by every technique it
 // applies to. 25 of these cover all 466 techniques — see the migration for why
 // they are a table rather than columns.
@@ -222,6 +231,12 @@ type Technique struct {
 
 	GiNoGi      string `json:"gi_no_gi"` // Both | Gi Only | No-Gi Only
 	TypicalBelt string `json:"typical_belt"`
+
+	// Source is "seed" (the embedded JSON owns it, and a deploy rewrites it)
+	// or "admin" (authored in the console, the database owns it). Read-only on
+	// the wire — the server sets it, so a client cannot promote its own row
+	// out of the deploy's reach or demote a seeded one into it.
+	Source string `json:"source,omitempty"`
 
 	// Description is mechanics; WhenToUse is the decision about when the
 	// mechanics apply. Keeping them apart is the point — merging them produces

@@ -1829,6 +1829,39 @@ components:
             reordering or adding an entry does not reset it — it is what makes
             "you have been on this five weeks, consider rotating" answerable.
 
+    TechniqueWrite:
+      type: object
+      description: >
+        The admin-writable surface. `id` and `source` are absent on purpose —
+        the id is derived from the name at creation and immutable after, and
+        the source is the server's.
+      required: [name, category, position, gi_no_gi]
+      properties:
+        name: { type: string, example: São Paulo Pass }
+        aliases: { type: array, items: { type: string } }
+        category: { type: string, example: Pass }
+        position:
+          type: string
+          description: Must be one of GET /admin/techniques/positions.
+          example: Half Guard - Top
+        position_detail: { type: string }
+        gi_no_gi: { type: string, enum: [Both, Gi Only, No-Gi Only] }
+        typical_belt: { type: string }
+        description: { type: string }
+        setup_from: { type: array, items: { type: string } }
+        common_counters: { type: array, items: { type: string } }
+        when_to_use: { type: string }
+        common_next_moves: { type: array, items: { type: string } }
+        video_reference: { type: string }
+        source_notes: { type: string }
+        ibjjf_ruleset_id: { type: string }
+        function:
+          type: string
+          enum: [advance, reverse, escape, control, finish, ""]
+        to_position:
+          type: string
+          description: Must be one of GET /admin/techniques/positions, or empty.
+
   headers:
     ETag:
       description: >
@@ -3445,6 +3478,126 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+
+  /admin/techniques:
+    post:
+      summary: Create a technique from the admin console
+      operationId: createTechnique
+      description: >
+        Authoring the catalog without a deploy. The row is written with
+        `source: "admin"`, which the seeder cannot touch — so a release never
+        reverts it. An export command carries admin-authored content back into
+        the seed JSON, which is how it reaches another environment.
+
+
+        The **id is derived from the name** and is not accepted from the client:
+        it becomes a foreign key in athletes' training records, so it outlives
+        every other field and can never be changed. "São Paulo Pass" becomes
+        `sao-paulo-pass`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TechniqueWrite"
+      responses:
+        "200":
+          description: The stored technique, including its generated id.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [technique]
+                properties:
+                  technique:
+                    $ref: "#/components/schemas/Technique"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: >
+            The derived id is taken. Deliberately not an upsert — the id may
+            already be referenced by somebody's training record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /admin/techniques/positions:
+    get:
+      summary: The position vocabulary a technique may claim
+      operationId: listTechniquePositions
+      description: >
+        Derived from the catalog rather than a constant, so the editor's picker
+        and the validator cannot disagree. A position no client recognises is
+        the worst data this table can hold: it writes, it renders, and it
+        returns an empty list forever with nothing reporting a fault.
+      responses:
+        "200":
+          description: Every distinct position currently in use.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [positions]
+                properties:
+                  positions:
+                    type: array
+                    items: { type: string }
+                    example: [Guard - Bottom, Half Guard - Top, Other]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /admin/techniques/{techniqueID}:
+    patch:
+      summary: Edit an admin-authored technique
+      operationId: updateTechnique
+      description: >
+        Only `source: "admin"` rows. A seeded technique belongs to the deploy —
+        editing it here would be reverted by the next release's re-seed, so it
+        is refused with a 409 explaining that `techniques.json` is the way to
+        change it. The id comes from the path and is never moved.
+      parameters:
+        - name: techniqueID
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TechniqueWrite"
+      responses:
+        "200":
+          description: The updated technique.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [technique]
+                properties:
+                  technique:
+                    $ref: "#/components/schemas/Technique"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The technique is seeded, so a deploy owns it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /admin/users:
     get:

@@ -6983,6 +6983,98 @@ have their own quieter `role="status"` notice.
   auth.
 
 
+## 2026-08-03 — Content stops needing a deploy
+
+Asked for after a class taught a pass — the São Paulo — whose name was not in
+the library, and there was no way to record it without opening a laptop.
+
+Two corrections framed the work. **Content never needed migrations**: those are
+schema, and adding a technique was always "edit `techniques.json`, commit,
+deploy, re-seed". Still a code round-trip, but not the treadmill it looked
+like. And **the seed was never going to fight admin rows**: `UpsertAll` for
+techniques and exercises does not delete ids it does not know about. What it
+*would* do is revert an admin edit to a row the JSON also knows, on every
+deploy, because a re-seed runs on every release.
+
+### The decision that shaped everything: ids are permanent
+
+`bjj_session_tags.technique_id` is a foreign key. A technique id is a reference
+in athletes' training records for as long as those records exist. So:
+
+- **ids are derived, never typed** — `Slug("São Paulo Pass")` → `sao-paulo-pass`,
+  with accents folded so it is not `s-o-paulo`.
+- **ids are immutable.** The update takes its id from the path, never the body.
+  Renaming the technique later leaves the id alone, which looks inconsistent
+  and is correct: an id that tracks the name is an id that changes.
+- **create is not an upsert.** A collision is a 409, because silently rewriting
+  the technique behind an existing id changes what somebody's history says
+  they did.
+
+### `source`, and what it buys
+
+One column, `seed` | `admin`, on `techniques` and `exercises` (migration
+000032). The seeder's upsert gained `WHERE source = 'seed'`, and that single
+clause is what allows a second writer to exist at all — without it every deploy
+silently reverts admin content.
+
+The reverse also had to hold, and is tested separately: the guard must not stop
+the seed updating *its own* rows, which would be a content freeze that looks
+exactly like "nothing changed".
+
+Admin edits are refused on seeded rows rather than allowed-then-reverted, and
+the refusal explains itself — a bare 404 at an id the console is displaying
+reads as a bug, when the real answer is "that one lives in the JSON".
+
+### One validator, not two
+
+`ValidateFields` was split out of the seeder's `validate()` and exported, so
+admin writes and the deploy apply the same rules. A position family or a
+function verb no client recognises is the worst data this catalog can hold: it
+writes, it renders, and it returns an empty list forever with nothing
+reporting a fault.
+
+Position is validated against **the catalog's own distinct values**, not a
+constant — the same choice `validate()` already makes for `to_position`. The
+first version of this hardcoded "must be a known family" and three existing
+tests immediately failed: the shipped library holds 16 distinct positions, and
+one of them is the literal "Other" (the technical standup, which happens from
+nowhere in particular). A rule invented from the shape of the data rather than
+read off it.
+
+### The two-writers hazard, demonstrated on day one
+
+The seed's upsert wraps three columns in `NULLIF($n, '')` — `ibjjf_ruleset_id`
+has a foreign key, and `function`/`to_position` are validated vocabularies
+where empty means "not recorded". The new INSERT did not, and failed the
+ruleset FK on the first test that ran. Exactly the divergence this feature has
+to avoid, surfacing before a line of UI existed.
+
+### How content reaches production
+
+Author live in an environment, then export the `source = 'admin'` rows back
+into the seed JSON, review the diff, and deploy. Promotion is the existing
+pipeline, the seed artifacts stay reproducible, and the one permanent thing —
+the id — gets read by a human before it is in anyone's training record.
+
+### Gaps this leaves
+
+- **The export does not exist yet.** Until it does, admin content lives only in
+  the environment it was authored in. That is the next PR and the thing that
+  makes this promotable rather than local.
+- **No admin UI.** This is the API and the data rules; the console screens are
+  a separate PR.
+- **Techniques only.** Exercises got the `source` column and the seed guard but
+  no write path — the shapes differ enough (position/category/function vs
+  sport/equipment/muscles) that one generic editor would be more machinery than
+  two content types earn.
+- **No delete.** Deliberate: a technique with training records pointing at it
+  cannot be removed without deciding what happens to them, and that is a real
+  design question rather than a missing endpoint.
+- **Handler-level validation is untested**, matching the rest of the repo,
+  which has no handler tests. The repository and validator rules are covered;
+  the request decoding and the 409-vs-404 explanation are not.
+
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

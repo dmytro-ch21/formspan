@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // Generated from the authored spreadsheet by
@@ -75,6 +76,51 @@ func RulesetSeedData() ([]Ruleset, error) {
 // name attached.
 var validGiNoGi = map[string]bool{"Both": true, "Gi Only": true, "No-Gi Only": true}
 
+// ValidateFields is every rule that can be judged from ONE technique, with no
+// view of the rest of the library.
+//
+// Exported and split out because the admin console writes techniques too, and
+// two validators for one catalog is how a vocabulary drifts. A family or a
+// function verb the clients do not recognise is the worst kind of bad data
+// here: it seeds, it renders, and it silently returns nothing forever — the
+// one field where being wrong looks identical to being right.
+//
+// Cross-entry rules need the whole catalog and stay in validate(); the admin
+// path checks those against the database instead. `position` is one of them,
+// NOT a per-field rule: the shipped catalog holds 16 distinct values, 15
+// family-derived and one literal "Other" (the technical standup, which happens
+// from nowhere in particular). Requiring a known family here rejects real
+// content — which is how this was first written, and three tests caught it.
+func ValidateFields(t Technique) error {
+	switch {
+	case t.ID == "":
+		return fmt.Errorf("technique: entry %q has no id", t.Name)
+	case t.Name == "" || t.Category == "" || t.Position == "":
+		return fmt.Errorf("technique: %q needs name, category, and position", t.ID)
+	case !validGiNoGi[t.GiNoGi]:
+		return fmt.Errorf("technique: %q has unknown gi_no_gi %q", t.ID, t.GiNoGi)
+	case t.Function != "" && !validFunctions[t.Function]:
+		// The column has no CHECK constraint (see migration 000028), so this
+		// is the only thing standing between a typo and a value no client
+		// knows how to render. Empty is legal and means "not a technique" —
+		// the breakfalls and the grappling stance.
+		return fmt.Errorf("technique: %q has unknown function %q", t.ID, t.Function)
+	}
+	return nil
+}
+
+// FamilyOf reduces "Half Guard - Bottom" to "Half Guard" — the prefix the
+// clients' filter chips match on. Duplicated in each client because they need
+// it offline; this is the server's copy and the one the validators use.
+func FamilyOf(position string) string {
+	for family := range validFamilies {
+		if position == family || strings.HasPrefix(position, family+" - ") {
+			return family
+		}
+	}
+	return ""
+}
+
 func validate(techniques []Technique) error {
 	// The `techniques.position` vocabulary — the destinations a to_position
 	// may name. Derived from the library itself rather than hardcoded: the
@@ -95,15 +141,12 @@ func validate(techniques []Technique) error {
 
 	seen := make(map[string]bool, len(techniques))
 	for _, t := range techniques {
+		if err := ValidateFields(t); err != nil {
+			return err
+		}
 		switch {
-		case t.ID == "":
-			return fmt.Errorf("technique: entry %q has no id", t.Name)
 		case seen[t.ID]:
 			return fmt.Errorf("technique: duplicate id %q", t.ID)
-		case t.Name == "" || t.Category == "" || t.Position == "":
-			return fmt.Errorf("technique: %q needs name, category, and position", t.ID)
-		case !validGiNoGi[t.GiNoGi]:
-			return fmt.Errorf("technique: %q has unknown gi_no_gi %q", t.ID, t.GiNoGi)
 		case t.ToPosition != "" && !known[t.ToPosition]:
 			// A typo here is SILENT and total: "Side Control" instead of
 			// "Side Control - Top" produces an edge pointing at a position
@@ -111,12 +154,6 @@ func validate(techniques []Technique) error {
 			// nothing and nothing reports a fault. Same failure shape as the
 			// family typo this file already guards, one column over.
 			return fmt.Errorf("technique: %q has unknown to_position %q", t.ID, t.ToPosition)
-		case t.Function != "" && !validFunctions[t.Function]:
-			// The column has no CHECK constraint (see migration 000028), so
-			// this is the only thing standing between a typo and a value no
-			// client knows how to render. Empty is legal and means "not a
-			// technique" — the breakfalls and the grappling stance.
-			return fmt.Errorf("technique: %q has unknown function %q", t.ID, t.Function)
 		}
 		seen[t.ID] = true
 	}
