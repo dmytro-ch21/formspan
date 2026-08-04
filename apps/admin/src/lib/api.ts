@@ -345,3 +345,87 @@ export async function updateTechnique(
   );
   return data.technique;
 }
+
+/**
+ * An exercise as the catalog stores it.
+ *
+ * `media` is present but not writable — it lives in its own table with no upload
+ * path, so the console never sends it and an edit can never clear it. Shown
+ * read-only so an operator can see an exercise has assets rather than wondering.
+ */
+export type Exercise = {
+  id: string;
+  name: string;
+  sport: string;
+  movement_pattern: string;
+  movement_pattern_detail: string;
+  primary_muscles: string[];
+  secondary_muscles: string[];
+  equipment: string[];
+  load_type: string;
+  is_unilateral: boolean;
+  instructions: string;
+  media?: { kind: string; url: string; is_default: boolean }[];
+  /** "admin" for everything this console lists. Same caveat as Technique.source:
+   *  populated only on /admin/*, so never derive ownership from it elsewhere. */
+  source?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+/** The exercises the console owns — not the catalog, for the same reason as techniques. */
+export async function listAuthoredExercises(): Promise<Exercise[]> {
+  const data = await adminFetch<{ exercises: Exercise[] }>("/admin/exercises");
+  return data.exercises;
+}
+
+/**
+ * The closed sets an exercise write must pick from.
+ *
+ * Served rather than hardcoded here so the dropdowns and the validator cannot
+ * disagree. `movement_patterns` is the COARSE vocabulary the cross-sport rules
+ * read — an exercise filed outside it renders perfectly and is silently
+ * invisible to every rule, which is the one failure that looks like success.
+ */
+export type ExerciseVocabularies = {
+  sports: string[];
+  movement_patterns: string[];
+  load_types: string[];
+};
+
+export async function listExerciseVocabularies(): Promise<ExerciseVocabularies> {
+  return adminFetch<ExerciseVocabularies>("/admin/exercises/vocabularies");
+}
+
+/**
+ * One exercise from the public read path.
+ *
+ * Returns the exercise at the TOP LEVEL, like the technique detail endpoint and
+ * unlike the admin writes, which wrap theirs. Reading `.exercise` here yields
+ * undefined rather than an error — that exact mistake made the technique edit
+ * page 404 on an id that plainly exists.
+ */
+export async function getExercise(id: string): Promise<Exercise> {
+  return adminFetch<Exercise>(`/exercises/${encodeURIComponent(id)}`);
+}
+
+export type ExerciseWrite = Omit<
+  Exercise,
+  "id" | "source" | "media" | "created_at" | "updated_at"
+>;
+
+export async function createExercise(body: ExerciseWrite): Promise<Exercise> {
+  const data = await adminFetch<{ exercise: Exercise }>("/admin/exercises", {
+    method: "POST",
+    body,
+  });
+  return data.exercise;
+}
+
+export async function updateExercise(id: string, body: ExerciseWrite): Promise<Exercise> {
+  const data = await adminFetch<{ exercise: Exercise }>(
+    `/admin/exercises/${encodeURIComponent(id)}`,
+    { method: "PATCH", body },
+  );
+  return data.exercise;
+}

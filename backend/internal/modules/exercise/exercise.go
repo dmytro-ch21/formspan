@@ -157,16 +157,27 @@ type Exercise struct {
 	MovementPattern string `json:"movement_pattern"`
 	// The source catalog's own, far more granular pattern (75 distinct
 	// values). Kept for display and filtering; rules read MovementPattern.
-	MovementPatternDetail string    `json:"movement_pattern_detail"`
-	PrimaryMuscles        []string  `json:"primary_muscles"`
-	SecondaryMuscles      []string  `json:"secondary_muscles"`
-	Equipment             []string  `json:"equipment"`
-	LoadType              LoadType  `json:"load_type"`
-	IsUnilateral          bool      `json:"is_unilateral"`
-	Instructions          string    `json:"instructions"`
-	Media                 []Media   `json:"media"`
-	CreatedAt             time.Time `json:"created_at"`
-	UpdatedAt             time.Time `json:"updated_at"`
+	MovementPatternDetail string   `json:"movement_pattern_detail"`
+	PrimaryMuscles        []string `json:"primary_muscles"`
+	SecondaryMuscles      []string `json:"secondary_muscles"`
+	Equipment             []string `json:"equipment"`
+	LoadType              LoadType `json:"load_type"`
+	IsUnilateral          bool     `json:"is_unilateral"`
+	Instructions          string   `json:"instructions"`
+	Media                 []Media  `json:"media"`
+
+	// Source is "seed" (the embedded JSON owns it, and a deploy rewrites it) or
+	// "admin" (authored in the console, the database owns it). Read-only on the
+	// wire — the server sets it, so a client cannot promote its own row out of
+	// the deploy's reach or demote a seeded one into it.
+	//
+	// Populated only on /admin/* responses; the public read path does not select
+	// it. Do not derive ownership from its absence — see the technique module,
+	// where reading it off a public detail response marked every row
+	// deploy-owned including the one just written.
+	Source    string    `json:"source,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // Filter narrows a catalog listing. A zero Filter lists everything.

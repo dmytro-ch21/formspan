@@ -33,7 +33,8 @@ import { VolaMark } from "./Brand";
 
 const SECTIONS = [
   { key: "users", href: "/users", label: "Users" },
-  { key: "content", href: "/content", label: "Content" },
+  { key: "content", href: "/content", label: "Techniques" },
+  { key: "exercises", href: "/content/exercises", label: "Exercises" },
   { key: "health", href: "/health", label: "Health" },
 ] as const;
 

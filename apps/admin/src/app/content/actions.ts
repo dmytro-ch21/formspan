@@ -8,11 +8,15 @@ import { ApiError, createTechnique, updateTechnique, type TechniqueWrite } from 
 /**
  * What the form renders after a submit.
  *
+ * Generic over the write shape because both catalogs use it — the technique and
+ * exercise forms share every behaviour that touches this type (restore on a
+ * rejected save, re-announce on a repeat) and share none of their fields.
+ *
  * `id` on success so the create screen can send the operator to the edit screen
- * for the technique it just minted — the id is derived from the name, so seeing
+ * for the row it just minted — the id is derived from the name, so seeing
  * it is how you confirm the slug is what you expected.
  */
-export type SaveResult =
+export type SaveResult<TWrite = TechniqueWrite> =
   | { status: "idle" }
   | { status: "ok"; id: string; name: string }
   /**
@@ -32,7 +36,7 @@ export type SaveResult =
    * inside one is a cascading render, and the action already receives the
    * previous result, so it is free.
    */
-  | { status: "error"; message: string; values: TechniqueWrite; attempt: number };
+  | { status: "error"; message: string; values: TWrite; attempt: number };
 
 /**
  * Lists arrive from the form as one-per-line text.

@@ -49,6 +49,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/dmytro-ch21/vola/backend/internal/modules/exercise"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/technique"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/database"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/httplog"
@@ -58,10 +59,14 @@ func main() {
 	logger := httplog.For("exportcontent")
 
 	var (
-		seedOut = flag.String("seed", "internal/modules/technique/techniques.json",
-			"the deploy artifact — embedded in the binary and seeded to the database")
-		addOut = flag.String("additions", "internal/modules/technique/techniques.additions.json",
-			"the non-spreadsheet record — merged back in by the importer")
+		techSeed = flag.String("techniques", "internal/modules/technique/techniques.json",
+			"the technique deploy artifact — embedded in the binary and seeded to the database")
+		techAdd = flag.String("technique-additions", "internal/modules/technique/techniques.additions.json",
+			"the non-spreadsheet technique record — merged back in by the importer")
+		exSeed = flag.String("exercises", "internal/modules/exercise/exercises.json",
+			"the exercise deploy artifact")
+		exAdd = flag.String("exercise-additions", "internal/modules/exercise/exercises.additions.json",
+			"the non-spreadsheet exercise record — merged back in by the importer")
 		adopt = flag.Bool("adopt", false,
 			"after writing, mark the exported rows source='seed' — only once the JSON is deployed")
 	)
@@ -80,35 +85,57 @@ func main() {
 	}
 	defer pool.Close()
 
-	repo := technique.NewPostgresRepository(pool)
-	authored, err := repo.AdminAuthored(ctx)
+	techRepo := technique.NewPostgresRepository(pool)
+	exRepo := exercise.NewPostgresRepository(pool)
+
+	techniques, err := techRepo.AdminAuthored(ctx)
 	if err != nil {
-		logger.Error("export: read", "err", err)
+		logger.Error("export: read techniques", "err", err)
 		os.Exit(1)
 	}
-	if len(authored) == 0 {
-		logger.Info("export: nothing authored in the console; files untouched",
-			"seed", *seedOut, "additions", *addOut)
+	exercises, err := exRepo.AdminAuthored(ctx)
+	if err != nil {
+		logger.Error("export: read exercises", "err", err)
+		os.Exit(1)
+	}
+	if len(techniques) == 0 && len(exercises) == 0 {
+		logger.Info("export: nothing authored in the console; files untouched")
 		return
 	}
 
-	alreadyDeployed, err := idsIn(*seedOut)
-	if err != nil {
-		logger.Error("export: read the seed file", "err", err)
-		os.Exit(1)
-	}
-	if err := refuseSheetOwned(*seedOut, *addOut, authored); err != nil {
-		logger.Error("export: refused", "err", err)
-		os.Exit(1)
+	catalogs := catalogsFor(
+		filePaths{*techSeed, *techAdd, *exSeed, *exAdd},
+		techniques, techRepo.AdoptAsSeeded,
+		exercises, exRepo.AdoptAsSeeded,
+	)
+
+	// Every id the seed files ALREADY carried, captured before any write.
+	// Adoption is scoped to these: an id this run first wrote is not committed,
+	// let alone deployed, so adopting it hands content to a release that cannot
+	// reseed it and that the console will no longer let anyone edit.
+	deployed := map[string]map[string]bool{}
+	for _, c := range catalogs {
+		have, err := idsIn(c.seedPath)
+		if err != nil {
+			logger.Error("export: read the seed file", "catalog", c.what, "err", err)
+			os.Exit(1)
+		}
+		deployed[c.what] = have
+		if err := refuseSheetOwned(c.seedPath, c.additionsPath, c.ids); err != nil {
+			logger.Error("export: refused", "catalog", c.what, "err", err)
+			os.Exit(1)
+		}
 	}
 
-	// Written through one function so the two-file invariant has somewhere to be
-	// tested. It previously lived inline in main(), which meant deleting the
-	// techniques.json write left the entire suite green — the exact regression
-	// this command's second revision exists to fix, invisible to its own tests.
-	if err := run(*seedOut, *addOut, authored, logger); err != nil {
-		logger.Error("export: write", "err", err)
-		os.Exit(1)
+	for _, c := range catalogs {
+		if len(c.entries) == 0 {
+			logger.Info("export: nothing authored", "catalog", c.what)
+			continue
+		}
+		if err := run(c, logger); err != nil {
+			logger.Error("export: write", "catalog", c.what, "err", err)
+			os.Exit(1)
+		}
 	}
 
 	if !*adopt {
@@ -116,28 +143,143 @@ func main() {
 			"once these files are committed and deployed, or the deploy will not own them")
 		return
 	}
-	// Only ids the seed file ALREADY carried before this run touched it. An id
-	// this export just added is by definition not committed, let alone deployed,
-	// so adopting it hands content to a release that cannot reseed it and that
-	// the console will no longer let anyone edit — the precise state the two
-	// commands exist to keep apart. Without this, `-adopt` run for Monday's
-	// batch also adopts the technique authored on Wednesday and written to the
-	// file seconds earlier.
-	ids := adoptable(alreadyDeployed, authored)
-	if len(ids) == 0 {
+	adoptedAny := false
+	for _, c := range catalogs {
+		ids := adoptable(deployed[c.what], c.ids)
+		if skipped := len(c.ids) - len(ids); skipped > 0 {
+			logger.Info("export: some rows were not adopted because this run is the "+
+				"first to write them; commit and deploy, then re-run",
+				"catalog", c.what, "skipped", skipped)
+		}
+		if len(ids) == 0 {
+			continue
+		}
+		if c.adopt == nil {
+			logger.Error("export: adopt", "catalog", c.what, "err",
+				fmt.Errorf("no adopt function — refusing to report an adoption that did not happen"))
+			os.Exit(1)
+		}
+		if err := c.adopt(ctx, ids); err != nil {
+			logger.Error("export: adopt", "catalog", c.what, "err", err)
+			os.Exit(1)
+		}
+		adoptedAny = true
+		logger.Info("export: adopted; the deploy now owns these rows",
+			"catalog", c.what, "count", len(ids))
+	}
+	if !adoptedAny {
 		logger.Info("export: nothing to adopt — every authored row is new to the " +
-			"seed file this run, so none of it is deployed yet; commit and deploy, then re-run")
-		return
+			"seed files this run, so none of it is deployed yet; commit and deploy, then re-run")
 	}
-	if skipped := len(authored) - len(ids); skipped > 0 {
-		logger.Info("export: some rows were not adopted because this run is the "+
-			"first to write them; commit and deploy, then re-run", "skipped", skipped)
+}
+
+// filePaths is the four files an export touches.
+type filePaths struct{ techSeed, techAdditions, exSeed, exAdditions string }
+
+// catalogsFor builds what the export runs over.
+//
+// Extracted from main() because main() has no test, and the wiring here is
+// load-bearing in two places that are invisible from inside run(): which
+// catalog preserves `media`, and which repository each catalog adopts against.
+// The first version of these tests built their own catalogs, so deleting either
+// wiring from main() left the whole suite green — which is the same shape of
+// gap this command has now shipped twice.
+func catalogsFor(
+	p filePaths,
+	techniques []technique.Technique,
+	adoptTechniques func(context.Context, []string) error,
+	exercises []exercise.Exercise,
+	adoptExercises func(context.Context, []string) error,
+) []catalog {
+	return []catalog{
+		{
+			what: "techniques", seedPath: p.techSeed, additionsPath: p.techAdditions,
+			entries: mapEntries(techniques, techniqueEntryOf),
+			ids:     idsOfTechniques(techniques),
+			adopt:   adoptTechniques,
+			// Nothing to preserve: contentReturning selects every technique
+			// column, so no key in techniques.json is the file's alone.
+			validate: func() error {
+				for _, t := range techniques {
+					if err := technique.ValidateFields(t); err != nil {
+						return fmt.Errorf("%q would not seed: %w", t.ID, err)
+					}
+				}
+				return nil
+			},
+		},
+		{
+			what: "exercises", seedPath: p.exSeed, additionsPath: p.exAdditions,
+			entries:  mapEntries(exercises, exerciseEntryOf),
+			ids:      idsOfExercises(exercises),
+			adopt:    adoptExercises,
+			preserve: exercisePreserve,
+			validate: func() error {
+				for _, e := range exercises {
+					if err := exercise.ValidateForWrite(e); err != nil {
+						return fmt.Errorf("%q would not seed: %w", e.ID, err)
+					}
+				}
+				return nil
+			},
+		},
 	}
-	if err := repo.AdoptAsSeeded(ctx, ids); err != nil {
-		logger.Error("export: adopt", "err", err)
-		os.Exit(1)
+}
+
+// mapEntries renders a catalog's rows through its own entryOf.
+func mapEntries[T any](rows []T, render func(T) entry) []entry {
+	out := make([]entry, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, render(r))
 	}
-	logger.Info("export: adopted; the deploy now owns these rows", "count", len(ids))
+	return out
+}
+
+func idsOfTechniques(ts []technique.Technique) []string {
+	out := make([]string, 0, len(ts))
+	for _, t := range ts {
+		out = append(out, t.ID)
+	}
+	return out
+}
+
+func idsOfExercises(es []exercise.Exercise) []string {
+	out := make([]string, 0, len(es))
+	for _, e := range es {
+		out = append(out, e.ID)
+	}
+	return out
+}
+
+// catalog is one library's worth of an export: the two files it lives in, the
+// rows to fold in, and which keys the FILE owns rather than the database.
+//
+// Both catalogs go through the same code because the invariant is the same and
+// it is the invariant that is easy to get wrong — content in only one of the two
+// files is lost, by the deploy not carrying it or by the next re-import deleting
+// it. One implementation means one place for that to be right.
+type catalog struct {
+	what          string // "techniques" | "exercises", for the log line
+	seedPath      string
+	additionsPath string
+	entries       []entry
+	ids           []string
+	// preserve names keys whose existing value in the FILE wins over the
+	// exported one. See mergeInto.
+	preserve []string
+	// adopt hands this catalog's rows to the deploy. A field rather than a
+	// switch on `what`: the switch had no default, so a catalog whose name
+	// matched neither case logged a successful adoption having adopted nothing,
+	// and swapping the two repositories survived the entire suite.
+	adopt func(context.Context, []string) error
+	// validate checks every row would actually seed, and runs INSIDE run()
+	// before anything is written.
+	//
+	// Per-catalog because each library has its own validator, and inside run()
+	// rather than in main() because main() has no test — that is precisely how
+	// the two-file invariant shipped broken here once, invisible to its own
+	// suite. A nil validate is a programming error, not "no rules".
+	validate func() error
 }
 
 // run merges the authored rows into BOTH catalog files and writes them.
@@ -153,7 +295,7 @@ func main() {
 // next spreadsheet re-import cleans up by deleting the entry. The reverse
 // half-state is a phantom: content the deploy never carries, which nothing
 // removes and nobody can edit.
-func run(seedPath, additionsPath string, authored []technique.Technique, logger *slog.Logger) error {
+func run(c catalog, logger *slog.Logger) error {
 	type staged struct {
 		what   string
 		path   string
@@ -161,22 +303,24 @@ func run(seedPath, additionsPath string, authored []technique.Technique, logger 
 		added  int
 		upd    int
 	}
+	// Before any write: the file is what go:embed bakes into the binary, so an
+	// entry that cannot seed takes the next deploy down, far from the operator
+	// who could still fix it.
+	if c.validate == nil {
+		return fmt.Errorf("%s: no validator — refusing to write unchecked content", c.what)
+	}
+	if err := c.validate(); err != nil {
+		return fmt.Errorf("%s: %w", c.what, err)
+	}
+
 	var plan []staged
 	for _, f := range []struct{ what, path string }{
-		{"seed", seedPath},
-		{"additions", additionsPath},
+		{"seed", c.seedPath},
+		{"additions", c.additionsPath},
 	} {
-		merged, added, upd, err := mergeInto(f.path, authored)
+		merged, added, upd, err := mergeInto(f.path, c.entries, c.preserve...)
 		if err != nil {
 			return fmt.Errorf("%s: %w", f.what, err)
-		}
-		// The file is what go:embed bakes into the binary. An invalid entry here
-		// fails SeedData() and takes the whole seed down on the next deploy —
-		// far from the operator who could still fix it.
-		for _, t := range authored {
-			if err := technique.ValidateFields(t); err != nil {
-				return fmt.Errorf("%s: %q would not seed: %w", f.what, t.ID, err)
-			}
 		}
 		plan = append(plan, staged{f.what, f.path, merged, added, upd})
 	}
@@ -184,7 +328,7 @@ func run(seedPath, additionsPath string, authored []technique.Technique, logger 
 		if err := writeJSON(p.path, p.merged); err != nil {
 			return fmt.Errorf("%s: %w", p.what, err)
 		}
-		logger.Info("export: wrote", "file", p.what, "path", p.path,
+		logger.Info("export: wrote", "catalog", c.what, "file", p.what, "path", p.path,
 			"added", p.added, "updated", p.upd, "total", len(p.merged))
 	}
 	// Read back rather than trust the writes: one guard for a half write, a
@@ -195,7 +339,7 @@ func run(seedPath, additionsPath string, authored []technique.Technique, logger 
 	// it earns its place at runtime, on a filesystem that lied, not in the test
 	// matrix. verifyContains itself is tested.
 	for _, p := range plan {
-		if err := verifyContains(p.path, authored); err != nil {
+		if err := verifyContains(p.path, c.ids); err != nil {
 			return fmt.Errorf("%s: %w", p.what, err)
 		}
 	}
@@ -204,14 +348,14 @@ func run(seedPath, additionsPath string, authored []technique.Technique, logger 
 
 // verifyContains re-reads a written file and confirms it carries every id the
 // export just put in it.
-func verifyContains(path string, authored []technique.Technique) error {
+func verifyContains(path string, ids []string) error {
 	have, err := idsIn(path)
 	if err != nil {
 		return fmt.Errorf("verify: %w", err)
 	}
-	for _, t := range authored {
-		if !have[t.ID] {
-			return fmt.Errorf("%q is missing from %s after writing it", t.ID, filepath.Base(path))
+	for _, id := range ids {
+		if !have[id] {
+			return fmt.Errorf("%q is missing from %s after writing it", id, filepath.Base(path))
 		}
 	}
 	return nil
@@ -225,14 +369,14 @@ func verifyContains(path string, authored []technique.Technique) error {
 // console will no longer let anyone edit. Without this, `-adopt` intended for
 // last week's batch also adopts the technique authored an hour ago and written
 // to the file seconds earlier.
-func adoptable(alreadyDeployed map[string]bool, authored []technique.Technique) []string {
-	ids := make([]string, 0, len(authored))
-	for _, t := range authored {
-		if alreadyDeployed[t.ID] {
-			ids = append(ids, t.ID)
+func adoptable(alreadyDeployed map[string]bool, ids []string) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if alreadyDeployed[id] {
+			out = append(out, id)
 		}
 	}
-	return ids
+	return out
 }
 
 // refuseSheetOwned rejects any authored id the SPREADSHEET owns.
@@ -246,7 +390,7 @@ func adoptable(alreadyDeployed map[string]bool, authored []technique.Technique) 
 //
 // A hard error rather than a skip: skipping would silently drop content that
 // has no other copy, which is the failure this whole command exists to prevent.
-func refuseSheetOwned(seedPath, additionsPath string, authored []technique.Technique) error {
+func refuseSheetOwned(seedPath, additionsPath string, ids []string) error {
 	seeded, err := idsIn(seedPath)
 	if err != nil {
 		return err
@@ -256,9 +400,9 @@ func refuseSheetOwned(seedPath, additionsPath string, authored []technique.Techn
 		return err
 	}
 	var clashes []string
-	for _, t := range authored {
-		if seeded[t.ID] && !ours[t.ID] {
-			clashes = append(clashes, t.ID)
+	for _, id := range ids {
+		if seeded[id] && !ours[id] {
+			clashes = append(clashes, id)
 		}
 	}
 	if len(clashes) > 0 {
@@ -298,7 +442,7 @@ func idsIn(path string) (map[string]bool, error) {
 // one real change in a whole-file rewrite. Nobody reads that diff, and the
 // review step is the only thing standing between a typo and a permanent
 // foreign key in athletes' training records.
-func mergeInto(path string, authored []technique.Technique) (
+func mergeInto(path string, authored []entry, preserve ...string) (
 	merged []entry, added, updated int, err error,
 ) {
 	existing, err := readEntries(path)
@@ -333,14 +477,21 @@ func mergeInto(path string, authored []technique.Technique) (
 	// New ids are appended, sorted among themselves, so the output does not
 	// depend on the order the database happened to return them in.
 	var fresh []string
-	for _, t := range authored {
-		if _, exists := byID[t.ID]; exists {
+	for _, e := range authored {
+		id := e.id()
+		if prev, exists := byID[id]; exists {
 			updated++
+			// Some keys are the FILE's, not the database's. `media` is the one
+			// that matters: the write path cannot author it and the export does
+			// not read it, so re-exporting an exercise a deploy later gave media
+			// to would otherwise reset it to `[]` — deleting the only record of
+			// an asset that is still sitting in the bucket.
+			e = carryOver(prev, e, preserve)
 		} else {
 			added++
-			fresh = append(fresh, t.ID)
+			fresh = append(fresh, id)
 		}
-		byID[t.ID] = entryOf(t)
+		byID[id] = e
 	}
 	sort.Strings(fresh)
 	order = append(order, fresh...)
@@ -350,6 +501,28 @@ func mergeInto(path string, authored []technique.Technique) (
 		merged = append(merged, byID[id])
 	}
 	return merged, added, updated, nil
+}
+
+// carryOver copies the named keys from the existing entry onto the new one,
+// when the existing entry has them. See mergeInto for why.
+func carryOver(prev, next entry, keys []string) entry {
+	for _, k := range keys {
+		var kept json.RawMessage
+		for _, p := range prev {
+			if p.Key == k {
+				kept = p.Val
+			}
+		}
+		if kept == nil {
+			continue
+		}
+		for i := range next {
+			if next[i].Key == k {
+				next[i].Val = kept
+			}
+		}
+	}
+	return next
 }
 
 // The key order both files are written in. Not alphabetical — it is the order
@@ -378,7 +551,7 @@ func mergeInto(path string, authored []technique.Technique) (
 // pgx encodes a nil slice as NULL. Seeding one is a not-null violation inside
 // UpsertAll's transaction, so a single exported technique with no aliases takes
 // the ENTIRE seed down — every technique, not just its own row.
-var keyOrder = []string{
+var techniqueKeyOrder = []string{
 	"id", "name", "aliases", "category", "function", "position",
 	"position_detail", "to_position", "gi_no_gi", "typical_belt", "description",
 	"when_to_use", "setup_from", "common_next_moves", "common_counters",
@@ -386,7 +559,7 @@ var keyOrder = []string{
 }
 
 // entryOf renders a technique in the catalog files' shape.
-func entryOf(t technique.Technique) entry {
+func techniqueEntryOf(t technique.Technique) entry {
 	values := map[string]any{
 		"id":                t.ID,
 		"name":              t.Name,
@@ -413,7 +586,7 @@ func entryOf(t technique.Technique) entry {
 	}
 
 	var e entry
-	for _, k := range keyOrder {
+	for _, k := range techniqueKeyOrder {
 		v, ok := values[k]
 		if !ok {
 			continue
@@ -427,6 +600,77 @@ func entryOf(t technique.Technique) entry {
 		e = append(e, pair{Key: k, Val: raw})
 	}
 	return e
+}
+
+// exerciseKeyOrder is the order exercises.json is written in — the order the
+// importer emits, so an exported entry reads like its 503 neighbours.
+//
+// Every key is ALWAYS written, matching the file: all 504 entries carry all 12,
+// including `"instructions": ""` on 443 of them and `"media": []` on 500. There
+// is no key here where absent means something different from empty, which is
+// what makes this simpler than the technique order.
+var exerciseKeyOrder = []string{
+	"id", "name", "sport", "movement_pattern", "movement_pattern_detail",
+	"primary_muscles", "secondary_muscles", "equipment", "load_type",
+	"is_unilateral", "instructions", "media",
+}
+
+// exercisePreserve names the keys the FILE owns rather than the database.
+//
+// Declared here rather than inline in main() because it is load-bearing and
+// main() has no test: deleting it leaves the whole suite green, and the
+// consequence is a real DELETE. `upsertMedia`'s prune is NOT scoped to
+// `source = 'seed'` the way the exercise upsert above it is, so re-seeding an
+// entry whose JSON says `"media": []` removes that exercise's `exercise_media`
+// rows even when the row itself is admin-owned and correctly skipped. Verified
+// against Postgres: 1 media row before, 0 after.
+//
+// So carryOver is the only thing between a re-export and losing the record of
+// an asset still sitting in the bucket. It is referenced by both main() and the
+// test for exactly the reason `validate` is a field on the catalog.
+var exercisePreserve = []string{"media"}
+
+// exerciseEntryOf renders an exercise in exercises.json's shape.
+//
+// `media` is written as `[]` and then, on a re-export, replaced by whatever the
+// file already had — see `preserve` in main and carryOver in mergeInto. The
+// write path cannot author media and AdminAuthored does not read it, so this is
+// the only honest value to emit for a new entry and the only safe rule for an
+// existing one.
+func exerciseEntryOf(e exercise.Exercise) entry {
+	values := map[string]any{
+		"id":                      e.ID,
+		"name":                    e.Name,
+		"sport":                   e.Sport,
+		"movement_pattern":        e.MovementPattern,
+		"movement_pattern_detail": e.MovementPatternDetail,
+		"primary_muscles":         orEmpty(e.PrimaryMuscles),
+		"secondary_muscles":       orEmpty(e.SecondaryMuscles),
+		"equipment":               orEmpty(e.Equipment),
+		"load_type":               string(e.LoadType),
+		"is_unilateral":           e.IsUnilateral,
+		"instructions":            e.Instructions,
+		"media":                   []any{},
+	}
+	var out entry
+	for _, k := range exerciseKeyOrder {
+		v, ok := values[k]
+		if !ok {
+			// A key added to exerciseKeyOrder with no matching value would
+			// otherwise emit `null` — and for the three TEXT[] NOT NULL columns
+			// that is the "one entry takes the whole seed transaction down"
+			// failure this file warns about elsewhere.
+			panic(fmt.Sprintf("exportcontent: exerciseKeyOrder has %q with no value", k))
+		}
+		raw, err := rawJSON(v)
+		if err != nil {
+			// Only reachable if a string, bool or []string fails to marshal,
+			// which encoding/json does not do.
+			panic(fmt.Sprintf("exportcontent: marshal %q: %v", k, err))
+		}
+		out = append(out, pair{Key: k, Val: raw})
+	}
+	return out
 }
 
 // orEmpty turns a nil slice into an empty one, so it serialises as `[]` rather

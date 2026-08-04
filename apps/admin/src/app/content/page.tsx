@@ -3,6 +3,7 @@ import Link from "next/link";
 import { listAuthoredTechniques } from "@/lib/api";
 import { formatUTC } from "@/lib/format";
 import { AdminMasthead } from "../AdminMasthead";
+import { OwnershipNote } from "./ContentNav";
 
 /**
  * The techniques this console owns.
@@ -18,7 +19,7 @@ export default async function ContentPage() {
   return (
     <div className="min-h-screen w-full">
       <AdminMasthead
-        title="Content"
+        title="Techniques"
         section="content"
         meta={`${techniques.length} authored here`}
         action={
@@ -32,21 +33,7 @@ export default async function ContentPage() {
       />
 
       <main className="flex flex-col gap-6 px-10 py-8">
-        <p className="max-w-3xl rounded-lg border border-border bg-card px-4 py-3 text-[13px] text-text-secondary">
-          Techniques written here are live in the catalog immediately — no deploy. They are
-          marked <code className="font-mono">source=admin</code>, which the seeder cannot
-          touch, so a release never reverts them.{" "}
-          <strong className="text-text">
-            A release does not carry them either until they are exported.
-          </strong>{" "}
-          Run <code className="font-mono">go run ./cmd/exportcontent</code> to write them into
-          the seed files, review that diff, and merge it.
-          <br />
-          <br />
-          The rest of the library — everything from the spreadsheet — is owned by the deploy
-          and is not editable here. Editing one of those means editing{" "}
-          <code className="font-mono">techniques.json</code> and releasing.
-        </p>
+        <OwnershipNote catalog="Techniques" file="techniques.json" />
 
         {techniques.length === 0 ? (
           <p className="rounded-lg border border-border bg-card px-4 py-6 text-[13px] text-text-secondary">

@@ -1516,6 +1516,21 @@ components:
             values, e.g. "Scapular Elevation"). For display and filtering;
             rules read `movement_pattern`.
           example: Hip Adduction
+        source:
+          type: string
+          enum: [seed, admin]
+          description: >
+            Where this exercise came from: `seed` means the deploy owns it (the
+            embedded JSON rewrites it on every release), `admin` means it was
+            authored in the console and the database owns it. Read-only — the
+            server sets it.
+
+
+            **Present only on `/admin/*` responses.** Absent from `GET
+            /exercises` and `GET /exercises/{exerciseID}`, which do not select
+            the column — so its absence means "this endpoint does not report
+            provenance", never "not admin-authored". Use membership of
+            `GET /admin/exercises` instead.
         primary_muscles:
           type: array
           items: { type: string }
@@ -1895,6 +1910,36 @@ components:
             When this technique JOINED the list. Preserved across re-saves, so
             reordering or adding an entry does not reset it — it is what makes
             "you have been on this five weeks, consider rotating" answerable.
+
+    ExerciseWrite:
+      type: object
+      description: >
+        The admin-writable surface. `id`, `source` and `media` are absent by
+        design: the id is derived from the name and permanent, `source` is the
+        server's, and media has no upload path — leaving it out is what
+        guarantees an edit cannot clear media a deploy added.
+
+
+        Every field is optional so PATCH can be partial. POST requires `name`,
+        and the write is rejected unless `sport`, `movement_pattern` and
+        `load_type` end up valid.
+      properties:
+        name: { type: string, maxLength: 200 }
+        sport:
+          type: string
+          description: Must be a sport in the discipline registry — see GET /modules.
+        movement_pattern:
+          type: string
+          description: Must be one of GET /admin/exercises/vocabularies.
+        movement_pattern_detail: { type: string }
+        primary_muscles: { type: array, items: { type: string } }
+        secondary_muscles: { type: array, items: { type: string } }
+        equipment: { type: array, items: { type: string } }
+        load_type:
+          type: string
+          enum: [weight_reps, reps, time, distance, distance_time]
+        is_unilateral: { type: boolean }
+        instructions: { type: string }
 
     TechniqueWrite:
       type: object
@@ -3688,6 +3733,176 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+
+  /admin/exercises:
+    get:
+      summary: List the exercises the console can edit
+      operationId: listAuthoredExercises
+      description: >
+        Every exercise with `source: "admin"` — what the console owns and can
+        edit — and deliberately not the whole catalog. `PATCH` refuses a seeded
+        row, because the seed JSON owns those and an edit would be reverted by
+        the next deploy.
+
+
+        Unbounded, for the same reason as the technique equivalent: the set
+        grows one row at a time, and `cmd/exportcontent` reads the same query.
+        A `LIMIT` here would silently truncate the export rather than error.
+      responses:
+        "200":
+          description: >
+            The authored exercises, ordered by id. `[]` when nothing has been
+            authored yet — an empty array, never null. `media` is always empty
+            on this response; it is not part of the write path.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [exercises]
+                properties:
+                  exercises:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Exercise"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      summary: Create an exercise from the admin console
+      operationId: createExercise
+      description: >
+        Authoring the catalog without a deploy. The row is written with
+        `source: "admin"`, which the seeder cannot touch — so a release never
+        reverts it. `cmd/exportcontent` carries admin-authored content back into
+        the seed JSON, which is how it reaches another environment.
+
+
+        The **id is derived from the name** and is not accepted from the client:
+        it becomes a foreign key in workout items and logged sets, so it outlives
+        every other field and can never be changed. "Zercher Squat" becomes
+        `zercher-squat`.
+
+
+        **Media cannot be authored here.** It lives in its own table with no
+        upload path, so an exercise created this way has none — and, because
+        `media` is not part of the request, an edit can never clear media a
+        later deploy adds.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExerciseWrite"
+      responses:
+        "200":
+          description: The stored exercise, including its generated id.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [exercise]
+                properties:
+                  exercise:
+                    $ref: "#/components/schemas/Exercise"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: >
+            The derived id is taken. Deliberately not an upsert — the id may
+            already be a foreign key in somebody's training record, so rewriting
+            the exercise behind it changes what their history says they did.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /admin/exercises/vocabularies:
+    get:
+      summary: The closed sets an exercise write must pick from
+      operationId: exerciseVocabularies
+      description: >
+        Served rather than hardcoded in the client, so the editor's dropdowns
+        and the validator cannot disagree. `movement_patterns` is the COARSE
+        vocabulary the cross-sport rules are written against — an exercise filed
+        outside it renders perfectly and is silently invisible to every rule,
+        which is the one failure here that looks identical to success.
+      responses:
+        "200":
+          description: The three vocabularies, each sorted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sports, movement_patterns, load_types]
+                properties:
+                  sports:
+                    type: array
+                    items: { type: string }
+                  movement_patterns:
+                    type: array
+                    items: { type: string }
+                  load_types:
+                    type: array
+                    items: { type: string }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /admin/exercises/{exerciseID}:
+    patch:
+      summary: Edit a console-authored exercise
+      operationId: updateExercise
+      description: >
+        A PARTIAL update: an omitted field keeps its stored value, and a field
+        sent as empty is cleared. The id comes from the path and is never moved,
+        because renaming must not orphan the training records pointing at it.
+
+
+        Refuses a **seeded** exercise with 409 rather than editing it: the seed
+        JSON owns those, and a change here would be reverted on the next
+        release. Edit `exercises.json` and deploy instead.
+      parameters:
+        - name: exerciseID
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExerciseWrite"
+      responses:
+        "200":
+          description: The stored exercise.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [exercise]
+                properties:
+                  exercise:
+                    $ref: "#/components/schemas/Exercise"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: That exercise is seeded, so a deploy owns it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /admin/techniques:
     get:

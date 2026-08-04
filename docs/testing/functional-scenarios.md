@@ -3713,3 +3713,61 @@ Covers `components/BjjRankHeader.tsx`, `components/TrainingSummary.tsx`,
   it used `adjustsFontSizeToFit`, which the shared component deliberately avoids
   because it measures after layout and is unreliable across nested `Text` runs.
 
+## Exercise authoring in the admin console (`/v1/admin/exercises`, `/content/exercises`)
+
+Everything under "Content authoring in the admin console" applies here too —
+the ownership rule, the seeded-id explanation, the restore-after-a-rejected-save,
+the server actions checking the allowlist themselves. These are the ones this
+catalog adds.
+
+### Happy path
+
+- The vocabularies come from `GET /v1/admin/exercises/vocabularies`, which is
+  derived from the same maps the seeder validates against. Assert every offered
+  value actually passes validation — the point of serving them is that picking
+  one cannot be refused.
+- An exercise created here is immediately in `GET /v1/exercises` and on both
+  clients.
+- **`cmd/exportcontent` carries it into both `exercises.json` and
+  `exercises.additions.json`.** One without the other is lost: the deploy will
+  not carry it, or the next spreadsheet re-import deletes it.
+- The exported file seeds. Run `cmd/seed` from it and count the rows.
+
+### Edge cases & errors
+
+- **Editing one field must not flip `is_unilateral`.** This is the field a
+  plain-bool decode cannot express — false and absent are the same value — so
+  create a unilateral exercise, PATCH only `movement_pattern`, and assert it is
+  still unilateral. Everything else on the row must survive too.
+- **A re-export must not wipe media.** Give an exercise media in the file, edit
+  it in the console, re-export, and assert the media is still there. The write
+  path cannot author media and the export does not read it, so the naive
+  behaviour is to reset it to `[]` — deleting the only record of an asset still
+  in the bucket.
+- A new exercise exports with `"media": []`, not a missing key: all 504 shipped
+  entries carry the key.
+- An unknown `movement_pattern` is refused and **the message lists the legal
+  sixteen**. This is the one field where being wrong looks exactly like being
+  right — the exercise renders and is silently invisible to every cross-sport
+  rule — so a bare "invalid input" is not enough.
+- An unknown `sport` and an unknown `load_type` are refused by name too.
+- "Zercher Squat" is already in the seeded catalog. Creating it must 409 rather
+  than mint a second id, and that is worth asserting with a real name from the
+  catalog rather than a synthetic one.
+
+### The properties only a real database can check
+
+The fake repository implements its own ownership check, so these pass in the
+handler suite no matter what the SQL says:
+
+- **`UPDATE ... WHERE source = 'admin'`** — a seeded row must be refused by the
+  statement, not by Go. Deleting that clause leaves the whole handler suite
+  green.
+- **`AdoptAsSeeded` must not touch `updated_at` on already-seeded rows.** Assert
+  the timestamp, not `source`: setting `seed` on a `seed` row is invisible in
+  the value, and clients delta-sync on the timestamp, so an unscoped adoption
+  makes every exercise look changed to every device.
+- **A deploy re-seed must not revert an admin row.** Create one, run
+  `UpsertAll` with a different name, assert the admin row is unchanged.
+
+
