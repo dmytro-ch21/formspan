@@ -8692,6 +8692,141 @@ directions.
   which is the point, but it reports zero `rules-of-hooks` violations today
   rather than anyone having read all thirty.
 
+## 2026-08-04 — The console's masthead becomes one component, and the mark comes in with it
+
+Closes the deferral recorded in *"The admin console gets the same marks, and
+the second copy is a deliberate one"* — three entries up, since two mobile
+entries landed between them. `apps/admin` had its six copies of an identical
+`<header>` collapsed into one `<AdminMasthead>`, and that component
+carries `VolaMark`. The three "Not authorized" screens — byte-identical
+triplets living in `users/`, `content/` and `health/`'s layouts — became one
+`<NotAuthorized>`, and it and `error.tsx` both now carry `VolaLockup`. Nothing
+in `apps/admin` that fills a screen is unbranded any more.
+
+### A component each page renders, not a shared layout
+
+This was the open question, and the route tree answers it rather than taste
+doing so. **Every masthead's content is the page's own, and arrives with the
+page's own data**: a technique's name, an athlete's display name and belt,
+"N known to the API" counted from the very list the table underneath renders. A
+layout renders *around* a page without seeing any of that, so a layout-owned
+masthead needs the title pushed back up from the page — a client context, a
+title that lands a frame after the header paints, and a `"use client"` boundary
+around chrome that is otherwise entirely static.
+
+The case that settles it is `content/[id]`, which renders **two different
+mastheads on two branches of one page** (the seeded dead-end and the edit
+form). One layout can only render one header.
+
+Review added the argument this reasoning was missing, and it is the strongest
+one: a `(console)/layout.tsx` holding the masthead would sit **above** the
+three gate layouts, so a non-allowlisted account would get branded console
+chrome — the mark, the title, all three nav links — wrapped around its own
+"Not authorized" screen. The thing that refuses you would be framed by the
+navigation it is refusing you.
+
+So the six copies collapse to six *call sites*, which is the honest shape: the
+markup exists once, the content stays where the data is.
+
+### The mark in the bar, the lockup on full-page surfaces
+
+Three presentations of one identity, chosen per surface rather than for
+uniformity. The bar is ~64px tall and `VolaLockup` is 0.66x its own width in
+height, so at any width where the wordmark is legible it roughly doubles the
+header. `Brand.tsx` already records that there is no wide-and-short arrangement
+to reach for either — the horizontal lockup's mark is 3.4x its wordmark's
+height and only balances beside a tagline this product does not ship. Dense
+chrome therefore gets the mark alone, with "VOLA Admin" carried by the
+accessible name on its link.
+
+`NotAuthorized` and `error.tsx` are centred full-page surfaces, which is the
+arrangement the stacked lockup was measured for, so they get it. They do
+**not** get the "ADMIN" qualifier the signed-out entry sets beneath it: there
+the lockup is the page's subject and the qualifier is its heading text, whereas
+here the heading is the refusal or the failure, and a second line of display
+type above it competes with the thing the reader needs. Both lockups are inert
+rather than links — on a 403 the only place to go is the route that just
+refused you, and on the error screen "Try again" is the way out while a logo
+linking to a currently-throwing route is a loop.
+
+`Brand.tsx` itself was not touched, so `check:brand-copies` stays green without
+the paired edit it exists to force.
+
+### The nav now says where you are
+
+Each page used to hand-write the cross-console nav **minus itself**, so the set
+of links changed as you moved and nothing in it said where you were. With one
+component the current section has to be a parameter regardless, so it is now
+shown and marked with `aria-current="page"` rather than omitted — the same
+reasoning as `NavLink` in `apps/web`, where colour alone was not allowed to
+carry the fact either. Collapsing the copies also settled a disagreement nobody
+had noticed: `health/page.tsx` styled its links `hover:underline` while the
+other two used `underline`. Detail screens keep the single up-link they had
+instead of gaining the nav.
+
+### Two defects the extraction surfaced
+
+**`users/[id]` had no `h1`.** Its title was a `<span>` while every other
+screen's was a heading, so the athlete's name was styled like a heading and
+exposed as nothing. The masthead always renders one, so it is fixed by
+construction.
+
+**All three "Not authorized" screens read "user_2xYz…isn't on the admin
+allowlist"** — the Clerk id welded to the next word. Fixed with an explicit
+`{" "}`.
+
+The interesting part is that **this is toolchain-specific, and the widely
+documented behaviour says it shouldn't happen.** Review pushed back on the fix
+as unnecessary, correctly citing Babel: `cleanJSXElementLiteralChild` trims
+leading whitespace only on lines *after* the first, so a space between an
+expression and same-line text is preserved. That is true of Babel and false of
+SWC, which is what Next 16 / Turbopack actually builds this app with. Measured
+against the running dev server, all four variants:
+
+| JSX                                        | space |
+| ------------------------------------------ | ----- |
+| `{expr} text…` wrapping onto a second line | lost  |
+| `{expr} text…` all on one line             | kept  |
+| `{expr}` then text starting its own line   | lost  |
+| `{expr}{" "}` then text                    | kept  |
+
+The first row is exactly the shape all three originals had — the wrap is the
+variable, and it is invisible at a glance because it is produced by ordinary
+line-length formatting rather than by anything anyone chose. So: **do not
+restore the plain space on the strength of Babel's documented behaviour**, and
+be wary of reasoning about JSX whitespace from any transform other than the one
+in the build. The reason it shipped three times is that nothing catches it but
+reading the rendered page — no typecheck, no lint, no test.
+
+### Gaps
+
+**The masthead was never seen above real page content.** Every admin read in
+this environment returns 500 from the API (`/admin/users`, `/admin/techniques`,
+`/admin/health` alike), with the local database fully migrated at version 33
+and every table present — so it looks like a stale API binary rather than a
+schema problem, and it is unrelated to this change. Verification was done on a
+temporary preview route rendering all five masthead shapes with realistic props
+(including the real `BeltSwatch`), plus `NotAuthorized`; the route was deleted
+before commit. `error.tsx` is the one screen verified for real, at `/users`,
+because the 500 renders it.
+
+**Only the screen was shared, not the gate.** Each layout still calls
+`currentUser()` and `isAllowedAdmin` itself. That is deliberate — the check is
+the load-bearing line and a reader should not have to follow an import to learn
+whether a route is guarded — but it does mean the triplication is reduced, not
+removed, and a fourth admin section still has to remember to write it.
+
+**No long title has been through the title row.** The left group has no
+`min-w-0` and the `h1` does not truncate, while the nav is now `shrink-0`, so a
+long technique or display name wraps and grows the bar rather than overflowing
+it. That is the benign outcome and it matches what the six originals did, but
+it is reasoned rather than observed — the real names never rendered.
+
+**`MARK_ASPECT` is a second copy of the mark's `viewBox`** that nothing checks:
+`check:brand-copies` compares the two `Brand.tsx` files only. A drift
+letterboxes the tick by a few pixels rather than distorting it, and the
+generator that is meant to replace the hand-copied brand modules would take
+this with it.
 
 ## Open items / known gaps as of this entry
 

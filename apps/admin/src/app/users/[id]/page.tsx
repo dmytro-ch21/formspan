@@ -1,9 +1,9 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { ApiError, fetchHealth, getUserBjjStanding, getUserDetail } from "@/lib/api";
 import type { BjjStanding, HealthEvent } from "@/lib/api";
 import { formatUTC } from "@/lib/format";
+import { AdminMasthead } from "../../AdminMasthead";
 import { BeltSwatch, describeBelt } from "./Belt";
 
 /**
@@ -59,32 +59,30 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
 
   return (
     <div className="min-h-screen w-full">
-      <header className="flex w-full items-center justify-between border-b border-border bg-card px-10 py-5">
-        <div className="flex items-center gap-4">
-          <span className="font-barlow-condensed text-[17px] font-bold tracking-[0.1em] uppercase">
-            {user.display_name ?? "User Detail"}
-          </span>
-          <span className="font-mono text-[12px] text-text-secondary">{id}</span>
-          {/* Rank, beside the athlete rather than in a section further down —
-              it's read as identity here, the same way a display name is. */}
-          {standing?.current && (
-            <div className="flex items-center gap-2">
-              <BeltSwatch
-                belt={standing.current.belt}
-                stripes={standing.current.stripes}
-                degree={standing.current.degree}
-                width={64}
-              />
-              <span className="text-[12px] text-text-secondary">
-                {describeBelt(standing.current.belt, standing.current.stripes, standing.current.degree)}
-              </span>
-            </div>
-          )}
-        </div>
-        <Link href="/users" className="text-[13px] text-text-secondary underline">
-          Back to User Lookup
-        </Link>
-      </header>
+      {/* The athlete's name was a `span` here while every other screen's title
+          was an `h1`, so this page had no heading at all. The masthead always
+          renders one. */}
+      <AdminMasthead
+        title={user.display_name ?? "User Detail"}
+        meta={<span className="font-mono text-[12px]">{id}</span>}
+        back={{ href: "/users", label: "Back to User Lookup" }}
+      >
+        {/* Rank, beside the athlete rather than in a section further down —
+            it's read as identity here, the same way a display name is. */}
+        {standing?.current && (
+          <div className="flex items-center gap-2">
+            <BeltSwatch
+              belt={standing.current.belt}
+              stripes={standing.current.stripes}
+              degree={standing.current.degree}
+              width={64}
+            />
+            <span className="text-[12px] text-text-secondary">
+              {describeBelt(standing.current.belt, standing.current.stripes, standing.current.degree)}
+            </span>
+          </div>
+        )}
+      </AdminMasthead>
 
       <main className="flex flex-col gap-4 px-10 py-8">
         <section className="grid grid-cols-2 gap-4 md:grid-cols-4">

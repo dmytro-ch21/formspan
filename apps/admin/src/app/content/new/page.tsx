@@ -1,6 +1,5 @@
-import Link from "next/link";
-
 import { listPositions } from "@/lib/api";
+import { AdminMasthead } from "../../AdminMasthead";
 import { createTechniqueAction } from "../actions";
 import { TechniqueForm } from "../TechniqueForm";
 
@@ -17,16 +16,7 @@ export default async function NewTechniquePage() {
 
   return (
     <div className="min-h-screen w-full">
-      <header className="flex w-full items-center justify-between border-b border-border bg-card px-10 py-5">
-        <div className="flex items-center gap-4">
-          <h1 className="font-barlow-condensed text-[17px] font-bold tracking-[0.1em] uppercase">
-            New technique
-          </h1>
-        </div>
-        <Link href="/content" className="text-[13px] text-text-secondary underline">
-          Back to content
-        </Link>
-      </header>
+      <AdminMasthead title="New technique" back={{ href: "/content", label: "Back to content" }} />
 
       <main className="max-w-4xl px-10 py-8">
         <p className="mb-6 max-w-2xl text-[13px] text-text-secondary">

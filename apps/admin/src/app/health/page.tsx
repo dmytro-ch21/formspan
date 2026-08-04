@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { fetchHealth, type HealthEvent, type HealthEventKind } from "@/lib/api";
+import { AdminMasthead } from "../AdminMasthead";
 
 /**
  * Health — is anything wrong, and for whom.
@@ -50,22 +51,7 @@ export default async function HealthPage() {
 
   return (
     <div className="min-h-screen w-full">
-      <header className="flex w-full items-center justify-between border-b border-border bg-card px-10 py-5">
-        <div className="flex items-center gap-4">
-          <h1 className="font-barlow-condensed text-[17px] font-bold tracking-[0.1em] uppercase">
-            Health
-          </h1>
-          <span className="text-[13px] text-text-secondary">last {WINDOW_HOURS} hours</span>
-        </div>
-        <nav className="flex items-center gap-5 text-[13px] text-text-secondary">
-          <Link href="/users" className="hover:underline">
-            Users
-          </Link>
-          <Link href="/content" className="hover:underline">
-            Content
-          </Link>
-        </nav>
-      </header>
+      <AdminMasthead title="Health" section="health" meta={`last ${WINDOW_HOURS} hours`} />
 
       <main className="flex flex-col gap-8 px-10 py-8">
         <section className="grid grid-cols-2 gap-4 md:grid-cols-4">
