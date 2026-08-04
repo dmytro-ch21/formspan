@@ -8079,6 +8079,91 @@ within 0.05% of the artwork rather than 1.4% off — so the header got sharper a
 a side effect nobody asked for. `splash-icon.png` is now referenced by nothing
 and was left in place rather than deleted.
 
+## 2026-08-04 — The tick becomes the icon, and the header stops impersonating the wordmark
+
+Two complaints from the phone, one cause. The home-screen icon was not the
+logo, and the in-app header was not the wordmark. Both had stand-ins that had
+outlived the reason they existed.
+
+### The icon was a placeholder all the way down
+
+`icon.png` was a rounded-stroke checkmark on a `#42F58D`→`#B8FF2C` gradient —
+drawn before the real artwork arrived and never replaced. The important part is
+that **the masters were placeholders too**: `assets/brand/app-icons/*.svg` drew
+the same stand-in tick, so the repo's own "edit the SVG and regenerate" rule
+would faithfully have reproduced the wrong logo. Regenerating the PNGs was
+never the fix on its own; the masters had to be rebuilt on the real mark first.
+Worth remembering the next time a raster looks stale — check whether its source
+is stale too, or the regeneration just launders the mistake.
+
+Three things the rebuild had to get right:
+
+**The iOS icon is full-bleed and opaque.** The old dark master drew a rounded
+rect inset 16px with `rx="220"`, which is a preview affordance, not an icon:
+iOS applies its own corner mask, and a 1024 PNG with transparent corners is an
+App Store rejection. It is now a flat square with no alpha anywhere.
+
+**The Android foreground is held to 458px on a 1024 canvas, and the first
+answer was 560px and wrong.** Adaptive icons get cropped to whatever shape the
+launcher likes, and the guaranteed-visible region is a 66dp **circle** — radius
+312.9px on this canvas — not a square. 560px was sized against the square,
+justified on the reasoning that a tick's bounding-box corners are empty so the
+overhang has nothing in it. That is exactly backwards for this shape: the
+tick's longest arm *ends* at its own bbox's top-right corner, so the corner
+that overhangs is the fullest point on the mark, not the emptiest. Measured, it
+put the tip 376px from centre, and a circular mask amputated it.
+
+Review caught it by rendering the committed PNG under circle, squircle and
+square masks rather than reading the SVG — which is the lesson worth keeping.
+The masters were right about what they were drawing; the claim that failed was
+a geometric one about the *result*, and only the result could disprove it.
+458px lands the tip at 307.3px, inside the circle with a few pixels to spare so
+an antialiased edge is not resting on the guarantee.
+
+**The monochrome layer collapses to one silhouette.** The mark is three
+overlapping polygons in three greens; drawn in a single flat colour they abut
+into one shape, so the themed-icon layer is the same geometry with the fills
+replaced rather than a separately drawn silhouette.
+
+### The header wordmark was typed, not drawn
+
+The header set the tick followed by "VOLA" in the system font at weight 800
+with 3pt of tracking. That is not a smaller version of the logo — it is a
+different logo. The real letterforms disagree with the typed ones on the two
+most recognisable glyphs: the A is a bare apex with no crossbar, and the O is a
+rounded rectangle rather than an ellipse. Set beside the actual mark, the
+impersonation was the thing making the header look heavy.
+
+It is now `vola-wordmark.png` at 88pt, and the tick is gone from the header
+entirely. Both halves of that were the ask, and they reinforce: once the
+letters are the real ones, the header no longer needs a glyph sitting beside
+them to say what the brand is. 88 is where the wordmark carries the same weight
+as the screen title opposite it; the height is the artwork's own 14030:1759
+ratio rather than a rounded number, because any other box shape letterboxes
+under `contain` and quietly shrinks the letters inside their own footprint.
+
+The tick keeps the two jobs it earns: the app icon, and the landing beat of
+`AnimatedSplash`.
+
+### Gaps
+
+**None of this is verifiable in Expo Go.** App icons are native — Expo Go shows
+Expo Go's icon, whatever the project config says — so the icon half needs a real
+build (`expo run:ios --device`) to see at all, which is also how it was
+reported. The header half is ordinary JS and shows up on a reload.
+
+`apps/mobile/assets/images/splash-icon.png` is **deleted** here rather than
+left orphaned as the previous entry left it. It was the placeholder tick, it
+was referenced by nothing, and this change's whole thesis is that a stale
+placeholder in the tree is how the wrong logo ships — leaving one behind while
+arguing that would have been funny in the wrong way.
+
+`assets/brand/splash/vola-splash-dark.svg` and its light twin are the remaining
+case: also unreferenced, also still drawing the placeholder tick. They are left
+alone because a splash master implies a design decision about what the native
+splash shows, and that decision is currently "nothing" — regenerating them
+would be inventing an answer to a question nobody has asked yet.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

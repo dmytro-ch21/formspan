@@ -28,8 +28,8 @@ import { vola } from '@/constants/Colors';
  * write the wipe and would have run on the JS thread, i.e. stuttered during
  * precisely the launch it exists to cover.
  *
- * No `react-native-svg`: this app deliberately has none (see `ScreenHeader`'s
- * `Mark()` and `ui/Icon.tsx`), and nothing here needs it.
+ * No `react-native-svg`: this app deliberately has none (see `Belt.tsx` and
+ * `ui/Icon.tsx` for why), and nothing here needs it.
  */
 
 // The lockup's proportions, measured off `vola-stacked-color.svg` in its own

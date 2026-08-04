@@ -9,6 +9,18 @@ import { vola } from '@/constants/Colors';
 /**
  * The top of every tab screen: the wordmark, then the screen's name.
  *
+ * **The wordmark is the drawn artwork, not typed letters.** This used to be
+ * the brand tick followed by "VOLA" set in the system font at weight 800 with
+ * 3pt of tracking — an impersonation of the logo built from the only parts a
+ * text node can offer. The real letterforms are a different shape entirely
+ * (the A is an apex with no crossbar, the O is a rounded rectangle), so the
+ * typed version was not a smaller version of the logo, it was a different
+ * logo. It is now `vola-wordmark.png`, lifted from the stacked lockup — which
+ * also means the header no longer needs the tick beside it to say what the
+ * letters are. The tick still appears where it earns its place: the app icon,
+ * and the landing beat of `AnimatedSplash`. It just isn't furniture on every
+ * screen any more.
+ *
  * Replaces React Navigation's default header, which drew its own surface
  * colour and a hairline rule — two bands of subtly different dark, stacked
  * against a third at the bottom. On a dark theme those seams are the most
@@ -39,10 +51,25 @@ export function ScreenHeader({ title, action }: { title: string; action?: React.
       <View style={styles.row}>
         <Text style={styles.title}>{title}</Text>
         <RNView style={styles.wordmark} pointerEvents="none">
-          <Mark />
-          <Text style={styles.wordmarkText} accessibilityLabel="VOLA" accessibilityRole="header">
-            VOLA
-          </Text>
+          {/* `accessible` sits on this inner view, not on the absolutely
+              positioned wrapper. The wrapper is `left: 0, right: 0` so that the
+              wordmark centres on the row rather than on whatever space the
+              title leaves — but that makes it as wide as the header, and an
+              accessibility element is the size of its frame. Put the label out
+              there and touch-exploring anywhere across the middle band of the
+              row reads "VOLA" instead of the screen name it is sitting on top
+              of. Here the element is the 88pt artwork and nothing else. */}
+          <RNView accessible accessibilityRole="header" accessibilityLabel="VOLA">
+            <Image
+              source={require('@/assets/images/vola-wordmark.png')}
+              style={styles.wordmarkImage}
+              contentFit="contain"
+              // The view above carries the label; announcing the image too
+              // would read the brand name twice.
+              alt=""
+              accessible={false}
+            />
+          </RNView>
         </RNView>
         {/* Before `action`, so a screen's own control stays in the corner it
             has always been in. The chip is silent unless there is something
@@ -51,37 +78,6 @@ export function ScreenHeader({ title, action }: { title: string; action?: React.
         {action}
       </View>
     </View>
-  );
-}
-
-/**
- * The brand tick, from the designed logo kit.
- *
- * **This replaced a drawn substitute, and the substitute was the odd one
- * out.** The header used to set "VOL" and then draw its own chevron from two
- * rotated rules to stand in for the A — a workaround from before a real mark
- * existed, with arithmetic in this file to make the two strokes mitre. The
- * actual logo is a faceted tick in three greens (`#D0E950`, `#9CC740`,
- * `#71912F`) sitting *before* the wordmark, not inside it, so the wordmark is
- * now simply "VOLA".
- *
- * A PNG rather than the SVG it was drawn as: this app has no
- * `react-native-svg` (see `Belt.tsx` and `ui/Icon.tsx` for why), and unlike
- * those two the mark is genuinely un-drawable from views — it is overlapping
- * filled polygons, not rules and circles. Exported from
- * `assets/brand/logos/source/vola-mark-color.png`, trimmed to its content box
- * and squared, so it is regenerable rather than hand-cropped.
- */
-function Mark() {
-  return (
-    <Image
-      source={require('@/assets/images/vola-mark.png')}
-      style={styles.mark}
-      contentFit="contain"
-      // Decorative: the wordmark beside it already carries the header label.
-      alt=""
-      accessible={false}
-    />
   );
 }
 
@@ -95,16 +91,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  wordmarkText: {
-    fontSize: 15,
-    fontWeight: '800',
-    letterSpacing: 3,
-    color: vola.text,
-  },
-  // Wider than tall: the source mark is 550×496, and `contain` letterboxes
-  // inside whatever box it is given, so a square one would leave the tick
-  // floating in dead space to either side.
-  mark: { width: 20, height: 18, marginRight: 7 },
+  // 88 is where the wordmark carries the same weight as the screen title
+  // opposite it without starting to compete. The height is derived from the
+  // source SVG's 14030:1759 rather than typed, so the box is the artwork's
+  // shape and `contain` has almost nothing to letterbox — the PNG's own
+  // 2048:257 differs by a rounded-up pixel, which costs 0.08pt of slack, a
+  // quarter of a device pixel at 3x. The viewBox ratio rather than the
+  // raster's because `AnimatedSplash` derives the whole lockup from the same
+  // numbers, and two files disagreeing by a rounding is worse than either.
+  wordmarkImage: { width: 88, height: 88 * (1759 / 14030) },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

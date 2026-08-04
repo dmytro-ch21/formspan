@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Android themed-icon layer: one flat colour, the launcher tints it. The three
+       facets collapse to a single silhouette because they abut. Same 458px circular
+       safe-zone sizing as the foreground layer - see its note.
+       Mark geometry is the real logo from logos/source/vola-mark-color.svg,
+       content box 4645x4185 at (1911,2141), placed at 458px wide and centred. -->
+  <g transform="translate(94.57 94.57) scale(0.09860065)">
+    <path fill="#FFFFFF" d="M1911 3801l1625 1128 3020 -2788 -2933 4185 -1712 -2525z"/>
+    <path fill="#FFFFFF" d="M3008 5418l401 -577 -1498 -1040 1097 1617z"/>
+    <path fill="#FFFFFF" d="M3536 4929l-528 489 367 -600 161 111z"/>
+  </g>
+</svg>

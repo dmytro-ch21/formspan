@@ -1,17 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" fill="none">
-
-
-<rect x="16" y="16" width="992" height="992" rx="220" fill="#0B1220"/>
-<g transform="translate(190 180) scale(1.25)">
-
-<defs>
-  <linearGradient id="grad-vola-app-icon-dark-1024" x1="120" y1="360" x2="410" y2="100" gradientUnits="userSpaceOnUse">
-    <stop stop-color="#42F58D"/>
-    <stop offset="1" stop-color="#B8FF2C"/>
-  </linearGradient>
-</defs>
-<path d="M120 270 L220 365 L405 135" stroke="url(#grad-vola-app-icon-dark-1024)" stroke-width="58" stroke-linecap="round" stroke-linejoin="round"/>
-
-</g>
-
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- iOS/dark app icon. Full-bleed and opaque on purpose: iOS applies its own
+       corner mask, and a PNG with transparent corners is an App Store rejection.
+       Mark geometry is the real logo from logos/source/vola-mark-color.svg,
+       content box 4645x4185 at (1911,2141), placed at 620px wide and centred. -->
+  <rect width="1024" height="1024" fill="#0B1220"/>
+  <g transform="translate(-53.07 -53.07) scale(0.13347686)">
+    <path fill="#D0E950" d="M1911 3801l1625 1128 3020 -2788 -2933 4185 -1712 -2525z"/>
+    <path fill="#9CC740" d="M3008 5418l401 -577 -1498 -1040 1097 1617z"/>
+    <path fill="#71912F" d="M3536 4929l-528 489 367 -600 161 111z"/>
+  </g>
 </svg>
