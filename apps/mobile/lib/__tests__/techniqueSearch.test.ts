@@ -109,6 +109,16 @@ describe('searchTechniques against the real catalog', () => {
     expect(searchTechniques(catalog, '   ')).toHaveLength(catalog.length);
   });
 
+  it('a query of nothing but punctuation is treated as empty, not as a match', () => {
+    // Consequence of folding dashes to spaces: "-" now folds to "". Deliberate
+    // — a lone dash is not a search, and returning the whole list is what
+    // an empty box already does. Pinned because it changed: before the fold it
+    // matched every hyphenated name.
+    expect(foldForSearch('-')).toBe('');
+    expect(searchTechniques(catalog, '-')).toHaveLength(catalog.length);
+    expect(searchTechniques(catalog, ' — ')).toHaveLength(catalog.length);
+  });
+
   it('does not match a query spanning two fields', () => {
     // The haystack joins name/aliases/position, so without a separator a query
     // could match across the seam and return a technique whose name ends how
