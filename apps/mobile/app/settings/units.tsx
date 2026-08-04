@@ -3,6 +3,7 @@ import { Pressable, ScrollView, StyleSheet } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { useAccent } from '@/lib/AccentProvider';
 import { UNIT_SYSTEMS } from '@/lib/units';
 import { useUnits } from '@/lib/useUnits';
 
@@ -14,6 +15,7 @@ import { useUnits } from '@/lib/useUnits';
  * control per feature becomes unnavigable long before it becomes complete.
  */
 export default function UnitsSettingsScreen() {
+  const accent = useAccent();
   const { units, setUnits, unsynced } = useUnits();
 
   return (
@@ -37,7 +39,7 @@ export default function UnitsSettingsScreen() {
                 <Text style={styles.rowLabel}>{u.label}</Text>
                 <Text style={styles.muted}>{u.detail}</Text>
               </View>
-              {selected && <Text style={styles.tick}>✓</Text>}
+              {selected && <Text style={[styles.tick, { color: accent.ink }]}>✓</Text>}
             </Pressable>
           );
         })}
@@ -79,7 +81,7 @@ const styles = StyleSheet.create({
   rowBody: { flex: 1, gap: 2 },
   rowLabel: { fontSize: 16, fontWeight: '600' },
   muted: { color: vola.textMuted, fontSize: 13 },
-  tick: { color: vola.lime, fontSize: 18, fontWeight: '700' },
+  tick: { fontSize: 18, fontWeight: '700' },
   note: { color: vola.textDim, fontSize: 12, lineHeight: 17, paddingHorizontal: 4 },
   unsynced: { color: vola.warn, fontSize: 13, lineHeight: 18, paddingHorizontal: 4 },
 });

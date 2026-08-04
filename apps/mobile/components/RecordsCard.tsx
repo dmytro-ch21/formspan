@@ -7,6 +7,7 @@ import { Text, View } from '@/components/Themed';
 import { Medal } from '@/components/ui/Medal';
 import { StatValue } from '@/components/ui/Stat';
 import { vola } from '@/constants/Colors';
+import { useAccent } from '@/lib/AccentProvider';
 import { cachedExercises } from '@/lib/sessionStore';
 import {
   describeEvidence,
@@ -37,6 +38,7 @@ export function RecordsCard({
   getToken: TokenGetter;
   units: UnitSystem;
 }) {
+  const accent = useAccent();
   const router = useRouter();
   const [records, setRecords] = useState<ExerciseRecords[] | null>(null);
   const [names, setNames] = useState<Map<string, string>>(new Map());
@@ -73,7 +75,7 @@ export function RecordsCard({
           accessibilityRole="button"
           testID="records-manage"
         >
-          <Text style={styles.action}>Choose</Text>
+          <Text style={[styles.action, { color: accent.ink }]}>Choose</Text>
         </Pressable>
       </RNView>
 
@@ -188,7 +190,8 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 1,
   },
-  action: { color: vola.lime, fontWeight: '700', fontSize: 14 },
+  // Colour set inline, from the accent.
+  action: { fontWeight: '700', fontSize: 14 },
   card: {
     borderWidth: 1,
     borderColor: vola.line,

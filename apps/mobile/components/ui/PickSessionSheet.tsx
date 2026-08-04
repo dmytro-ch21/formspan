@@ -4,6 +4,7 @@ import { Modal, Pressable, ScrollView, StyleSheet, View as RNView } from 'react-
 import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
+import { useAccent } from '@/lib/AccentProvider';
 import { enabledSports } from '@/lib/modules';
 import type { Module } from '@/lib/modules';
 import { cachedWorkouts } from '@/lib/sessionStore';
@@ -49,6 +50,7 @@ export function PickSessionSheet({
   onPick: (pick: Pick) => void;
   onClose: () => void;
 }) {
+  const accent = useAccent();
   const sports = enabledSports(modules);
   const [workouts, setWorkouts] = useState<Workout[]>([]);
 
@@ -87,7 +89,7 @@ export function PickSessionSheet({
             accessibilityLabel="Close"
             testID="pick-close"
           >
-            <Text style={styles.close}>Done</Text>
+            <Text style={[styles.close, { color: accent.ink }]}>Done</Text>
           </Pressable>
         </RNView>
 
@@ -166,7 +168,7 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   title: { fontSize: 20, fontWeight: '800' },
-  close: { color: vola.lime, fontWeight: '700', fontSize: 15 },
+  close: { fontWeight: '700', fontSize: 15 },
   body: { paddingHorizontal: 20, paddingBottom: 40, gap: 18 },
   group: { gap: 6 },
   groupLabel: {

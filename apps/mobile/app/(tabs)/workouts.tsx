@@ -28,6 +28,7 @@ import {
   type Workout,
 } from '@/lib/workouts';
 import { vola } from '@/constants/Colors';
+import { useAccent } from '@/lib/AccentProvider';
 
 const SCOPES = [
   { key: 'mine', label: 'My workouts' },
@@ -35,6 +36,7 @@ const SCOPES = [
 ] as const;
 
 export default function WorkoutsScreen() {
+  const accent = useAccent();
   // For the sport label on each card — the registry carries the acronym, so
   // this renders "BJJ" rather than the "Bjj" that capitalising a key gives.
   const { modules } = useModules();
@@ -139,7 +141,13 @@ export default function WorkoutsScreen() {
                 setScope(s.key);
                 setLoading(true);
               }}
-              style={[styles.scopeTab, active && styles.scopeTabActive]}
+              style={[
+                styles.scopeTab,
+                active && [
+                  styles.scopeTabActive,
+                  { backgroundColor: accent.accent, borderColor: accent.accent },
+                ],
+              ]}
               accessibilityRole="button"
               accessibilityState={{ selected: active }}
               testID={`workouts-scope-${s.key}`}
@@ -212,7 +220,10 @@ export default function WorkoutsScreen() {
                 <View style={styles.cardHead}>
                   <Text style={styles.cardTitle}>{item.name}</Text>
                   {item.visibility === 'public' && (
-                    <Text style={styles.badge} testID={`workout-${item.id}-public`}>
+                    <Text
+                      style={[styles.badge, { color: accent.ink }]}
+                      testID={`workout-${item.id}-public`}
+                    >
                       Shared
                     </Text>
                   )}
@@ -231,13 +242,13 @@ export default function WorkoutsScreen() {
 
       {scope === 'mine' && (
         <Pressable
-          style={styles.fab}
+          style={[styles.fab, { backgroundColor: accent.accent }]}
           onPress={() => setComposing(true)}
           accessibilityRole="button"
           accessibilityLabel="New workout"
           testID="workouts-new"
         >
-          <Text style={styles.fabText}>New workout</Text>
+          <Text style={[styles.fabText, { color: accent.on }]}>New workout</Text>
         </Pressable>
       )}
 
@@ -262,6 +273,7 @@ function NewWorkoutSheet({
   onClose: () => void;
   onCreated: (w: Workout) => void;
 }) {
+  const accent = useAccent();
   const [name, setName] = useState('');
   // The first sport this athlete actually trains, not a hardcoded 'strength'.
   // A strength-disabled athlete would otherwise silently create strength
@@ -329,7 +341,7 @@ function NewWorkoutSheet({
       <View style={styles.sheet}>
         <View style={styles.sheetHead}>
           <Pressable onPress={onClose} accessibilityRole="button" hitSlop={12}>
-            <Text style={styles.link}>Cancel</Text>
+            <Text style={[styles.link, { color: accent.ink }]}>Cancel</Text>
           </Pressable>
           <Text style={styles.sheetTitle}>New workout</Text>
           <Pressable
@@ -340,7 +352,13 @@ function NewWorkoutSheet({
             hitSlop={12}
             testID="new-workout-create"
           >
-            <Text style={[styles.link, (!name.trim() || busy) && styles.linkDisabled]}>
+            <Text
+              style={[
+                styles.link,
+                { color: accent.ink },
+                (!name.trim() || busy) && styles.linkDisabled,
+              ]}
+            >
               {busy ? '…' : 'Create'}
             </Text>
           </Pressable>
@@ -414,7 +432,9 @@ function NewWorkoutSheet({
             <Text style={styles.label}>Share publicly</Text>
             <Text style={styles.muted}>Anyone can view it. You stay the only editor.</Text>
           </View>
-          <View style={[styles.switch, isPublic && styles.switchOn]}>
+          <View
+            style={[styles.switch, isPublic && [styles.switchOn, { backgroundColor: accent.accent }]]}
+          >
             <View style={[styles.knob, isPublic && styles.knobOn]} />
           </View>
         </Pressable>
@@ -440,16 +460,24 @@ export function Chip({
   onPress: () => void;
   testID?: string;
 }) {
+  const accent = useAccent();
+
   return (
     <Pressable
       onPress={onPress}
-      style={[styles.chip, active && styles.chipActive]}
+      style={[
+        styles.chip,
+        active && [
+          styles.chipActive,
+          { backgroundColor: accent.accent, borderColor: accent.accent },
+        ],
+      ]}
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
       hitSlop={{ top: 8, bottom: 8 }}
       testID={testID}
     >
-      <Text style={[styles.chipText, active && styles.chipTextActive]}>{label}</Text>
+      <Text style={[styles.chipText, active && [styles.chipTextActive, { color: accent.on }]]}>{label}</Text>
     </Pressable>
   );
 }
@@ -465,7 +493,7 @@ const styles = StyleSheet.create({
     borderColor: vola.line,
     alignItems: 'center',
   },
-  scopeTabActive: { backgroundColor: vola.lime, borderColor: vola.lime },
+  scopeTabActive: {},
   scopeText: { fontWeight: '600' },
   scopeTextActive: { color: vola.navy },
   loader: { marginTop: 32 },
@@ -487,7 +515,6 @@ const styles = StyleSheet.create({
   badge: {
     fontSize: 11,
     fontWeight: '700',
-    color: vola.lime,
     backgroundColor: vola.surfaceRaised,
     paddingHorizontal: 8,
     paddingVertical: 3,
@@ -503,7 +530,6 @@ const styles = StyleSheet.create({
     left: 16,
     right: 16,
     bottom: 16,
-    backgroundColor: vola.lime,
     borderRadius: 14,
     paddingVertical: 16,
     alignItems: 'center',
@@ -517,7 +543,7 @@ const styles = StyleSheet.create({
   sheet: { flex: 1, padding: 20, gap: 12, backgroundColor: vola.bg },
   sheetHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   sheetTitle: { fontSize: 17, fontWeight: '700' },
-  link: { fontSize: 16, color: vola.lime, fontWeight: '600' },
+  link: { fontSize: 16, fontWeight: '600' },
   linkDisabled: { opacity: 0.35 },
   input: {
     borderWidth: 1,
@@ -540,9 +566,9 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 14,
   },
-  chipActive: { backgroundColor: vola.lime, borderColor: vola.lime },
+  chipActive: {},
   chipText: { fontSize: 14, fontWeight: '600' },
-  chipTextActive: { color: vola.navy },
+  chipTextActive: {},
   toggleRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 16 },
   toggleBody: { flex: 1 },
   switch: {
@@ -553,7 +579,7 @@ const styles = StyleSheet.create({
     padding: 3,
     justifyContent: 'center',
   },
-  switchOn: { backgroundColor: vola.lime },
+  switchOn: {},
   knob: { width: 24, height: 24, borderRadius: 999, backgroundColor: vola.surface },
   knobOn: { alignSelf: 'flex-end', backgroundColor: vola.navy },
 });

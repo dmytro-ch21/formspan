@@ -4,6 +4,7 @@ import { AppState, Pressable, StyleSheet, View as RNView } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { useAccent } from '@/lib/AccentProvider';
 import { formatRest } from '@/lib/rest';
 
 export type RestState = {
@@ -123,6 +124,7 @@ export function RestTimerBar({
   onTogglePause: () => void;
   onStop: () => void;
 }) {
+  const accent = useAccent();
   const done = remaining <= 0;
   const paused = rest.pausedWith != null;
   const progress = Math.max(0, Math.min(1, remaining / rest.total));
@@ -133,7 +135,11 @@ export function RestTimerBar({
           the number at all. */}
       <RNView style={styles.track}>
         <RNView
-          style={[styles.fill, { width: `${progress * 100}%` }, done && styles.fillDone]}
+          style={[
+            styles.fill,
+            { width: `${progress * 100}%`, backgroundColor: accent.accent },
+            done && styles.fillDone,
+          ]}
         />
       </RNView>
 
@@ -186,7 +192,7 @@ export function RestTimerBar({
           accessibilityLabel={done ? 'Dismiss the rest timer' : 'Skip the rest'}
           testID="rest-skip"
         >
-          <Text style={styles.skipText}>{done ? 'Done' : 'Skip'}</Text>
+          <Text style={[styles.skipText, { color: accent.ink }]}>{done ? 'Done' : 'Skip'}</Text>
         </Pressable>
       </View>
     </View>
@@ -202,7 +208,7 @@ const styles = StyleSheet.create({
   },
   barDone: { backgroundColor: vola.surfaceRaised },
   track: { height: 3, backgroundColor: vola.line, width: '100%' },
-  fill: { height: 3, backgroundColor: vola.lime },
+  fill: { height: 3 },
   fillDone: { backgroundColor: vola.green },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingTop: 10 },
   adjust: {
@@ -229,5 +235,5 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: vola.surfaceRaised,
   },
-  skipText: { fontWeight: '700', fontSize: 14, color: vola.lime },
+  skipText: { fontWeight: '700', fontSize: 14 },
 });

@@ -5,6 +5,7 @@ import { ActivityIndicator, ScrollView, StyleSheet } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { useAccent } from '@/lib/AccentProvider';
 import { fetchExercises, pickImage, type Exercise } from '@/lib/exercises';
 import { fetchSuggestions, type Suggestion } from '@/lib/sessions';
 import { cachedExercises } from '@/lib/sessionStore';
@@ -26,6 +27,7 @@ import { useUnits } from '@/lib/useUnits';
  * apart.
  */
 export default function ExerciseDetailScreen() {
+  const accent = useAccent();
   const { id } = useLocalSearchParams<{ id: string }>();
   const getToken = useAuthToken();
   const { units } = useUnits();
@@ -136,7 +138,7 @@ export default function ExerciseDetailScreen() {
           {stats?.estimated_1rm_kg != null && (
             <View style={styles.oneRm}>
               <Text style={styles.oneRmLabel}>Estimated 1RM</Text>
-              <Text style={styles.oneRmValue}>
+              <Text style={[styles.oneRmValue, { color: accent.ink }]}>
                 {formatEstimate(stats.estimated_1rm_kg, units)}
               </Text>
               {stats.best_1rm_kg != null && (
@@ -238,7 +240,7 @@ const styles = StyleSheet.create({
     borderTopColor: vola.lineSoft,
   },
   oneRmLabel: { fontSize: 12, color: vola.textDim, textTransform: 'uppercase', letterSpacing: 0.8 },
-  oneRmValue: { fontSize: 20, fontWeight: '800', color: vola.lime },
+  oneRmValue: { fontSize: 20, fontWeight: '800' },
   oneRmBest: { fontSize: 12, color: vola.textMuted },
   when: { color: vola.textMuted, fontSize: 13, textAlign: 'center' },
   reason: { color: vola.textMuted, fontSize: 13, lineHeight: 18 },

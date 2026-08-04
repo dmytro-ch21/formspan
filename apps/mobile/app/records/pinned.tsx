@@ -4,6 +4,7 @@ import { ActivityIndicator, FlatList, Pressable, StyleSheet, TextInput } from 'r
 
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { useAccent } from '@/lib/AccentProvider';
 import { fetchExercises, type Exercise } from '@/lib/exercises';
 import { fetchPinned, setPinned } from '@/lib/records';
 import { cacheExercises, cachedExercises } from '@/lib/sessionStore';
@@ -25,6 +26,7 @@ const MAX_PINNED = 12;
  * left half-applied is a settings screen people don't trust.
  */
 export default function PinnedRecordsScreen() {
+  const accent = useAccent();
   const getToken = useAuthToken();
   const [all, setAll] = useState<Exercise[]>([]);
   const [pinned, setPinnedState] = useState<string[] | null>(null);
@@ -154,7 +156,12 @@ export default function PinnedRecordsScreen() {
                 style={styles.row}
                 testID={`pin-${item.id}`}
               >
-                <View style={[styles.tick, on && styles.tickOn]}>
+                <View
+                  style={[
+                    styles.tick,
+                    on && [styles.tickOn, { backgroundColor: accent.accent, borderColor: accent.accent }],
+                  ]}
+                >
                   {on && <Text style={styles.tickMark}>✓</Text>}
                 </View>
                 <View style={styles.rowBody}>
@@ -200,7 +207,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  tickOn: { backgroundColor: vola.lime, borderColor: vola.lime },
+  tickOn: {},
   tickMark: { color: vola.bg, fontWeight: '900', fontSize: 14 },
   rowBody: { flex: 1, gap: 1 },
   name: { fontSize: 15, fontWeight: '600' },

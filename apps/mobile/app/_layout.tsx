@@ -2,7 +2,7 @@ import { ClerkProvider, useAuth, useSignUp } from '@clerk/clerk-expo';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { clearSessionToken } from '@/lib/session';
 
-import { AccentProvider } from '@/lib/AccentProvider';
+import { AccentProvider, useAccent } from '@/lib/AccentProvider';
 import { ModulesProvider } from '@/lib/ModulesProvider';
 import { TrackEffortProvider } from '@/lib/TrackEffortProvider';
 import { setSyncIdentity, startSyncOrchestrator } from '@/lib/sync';
@@ -30,7 +30,9 @@ const volaNavTheme = {
     card: vola.surface,
     border: vola.lineSoft,
     text: vola.text,
-    primary: vola.lime,
+    // Overridden per-render in RootLayoutNav — this literal is only what a
+    // module-level object can hold, and the accent is a preference.
+    primary: vola.accent,
   },
 };
 
@@ -207,8 +209,9 @@ function RootLayoutNav() {
 // Always dark, and carrying VOLA's own ground rather than React Navigation's
 // default near-black — the app has one palette.
 function RootStack() {
+  const accent = useAccent();
   return (
-    <ThemeProvider value={volaNavTheme}>
+    <ThemeProvider value={{ ...volaNavTheme, colors: { ...volaNavTheme.colors, primary: accent.accent } }}>
       <Stack
         screenOptions={{
           // One continuous ground on pushed screens too. The default header
@@ -217,7 +220,7 @@ function RootStack() {
           // two slabs — the same separation the tab shell just lost.
           headerStyle: { backgroundColor: vola.bg },
           headerShadowVisible: false,
-          headerTintColor: vola.lime,
+          headerTintColor: accent.accent,
           headerTitleStyle: { color: vola.text },
           contentStyle: { backgroundColor: vola.bg },
         }}

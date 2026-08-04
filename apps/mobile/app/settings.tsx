@@ -7,7 +7,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, View as RNView } from 'react-
 import { Text, View } from '@/components/Themed';
 import { accents, vola, type AccentName } from '@/constants/Colors';
 import { Icon } from '@/components/ui/Icon';
-import { useAccentChoice } from '@/lib/AccentProvider';
+import { useAccent, useAccentChoice } from '@/lib/AccentProvider';
 import { useAuth as useClerkAuth } from '@clerk/clerk-expo';
 
 import { readAutoRest, writeAutoRest } from '@/lib/rest';
@@ -216,6 +216,7 @@ function Toggle({
   last?: boolean;
   testID?: string;
 }) {
+  const accent = useAccent();
   return (
     <Pressable
       style={[styles.row, !last && styles.rowDivided]}
@@ -229,7 +230,7 @@ function Toggle({
         <Text style={styles.rowLabel}>{label}</Text>
         {hint && <Text style={styles.muted}>{hint}</Text>}
       </View>
-      <View style={[styles.switch, value && styles.switchOn]}>
+      <View style={[styles.switch, value && [styles.switchOn, { backgroundColor: accent.accent }]]}>
         <View style={[styles.knob, value && styles.knobOn]} />
       </View>
     </Pressable>
@@ -330,7 +331,7 @@ const styles = StyleSheet.create({
     padding: 3,
     justifyContent: 'center',
   },
-  switchOn: { backgroundColor: vola.lime },
+  switchOn: {},
   knob: { width: 24, height: 24, borderRadius: 999, backgroundColor: vola.surface },
   knobOn: { alignSelf: 'flex-end', backgroundColor: vola.navy },
   note: { color: vola.textDim, fontSize: 12, lineHeight: 17, paddingHorizontal: 4 },

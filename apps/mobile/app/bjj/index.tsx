@@ -5,6 +5,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View as RNView } 
 import { Belt as BeltView, describeBelt } from '@/components/Belt';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { useAccent } from '@/lib/AccentProvider';
 import { describeTimeAtBelt, getStanding, nextRank, type Promotion, type Standing } from '@/lib/bjj';
 import { useModules } from '@/lib/ModulesProvider';
 import { useAuthToken } from '@/lib/useAuthToken';
@@ -18,6 +19,7 @@ import { useAuthToken } from '@/lib/useAuthToken';
  * backend's own `StandingFrom`.
  */
 export default function BjjStandingScreen() {
+  const accent = useAccent();
   const getToken = useAuthToken();
   const router = useRouter();
   // The You-screen card that links here already gates on this, but the
@@ -109,7 +111,7 @@ export default function BjjStandingScreen() {
               accessibilityRole="button"
               testID="bjj-add-promotion"
             >
-              <Text style={styles.headerAction}>Add</Text>
+              <Text style={[styles.headerAction, { color: accent.ink }]}>Add</Text>
             </Pressable>
           ),
         }}
@@ -186,7 +188,7 @@ export default function BjjStandingScreen() {
 const styles = StyleSheet.create({
   scroll: { padding: 20, gap: 4, paddingBottom: 48 },
   centre: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 8 },
-  headerAction: { color: vola.lime, fontWeight: '700', fontSize: 16 },
+  headerAction: { fontWeight: '700', fontSize: 16 },
   loading: { marginTop: 32 },
   hero: { alignItems: 'center', gap: 10, paddingVertical: 20 },
   heroTitle: { fontSize: 20, fontWeight: '800', textAlign: 'center' },

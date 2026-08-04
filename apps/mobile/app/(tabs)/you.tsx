@@ -8,6 +8,7 @@ import { RecordsCard } from '@/components/RecordsCard';
 import { TrainingSummary } from '@/components/TrainingSummary';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { useAccent } from '@/lib/AccentProvider';
 import { isNotFound } from '@/lib/apiError';
 import { getProfile, type Profile } from '@/lib/profile';
 import { UNIT_SYSTEMS } from '@/lib/units';
@@ -25,6 +26,7 @@ import { useAuthToken } from '@/lib/useAuthToken';
  * look like the same kind of action, and they aren't.
  */
 export default function YouScreen() {
+  const accent = useAccent();
   const getToken = useAuthToken();
   const router = useRouter();
 
@@ -93,7 +95,7 @@ export default function YouScreen() {
               accessibilityRole="button"
               testID="you-edit"
             >
-              <Text style={styles.action}>Edit</Text>
+              <Text style={[styles.action, { color: accent.ink }]}>Edit</Text>
             </Pressable>
             <Pressable
               onPress={() => router.push('/settings')}
@@ -101,7 +103,7 @@ export default function YouScreen() {
               accessibilityRole="button"
               testID="you-settings"
             >
-              <Text style={styles.action}>Settings</Text>
+              <Text style={[styles.action, { color: accent.ink }]}>Settings</Text>
             </Pressable>
           </View>
         }
@@ -181,7 +183,7 @@ const styles = StyleSheet.create({
   scroll: { gap: 12, paddingBottom: TAB_BAR_CLEARANCE },
   body: { paddingHorizontal: 20, gap: 10 },
   actions: { flexDirection: 'row', gap: 16 },
-  action: { color: vola.lime, fontWeight: '700', fontSize: 14 },
+  action: { fontWeight: '700', fontSize: 14 },
   name: { fontSize: 26, fontWeight: '800', marginTop: 4 },
   sectionLabel: {
     fontSize: 12,

@@ -16,6 +16,8 @@ import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { PickSessionSheet } from '@/components/ui/PickSessionSheet';
 import { vola } from '@/constants/Colors';
+import { sportColor } from '@/components/ui/sport';
+import { useAccent } from '@/lib/AccentProvider';
 import {
   addDays,
   addMonths,
@@ -73,6 +75,7 @@ export function WeekPlanner({
   userId: string | null;
   modules: Module[];
 }) {
+  const accent = useAccent();
   const [now, setNow] = useState(() => new Date());
   const [plans, setPlans] = useState<PlannedSession[]>([]);
   const [names, setNames] = useState<Record<string, string>>({});
@@ -361,7 +364,12 @@ export function WeekPlanner({
             <RNView key={key} style={[styles.day, i > 0 && styles.dayDivided]}>
               <RNView style={styles.dayHead}>
                 <RNView style={styles.dayName}>
-                  <Text style={[styles.weekday, isToday && styles.weekdayToday]}>
+                  <Text
+                    style={[
+                      styles.weekday,
+                      isToday && [styles.weekdayToday, { color: accent.ink }],
+                    ]}
+                  >
                     {d.toLocaleDateString(undefined, { weekday: 'short' }).toUpperCase()}
                   </Text>
                   <Text style={[styles.date, isPast && styles.dimmed]}>
@@ -381,7 +389,7 @@ export function WeekPlanner({
                     })}`}
                     testID={`plan-add-${key}`}
                   >
-                    <Text style={styles.add}>+ Add</Text>
+                    <Text style={[styles.add, { color: accent.ink }]}>+ Add</Text>
                   </Pressable>
                 )}
               </RNView>
@@ -402,9 +410,19 @@ export function WeekPlanner({
                     }, planned. Long press to remove.`}
                     testID={`plan-entry-${p.id}`}
                   >
-                    <RNView style={styles.entryRule} />
+                    <RNView
+                      style={[
+                        styles.entryRule,
+                        { backgroundColor: sportColor(p.sport) ?? accent.accent },
+                      ]}
+                    />
                     <RNView style={styles.entryMain}>
-                      <Text style={styles.entrySport}>
+                      <Text
+                        style={[
+                          styles.entrySport,
+                          { color: sportColor(p.sport) ?? vola.textDim },
+                        ]}
+                      >
                         {labelFor(modules, p.sport).toUpperCase()}
                       </Text>
                       <Text style={styles.entryTitle} numberOfLines={1}>
@@ -622,10 +640,10 @@ const styles = StyleSheet.create({
   dayHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   dayName: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
   weekday: { fontSize: 11, fontWeight: '700', letterSpacing: 1, color: vola.textDim },
-  weekdayToday: { color: vola.lime },
+  weekdayToday: {},
   date: { fontSize: 15, fontWeight: '700', fontVariant: ['tabular-nums'] },
   dimmed: { color: vola.textDim, opacity: 0.55 },
-  add: { fontSize: 13, fontWeight: '700', color: vola.lime },
+  add: { fontSize: 13, fontWeight: '700' },
   rest: { fontSize: 13, color: vola.textDim },
 
   entry: {
@@ -639,7 +657,9 @@ const styles = StyleSheet.create({
   },
   entryPressed: { backgroundColor: vola.surfaceHover },
   // Lime, unlike the session cards' green: this is an intention, not a result.
-  entryRule: { width: 3, alignSelf: 'stretch', backgroundColor: vola.lime },
+  // The discipline's colour, matching the session rows on Today — set at the
+  // call site because it varies per entry.
+  entryRule: { width: 3, alignSelf: 'stretch' },
   entryMain: { flex: 1, paddingVertical: 9, paddingLeft: 8, gap: 1 },
   entrySport: { fontSize: 9, fontWeight: '700', letterSpacing: 0.9, color: vola.textDim },
   entryTitle: { fontSize: 14, fontWeight: '700' },

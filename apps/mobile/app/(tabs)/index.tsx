@@ -503,7 +503,11 @@ export default function TodayScreen() {
             urgent thing look exactly like the four finished ones. */}
         {active ? (
           <Pressable
-            style={[styles.resumeCard, activeIsStale && styles.resumeCardStale]}
+            style={[
+              styles.resumeCard,
+              { borderColor: accent.accent },
+              activeIsStale && styles.resumeCardStale,
+            ]}
             onPress={() => router.push(sessionHref(active, modules))}
             accessibilityRole="button"
             // Deliberately excludes the ticking time. A 1 Hz live region would
@@ -521,7 +525,13 @@ export default function TodayScreen() {
             }
             testID="resume-session"
           >
-            <Text style={[styles.resumeEyebrow, activeIsStale && styles.resumeEyebrowStale]}>
+            <Text
+              style={[
+                styles.resumeEyebrow,
+                { color: accent.ink },
+                activeIsStale && styles.resumeEyebrowStale,
+              ]}
+            >
               {activeIsStale ? 'UNFINISHED' : 'IN PROGRESS'}
             </Text>
             <Text style={styles.resumeTitle}>{active.name || active.sport}</Text>
@@ -775,7 +785,7 @@ export default function TodayScreen() {
               accessibilityState={{ busy: syncing, disabled: syncing }}
               testID="retry-sync"
             >
-              {syncing ? <ActivityIndicator /> : <Text style={styles.retryText}>Retry</Text>}
+              {syncing ? <ActivityIndicator /> : <Text style={[styles.retryText, { color: accent.ink }]}>Retry</Text>}
             </Pressable>
           </View>
         )}
@@ -827,14 +837,13 @@ const styles = StyleSheet.create({
     backgroundColor: vola.surfaceRaised,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: vola.lime,
     padding: 18,
     gap: 4,
   },
   // Stale sessions drop the lime entirely: lime is this app's "act on this
   // now", and a workout from last Tuesday is not that.
   resumeCardStale: { borderColor: vola.line, backgroundColor: vola.surface },
-  resumeEyebrow: { color: vola.lime, fontSize: 11, letterSpacing: 1.2, fontWeight: '700' },
+  resumeEyebrow: { fontSize: 11, letterSpacing: 1.2, fontWeight: '700' },
   resumeEyebrowStale: { color: vola.warn },
   resumeActionStale: { backgroundColor: 'transparent', borderWidth: 1, borderColor: vola.line },
   resumeActionTextStale: { color: vola.text },
@@ -845,12 +854,11 @@ const styles = StyleSheet.create({
   chip: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   resumeAction: {
     marginTop: 12,
-    backgroundColor: vola.lime,
     borderRadius: 10,
     paddingVertical: 13,
     alignItems: 'center',
   },
-  resumeActionText: { color: vola.navy, fontWeight: '700', fontSize: 16 },
+  resumeActionText: { fontWeight: '700', fontSize: 16 },
 
   startBlock: { gap: 8 },
 
@@ -926,7 +934,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   pendingText: { color: vola.warn, fontSize: 13 },
-  retryText: { color: vola.lime, fontWeight: '600', fontSize: 14 },
+  retryText: { fontWeight: '600', fontSize: 14 },
   syncError: { color: vola.danger, fontSize: 13, marginTop: -8 },
 
   errorText: { color: vola.danger, fontSize: 13 },
