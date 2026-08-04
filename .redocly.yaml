@@ -2,6 +2,19 @@ apis:
   public:
     root: contracts/public.openapi.yaml
 
+# WITHOUT `extends`, a root-level `rules:` block REPLACES redocly's default
+# ruleset instead of amending it — so this file ran ZERO rules and printed
+# "Woohoo! Your API description is valid." no matter what the spec said. It was
+# dead long enough for four `$ref`s to a response that has never existed
+# (`InvalidInput`; the response is called `BadRequest`) to sit in the contract
+# unnoticed, and for two new schemas to land in `components.parameters` where
+# nothing could resolve them.
+#
+# Exactly the failure mode CLAUDE.md already records for `fmt:api`: a check
+# that cannot fail is worse than no check, because it is counted as passing.
+extends:
+  - recommended
+
 rules:
   # Internal API, not published under an open license.
   info-license: off

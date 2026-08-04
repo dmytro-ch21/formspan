@@ -139,3 +139,36 @@ func writeSessionError(w http.ResponseWriter, r *http.Request, err error) {
 		apihttp.WriteInternal(w, r, "bjj", err)
 	}
 }
+
+// ProficiencyHandler serves the technique funnel, read across every session.
+//
+// Its own handler rather than a method on SessionHandler because it takes a
+// different repository interface: this is a cross-session aggregate, not an
+// operation on one session, and keeping the interfaces narrow is what lets
+// each be faked in a test without stubbing the other.
+type ProficiencyHandler struct {
+	repo ProficiencyRepository
+}
+
+func NewProficiencyHandler(repo ProficiencyRepository) *ProficiencyHandler {
+	return &ProficiencyHandler{repo: repo}
+}
+
+// List is self-scoped (RequireAuth): the caller's own evidence, never anyone
+// else's. There is no path parameter to scope it by and deliberately so —
+// this data is one athlete's training record.
+func (h *ProficiencyHandler) List(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.ClaimsFromContext(r.Context())
+
+	rows, err := h.repo.ListProficiency(r.Context(), claims.UserID)
+	if err != nil {
+		apihttp.WriteInternal(w, r, "bjj", err)
+		return
+	}
+	apihttp.WriteJSON(w, http.StatusOK, map[string]any{
+		"techniques": rows,
+		// Folded from the same rows the client is being shown, so the headline
+		// numbers cannot disagree with the list under them.
+		"summary": SummariseProficiency(rows),
+	})
+}

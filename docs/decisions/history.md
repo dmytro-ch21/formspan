@@ -6437,6 +6437,216 @@ it is the honest place for them.
   regression here, but the layout and VoiceOver behaviour are unconfirmed.
 
 
+## 2026-08-03 — Reading the funnel back
+
+`GET /v1/bjj/proficiency` and `/dashboard/proficiency`. The other half of the
+capture PR that landed earlier today: the evidence stream now has a reader.
+
+Web, per the platform rule — this is review and analysis, done sitting down.
+The phone captures the evidence mid-reflection and nothing here belongs on it.
+
+### Not a score, and that is the design
+
+`docs/decisions/bjj-tracking-design.md` rules out asking anyone to rate their
+triangle 1–5: people are bad at it, it goes stale, and it produces a number
+with no provenance. So the endpoint returns facts — drilled twelve times, went
+for it three times, landed twice, across five sessions — and the page shows
+them. Every judgement it invites is one the reader can see the basis for.
+
+The **drop-off leads**, not the totals. "You have drilled 34 techniques and
+taken 6 of them into a live round" is something to act on this week; "210 reps"
+is a statistic. The page is ordered funnel-first, list-second for that reason
+alone, and the summary counts TECHNIQUES rather than reps.
+
+A hit rate appears only past five live tries. One landed out of one is not a
+100% hit rate, and rendering it as one invites a conclusion the data cannot
+carry — the same honesty the rest of the screen is built on, applied to the
+one number that would otherwise flatter.
+
+### The double-count convention, now enforced
+
+The capture PR recorded a trap rather than fixing it: tapping "Landed" on the
+armbar row *and* "Submissions / Hit" in the live grid, for one armbar, writes
+two `scored` rows — one technique-tagged, one not. Both screens render them
+correctly and separately, so nothing looks wrong anywhere.
+
+This endpoint is where that had to be decided, and the rule is: **a
+technique-tagged row is the specific record, an untagged row is the catch-all**,
+so per-technique reads take the former and only the former. It is enforced by
+one clause (`AND t.technique_id IS NOT NULL`) and pinned by a test that seeds
+an untagged `scored: 5` alongside the tagged rows and asserts it is nowhere in
+the technique's number. Deleting the clause turns that test red.
+
+### The summary is folded, not queried
+
+`SummariseProficiency` is a pure function over the rows the client is being
+shown, not a second aggregate with its own `WHERE`. Two reasons: it cannot
+drift from the list underneath it, and it is testable without a database. The
+failure it forecloses is specific — once a cap binds, a separate `COUNT(*)`
+reports a total the visible list contradicts.
+
+### Ordering, and one guard that cannot be tested
+
+`ORDER BY SUM(t.count) DESC, t.technique_id` — most evidence first, because
+that is where a conclusion is safest, with the id making the order total.
+
+**Deleting the tiebreak does not turn any test red**, and the test says so
+rather than implying coverage. The first version of this entry also gave the
+*wrong reason* — it claimed a HashAggregate. `EXPLAIN` at two scales says
+otherwise:
+
+	Limit -> Sort(sum DESC, technique_id) -> GroupAggregate -> Sort(technique_id, ...)
+
+`COUNT(DISTINCT t.session_id)` forces that inner sort, and it leads with
+`technique_id`, so the aggregate hands the outer sort an already-ordered stream
+and Postgres preserves it for equal keys. Getting this right matters because it
+names the real fragility, which the wrong explanation hid: **the tiebreak is
+redundant only while `COUNT(DISTINCT session_id)` keeps the aggregate sorted.**
+Drop that column and the planner picks a HashAggregate, whose group output is
+bucket order — measured on 466 tied techniques, 459 of 466 positions moved.
+So the guard is load-bearing *and* currently invisible, which is the worst
+combination to leave undocumented.
+
+`LIMIT 500` for the same reason every list has one now, and it **cannot bind**
+today — but the first version of this entry was wrong about why, too. It said
+"only a client inventing ids could reach it"; a client cannot invent ids at
+all, because `technique_id` has an FK and an unknown one is rejected as invalid
+input. The row count is capped by the library, at 466. The only way it ever
+binds is **the library growing past 500**, at which point the funnel truncates
+silently and the summary — folded from the truncated rows — under-reports in
+step. That is now pinned by a test asserting the catalog stays under the cap,
+which is the version of this guard that can actually fail.
+
+### Nav gating stays capability-based
+
+`catalog === "techniques"`, not `key === "bjj"` — the check this codebase has
+deliberately avoided everywhere else. Mild over-inclusion accepted and recorded:
+the evidence stream is `bjj_session_tags`, so a future discipline with a
+technique catalog (judo, wrestling) would surface the link and find it empty.
+That is the right failure — an analytical screen with an honest empty state.
+
+### The two defects only rendering could catch, caught by reading the CSS
+
+**`bg-lime-rule` is not a class.** `@theme` maps `--color-lime`, `--color-lime-ink`
+and the rest; it never maps `--color-lime-rule`, which exists only as a raw var
+that `.accent-rule` consumes. So the funnel bars — the one element carrying the
+drop-off visually — emitted no background rule and rendered transparent. Three
+invisible bars on the section the page is built around.
+
+The fix was not to add the token. `--c-lime-rule` is `#b8ff2c` in *both* modes,
+which is 1.21:1 on a light card; globals.css says as much. `--c-lime` is
+theme-stepped (3.27:1 light, 15.12:1 dark) and is the right one.
+
+**The bar widths resolved against the wrong box.** A percentage width on a flex
+item resolves against the flex *container's* content box, not the track left
+after the label and the number. The bar was the only shrinkable item, so it
+absorbed the overflow — and by construction the longest bar always requested
+exactly 100%, so it was always the one clamped while shorter bars sat at their
+true percentage. Net effect: the drop-off was drawn consistently shallower than
+it is, on the screen whose entire purpose is showing that drop-off. Fixed by
+giving the fill its own `flex-1` track. The denominator now spans all three
+stages too, since `tried_live` can exceed `drilled` (they are counted
+independently) and would otherwise ask for >100% and clamp two different
+numbers to identical bars.
+
+Both were found by reading the branch's own compiled stylesheet, not by looking
+at the page — which is the part worth remembering. **No unit test would ever
+catch a Tailwind class that does not exist**, and the functional scenarios
+written for this feature are all behavioural. The page still has not been
+rendered.
+
+### A bucket that was reachable and had nowhere to go
+
+`bucketOf` returned `null` for a technique with no drilled, attempted or scored
+evidence — which the endpoint can absolutely return, because its only filter is
+`technique_id IS NOT NULL` and a `conceded`-only row passes it. That row counted
+toward "Everything" and toward no sub-bucket, so the chip counts silently failed
+to sum, and it rendered as a line of dashes that reads like a data bug. It is
+now its own bucket ("Used on you"), which also gives `conceded` its first
+display surface anywhere in the product.
+
+### The OpenAPI gate had been dead for months
+
+The two new schemas landed in `components.parameters` rather than
+`components.schemas` — an insertion anchored one section too low — so the
+endpoint's documented 200 body pointed at nothing. `pnpm run lint:openapi`
+reported "Woohoo! Your API description is valid."
+
+It always did. `.redocly.yaml` declared a root-level `rules:` block with **no
+`extends:`**, and that *replaces* redocly's default ruleset rather than amending
+it. The gate ran zero rules. Long enough that four `$ref`s to
+`#/components/responses/InvalidInput` — a response that has never existed, it
+is called `BadRequest` — and one `security: [{ bearerAuth: [] }]` naming a
+scheme that is actually `ClerkBearerAuth` were sitting in the contract
+unnoticed.
+
+This is precisely the shape `CLAUDE.md` already records for `fmt:api`: a check
+that cannot fail is worse than no check, because it is counted as having
+passed. `extends: [recommended]` is back, the five pre-existing breakages are
+fixed, two flow-style descriptions containing commas (which YAML parsed as
+extra properties — one of them mine) are quoted, and the gate is now verified
+to go red on a dangling `$ref` rather than assumed to.
+
+### Three guards that were invisible, and one number that could stick a 500
+
+Review found seven surviving mutations where I had expected two. Three were
+cheap to close and are now asserted: `MAX(started_at)` could be `MIN` (both
+fixture sessions were stamped `time.Now()` microseconds apart, so the fixture
+needed fixing before the assertion could exist), the whole `conceded` pivot
+could be `0`, and `position`/`category` could be swapped in the SELECT list —
+the standing hazard of a ten-column positional `Scan`, and both fields are
+`required` in the contract.
+
+Separately, `Tag.Count` had a lower bound and no upper one. `SUM(count)` is a
+bigint that this query narrows with `::int`, so two rows near `MaxInt32` on one
+technique make the endpoint fail with "integer out of range" — durable data, so
+it stays broken for that athlete until the sessions are deleted. Now capped at
+1000, which constrains only nonsense.
+
+### And then CI found the one thing four reviewers could not
+
+The integration tests used real catalog ids (`americana-mount`, `aoki-lock`)
+and passed locally while failing in CI on a foreign-key violation. The reason
+is embarrassing and worth recording: I had run `cmd/seed` against my local
+`vola_test` earlier in the session, by hand, for unrelated reasons. **CI only
+runs `cmd/migrate up`.** So the tests were depending on ambient database state
+that had nothing to do with what they were asserting, and the local green was
+an artifact of my own shell history.
+
+Every fixture now seeds the technique rows it needs. And the guard on the
+library size stopped querying the database at all — it reads the *embedded*
+catalog via `technique.SeedData()`, so it runs everywhere instead of skipping
+in precisely the environment it most needed to run in. That first version was a
+silently-skipping test, which is the failure `CLAUDE.md` already records about
+`TEST_DATABASE_URL` reproduced inside a single test.
+
+Verified the fix the only way that means anything: created a fresh database,
+ran `migrate up` and *not* `seed`, confirmed `count(*) FROM techniques` is 0,
+and ran the whole backend suite against it green.
+
+### Gaps this leaves
+
+- **`conceded` has a bucket but still no column.** The "Used on you" filter
+  surfaces those rows; the table has no count for them. The defensive funnel —
+  "which submission keeps catching me" — is the obvious next feature, and both
+  the API and the bucket now exist for it.
+- **No web test suite exists at all.** `bucketOf`, the chip-count fold and the
+  hit-rate withholding rule are pure functions over plain data, each encoding a
+  load-bearing property, and nothing can assert any of them. Lifting them into
+  `src/lib/` would make them testable without a renderer. Named here because
+  the mobile suite exists precisely for this shape of logic and web has no
+  equivalent.
+- **No position or category rollup.** The design doc's position heatmap is a
+  different read over the same rows and is not this PR.
+- **No time axis.** Everything is all-time. "Improving" is not answerable from
+  this screen, only "how much evidence exists", and that gap is the reason
+  `sessions` and `last_seen` are in the payload.
+- **The page is unverified against a signed-in session.** It builds, the route
+  registers, and the endpoint returns 401 unauthenticated as designed — but
+  rendering it with real rows needs credentials, which is not something to
+  automate. Worth a look before it is trusted.
+
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
