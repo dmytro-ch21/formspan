@@ -172,6 +172,29 @@ export default function BjjSessionScreen() {
     }
   }
 
+  // ABOVE the early returns below, and it has to stay there.
+  //
+  // This was the only hook after them, so the first render (loading) called one
+  // fewer hook than every render after it — "Rendered more hooks than during the
+  // previous render", a black screen on every BJJ session opened from Today.
+  // The rule is positional: React matches hooks by call order, so a hook after a
+  // conditional return is a hook that sometimes does not run.
+  //
+  // Every technique with evidence, drilled or not — the same union the wizard's
+  // live step takes, and for the same reason. Keyed off the drilled list alone,
+  // a technique tried live but not drilled today showed NOWHERE: saved, synced,
+  // and invisible. Reachable without a focus list even existing — remove a
+  // drilled chip and its attempted/scored rows deliberately survive.
+  const techniqueRows = useMemo(() => {
+    const ids: string[] = [];
+    for (const t of detail?.tags ?? []) {
+      if (!t.technique_id) continue;
+      if (t.event === 'conceded') continue;
+      if (!ids.includes(t.technique_id)) ids.push(t.technique_id);
+    }
+    return ids;
+  }, [detail?.tags]);
+
   if (loading) {
     return (
       <View style={styles.centre}>
@@ -198,20 +221,6 @@ export default function BjjSessionScreen() {
   const kindLabel = detail ? (KINDS.find((k) => k.key === detail.kind)?.label ?? detail.kind) : '';
 
   const drilled = (detail?.tags ?? []).filter((t) => t.event === 'drilled');
-  // Every technique with evidence, drilled or not — the same union the wizard's
-  // live step takes, and for the same reason. Keyed off the drilled list alone,
-  // a technique tried live but not drilled today showed NOWHERE: saved, synced,
-  // and invisible. Reachable without a focus list even existing — remove a
-  // drilled chip and its attempted/scored rows deliberately survive.
-  const techniqueRows = useMemo(() => {
-    const ids: string[] = [];
-    for (const t of detail?.tags ?? []) {
-      if (!t.technique_id) continue;
-      if (t.event === 'conceded') continue;
-      if (!ids.includes(t.technique_id)) ids.push(t.technique_id);
-    }
-    return ids;
-  }, [detail?.tags]) as string[];
   // `scored` here is untagged only, mirroring the wizard's tagCount. The
   // category grid is fed by the wizard's live step, which writes untagged
   // rows; counting the drilled step's per-technique outcomes as well would
