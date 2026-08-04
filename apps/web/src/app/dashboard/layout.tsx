@@ -11,6 +11,7 @@ import { listModules, type Module } from "@/lib/modules";
 import { ModulesProvider } from "@/lib/ModulesProvider";
 import { DashboardNav } from "./DashboardNav";
 import { ThemeToggle } from "../ThemeToggle";
+import { VolaLockup } from "../Brand";
 
 /**
  * The dark shell. A fixed rail rather than a top bar: the destinations are
@@ -45,12 +46,13 @@ export default async function DashboardLayout({
         <aside className="sticky top-0 flex h-screen w-60 shrink-0 flex-col border-r border-line-soft bg-surface">
           <Link
             href="/dashboard"
-            className="flex items-center gap-2.5 px-5 py-6"
+            className="flex justify-center px-5 py-6"
+            aria-label="VOLA, dashboard"
           >
-            <Mark />
-            <span className="font-display text-xl font-bold tracking-wide">
-              VOLA
-            </span>
+            {/* The wordmark takes `currentColor`, so it is white on the dark
+                theme and near-black on the light one without this file knowing
+                which is active. */}
+            <VolaLockup width={92} />
           </Link>
 
           <DashboardNav />
@@ -74,36 +76,5 @@ export default async function DashboardLayout({
         </main>
       </div>
     </ModulesProvider>
-  );
-}
-
-/** The VOLA check, inlined so the rail renders without a network request. */
-function Mark() {
-  return (
-    <svg width="26" height="26" viewBox="0 0 1024 1024" aria-hidden="true">
-      <defs>
-        <linearGradient
-          id="vola-rail-mark"
-          x1="120"
-          y1="360"
-          x2="410"
-          y2="100"
-          gradientUnits="userSpaceOnUse"
-        >
-          <stop stopColor="#42F58D" />
-          <stop offset="1" stopColor="#B8FF2C" />
-        </linearGradient>
-      </defs>
-      <g transform="translate(190 180) scale(1.25)">
-        <path
-          d="M120 270 L220 365 L405 135"
-          stroke="url(#vola-rail-mark)"
-          strokeWidth="58"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          fill="none"
-        />
-      </g>
-    </svg>
   );
 }
