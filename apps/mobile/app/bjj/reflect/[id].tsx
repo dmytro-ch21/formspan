@@ -353,6 +353,19 @@ function DrilledStep({
         </Text>
       )}
 
+      {/*
+        A query that matches nothing rendered a blank space, indistinguishable
+        from an empty box — and this is the screen where that reads as "the
+        technique isn't in the library", which is how a lookup bug became a
+        plan to author a duplicate. Say it outright instead.
+      */}
+      {!failed && query.trim().length > 0 && results.length === 0 && (
+        <Text style={styles.muted} testID="bjj-drilled-empty">
+          No technique matches “{query.trim()}”. Try a shorter search or another spelling — or skip
+          this step, everything else still saves.
+        </Text>
+      )}
+
       {results.map((t) => {
         const [code, accent] = categoryBadge(t.category);
         return (

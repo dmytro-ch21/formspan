@@ -7160,6 +7160,41 @@ block), so "ã" becomes "a" + a mark that is then dropped. Applied to both the
 query and the haystack, so a Portuguese keyboard is not the thing that breaks
 instead.
 
+### The larger half, which review found and the first cut missed
+
+Diacritics were 3 of the 26 non-ASCII characters in the searchable fields. The
+other 23 are **U+2013 EN DASH**, which NFD does not decompose — and they sit in
+**16 technique names**:
+
+	"north-south pass"          -> nothing
+	"crossface-underhook"       -> nothing
+	"north–south pass"          -> found, with the dash pasted in
+
+Same defect, eight times the blast radius, and not a misspelling: the two
+characters render nearly identically and only one is on a keyboard. The
+catalog already disagrees with itself about it — `positions.json` spells the
+position `"North-South"` with a plain hyphen (and carries the alias
+`"north south"`) while every technique name in that position uses the en dash,
+so the chip and the names disagree on screen.
+
+So the fold also maps every dash — U+2010–U+2015, U+2212, and the ASCII hyphen
+— **to a space**, not to a hyphen. Folding to a hyphen closes the 16; folding
+to a space also makes "north south", "kesa gatame" and "crossface underhook"
+work, because nobody reaches for a hyphen when searching. Measured over every
+name and alias in the catalog, folding to a space finds everything folding to a
+hyphen finds, plus six more query forms, and loses nothing:
+
+	                       ->hyphen   ->space
+	  "north south"              0        13
+	  "north south choke"        0         1
+	  "crossface underhook"      0         1
+	  "kesa gatame"              7         8
+
+The first cut of this PR shipped the accent fix and a "Gaps" note saying the
+blast radius was small because only 2 entries carried diacritics — true, and
+90% of the hazard was still open. The reviewer inventoried the actual code
+points rather than trusting the claim.
+
 `String.prototype.normalize` is not universal on Hermes, so it was verified in
 the binary that actually ships in the app rather than assumed from jest, which
 runs on Node: the framework carries the NFKC/NFKD form names and the "Invalid
@@ -7171,6 +7206,15 @@ Search runs per keystroke over 466 entries × name + aliases + position — arou
 immutable and module-cached, so the map invalidates itself when a refetch makes
 new ones. Fields are joined with a separator so a query cannot match across the
 seam between a name and a position.
+
+### The screen that made a lookup failure look like missing content
+
+The reflection wizard's technique picker had no empty state — a query matching
+nothing rendered blank space, indistinguishable from an unfilled box. That is
+the exact surface where an athlete is trying to attach a technique to a session
+they just trained, so a blank result reads as "not in the library" rather than
+"not found". It now says which query found nothing. The Library tab already did
+this correctly; reflect did not.
 
 ### Duplicated, deliberately
 
@@ -7185,15 +7229,27 @@ saying so.
   actually written — finds nothing, because folding is not fuzzy matching.
   The honest fix is an alias, not a distance metric: aliases already exist for
   exactly this and are how "scarf hold" finds "Kesa-Gatame".
-- **Only 2 of 466 entries carry diacritics** today (this one and Rear Naked
-  Choke's "Mata leão" aliases), so the blast radius was small — but the test
-  derives its cases from the catalog rather than hardcoding them, so a future
-  import that adds accented names is covered without anyone remembering.
+- **The web copy has no test and nothing enforces it matches mobile's.**
+  `apps/web` has no test runner at all and `verify` runs `test:mobile` only, so
+  the only guard against the two copies drifting is a comment in each saying
+  "change one, change the other". Deliberate for now — a cross-app import from
+  a jest-expo suite into a `"use client"` Next module is uglier than the risk,
+  and the position vocabulary is already duplicated four ways on the same
+  terms — but it is the weak point of this shape, and it is where the next bug
+  of this kind will live.
+- **The exercise catalog's search still folds nothing.** Both library screens
+  compute `query.trim().toLowerCase()` for exercises and hand the raw query to
+  `searchTechniques`, so one input box now has two matching rules. No live
+  defect: 0 of 504 exercise names contain a non-ASCII character. It becomes one
+  the first time a seeded exercise does, and the backend's own exercise search
+  presumably folds nothing either.
 - **Not verified on a device.** The unit tests run against the real shipped
   `techniques.json`, and the Hermes check was made against the installed
   binary, but nobody has typed "sao paulo" into the app.
-- **Nothing else that searches was audited.** The exercise catalog has its own
-  search, and if any of its 504 entries carry accents it has the same bug.
+- **`positions.json` and the technique names still disagree** about how
+  "North-South" is punctuated. Folding makes that invisible to search, which
+  is the point, but the underlying data is still inconsistent and anything that
+  joins on the literal string — a future import, a report — will trip on it.
 
 
 ## Open items / known gaps as of this entry

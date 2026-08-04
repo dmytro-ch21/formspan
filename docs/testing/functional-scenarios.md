@@ -2973,6 +2973,16 @@ this is API-surface behaviour even though no endpoint changed.
   way to add the technique, which would have minted a duplicate id.
 - **And by its accented spelling**, so a Portuguese keyboard is not the thing
   that breaks instead. Fold both the query and the haystack.
+- **The same for dashes, which is the bigger half.** All three of "north-south
+  pass", "north–south pass" and "north south pass" must find the same thing.
+  The catalog spells 16 names with U+2013, the keyboard offers the hyphen, and
+  people type neither — so every dash folds to a space. The position chip for
+  those techniques says "North-South" with a plain hyphen while the names use
+  the en dash, so the screen contradicts itself before search even runs.
+- **Position is searchable, not just name and aliases.** 37 half-guard
+  techniques are named nothing like "half guard" and are reachable only by
+  typing the position — assert on those specifically, or the case passes on
+  name matches and proves nothing.
 - Derive the cases from the catalog rather than hardcoding them — assert that
   *every* entry whose name carries a combining mark is findable by its folded
   form, so a future import is covered without anyone remembering.
@@ -2984,3 +2994,7 @@ this is API-surface behaviour even though no endpoint changed.
   and a stale or mis-keyed cache shows up as one query answering differently.
 - Misspellings are **out of scope**: "sao paolo" finds nothing, and the fix for
   that is an alias, not fuzzy matching.
+- **A search that finds nothing says so.** The reflection wizard's picker
+  rendered blank space on zero results, which on that screen reads as "the
+  technique isn't in the library" — the misreading that started three PRs of
+  work. Assert the empty state names the query that failed.

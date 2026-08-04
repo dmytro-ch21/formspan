@@ -118,6 +118,9 @@ export async function fetchTechniques(
   summaryCache = (body.techniques ?? []).map((t) => ({
     ...t,
     aliases: t.aliases ?? [],
+    // haystack() folds position on every entry now, where the old three-way
+    // filter short-circuited on a name match and often never read it.
+    position: t.position ?? '',
     position_detail: t.position_detail ?? '',
     typical_belt: t.typical_belt ?? '',
     ibjjf_ruleset_id: t.ibjjf_ruleset_id ?? '',
@@ -220,9 +223,31 @@ export async function fetchRulesets(
  * carries the NFKC/NFKD form names and the "Invalid normalization form" error
  * beside its other String.prototype errors), so this is safe on device, not
  * only in jest's Node.
+ *
+ * Dashes fold the same way and for the same reason, and they are the LARGER
+ * half of this bug: 16 technique names are spelled with U+2013 EN DASH
+ * ("North–South Pass"), which NFD does not decompose. Typing the hyphen
+ * that is actually on the keyboard is not a misspelling — the two
+ * characters render nearly identically — so "north-south pass" finding
+ * nothing is the São Paulo failure again with eight times the blast
+ * radius. The app's own vocabulary disagrees with itself here: positions.json
+ * spells the position "North-South" with a plain hyphen while every technique
+ * name in it uses the en dash.
+ *
+ * Every dash folds to a SPACE rather than to a hyphen, which also makes
+ * "north south" and "kesa gatame" work — nobody reaches for a hyphen when
+ * searching. Measured over every name and alias in the catalog: folding to a
+ * space finds everything folding to a hyphen finds, plus six more query forms,
+ * and loses nothing.
  */
 export function foldForSearch(value: string): string {
-  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[-\u2010-\u2015\u2212]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .toLowerCase()
+    .trim();
 }
 
 /**
