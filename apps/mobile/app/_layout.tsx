@@ -2,6 +2,7 @@ import { ClerkProvider, useAuth, useSignUp } from '@clerk/clerk-expo';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { clearSessionToken } from '@/lib/session';
 
+import { AccentProvider, useAccent } from '@/lib/AccentProvider';
 import { ModulesProvider } from '@/lib/ModulesProvider';
 import { TrackEffortProvider } from '@/lib/TrackEffortProvider';
 import { setSyncIdentity, startSyncOrchestrator } from '@/lib/sync';
@@ -29,7 +30,9 @@ const volaNavTheme = {
     card: vola.surface,
     border: vola.lineSoft,
     text: vola.text,
-    primary: vola.lime,
+    // Overridden per-render in RootLayoutNav — this literal is only what a
+    // module-level object can hold, and the accent is a preference.
+    primary: vola.accent,
   },
 };
 
@@ -85,11 +88,16 @@ export default function RootLayout() {
       {/* Inside ClerkProvider because it keys on userId, and above the
           navigator because the tab bar is built from it. */}
       <ModulesProvider>
-        <UnitsProvider>
-          <TrackEffortProvider>
-            <RootLayoutNav />
-          </TrackEffortProvider>
-        </UnitsProvider>
+        {/* Above the navigator for the same reason ModulesProvider is: the tab
+            bar takes its colour from here, so a value that lands one render
+            late means the app comes up green and changes. */}
+        <AccentProvider>
+          <UnitsProvider>
+            <TrackEffortProvider>
+              <RootLayoutNav />
+            </TrackEffortProvider>
+          </UnitsProvider>
+        </AccentProvider>
       </ModulesProvider>
     </ClerkProvider>
   );
@@ -201,8 +209,9 @@ function RootLayoutNav() {
 // Always dark, and carrying VOLA's own ground rather than React Navigation's
 // default near-black — the app has one palette.
 function RootStack() {
+  const accent = useAccent();
   return (
-    <ThemeProvider value={volaNavTheme}>
+    <ThemeProvider value={{ ...volaNavTheme, colors: { ...volaNavTheme.colors, primary: accent.accent } }}>
       <Stack
         screenOptions={{
           // One continuous ground on pushed screens too. The default header
@@ -211,7 +220,7 @@ function RootStack() {
           // two slabs — the same separation the tab shell just lost.
           headerStyle: { backgroundColor: vola.bg },
           headerShadowVisible: false,
-          headerTintColor: vola.lime,
+          headerTintColor: accent.accent,
           headerTitleStyle: { color: vola.text },
           contentStyle: { backgroundColor: vola.bg },
         }}

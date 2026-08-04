@@ -16,9 +16,11 @@
  * first place.
  *
  * This is a stopgap. The real fix is generating both files from
- * `assets/brand/logos/source/`, which would also cover `apps/mobile`'s copy of
- * the lockup ratios — a React package cannot reach that one, since the app
- * deliberately has no `react-native-svg`.
+ * `assets/brand/logos/source/`, the way `scripts/generate_icons.mjs` now
+ * generates the mobile icon set from `assets/brand/icons/`. Note the old
+ * reason that could not cover `apps/mobile` — "the app deliberately has no
+ * react-native-svg" — no longer holds: it turned out to ship inside Expo Go,
+ * so the mobile app renders real SVG now and a generator can reach it too.
  */
 import { readFileSync } from "node:fs";
 

@@ -5,6 +5,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet } from 'react-nati
 
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { useAccent } from '@/lib/AccentProvider';
 import { blockedRows, retryBlockedRow, type BlockedRow } from '@/lib/sessionStore';
 import { syncNow, useSyncState } from '@/lib/sync';
 import { useAuthToken } from '@/lib/useAuthToken';
@@ -31,6 +32,7 @@ import { useAuthToken } from '@/lib/useAuthToken';
  * screen people reach when they are already worried about their training.
  */
 export default function SyncScreen() {
+  const accent = useAccent();
   const { userId } = useAuth();
   const getToken = useAuthToken();
   const state = useSyncState();
@@ -131,7 +133,7 @@ export default function SyncScreen() {
                   accessibilityLabel={`Retry ${row.name}`}
                   testID={`retry-${row.id}`}
                 >
-                  <Text style={styles.retryText}>
+                  <Text style={[styles.retryText, { color: accent.ink }]}>
                     {busy === row.id ? 'Trying…' : 'Try again'}
                   </Text>
                 </Pressable>
@@ -168,5 +170,5 @@ const styles = StyleSheet.create({
   rowKind: { fontSize: 12, color: vola.textMuted, textTransform: 'capitalize' },
   rowError: { fontSize: 13, color: vola.danger, lineHeight: 18 },
   retry: { paddingVertical: 8 },
-  retryText: { fontSize: 14, fontWeight: '600', color: vola.lime },
+  retryText: { fontSize: 14, fontWeight: '600' },
 });

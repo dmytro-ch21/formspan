@@ -6,6 +6,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View as RNView } 
 import { categoryBadge } from '@/components/LibraryTile';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { useAccent } from '@/lib/AccentProvider';
 import {
   executionSteps,
   fetchRulesets,
@@ -46,6 +47,8 @@ import { useAuthToken } from '@/lib/useAuthToken';
  * this screen navigates any more.
  */
 export default function TechniqueScreen() {
+  // `accent` is taken in this file for the technique badge's own colour.
+  const ui = useAccent();
   const { id } = useLocalSearchParams<{ id: string }>();
   const getToken = useAuthToken();
 
@@ -123,7 +126,7 @@ export default function TechniqueScreen() {
   if (loading) {
     return (
       <View style={styles.centre}>
-        <ActivityIndicator color={vola.lime} />
+        <ActivityIndicator color={ui.accent} />
       </View>
     );
   }
@@ -137,7 +140,7 @@ export default function TechniqueScreen() {
           {error ?? 'Technique not found.'}
         </Text>
         <Pressable onPress={() => void load()} hitSlop={10} accessibilityRole="button">
-          <Text style={styles.retry}>Try again</Text>
+          <Text style={[styles.retry, { color: ui.ink }]}>Try again</Text>
         </Pressable>
       </View>
     );
@@ -427,7 +430,7 @@ const styles = StyleSheet.create({
   body: { padding: 20, gap: 16 },
   centre: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 },
   error: { color: vola.danger, fontSize: 14, textAlign: 'center', lineHeight: 20 },
-  retry: { color: vola.lime, fontSize: 14, fontWeight: '600' },
+  retry: { fontSize: 14, fontWeight: '600' },
 
   hero: {
     minHeight: 168,

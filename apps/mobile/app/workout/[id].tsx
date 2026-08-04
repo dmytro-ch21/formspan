@@ -38,10 +38,12 @@ import {
   startLocalSession,
 } from '@/lib/sessionStore';
 import { vola } from '@/constants/Colors';
+import { useAccent } from '@/lib/AccentProvider';
 import { fromDisplayWeight, toDisplayWeight, weightUnit } from '@/lib/units';
 import { useUnits } from '@/lib/useUnits';
 
 export default function WorkoutDetailScreen() {
+  const accent = useAccent();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { userId } = useAuth();
   const getToken = useAuthToken();
@@ -246,7 +248,9 @@ export default function WorkoutDetailScreen() {
           headerRight: () =>
             canEdit && dirty ? (
               <Pressable onPress={save} disabled={saving} hitSlop={12} testID="workout-save">
-                <Text style={styles.headerAction}>{saving ? 'Saving…' : 'Save'}</Text>
+                <Text style={[styles.headerAction, { color: accent.ink }]}>
+                  {saving ? 'Saving…' : 'Save'}
+                </Text>
               </Pressable>
             ) : null,
         }}
@@ -260,7 +264,11 @@ export default function WorkoutDetailScreen() {
         </Text>
 
         <Pressable
-          style={[styles.startButton, (starting || dirty) && styles.disabled]}
+          style={[
+            styles.startButton,
+            { backgroundColor: accent.accent },
+            (starting || dirty) && styles.disabled,
+          ]}
           onPress={start}
           disabled={starting || dirty}
           accessibilityRole="button"
@@ -280,7 +288,7 @@ export default function WorkoutDetailScreen() {
         </Pressable>
 
         {!canEdit && (
-          <Text style={styles.readonly} testID="workout-readonly">
+          <Text style={[styles.readonly, { color: accent.ink }]} testID="workout-readonly">
             {workout.owner_user_id === null
               ? 'A VOLA template — view only.'
               : 'Shared by someone else — view only.'}
@@ -533,6 +541,7 @@ function ExercisePicker({
   onClose: () => void;
   onPick: (e: Exercise) => void;
 }) {
+  const accent = useAccent();
   const getToken = useAuthToken();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Exercise[]>([]);
@@ -580,7 +589,7 @@ function ExercisePicker({
       <View style={styles.sheet}>
         <View style={styles.sheetHead}>
           <Pressable onPress={onClose} accessibilityRole="button" hitSlop={12}>
-            <Text style={styles.headerAction}>Cancel</Text>
+            <Text style={[styles.headerAction, { color: accent.ink }]}>Cancel</Text>
           </Pressable>
           <Text style={styles.sheetTitle}>Add exercise</Text>
           <View style={{ width: 56 }} />
@@ -652,13 +661,12 @@ const styles = StyleSheet.create({
   meta: { color: vola.textMuted, fontSize: 13, textTransform: 'capitalize' },
   readonly: {
     fontSize: 13,
-    color: vola.lime,
     backgroundColor: vola.surfaceRaised,
     padding: 10,
     borderRadius: 10,
     overflow: 'hidden',
   },
-  headerAction: { fontSize: 16, fontWeight: '600', color: vola.lime },
+  headerAction: { fontSize: 16, fontWeight: '600' },
   item: { borderWidth: 1, borderColor: vola.line, borderRadius: 14, backgroundColor: vola.surface },
   itemHead: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12 },
   itemIndex: { width: 18, textAlign: 'center', color: vola.textDim, fontWeight: '700' },
@@ -696,7 +704,6 @@ const styles = StyleSheet.create({
   removeText: { color: vola.danger },
   disabled: { opacity: 0.35 },
   startButton: {
-    backgroundColor: vola.lime,
     borderRadius: 14,
     paddingVertical: 16,
     alignItems: 'center',

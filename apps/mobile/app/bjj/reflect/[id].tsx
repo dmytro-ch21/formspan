@@ -13,6 +13,7 @@ import {
 import { LibraryTile, categoryBadge } from '@/components/LibraryTile';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { useAccent } from '@/lib/AccentProvider';
 import {
   FUNNEL_OUTCOMES,
   LIVE_ROWS,
@@ -65,6 +66,7 @@ const STEPS: { key: Step; title: string; blurb: string }[] = [
 ];
 
 export default function ReflectScreen() {
+  const accent = useAccent();
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { userId } = useAuth();
@@ -205,7 +207,7 @@ export default function ReflectScreen() {
           title: `Step ${step + 1} of ${STEPS.length}`,
           headerRight: () => (
             <Pressable onPress={finish} hitSlop={12} accessibilityRole="button" testID="bjj-reflect-done">
-              <Text style={styles.headerAction}>Done</Text>
+              <Text style={[styles.headerAction, { color: accent.ink }]}>Done</Text>
             </Pressable>
           ),
         }}
@@ -216,7 +218,13 @@ export default function ReflectScreen() {
           nothing. */}
       <RNView style={styles.progress} accessible accessibilityLabel={`Step ${step + 1} of ${STEPS.length}`}>
         {STEPS.map((s, i) => (
-          <RNView key={s.key} style={[styles.progressBar, i <= step && styles.progressBarOn]} />
+          <RNView
+            key={s.key}
+            style={[
+              styles.progressBar,
+              i <= step && [styles.progressBarOn, { backgroundColor: accent.accent }],
+            ]}
+          />
         ))}
       </RNView>
 
@@ -252,11 +260,11 @@ export default function ReflectScreen() {
         </Pressable>
         <Pressable
           onPress={() => (last ? finish() : setStep((s) => s + 1))}
-          style={styles.next}
+          style={[styles.next, { backgroundColor: accent.accent }]}
           accessibilityRole="button"
           testID="bjj-reflect-next"
         >
-          <Text style={styles.nextText}>{last ? 'Save it' : 'Next'}</Text>
+          <Text style={[styles.nextText, { color: accent.on }]}>{last ? 'Save it' : 'Next'}</Text>
         </Pressable>
       </RNView>
     </View>
@@ -286,6 +294,8 @@ function DrilledStep({
   onChange: (d: SessionDetail) => void;
   getToken: ReturnType<typeof useAuthToken>;
 }) {
+  // `accent` is taken below for the technique badge's own colour.
+  const ui = useAccent();
   const [all, setAll] = useState<TechniqueSummary[]>([]);
   const [query, setQuery] = useState('');
   const [failed, setFailed] = useState(false);
@@ -389,7 +399,7 @@ function DrilledStep({
                 {t.position}
               </Text>
             </RNView>
-            <Text style={styles.plus}>＋</Text>
+            <Text style={[styles.plus, { color: ui.ink }]}>＋</Text>
           </Pressable>
         );
       })}
@@ -678,6 +688,7 @@ function Counter({
   onRemove: () => void;
   testID: string;
 }) {
+  const accent = useAccent();
   const on = value > 0;
   return (
     <Pressable
@@ -687,7 +698,7 @@ function Counter({
         styles.counter,
         on &&
           (tone === 'scored'
-            ? styles.counterScored
+            ? [styles.counterScored, { borderColor: accent.accent }]
             : tone === 'conceded'
               ? styles.counterConceded
               : styles.counterNeutral),
@@ -766,11 +777,11 @@ const styles = StyleSheet.create({
   centreTitle: { fontSize: 18, fontWeight: '700', textAlign: 'center' },
   centreMuted: { color: vola.textMuted, fontSize: 13, textAlign: 'center' },
 
-  headerAction: { color: vola.lime, fontWeight: '700', fontSize: 16 },
+  headerAction: { fontWeight: '700', fontSize: 16 },
 
   progress: { flexDirection: 'row', gap: 4, paddingHorizontal: 20, paddingTop: 4 },
   progressBar: { flex: 1, height: 3, borderRadius: 999, backgroundColor: vola.line },
-  progressBarOn: { backgroundColor: vola.lime },
+  progressBarOn: {},
 
   stepTitle: { fontSize: 22, fontWeight: '800', marginTop: 8 },
   stepBlurb: { color: vola.textMuted, fontSize: 13, marginBottom: 6 },
@@ -809,7 +820,7 @@ const styles = StyleSheet.create({
   },
   resultBody: { flex: 1, gap: 2 },
   resultName: { fontSize: 15, fontWeight: '600' },
-  plus: { color: vola.lime, fontSize: 20, fontWeight: '700' },
+  plus: { fontSize: 20, fontWeight: '700' },
 
   // One drilled technique: its name and a remove control. The funnel counters
   // that used to sit under it moved to the live step, so this is now a plain
@@ -875,7 +886,7 @@ const styles = StyleSheet.create({
   // Scored reads as the app's "this is yours / act here" accent; conceded is
   // warn rather than danger — getting swept is information, not a failure,
   // and the tone should not scold. See the no-shame-messaging stance.
-  counterScored: { borderColor: vola.lime, backgroundColor: vola.setDone },
+  counterScored: { backgroundColor: vola.setDone },
   counterConceded: { borderColor: vola.warn, backgroundColor: vola.surfaceRaised },
   // "Tried" is neither a win nor something that happened to you — it is the
   // attempt, which is the thing being encouraged. Raised surface, no accent.
@@ -904,10 +915,9 @@ const styles = StyleSheet.create({
   skipText: { color: vola.textMuted, fontWeight: '700', fontSize: 15 },
   next: {
     flex: 1,
-    backgroundColor: vola.lime,
     borderRadius: 12,
     paddingVertical: 15,
     alignItems: 'center',
   },
-  nextText: { color: vola.navy, fontWeight: '700', fontSize: 16 },
+  nextText: { fontWeight: '700', fontSize: 16 },
 });

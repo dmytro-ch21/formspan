@@ -5,6 +5,8 @@ import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { Stat, StatRow } from '@/components/ui/Stat';
 import { vola } from '@/constants/Colors';
+import { useAccent } from '@/lib/AccentProvider';
+import { sportColor } from '@/components/ui/sport';
 import { formatDuration } from '@/lib/history';
 import { labelFor, type Module } from '@/lib/modules';
 import { dayString, monthGrid, weekDays } from '@/lib/calendar';
@@ -84,6 +86,7 @@ export function TrainingCalendar({
   units: UnitSystem;
   onOpenSession: (s: Session) => void;
 }) {
+  const accent = useAccent();
   const [expanded, setExpanded] = useState(false);
   const [monthOpen, setMonthOpen] = useState(false);
   // The month being browsed, which is not always the month `now` is in — the
@@ -288,11 +291,19 @@ export function TrainingCalendar({
               <Text style={[styles.weekday, isFuture && styles.dimmed]}>
                 {d.toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 3).toUpperCase()}
               </Text>
-              <RNView style={[styles.date, isToday && styles.dateToday]}>
+              <RNView
+                style={[
+                  styles.date,
+                  isToday && [
+                    styles.dateToday,
+                    { backgroundColor: accent.accent, shadowColor: accent.accent },
+                  ],
+                ]}
+              >
                 <Text
                   style={[
                     styles.dateText,
-                    isToday && styles.dateTextToday,
+                    isToday && [styles.dateTextToday, { color: accent.on }],
                     isFuture && styles.dimmed,
                   ]}
                 >
@@ -379,7 +390,7 @@ export function TrainingCalendar({
               accessibilityLabel="Close"
               testID="calendar-close-month"
             >
-              <Text style={styles.close}>Done</Text>
+              <Text style={[styles.close, { color: accent.ink }]}>Done</Text>
             </Pressable>
           </RNView>
 
@@ -435,14 +446,14 @@ export function TrainingCalendar({
                         style={[
                           styles.gridDate,
                           isSelected && styles.gridDateSelected,
-                          isToday && styles.gridDateToday,
+                          isToday && [styles.gridDateToday, { backgroundColor: accent.accent }],
                         ]}
                       >
                         <Text
                           style={[
                             styles.gridDateText,
                             !cell.inMonth && styles.dimmed,
-                            isToday && styles.dateTextToday,
+                            isToday && [styles.dateTextToday, { color: accent.on }],
                           ]}
                         >
                           {cell.date.getDate()}
@@ -558,6 +569,7 @@ function DayRow({
   onOpenSession: (s: Session) => void;
   headless?: boolean;
 }) {
+  const accent = useAccent();
   return (
     <RNView style={styles.day}>
       {!headless && (
@@ -607,7 +619,12 @@ function DayRow({
 
           {planned.map((p) => (
             <RNView key={p.id} style={styles.entry}>
-              <RNView style={[styles.entryRule, { backgroundColor: vola.lime }]} />
+              <RNView
+                style={[
+                  styles.entryRule,
+                  { backgroundColor: sportColor(p.sport) ?? accent.accent },
+                ]}
+              />
               <RNView style={styles.entryMain}>
                 <Text style={styles.entrySport}>{labelFor(modules, p.sport).toUpperCase()}</Text>
                 <Text style={styles.entryTitle} numberOfLines={1}>
@@ -641,9 +658,30 @@ const styles = StyleSheet.create({
   cell: { flex: 1, alignItems: 'center', gap: 4 },
   weekday: { fontSize: 10, fontWeight: '700', letterSpacing: 0.6, color: vola.textDim },
   date: { width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  dateToday: { backgroundColor: vola.lime },
+  /**
+   * Today's chip, and the one place in this app that uses a shadow.
+   *
+   * The glow is `shadowColor` set to the chip's own fill rather than to black,
+   * which on a near-black ground reads as light coming off the chip instead of
+   * the chip sitting above the card. Nothing else here casts one — a dark UI
+   * where several things glow is a dark UI where nothing stands out, and this
+   * marker has to win against six neighbours that are the same size and shape.
+   *
+   * Android takes `elevation` and ignores the rest, so it gets a plain lift
+   * rather than a coloured one. That is a real difference and an acceptable
+   * one: the fill already carries the meaning, and the glow is emphasis.
+   */
+  dateToday: {
+    // Fill and glow are the accent's, set at the call site — the shadow has to
+    // match the fill or it reads as a drop shadow rather than light.
+    shadowOpacity: 0.55,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 6,
+  },
   dateText: { fontSize: 15, fontWeight: '700', fontVariant: ['tabular-nums'] },
-  dateTextToday: { color: vola.navy },
+  // Ink set inline: what can be written on the fill is the accent's own.
+  dateTextToday: {},
   dimmed: { color: vola.textDim, opacity: 0.5 },
   // 8pt, not the original 4 and not the 6 this first grew to.
   //
@@ -700,7 +738,7 @@ const styles = StyleSheet.create({
   },
   sheetTitle: { fontSize: 18, fontWeight: '800' },
   sheetClose: { marginLeft: 'auto' },
-  close: { color: vola.lime, fontWeight: '700', fontSize: 15 },
+  close: { fontWeight: '700', fontSize: 15 },
   sheetBody: { paddingHorizontal: 16, paddingBottom: 44, gap: 4 },
 
   gridHead: { flexDirection: 'row', marginBottom: 6 },
@@ -716,7 +754,7 @@ const styles = StyleSheet.create({
   gridCell: { flex: 1, alignItems: 'center', gap: 3, paddingVertical: 2 },
   gridDate: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
   gridDateSelected: { borderWidth: 1, borderColor: vola.line, backgroundColor: vola.surface },
-  gridDateToday: { backgroundColor: vola.lime, borderWidth: 0 },
+  gridDateToday: { borderWidth: 0 },
   gridDateText: { fontSize: 14, fontWeight: '600', fontVariant: ['tabular-nums'] },
 
   legend: { flexDirection: 'row', gap: 16, justifyContent: 'center', paddingVertical: 12 },

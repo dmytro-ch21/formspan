@@ -6,6 +6,7 @@ import { useFocusEffect } from 'expo-router';
 import { Text, View } from '@/components/Themed';
 import { StatValue } from '@/components/ui/Stat';
 import { vola } from '@/constants/Colors';
+import { useAccent } from '@/lib/AccentProvider';
 import {
   buildGrid,
   delta,
@@ -121,6 +122,7 @@ function SummaryBody({
   failed: boolean;
   units: UnitSystem;
 }) {
+  const accent = useAccent();
   const t = history?.totals;
   const p = history?.previous;
 
@@ -139,10 +141,18 @@ function SummaryBody({
               accessibilityRole="button"
               accessibilityState={{ selected: span === s.key }}
               accessibilityLabel={`Show ${s.pick}`}
-              style={[styles.segment, span === s.key && styles.segmentOn]}
+              style={[
+                styles.segment,
+                span === s.key && [styles.segmentOn, { backgroundColor: accent.accent }],
+              ]}
               testID={`training-span-${s.key}`}
             >
-              <Text style={[styles.segmentText, span === s.key && styles.segmentTextOn]}>
+              <Text
+                style={[
+                  styles.segmentText,
+                  span === s.key && [styles.segmentTextOn, { color: accent.on }],
+                ]}
+              >
                 {s.label}
               </Text>
             </Pressable>
@@ -558,9 +568,10 @@ const styles = StyleSheet.create({
   // Four options share this row now, so the padding is tighter than the two
   // it was built for. The labels are abbreviated for the same reason.
   segment: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999 },
-  segmentOn: { backgroundColor: vola.lime },
+  // Colour set inline, from the chosen accent.
+  segmentOn: {},
   segmentText: { fontSize: 12, fontWeight: '700', color: vola.textMuted },
-  segmentTextOn: { color: vola.bg },
+  segmentTextOn: {},
 
   card: {
     borderWidth: 1,

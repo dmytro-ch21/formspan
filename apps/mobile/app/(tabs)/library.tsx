@@ -16,6 +16,7 @@ import { LibraryTile, categoryBadge, patternBadge, positionBadge } from '@/compo
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { useAccent } from '@/lib/AccentProvider';
 import { getStanding } from '@/lib/bjj';
 import { fetchExercises, pickImage, type Exercise } from '@/lib/exercises';
 import { PREF_LIBRARY_BELT, PREF_LIBRARY_SPORT, readPref, writePref } from '@/lib/prefs';
@@ -192,6 +193,7 @@ type Row =
   | { kind: 'technique'; key: string; name: string; t: TechniqueSummary };
 
 export default function LibraryScreen() {
+  const accent = useAccent();
   const getToken = useAuthToken();
   const { modules } = useModules();
 
@@ -647,14 +649,20 @@ export default function LibraryScreen() {
               <Pressable
                 key={s.key || 'all'}
                 onPress={() => setSport(s.key)}
-                style={[styles.chip, active && styles.chipActive]}
+                style={[
+                  styles.chip,
+                  active && [
+                    styles.chipActive,
+                    { backgroundColor: accent.accent, borderColor: accent.accent },
+                  ],
+                ]}
                 hitSlop={8}
                 accessibilityRole="button"
                 accessibilityLabel={`Filter by ${s.label}`}
                 accessibilityState={{ selected: active }}
                 testID={`library-filter-${s.key || 'all'}`}
               >
-                <Text style={[styles.chipText, active && styles.chipTextActive]}>{s.label}</Text>
+                <Text style={[styles.chipText, active && [styles.chipTextActive, { color: accent.on }]]}>{s.label}</Text>
               </Pressable>
             );
           })}
@@ -940,9 +948,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 7,
   },
-  chipActive: { backgroundColor: vola.lime, borderColor: vola.lime },
+  // Fill and border set inline, from the accent.
+  chipActive: {},
   chipText: { color: vola.textMuted, fontSize: 13, fontWeight: '600' },
-  chipTextActive: { color: vola.navy },
+  // Ink set inline: what may be written on the accent is the accent's own.
+  chipTextActive: {},
 
   positionRow: { gap: 8, paddingRight: 20 },
   posChip: {

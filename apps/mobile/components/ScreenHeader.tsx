@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SyncChip } from '@/components/SyncChip';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { useAccent } from '@/lib/AccentProvider';
 
 /**
  * The top of every tab screen: the wordmark, then the screen's name.
@@ -43,13 +44,26 @@ import { vola } from '@/constants/Colors';
  */
 export function ScreenHeader({ title, action }: { title: string; action?: React.ReactNode }) {
   const insets = useSafeAreaInsets();
+  const accent = useAccent();
 
   return (
     // The row is the positioning context for the centred wordmark, so the
     // title's own width can't push it off-centre.
     <View style={[styles.wrap, { paddingTop: insets.top + 14 }]}>
       <View style={styles.row}>
-        <Text style={styles.title}>{title}</Text>
+        <RNView style={styles.titleWrap}>
+          <Text style={styles.title}>{title}</Text>
+          {/* A dot, not a word. It marks the current screen in the accent the
+              athlete chose, which is the same job the tab bar's underline does
+              one row down — the pair is what makes "where am I" answerable from
+              either end of the screen. Hidden from assistive tech: it repeats
+              the title it sits beside. */}
+          <RNView
+            style={[styles.dot, { backgroundColor: accent.accent }]}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+          />
+        </RNView>
         <RNView style={styles.wordmark} pointerEvents="none">
           {/* `accessible` sits on this inner view, not on the absolutely
               positioned wrapper. The wrapper is `left: 0, right: 0` so that the
@@ -107,6 +121,7 @@ const styles = StyleSheet.create({
     gap: 12,
     minHeight: 28,
   },
+  titleWrap: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   title: {
     fontSize: 15,
     fontWeight: '700',
@@ -114,6 +129,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 1,
   },
+  dot: { width: 6, height: 6, borderRadius: 3 },
 });
 
 /**

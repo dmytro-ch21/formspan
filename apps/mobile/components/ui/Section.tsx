@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, View as RNView } from 'react-native';
 import { Text } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { Icon } from '@/components/ui/Icon';
+import { useAccent } from '@/lib/AccentProvider';
 
 /**
  * The label above a group of cards, with an optional way out of it.
@@ -28,6 +29,8 @@ export function SectionHeader({
   onAction?: () => void;
   testID?: string;
 }) {
+  const accent = useAccent();
+
   return (
     <RNView style={styles.head}>
       <Text style={styles.label}>{label.toUpperCase()}</Text>
@@ -40,8 +43,8 @@ export function SectionHeader({
           style={styles.action}
           testID={testID}
         >
-          <Text style={styles.actionText}>{action}</Text>
-          <Icon name="chevron" size={12} color={vola.textMuted} />
+          <Text style={[styles.actionText, { color: accent.ink }]}>{action}</Text>
+          <Icon name="chevron" size={12} color={accent.ink} />
         </Pressable>
       )}
     </RNView>
@@ -63,5 +66,7 @@ const styles = StyleSheet.create({
     color: vola.textDim,
   },
   action: { flexDirection: 'row', alignItems: 'center', gap: 2 },
-  actionText: { fontSize: 13, fontWeight: '600', color: vola.textMuted },
+  // Colour is set inline, from the chosen accent — this is a way out of the
+  // section, and the accent is what marks "act here" everywhere else.
+  actionText: { fontSize: 13, fontWeight: '700' },
 });

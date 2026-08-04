@@ -19,18 +19,24 @@ import { vola } from '@/constants/Colors';
  * technique category) failed validation — violet against blue came out at ΔE
  * 2.0 for a deuteranope and 12.9 even with full colour vision, i.e. two
  * categories that look identical to everyone. Three hues plus a neutral clear
- * every check (worst adjacent pair ΔE 21.7 CVD / 35.6 normal), so the nine
- * categories map onto four *intents* for colour while the code stays specific.
+ * every check, so the nine categories map onto four *intents* for colour while
+ * the code stays specific.
  *
- * Re-run `validate_palette.js` against `vola.surface` before adding a fourth
- * hue; adjacent-pair separation is not eyeballable.
+ * **The figure that used to sit here — "worst adjacent pair ΔE 21.7 CVD" — was
+ * wrong.** It was measured by hand against a validator that had been cited for
+ * months and never committed. Running the four through the real
+ * `scripts/validate_palette.mjs` put defend-versus-hold at 14.7 for a
+ * protanope: a mid blue and a mid grey converge. The neutral moved a step
+ * darker (`vola.tileHold`) to separate on lightness, and the worst pair is now
+ * 19.5. The validator checks all six pairs on every run, so the next hue added
+ * here cannot repeat this — adjacent-pair separation is not eyeballable.
  */
 
 /** What a technique is *for*. Colour groups by this; the code stays specific. */
 const ATTACK = vola.danger; //  finishing
 const ADVANCE = vola.lime; //   improving position
 const DEFEND = vola.info; //    getting out / keeping guard
-const HOLD = vola.textMuted; // staying put — deliberately achromatic
+const HOLD = vola.tileHold; //  staying put — deliberately achromatic
 
 /**
  * Category → [code, accent]. Codes are what a coach would write on a whiteboard;

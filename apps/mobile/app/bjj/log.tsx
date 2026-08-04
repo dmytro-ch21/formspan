@@ -10,6 +10,7 @@ import {
 
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { useAccent } from '@/lib/AccentProvider';
 import {
   KINDS,
   MAX_RPE,
@@ -70,6 +71,7 @@ function defaultDraft(kind: Kind): Draft {
 }
 
 export default function LogBjjScreen() {
+  const accent = useAccent();
   const router = useRouter();
   const { userId } = useAuth();
   const { modules, ready: modulesReady } = useModules();
@@ -243,7 +245,10 @@ export default function LogBjjScreen() {
               <Pressable
                 key={k.key}
                 onPress={() => setKind(k.key)}
-                style={[styles.kindCard, active && styles.kindCardActive]}
+                style={[
+                  styles.kindCard,
+                  active && [styles.kindCardActive, { borderColor: accent.accent }],
+                ]}
                 accessibilityRole="radio"
                 accessibilityState={{ selected: active }}
                 accessibilityLabel={`${k.label}. ${k.blurb}`}
@@ -270,7 +275,13 @@ export default function LogBjjScreen() {
               <Pressable
                 key={o.key}
                 onPress={() => setDraft((d) => ({ ...d, gi: o.value }))}
-                style={[styles.chip, active && styles.chipActive]}
+                style={[
+                  styles.chip,
+                  active && [
+                    styles.chipActive,
+                    { backgroundColor: accent.accent, borderColor: accent.accent },
+                  ],
+                ]}
                 accessibilityRole="radio"
                 accessibilityState={{ selected: active }}
                 testID={`bjj-gi-${o.key}`}
@@ -357,11 +368,13 @@ export default function LogBjjScreen() {
         <Pressable
           onPress={() => commit('done')}
           disabled={saving}
-          style={[styles.cta, saving && styles.disabled]}
+          style={[styles.cta, { backgroundColor: accent.accent }, saving && styles.disabled]}
           accessibilityRole="button"
           testID="bjj-log-save"
         >
-          <Text style={styles.ctaText}>{saving ? 'Logging…' : 'Log it'}</Text>
+          <Text style={[styles.ctaText, { color: accent.on }]}>
+            {saving ? 'Logging…' : 'Log it'}
+          </Text>
         </Pressable>
 
         <Pressable
@@ -460,6 +473,7 @@ function Stepper({
   suffix: string;
   testID: string;
 }) {
+  const accent = useAccent();
   return (
     <RNView style={styles.stepper}>
       <Pressable
@@ -469,7 +483,7 @@ function Stepper({
         accessibilityLabel={`One fewer ${suffix}`}
         testID={`${testID}-minus`}
       >
-        <Text style={styles.stepperSign}>−</Text>
+        <Text style={[styles.stepperSign, { color: accent.ink }]}>−</Text>
       </Pressable>
       <RNView style={styles.stepperValue}>
         <Text style={styles.stepperNumber} testID={`${testID}-value`}>
@@ -484,7 +498,7 @@ function Stepper({
         accessibilityLabel={`One more ${suffix}`}
         testID={`${testID}-plus`}
       >
-        <Text style={styles.stepperSign}>+</Text>
+        <Text style={[styles.stepperSign, { color: accent.ink }]}>+</Text>
       </Pressable>
     </RNView>
   );
@@ -520,7 +534,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     gap: 2,
   },
-  kindCardActive: { borderColor: vola.lime, backgroundColor: vola.setDone },
+  kindCardActive: { backgroundColor: vola.setDone },
   kindLabel: { fontSize: 16, fontWeight: '700' },
   kindLabelActive: { color: vola.text },
   kindBlurb: { fontSize: 12, color: vola.textDim },
@@ -537,7 +551,7 @@ const styles = StyleSheet.create({
     minHeight: 44,
     justifyContent: 'center',
   },
-  chipActive: { backgroundColor: vola.lime, borderColor: vola.lime },
+  chipActive: {},
   chipText: { fontWeight: '600', color: vola.textMuted },
   chipTextActive: { color: vola.navy },
 
@@ -571,7 +585,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  stepperSign: { fontSize: 24, fontWeight: '700', color: vola.lime },
+  stepperSign: { fontSize: 24, fontWeight: '700' },
   stepperValue: { minWidth: 96, alignItems: 'center', justifyContent: 'center' },
   stepperNumber: { fontSize: 18, fontWeight: '800' },
   stepperSuffix: { fontSize: 11, color: vola.textDim },
@@ -591,13 +605,12 @@ const styles = StyleSheet.create({
   rpeNumberFilled: { color: vola.navy },
 
   cta: {
-    backgroundColor: vola.lime,
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: 'center',
     marginTop: 24,
   },
-  ctaText: { color: vola.navy, fontWeight: '700', fontSize: 16 },
+  ctaText: { fontWeight: '700', fontSize: 16 },
   secondary: {
     backgroundColor: vola.surfaceRaised,
     borderRadius: 12,

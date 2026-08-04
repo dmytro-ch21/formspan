@@ -1,25 +1,36 @@
 import { Tabs } from 'expo-router';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View, type PressableProps } from 'react-native';
 
+import { Icon, type IconName } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
+import { useAccent } from '@/lib/AccentProvider';
 import { useModules } from '@/lib/ModulesProvider';
 
 /**
- * The tab bar from the hi-fi design: flat, flush to the bottom, on the same
- * ground as everything else. Type only — no icons, no pill, no fill.
+ * The tab bar: an icon, a label, and an underline on the active one.
  *
- * This replaces a floating glass pill, which was the wrong instinct. A
- * floating control is a *thing on top of* the app; the design treats
- * navigation as part of the page, quiet enough to ignore until you look for
- * it. The active tab is marked by a small dot above the label rather than a
- * container, which is the least furniture that can still answer "where am
- * I" at a glance.
+ * It was type-only with a dot above the label, on the reasoning that an icon
+ * beside a word is redundant furniture. The redesign puts the icons back, and
+ * the argument against them was thinner than it looked: at a glance-and-tap
+ * distance — thumb moving before the eye has read anything — a shape is faster
+ * to acquire than a five-letter word, and four destinations are few enough
+ * that each shape stays learnable.
  *
- * A hairline is the only separator, and it's the one seam worth keeping:
+ * The active mark moved from a dot above the label to a rule beneath it. A dot
+ * is ambiguous about *what* it marks when there is now also an icon above the
+ * word; an underline is unambiguously about the item it sits under.
+ *
+ * **The accent comes from the provider, not the palette**, so the bar follows
+ * whatever the athlete chose. That is also why the styles below are split:
+ * anything accent-coloured has to be inline, because `StyleSheet.create` is
+ * evaluated once at module load and cannot see a preference.
+ *
+ * A hairline is the only separator, and it is the one seam worth keeping:
  * without it the labels read as content when a list scrolls behind them.
  */
 export default function TabLayout() {
   const { modules, ready } = useModules();
+  const accent = useAccent();
 
   /**
    * The Library is the only tab whose whole reason for existing can be turned
@@ -45,35 +56,97 @@ export default function TabLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: vola.text,
+        tabBarActiveTintColor: accent.accent,
         tabBarInactiveTintColor: vola.textDim,
         sceneStyle: { backgroundColor: vola.bg },
         tabBarStyle: styles.bar,
         tabBarLabelStyle: styles.label,
         tabBarIconStyle: styles.iconSlot,
-        // The dot *is* the icon slot — a marker above the label rather than
-        // a glyph beside it.
-        tabBarIcon: ({ focused }) => <View style={[styles.dot, focused && styles.dotActive]} />,
+        tabBarButton: (props) => <TabButton {...props} color={accent.accent} />,
       }}
     >
-      <Tabs.Screen name="index" options={{ title: 'Today' }} />
-      <Tabs.Screen name="workouts" options={{ title: 'Plan' }} />
-      <Tabs.Screen
-        name="library"
-        options={{ title: 'Library', href: anyCatalog ? undefined : null }}
-      />
-      <Tabs.Screen name="you" options={{ title: 'You' }} />
+      {TABS.map(({ name, title, icon }) => (
+        <Tabs.Screen
+          key={name}
+          name={name}
+          options={{
+            title,
+            href: name === 'library' && !anyCatalog ? null : undefined,
+            tabBarIcon: ({ focused }) => (
+              <Icon
+                name={icon}
+                size={22}
+                color={focused ? accent.accent : vola.textDim}
+              />
+            ),
+          }}
+        />
+      ))}
     </Tabs>
   );
 }
+
+/**
+ * The default tab button, plus the rule under the active one.
+ *
+ * A wrapper rather than part of the icon, so the underline spans the tab's own
+ * width instead of the glyph's — an underline as narrow as a 22pt icon reads as
+ * a dropped shadow rather than a marker.
+ *
+ * `focused` is read off `accessibilityState.selected`, which the navigator
+ * already sets on every tab button. Deriving it rather than threading a second
+ * source of truth means the underline cannot disagree with what a screen
+ * reader announces.
+ */
+/**
+ * Typed structurally rather than against `BottomTabBarButtonProps`. That type
+ * lives in `@react-navigation/bottom-tabs`, which is a *transitive* dependency
+ * of expo-router — importing from it would mean adding a direct dependency on
+ * a package this app never chose, and pinning it separately from the router
+ * that owns it. The three fields used here are stable navigator contract.
+ */
+type TabButtonProps = PressableProps & {
+  children?: React.ReactNode;
+  color: string;
+  /** React Navigation 7 sets the ARIA form; older versions set the RN one. */
+  'aria-selected'?: boolean;
+};
+
+function TabButton({ color, children, ...props }: TabButtonProps) {
+  // Both spellings, because the navigator changed which one it sets and
+  // reading only `accessibilityState` gave a permanently-unfocused underline —
+  // it rendered on every tab, transparent, which looks exactly like no
+  // underline at all.
+  const focused = props['aria-selected'] ?? props.accessibilityState?.selected ?? false;
+  return (
+    <View style={styles.tabSlot}>
+      <Pressable {...props} style={styles.tabPress}>
+        {children}
+      </Pressable>
+      <View
+        style={[styles.underline, focused && { backgroundColor: color }]}
+        // Decoration that repeats what `selected` already conveys.
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+      />
+    </View>
+  );
+}
+
+const TABS = [
+  { name: 'index', title: 'Today', icon: 'dashboard' },
+  { name: 'workouts', title: 'Plan', icon: 'calendar' },
+  { name: 'library', title: 'Library', icon: 'chart' },
+  { name: 'you', title: 'You', icon: 'profile' },
+] as const satisfies readonly { name: string; title: string; icon: IconName }[];
 
 const styles = StyleSheet.create({
   bar: {
     backgroundColor: vola.bg,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: vola.lineSoft,
-    height: 88,
-    paddingTop: 10,
+    height: 94,
+    paddingTop: 12,
     elevation: 0,
   },
   label: {
@@ -82,7 +155,20 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 1.1,
   },
-  iconSlot: { height: 10, marginBottom: 2 },
-  dot: { width: 5, height: 5, borderRadius: 3, backgroundColor: 'transparent' },
-  dotActive: { backgroundColor: vola.lime },
+  iconSlot: { height: 24, marginBottom: 2 },
+
+  // `justifyContent: flex-start` so the underline sits directly under the
+  // label rather than being pushed to the bottom of the bar, where the safe
+  // area inset was clipping it entirely.
+  tabSlot: { flex: 1, alignItems: 'center', justifyContent: 'flex-start' },
+  tabPress: { alignItems: 'center', justifyContent: 'center', width: '100%' },
+  // Always laid out, coloured only when active — so the row does not shift by
+  // 2pt every time the tab changes.
+  underline: {
+    height: 2,
+    width: 20,
+    borderRadius: 1,
+    backgroundColor: 'transparent',
+    marginTop: 5,
+  },
 });

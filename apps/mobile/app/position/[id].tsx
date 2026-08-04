@@ -5,6 +5,7 @@ import { ActivityIndicator, FlatList, Pressable, StyleSheet, View as RNView } fr
 import { categoryBadge, positionBadge } from '@/components/LibraryTile';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { useAccent } from '@/lib/AccentProvider';
 import { fetchPosition, techniquesInPosition, type Position } from '@/lib/positions';
 import { FUNCTION_ORDER, groupByFunction } from '@/lib/techniqueGraph';
 import { fetchTechniques, type TechniqueSummary } from '@/lib/techniques';
@@ -65,6 +66,8 @@ type ListRow =
   | { kind: 'technique'; id: string; technique: TechniqueSummary };
 
 export default function PositionScreen() {
+  // `accent` is taken in this file for the position badge's own colour.
+  const ui = useAccent();
   const { id } = useLocalSearchParams<{ id: string }>();
   const getToken = useAuthToken();
 
@@ -154,7 +157,7 @@ export default function PositionScreen() {
   if (loading) {
     return (
       <View style={styles.centre}>
-        <ActivityIndicator color={vola.lime} />
+        <ActivityIndicator color={ui.accent} />
       </View>
     );
   }
@@ -168,7 +171,7 @@ export default function PositionScreen() {
           {error ?? 'Position not found.'}
         </Text>
         <Pressable onPress={() => loadWithDeadline()} hitSlop={10} accessibilityRole="button">
-          <Text style={styles.retry}>Try again</Text>
+          <Text style={[styles.retry, { color: ui.ink }]}>Try again</Text>
         </Pressable>
       </View>
     );
@@ -250,7 +253,7 @@ export default function PositionScreen() {
       }
       renderItem={({ item }) =>
         item.kind === 'header' ? (
-          <Text style={styles.groupLabel} accessibilityRole="header">
+          <Text style={[styles.groupLabel, { color: ui.ink }]} accessibilityRole="header">
             {item.label} · {item.count}
           </Text>
         ) : (
@@ -307,6 +310,7 @@ function sectionLabel(p: Position, count: number): string {
  * sides would force empty or duplicated prose on the entries that have one.
  */
 function Priorities({ text }: { text: string }) {
+  const ui = useAccent();
   const paragraphs = text
     .split(/\n\s*\n/)
     .map((s) => s.trim())
@@ -328,7 +332,7 @@ function Priorities({ text }: { text: string }) {
         }
         return (
           <RNView key={i} style={styles.sideBlock}>
-            <Text style={styles.sideLabel} accessibilityRole="header">
+            <Text style={[styles.sideLabel, { color: ui.ink }]} accessibilityRole="header">
               {match[1].toUpperCase()}
             </Text>
             <Text style={styles.prose}>{match[2]}</Text>
@@ -427,7 +431,7 @@ const styles = StyleSheet.create({
   body: { paddingVertical: 16, gap: 16 },
   centre: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 },
   error: { color: vola.danger, fontSize: 14, textAlign: 'center', lineHeight: 20 },
-  retry: { color: vola.lime, fontSize: 14, fontWeight: '600' },
+  retry: { fontSize: 14, fontWeight: '600' },
 
   hero: {
     minHeight: 168,
@@ -479,13 +483,12 @@ const styles = StyleSheet.create({
   prose: { fontSize: 15, lineHeight: 23, color: vola.text },
 
   sideBlock: { gap: 5 },
-  sideLabel: { color: vola.lime, fontSize: 11, letterSpacing: 1.2, fontWeight: '800' },
+  sideLabel: { fontSize: 11, letterSpacing: 1.2, fontWeight: '800' },
 
   // The verb headings inside the list. Distinct from edgeLabel, which names
   // the whole section once in the header — these repeat down the list and so
   // need top space to separate one group from the rows of the previous one.
   groupLabel: {
-    color: vola.lime,
     fontSize: 12,
     letterSpacing: 1.2,
     fontWeight: '800',

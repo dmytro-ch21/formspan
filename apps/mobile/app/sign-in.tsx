@@ -289,6 +289,14 @@ export default function SignInScreen() {
   );
 }
 
+/**
+ * NOTE ON COLOUR: this screen renders *before* sign-in, where there is no
+ * account and therefore no stored accent — `AccentProvider` deliberately
+ * serves the default rather than the last user's choice. So these reference
+ * `vola.accent` (the default) directly instead of `useAccent()`, which would
+ * provably return the same constant here. If a device-level accent ever
+ * exists, this is the set of call sites to revisit.
+ */
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -317,7 +325,7 @@ const styles = StyleSheet.create({
     backgroundColor: vola.surface,
   },
   button: {
-    backgroundColor: vola.lime,
+    backgroundColor: vola.accent,
     borderRadius: 8,
     paddingVertical: 14,
     alignItems: 'center',
@@ -344,7 +352,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   footerLink: {
-    color: vola.lime,
+    color: vola.accent,
     fontWeight: '600',
   },
 });

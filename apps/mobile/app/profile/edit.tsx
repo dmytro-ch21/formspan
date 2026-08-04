@@ -4,6 +4,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, TextInput } from 
 
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { useAccent } from '@/lib/AccentProvider';
 import { isNotFound } from '@/lib/apiError';
 import { setModules } from '@/lib/modules';
 import { useModules } from '@/lib/ModulesProvider';
@@ -20,6 +21,7 @@ import { useAuthToken } from '@/lib/useAuthToken';
  * changes answers, where getting units wrong only changes labels.
  */
 export default function EditProfileScreen() {
+  const accent = useAccent();
   const getToken = useAuthToken();
   const router = useRouter();
 
@@ -166,7 +168,9 @@ export default function EditProfileScreen() {
           title: 'Edit profile',
           headerRight: () => (
             <Pressable onPress={save} disabled={saving} hitSlop={12} testID="profile-save">
-              <Text style={styles.headerAction}>{saving ? 'Saving…' : 'Save'}</Text>
+              <Text style={[styles.headerAction, { color: accent.ink }]}>
+                {saving ? 'Saving…' : 'Save'}
+              </Text>
             </Pressable>
           ),
         }}
@@ -205,7 +209,13 @@ export default function EditProfileScreen() {
                 // Tapping the selected one clears it — this feeds calorie
                 // maths and "unset" has to stay reachable.
                 onPress={() => setPatch((p) => ({ ...p, sex: selected ? null : s }))}
-                style={[styles.chip, selected && styles.chipActive]}
+                style={[
+                  styles.chip,
+                  selected && [
+                    styles.chipActive,
+                    { backgroundColor: accent.accent, borderColor: accent.accent },
+                  ],
+                ]}
                 accessibilityRole="radio"
                 accessibilityState={{ selected }}
                 testID={`profile-sex-${s}`}
@@ -239,7 +249,9 @@ export default function EditProfileScreen() {
                 testID={`profile-${s.key}`}
               >
                 <Text style={styles.toggleLabel}>{s.label}</Text>
-                <View style={[styles.switch, on && styles.switchOn]}>
+                <View
+                  style={[styles.switch, on && [styles.switchOn, { backgroundColor: accent.accent }]]}
+                >
                   <View style={[styles.knob, on && styles.knobOn]} />
                 </View>
               </Pressable>
@@ -288,7 +300,7 @@ const styles = StyleSheet.create({
   unavailable: { fontSize: 16, fontWeight: '600', textAlign: 'center' },
   unavailableHint: { color: vola.textMuted, fontSize: 13, textAlign: 'center' },
   scroll: { padding: 20, gap: 8, paddingBottom: 48 },
-  headerAction: { color: vola.lime, fontWeight: '700', fontSize: 16 },
+  headerAction: { fontWeight: '700', fontSize: 16 },
   field: { gap: 6 },
   sectionLabel: {
     fontSize: 12,
@@ -318,7 +330,7 @@ const styles = StyleSheet.create({
     minHeight: 44,
     justifyContent: 'center',
   },
-  chipActive: { backgroundColor: vola.lime, borderColor: vola.lime },
+  chipActive: {},
   chipText: { fontWeight: '600', color: vola.textMuted },
   chipTextActive: { color: vola.navy },
   card: {
@@ -345,7 +357,7 @@ const styles = StyleSheet.create({
     padding: 3,
     justifyContent: 'center',
   },
-  switchOn: { backgroundColor: vola.lime },
+  switchOn: {},
   knob: { width: 24, height: 24, borderRadius: 999, backgroundColor: vola.surface },
   knobOn: { alignSelf: 'flex-end', backgroundColor: vola.navy },
   error: { color: vola.danger, fontSize: 14 },

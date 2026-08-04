@@ -689,6 +689,14 @@ export default function ForgotPasswordScreen() {
   );
 }
 
+/**
+ * NOTE ON COLOUR: this screen renders *before* sign-in, where there is no
+ * account and therefore no stored accent — `AccentProvider` deliberately
+ * serves the default rather than the last user's choice. So these reference
+ * `vola.accent` (the default) directly instead of `useAccent()`, which would
+ * provably return the same constant here. If a device-level accent ever
+ * exists, this is the set of call sites to revisit.
+ */
 const styles = StyleSheet.create({
   scroll: {
     flexGrow: 1,
@@ -699,7 +707,7 @@ const styles = StyleSheet.create({
   },
 
   hero: { gap: 6 },
-  eyebrow: { color: vola.lime, fontSize: 11, letterSpacing: 1.6, fontWeight: '700' },
+  eyebrow: { color: vola.accent, fontSize: 11, letterSpacing: 1.6, fontWeight: '700' },
   title: { fontSize: 26, fontWeight: '700' },
   subtitle: { color: vola.textMuted, fontSize: 14, lineHeight: 20 },
   subtitleStrong: { color: vola.text, fontWeight: '600' },
@@ -731,7 +739,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 14,
   },
-  revealText: { color: vola.lime, fontSize: 13, fontWeight: '600' },
+  revealText: { color: vola.accent, fontSize: 13, fontWeight: '600' },
 
   codeInput: {
     fontSize: 28,
@@ -756,11 +764,11 @@ const styles = StyleSheet.create({
   formError: { color: vola.danger, fontSize: 14, lineHeight: 19 },
   notice: { color: vola.green, fontSize: 14 },
 
-  inlineLink: { color: vola.lime, fontSize: 14, fontWeight: '600' },
+  inlineLink: { color: vola.accent, fontSize: 14, fontWeight: '600' },
   mutedLink: { color: vola.textMuted, fontSize: 14 },
 
   button: {
-    backgroundColor: vola.lime,
+    backgroundColor: vola.accent,
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: 'center',
@@ -772,5 +780,5 @@ const styles = StyleSheet.create({
 
   footer: { alignItems: 'center', paddingVertical: 4 },
   footerText: { color: vola.textMuted, fontSize: 14 },
-  footerLink: { color: vola.lime, fontWeight: '600' },
+  footerLink: { color: vola.accent, fontWeight: '600' },
 });

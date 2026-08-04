@@ -1,268 +1,123 @@
-import { StyleSheet, View } from 'react-native';
+import Svg, { Circle, Path, Rect } from 'react-native-svg';
 
 import { vola } from '@/constants/Colors';
+import { BRAND_ICONS, type BrandIconName, type Primitive } from './icons.generated';
 
 /**
- * The icon set, drawn from plain views rather than SVG.
+ * The icon set — the brand kit's own geometry, rendered.
  *
- * **No `react-native-svg`, for the reason `Belt.tsx` already gives**: it is a
- * native dependency, so adding it means a prebuild and a fresh device build
- * for everyone — a steep price for a handful of glyphs. Every icon here is
- * straight rules, a circle, or a rotated corner, which views draw exactly.
+ * This used to draw every icon out of `View`s with borders and rotations,
+ * because the rule was that `react-native-svg` is a native dependency and
+ * therefore a prebuild and a fresh device build for everyone. **That premise
+ * was wrong for this SDK.** It is in Expo's `bundledNativeModules.json` at
+ * 15.15.4 — it ships *inside* Expo Go, so adding it costs no prebuild and
+ * breaks no workflow.
  *
- * The geometry is lifted from `assets/brand/icons/*.svg` (the brand kit is the
- * source of truth) and re-expressed at the same proportions on a 24-unit grid.
- * `barbell` in particular is a literal transcription — `workout.svg` is five
- * straight strokes and nothing else, so the drawn version is not an
- * approximation of it, it *is* it.
+ * The old rule had a real cost. A check mark drawn from two borders rendered as
+ * a downward chevron for a while: the geometry was a mirror of a tick, 241
+ * tests were green, and it was caught only by looking at a Simulator. Icons are
+ * drawings; they belong in a drawing format.
  *
- * Stroke weight scales with size rather than being fixed: a 1.8pt stroke that
- * looks right at 24pt is a smudge at 12pt and a hairline at 40pt. The floor of
- * 1.1 stops it disappearing entirely on the smallest inline uses.
+ * Geometry is **generated** from `assets/brand/icons/*.svg` by
+ * `scripts/generate_icons.mjs`, never hand-copied — `verify` fails if the
+ * generated file has drifted from the kit. Recolour with the `color` prop
+ * rather than forking an icon; the kit's `currentColor` is what makes that work.
  *
- * Everything takes `color` and defaults to `textDim`, so an icon beside a
- * label inherits that label's rank instead of shouting over it. Icons are
- * decoration next to text that already says the same thing, so they are all
- * `accessible={false}` — a screen reader announcing "clock, 41 minutes" is
- * reading the furniture out loud.
+ * Everything defaults to `textDim`, so an icon beside a label inherits that
+ * label's rank instead of shouting over it. And **every icon is hidden from
+ * assistive technology**: they sit next to text that already says the same
+ * thing, and a screen reader announcing "clock, 41 minutes" is reading the
+ * furniture out loud. An icon that is genuinely the only content needs a
+ * labelled `Pressable` around it, not an exception here.
  */
 
-export type IconName =
-  | 'barbell'
-  | 'calendar'
-  | 'check'
-  | 'chevron'
-  | 'layers'
-  | 'timer';
+/**
+ * Icons the app needs that the brand kit does not have.
+ *
+ * Deliberately small, and each is here because the kit has no equivalent rather
+ * than because the kit's version was inconvenient. If one ever gets a real
+ * counterpart in `assets/brand/icons/`, delete it from here — a local copy of
+ * an icon the kit also defines is exactly the drift the generator prevents.
+ */
+const EXTRA = {
+  /** Disclosure. The kit has no chevron; it is chrome rather than iconography. */
+  chevron: [{ t: 'p', d: 'M9 5l7 7-7 7' }],
+  'chevron-down': [{ t: 'p', d: 'M5 9l7 7 7-7' }],
+  /** Back. The same stroke, mirrored. */
+  back: [{ t: 'p', d: 'M15 5l-7 7 7 7' }],
+  /** Sets in a session — the "20 sets" meta row. */
+  layers: [{ t: 'p', d: 'M4 7h16M4 12h16M4 17h10' }],
+} as const satisfies Record<string, readonly Primitive[]>;
+
+/**
+ * Names the app used before the kit did.
+ *
+ * Kept so call sites do not churn for a rename: `barbell` is what the session
+ * rows have always asked for, and `workout` is what the kit calls the same
+ * drawing.
+ */
+const ALIAS = { barbell: 'workout' } as const;
+
+export type IconName = BrandIconName | keyof typeof EXTRA | keyof typeof ALIAS;
+
+function primitives(name: IconName): readonly Primitive[] {
+  if (name in ALIAS) return BRAND_ICONS[ALIAS[name as keyof typeof ALIAS]];
+  if (name in EXTRA) return EXTRA[name as keyof typeof EXTRA];
+  return BRAND_ICONS[name as BrandIconName];
+}
 
 export function Icon({
   name,
   size = 14,
   color = vola.textDim,
+  strokeWidth,
 }: {
   name: IconName;
   size?: number;
   color?: string;
+  /**
+   * Overrides the kit's 1.8. Worth setting only when an icon is rendered far
+   * from 24pt — a hairline at 40pt and a slab at 12pt are the two ways a
+   * uniform stroke stops looking uniform.
+   */
+  strokeWidth?: number;
 }) {
-  // Proportional to the box, floored so it survives at inline sizes.
-  const w = Math.max(1.1, size * 0.1);
-  const box = { width: size, height: size };
-
-  switch (name) {
-    /**
-     * A right-pointing chevron: one square corner, rotated.
-     *
-     * Two borders on a box beats two rotated rules here — the rules meet at a
-     * mitre only if their overlap is computed, whereas a border corner is
-     * mitred by the layout engine for free. (This used to cite `ScreenHeader`
-     * as the place doing that arithmetic; it no longer does any, having gone
-     * from a drawn stand-in wordmark to the real artwork as an image.)
-     */
-    case 'chevron': {
-      const arm = size * 0.4;
-      return (
-        <View style={[box, styles.center]} accessible={false}>
-          <View
-            style={{
-              width: arm,
-              height: arm,
-              borderTopWidth: w,
-              borderRightWidth: w,
-              borderColor: color,
-              transform: [{ rotate: '45deg' }],
-              // The rotated square's visual mass sits left of its box centre;
-              // this pulls it back so a chevron in a row reads as centred.
-              marginLeft: -arm * 0.2,
-            }}
+  const sw = strokeWidth ?? 1.8;
+  return (
+    <Svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      accessible={false}
+      importantForAccessibility="no-hide-descendants"
+    >
+      {primitives(name).map((p, i) =>
+        p.t === 'p' ? (
+          <Path
+            key={i}
+            d={p.d}
+            stroke={color}
+            strokeWidth={sw}
+            strokeLinecap="round"
+            strokeLinejoin="round"
           />
-        </View>
-      );
-    }
-
-    /**
-     * The same trick, two adjacent borders and a quarter-turn the other way.
-     *
-     * **Bottom + right, rotated +45° — the mirror of this is not a tick.** With
-     * `borderLeft` and −45° both arms come out pointing *upward*, which draws a
-     * symmetrical V; on a filled circle that reads as a downward chevron, i.e.
-     * a disclosure control, on a card that is not expandable. Verified on the
-     * Simulator, where it shipped wrong first.
-     *
-     * The asymmetry is the whole glyph: `height` is the long arm rising to the
-     * right, `width` the short one dropping to the left.
-     */
-    case 'check': {
-      const long = size * 0.62;
-      const short = size * 0.32;
-      return (
-        <View style={[box, styles.center]} accessible={false}>
-          <View
-            style={{
-              width: short,
-              height: long,
-              borderBottomWidth: w,
-              borderRightWidth: w,
-              borderColor: color,
-              transform: [{ rotate: '45deg' }],
-              // The rotated glyph's mass sits low; this re-centres it in the box.
-              marginTop: -size * 0.1,
-            }}
+        ) : p.t === 'c' ? (
+          <Circle key={i} cx={p.cx} cy={p.cy} r={p.r} stroke={color} strokeWidth={sw} />
+        ) : (
+          <Rect
+            key={i}
+            x={p.x}
+            y={p.y}
+            width={p.w}
+            height={p.h}
+            rx={p.rx}
+            stroke={color}
+            strokeWidth={sw}
+            strokeLinejoin="round"
           />
-        </View>
-      );
-    }
-
-    /**
-     * A clock reading three o'clock.
-     *
-     * The brand icon's hand sits at about eleven, which needs a rotation about
-     * one *end* of the hand rather than its centre — and rotating about a
-     * point that isn't the centre means either `transformOrigin` or arithmetic
-     * per size. Axis-aligned hands need neither and read as a clock just as
-     * plainly. The crown on top is `timer.svg`'s `M9 2h6`, and it's what
-     * separates this from a plain circle at 12pt.
-     */
-    case 'timer': {
-      const d = size * 0.78;
-      const hand = d * 0.3;
-      return (
-        <View style={[box, styles.center]} accessible={false}>
-          <View
-            style={{
-              position: 'absolute',
-              top: 0,
-              width: size * 0.34,
-              height: w,
-              borderRadius: w,
-              backgroundColor: color,
-            }}
-          />
-          <View
-            style={{
-              width: d,
-              height: d,
-              borderRadius: d / 2,
-              borderWidth: w,
-              borderColor: color,
-              marginTop: size * 0.11,
-            }}
-          />
-          {/* Both hands start at the dial's centre, so they are positioned
-              from it rather than centred in the box — the dial is nudged down
-              by the crown and the hands have to follow it. */}
-          <View
-            style={{
-              position: 'absolute',
-              top: size * 0.11 + d / 2 - hand,
-              width: w,
-              height: hand,
-              backgroundColor: color,
-            }}
-          />
-          <View
-            style={{
-              position: 'absolute',
-              top: size * 0.11 + d / 2 - w / 2,
-              left: size / 2,
-              width: hand * 0.8,
-              height: w,
-              backgroundColor: color,
-            }}
-          />
-        </View>
-      );
-    }
-
-    /**
-     * `workout.svg`, stroke for stroke: `M6 9v6 M18 9v6 M3 10v4 M21 10v4
-     * M6 12h12` — inner plates, outer plates, bar. The fractions below are
-     * those coordinates over 24.
-     */
-    case 'barbell': {
-      const plate = (h: number, left: number) => ({
-        position: 'absolute' as const,
-        left: size * left - w / 2,
-        width: w,
-        height: size * h,
-        borderRadius: w,
-        backgroundColor: color,
-      });
-      return (
-        <View style={[box, styles.center]} accessible={false}>
-          <View style={plate(0.25, 0.125)} />
-          <View style={plate(0.25, 0.875)} />
-          <View style={plate(0.42, 0.25)} />
-          <View style={plate(0.42, 0.75)} />
-          <View
-            style={{
-              width: size * 0.5,
-              height: w,
-              backgroundColor: color,
-            }}
-          />
-        </View>
-      );
-    }
-
-    /** Stacked rules — a count of things done, for a set tally. */
-    case 'layers': {
-      const rule = {
-        width: size * 0.72,
-        height: w,
-        borderRadius: w,
-        backgroundColor: color,
-      };
-      return (
-        <View style={[box, styles.center, { gap: size * 0.16 }]} accessible={false}>
-          <View style={rule} />
-          <View style={rule} />
-          <View style={rule} />
-        </View>
-      );
-    }
-
-    /** `calendar.svg`: the body, its header rule, and two binder tabs. */
-    case 'calendar': {
-      const body = size * 0.82;
-      const tab = (left: number) => ({
-        position: 'absolute' as const,
-        top: 0,
-        left: size * left - w / 2,
-        width: w,
-        height: size * 0.18,
-        borderRadius: w,
-        backgroundColor: color,
-      });
-      return (
-        <View style={[box, styles.center]} accessible={false}>
-          <View style={tab(0.33)} />
-          <View style={tab(0.67)} />
-          <View
-            style={{
-              width: body,
-              height: body,
-              marginTop: size * 0.14,
-              borderWidth: w,
-              borderColor: color,
-              borderRadius: size * 0.14,
-              overflow: 'hidden',
-            }}
-          >
-            <View
-              style={{
-                marginTop: size * 0.16,
-                width: '100%',
-                height: w,
-                backgroundColor: color,
-              }}
-            />
-          </View>
-        </View>
-      );
-    }
-  }
+        ),
+      )}
+    </Svg>
+  );
 }
-
-const styles = StyleSheet.create({
-  center: { alignItems: 'center', justifyContent: 'center' },
-});
