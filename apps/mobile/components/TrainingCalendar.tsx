@@ -641,7 +641,27 @@ const styles = StyleSheet.create({
   cell: { flex: 1, alignItems: 'center', gap: 4 },
   weekday: { fontSize: 10, fontWeight: '700', letterSpacing: 0.6, color: vola.textDim },
   date: { width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  dateToday: { backgroundColor: vola.lime },
+  /**
+   * Today's chip, and the one place in this app that uses a shadow.
+   *
+   * The glow is `shadowColor` set to the chip's own fill rather than to black,
+   * which on a near-black ground reads as light coming off the chip instead of
+   * the chip sitting above the card. Nothing else here casts one — a dark UI
+   * where several things glow is a dark UI where nothing stands out, and this
+   * marker has to win against six neighbours that are the same size and shape.
+   *
+   * Android takes `elevation` and ignores the rest, so it gets a plain lift
+   * rather than a coloured one. That is a real difference and an acceptable
+   * one: the fill already carries the meaning, and the glow is emphasis.
+   */
+  dateToday: {
+    backgroundColor: vola.lime,
+    shadowColor: vola.lime,
+    shadowOpacity: 0.55,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 6,
+  },
   dateText: { fontSize: 15, fontWeight: '700', fontVariant: ['tabular-nums'] },
   dateTextToday: { color: vola.navy },
   dimmed: { color: vola.textDim, opacity: 0.5 },

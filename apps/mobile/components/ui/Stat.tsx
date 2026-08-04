@@ -2,6 +2,7 @@ import { Children, cloneElement, isValidElement } from 'react';
 import { StyleSheet, View as RNView } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
+import { Icon, type IconName } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
 
 /**
@@ -131,6 +132,8 @@ export function Stat({
   size,
   fit,
   slots,
+  icon,
+  tone,
 }: {
   label: string;
   value: string;
@@ -138,12 +141,30 @@ export function Stat({
   size?: number;
   fit?: boolean;
   slots?: number;
+  /**
+   * A glyph above the figure, in a tinted disc.
+   *
+   * Optional because it is decoration: it repeats what the label already says
+   * in words, and three unlabelled discs would be a puzzle. What it buys is a
+   * scan — the eye finds "the clock one" across a row faster than it reads
+   * three words — so it is worth having where a row is glanced at and
+   * pointless where it is read.
+   */
+  icon?: IconName;
+  /** The disc's hue. Defaults to the accent's own, set by the caller. */
+  tone?: string;
 }) {
   const rounded = change == null ? null : Math.round(change);
   // Grouped, or VoiceOver reads the figure and its label as two unrelated
-  // stops with nothing connecting them.
+  // stops with nothing connecting them. The icon is inside the group and
+  // unlabelled, so it adds nothing to what is announced.
   return (
     <RNView style={styles.stat} accessible accessibilityLabel={`${value} ${label}`}>
+      {icon && (
+        <RNView style={[styles.badge, { backgroundColor: `${tone ?? vola.textMuted}22` }]}>
+          <Icon name={icon} size={17} color={tone ?? vola.textMuted} />
+        </RNView>
+      )}
       <StatValue value={value} size={size} fit={fit} slots={slots} />
       <Text style={styles.label}>{label}</Text>
       {rounded != null && rounded !== 0 && (
@@ -195,6 +216,14 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
   stat: { gap: 1 },
+  badge: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 7,
+  },
   label: {
     fontSize: 11,
     color: vola.textDim,

@@ -2,11 +2,19 @@ import { useAuth } from '@clerk/clerk-expo';
 import { request as requestSync, syncNow, useSyncState } from '@/lib/sync';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, AppState, Pressable, ScrollView, StyleSheet } from 'react-native';
+import {
+  ActivityIndicator,
+  AppState,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View as RNView,
+} from 'react-native';
 
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
 import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
+import { sportColor } from '@/components/ui/sport';
 import { PickSessionSheet } from '@/components/ui/PickSessionSheet';
 import { SectionHeader } from '@/components/ui/Section';
 import { SessionCard, type Metric } from '@/components/ui/SessionCard';
@@ -22,6 +30,7 @@ import { cachedWorkouts, listLocalSessions } from '@/lib/sessionStore';
 import { formatVolume, type UnitSystem } from '@/lib/units';
 import { enabledSports, labelFor, type Module } from '@/lib/modules';
 import { useModules } from '@/lib/ModulesProvider';
+import { useAccent } from '@/lib/AccentProvider';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
 
@@ -225,6 +234,7 @@ function describeSession(s: Session, mods: Module[]): string {
  * question someone opens this tab to ask.
  */
 export default function TodayScreen() {
+  const accent = useAccent();
   const { modules } = useModules();
   // is_sport filtered, not just enabled: nutrition is a module you can turn
   // on, but "Start a nutrition session" is nonsense — there is no catalog,
@@ -579,19 +589,39 @@ export default function TodayScreen() {
                   accessibilityLabel={`Start ${p.workoutName ?? labelFor(modules, p.sport)}, planned for today`}
                   testID={`today-plan-${p.id}`}
                 >
+                  {/* The discipline's own colour down the edge, matching the
+                      Recent rows below — so the eye learns one mapping for the
+                      whole screen rather than two. */}
+                  <RNView
+                    style={[
+                      styles.planRule,
+                      { backgroundColor: sportColor(p.sport) ?? accent.accent },
+                    ]}
+                  />
                   <View style={styles.planMain}>
-                    <Text style={styles.planEyebrow}>
+                    <Text
+                      style={[
+                        styles.planEyebrow,
+                        { color: sportColor(p.sport) ?? vola.textDim },
+                      ]}
+                    >
                       {labelFor(modules, p.sport).toUpperCase()}
                     </Text>
                     <Text style={styles.planTitle}>
                       {p.workoutName ?? `${labelFor(modules, p.sport)} session`}
                     </Text>
                   </View>
-                  <View style={styles.planGo}>
-                    <Text style={styles.planGoText}>
+                  {/* The accent, not the sport: this is the one thing on the
+                      card you are meant to press, and "act here" is the job the
+                      accent does everywhere else in the app. A sport-coloured
+                      button would make the edge and the action the same signal
+                      and leave the primary action unmarked. */}
+                  <View style={[styles.planGo, { backgroundColor: accent.accent }]}>
+                    <Text style={[styles.planGoText, { color: accent.on }]}>
                       {logsAfterwards(p.sport, modules) ? 'Log' : 'Start'}
                     </Text>
                   </View>
+                  <Icon name="chevron" size={14} color={vola.textDim} />
                 </Pressable>
               ))
             ) : (
@@ -623,7 +653,14 @@ export default function TodayScreen() {
               accessibilityLabel="Start something"
               testID="start-something"
             >
-              <Text style={styles.startText}>+ Start something</Text>
+              {/* The plus is a disc rather than a character. As "+ Start" it
+                  was a glyph doing a button's job — the same weight as the
+                  words, and the only affordance on a dashed card that otherwise
+                  reads as an empty state. */}
+              <RNView style={[styles.startPlus, { borderColor: accent.accent }]}>
+                <Icon name="plus" size={15} color={accent.accent} />
+              </RNView>
+              <Text style={styles.startText}>Start something</Text>
             </Pressable>
 
             {/* Every discipline off is a reachable state — nothing stops a
@@ -659,8 +696,19 @@ export default function TodayScreen() {
 
         {week.sessions > 0 && (
           <StatRow testID="week-summary">
-            <Stat label="Sessions" value={String(week.sessions)} />
-            <Stat label="Days" value={String(week.dayKeys.size)} />
+            {/* The three discs are the only colour in this card, and each one
+                is a different hue on purpose: they are three unrelated
+                measures, not a ramp, so a single accent-coloured set would
+                imply they belong to one scale. `heart` for sessions rather
+                than a barbell — a week's count spans every discipline, and a
+                barbell would claim it was all lifting. */}
+            <Stat label="Sessions" value={String(week.sessions)} icon="heart" tone={accent.accent} />
+            <Stat
+              label="Days"
+              value={String(week.dayKeys.size)}
+              icon="calendar"
+              tone={vola.warn}
+            />
             {/* Whichever measure the week actually produced. Dash until the
                 unit is known, rather than a number in the wrong one: this used
                 to render kilograms for a moment to an athlete set to pounds,
@@ -670,11 +718,15 @@ export default function TodayScreen() {
               <Stat
                 label="Volume"
                 value={unitsReady ? formatVolume(week.volumeKg, units) : '—'}
+                icon="barbell"
+                tone={vola.info}
               />
             ) : (
               <Stat
                 label="Time"
                 value={week.seconds > 0 ? formatDuration(week.seconds) : '—'}
+                icon="timer"
+                tone={vola.info}
               />
             )}
           </StatRow>
@@ -688,6 +740,7 @@ export default function TodayScreen() {
                 key={s.id}
                 name={s.name || s.sport}
                 sport={labelFor(modules, s.sport)}
+                sportKey={s.sport}
                 when={shortDay(s.started_at)}
                 metrics={sessionMetrics(s, modules, units)}
                 complete={!!s.ended_at}
@@ -812,21 +865,19 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: vola.line,
     borderRadius: 14,
-    paddingLeft: 16,
+    overflow: 'hidden',
+    paddingLeft: 0,
     paddingRight: 12,
     paddingVertical: 14,
   },
   planCardPressed: { backgroundColor: vola.surfaceHover },
-  planMain: { flex: 1, gap: 2 },
-  planEyebrow: { fontSize: 10, fontWeight: '700', letterSpacing: 1, color: vola.textDim },
+  planRule: { width: 3, alignSelf: 'stretch', marginVertical: -14 },
+  planMain: { flex: 1, gap: 2, marginLeft: 13 },
+  // Colour set inline, from the discipline.
+  planEyebrow: { fontSize: 10, fontWeight: '700', letterSpacing: 1 },
   planTitle: { fontSize: 18, fontWeight: '700' },
-  planGo: {
-    backgroundColor: vola.lime,
-    borderRadius: 10,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-  },
-  planGoText: { color: vola.navy, fontWeight: '800', fontSize: 15 },
+  planGo: { borderRadius: 10, paddingHorizontal: 18, paddingVertical: 10 },
+  planGoText: { fontWeight: '800', fontSize: 15 },
 
   planEmpty: {
     flexDirection: 'row',
@@ -844,13 +895,25 @@ const styles = StyleSheet.create({
 
   // Outlined, never filled — see the comment at its call site.
   startButton: {
+    flexDirection: 'row',
     borderWidth: 1,
     borderColor: vola.line,
-    borderRadius: 12,
-    paddingVertical: 13,
+    borderStyle: 'dashed',
+    borderRadius: 14,
+    paddingVertical: 16,
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
   },
-  startText: { color: vola.text, fontWeight: '600', fontSize: 15 },
+  startPlus: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  startText: { color: vola.text, fontWeight: '600', fontSize: 16 },
 
   // The cards space themselves; the header sits a touch closer to the first
   // one than the gap between cards, so the label reads as belonging to them.

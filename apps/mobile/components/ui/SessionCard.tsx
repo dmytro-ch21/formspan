@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, View as RNView } from 'react-native';
 import { Text } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { Icon, type IconName } from '@/components/ui/Icon';
+import { sportColor, sportIcon, sportTint } from '@/components/ui/sport';
 
 /**
  * A logged session, as a card rather than a line of text.
@@ -17,16 +18,21 @@ import { Icon, type IconName } from '@/components/ui/Icon';
  * with an icon apiece — a duration and a set count no longer look identical
  * at a glance.
  *
- * **The left rule is the state, and it is the only thing on the card that
- * carries colour.** Green for a finished session, amber for one still open.
- * Not lime: lime means "act here" everywhere else in this app, the resume
- * card at the top of Today already claims it, and a list where every row is
- * lime has no primary action left.
+ * **The left rule is the discipline, and the tick is the state.** The rule used
+ * to carry completion — green for finished, amber for open — and that swapped
+ * for a reason worth recording, because it trades one scan for another. The
+ * old arrangement made "which one did I abandon" findable by running down the
+ * left edge. The new one makes "which of these was BJJ" findable instead, and
+ * that is the question a mixed list actually raises: completion is already
+ * answered at the right-hand end of every row, by a mark that is present or
+ * absent rather than a colour that has to be interpreted.
  *
- * The tick is drawn only when the session is finished. An unfinished one gets
- * the word instead, because a greyed-out tick reads as "done, dimly" — and
- * the distinction between a session you finished and one you abandoned
- * mid-workout is the one thing this list must not blur.
+ * The tick is drawn only when the session is finished, and an unfinished one
+ * gets the word rather than a dimmed tick — a greyed-out tick reads as "done,
+ * dimly", and the distinction between a session you finished and one you
+ * abandoned mid-workout is the one thing this list must not blur.
+ *
+ * The tick stays green on every theme. It is a reading, not chrome.
  */
 
 export type Metric = { icon: IconName; value: string };
@@ -34,6 +40,7 @@ export type Metric = { icon: IconName; value: string };
 export function SessionCard({
   name,
   sport,
+  sportKey,
   when,
   metrics,
   complete,
@@ -44,6 +51,8 @@ export function SessionCard({
   name: string;
   /** The discipline's own label, from the module registry — so "BJJ" stays "BJJ". */
   sport: string;
+  /** The raw key, for colour and glyph. Unknown values fall back to neutral. */
+  sportKey?: string;
   /** Short and already formatted, e.g. "Mon 28". */
   when: string;
   metrics: Metric[];
@@ -52,6 +61,9 @@ export function SessionCard({
   accessibilityLabel: string;
   testID?: string;
 }) {
+  const tone = (sportKey && sportColor(sportKey)) || vola.textMuted;
+  const glyph = sportKey ? sportIcon(sportKey) : undefined;
+
   return (
     <Pressable
       onPress={onPress}
@@ -60,12 +72,18 @@ export function SessionCard({
       accessibilityLabel={accessibilityLabel}
       testID={testID}
     >
-      <RNView style={[styles.rule, complete ? styles.ruleDone : styles.ruleOpen]} />
+      <RNView style={[styles.rule, { backgroundColor: tone }]} />
+
+      {glyph && (
+        <RNView style={[styles.badge, { backgroundColor: sportTint(tone) }]}>
+          <Icon name={glyph} size={18} color={tone} />
+        </RNView>
+      )}
 
       <RNView style={styles.body}>
         <RNView style={styles.head}>
           <RNView style={styles.headText}>
-            <Text style={styles.sport}>{sport.toUpperCase()}</Text>
+            <Text style={[styles.sport, { color: tone }]}>{sport.toUpperCase()}</Text>
             <Text style={styles.name} numberOfLines={1}>
               {name}
             </Text>
@@ -101,6 +119,7 @@ export function SessionCard({
 const styles = StyleSheet.create({
   card: {
     flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: vola.surface,
     borderRadius: 14,
     borderWidth: 1,
@@ -108,19 +127,21 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   pressed: { backgroundColor: vola.surfaceHover },
-  rule: { width: 3 },
-  ruleDone: { backgroundColor: vola.green },
-  ruleOpen: { backgroundColor: vola.warn },
+  rule: { width: 3, alignSelf: 'stretch' },
+  badge: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 12,
+  },
 
   body: { flex: 1, paddingHorizontal: 13, paddingVertical: 11, gap: 9 },
   head: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
   headText: { flex: 1, gap: 1 },
-  sport: {
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 1,
-    color: vola.textDim,
-  },
+  // Colour is set inline, from the discipline.
+  sport: { fontSize: 10, fontWeight: '700', letterSpacing: 1 },
   name: { fontSize: 16, fontWeight: '700' },
   when: {
     fontSize: 12,
