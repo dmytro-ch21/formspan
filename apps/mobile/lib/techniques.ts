@@ -253,11 +253,18 @@ export function foldForSearch(value: string): string {
 /**
  * Folded haystacks, cached per technique object.
  *
- * Search runs on every keystroke over the whole 466-entry library, and folding
- * name + aliases + position each time is ~2000 normalize calls per character
- * typed. The catalog objects are immutable and module-cached, so a WeakMap
- * keyed on the object is both correct and free to invalidate — a refetch makes
- * new objects and the old entries are collected.
+ * Search runs on every keystroke over the whole 466-entry library. Folding
+ * name + aliases + position each time is 1592 fold calls per character typed,
+ * measured at 0.774 ms uncached against 0.029 ms cached on Node (27x) — Hermes
+ * is several times slower again, which is where it starts to matter on a phone
+ * mid-session.
+ *
+ * A WeakMap keyed on the technique object is what makes this safe: the catalog
+ * objects are built once in fetchTechniques and never written to, so a refetch
+ * makes new objects and the stale entries are collected with them. That
+ * immutability is the load-bearing assumption and it is a CONVENTION, not
+ * something enforced — mutate a summary in place and search silently keeps
+ * answering from the pre-mutation text. Build a new object instead.
  */
 const foldedCache = new WeakMap<object, string>();
 
