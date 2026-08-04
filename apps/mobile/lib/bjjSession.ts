@@ -69,6 +69,33 @@ export const LIVE_ROWS: { category: Category; label: string; scored: string; con
   { category: 'takedown', label: 'Takedowns', scored: 'Took down', conceded: 'Taken down' },
 ];
 
+/** Library category → tag vocabulary. Anything without a symmetric opposite
+/** Library category → tag vocabulary. Anything without a symmetric opposite
+ *  lands in `control`, which is honest rather than inventing a seventh. */
+export function toCategory(libraryCategory: string): Category {
+  switch (libraryCategory) {
+    case 'Submission':
+      return 'submission';
+    case 'Sweep':
+      return 'sweep';
+    case 'Pass':
+      return 'pass';
+    case 'Escape':
+      return 'escape';
+    case 'Takedown':
+      return 'takedown';
+    default:
+      return 'control';
+  }
+}
+
+/** "Half Guard - Bottom" → "Half Guard". Mirrors the Library's own family
+ *  matching so a tag and a filter chip mean the same thing. */
+export function familyOf(position: string): string {
+  const family = POSITIONS.find((p) => position === p || position.startsWith(`${p} - `));
+  return family ?? '';
+}
+
 /**
  * The live outcomes a drilled technique can have, and the middle of the
  * funnel.
@@ -93,6 +120,13 @@ export const LIVE_ROWS: { category: Category; label: string; scored: string; con
  * times and hit one is `attempted: 3, scored: 1` — so attempts + scores is
  * how often you went for it, and scored/(attempted+scored) is the hit rate.
  */
+/**
+ * Anything that can name a technique and supply its tag-vocabulary category
+ * and position. A drilled `Tag` satisfies it; so does a focus entry once
+ * `toCategory`/`familyOf` have been applied.
+ */
+export type TechniqueRef = Pick<Tag, 'technique_id' | 'category' | 'position'>;
+
 export const FUNNEL_OUTCOMES: { event: Extract<Event, 'attempted' | 'scored'>; label: string }[] = [
   { event: 'attempted', label: 'Tried' },
   { event: 'scored', label: 'Landed' },
@@ -121,8 +155,9 @@ export function techniqueOutcomeCount(
 /**
  * Add or take back one live outcome for a technique that was drilled.
  *
- * The new row inherits `category` and `position` from the drilled row rather
- * than recomputing them. Two reasons, and the second is the one that bites:
+ * The new row inherits `category` and `position` from the SOURCE rather than
+ * recomputing them. The source is whichever row named the technique — a
+ * drilled tag, or a focus entry translated into the tag vocabulary. Two reasons, and the second is the one that bites:
  * the funnel only joins if both ends agree on the position, and `familyOf()`
  * returns `''` for a family the hardcoded POSITIONS list has fallen behind on
  * — so deriving it twice could put the drilled row under "Half Guard" and the
@@ -131,11 +166,11 @@ export function techniqueOutcomeCount(
  */
 export function bumpTechniqueOutcome(
   tags: Tag[],
-  drilled: Tag,
+  source: TechniqueRef,
   event: Extract<Event, 'attempted' | 'scored'>,
   delta: number,
 ): Tag[] {
-  const techniqueID = drilled.technique_id;
+  const techniqueID = source.technique_id;
   if (!techniqueID) return tags;
 
   const next = [...tags];
@@ -143,9 +178,9 @@ export function bumpTechniqueOutcome(
   if (i === -1) {
     if (delta < 0) return tags;
     next.push({
-      category: drilled.category,
+      category: source.category,
       event,
-      position: drilled.position,
+      position: source.position,
       technique_id: techniqueID,
       count: delta,
     });
@@ -171,27 +206,20 @@ export function removeDrilledTechnique(tags: Tag[], techniqueID: string | null |
   // A nullish id matches every UNTAGGED row, and the API sends
   // `"technique_id": null` on every one of them (the Go field has no
   // omitempty). Without this guard, removing a drilled row that has lost its
-  // technique — a state `ON DELETE SET NULL` is explicitly designed to
-  // produce when a technique is retired from the library — deletes the whole
-  // live grid's "You" column. And `PUT /bjj/sessions/{id}` replaces the tag
-  // set wholesale, so it is permanent and it syncs.
+  // technique — a state `ON DELETE SET NULL` is designed to produce when a
+  // technique is retired — deletes the whole live grid's "You" column, and
+  // `PUT /bjj/sessions/{id}` replaces the tag set wholesale, so it syncs.
   if (!techniqueID) return tags;
-  // Bounded by event as well as id. This function owns exactly the three
-  // rows the drilled step can author; `conceded` is excluded because this
-  // screen cannot produce a technique-tagged one, so any that exist came from
-  // elsewhere and deleting them is data loss.
+  // ONLY the drilled row now.
   //
-  // With the guard above in place this allow-list is currently EQUIVALENT to
-  // `!== conceded` — there are only four events — so no test can distinguish
-  // them, and none pretends to. It is written this way so a fifth event does
-  // not silently join the set this function deletes.
-  return tags.filter(
-    (t) =>
-      !(
-        t.technique_id === techniqueID &&
-        (t.event === 'drilled' || t.event === 'attempted' || t.event === 'scored')
-      ),
-  );
+  // It used to take `attempted` and `scored` with it, and that was right while
+  // the drilled step was the only place they could be authored — leaving them
+  // behind stranded evidence with no control to edit it. Live outcomes now come
+  // from the focus rows in the live step, which are reachable whether or not
+  // the technique was drilled today. So "I did not actually drill this" and "I
+  // did not hit this live" are different statements, and un-saying one must not
+  // un-say the other.
+  return tags.filter((t) => !(t.technique_id === techniqueID && t.event === 'drilled'));
 }
 
 /**
