@@ -60,6 +60,22 @@ const navItems: {
     label: "Library",
     needs: (m) => m.some((x) => x.enabled && x.capabilities.catalog !== ""),
   },
+  {
+    href: "/dashboard/proficiency",
+    label: "Technique funnel",
+    // A capability, not a sport name — same reasoning as Records above. The
+    // funnel names techniques, so it needs a discipline whose catalog IS
+    // techniques; a barbell athlete has nothing for it to list.
+    //
+    // Mild over-inclusion accepted and worth knowing: the evidence stream is
+    // `bjj_session_tags`, so a future discipline with a technique catalog
+    // (judo, wrestling) would surface this link and find it empty. That is the
+    // right failure — an empty analytical screen with an honest empty state —
+    // and better than gating on `key === "bjj"`, which is the check this
+    // codebase has deliberately avoided everywhere else.
+    needs: (m) =>
+      m.some((x) => x.enabled && x.capabilities.catalog === "techniques"),
+  },
   { href: "/dashboard/settings", label: "Settings" },
 ];
 

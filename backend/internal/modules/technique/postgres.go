@@ -21,16 +21,18 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 
 // Two column sets, deliberately. The prose fields (description, when_to_use,
 // the three edge arrays) are most of the library's bytes, and a list request
-// needs none of them: returning full rows ships ~550 KB to draw a scrolling
-// list where ~70 KB will do.
+// needs none of them: returning full rows ships ~485 KB to draw a scrolling
+// list where ~175 KB will do.
 const summaryColumns = `
 	t.id, t.name, t.aliases, t.category, COALESCE(t.function, ''),
 	t.position, t.position_detail,
+	COALESCE(t.to_position, ''),
 	t.gi_no_gi, t.typical_belt, COALESCE(t.ibjjf_ruleset_id, ''), t.setup_from`
 
 const detailColumns = `
 	t.id, t.name, t.aliases, t.category, COALESCE(t.function, ''),
 	t.position, t.position_detail,
+	COALESCE(t.to_position, ''),
 	t.gi_no_gi, t.typical_belt, t.description, t.when_to_use,
 	t.setup_from, t.common_next_moves, t.common_counters,
 	t.video_reference, t.source_notes, COALESCE(t.ibjjf_ruleset_id, ''),
@@ -51,7 +53,7 @@ type scannable interface{ Scan(dest ...any) error }
 func scanSummary(row scannable) (*Summary, error) {
 	var s Summary
 	err := row.Scan(&s.ID, &s.Name, &s.Aliases, &s.Category, &s.Function,
-		&s.Position, &s.PositionDetail, &s.GiNoGi, &s.TypicalBelt,
+		&s.Position, &s.PositionDetail, &s.ToPosition, &s.GiNoGi, &s.TypicalBelt,
 		&s.IBJJFRulesetID, &s.SetupFrom)
 	if err != nil {
 		return nil, err
@@ -62,7 +64,7 @@ func scanSummary(row scannable) (*Summary, error) {
 func scanTechnique(row scannable) (*Technique, error) {
 	var t Technique
 	err := row.Scan(&t.ID, &t.Name, &t.Aliases, &t.Category, &t.Function,
-		&t.Position, &t.PositionDetail, &t.GiNoGi, &t.TypicalBelt, &t.Description,
+		&t.Position, &t.PositionDetail, &t.ToPosition, &t.GiNoGi, &t.TypicalBelt, &t.Description,
 		&t.WhenToUse, &t.SetupFrom, &t.CommonNextMoves, &t.CommonCounters,
 		&t.VideoReference, &t.SourceNotes, &t.IBJJFRulesetID,
 		&t.CreatedAt, &t.UpdatedAt)
@@ -397,6 +399,13 @@ func (r *PostgresRepository) UpsertRulesets(ctx context.Context, rulesets []Rule
 	return nil
 }
 
+// The `source = 'seed'` guard is what lets a second writer exist at all.
+// Without it a deploy silently reverts every admin edit to a row the JSON also
+// knows about — and a re-seed runs on every deploy, so the revert would be
+// routine rather than rare. Admin-authored rows are `source = 'admin'` and this
+// upsert cannot touch them; an id collision between the two is refused at write
+// time in the admin handler rather than resolved here.
+//
 // The trailing WHERE keeps an unchanged row a true no-op, so updated_at
 // means "last content change" rather than "last deploy" — same reasoning as
 // the exercise catalog, and the same prerequisite for delta sync.
@@ -405,14 +414,15 @@ const upsertSQL = `
 		id, name, aliases, category, position, position_detail, gi_no_gi,
 		typical_belt, description, setup_from, common_counters,
 		when_to_use, common_next_moves, video_reference, source_notes,
-		ibjjf_ruleset_id, function
+		ibjjf_ruleset_id, function, to_position
 	) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-		NULLIF($16, ''), NULLIF($17, ''))
+		NULLIF($16, ''), NULLIF($17, ''), NULLIF($18, ''))
 	ON CONFLICT (id) DO UPDATE SET
 		name            = EXCLUDED.name,
 		aliases         = EXCLUDED.aliases,
 		category        = EXCLUDED.category,
 		function        = EXCLUDED.function,
+		to_position     = EXCLUDED.to_position,
 		position        = EXCLUDED.position,
 		position_detail = EXCLUDED.position_detail,
 		gi_no_gi        = EXCLUDED.gi_no_gi,
@@ -426,14 +436,14 @@ const upsertSQL = `
 		source_notes      = EXCLUDED.source_notes,
 		ibjjf_ruleset_id  = EXCLUDED.ibjjf_ruleset_id,
 		updated_at      = now()
-	WHERE (
+	WHERE techniques.source = 'seed' AND (
 		techniques.name, techniques.aliases, techniques.category,
 		techniques.position, techniques.position_detail, techniques.gi_no_gi,
 		techniques.typical_belt, techniques.description,
 		techniques.setup_from, techniques.common_counters,
 		techniques.when_to_use, techniques.common_next_moves,
 		techniques.video_reference, techniques.source_notes,
-		techniques.ibjjf_ruleset_id, techniques.function
+		techniques.ibjjf_ruleset_id, techniques.function, techniques.to_position
 	) IS DISTINCT FROM (
 		EXCLUDED.name, EXCLUDED.aliases, EXCLUDED.category,
 		EXCLUDED.position, EXCLUDED.position_detail, EXCLUDED.gi_no_gi,
@@ -441,7 +451,7 @@ const upsertSQL = `
 		EXCLUDED.setup_from, EXCLUDED.common_counters,
 		EXCLUDED.when_to_use, EXCLUDED.common_next_moves,
 		EXCLUDED.video_reference, EXCLUDED.source_notes,
-		EXCLUDED.ibjjf_ruleset_id, EXCLUDED.function
+		EXCLUDED.ibjjf_ruleset_id, EXCLUDED.function, EXCLUDED.to_position
 	)`
 
 // UpsertAll writes the whole library in one transaction, so a deploy either
@@ -458,7 +468,8 @@ func (r *PostgresRepository) UpsertAll(ctx context.Context, techniques []Techniq
 		batch.Queue(upsertSQL, t.ID, t.Name, t.Aliases, t.Category, t.Position,
 			t.PositionDetail, t.GiNoGi, t.TypicalBelt, t.Description,
 			t.SetupFrom, t.CommonCounters, t.WhenToUse, t.CommonNextMoves,
-			t.VideoReference, t.SourceNotes, t.IBJJFRulesetID, t.Function)
+			t.VideoReference, t.SourceNotes, t.IBJJFRulesetID, t.Function,
+			t.ToPosition)
 	}
 
 	results := tx.SendBatch(ctx, batch)

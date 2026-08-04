@@ -73,6 +73,14 @@ func TestValidate_RejectsBadContent(t *testing.T) {
 		// The column has no CHECK, so this validator is the ONLY thing between
 		// a typo and a value no client can render. Without a case here,
 		// replacing the guard with `case false:` leaves the whole suite green.
+		// to_position's guard is likewise the ONLY thing between a typo and an
+		// edge that resolves to nothing on every traversal. Replacing it with
+		// `case false:` leaves the whole suite green without this case — the
+		// exact gap the comment above describes, one column over.
+		{"unknown to_position", []Technique{
+			{ID: "a", Name: "A", Category: "Sweep", Position: "Guard - Bottom",
+				GiNoGi: "Both", ToPosition: "Side Control"},
+		}},
 		{"unknown function", []Technique{
 			{ID: "a", Name: "A", Category: "Sweep", Position: "Guard - Bottom",
 				GiNoGi: "Both", Function: "submit"},
@@ -704,6 +712,12 @@ func TestReseedPopulatesFunctionOnRowsThatPredateTheColumn(t *testing.T) {
 
 	// Rewind to the state migration 000028 leaves behind: every row present,
 	// every function NULL.
+	//
+	// NOTE: this and the counts below assume this package owns every row in
+	// `techniques`. That holds only because the suite runs with `-p 1` — see
+	// ci.yml. Scoping each assertion instead was tried and abandoned: there are
+	// seven of them across this file, fixing one left the other six flaking,
+	// and every future assertion would have to remember.
 	if _, err := pool.Exec(ctx,
 		`UPDATE techniques SET function = NULL, updated_at = now() - interval '1 day'`,
 	); err != nil {
@@ -752,5 +766,182 @@ func TestReseedPopulatesFunctionOnRowsThatPredateTheColumn(t *testing.T) {
 	}
 	if !after.After(before) {
 		t.Error("updated_at did not move, so no delta-syncing client would ever refetch")
+	}
+}
+
+// to_position is sparse on purpose, and every value must name a real position.
+//
+// The sparseness is the point: it is authored, not derived (see migration
+// 000029 for the two measurements), so a NULL means "not recorded" and is
+// honest. What must never happen is a value naming a position that does not
+// exist — "Side Control" instead of "Side Control - Top" — because that edge
+// then resolves to nothing on every traversal and NOTHING reports a fault.
+// The seed validator is the only guard; this is the test that it works.
+//
+// The count is pinned so coverage can only rise. If it falls, authored data
+// was lost rather than a decision being made.
+func TestToPositionNamesRealPositionsAndOnlyGrows(t *testing.T) {
+	techniques, err := SeedData()
+	if err != nil {
+		t.Fatalf("SeedData: %v", err)
+	}
+
+	var populated, selfLoops int
+	for _, tq := range techniques {
+		if tq.ToPosition == "" {
+			continue
+		}
+		populated++
+		// Deliberately NO "is it a real position" assertion here: SeedData()
+		// has already run validate() over this same slice, so `positions`
+		// below is built from the very data that check would test and can
+		// never disagree. TestValidate_RejectsBadContent covers that property
+		// where it can actually fail.
+		if tq.ToPosition == tq.Position {
+			selfLoops++
+		}
+	}
+
+	const wantAtLeast = 149
+	if populated < wantAtLeast {
+		t.Fatalf("only %d techniques have a destination, want at least %d — authored data was lost",
+			populated, wantAtLeast)
+	}
+
+	// Self-loops are meaningful, not a bug: a guard BREAK leaves you in
+	// guard-top having not yet passed, and a single-leg entry leaves you
+	// standing having not yet finished. Recording "stays put" as a fact is
+	// what lets NULL mean "not recorded" without ambiguity.
+	if selfLoops == 0 {
+		t.Error("no self-loops at all — 'stays put' should be recorded, not left NULL")
+	}
+
+	// The transitions must actually cross positions, or the column is just a
+	// copy of `position` and answers nothing.
+	if populated-selfLoops < 100 {
+		t.Errorf("only %d real position changes recorded", populated-selfLoops)
+	}
+}
+
+// A to_position-only change must actually reach the database.
+//
+// The analogue of TestReseedPopulatesFunctionOnRowsThatPredateTheColumn, and
+// added for the same reason: the `IS DISTINCT FROM` tuple decides whether the
+// row updates at all, and a column missing from it is written by the SET
+// clause that never runs. The seed logs "466 upserted" and nothing lands.
+//
+// Review proved this is not hypothetical here — removing to_position from the
+// two tuple sides leaves the entire technique suite green while writing zero
+// destinations on the upgrade path deploying 000029 produces. That is the
+// third time this project has met this shape.
+func TestReseedPopulatesToPositionOnRowsThatPredateTheColumn(t *testing.T) {
+	repo := newTestRepo(t)
+	pool := repo.pool
+	ctx := context.Background()
+
+	techniques, err := SeedData()
+	if err != nil {
+		t.Fatalf("SeedData: %v", err)
+	}
+	if err := repo.UpsertAll(ctx, techniques); err != nil {
+		t.Fatalf("first seed: %v", err)
+	}
+
+	// Exactly what migration 000029 leaves behind: every row present, every
+	// destination NULL.
+	if _, err := pool.Exec(ctx,
+		`UPDATE techniques SET to_position = NULL, updated_at = now() - interval '1 day'`,
+	); err != nil {
+		t.Fatalf("rewind: %v", err)
+	}
+	var before time.Time
+	if err := pool.QueryRow(ctx, `SELECT max(updated_at) FROM techniques`).Scan(&before); err != nil {
+		t.Fatalf("read updated_at: %v", err)
+	}
+
+	if err := repo.UpsertAll(ctx, techniques); err != nil {
+		t.Fatalf("re-seed: %v", err)
+	}
+
+	var want int
+	for _, tq := range techniques {
+		if tq.ToPosition != "" {
+			want++
+		}
+	}
+	var got int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM techniques WHERE to_position IS NOT NULL`).Scan(&got); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if got != want {
+		t.Fatalf("re-seed wrote %d destinations, want %d — the change-detection tuple "+
+			"is not seeing `to_position`, so the update is a silent no-op", got, want)
+	}
+
+	var after time.Time
+	if err := pool.QueryRow(ctx, `SELECT max(updated_at) FROM techniques`).Scan(&after); err != nil {
+		t.Fatalf("read updated_at: %v", err)
+	}
+	if !after.After(before) {
+		t.Error("updated_at did not move, so no delta-syncing client would ever refetch")
+	}
+}
+
+// `setup_from` must be on the SUMMARY, not just the detail row.
+//
+// It is what makes the library a traversable graph: the client inverts it
+// once over the cached list to answer "what follows from here". Detail-only,
+// that costs one request per technique to walk a single hop, and
+// `lib/techniqueGraph.ts` could not exist.
+//
+// Added post-merge, because a review found that deleting `t.setup_from` from
+// `summaryColumns` and `&s.SetupFrom` from `scanSummary` — reverting the
+// whole change that put it there — left this entire suite GREEN. Every other
+// SetupFrom assertion in this file reaches it through `Get` (the detail path)
+// or a direct pool query. None read it off a Summary.
+//
+// The nil check is the sharp half. `SetupFrom` has no `omitempty`, so a nil
+// slice marshals to `"setup_from": null` — which violates the `required` +
+// `type: array` contract, and reaches the client as a null where it expects
+// an array. Silent server-side, loud in the app.
+func TestSummaryCarriesTheGraphEdge(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	seed, err := SeedData()
+	if err != nil {
+		t.Fatalf("SeedData: %v", err)
+	}
+	if err := repo.UpsertAll(ctx, seed); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	list, err := repo.List(ctx, Filter{})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(list) < 400 {
+		t.Fatalf("listed %d techniques, expected the whole library", len(list))
+	}
+
+	var withEdges int
+	for _, s := range list {
+		// Never nil, even for the entries that genuinely have no edges: the
+		// column is NOT NULL DEFAULT '{}', and pgx decodes that to an empty
+		// non-nil slice. A nil here means the column left the summary.
+		if s.SetupFrom == nil {
+			t.Fatalf("%q has a nil setup_from on the summary — it marshals to "+
+				"null, violating the contract's required array", s.ID)
+		}
+		if len(s.SetupFrom) > 0 {
+			withEdges++
+		}
+	}
+
+	// Pinned low against ordinary library growth, high enough that a summary
+	// silently losing the column cannot pass.
+	if withEdges < 300 {
+		t.Errorf("only %d of %d summaries carry graph edges", withEdges, len(list))
 	}
 }

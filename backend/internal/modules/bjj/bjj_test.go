@@ -143,3 +143,32 @@ func TestValidate(t *testing.T) {
 		})
 	}
 }
+
+func TestTagCountIsBoundedAtBothEnds(t *testing.T) {
+	// The upper bound is not tidiness. SUM(count) feeds a ::int narrowing in
+	// the proficiency query, so two rows near math.MaxInt32 on one technique
+	// make that endpoint fail with "integer out of range" — and the data is
+	// durable, so it stays broken for that athlete until the sessions are
+	// deleted.
+	base := Tag{Category: CategorySubmission, Event: EventScored, Position: "Guard"}
+	for _, tc := range []struct {
+		count int
+		ok    bool
+	}{
+		{0, false},
+		{1, true},
+		{maxTagCount, true},
+		{maxTagCount + 1, false},
+		{1 << 30, false},
+	} {
+		tag := base
+		tag.Count = tc.count
+		err := tag.Validate()
+		if tc.ok && err != nil {
+			t.Errorf("count %d rejected: %v", tc.count, err)
+		}
+		if !tc.ok && err == nil {
+			t.Errorf("count %d accepted", tc.count)
+		}
+	}
+}

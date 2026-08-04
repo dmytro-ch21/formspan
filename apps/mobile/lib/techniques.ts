@@ -58,6 +58,12 @@ export type TechniqueSummary = {
    */
   function?: string;
   position: string;
+  /**
+   * Where the technique leaves you. Absent means NOT RECORDED, never "goes
+   * nowhere" — a technique that genuinely stays put carries its own
+   * `position` value here. Sparse by design; see migration 000029.
+   */
+  to_position?: string;
   position_detail: string;
   gi_no_gi: string;
   /** Commonly taught from — an observation, never a gate. */
@@ -112,6 +118,9 @@ export async function fetchTechniques(
   summaryCache = (body.techniques ?? []).map((t) => ({
     ...t,
     aliases: t.aliases ?? [],
+    // haystack() folds position on every entry now, where the old three-way
+    // filter short-circuited on a name match and often never read it.
+    position: t.position ?? '',
     position_detail: t.position_detail ?? '',
     typical_belt: t.typical_belt ?? '',
     ibjjf_ruleset_id: t.ibjjf_ruleset_id ?? '',
@@ -198,21 +207,93 @@ export async function fetchRulesets(
 }
 
 /**
- * Local search across name and aliases.
+ * Lowercase and strip diacritics, so what someone types on a phone matches
+ * what the library actually stores.
+ *
+ * This is not cosmetic. `sao-paulo-pass` — "São Paulo Pass" — has been in the
+ * catalog the whole time and was unfindable: a plain `toLowerCase().includes()`
+ * fails "sao paulo" against "São Paulo" because the strings genuinely differ,
+ * and nobody types the tilde on a phone keyboard. The technique looked missing,
+ * and the near-consequence was authoring a duplicate — two ids for one
+ * technique, permanently, in every training record that referenced either.
+ *
+ * NFD splits "ã" into "a" + U+0303 COMBINING TILDE; the range U+0300–U+036F is
+ * the combining-marks block, so removing it leaves the base letters. Hermes
+ * implements `String.prototype.normalize` (verified in the shipped binary — it
+ * carries the NFKC/NFKD form names and the "Invalid normalization form" error
+ * beside its other String.prototype errors), so this is safe on device, not
+ * only in jest's Node.
+ *
+ * Dashes fold the same way and for the same reason, and they are the LARGER
+ * half of this bug: 16 technique names are spelled with U+2013 EN DASH
+ * ("North–South Pass"), which NFD does not decompose. Typing the hyphen
+ * that is actually on the keyboard is not a misspelling — the two
+ * characters render nearly identically — so "north-south pass" finding
+ * nothing is the São Paulo failure again with eight times the blast
+ * radius. The app's own vocabulary disagrees with itself here: positions.json
+ * spells the position "North-South" with a plain hyphen while every technique
+ * name in it uses the en dash.
+ *
+ * Every dash folds to a SPACE rather than to a hyphen, which also makes
+ * "north south" and "kesa gatame" work — nobody reaches for a hyphen when
+ * searching. Measured over every name and alias in the catalog: folding to a
+ * space finds everything folding to a hyphen finds, plus six more query forms,
+ * and loses nothing.
+ *
+ * DUPLICATED in apps/web/src/lib/api.ts. The two apps share no package, and mobile
+ * needs its copy to work offline — the same reason the position vocabulary
+ * is duplicated four ways. Change one, change the other: nothing enforces it,
+ * `verify` runs no web tests, and a silent divergence here is invisible.
+ */
+export function foldForSearch(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[-\u2010-\u2015\u2212]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .toLowerCase()
+    .trim();
+}
+
+/**
+ * Folded haystacks, cached per technique object.
+ *
+ * Search runs on every keystroke over the whole 466-entry library. Folding
+ * name + aliases + position each time is 1592 fold calls per character typed,
+ * measured at 0.774 ms uncached against 0.029 ms cached on Node (27x) — Hermes
+ * is several times slower again, which is where it starts to matter on a phone
+ * mid-session.
+ *
+ * A WeakMap keyed on the technique object is what makes this safe: the catalog
+ * objects are built once in fetchTechniques and never written to, so a refetch
+ * makes new objects and the stale entries are collected with them. That
+ * immutability is the load-bearing assumption and it is a CONVENTION, not
+ * something enforced — mutate a summary in place and search silently keeps
+ * answering from the pre-mutation text. Build a new object instead.
+ */
+const foldedCache = new WeakMap<object, string>();
+
+function haystack(t: TechniqueSummary): string {
+  const hit = foldedCache.get(t);
+  if (hit !== undefined) return hit;
+  // One joined string rather than three comparisons: the separator stops a
+  // query spanning two fields ("armbar guard") from matching across the join.
+  const built = [foldForSearch(t.name), ...t.aliases.map(foldForSearch), foldForSearch(t.position)].join('\n');
+  foldedCache.set(t, built);
+  return built;
+}
+
+/**
+ * Local search across name, aliases and position.
  *
  * Aliases matter more than they look: half this library is known by two names,
  * and someone searching "scarf hold" will never find "Kesa-Gatame Escape"
  * without them.
  */
 export function searchTechniques(list: TechniqueSummary[], query: string): TechniqueSummary[] {
-  const q = query.trim().toLowerCase();
+  const q = foldForSearch(query.trim());
   if (!q) return list;
-  return list.filter(
-    (t) =>
-      t.name.toLowerCase().includes(q) ||
-      t.aliases.some((a) => a.toLowerCase().includes(q)) ||
-      t.position.toLowerCase().includes(q),
-  );
+  return list.filter((t) => haystack(t).includes(q));
 }
 
 /**

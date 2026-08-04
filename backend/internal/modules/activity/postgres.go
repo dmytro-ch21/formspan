@@ -66,7 +66,8 @@ func (r *PostgresRepository) getOwnedByID(ctx context.Context, id, userID string
 func (r *PostgresRepository) ListByUser(ctx context.Context, userID string) ([]Activity, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, user_id, kind, occurred_at, notes, details, request_id, trace_id, created_at
-		FROM activities WHERE user_id = $1 ORDER BY occurred_at DESC`, userID)
+		FROM activities WHERE user_id = $1 ORDER BY occurred_at DESC, id DESC
+		LIMIT $2`, userID, maxUserActivities)
 	if err != nil {
 		return nil, fmt.Errorf("activity: list: %w", err)
 	}
@@ -85,6 +86,37 @@ func (r *PostgresRepository) ListByUser(ctx context.Context, userID string) ([]A
 	}
 	return activities, nil
 }
+
+// maxUserActivities bounds the per-user activity list — the last unbounded
+// query in this module, and the only one both a user and an admin can reach.
+//
+// It was survivable while the response streamed straight out. It stopped being
+// survivable when apihttp.ConditionalGet started buffering the whole identity
+// body in order to hash it: an unbounded row count became an unbounded
+// server-side allocation, one per in-flight request. Peak memory is now
+// bounded by the largest response the API can produce, so no endpoint gets to
+// be unbounded any more.
+//
+// Nothing writes this table today — the in-app logging form was removed, and
+// mobile's `lib/activities.ts` outbox is intact plumbing with no caller. The
+// bound is not waiting on that to change: the rows that exist are real, the
+// endpoint is reachable by both a user and an admin, and an append-only audit
+// log is the one shape guaranteed to grow monotonically the moment it is
+// re-armed. A ceiling is cheaper to add now than to discover later.
+//
+// `activities` is an append-only audit log read newest-first; nothing in
+// either client paginates it, so this is a ceiling rather than a page size.
+//
+// The `id` tiebreak is not decorative — it is the rule this module already
+// documents on ListUsers, and adding a LIMIT is exactly what makes it bite.
+// `occurred_at` is CLIENT-supplied (mobile writes it from local SQLite), so
+// ties at the boundary are realistic, and without a unique second key
+// Postgres gives no stable order for them: which row the cap includes can
+// change between two identical requests. That is a correctness bug on its own,
+// and it is also an ETag bug — a reordered array hashes differently, so the
+// endpoint becomes a permanent cache miss on unchanged data, defeating the
+// feature on the very endpoint this ceiling was added to protect.
+const maxUserActivities = 500
 
 // maxAdminUsers bounds the lookup list.
 //

@@ -426,3 +426,56 @@ func TestHandler_DefaultMediaFillsGapsButStaysLabelled(t *testing.T) {
 			defaultMedia["strength"][0].URL)
 	}
 }
+
+func TestSeedingCannotOverwriteAdminAuthoredExercises(t *testing.T) {
+	// The exercises half of migration 000032's guard, which had NO coverage:
+	// deleting `WHERE exercises.source = 'seed' AND` left the entire backend
+	// suite green. Inert today — there is no exercise write path yet — which is
+	// exactly why it would still be untested when one lands and makes it
+	// load-bearing. Mirrors the technique test.
+	databaseURL := os.Getenv("TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("TEST_DATABASE_URL not set, skipping Postgres integration test")
+	}
+	ctx := context.Background()
+	pool, err := database.NewPool(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { pool.Close() })
+	t.Cleanup(func() {
+		if _, err := pool.Exec(ctx, `DELETE FROM exercises WHERE id = 'test-admin-exercise'`); err != nil {
+			t.Logf("cleanup: %v", err)
+		}
+	})
+	repo := NewPostgresRepository(pool)
+
+	// Stand in for the admin write path this module does not have yet.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO exercises (id, name, sport, movement_pattern, load_type, source)
+		VALUES ('test-admin-exercise', 'Authored In Console', 'strength',
+		        'squat', 'weight_reps', 'admin')`); err != nil {
+		t.Fatalf("seed admin row: %v", err)
+	}
+
+	// A deploy whose JSON carries the same id with different content.
+	if err := repo.UpsertAll(ctx, []Exercise{{
+		ID: "test-admin-exercise", Name: "Overwritten By The Seed", Sport: "strength",
+		MovementPattern: "squat", LoadType: "weight_reps",
+		PrimaryMuscles: []string{}, SecondaryMuscles: []string{}, Equipment: []string{},
+	}}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	var name, source string
+	if err := pool.QueryRow(ctx,
+		`SELECT name, source FROM exercises WHERE id = 'test-admin-exercise'`).Scan(&name, &source); err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if name != "Authored In Console" {
+		t.Errorf("a re-seed overwrote admin content: name = %q", name)
+	}
+	if source != "admin" {
+		t.Errorf("source became %q — the row was adopted by the seed", source)
+	}
+}

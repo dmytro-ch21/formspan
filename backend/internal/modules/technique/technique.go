@@ -26,6 +26,15 @@ import (
 
 var ErrNotFound = errors.New("technique: not found")
 
+// The module had only ErrNotFound while it was read-only. Authoring from the
+// admin console gave it a write path, and a write path needs to tell a bad
+// request apart from a collision — see internal/modules/profile for the
+// convention these follow.
+var (
+	ErrInvalidInput  = errors.New("technique: invalid input")
+	ErrAlreadyExists = errors.New("technique: already exists")
+)
+
 // Ruleset is one IBJJF competition ruling, shared by every technique it
 // applies to. 25 of these cover all 466 techniques — see the migration for why
 // they are a table rather than columns.
@@ -58,9 +67,19 @@ type Ruleset struct {
 // library, and nothing else.
 //
 // The library is 466 techniques and the long prose fields dominate its size —
-// returning full rows from the list endpoint ships ~550 KB to draw a scrolling
-// list. This is ~70 KB. Aliases are included deliberately: the client searches
-// locally, and "kesa gatame" has to find "Scarf Hold".
+// returning full rows from the list endpoint ships ~485 KB to draw a scrolling
+// list. This is ~175 KB. Aliases are included deliberately: the client searches
+// locally, and "kesa gatame" has to find "Scarf Hold".//
+// The numbers, re-measured 2026-08-03 over the seeded 466: the summary list
+// is ~175 KB and full rows ~485 KB (~795 KB as Get returns them, since the
+// embedded ruleset is real payload). They were written as "~70 KB / ~550 KB"
+// and drifted 2.3x as the library grew and gained `function`, `setup_from`
+// and `to_position` — which matters because these figures ARE the argument
+// for the split, quoted in a schema description a client author reads.
+//
+// Worth knowing before optimising the payload further: the backend has no
+// response compression at all, and this list gzips to ~17 KB. One middleware
+// would dwarf any field-level saving here.
 type Summary struct {
 	ID       string   `json:"id"`
 	Name     string   `json:"name"`
@@ -75,7 +94,20 @@ type Summary struct {
 
 	Position       string `json:"position"`
 	PositionDetail string `json:"position_detail"`
-	GiNoGi         string `json:"gi_no_gi"`
+
+	// Where the technique LEAVES you, or empty when not recorded.
+	//
+	// Closes the half of the graph `position` and `function` cannot express:
+	// where it starts and what it does, but not where it ends. Sparse by
+	// design — see migration 000029 for the two measurements that made this
+	// authoring work rather than derivation work.
+	//
+	// Empty means NOT RECORDED, never "goes nowhere". A technique that
+	// genuinely leaves you where you started carries its own position, so
+	// "stays put" is recorded as a fact rather than read out of an absence.
+	ToPosition string `json:"to_position,omitempty"`
+
+	GiNoGi string `json:"gi_no_gi"`
 
 	// Presented as "commonly taught from", never as a recommendation. It sits
 	// beside IBJJF legality, and two belt-shaped fields where one is advisory
@@ -193,8 +225,18 @@ type Technique struct {
 	Position       string `json:"position"`
 	PositionDetail string `json:"position_detail"`
 
+	// Where it LEAVES you; see Summary.ToPosition. Empty means not recorded,
+	// never "goes nowhere".
+	ToPosition string `json:"to_position,omitempty"`
+
 	GiNoGi      string `json:"gi_no_gi"` // Both | Gi Only | No-Gi Only
 	TypicalBelt string `json:"typical_belt"`
+
+	// Source is "seed" (the embedded JSON owns it, and a deploy rewrites it)
+	// or "admin" (authored in the console, the database owns it). Read-only on
+	// the wire — the server sets it, so a client cannot promote its own row
+	// out of the deploy's reach or demote a seeded one into it.
+	Source string `json:"source,omitempty"`
 
 	// Description is mechanics; WhenToUse is the decision about when the
 	// mechanics apply. Keeping them apart is the point — merging them produces

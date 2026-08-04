@@ -1,6 +1,6 @@
 import { useAuth } from '@clerk/clerk-expo';
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, TextInput, View as RNView } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
@@ -11,8 +11,8 @@ import {
   LIVE_ROWS,
   describeRPE,
   rollingMinutes,
+  techniqueOutcomeCount,
   type SessionDetail,
-  type Tag,
 } from '@/lib/bjjSession';
 import {
   deleteLocalSession,
@@ -198,21 +198,47 @@ export default function BjjSessionScreen() {
   const kindLabel = detail ? (KINDS.find((k) => k.key === detail.kind)?.label ?? detail.kind) : '';
 
   const drilled = (detail?.tags ?? []).filter((t) => t.event === 'drilled');
-  const live = (detail?.tags ?? []).filter((t) => t.event === 'scored' || t.event === 'conceded');
+  // Every technique with evidence, drilled or not — the same union the wizard's
+  // live step takes, and for the same reason. Keyed off the drilled list alone,
+  // a technique tried live but not drilled today showed NOWHERE: saved, synced,
+  // and invisible. Reachable without a focus list even existing — remove a
+  // drilled chip and its attempted/scored rows deliberately survive.
+  const techniqueRows = useMemo(() => {
+    const ids: string[] = [];
+    for (const t of detail?.tags ?? []) {
+      if (!t.technique_id) continue;
+      if (t.event === 'conceded') continue;
+      if (!ids.includes(t.technique_id)) ids.push(t.technique_id);
+    }
+    return ids;
+  }, [detail?.tags]) as string[];
+  // `scored` here is untagged only, mirroring the wizard's tagCount. The
+  // category grid is fed by the wizard's live step, which writes untagged
+  // rows; counting the drilled step's per-technique outcomes as well would
+  // make this screen report a bigger number than the wizard shows for the
+  // same session, with nothing to explain the gap.
+  //
+  // `conceded` is NOT filtered that way, and the asymmetry is deliberate. No
+  // screen in this app can author a technique-tagged conceded row — the API
+  // accepts one and removeDrilledTechnique goes out of its way to preserve
+  // one — so filtering it here would leave it with no display surface
+  // anywhere: saved, synced, and invisible. There is no editor for it to
+  // disagree with, so the grid is the honest place for it.
+  const live = (detail?.tags ?? []).filter(
+    (t) => t.event === 'conceded' || (!t.technique_id && t.event === 'scored'),
+  );
   const summary = detail
     ? [kindLabel, detail.gi === null ? null : detail.gi ? 'Gi' : 'No-gi', detail.academy || null]
         .filter(Boolean)
         .join(' · ')
     : '';
   const hasAnyDetail =
-    drilled.length + live.length > 0 ||
+    drilled.length + live.length + techniqueRows.length > 0 ||
     !!detail?.note ||
     !!detail?.body_note ||
     !!detail?.academy ||
     detail?.session_rpe != null ||
     detail?.gi != null;
-  const nameOf = (t: Tag) =>
-    techniques.find((x) => x.id === t.technique_id)?.name ?? t.technique_id ?? '';
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.body} testID="bjj-session-screen">
@@ -283,14 +309,32 @@ export default function BjjSessionScreen() {
         <Text style={styles.summary}>{summary}</Text>
       )}
 
-      {drilled.length > 0 && (
-        <Section title="Drilled">
+      {techniqueRows.length > 0 && (
+        <Section title="Techniques">
           <RNView style={styles.chips}>
-            {drilled.map((t, i) => (
-              <RNView key={`${t.technique_id}-${i}`} style={styles.chip}>
-                <Text style={styles.chipText}>{nameOf(t)}</Text>
-              </RNView>
-            ))}
+            {techniqueRows.map((techniqueID) => {
+              // The funnel, read back. Without these numbers `attempted` would
+              // be written by the wizard and displayed nowhere — the exact
+              // defect this feature exists to fix, recreated one screen along.
+              const wasDrilled = drilled.some((d) => d.technique_id === techniqueID);
+              const name = techniques.find((x) => x.id === techniqueID)?.name ?? techniqueID;
+              const tried = techniqueOutcomeCount(detail?.tags ?? [], techniqueID, 'attempted');
+              const landed = techniqueOutcomeCount(detail?.tags ?? [], techniqueID, 'scored');
+              return (
+                <RNView key={techniqueID} style={styles.chip}>
+                  <Text style={styles.chipText}>{name}</Text>
+                  <Text style={styles.chipFunnel}>
+                    {/* "Drilled" is now one fact among several rather than the
+                        thing that puts a technique on this screen at all. */}
+                    {wasDrilled && 'drilled'}
+                    {wasDrilled && tried + landed > 0 ? ' · ' : ''}
+                    {tried > 0 && `${tried} tried`}
+                    {landed > 0 && tried > 0 ? ' · ' : ''}
+                    {landed > 0 && <Text style={styles.scored}>{landed} landed</Text>}
+                  </Text>
+                </RNView>
+              );
+            })}
           </RNView>
         </Section>
       )}
@@ -460,6 +504,10 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   chipText: { fontSize: 14, color: vola.text },
+  // The funnel numbers under the technique name. Muted by default because
+  // the technique is what the eye is scanning for; `landed` picks up the
+  // scored accent so the good half is findable at a glance.
+  chipFunnel: { fontSize: 12, color: vola.textMuted, marginTop: 2 },
 
   liveRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6 },
   liveLabel: { flex: 1, fontSize: 15, color: vola.text },

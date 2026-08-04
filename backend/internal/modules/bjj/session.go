@@ -170,11 +170,21 @@ type Tag struct {
 
 // Validate reports whether this is a tag the system can store and later read
 // as evidence.
+// maxTagCount bounds one tag's repetitions. Generous — nobody hits 1000
+// armbars in a session — so it constrains only nonsense.
+const maxTagCount = 1000
+
 func (t Tag) Validate() error {
 	if !t.Category.Valid() || !t.Event.Valid() {
 		return ErrInvalidInput
 	}
-	if t.Count < 1 {
+	// Upper bound as well as lower. SUM(count) is a bigint that the proficiency
+	// query narrows with ::int, so two rows near math.MaxInt32 on one technique
+	// make that read fail with "integer out of range" — a 500 that STAYS
+	// broken for that athlete until the sessions are deleted, because the bad
+	// data is durable. Self-inflicted only (the endpoint is self-scoped), but a
+	// ceiling is cheaper than the support conversation.
+	if t.Count < 1 || t.Count > maxTagCount {
 		return ErrInvalidInput
 	}
 	// A technique id that is present but empty is a client bug rather than an

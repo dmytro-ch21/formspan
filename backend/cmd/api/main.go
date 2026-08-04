@@ -67,11 +67,15 @@ func main() {
 	bjjRepo := bjj.NewPostgresRepository(pool)
 	bjjHandler := bjj.NewHandler(bjjRepo)
 	bjjSessionHandler := bjj.NewSessionHandler(bjjRepo)
+	bjjProficiencyHandler := bjj.NewProficiencyHandler(bjjRepo)
+	bjjFocusHandler := bjj.NewFocusHandler(bjjRepo)
 	featureFlagHandler := featureflag.NewHandler(featureflag.NewPostgresRepository(pool))
 	activityHandler := activity.NewHandler(activity.NewPostgresRepository(pool))
 	exerciseHandler := exercise.NewHandler(exercise.NewPostgresRepository(pool), os.Getenv("MEDIA_BASE_URL"))
 	workoutHandler := workout.NewHandler(workout.NewPostgresRepository(pool))
-	techniqueHandler := technique.NewHandler(technique.NewPostgresRepository(pool))
+	techniqueRepo := technique.NewPostgresRepository(pool)
+	techniqueHandler := technique.NewHandler(techniqueRepo)
+	techniqueContentHandler := technique.NewContentHandler(techniqueRepo)
 	sessionHandler := session.NewHandler(session.NewPostgresRepository(pool))
 	planHandler := plan.NewHandler(plan.NewPostgresRepository(pool))
 
@@ -92,6 +96,14 @@ func main() {
 	// PUT /v1/sessions/{id}/sets carries what a strength session has.
 	mux.Handle("PUT /v1/bjj/sessions/{sessionID}", verifier.RequireAuth(http.HandlerFunc(bjjSessionHandler.PutDetail)))
 	mux.Handle("GET /v1/bjj/sessions/{sessionID}", verifier.RequireAuth(http.HandlerFunc(bjjSessionHandler.GetDetail)))
+	// The technique funnel, read across every session. Under /v1/bjj because
+	// it is discipline-scoped evidence, not a property of the account.
+	mux.Handle("GET /v1/bjj/proficiency", verifier.RequireAuth(http.HandlerFunc(bjjProficiencyHandler.List)))
+	// What the athlete is deliberately working on. Read by the reflection
+	// wizard (mobile) and set from the analytical surface (web), per the
+	// platform split: choosing a focus for the next few weeks is planning.
+	mux.Handle("GET /v1/bjj/focus", verifier.RequireAuth(http.HandlerFunc(bjjFocusHandler.Get)))
+	mux.Handle("PUT /v1/bjj/focus", verifier.RequireAuth(http.HandlerFunc(bjjFocusHandler.Set)))
 
 	mux.Handle("GET /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Get)))
 	mux.Handle("POST /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Create)))
@@ -115,6 +127,13 @@ func main() {
 	mux.Handle("GET /v1/techniques/positions", verifier.RequireAuth(http.HandlerFunc(techniqueHandler.Positions)))
 	mux.Handle("GET /v1/techniques/positions/{positionID}", verifier.RequireAuth(http.HandlerFunc(techniqueHandler.GetPosition)))
 	mux.Handle("GET /v1/techniques/{techniqueID}", verifier.RequireAuth(http.HandlerFunc(techniqueHandler.Get)))
+	// Authoring the catalog from the admin console, so adding a technique is
+	// not a deploy. Under /v1/admin and RequireAdmin — this writes shared
+	// reference content that every athlete's library and every training record
+	// points at.
+	mux.Handle("GET /v1/admin/techniques/positions", verifier.RequireAdmin(http.HandlerFunc(techniqueContentHandler.Positions)))
+	mux.Handle("POST /v1/admin/techniques", verifier.RequireAdmin(http.HandlerFunc(techniqueContentHandler.Create)))
+	mux.Handle("PATCH /v1/admin/techniques/{techniqueID}", verifier.RequireAdmin(http.HandlerFunc(techniqueContentHandler.Update)))
 	mux.Handle("GET /v1/sessions", verifier.RequireAuth(http.HandlerFunc(sessionHandler.List)))
 	mux.Handle("POST /v1/sessions", verifier.RequireAuth(http.HandlerFunc(sessionHandler.Create)))
 	// Registered before the {sessionID} pattern is irrelevant to net/http's
@@ -176,7 +195,7 @@ func main() {
 	recorder := health.NewRecorder(healthRepo, slowRequestAfter, logger)
 
 	logger.Info("api listening", "port", port, "slow_request_ms", slowRequestAfter.Milliseconds())
-	if err := http.ListenAndServe(":"+port, httplog.Middleware(logger, recorder.Observe)(withCORS(mux))); err != nil {
+	if err := http.ListenAndServe(":"+port, httplog.Middleware(logger, recorder.Observe)(apihttp.Stack(withCORS(mux)))); err != nil {
 		logger.Error("server exited", "err", err)
 		os.Exit(1)
 	}
@@ -202,12 +221,20 @@ func withCORS(next http.Handler) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
+		// Outside the allowlist check on purpose: a response to a request with
+		// no/disallowed Origin varies on Origin just as much, and a cache that
+		// stored it without saying so could later hand it to an allowed origin
+		// with no Access-Control-Allow-Origin on it.
+		w.Header().Add("Vary", "Origin")
 		if allowed[origin] {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Vary", "Origin")
 		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, traceparent")
+		// `If-None-Match` is NOT a CORS-safelisted request header, so without it
+		// here the browser's preflight rejects every conditional request the
+		// fetch layer tries to make. The middleware would keep working for
+		// native clients and be dead code for the web app.
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, traceparent, If-None-Match")
 		// Response headers a browser is allowed to *read*.
 		//
 		// Without this the trace correlation is one-way: the clients send a
@@ -217,7 +244,12 @@ func withCORS(next http.Handler) http.Handler {
 		// invisible to the very code that would log them, which is most of the
 		// point of stamping them. Native clients are unaffected, so this is
 		// invisible until someone tries to surface a request id in the web app.
-		w.Header().Set("Access-Control-Expose-Headers", "traceparent, x-request-id")
+		//
+		// `ETag` is the same trap and the reason conditional GET needs it: the
+		// browser's own HTTP cache revalidates without any of this, but code
+		// that wants to hold a validator itself cannot read one it is not
+		// exposed. Note `Content-Encoding` is safelisted already.
+		w.Header().Set("Access-Control-Expose-Headers", "traceparent, x-request-id, ETag")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -227,6 +259,19 @@ func withCORS(next http.Handler) http.Handler {
 }
 
 func handleHealthz(w http.ResponseWriter, r *http.Request) {
+	// The one route that opts out of conditional GET, and the only one where
+	// caching is actively wrong. Its body is a constant, so its ETag would be
+	// constant forever — a prober sending If-None-Match would get 304 for the
+	// life of the deployment, and a checker asserting `status == 200` would
+	// report unhealthy with nothing wrong. A liveness probe wants proof the
+	// server produced a response, not proof it hasn't changed.
+	//
+	// `no-store` also removes the one response that RFC 9111 §3.5 does NOT
+	// protect from shared caches: this route carries no Authorization, so
+	// without it a CDN with a default TTL could keep serving `{"status":"ok"}`
+	// for a dead API. Setting it here rather than in the middleware because it
+	// is a property of what this endpoint MEANS, not of the transport.
+	w.Header().Set("Cache-Control", "no-store")
 	apihttp.WriteJSON(w, http.StatusOK, map[string]string{
 		"status":  "ok",
 		"service": "api",

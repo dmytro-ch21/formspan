@@ -5818,6 +5818,1467 @@ watched the PATCH land, and read the new name back out of Postgres.
 Web has no BJJ session view — this is mobile only. Reading history back on a
 desk is squarely web's half under the platform rule, and it is the natural
 companion, but a working phone screen beat half of both.
+## 2026-08-03 — Where a technique leaves you
+
+`to_position`, closing the last axis of the taxonomy. `position` says where a
+technique starts, `function` says what it does, and until now nothing said
+where it ends — so the library could answer "what can I do from here" and
+"what follows this" but not "where does this put me", which is the question a
+gameplan or a curriculum is made of.
+
+### It was measured twice before a line was written, and both said "author it"
+
+1. **Name parsing** ("X to Y", back takes, guard pulls) reaches 42% — and 97
+   of those are submissions, whose destination is the end of the exchange
+   rather than a position.
+2. **Inverting `setup_from`** looked like the clever answer and was not. Of
+   the 159 techniques with followers, **137 have followers in the same
+   position**: that edge links control-to-attack *within* a position, not
+   transitions between them. It infers a real position change for 22 of 466.
+
+So this was authoring work. Synthesising the other ~270 would have produced
+plausible-looking data that a rule engine cannot distinguish from the truth —
+the same failure this project keeps circling, and the reason the column is
+deliberately sparse instead of complete.
+
+**149 of 466 populated**, scoped to advance/reverse — the transitions a
+gameplan is made of. The destinations were authored by the user; every id and
+every destination was validated against the library before being written,
+because the failure mode is silent: `Side Control` instead of
+`Side Control - Top` produces an edge that resolves to nothing on every
+traversal with nothing reporting a fault. Seed validation catches exactly
+that, by name, and resolves against the library's own position vocabulary
+rather than a second hardcoded list — that set already grew by one when leg
+entanglement was promoted.
+
+### What it buys, immediately
+
+```
+from                  to                          ways
+Guard - Top        -> Side Control - Top            31
+Standing           -> Guard - Top                   29
+Guard - Bottom     -> Guard - Top                   16
+Guard - Bottom     -> Mount - Top                   13
+Half Guard - Top   -> Side Control - Top            10
+Guard - Bottom     -> Standing                      10
+```
+
+The passing game, the takedown game, and the sweep game splitting between
+coming up in their guard and going straight to mount.
+
+### NULL means "not recorded", never "goes nowhere"
+
+The distinction is load-bearing, and the 7 **self-loops** are what make it
+work: a guard *break* leaves you in guard-top having not yet passed, a
+single-leg entry leaves you standing having not yet finished. Recording
+"stays put" as a fact rather than an absence is what lets a missing value
+mean one unambiguous thing. A client must not infer a self-loop from a
+missing key.
+
+### Lessons half-applied, and the half that was missed
+
+The fixes `function` learned under review were applied up front. **The tests
+that hold them were not** — which is the same gap the immediately preceding
+commit had just closed for `function`, reproduced one column over, and
+review caught it: `to_position` is in the `IS DISTINCT FROM` tuple (a field
+missing from it updates nothing and no delta-syncing client ever learns —
+the `completed`-flag shape, found twice already); validated in Go with no
+CHECK per 000021; **no index** per 000018, because nothing filters on it yet
+and an unused index reads as reassurance; on the summary payload *and* its
+OpenAPI schema; normalised at the client parse boundary; and carried forward
+by the importer, because the spreadsheet does not have this column and a
+re-import would otherwise silently blank every authored destination.
+
+What was missed, and is now fixed: all three of those guards were written
+correctly and held there by **nothing**. Deleting `to_position` from the
+tuple left the entire suite green while writing zero destinations on the
+upgrade path; replacing the validator with `case false:` did the same; and
+the new test's headline assertion was unreachable, because `SeedData()` had
+already validated the slice the assertion's own map was built from. There is
+a reseed test and a validator case now, both mutation-checked.
+
+Two more the same review found. `knownPositions` was package-level and only
+ever grew, which made `validate()` **order-dependent** — a bad destination
+was rejected in a clean process and accepted after any earlier `SeedData()`,
+so a validator test would pass alone and go silently weaker in the suite —
+and it was a concurrent map write under `-race`. It is a local now. And
+`carry_to_position` preserved the values but appended the key, so all 149
+records differed in key order and the artifact stopped being byte-
+reproducible **one commit after that property was established**. It rebuilds
+the dict now, and fails the import outright if a renamed id would drop a
+destination that exists nowhere else.
+
+The pattern worth naming: applying a fix is not applying the lesson. The
+lesson was "a guard nothing exercises is a guard that gets deleted", and it
+had to be learned twice.
+
+### Open
+
+`situp-guard-arm-drag` was given conditionally ("Back - Top if taught as a
+completed arm-drag to the back, otherwise SAME") and recorded as the
+completed reading. The remaining 317 are unrecorded by choice, not oversight;
+the pinned count means coverage can only rise.
+
+Nothing reads `to_position` yet — no screen, no suggestion. That is the same
+foundation-before-feature order as `function`, which took a round of user
+feedback to justify. The difference is that `function` now has two surfaces
+reading it, so the pattern has at least been shown to close.
+## 2026-08-03 — Response compression
+
+`apihttp.Compress`, wired into the API's middleware chain. The technique
+library's list endpoint is ~175 KB of JSON and **~17 KB gzipped** — a 10x
+saving on the single largest thing this API serves, paid on every cold app
+open.
+
+It came out of a post-merge audit that was arguing about whether one field's
++20 KB was affordable. It was the right question and the wrong altitude: with
+compression that field costs ~3 KB, and the same middleware applies to every
+endpoint rather than one column. Worth remembering the next time a payload
+debate starts — check whether the transport is doing its job first.
+
+### Why it is not four lines
+
+**The size threshold has to be deferred.** Most responses here are tiny — an
+error body is ~60 bytes and gzip's header alone is 18, so compressing those
+makes them *bigger* and burns CPU. But the size is not knowable up front:
+handlers stream through `WriteJSON` and almost never set `Content-Length`.
+
+So the writer buffers, and only commits to gzip once the response is provably
+past 1 KB. Anything that finishes under it is written through verbatim — no
+`Content-Encoding`, no gzip framing. That deferral is the entire reason there
+is a state machine rather than a wrapper.
+
+Three things it gets right that are silent when wrong:
+
+- **`Content-Length` is deleted** when compression starts. It describes the
+  uncompressed body, and a response whose declared length disagrees with its
+  bytes makes clients truncate or hang rather than error.
+- **`Vary: Accept-Encoding` is set on every response**, compressed or not,
+  or a cache keying on the URL alone hands a gzipped body to a client that
+  cannot read it. It is `Add`, not `Set` — and `withCORS` was changed to
+  `Add` its `Vary: Origin` for the same reason. `Vary` is a list; `Set`
+  silently drops whichever middleware ran first.
+- **`Accept-Encoding` is parsed, not substring-matched.** "notgzip" contains
+  "gzip", and `gzip;q=0` means the client explicitly refuses it.
+
+Ten tests, all on the edges rather than the happy path: small bodies left
+alone, no double-encoding when a handler set its own `Content-Encoding`,
+status preserved, empty responses (204 and bare `WriteHeader`) neither
+hanging nor gaining framing.
+
+### Verified live, and one gap
+
+Wired into the real chain and confirmed end to end: a small 401 passes
+through uncompressed with `Vary` set, and `httplog` still records the correct
+status despite the header write being deferred past `ServeHTTP` — which was
+the interaction most likely to break quietly.
+
+**Not verified live: a large compressed response.** Every endpoint big enough
+to cross the threshold is behind `RequireAuth`, and no Clerk token was
+available. The 100 KB round trip is unit-tested, so this is inference from a
+test rather than an observation of the deployed path.
+
+### Not done
+
+No `ETag`/conditional GET. Reference content changes only on deploy and every
+row carries `updated_at`, so `max(updated_at)` is a ready-made validator —
+the natural next step, and a bigger saving still for repeat opens.
+## 2026-08-03 — Conditional GET
+
+`apihttp.ConditionalGet`, the other half of the compression saving and the
+larger one for the case that actually recurs. This takes the *repeat* fetch to
+a ~150-byte header exchange.
+
+Most of what this API serves on a cold open is reference content that changes
+only on deploy. Measured against the seeded database rather than estimated —
+the compression entry above had been quoting a guess, and it was wrong about
+which endpoint is biggest:
+
+| endpoint | rows | raw | gzip |
+| --- | --- | --- | --- |
+| `GET /v1/exercises` | 504 | 211.7 KB | 12.6 KB |
+| `GET /v1/techniques` | 466 | 164.2 KB | 17.4 KB |
+| `GET /v1/techniques/positions` | 11 | 16.6 KB | 5.7 KB |
+| `GET /v1/techniques/rulesets` | 25 | 15.8 KB | 1.9 KB |
+
+The **exercise catalog**, not the technique library, is the largest thing this
+API serves. Worth knowing before optimising the wrong endpoint — and a
+reminder that "~175 KB" survived two PRs' worth of doc comments without anyone
+measuring it.
+
+### Why a body hash and not `max(updated_at)`
+
+The cheaper design computes a validator from the data *before* running the
+query and skips the query too. It was rejected for two reasons. It needs a
+per-module `LastModified` on every repository that wants it, and
+`updated_at` does not cover the parts of a response that are not rows — the
+derived volume summary, the embedded ruleset object, a filter applied in SQL.
+A hash of the bytes about to be sent cannot disagree with what it describes.
+
+The cost is honest and worth stating: **this saves bandwidth, not database
+work.** The query still runs and the JSON is still marshalled, because the
+hash is of the finished body. Over a phone connection the bytes are the
+dominant cost, and they are the half fixable without touching every module.
+
+Per-repository validators remain the next step, and the middleware now leaves
+a seam for them rather than foreclosing on it — see below.
+
+### The order is load-bearing, and the test that "pinned" it did not
+
+`ConditionalGet` sits **inside** `Compress`, so it hashes the identity body.
+Outside, the ETag would change with `Accept-Encoding` and every gzip-capable
+client — which is all of them — would be a permanent cache miss.
+
+A test asserted exactly that: plain and gzipped responses share one ETag, and
+a 304 comes back out through the compressor with no body and no gzip framing.
+It could only ever pass. It built `Compress(ConditionalGet(handler))` **inside
+the test**, so it was asserting against an order it had just constructed
+itself — review swapped the real order in `cmd/api/main.go` and the entire
+backend suite stayed green.
+
+The fix is structural rather than a better assertion: `apihttp.Stack()` now
+owns the composition, `main.go` calls that, and the test exercises `Stack`.
+Assembly belongs somewhere a test can reach. **This is the sixth time this
+session a test passed for the wrong reason** — the recurring shape is an
+assertion that re-derives its own premise instead of reading the shipped one.
+
+### A handler's own ETag is now honoured, not just echoed
+
+The first version left a handler-supplied `ETag` alone — it emitted it and
+then ignored `If-None-Match` entirely. That is a validator that looks like it
+works: the client dutifully sends it back on every request and always gets the
+full payload. And it is precisely where a cheap `max(updated_at)` validator
+would have landed, so the intended next step would have arrived and silently
+done nothing.
+
+Now the middleware steps aside *and* answers the conditional request against
+the handler's validator. It also honours one set **after** the first `Write` —
+stdlib freezes headers there, but this middleware defers the header write, so
+the tag is still in the map and would otherwise have been silently overwritten
+by a body hash. `compress.go` already carried the same fix for
+`Content-Encoding`; this is the same bug in a second place.
+
+### Buffering made an unbounded list a memory question
+
+Hashing the body means holding it. Benchmarked at the size of the largest
+response above: 461 KB/op through `Compress` alone, 806 KB/op through both —
+roughly **+344 KB per in-flight request**.
+
+That is bounded by the largest response the API can produce, which turned an
+old latency smell into a real ceiling problem: `activity.ListByUser` had no
+`LIMIT` at all and was reachable by both a user and an admin. (Nothing writes
+that table today — mobile's `lib/activities.ts` outbox is intact plumbing with
+no caller. The bound does not depend on that changing: the rows that exist are
+real, and an append-only audit log is the one shape guaranteed to grow the
+moment it is re-armed.) Now capped at 500,
+newest-first, with a real-database test that fails both when the `LIMIT` is
+removed and when the `ORDER BY` is flipped so the cap keeps the *oldest* rows
+instead — an audit log quietly answering with its own prehistory is the
+failure worth catching, and a regex over the query string would catch neither.
+
+### Browsers needed two CORS headers, natives needed none
+
+`If-None-Match` is not a CORS-safelisted request header, so without it in
+`Access-Control-Allow-Headers` the preflight rejects every conditional request
+`apps/web` makes. And `ETag` had to join `Access-Control-Expose-Headers` or JS
+cannot read the validator it is supposed to send back. Both were missing.
+
+The trap is that neither affects iOS or Android at all — the feature would
+have worked in every place it was tested and been dead code in the browser.
+Same shape as the `traceparent`/`x-request-id` exposure fix that sits three
+lines above it in `withCORS`.
+
+### Scope, and the two things that would be bugs
+
+GET and HEAD only, 200 only.
+
+- **A 304 on a POST** would be a silent data-loss bug: the client believes
+  its write was a no-op.
+- **A 304 on a 404 or 500** would cache the failure — the client keeps
+  treating a stale copy as valid because the server said nothing changed.
+
+Both are tested. Also: `*` matches, a comma list matches, a `W/`-prefixed
+echo matches (If-None-Match comparison is explicitly weak), a handler's own
+ETag is honoured, and a 304 carries no `Content-Length` — a declared length
+with no bytes behind it is what makes a client hang waiting for them.
+
+That last assertion was itself vacuous at first: a `ResponseRecorder` never
+synthesises a `Content-Length`, so "it is absent" proved nothing. The handler
+in the test now sets one explicitly, and the 200 is asserted to keep both
+headers so the test cannot pass by deleting them unconditionally. Every guard
+added here was mutation-checked — deleted, confirmed red, restored.
+
+### Two blocking defects a second review round found
+
+**Weak comparison was one-sided.** `matches` stripped `W/` from the client's
+candidate but never from the server's tag. Every strong-ETag test passed, and
+a handler supplying a *weak* validator never revalidated — the client echoed
+it back verbatim, the strings differed by four characters, 200 every time.
+
+That is not a corner: `max(updated_at)` is precisely a validator that must be
+weak, because it cannot promise byte-identity (two writes inside one second, a
+derived field that moves without it). So the seam this middleware advertises
+for per-repository validators was broken for the exact shape it was built for,
+and broken in the specific way its own doc comment says the design avoids —
+"a validator that looks like it works". RFC 9110 §13.1.2: If-None-Match uses
+weak comparison, strip both sides.
+
+**A `LIMIT` without a unique tiebreak.** `ORDER BY occurred_at DESC` alone,
+with a ceiling newly on top of it. `occurred_at` is client-supplied (mobile
+writes it from local SQLite), so ties are realistic, and Postgres gives no
+stable order for equal sort keys. Two consequences: membership of the cap can
+change between identical requests (a row the caller can never see), and the
+array reorders, so the hash changes and the endpoint becomes a permanent cache
+miss — defeating the feature on the very endpoint the cap was added for. This
+module already documents the rule on `ListUsers`; the new query was the one
+query in `internal/modules` that added a `LIMIT` without honouring it.
+
+Measured rather than argued: on an index of `(user_id, occurred_at DESC)` with
+no `id`, a plain `UPDATE` to one row of a tied pair flipped which of the two
+survived the cap.
+
+### The test written to prove the fix could not catch the bug in it
+
+The integration test spaced every row an hour apart, so the ordering was total
+and the tie case was never exercised. It now creates a real tie straddling the
+cut and pins the exact expected order.
+
+And a limit worth stating rather than papering over: **deleting `, id DESC`
+still does not turn that test red.** Migration 000030 adds
+`(user_id, occurred_at DESC, id DESC)` — every ORDER BY column, same
+direction — so an index scan hands back that order whether or not the SQL asks
+for it. The tiebreak stays because it is what keeps the order total if the
+plan changes to a seq scan or the index is altered; the index stays because it
+turns a fetch-everything-then-sort into a scan that stops at 500. Neither is
+redundant with the other, and the test comment says so, because a guard that
+only looks covered is the failure this project keeps repeating.
+
+### Every list now has a ceiling, because the memory claim depends on it
+
+"Peak memory is bounded by the largest response the API can produce" is only
+true if no list is unbounded. `workout.List` still was — and it is the one
+list whose size is driven by *total user count* rather than one athlete's
+history, since `visibleTo` admits every user's public workouts. Capped at 500.
+
+Its `ORDER BY name, id` was already total, which a third review round showed
+is not the same as correct. A cap over a **multi-owner** list evicts across
+ownership: once 500 public workouts sorted ahead of it, a user's own workout
+named "Z…" silently vanished from the default list. Measured with 501 public
+rows. The order is now `(owner_user_id IS NOT DISTINCT FROM $1) DESC, name,
+id`, so the eviction lands on other people's content.
+
+`IS NOT DISTINCT FROM` rather than `=`, and the difference is the whole bug in
+miniature. `owner_user_id` is nullable — NULL means a VOLA-authored official
+template, which the `workouts_official_is_public` CHECK forces public, so they
+are always in the default list. `NULL = $1` is NULL, and `ORDER BY … DESC` is
+NULLS FIRST, so `=` sorted every official template **above** the caller's own:
+the identical eviction, reintroduced by the one row class that outranks them.
+No official template exists yet, so nothing was broken in practice — the
+comment confidently claiming the opposite was the part that would have cost
+someone a day. The fixture now includes a NULL-owner row, because one where
+every row has a real owner cannot see any of this.
+
+### Smaller things from the same round
+
+- **`Cache-Control: private, no-cache`** now accompanies the ETag. An ETag
+  makes a response revalidatable, which is an invitation to intermediaries
+  that did not exist before. RFC 9111 §3.5 already forbids a shared cache from
+  storing a response to an `Authorization`-carrying request, so this is
+  defence in depth — but "every proxy honours §3.5" is not something to rely
+  on silently when the stated default is privacy by default.
+- **`Compress` no longer gzips a status that cannot carry a body.** RFC 9111
+  §4.3.4 has a cache copy a 304's headers onto the stored 200 it validates, so
+  `Content-Encoding: gzip` on an empty 304 gets grafted onto a stored identity
+  body and the client gunzips plaintext. Unreachable today; 304s only just
+  entered this codebase's vocabulary, and the damage would land in someone
+  else's cache.
+- **A handler ETag set after its *last* write** was silently overwritten by
+  the body hash — a third ordering neither earlier fix covered, and the one a
+  natural `WriteJSON`-then-stamp handler produces.
+- **`If-None-Match` is now read with `Header.Values`**, joined. `Get` returns
+  only the first field line; RFC 9110 §5.3 makes repeated lines equivalent to
+  one comma-joined line. Fails safe, which is why it would never be noticed.
+- **`Flusher`/`Hijacker`/`ReaderFrom` are deliberately not supported** and now
+  say so. Buffering to hash is incompatible with mid-response flushing, and
+  exposing them via `Unwrap` would let a handler emit the body twice. A
+  streaming endpoint has to be routed around this stack, not accommodated
+  inside it.
+- **One test now runs through a real `httptest.NewServer`.** Every other test
+  drives a `ResponseRecorder`, which does not enforce `bodyAllowedForStatus`,
+  does not suppress HEAD bodies, and does not apply the stdlib's own 304
+  header suppression — and nothing was testing HEAD at all, the method where
+  that divergence is widest.
+
+The review also flagged a contradiction between the new comment ("the offline
+mobile outbox appends to this table on every sync") and the contract ("nothing
+writes that table now"), and leaned toward the comment. The contract was
+right: `apps/mobile/lib/activities.ts` has the `POST` code but no caller, and
+says so in its own header. The comment was corrected — the bound does not
+depend on the outbox being live.
+
+### A third round, and one rule that disagreed with itself
+
+`Cache-Control: no-store` opts a route out of conditional GET entirely — the
+rule `/v1/healthz` relies on, since a constant body means a validator that
+never changes and a prober sending `If-None-Match` would be answered `304` for
+the life of the deployment while a checker asserting `200` reported an outage
+that wasn't happening.
+
+But the check lived only in the post-handler block, which is unreachable once
+a handler supplies its own `ETag`. So a route setting both got `304` or `200`
+depending purely on **where** it stamped the tag — before `WriteHeader`,
+mid-stream, or after the last write. Three orderings that disagree is worse
+than any one of the three answers, and `api-conventions.md` stated the rule
+categorically while the code honoured it in one case of three. Now checked in
+`adoptHandlerETag` as well, with a test that runs all three.
+
+The same round found `Cache-Control` missing from the handler-ETag path
+entirely — `adoptHandlerETag` commits the status line, so the post-handler
+default could never reach it. That is the branch a per-repository validator
+over user-scoped data lands in, so the one branch needing `private` most was
+the one not getting it.
+
+And a constraint on that seam worth stating, because the body-hash design is
+immune to it: `Vary` is `Accept-Encoding, Origin`, **not** `Authorization`. A
+handler-supplied validator that isn't user-scoped — a bare `max(updated_at)`
+over a shared table, the obvious first draft — would revalidate user B against
+user A's stored body. A hash of the bytes cannot, because the bytes differ.
+Nothing enforces this; it is documented where the seam is documented.
+
+### The contract said none of this
+
+`contracts/public.openapi.yaml` had no `304`, no `ETag`, no `If-None-Match`
+anywhere — the wire contract described an API that did not behave the way the
+API behaves. Fixed across all 29 GET operations via reusable
+`components/{headers,parameters,responses}` entries, plus a note in
+`info.description` covering both this and compression, since middleware-applied
+behaviour is not a per-operation choice even though OpenAPI can only express
+it per-operation.
+
+### Verified live
+
+Against the running API, not only in tests. `GET /v1/healthz` initially served
+as the probe — it returned `ETag: "_fdCXnLztuTSo0buAHtRdg"` and the whole
+revalidation matrix behaved on the wire: the exact tag, a `W/` weakened echo,
+`*`, and a comma list all returned `304` with **0 body bytes**, while a wrong
+tag returned `200` with 32. `HEAD` carried the same validator. Two separate
+`If-None-Match` field lines with the match in the *second* returned `304`,
+confirming the `Header.Values` fix rather than assuming it. A `304` requested
+with `Accept-Encoding: gzip` came back with no `Content-Encoding`.
+
+That route has since opted out (`no-store`, below), and re-verified as such:
+`Cache-Control: no-store`, no `ETag`, and `200` with a body against `*`, the
+old tag, and a weakened echo alike.
+
+A trap worth recording, because it produced a confidently wrong reading for
+several minutes: killing `go run`'s PID does **not** kill the compiled binary
+it spawned. The second verification run silently answered from the *first*
+run's still-listening process, which predated the change — so the new
+behaviour looked broken while the unit test for it passed. `lsof -i :PORT -P
+-n` names the real process; kill that one.
+
+Every endpoint over the gzip threshold is behind auth while `/v1/healthz` is
+not, so the large-payload path is verified instead by
+`TestTheStackThroughARealServer` — a real `net/http` server over a real
+socket, asserting a gzipped ~66 KB body, a matching ETag on `GET` and `HEAD`,
+and a `304` that keeps `Vary` while carrying no body, no `Content-Encoding`
+and no `Content-Length`. That closes the "never verified on the wire" thread
+the compression entry left open.
+
+## 2026-08-03 — The technique funnel had no middle
+
+Asked to track technique proficiency. The schema was built for it —
+`bjj_session_tags` records `event` (`drilled → attempted → scored`, plus
+`conceded`), `position` and `technique_id`, and migration 000025's own comment
+says the deferred features "are all pure reads over" it. The capture side had
+quietly stopped holding up its end:
+
+| funnel stage | captured before this |
+| --- | --- |
+| `drilled` | yes, with `technique_id` |
+| `attempted` | **never produced by anything** — a dead enum in `session.go:109` and `bjjSession.ts:45` alike |
+| `scored` / `conceded` | category + position only; the live grid filters technique-tagged rows *out* by design |
+
+So a per-technique proficiency view would have read "drilled 12 times" and
+nothing else, for every technique. The drop-off the design doc calls the most
+actionable number in the sport — "drilled 12 times, attempted 0 is a finding,
+not a statistic" — was structurally uncomputable. Confirmed against the
+database before writing any code: 4 tag rows, **0 carrying a technique**.
+
+This is the `completed`-flag failure inverted. There the field was written and
+never read; here the reader was deferred and the writer quietly stopped
+carrying the field. Same outcome — a column that looks populated in the schema
+and is empty in practice — and the same reason it survived: nothing fails when
+an optional field goes unwritten.
+
+### Where the counters went, and why not in the live grid
+
+On the **drilled step**, under each technique the athlete just named. The live
+grid was the obvious home and is the wrong one: it is a category×outcome grid
+with no technique in it, so putting the funnel there means a second technique
+search during the fastest screen in the flow. On the drilled step the
+candidate list is already on screen — the question "did you try any of it
+live?" costs one tap per answer.
+
+No new wizard step, so no extra Next tap. The J4 criterion (a full session
+logged in under a minute) is the number this design is ruthless about, and a
+step boundary is the most expensive thing you can add to a wizard.
+
+Left at zero the counters still say something: "drilled, never tried live" is
+the finding, not an empty cell. Nothing here is required.
+
+### Attempted and scored are disjoint, and the labels have to carry it
+
+Per the migration's own wording, `attempted` is "tried it live, it didn't
+land" — not "total tries". Went for it four times and hit one is
+`attempted: 3, scored: 1`. So attempts + scores is how often you went for it,
+and `scored / (attempted + scored)` is the hit rate. The copy says this
+explicitly, because the other reading is at least as natural and the two
+produce different numbers from the same taps.
+
+### The two surfaces have to partition the tag list
+
+`tagCount` already excluded technique-tagged rows, with a comment noting
+nothing could produce one yet "but the API accepts one, so a reflection
+authored elsewhere and read back would hit it". That foresight is what made
+this change safe on the wizard side — the live grid and the funnel now own
+disjoint halves of the tag list, so no event is displayed twice and every
+displayed event has a control that can change it.
+
+The **read-back screen had not been given the same treatment**, and this
+change would have broken it two ways: its live grid summed technique-tagged
+`scored` rows into the category totals, so it would have reported a bigger
+number than the wizard for the same session with nothing to explain the gap;
+and `attempted` appeared nowhere on it at all. The second one is the funnier
+failure — recreating the exact write-but-never-read defect this feature exists
+to fix, one screen along. Both fixed here: the grid mirrors `tagCount` for
+`scored`, and the Drilled section carries each technique's tried/landed
+numbers. Not for `conceded` — see below.
+
+### No backend change
+
+`Tag.Validate()` already accepted `attempted` with a `technique_id`, and the
+table already had the columns. The whole PR is `apps/mobile`. Worth recording
+because it is what the schema-first decision bought: the expensive half was
+done months ago, on purpose, and the feature landed as a pure client change.
+
+### What review caught, and it was the dangerous kind
+
+`removeDrilledTechnique` lost the `event === 'drilled'` guard the inline
+filter it replaced had carried, leaving the technique-id match as the only
+bound. A nullish id then matches every **untagged** row — and the API sends
+`"technique_id": null` on every one of them, because the Go field has no
+`omitempty`. So removing a drilled row that had lost its technique deleted the
+live grid's entire "You" column. Reachable, not theoretical: migration 000025
+sets `technique_id` NULL when a technique is retired from the library, on
+purpose, so the athlete's record of having drilled it survives. And
+`PUT /bjj/sessions/{id}` replaces the tag set wholesale, so it would have
+synced to the server and every other device.
+
+The test named for that exact property could not catch it. Its only untagged
+fixture row was `conceded`, which the guard excludes independently of the id
+match — replacing the whole function body with `filter(t => t.event ===
+'conceded')` kept it green. Every fixture in the file also omitted
+`technique_id` entirely (giving `undefined`, the locally-authored shape)
+rather than the `null` the API actually sends, which is where the bug lived.
+
+That is three in a row now — the conditional-GET order test, the activity
+LIMIT tie test, and this — where the test written to demonstrate a property
+was satisfied by something other than that property. The common shape: the
+fixture accidentally contains the value the broken code produces.
+
+One thing worth stating rather than papering over: with the nullish-id guard
+in place, the explicit `drilled | attempted | scored` allow-list is
+**equivalent** to `!== conceded`, since there are only four events. No test
+distinguishes them and none pretends to. It is written the long way so a fifth
+event cannot silently join the set this function deletes.
+
+Review also caught the read-back screen making a technique-tagged `conceded`
+row invisible everywhere — a row the delete path goes out of its way to
+preserve — and, because `hasAnyDetail` counted only what was displayed, a
+reflection holding nothing else would have rendered "No detail recorded" on
+the screen that exists because detail was being recorded and never shown. The
+grid now carries those rows: there is no editor for them to disagree with, so
+it is the honest place for them.
+
+### Gaps this leaves
+
+- **Nothing reads the funnel across sessions yet.** This is the capture half;
+  the web proficiency view is the next PR. Until it lands the athlete sees
+  per-session numbers only, which is thin justification for the taps.
+- **`conceded` still has no technique.** "They armbarred me" stays
+  category+position, so the *defensive* funnel does not exist. Deliberate for
+  now — the drilled list gives the offensive side a free candidate list and
+  the defensive side has no equivalent, so it would cost a search.
+- **The counters are only reachable through a drilled chip.** Hitting a
+  technique live that you did not drill today has nowhere to go except the
+  untagged live grid. Fine while the funnel's purpose is measuring the
+  drilled→attempted drop-off specifically; wrong if the goal becomes complete
+  per-technique history.
+- **The two displays partition the tag list; the evidence stream does not.**
+  Tap "Landed 1" on the armbar row and then "Submissions / Hit" once, for one
+  armbar, and two `scored` rows exist for a single real event — one
+  technique-tagged, one not. Each screen renders them correctly and
+  separately, so nothing looks wrong anywhere. The follow-up web view has to
+  pick a convention (technique-tagged rows are the specific record, untagged
+  the catch-all) rather than sum both, or the same armbar counts twice.
+  Recorded here so that lands as a known decision and not as a data bug
+  discovered later.
+- **A drilled row whose technique was retired gets no counters at all.** It
+  renders as a named row with no funnel, because outcomes cannot attach to
+  nothing. Correct, but it means retiring a library entry silently ends the
+  funnel for anyone mid-way through collecting on it.
+- **NOT VERIFIED ON A DEVICE.** `pnpm run verify` is green and the transforms
+  are mutation-tested, but nothing has drawn these rows: Expo Go 57.0.6
+  segfaults (`EXC_BAD_ACCESS` in `worklets::jsi_utils`) on both an iOS 17.2
+  iPhone 15 Pro and an iOS 26.5 iPhone 17 Pro. Confirmed unrelated to this
+  change by reproducing the identical crash on the app **root route**, which
+  this branch does not touch — so it is an Expo Go/simulator problem, not a
+  regression here, but the layout and VoiceOver behaviour are unconfirmed.
+
+
+## 2026-08-03 — Reading the funnel back
+
+`GET /v1/bjj/proficiency` and `/dashboard/proficiency`. The other half of the
+capture PR that landed earlier today: the evidence stream now has a reader.
+
+Web, per the platform rule — this is review and analysis, done sitting down.
+The phone captures the evidence mid-reflection and nothing here belongs on it.
+
+### Not a score, and that is the design
+
+`docs/decisions/bjj-tracking-design.md` rules out asking anyone to rate their
+triangle 1–5: people are bad at it, it goes stale, and it produces a number
+with no provenance. So the endpoint returns facts — drilled twelve times, went
+for it three times, landed twice, across five sessions — and the page shows
+them. Every judgement it invites is one the reader can see the basis for.
+
+The **drop-off leads**, not the totals. "You have drilled 34 techniques and
+taken 6 of them into a live round" is something to act on this week; "210 reps"
+is a statistic. The page is ordered funnel-first, list-second for that reason
+alone, and the summary counts TECHNIQUES rather than reps.
+
+A hit rate appears only past five live tries. One landed out of one is not a
+100% hit rate, and rendering it as one invites a conclusion the data cannot
+carry — the same honesty the rest of the screen is built on, applied to the
+one number that would otherwise flatter.
+
+### The double-count convention, now enforced
+
+The capture PR recorded a trap rather than fixing it: tapping "Landed" on the
+armbar row *and* "Submissions / Hit" in the live grid, for one armbar, writes
+two `scored` rows — one technique-tagged, one not. Both screens render them
+correctly and separately, so nothing looks wrong anywhere.
+
+This endpoint is where that had to be decided, and the rule is: **a
+technique-tagged row is the specific record, an untagged row is the catch-all**,
+so per-technique reads take the former and only the former. It is enforced by
+one clause (`AND t.technique_id IS NOT NULL`) and pinned by a test that seeds
+an untagged `scored: 5` alongside the tagged rows and asserts it is nowhere in
+the technique's number. Deleting the clause turns that test red.
+
+### The summary is folded, not queried
+
+`SummariseProficiency` is a pure function over the rows the client is being
+shown, not a second aggregate with its own `WHERE`. Two reasons: it cannot
+drift from the list underneath it, and it is testable without a database. The
+failure it forecloses is specific — once a cap binds, a separate `COUNT(*)`
+reports a total the visible list contradicts.
+
+### Ordering, and one guard that cannot be tested
+
+`ORDER BY SUM(t.count) DESC, t.technique_id` — most evidence first, because
+that is where a conclusion is safest, with the id making the order total.
+
+**Deleting the tiebreak does not turn any test red**, and the test says so
+rather than implying coverage. The first version of this entry also gave the
+*wrong reason* — it claimed a HashAggregate. `EXPLAIN` at two scales says
+otherwise:
+
+	Limit -> Sort(sum DESC, technique_id) -> GroupAggregate -> Sort(technique_id, ...)
+
+`COUNT(DISTINCT t.session_id)` forces that inner sort, and it leads with
+`technique_id`, so the aggregate hands the outer sort an already-ordered stream
+and Postgres preserves it for equal keys. Getting this right matters because it
+names the real fragility, which the wrong explanation hid: **the tiebreak is
+redundant only while `COUNT(DISTINCT session_id)` keeps the aggregate sorted.**
+Drop that column and the planner picks a HashAggregate, whose group output is
+bucket order — measured on 466 tied techniques, 459 of 466 positions moved.
+So the guard is load-bearing *and* currently invisible, which is the worst
+combination to leave undocumented.
+
+`LIMIT 500` for the same reason every list has one now, and it **cannot bind**
+today — but the first version of this entry was wrong about why, too. It said
+"only a client inventing ids could reach it"; a client cannot invent ids at
+all, because `technique_id` has an FK and an unknown one is rejected as invalid
+input. The row count is capped by the library, at 466. The only way it ever
+binds is **the library growing past 500**, at which point the funnel truncates
+silently and the summary — folded from the truncated rows — under-reports in
+step. That is now pinned by a test asserting the catalog stays under the cap,
+which is the version of this guard that can actually fail.
+
+### Nav gating stays capability-based
+
+`catalog === "techniques"`, not `key === "bjj"` — the check this codebase has
+deliberately avoided everywhere else. Mild over-inclusion accepted and recorded:
+the evidence stream is `bjj_session_tags`, so a future discipline with a
+technique catalog (judo, wrestling) would surface the link and find it empty.
+That is the right failure — an analytical screen with an honest empty state.
+
+### The two defects only rendering could catch, caught by reading the CSS
+
+**`bg-lime-rule` is not a class.** `@theme` maps `--color-lime`, `--color-lime-ink`
+and the rest; it never maps `--color-lime-rule`, which exists only as a raw var
+that `.accent-rule` consumes. So the funnel bars — the one element carrying the
+drop-off visually — emitted no background rule and rendered transparent. Three
+invisible bars on the section the page is built around.
+
+The fix was not to add the token. `--c-lime-rule` is `#b8ff2c` in *both* modes,
+which is 1.21:1 on a light card; globals.css says as much. `--c-lime` is
+theme-stepped (3.27:1 light, 15.12:1 dark) and is the right one.
+
+**The bar widths resolved against the wrong box.** A percentage width on a flex
+item resolves against the flex *container's* content box, not the track left
+after the label and the number. The bar was the only shrinkable item, so it
+absorbed the overflow — and by construction the longest bar always requested
+exactly 100%, so it was always the one clamped while shorter bars sat at their
+true percentage. Net effect: the drop-off was drawn consistently shallower than
+it is, on the screen whose entire purpose is showing that drop-off. Fixed by
+giving the fill its own `flex-1` track. The denominator now spans all three
+stages too, since `tried_live` can exceed `drilled` (they are counted
+independently) and would otherwise ask for >100% and clamp two different
+numbers to identical bars.
+
+Both were found by reading the branch's own compiled stylesheet, not by looking
+at the page — which is the part worth remembering. **No unit test would ever
+catch a Tailwind class that does not exist**, and the functional scenarios
+written for this feature are all behavioural. The page still has not been
+rendered.
+
+### A bucket that was reachable and had nowhere to go
+
+`bucketOf` returned `null` for a technique with no drilled, attempted or scored
+evidence — which the endpoint can absolutely return, because its only filter is
+`technique_id IS NOT NULL` and a `conceded`-only row passes it. That row counted
+toward "Everything" and toward no sub-bucket, so the chip counts silently failed
+to sum, and it rendered as a line of dashes that reads like a data bug. It is
+now its own bucket ("Used on you"), which also gives `conceded` its first
+display surface anywhere in the product.
+
+### The OpenAPI gate had been dead for months
+
+The two new schemas landed in `components.parameters` rather than
+`components.schemas` — an insertion anchored one section too low — so the
+endpoint's documented 200 body pointed at nothing. `pnpm run lint:openapi`
+reported "Woohoo! Your API description is valid."
+
+It always did. `.redocly.yaml` declared a root-level `rules:` block with **no
+`extends:`**, and that *replaces* redocly's default ruleset rather than amending
+it. The gate ran zero rules. Long enough that four `$ref`s to
+`#/components/responses/InvalidInput` — a response that has never existed, it
+is called `BadRequest` — and one `security: [{ bearerAuth: [] }]` naming a
+scheme that is actually `ClerkBearerAuth` were sitting in the contract
+unnoticed.
+
+This is precisely the shape `CLAUDE.md` already records for `fmt:api`: a check
+that cannot fail is worse than no check, because it is counted as having
+passed. `extends: [recommended]` is back, the five pre-existing breakages are
+fixed, two flow-style descriptions containing commas (which YAML parsed as
+extra properties — one of them mine) are quoted, and the gate is now verified
+to go red on a dangling `$ref` rather than assumed to.
+
+### Three guards that were invisible, and one number that could stick a 500
+
+Review found seven surviving mutations where I had expected two. Three were
+cheap to close and are now asserted: `MAX(started_at)` could be `MIN` (both
+fixture sessions were stamped `time.Now()` microseconds apart, so the fixture
+needed fixing before the assertion could exist), the whole `conceded` pivot
+could be `0`, and `position`/`category` could be swapped in the SELECT list —
+the standing hazard of a ten-column positional `Scan`, and both fields are
+`required` in the contract.
+
+Separately, `Tag.Count` had a lower bound and no upper one. `SUM(count)` is a
+bigint that this query narrows with `::int`, so two rows near `MaxInt32` on one
+technique make the endpoint fail with "integer out of range" — durable data, so
+it stays broken for that athlete until the sessions are deleted. Now capped at
+1000, which constrains only nonsense.
+
+### And then CI found the one thing four reviewers could not
+
+The integration tests used real catalog ids (`americana-mount`, `aoki-lock`)
+and passed locally while failing in CI on a foreign-key violation. The reason
+is embarrassing and worth recording: I had run `cmd/seed` against my local
+`vola_test` earlier in the session, by hand, for unrelated reasons. **CI only
+runs `cmd/migrate up`.** So the tests were depending on ambient database state
+that had nothing to do with what they were asserting, and the local green was
+an artifact of my own shell history.
+
+Every fixture now seeds the technique rows it needs. And the guard on the
+library size stopped querying the database at all — it reads the *embedded*
+catalog via `technique.SeedData()`, so it runs everywhere instead of skipping
+in precisely the environment it most needed to run in. That first version was a
+silently-skipping test, which is the failure `CLAUDE.md` already records about
+`TEST_DATABASE_URL` reproduced inside a single test.
+
+Verified the fix the only way that means anything: created a fresh database,
+ran `migrate up` and *not* `seed`, confirmed `count(*) FROM techniques` is 0,
+and ran the whole backend suite against it green.
+
+### Gaps this leaves
+
+- **`conceded` has a bucket but still no column.** The "Used on you" filter
+  surfaces those rows; the table has no count for them. The defensive funnel —
+  "which submission keeps catching me" — is the obvious next feature, and both
+  the API and the bucket now exist for it.
+- **No web test suite exists at all.** `bucketOf`, the chip-count fold and the
+  hit-rate withholding rule are pure functions over plain data, each encoding a
+  load-bearing property, and nothing can assert any of them. Lifting them into
+  `src/lib/` would make them testable without a renderer. Named here because
+  the mobile suite exists precisely for this shape of logic and web has no
+  equivalent.
+- **No position or category rollup.** The design doc's position heatmap is a
+  different read over the same rows and is not this PR.
+- **No time axis.** Everything is all-time. "Improving" is not answerable from
+  this screen, only "how much evidence exists", and that gap is the reason
+  `sessions` and `last_seen` are in the payload.
+- **The page is unverified against a signed-in session.** It builds, the route
+  registers, and the endpoint returns 401 unauthenticated as designed — but
+  rendering it with real rows needs credentials, which is not something to
+  automate. Worth a look before it is trusted.
+
+
+## 2026-08-03 — The focus list, and unbuilding a redundancy
+
+Raised by the user, and correct: the reflection wizard had started asking for
+the same thing twice. The drilled step captured tried/landed *per technique*;
+the live grid captured scored/conceded *per category*. Hit one armbar and there
+were two places to record it.
+
+The previous PR met this by writing a **convention** — technique-tagged rows
+are the specific record, untagged the catch-all — and teaching the query which
+to read. That was papering over it. Two capture paths for one event means the
+model is wrong, not the query.
+
+### What the data is actually for
+
+Laying the deferred features against what each one needs makes the answer
+obvious:
+
+| feature | needs |
+| --- | --- |
+| position heatmap ("where do I get stuck") | position + outcome. **No technique.** |
+| gap detection | position graph + which edges have evidence |
+| technique funnel | technique + stage |
+| gameplan | curation over the above |
+
+The design doc's own model is positions-as-nodes, techniques-as-edges, and an
+edge already knows its position — a technique row carries one. So the category
+grid and the technique funnel are **not two datasets. They are one dataset at
+two resolutions.** You capture low-resolution always, and high-resolution only
+where it earns its cost.
+
+### The asymmetry that decides where technique detail goes
+
+Position/category outcomes are cheap — a 5×2 grid of taps, no typing — and feed
+the two highest-value questions in the sport. Technique-level data is expensive:
+naming one means searching 466 entries. Across the whole library that data is
+mostly noise; across the three-to-five things you are actually developing it is
+the most valuable evidence in the system.
+
+So technique capture stops being a search step and becomes **a short focus
+list**, surfaced as one-tap chips inside the same grid. A focus technique's chip
+*is* the row. There is no second place to record it, and the redundancy is gone
+structurally rather than by convention.
+
+This is the design doc's own "focus mode" — the tier it calls highest-leverage
+and cheapest to build. Building it collapses the redundancy instead of managing
+it, and it is the thing curricula later drop into with no new plumbing, since a
+curriculum step is just a pre-authored focus.
+
+### `started_on`, and the edit that would have destroyed it
+
+The column exists so "you have been on this five weeks, consider rotating" is
+answerable. Which makes the obvious implementation wrong: `SetFocus` replaces
+the list wholesale, and a delete-then-insert would re-stamp every entry with
+today's date on **every reorder** — the most ordinary edit there is. The clock
+would reset constantly and nothing would report it.
+
+So the write upserts on `(user_id, technique_id)` updating `position` **only**,
+then prunes what is no longer listed. A test backdates an entry 35 days,
+re-saves the list with a new technique in front of it, and asserts the old
+entry's date survived while the new one starts today. The delete-first
+implementation passes every other test in the file and fails that one.
+
+### Cap of five, and the cap is the feature
+
+A focus list holding twenty techniques is the library again, and would put the
+wizard straight back to searching. Coaches structure development a few things at
+a time; the constant enforces that rather than describing it.
+
+### Two honest notes on what this leaves
+
+- **`drilled` counts across the library are near-worthless long-run.** What you
+  drilled is a record of your coach's curriculum, not your development — you did
+  not choose it. Its only real job is being the denominator in the drop-off.
+  Worth keeping for focus techniques; it should stop being the funnel's entry
+  point, which is the next PR.
+- **Nothing captures who you rolled with**, and it is probably the highest-value
+  missing axis. "Landed a triangle" against a fresh white belt and against a
+  brown belt are the same row today. One tap per session — mostly higher / same
+  / lower — would multiply the meaning of every outcome already recorded. The
+  design doc names it ("hit-live vs a same-rank partner") and nothing implements
+  it.
+
+### Four things review caught, two of which were live bugs
+
+**A `PUT` with no body returned 200 and changed nothing.** `[]string(nil)` binds
+to pgx as SQL NULL, and `technique_id <> ALL(NULL)` is NULL for every row — so
+the prune deleted nothing, and the response *looked* right because it is a
+read-back of the untouched list. That is precisely the failure the `<> ALL`
+choice was made to avoid; the NULL just moved from an element of the array to
+the array parameter. Guarded twice now: the handler rejects an absent field
+(which also makes the contract's `required` true), and the repository
+normalises nil to empty.
+
+**Two devices reordering the same list deadlocked, 23 times in 40 rounds.** The
+upsert takes one row lock per technique and iterated in the *athlete's* order,
+so two saves of the same techniques ranked differently took the same locks in
+opposite orders. It now iterates in `technique_id` order while keeping
+`position` from the original index — same locks, same sequence, ranking
+untouched. Measured 0 in 40 after.
+
+**`started_on` went on the wire as `2026-08-04T00:00:00Z`** while the contract
+promised `format: date`. Worse than a spec mismatch: a midnight-UTC instant
+localises to the *previous day* for anyone west of UTC, on the one field whose
+job is "how many weeks has this been here". Now a formatted string, matching
+`Promotion.PromotedOn` one file over.
+
+### The suite was quietly parallel over a shared database
+
+The fixtures correctly bring their own library rows rather than depending on
+`cmd/seed` — that lesson from the last PR landed. But `go test ./...` runs
+packages **in parallel against one database**, and the technique package has
+seven assertions counting `techniques` globally. Another package's fixtures sit
+inside those counts.
+
+Latent on `main` (measured 0 failures in 6 runs there, a narrow window) and
+reproducible here: 3 in 6. Scoping each assertion was tried and abandoned —
+fixing one left the other six, and every future assertion would have to
+remember. Both `test:api` and CI now run `go test -p 1`, which kills the class:
+0 in 6 after.
+
+### Gaps this leaves
+
+- **`started_on` is stamped from `CURRENT_DATE`, the server's date in UTC.** An
+  athlete adding a technique after ~8pm Eastern gets tomorrow's date. Cosmetic
+  at five-week granularity, but `/v1/sessions/history` already does calendar-day
+  work in the caller's timezone, so this is inconsistent with an established
+  convention.
+- **The four handler validations have no automated coverage** — the cap, the
+  duplicate check, the empty-id check, `MaxBytesReader`. There are no handler
+  tests anywhere in this repo, so this matches convention rather than breaking
+  it; worth naming because the cap in particular exists nowhere else, with no
+  database constraint behind it, so deleting the check would be silent.
+- **Backend only.** Nothing sets or reads a focus list yet — the web authoring
+  surface and the mobile capture collapse are the next two PRs, and the
+  redundancy stays until the second of them lands.
+- **No rotation prompt.** `started_on` is stored and returned; nothing reads it
+  to suggest rotating.
+- **No focus history.** Removing a technique from the list deletes the row, so
+  "what was I working on in June" is not answerable. Deliberate for now — the
+  evidence in `bjj_session_tags` survives regardless, which is the part that
+  matters.
+
+
+## 2026-08-03 — The capture collapse
+
+The redundancy the user spotted is now actually gone, rather than managed.
+
+Before this, one armbar could be recorded in two places: tried/landed **per
+technique** on the drilled step, and scored/conceded **per category** in the
+live grid. Two PRs ago that was met with a convention about which rows a query
+should read. This removes the second path.
+
+### What moved
+
+- **The drilled step gives up its counters.** It records what was covered and
+  nothing else — which is all it was ever good for. What you drilled is your
+  coach's curriculum, not your development; its only real job is being the
+  denominator in the drop-off.
+- **The live step gains a "Working on" block**, one row per focus technique,
+  Tried / Landed. One tap each, no search, because the focus list already named
+  them. Below it the category grid is unchanged and relabelled "Everything
+  else", which is the instruction: log each thing once, in the most specific
+  row available.
+
+Net taps are *lower* than before for the athlete who was double-recording, and
+unchanged for everyone else. For a technique drilled outside the focus list,
+per-technique live capture is simply gone — fewer taps because less is
+captured, which is a different claim and the deliberate trade: that data was
+the expensive half and mostly noise.
+
+### The union, and why focus alone would have stranded rows
+
+The block shows the focus list **plus any technique this session already has
+live evidence for**. Focus alone is not enough: drop a technique from the list
+on web after logging against it, and its `attempted`/`scored` rows stay in the
+session with no control able to edit them — saved, synced, invisible.
+
+That is exactly how the drilled-step counters stranded rows when a chip was
+removed, and repeating it one screen along would have defeated the point. The
+union keeps "what is displayed" and "what is stored" the same set. It is
+extracted as `focusRows()` rather than left in a `useMemo`, so it is testable
+without a renderer — and four mutations of it go red, including removing the
+union itself.
+
+### One property inverted on purpose
+
+`removeDrilledTechnique` used to take a technique's `attempted`/`scored` rows
+with it. That was right while the drilled step was the only place they could be
+authored. It is wrong now: live outcomes come from the focus rows, which are
+reachable whether or not the technique was drilled today. "I did not actually
+drill this" and "I did not hit this live" are different statements, and
+un-saying one must not un-say the other. The test that asserted the old
+behaviour now asserts the new one, and says why it flipped.
+
+### Two vocabulary helpers moved into `lib/`
+
+`toCategory` and `familyOf` were local to the reflection screen and are now
+needed by two modules. They are the translation from the library's vocabulary
+("Submission", "Guard - Bottom") to the tag vocabulary ("submission", "Guard"),
+and getting them applied in only one of the two places would file a focus row's
+evidence under a different position from a drilled row's for the same
+technique — splitting it in half with no error anywhere. One test pins that.
+
+### What review caught
+
+**The "Everything else" heading escaped its conditional**, so every athlete
+today — nobody has a focus list — saw a single grid headed "EVERYTHING ELSE"
+with nothing for it to be else to.
+
+**And technique-tagged live outcomes had no display surface on the session
+read-back screen.** It keyed the whole Techniques section off the drilled list,
+so a technique tried live but not drilled showed nowhere. Reachable *today*,
+with no focus list in existence: remove a drilled chip and its
+`attempted`/`scored` rows deliberately survive — then `hasAnyDetail` went false
+and the screen rendered "No detail recorded" over data that exists. The
+write-but-never-read-back defect, third appearance, one screen along each time.
+Fixed by taking the same union the live step takes, so display and storage are
+the same set on both screens.
+
+Also: the two functions this PR promoted into `lib/` had their fallbacks
+entirely untested — `familyOf` returning `''` for an unknown family and
+`toCategory` defaulting to `control` both survived mutation against the whole
+suite. Those are exactly the branches the code calls dangerous, and the stated
+reason for the move is that a mis-applied translation splits evidence silently.
+Both now pinned.
+
+And `removeDrilledTechnique`'s JSDoc still described the behaviour this PR
+inverted — hover text reading as an instruction to restore it.
+
+### Gaps this leaves
+
+- **Nothing sets a focus list yet.** The web authoring surface is still
+  unbuilt, so for most athletes the block is *absent* — not empty; it is gated
+  on having rows — and the category grid is the whole capture surface. The
+  exception is anyone holding a reflection with technique-tagged outcomes from
+  the previous build: they get a "Working on" block of raw technique slugs,
+  because the live step does not fetch the library. That is a strictly better place than before —
+  the redundancy is gone either way — but the technique funnel gets no new data
+  until web lands.
+- **Choosing "the most specific row" is copy, not structure.** An athlete can
+  still tap both their armbar row and Submissions/Hit for one armbar. Both
+  screens render that correctly and the proficiency read takes only the
+  technique-tagged row, so it does not double-count — but nothing prevents it.
+  Making it structural would mean the grid knowing which categories a focus
+  technique covers, which is more machinery than the problem currently earns.
+- **`conceded` still has no per-technique row.** "Which submission keeps
+  catching me" remains unanswerable at technique granularity. The defensive
+  funnel is the obvious next feature and the API side already accepts it.
+- **Not verified on a device.** `pnpm run verify` is green and the transforms
+  are mutation-tested, but nothing has drawn the new block.
+
+
+## 2026-08-03 — Setting the focus, beside the numbers that justify it
+
+The last piece of the three-PR arc. `/dashboard/proficiency` can now set the
+focus list, which is what makes the mobile collapse actually do anything —
+until this, the wizard's "Working on" block was absent for everyone because
+nothing could populate it.
+
+### Where it went, and why it is not its own screen
+
+A star per row in the proficiency table, plus a panel above it. Same pattern
+and the same reasoning as pinning on the Records page: on a wide screen the
+choice and the thing being chosen sit side by side, so you decide what to work
+on **while looking at the drop-off that says you should**. A technique showing
+"drilled 12, tried 0" is one click from becoming this month's focus.
+
+That adjacency is the design doc's insights→focus loop, and it only works if
+the two are one screen. A separate focus editor would make you remember the
+number rather than see it.
+
+Web, per the platform rule: choosing what to work on for the next few weeks is
+planning. The phone reads the list and never writes it.
+
+### `started_on` finally gets read
+
+The panel shows "3 weeks" per entry — the reason that column survives a re-save
+on the server, and until now stored and returned but **rendered** by nothing.
+It is parsed as UTC midnight and compared in whole days, so the count is
+globally consistent: identical everywhere at any instant. Not aligned to the
+viewer's calendar day — someone at UTC-8 sees it tick over at 16:00 on their
+day 6 — which is the right trade for a five-week granularity. The empty-string
+placeholder the optimistic update writes
+renders as nothing rather than as "0 weeks", which would be a number the
+athlete could read as real.
+
+### The cap is enforced in the UI as a refusal, not a silent truncation
+
+Starring a sixth technique sets an error naming the number and does not fire
+the request. The server rejects it too — this is the message, not the guard.
+
+### Three blocking findings, all in the plumbing rather than the idea
+
+**`Promise.all` did the opposite of the comment above it.** The comment
+promised "a failed focus read must not blank the funnel"; `Promise.all` rejects
+the moment either leg does. A 500 from the secondary read took the whole page
+down, under a banner saying the funnel had failed. `allSettled` now applies
+whichever leg resolved, and only the primary read's failure blanks anything.
+
+**Two saves in flight could leave the UI and the server disagreeing, in both
+directions.** Responses need not complete in request order, so a stale *success*
+could re-fill a star just cleared; and a per-click `previous` snapshot meant a
+late *failure* rolled back past edits that had already succeeded — emptying the
+panel while the server held a full list. Both reachable by ordinary clicking:
+setting three focus techniques is one round trip's worth. Every save is now
+stamped and only the newest outcome is applied, so the last write the athlete
+made is the one that stands. Both handlers were also collapsed into one writer,
+since two copies of this logic is how they drifted apart in the first place.
+
+**The cap refusal rendered under "Couldn't load your funnel."** `error` had
+become three channels — load failure, save failure, and the refusal — sharing
+one banner with a "Try again" button. So the one refusal guaranteed to happen
+told the athlete a load had failed that hadn't. Refusals and save failures now
+have their own quieter `role="status"` notice.
+
+### Gaps this leaves
+
+- **You can only focus on a technique you already have evidence for.** The
+  table lists what you have drilled or tried; something you have never touched
+  cannot be starred, so a coach saying "work on the berimbolo" has nowhere to
+  go until you have drilled it once. Adding a library search here is the
+  obvious follow-up and is deliberately not in this PR. The panel itself is now
+  rendered whenever a list exists, even with no evidence at all, so an athlete
+  can always see and clear what their phone is reading.
+- **No ordering control.** The list is the order techniques were starred, and
+  the API preserves whatever order it is sent — but nothing lets the athlete
+  rearrange it. Fine while the phone shows all five as equals; wrong once
+  anything treats the first entry as the primary focus.
+- **No rotation prompt.** The panel shows how many weeks; nothing suggests
+  rotating at four to six, which is the thing the number is for.
+- **Still not rendered.** Every class used was checked against the compiled
+  stylesheet — the defect that shipped two PRs ago was a class that did not
+  exist — but nothing has been seen on screen, because the page is behind Clerk
+  auth.
+
+
+## 2026-08-03 — Content stops needing a deploy
+
+Asked for after a class taught a pass — the São Paulo — whose name was not in
+the library, and there was no way to record it without opening a laptop.
+
+Two corrections framed the work. **Content never needed migrations**: those are
+schema, and adding a technique was always "edit `techniques.json`, commit,
+deploy, re-seed". Still a code round-trip, but not the treadmill it looked
+like. And **the seed was never going to fight admin rows**: `UpsertAll` for
+techniques and exercises does not delete ids it does not know about. What it
+*would* do is revert an admin edit to a row the JSON also knows, on every
+deploy, because a re-seed runs on every release.
+
+### The decision that shaped everything: ids are permanent
+
+`bjj_session_tags.technique_id` is a foreign key. A technique id is a reference
+in athletes' training records for as long as those records exist. So:
+
+- **ids are derived, never typed** — `Slug("São Paulo Pass")` → `sao-paulo-pass`,
+  with accents folded so it is not `s-o-paulo`.
+- **ids are immutable.** The update takes its id from the path, never the body.
+  Renaming the technique later leaves the id alone, which looks inconsistent
+  and is correct: an id that tracks the name is an id that changes.
+- **create is not an upsert.** A collision is a 409, because silently rewriting
+  the technique behind an existing id changes what somebody's history says
+  they did.
+
+### `source`, and what it buys
+
+One column, `seed` | `admin`, on `techniques` and `exercises` (migration
+000032). The seeder's upsert gained `WHERE source = 'seed'`, and that single
+clause is what allows a second writer to exist at all — without it every deploy
+silently reverts admin content.
+
+The reverse also had to hold, and is tested separately: the guard must not stop
+the seed updating *its own* rows, which would be a content freeze that looks
+exactly like "nothing changed".
+
+Admin edits are refused on seeded rows rather than allowed-then-reverted, and
+the refusal explains itself — a bare 404 at an id the console is displaying
+reads as a bug, when the real answer is "that one lives in the JSON".
+
+### One validator, not two
+
+`ValidateFields` was split out of the seeder's `validate()` and exported, so
+admin writes and the deploy apply the same rules. A position family or a
+function verb no client recognises is the worst data this catalog can hold: it
+writes, it renders, and it returns an empty list forever with nothing
+reporting a fault.
+
+Position is validated against **the catalog's own distinct values**, not a
+constant — the same choice `validate()` already makes for `to_position`. The
+first version of this hardcoded "must be a known family" and three existing
+tests immediately failed: the shipped library holds 16 distinct positions, and
+one of them is the literal "Other" (the technical standup, which happens from
+nowhere in particular). A rule invented from the shape of the data rather than
+read off it.
+
+### The two-writers hazard, demonstrated on day one
+
+The seed's upsert wraps three columns in `NULLIF($n, '')` — `ibjjf_ruleset_id`
+has a foreign key, and `function`/`to_position` are validated vocabularies
+where empty means "not recorded". The new INSERT did not, and failed the
+ruleset FK on the first test that ran. Exactly the divergence this feature has
+to avoid, surfacing before a line of UI existed.
+
+### How content reaches production
+
+Author live in an environment, then export the `source = 'admin'` rows back
+into the seed JSON, review the diff, and deploy. Promotion is the existing
+pipeline, the seed artifacts stay reproducible, and the one permanent thing —
+the id — gets read by a human before it is in anyone's training record.
+
+### What review caught — three defects, all in the layer that could not be tested
+
+**PATCH was a full replace while the contract promised partial.** `TechniqueWrite`
+marks four fields required and the method is `PATCH`, so a client author is told
+in writing the other fourteen are optional — and a console form posting only the
+edited field silently erased the rest. Omitting `description` wiped the prose.
+Every field is a pointer now, so absent is distinguishable from empty and
+clearing a field stays expressible.
+
+**Both writes returned `0001-01-01T00:00:00Z`.** `created_at`/`updated_at` were
+missing from the returning projection — well-formed enough to satisfy a schema
+validator and to render as "Created 1 Jan 0001".
+
+**An unbounded name minted a permanent id.** A ~3000-character incompressible
+name 500'd on Postgres's btree limit; a compressible 4000-character one
+*succeeded* and minted a 4000-character id that is now a foreign key in training
+records. The longest name in the shipped catalog is 41 characters, so a 200-cap
+rejects nothing real and guards the seeder too. Given this feature's own premise
+— the id outlives everything and cannot be taken back — an unbounded permanent
+id was the one input that must not have been accepted.
+
+All three were handler-layer, and **the handler could not be tested**: the
+constructor took `*PostgresRepository` rather than the interface, unlike every
+other module here. Taking the interface cost three lines and the layer now has
+nine tests.
+
+### The guard with zero coverage
+
+The exercises half of the seed guard had none — deleting
+`WHERE exercises.source = 'seed' AND` left the *entire* backend suite green. It
+is inert today because there is no exercise write path, which is exactly why it
+would still have been untested when one lands and makes it load-bearing. It now
+has the same test the techniques half does.
+
+Also worth recording: the timestamps fix is in SQL, so the handler test cannot
+see it — the fake repository supplies its own timestamps and stays green with
+the projection broken. That assertion lives in the integration test instead, and
+both mutations were checked separately.
+
+### Gaps this leaves
+
+- **The export does not exist yet.** Until it does, admin content lives only in
+  the environment it was authored in. That is the next PR and the thing that
+  makes this promotable rather than local.
+- **No admin UI.** This is the API and the data rules; the console screens are
+  a separate PR.
+- **Techniques only.** Exercises got the `source` column and the seed guard but
+  no write path — the shapes differ enough (position/category/function vs
+  sport/equipment/muscles) that one generic editor would be more machinery than
+  two content types earn.
+- **No delete.** Deliberate: a technique with training records pointing at it
+  cannot be removed without deciding what happens to them, and that is a real
+  design question rather than a missing endpoint.
+- **Two techniques whose names slug identically can never both exist**, and
+  there is no escape hatch — "Kimura (from Guard)" and "Kimura from Guard"
+  collide, and the only recourse is naming it something you did not want.
+  Auto-appending `-2` would be worse: it makes a permanent id depend on
+  insertion order. An optional server-validated `id_suffix` is the likely
+  answer, and is not in this PR.
+- **`source` is on the write response but not on any read path**, so the console
+  cannot render an "editable" badge without attempting a PATCH and reading the
+  409. Worth adding to the detail projection before the UI PR.
+- **The merged row is re-validated on update**, so a stored technique that fails
+  current validation cannot be edited until its data is fixed. Defensible, and
+  not obvious — it surfaced when a test fixture was incomplete.
+- **`cmd/seed` still logs "466 upserted" regardless of how many rows the guard
+  skipped**, so a JSON entry permanently shadowed by an admin row is invisible.
+
+
+## 2026-08-04 — The technique was never missing; the search could not find it
+
+`searchTechniques` folded case and nothing else, so a query and the catalog
+compared as literally different strings whenever an accent was involved:
+
+	"sao paulo"  -> nothing
+	"sao"        -> nothing
+	"são paulo"  -> found, and nobody types the tilde on a phone
+	"tozi"       -> found, by alias
+
+`sao-paulo-pass` — "São Paulo Pass", alias "Tozi pass", Guard - Top, with a
+full description and a `to_position` — had been in the library the whole time.
+
+### How it surfaced, which is the part worth keeping
+
+Not from a bug report. It came out of **testing the content-export command**:
+the first end-to-end run exported a fully-populated São Paulo Pass rather than
+the stub that had just been inserted, because the test had flipped a real
+seeded row to `source='admin'`. The export was working; the surprise in its
+output was the finding.
+
+The request that started three PRs of work — admin authoring, so a technique
+seen in class could be added without a deploy — was a **lookup** bug. And the
+work would have made it worse: authoring a second São Paulo pass mints a second
+id for one technique, permanently, in every training record referencing either.
+That is the exact catastrophe the authoring PR's design is most careful about,
+reached from the direction the design does not defend.
+
+### The fix
+
+`foldForSearch` normalises NFD and strips U+0300–U+036F (the combining-marks
+block), so "ã" becomes "a" + a mark that is then dropped. Applied to both the
+query and the haystack, so a Portuguese keyboard is not the thing that breaks
+instead.
+
+### The larger half, which review found and the first cut missed
+
+Diacritics were 3 of the 26 non-ASCII characters in the searchable fields. The
+other 23 are **U+2013 EN DASH**, which NFD does not decompose — and they sit in
+**16 technique names**:
+
+	"north-south pass"          -> nothing
+	"crossface-underhook"       -> nothing
+	"north–south pass"          -> found, with the dash pasted in
+
+Same defect, eight times the blast radius, and not a misspelling: the two
+characters render nearly identically and only one is on a keyboard. The
+catalog already disagrees with itself about it — `positions.json` spells the
+position `"North-South"` with a plain hyphen (and carries the alias
+`"north south"`) while every technique name in that position uses the en dash,
+so the chip and the names disagree on screen.
+
+So the fold also maps every dash — U+2010–U+2015, U+2212, and the ASCII hyphen
+— **to a space**, not to a hyphen. Folding to a hyphen closes the 16; folding
+to a space also makes "north south", "kesa gatame" and "crossface underhook"
+work, because nobody reaches for a hyphen when searching. Measured over every
+name and alias in the catalog, folding to a space finds everything folding to a
+hyphen finds, plus six more query forms, and loses nothing:
+
+	                       ->hyphen   ->space
+	  "north south"              0        13
+	  "north south choke"        0         1
+	  "crossface underhook"      0         1
+	  "kesa gatame"              7         8
+
+The first cut of this PR shipped the accent fix and a "Gaps" note saying the
+blast radius was small because only 2 entries carried diacritics — true, and
+90% of the hazard was still open. The reviewer inventoried the actual code
+points rather than trusting the claim.
+
+`String.prototype.normalize` is not universal on Hermes, so it was verified in
+the binary that actually ships in the app rather than assumed from jest, which
+runs on Node: the framework carries the NFKC/NFKD form names and the "Invalid
+normalization form" error string alongside its other `String.prototype` errors.
+
+Folded haystacks are memoised in a `WeakMap` keyed on the technique object.
+Search runs per keystroke over 466 entries × name + aliases + position — around
+2000 `normalize` calls per character without it — and the catalog objects are
+immutable and module-cached, so the map invalidates itself when a refetch makes
+new ones. Fields are joined with a separator so a query cannot match across the
+seam between a name and a position.
+
+### The screen that made a lookup failure look like missing content
+
+The reflection wizard's technique picker had no empty state — a query matching
+nothing rendered blank space, indistinguishable from an unfilled box. That is
+the exact surface where an athlete is trying to attach a technique to a session
+they just trained, so a blank result reads as "not in the library" rather than
+"not found". It now says which query found nothing. The Library tab already did
+this correctly; reflect did not.
+
+### Duplicated, deliberately
+
+`apps/mobile/lib/techniques.ts` and `apps/web/src/lib/api.ts` each have a copy.
+The two apps share no package and mobile's has to work offline — the same
+reason the position vocabulary is duplicated four ways. Both carry a comment
+saying so.
+
+### The test that derived its cases from the fix instead of the defect
+
+Worth recording because it is this repo's recurring failure and it happened
+again, inside the PR whose whole point was that a false negative is invisible.
+
+The sweep started as "every entry whose fields change under the fold", guarded
+by `expect(count).toBeGreaterThan(15)`, with a comment claiming a no-op fold
+would empty the set and fail. Backwards: under an identity fold the predicate
+`fold(f) !== f.toLowerCase()` is true for anything containing a capital letter,
+so the set grew from 432 to all 466 and the test **passed**. The threshold was
+meaningless against 432 either way, and the loop always queried the *name*, so
+for the 197 entries that qualified only through an alias or a position it
+asserted "a technique is findable by its own name" — true with or without any
+folding.
+
+It now derives from the **defect**: for each searchable field the typed form is
+its folded spelling, and an entry counts if the *old* search would not have
+found it by that spelling. Three ids are named explicitly —
+`sao-paulo-pass`, `north-south-pass`, `rear-naked-choke` — one per fold step,
+so removing any step drops its id from the set, and an identity fold empties
+the set entirely.
+
+Ten mutations were run against the final version and all ten go red. The last
+one found a real hole: weakening the field separator from `\n` to a space was
+still green, because the fold collapses whitespace and the span query was glued
+with no space in it. A spaced variant closes it.
+
+
+### Gaps this leaves
+
+- **Misspellings still miss.** "sao paolo" — which is how the request was
+  actually written — finds nothing, because folding is not fuzzy matching.
+  The honest fix is an alias, not a distance metric: aliases already exist for
+  exactly this and are how "scarf hold" finds "Kesa-Gatame".
+- **The web copy has no test and nothing enforces it matches mobile's.**
+  `apps/web` has no test runner at all and `verify` runs `test:mobile` only, so
+  the only guard against the two copies drifting is a comment in each saying
+  "change one, change the other". Deliberate for now — a cross-app import from
+  a jest-expo suite into a `"use client"` Next module is uglier than the risk,
+  and the position vocabulary is already duplicated four ways on the same
+  terms — but it is the weak point of this shape, and it is where the next bug
+  of this kind will live.
+- **The exercise catalog's search still folds nothing.** Both library screens
+  compute `query.trim().toLowerCase()` for exercises and hand the raw query to
+  `searchTechniques`, so one input box now has two matching rules. No live
+  defect: 0 of 504 exercise names contain a non-ASCII character. It becomes one
+  the first time a seeded exercise does, and the backend's own exercise search
+  presumably folds nothing either.
+- **Not verified on a device.** The unit tests run against the real shipped
+  `techniques.json`, and the Hermes check was made against the installed
+  binary, but nobody has typed "sao paulo" into the app.
+- **`positions.json` and the technique names still disagree** about how
+  "North-South" is punctuated. Folding makes that invisible to search, which
+  is the point, but the underlying data is still inconsistent and anything that
+  joins on the literal string — a future import, a report — will trip on it.
+
 
 ## 2026-08-03 — A shared UI kit for mobile, and the line between borrowing a look and borrowing a metric
 
@@ -6008,7 +7469,7 @@ the web app can see it and so planning stops being one device's private notes.
 
 ### The shape, and the one decision everything else follows from
 
-`plans` is `(id, user_id, day, sport, workout_id?, notes)` — migration 000029,
+`plans` is `(id, user_id, day, sport, workout_id?, notes)` — migration 000033,
 served at `/v1/plans` with list-by-range, create, patch and delete.
 
 **`day` is a DATE, not a timestamptz.** `sessions.started_at` is correctly a
@@ -6187,7 +7648,7 @@ than this code. Everything about the success path is covered by the 23 sync
 tests. It is worth one manual pass once the Expo Go/SDK versions are aligned.
 
 Note also that `apps/mobile/.env.local` points at **staging**, which does not
-have migration 000029 yet — so the plan sync will 404/400 there until the
+have migration 000033 yet — so the plan sync will 404/400 there until the
 backend is deployed. Nothing on the phone will work against staging until it
 is.
 

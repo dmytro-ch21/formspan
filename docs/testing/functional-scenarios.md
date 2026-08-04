@@ -377,6 +377,39 @@ except where a count is the property.
   hand-edit ever survives only in the artifact, the next import reverts it
   silently and the comment claiming it is generated is a lie.
 
+### Destination — where a technique leaves you (`to_position`)
+
+Sparse ON PURPOSE (149 of 466). Test the invariants, not the coverage.
+
+- **Every value names a real position.** The load-bearing one. `Side Control`
+  instead of `Side Control - Top` produces an edge that resolves to nothing on
+  every traversal, and nothing anywhere reports a fault — the seed validator is
+  the only guard. Inject the typo and confirm the seed refuses by name.
+- **The validator resolves against the library's own position vocabulary**, not
+  a second hardcoded list. That set grew by one when leg entanglement was
+  promoted; a list to keep in step is a list to forget.
+- **Absent means NOT RECORDED, never "goes nowhere".** A client must not infer
+  a self-loop from a missing key. The distinction only works because "stays
+  put" is recorded explicitly — see below.
+- **Self-loops exist and are correct.** A guard *break* records Guard - Top (you
+  have broken it, not passed it); a single-leg entry records Standing (you have
+  the leg, not the takedown). A test asserting zero self-loops would be
+  asserting the bug.
+- **Populated count only rises.** Pinned at 149. A fall means authored data was
+  lost rather than a decision being made — the values are hand-authored and
+  exist nowhere else.
+- **A re-import preserves them.** The spreadsheet does not carry this column,
+  so `import-exercise-catalog.py` must carry destinations forward from the
+  existing artifact. Without it the next import silently blanks every one, and
+  `seed.go` still claims the file is generated.
+- **Changing only `to_position` still bumps `updated_at`** — it is in the seed
+  upsert's `IS DISTINCT FROM` tuple. A field missing from that tuple updates
+  nothing and no delta-syncing client ever learns.
+- **The transition map answers.** `GROUP BY position, to_position` should show
+  the passing game (Guard-Top → Side Control-Top), the takedown game (Standing →
+  Guard-Top) and sweeps splitting between Guard-Top and Mount-Top. If those
+  three shapes are absent, the data is wrong regardless of what validates.
+
 ### Leg entanglement as a position
 
 - **The 26 ashi garami entries resolve to Leg Entanglement, not Guard.** Saddle,
@@ -2371,7 +2404,7 @@ most of the value is in the floor working alone.
   session to count.
 - Backing out of the wizard entirely still leaves the floor session logged.
 - Drilled: searching finds techniques by name and by alias; adding one shows
-  it as a removable chip; adding the same technique twice does not duplicate
+  it as a removable row; adding the same technique twice does not duplicate
   it.
 - A drilled technique records the **position family** derived from the
   technique's own position ("Half Guard - Bottom" → "Half Guard") and a
@@ -2391,6 +2424,84 @@ most of the value is in the floor working alone.
   and a build where it is slower or hidden has lost the point of the screen.
 - Re-saving the same reflection (a retry, a second sync) does not duplicate
   its tags — the whole set is replaced, not appended.
+
+#### The technique funnel (`drilled → attempted → scored`)
+
+- **The drilled step records what was covered and nothing else.** It has no
+  tried/landed counters — those moved to the live step, and a build where both
+  exist has reintroduced the redundancy this design removed.
+- **The live step's "Working on" block shows the focus list PLUS any technique
+  this session already has live evidence for.** Drop a technique from focus
+  after logging against it and its rows must still be editable; focus alone
+  would leave them saved, synced and invisible.
+- A technique in both focus and the session's tags appears **once**, labelled
+  with the library's name rather than its id.
+- **The vocabulary translation must be applied.** A focus entry carries
+  "Submission" / "Guard - Bottom"; its tags must be written as "submission" /
+  "Guard", or a focus row's evidence and a drilled row's for the same technique
+  file under different positions and split in half silently.
+- **Removing a drilled technique must NOT remove its live outcomes** — inverted
+  from the previous design, deliberately. The two are different statements now
+  that live outcomes have their own control.
+- With no focus set the block is absent entirely and the category grid is the
+  whole surface. That is the default state until the web authoring surface
+  ships, so it must be a first-class layout rather than an empty container.
+
+
+- Each **focus** technique carries **Tried** and **Landed** counters. Tap
+  increments, long-press decrements, decrementing to zero removes the row
+  rather than storing a zero — a zero-count row fails the backend's
+  `count > 0` CHECK, so the whole reflection would 400 on save because
+  someone tapped once and undid it.
+- The attempted/scored rows **inherit `category` and `position` from the
+  source** — usually a focus entry, translated through `toCategory`/`familyOf`
+  — not from a second derivation. `familyOf()` returns `''` for
+  a family the hardcoded POSITIONS list has fallen behind on — which has
+  happened twice — so deriving it again could file the drilled row under
+  "Half Guard" and the attempted row under nothing, splitting one technique's
+  evidence with no error anywhere.
+- **Attempted and scored are disjoint.** `attempted` is "went for it and it
+  didn't land", so four tries with one hit is `attempted: 3, scored: 1`. The
+  copy has to say so — the cumulative reading is at least as natural and
+  produces different numbers from the same taps.
+- Removing a drilled technique **leaves its Tried/Landed rows alone.** They are
+  reachable from the live step's focus block whether or not the technique was
+  drilled today, so nothing is stranded and the two facts are independent.
+- ...but a **technique-tagged `conceded`** row survives that removal. This
+  screen cannot author one, but the API accepts one, so a reflection authored
+  elsewhere and read back can carry it; deleting someone's "they armbarred
+  me" record because they removed a drilled chip is data loss.
+- **The category grid and the focus rows must partition the tag list.** The
+  grid owns untagged rows, the focus rows own technique-tagged ones. If either
+  counts the other's, a number appears that its own control refuses to move
+  and nothing explains why.
+- **The session read-back screen must agree with the wizard on `scored`**: its
+  grid excludes technique-tagged `scored` the same way, and the **Techniques**
+  section shows each technique's tried/landed instead — keyed off *any*
+  technique with evidence, NOT off the drilled list. Keyed off drilled, a
+  technique tried live but not drilled shows nowhere, and a session holding
+  only such rows renders "No detail recorded" over data that exists. Getting the second half wrong
+  recreates the exact write-but-never-read defect the funnel exists to fix.
+- **...but NOT on `conceded`, deliberately.** The read-back grid *includes*
+  technique-tagged `conceded` rows. No screen in this app can author one, so
+  there is no editor for the grid to disagree with — and filtering it out
+  would leave that row with no display surface anywhere, saved and synced and
+  invisible. A test written from "the grid mirrors tagCount" would fail
+  against correct code here.
+- **Every tag must be displayed somewhere.** The stronger property behind both
+  bullets above, and the one worth testing directly: take a reflection with
+  one row of every (event × tagged/untagged) combination and assert each is
+  visible on the read-back screen. `hasAnyDetail` must agree — a reflection
+  holding only a technique-tagged `conceded` row must not render "No detail
+  recorded".
+- **Do not record the same live event twice.** Tapping "Landed" on the armbar
+  row *and* "Submissions / Hit" in the live grid, for one armbar, writes two
+  `scored` rows — one technique-tagged, one not. Both screens show them
+  correctly and separately, so nothing looks wrong; any cross-session view
+  that sums `scored` across both shapes double-counts. Pick one convention
+  and test it.
+- Leaving every counter at zero is a valid, meaningful answer — "drilled,
+  never tried live" is the finding, not an empty cell.
 
 ### Reading it back
 
@@ -2431,6 +2542,184 @@ own, so none of them is redundant with "the FK exists".
   rather than silently dropped.
 - A reflection blob that no longer parses is skipped, not fatal — the session
   and its timing still push and the row still settles clean.
+
+
+### Setting focus on the proficiency page
+
+- **Starring a technique adds it to the focus list and it survives a reload.**
+  The star, the panel above, and the stored list must agree at all times.
+- **Un-starring removes it**, as does "Done" in the panel — two controls, one
+  list.
+- **Starring a sixth technique refuses**, names the cap, and **does not fire a
+  request**. The server rejects it too; the UI message is a courtesy, not the
+  guard.
+- **A failed save puts the previous list back.** Optimistic update, so a
+  network failure must not leave a filled star next to a list that never
+  changed.
+- **Two rapid toggles settle with the UI matching the server**, in both
+  directions. Responses need not complete in request order: a stale success can
+  re-fill a star just cleared, and a stale rollback can restore a snapshot that
+  predates edits which already succeeded. Star then un-star inside one round
+  trip; and star two techniques where the first save fails and the second
+  succeeds.
+- **A failed focus read must not blank the funnel.** They are two independent
+  reads; the secondary one failing leaves the table readable with the stars
+  simply unfilled.
+- **A cap refusal is not presented as a load failure.** It must not appear
+  under the "Couldn't load your funnel" banner or beside a "Try again" button —
+  nothing failed to load.
+- The panel shows **weeks since `started_on`**, not since the last save —
+  reorder or add an entry and an existing one's count must not reset. That is
+  the property the column exists for and it is enforced server-side.
+- A newly starred technique shows **no** week count until the server answers,
+  never "0 weeks": the optimistic entry has no real `started_on` and a zero
+  would read as a fact.
+- **An empty list renders a first-class empty state**, not an empty box — it is
+  the default for every athlete who has not set one.
+- **A stored list is visible even with no proficiency rows at all.** The phone
+  is reading that list; an athlete whose evidence is empty must still be able
+  to see and clear it.
+- The star column has an accessible name **naming the technique**; a column of
+  identical "Working on" buttons is unusable otherwise.
+
+### Authoring the catalog (`/v1/admin/techniques`)
+
+**Happy path**
+
+- Creating a technique returns it with a **derived id** — "São Paulo Pass" →
+  `sao-paulo-pass`, accents folded, not `s-o-paulo`.
+- It is immediately visible in `GET /v1/techniques`, on the phone's library and
+  as a tag target. That immediacy is the whole point of the feature.
+- Editing an admin-authored technique applies; the id does not move.
+
+**The property everything rests on**
+
+- **A re-seed must not touch an admin row.** Create one, run `cmd/seed` with a
+  JSON that carries the same id and different content, and assert the admin
+  content survives and `source` is still `admin`. Without this guard every
+  deploy silently reverts authored content, and a deploy happens on every
+  release.
+- **...and the seed must still update its own rows.** The inverse failure is a
+  content freeze that looks exactly like "nothing changed".
+
+**Edge cases and errors**
+
+- A duplicate id is a **409, never an upsert** — the id may already be a
+  foreign key in somebody's training record.
+- Editing a **seeded** technique is refused, and the message says to edit
+  `techniques.json` rather than 404ing at an id the console is displaying.
+- A position, function or gi_no_gi outside the catalog's vocabulary is a 400
+  naming the legal set. This is the worst data the table can hold: it writes,
+  it renders, and it returns nothing forever with no fault reported.
+- A name that slugs to nothing ("!!!") is a 400, not a NOT NULL violation far
+  from the cause.
+- `to_position` must resolve to a position the library uses, or the graph edge
+  points at nothing.
+- A body over 64 KB is rejected rather than read.
+
+**Auth and security**
+
+- `RequireAdmin` on every route — this writes shared reference content that
+  every athlete's library and every training record points at. A signed-in
+  non-admin gets 403, not 404.
+- `source` is server-set: a client cannot mark its own row `seed` (which would
+  hand it to the deploy) or a seeded row `admin`.
+
+### The focus list (`GET`/`PUT /v1/bjj/focus`)
+
+**Happy path**
+
+- `PUT` replaces wholesale: saving `[c, a]` then `[a, b]` leaves exactly `a, b`.
+  Merge semantics would make removing a technique impossible.
+- **Array order is the athlete's ranking and comes back unchanged.** Assert with
+  a list that is neither alphabetical nor id-order, or a `ORDER BY technique_id`
+  passes by accident.
+- The response carries library `name`/`position`/`category`, so a client renders
+  the list without a second fetch.
+
+**Edge cases and errors**
+
+- **A re-save must NOT reset `started_on`.** The property the column exists for.
+  Backdate an entry, re-save the list with a new technique in front of it, and
+  assert the old entry's date survived while the new one is today. A
+  delete-then-insert implementation passes every other scenario here and fails
+  only this one — and it fails silently in production, resetting the rotation
+  clock on every reorder.
+- An **empty array clears the list** — finishing a block is normal and must be
+  expressible. Returns `[]`, never `null`.
+- More than 5 techniques → 400, and the message names the number, because the
+  cap is the feature rather than a limit.
+- A repeated technique → 400. Without the check the primary key silently
+  collapses it and the client's list and the stored one disagree about length.
+- An unknown technique id → 400 (not 500), **and the whole save rolls back** —
+  a partially applied list leaves the athlete with one they never asked for.
+- An empty-string id → 400.
+- **`technique_ids` omitted entirely, or `null` → 400.** Both decode to a nil
+  slice, and before this was guarded they were a 200 that changed nothing —
+  with a response body that looked correct, because it is a read-back of the
+  untouched list. Clearing is spelled `[]`; absent is an error.
+- A body over 8 KB is rejected rather than read.
+- **Concurrent saves of the same techniques in different orders must not
+  deadlock.** The upsert takes a row lock per technique; iterating in the
+  athlete's ranking makes two devices take the same locks in opposite orders.
+  Two goroutines, one forward and one reversed, over ~25 rounds.
+
+**Auth and security**
+
+- Self-scoped, no path parameter. Another athlete's list must never be readable.
+- **A save must not prune anyone else's list.** Seed two athletes, replace one's
+  list, assert the other's is untouched — the delete is the easiest place to
+  drop a `user_id` and the easiest to not notice.
+- Unauthenticated → 401.
+
+### The technique funnel, read back (`GET /v1/bjj/proficiency`, `/dashboard/proficiency`)
+
+**Happy path**
+
+- A technique drilled in two sessions reports the SUM of both, and
+  `sessions: 2`. Counts from one class are weaker evidence than the same count
+  across six weeks, which is why that field exists and should be shown.
+- A technique drilled but never taken live reports `attempted 0, scored 0` and
+  lands in the "Never tried live" bucket. That is the headline finding, not an
+  empty row.
+- The summary counts **techniques, not reps** — 40 reps of one technique is
+  `drilled: 1` in the summary. A build that reports 40 has misread the point of
+  the screen.
+- The summary is folded from the rows the client is shown, so the two can never
+  disagree. Assert that directly: the headline must equal what you get by
+  counting the visible list.
+
+**Edge cases and errors**
+
+- **An untagged live-grid row must never be summed into a technique's number.**
+  The same real armbar can be recorded twice — once technique-tagged from the
+  drilled step, once as the category catch-all from the live grid. The
+  convention is that the tagged row is the specific record; per-technique reads
+  take it and only it. Seed both and assert the untagged count is absent.
+- An athlete whose only evidence is untagged rows gets an **empty funnel**, not
+  a phantom row — and `[]`, never `null`, so a client can iterate without a
+  null check.
+- A hit rate is **withheld below five live tries**. One landed out of one is
+  not 100%, and showing it as such invites a conclusion the data can't carry.
+- The order is `SUM(count) DESC, technique_id` and must be stable across
+  identical requests. Note removing the tiebreak does **not** currently turn a
+  test red — the plan happens to be stable — so this is a property to assert,
+  not one a mutation can prove.
+- The `LIMIT` cannot bind in practice (500 vs a 466-technique library). It is a
+  memory backstop, not pagination; do not write a test that implies it
+  truncates real data.
+- On a failed load the page shows an error banner with a retry, **not** the
+  empty state — "no evidence yet" is a different and wrong claim.
+
+**Auth and security**
+
+- Self-scoped: no path parameter, and another athlete's evidence must never
+  appear. Seed two users and assert the caller sees only their own — this is
+  the same cross-user shape that has been caught twice in other modules.
+- Unauthenticated returns 401, not an empty list.
+- The nav link is gated on `catalog === "techniques"`, so an athlete with no
+  technique-catalog discipline never sees it. That is UI tidiness only — the
+  endpoint's own auth is the real boundary.
 
 ## Reading a BJJ session back (mobile)
 
@@ -2556,6 +2845,159 @@ conflict story.
 - The content is identical for every user: there is nothing user-scoped here,
   and no endpoint takes a user id.
 
+## Response compression (`internal/platform/apihttp`)
+
+Every response now carries a new header and large ones change encoding, so
+this is API-surface behaviour even though no endpoint changed.
+
+- **A large response round-trips.** Fetch the technique list with
+  `Accept-Encoding: gzip` and confirm the decompressed body equals the
+  uncompressed one byte for byte. `fetch` and Go's `http.Client` decompress
+  transparently, so a client-side test sees only that it still parses.
+- **A small response is NOT compressed.** An error body is ~60 bytes and
+  gzip's header alone is 18 — compressing it makes it bigger. Assert no
+  `Content-Encoding` on a 404/401.
+- **The threshold test needs an INCOMPRESSIBLE payload.** Repeated text gzips
+  below the threshold, so a test built on it exercises the small-body path and
+  passes whatever the compression logic does. This bit the original
+  double-encode test.
+- **`Vary: Accept-Encoding` on every response**, compressed or not — plus
+  `Vary: Origin`. Both are `Add`ed; a middleware using `Set` silently drops
+  the other, which is how a cache serves a gzipped body to a client that
+  cannot read it.
+- **No double encoding.** A handler that sets its own `Content-Encoding` owns
+  it; the middleware must pass those bytes through untouched.
+- **`Content-Length` is absent when compressed.** Left in place it describes
+  the uncompressed body, and clients truncate or hang rather than error.
+- **Empty responses survive** — 204 and a bare `WriteHeader` must not hang,
+  gain gzip framing, or lose their status.
+- **The access log still records the right status.** The header write is
+  deferred past the handler returning; if that ordering breaks, every log line
+  reports the wrong code while responses look fine.
+
+## Conditional GET (`internal/platform/apihttp`)
+
+- **A repeat request returns 304 with no body.** Fetch, keep the `ETag`, send
+  it back as `If-None-Match`. Assert zero bytes — that is the entire feature.
+- **A changed body returns 200 and a different ETag.** Otherwise clients pin
+  themselves to stale content forever.
+- **The ETag does not change with `Accept-Encoding`.** It is computed inside
+  the compression middleware for exactly this reason; if it moves, every
+  gzip-capable client is a permanent cache miss and the feature does nothing.
+- **Never 304 a write.** A conditional POST/PUT/PATCH/DELETE must proceed
+  normally — a 304 tells the client its write was a no-op.
+- **Never 304 an error.** A 404 or 500 must keep its status, its body, and
+  carry no ETag, or a client caches the failure.
+- **A 304 carries no `Content-Length`.** A declared length with no bytes makes
+  a client hang waiting for them. **Set it in the handler first** — a
+  `ResponseRecorder` never synthesises one, so asserting it is absent proves
+  nothing unless something put it there. Assert the 200 still has it, or the
+  test passes just as well against code that deletes it unconditionally.
+- **A handler's own `ETag` is honoured, not just echoed.** Set one in a
+  handler, send it back as `If-None-Match`, assert 304. Emitting a validator
+  and ignoring it is the failure that looks exactly like success: the client
+  sends it on every request and always gets the full payload. This is the seam
+  a `max(updated_at)` validator lands in.
+- **A handler's `ETag` set after its first `Write` still wins.** The header
+  write is deferred, so the tag is still in the map — and without an explicit
+  re-check it gets silently overwritten by a body hash. Assert the bytes
+  written before the tag appeared aren't lost either.
+- **Assert against the real middleware stack, not one the test assembles.**
+  `apihttp.Stack()` exists because the order test built its own
+  `Compress(ConditionalGet(...))` and so could only ever pass — the production
+  order in `cmd/api/main.go` was swapped and the whole suite stayed green.
+  Anything asserting composition must reach the shipped composition.
+- **Browser clients need the CORS headers.** `If-None-Match` in
+  `Access-Control-Allow-Headers`, `ETag` in `Access-Control-Expose-Headers`.
+  Neither affects iOS or Android, so a native-only test pass says nothing —
+  this needs a real cross-origin fetch from `apps/web`.
+- **A WEAK `ETag` from a handler must still revalidate.** Comparison for
+  If-None-Match is the weak one, so `W/` is stripped from **both** sides.
+  Stripping only the client's candidate passes every strong-ETag test and
+  silently breaks `max(updated_at)`-style validators, which must be weak
+  because they cannot promise byte-identity. Test the verbatim echo — that is
+  what a real client sends. And test that a *different* weak tag is still a
+  200, or the strip has become "any weak tag matches".
+- **A status that cannot carry a body is never gzipped.** RFC 9111 §4.3.4 has
+  a cache copy a 304's headers onto the stored 200 it validates, so
+  `Content-Encoding: gzip` on an empty 304 gets grafted onto a stored identity
+  body. The damage lands in someone else's cache, never in a response anyone
+  here would look at.
+- **`Cache-Control: no-store` opts a route out entirely** — no `ETag`, no
+  `304`, even against `If-None-Match: *`. `/v1/healthz` relies on it: a
+  constant body means a constant validator, so a prober would be answered
+  `304` for the life of the deployment while a checker asserting `200`
+  reported an outage that isn't happening.
+- **A handler-supplied validator must be user-scoped.** `Vary` does not
+  include `Authorization`, so a bare `max(updated_at)` over a shared table
+  would revalidate user B against user A's stored body. The body-hash default
+  cannot do this; nothing enforces it for a handler's own tag.
+- **The `Cache-Control` default reaches all four ETag paths** — handler tag set
+  before `WriteHeader`, mid-stream, after the last write, and the middleware's
+  own hash. The three handler paths commit the status line early, so the
+  header cannot be added afterwards and has to be set on each.
+- **The ETag comes with `Cache-Control: private, no-cache`.** Making responses
+  revalidatable invites intermediaries that were not there before, and almost
+  everything served is per-user data on an authenticated route.
+- **List endpoints stay bounded.** The identity body is buffered whole to hash
+  it, so an unbounded row count is an unbounded per-request allocation. Any
+  new list endpoint needs a real-database test that it caps — and that the cap
+  keeps the **newest** rows, since a flipped `ORDER BY` still passes a
+  count-only assertion while quietly answering with the table's prehistory.
+- **A bounded list needs a TOTAL `ORDER BY`, and the test needs a real tie.**
+  A cap on a non-unique sort key makes membership nondeterministic: which row
+  falls outside can change between identical requests, and the reordered array
+  hashes differently, so the ETag on that endpoint becomes a permanent cache
+  miss. Space every fixture row apart and the test cannot see any of it —
+  create rows that tie *across the cut*. Note a covering index whose columns
+  match the `ORDER BY` supplies the order too, so removing the SQL tiebreak
+  may not turn the test red; say that in the test rather than implying
+  coverage that isn't there.
+- **A cap over a MULTI-OWNER list must sort the caller's own rows first.**
+  `workout.List` mixes your workouts with every user's public ones, so a plain
+  alphabetical cap evicts across ownership — your own workout named "Z…"
+  disappears once 500 public "A…" ones sort ahead of it. A count-only
+  assertion sees none of this; the fixture needs the caller's row to sort
+  last by name.
+- **Distinguish outcome from mechanism.** Two guards that produce the same
+  status code can both be deleted one at a time with the suite still green,
+  because each covers for the other. If a guard exists for a reason the status
+  code cannot show (streaming instead of buffering, say), assert that reason
+  directly or write down that the test does not pin it.
+
+## Searching the technique library (mobile Library tab, web `/dashboard/library`)
+
+- **An accented technique is findable by its ASCII spelling.** "sao paulo" must
+  find "São Paulo Pass". This was broken for months and looked like missing
+  content rather than a broken lookup — the response was to start building a
+  way to add the technique, which would have minted a duplicate id.
+- **And by its accented spelling**, so a Portuguese keyboard is not the thing
+  that breaks instead. Fold both the query and the haystack.
+- **The same for dashes, which is the bigger half.** All three of "north-south
+  pass", "north–south pass" and "north south pass" must find the same thing.
+  The catalog spells 16 names with U+2013, the keyboard offers the hyphen, and
+  people type neither — so every dash folds to a space. The position chip for
+  those techniques says "North-South" with a plain hyphen while the names use
+  the en dash, so the screen contradicts itself before search even runs.
+- **Position is searchable, not just name and aliases.** 37 half-guard
+  techniques are named nothing like "half guard" and are reachable only by
+  typing the position — assert on those specifically, or the case passes on
+  name matches and proves nothing.
+- Derive the cases from the catalog rather than hardcoding them — assert that
+  *every* entry whose name carries a combining mark is findable by its folded
+  form, so a future import is covered without anyone remembering.
+- Aliases still match ("tozi" → São Paulo Pass), and case still does not matter.
+- **A query must not match across two fields.** The haystack joins name,
+  aliases and position; without a separator a query spanning the seam returns a
+  technique that matches neither field.
+- Repeating a search returns the same result — the folded haystack is memoised,
+  and a stale or mis-keyed cache shows up as one query answering differently.
+- Misspellings are **out of scope**: "sao paolo" finds nothing, and the fix for
+  that is an alias, not fuzzy matching.
+- **A search that finds nothing says so.** The reflection wizard's picker
+  rendered blank space on zero results, which on that screen reads as "the
+  technique isn't in the library" — the misreading that started three PRs of
+  work. Assert the empty state names the query that failed.
 ## Planning a week, and starting what's planned (mobile)
 
 Covers `lib/plan.ts`, `components/WeekPlanner.tsx`,
