@@ -33,6 +33,7 @@ func (r *PostgresRepository) ListProficiency(
 			SUM(CASE WHEN t.event = 'attempted' THEN t.count ELSE 0 END)::int,
 			SUM(CASE WHEN t.event = 'scored'    THEN t.count ELSE 0 END)::int,
 			SUM(CASE WHEN t.event = 'conceded'  THEN t.count ELSE 0 END)::int,
+			SUM(CASE WHEN t.event = 'defended'  THEN t.count ELSE 0 END)::int,
 			COUNT(DISTINCT t.session_id)::int,
 			MAX(s.started_at)
 		FROM bjj_session_tags t
@@ -66,7 +67,7 @@ func (r *PostgresRepository) ListProficiency(
 	for rows.Next() {
 		var p Proficiency
 		if err := rows.Scan(&p.TechniqueID, &p.Name, &p.Position, &p.Category,
-			&p.Drilled, &p.Attempted, &p.Scored, &p.Conceded,
+			&p.Drilled, &p.Attempted, &p.Scored, &p.Conceded, &p.Defended,
 			&p.Sessions, &p.LastSeen); err != nil {
 			return nil, fmt.Errorf("bjj: scan proficiency: %w", err)
 		}

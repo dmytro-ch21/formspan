@@ -1,6 +1,7 @@
 package bjj
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -171,4 +172,114 @@ func TestTagCountIsBoundedAtBothEnds(t *testing.T) {
 			t.Errorf("count %d accepted", tc.count)
 		}
 	}
+}
+
+// The live vocabulary is a 2x2 of who initiated an exchange and whether it
+// landed. `defended` was the missing cell for a long time, which meant a
+// defensive success was the one outcome nothing could record — and the gap was
+// invisible because every OTHER combination worked.
+//
+// Asserting the shape rather than the list: a test that just spelled the five
+// values out would go green if someone deleted `defended` and updated it.
+func TestLiveEventsCoverBothInitiatorsAndBothOutcomes(t *testing.T) {
+	live := map[string]struct{ theirs, landed bool }{
+		"scored":    {theirs: false, landed: true},
+		"attempted": {theirs: false, landed: false},
+		"conceded":  {theirs: true, landed: true},
+		"defended":  {theirs: true, landed: false},
+	}
+
+	seen := map[[2]bool]string{}
+	for _, e := range Events() {
+		cell, ok := live[string(e)]
+		if !ok {
+			continue // `drilled` is practice, not an exchange.
+		}
+		key := [2]bool{cell.theirs, cell.landed}
+		if prev, dup := seen[key]; dup {
+			t.Fatalf("%q and %q describe the same cell of the 2x2", prev, e)
+		}
+		seen[key] = string(e)
+	}
+
+	if len(seen) != 4 {
+		t.Fatalf("the 2x2 has %d of 4 cells filled: %v — a missing cell is an "+
+			"outcome the schema cannot record at all", len(seen), seen)
+	}
+}
+
+func TestDefendedIsAcceptedAsAnEvent(t *testing.T) {
+	if !Event("defended").Valid() {
+		t.Fatal("defended must be a valid event; a roadmap's defensive criterion counts it")
+	}
+	if Event("stopped").Valid() {
+		t.Fatal("Valid() accepts anything, so it is not validating")
+	}
+}
+
+// The 400 message spells the vocabularies out for a client whose picker has
+// drifted. It used to spell them out LITERALLY, and went stale the moment one
+// grew — telling a rejected client there were four events when there were
+// five. A message about drift that can itself drift is worse than none.
+//
+// Asserted PER CLAUSE, not with a bare Contains over the whole string. The
+// first version of this test did the latter, and review proved it was theatre:
+// swapping join(Kinds()) and join(Events()) inside the message — so the 400
+// told a client that kinds were "drilled, attempted, scored…" and events were
+// "class, drilling…" — left it green. Every value was still *somewhere* in the
+// string. Membership without position proves nothing about a message whose
+// whole job is to say which vocabulary is which.
+func TestInvalidInputMessageNamesEachVocabularyInItsOwnClause(t *testing.T) {
+	msg := invalidInputMessage()
+
+	clause := func(t *testing.T, after string) string {
+		t.Helper()
+		i := strings.Index(msg, after)
+		if i < 0 {
+			t.Fatalf("message has no %q clause: %s", after, msg)
+		}
+		rest := msg[i+len(after):]
+		if j := strings.Index(rest, ";"); j >= 0 {
+			return rest[:j]
+		}
+		return rest
+	}
+
+	kinds := clause(t, "kind must be one of ")
+	cats := clause(t, "tag category one of ")
+	events := clause(t, "tag event one of ")
+
+	for _, c := range []struct {
+		name   string
+		clause string
+		want   []string
+		absent [][]string
+	}{
+		{"kind", kinds, asStrings(Kinds()), [][]string{asStrings(Events())}},
+		{"category", cats, asStrings(Categories()), [][]string{asStrings(Kinds())}},
+		{"event", events, asStrings(Events()), [][]string{asStrings(Kinds()), asStrings(Categories())}},
+	} {
+		for _, v := range c.want {
+			if !strings.Contains(c.clause, v) {
+				t.Errorf("the %s clause (%q) omits %q", c.name, c.clause, v)
+			}
+		}
+		// And nothing from another vocabulary, which is what makes the clause
+		// a claim about identity rather than about presence.
+		for _, other := range c.absent {
+			for _, v := range other {
+				if strings.Contains(c.clause, v) {
+					t.Errorf("the %s clause (%q) wrongly names %q", c.name, c.clause, v)
+				}
+			}
+		}
+	}
+}
+
+func asStrings[T ~string](vals []T) []string {
+	out := make([]string, len(vals))
+	for i, v := range vals {
+		out[i] = string(v)
+	}
+	return out
 }
