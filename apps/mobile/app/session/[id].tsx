@@ -573,7 +573,7 @@ export default function SessionScreen() {
               value={String(volume.total_reps)}
               size={22}
               fit
-              icon="heart"
+              icon="progress"
               tone={vola.info}
             />
             {/* Volume is a result, not a readout. Mid-session it's a
@@ -1386,9 +1386,23 @@ const styles = StyleSheet.create({
    */
   group: {
     gap: 8,
-    backgroundColor: vola.surface,
+    // A border and padding, and deliberately NO fill.
+    //
+    // The first version filled the card with `surface` and stepped the set
+    // rows up to `surfaceRaised`. Both halves of that were wrong. The step is
+    // 1.09:1 — the history log already records that exact pair as invisible,
+    // so it bought nothing — and filling the card cost something real: the
+    // done-row tint is solved *against `surface`*, so putting rows on
+    // `surfaceRaised` took done-versus-undone from 1.46:1 to 1.34:1, most of
+    // the margin that justified 15% over the rejected 10%. Re-tinting cannot
+    // recover it: lime@15% re-solved over `surfaceRaised` drops `textMuted`
+    // to 4.17:1, under the 4.5 the original tuning was held to.
+    //
+    // So the boundary is a line, not a ground, and every figure recorded in
+    // `Colors.ts` stays true. `line` rather than `lineSoft` because this sits
+    // on the page rather than on a card.
     borderWidth: 1,
-    borderColor: vola.lineSoft,
+    borderColor: vola.line,
     borderRadius: 16,
     padding: 12,
   },
@@ -1451,7 +1465,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 4,
   },
-  setRow: { backgroundColor: vola.surfaceRaised, borderRadius: 12 },
+  setRow: { backgroundColor: vola.surface, borderRadius: 12 },
   // The whole row, not just the tick: a column of rows is scanned by shape
   // and colour, and a 20px checkmark is not what the eye lands on.
   setRowDone: { backgroundColor: vola.setDone },

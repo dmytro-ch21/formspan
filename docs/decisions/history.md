@@ -9464,6 +9464,64 @@ a stale bundle while logging `ReferenceError` and re-bundling one module at a
 time. Screenshots in that window show the old UI. `expo start --clear` is the
 fix; typecheck stays clean throughout, which is the tell.
 
+## 2026-08-04 — The session screens, and a card fill that cost a measured figure
+
+The last of the redesign: the live logging screen, the start picker and the
+exercise picker take the language the dashboard screens already have.
+
+**The live screen gets deliberately less decoration.** It is used standing up,
+one-handed, with twenty seconds between sets, so what it needed was structure
+rather than ornament: each exercise is now a card, where before it was a bare
+stack separated from the next by an 8pt gap — the same gap that sits between
+the set rows *inside* it, so the boundary between movements was carried
+entirely by a name in bold.
+
+### The fill that had to come back out
+
+The first version of that card filled it with `surface` and stepped the set
+rows up to `surfaceRaised`. Review caught that both halves were wrong, and the
+reasoning is worth keeping because neither is visible in a screenshot:
+
+- **The step bought nothing.** `surfaceRaised` on `surface` is 1.09:1 — the
+  same pair this log already records as invisible, which is why the Plan tab's
+  raised thumb became an accent bar.
+- **The fill cost something real.** `setDone` is lime at 15% *solved against
+  `surface`*, so moving the rows to `surfaceRaised` took done-versus-undone
+  from 1.46:1 to 1.34:1 — most of the margin that justified 15% over the
+  rejected 10% (recorded at 1.26:1 as "stops being obvious in daylight").
+- **And it could not be re-tinted back.** Lime at 15% re-solved over
+  `surfaceRaised` is #2F402B, which restores 1.50 done-versus-row and drops
+  `textMuted` to 4.17:1 — under the 4.5 the original tuning was held to. The
+  ground got lighter and there was no headroom left.
+
+So the card is a border and padding with no fill: the boundary is a line rather
+than a ground, and every figure recorded in `Colors.ts` stays true.
+
+**Nothing would have caught this.** `validate_palette.mjs` asserts inks against
+`surface` and against `setDone`, and checks `surfaceRaised` only for accent and
+belt *fills*. It passes green either way. That is the same gap this log already
+records — a ground the validator does not know about is unchecked — reached by
+a second route.
+
+### Two bugs found by looking rather than reading
+
+- **The exercise picker was drawing 520 blank squares.** It rendered an image
+  when an exercise had one, and only 4 of 524 do. That is exactly the bug
+  `LibraryTile` was written to solve, repeating in a second screen.
+- **Today's week row was clipping `1,05…`** where the volume reads `1,058lb`.
+  The `fit` ladder had never been switched on there — added for the You
+  screen's tiles, and Today's stats left at full size. Invisible while the
+  account was metric and `480kg` fitted; imperial pushed it over. Review then
+  found the *same* bug one tap above it, in the calendar's month totals, where
+  the figures are strictly larger and so clip sooner.
+
+### Worth keeping
+
+The commit message claimed the set rows "step up to `surfaceRaised` to stay
+distinct". They did not — 1.09:1 is not a step. A message that describes an
+intention rather than a measurement is how a wrong change survives review, and
+this one only did not because the reviewer recomputed it.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

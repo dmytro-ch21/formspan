@@ -252,10 +252,13 @@ const styles = StyleSheet.create({
   scroll: { padding: 16, gap: 10, paddingBottom: 48 },
   loading: { marginTop: 32 },
   sectionLabel: { fontSize: 12, color: vola.textDim, textTransform: 'uppercase', marginTop: 8 },
+  // Geometry copied from the Plan tab's template card rather than approximated:
+  // no `gap` on the row, the disc's own `marginLeft` doing the spacing, and the
+  // body carrying its own padding. Keeping `gap: 12` as well put the disc 24pt
+  // from the rule instead of 12 — the same card, visibly not the same shape.
   card: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
     borderWidth: 1,
     borderColor: vola.line,
     borderRadius: 14,
@@ -272,7 +275,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginLeft: 12,
   },
-  cardBody: { flex: 1, gap: 3, paddingVertical: 16 },
+  // `paddingLeft` matches Plan's 14 and also covers the case `sport.ts` says is
+  // legitimate — an unknown discipline draws no disc, and the title would
+  // otherwise sit hard against the rule.
+  cardBody: { flex: 1, gap: 3, paddingVertical: 16, paddingLeft: 14 },
   cardTitle: { fontSize: 16, fontWeight: '600' },
   secondary: {
     borderWidth: 1,
