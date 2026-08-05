@@ -9600,8 +9600,20 @@ move and the first time it has.
   isolation pull. **This is a training convention, not anatomy** — a lateral
   raise is abduction, neither pressing nor pulling, and it lands in Push
   because that is the day it is programmed on. Anything with no such
-  convention (quads, hamstrings, calves, abs, forearms, neck) is deliberately
-  in neither and stays reachable through Isolation and its muscle group.
+  convention is deliberately in neither and stays reachable through Isolation
+  and its muscle group — including the two upper-body exclusions someone will
+  query, rotator cuff (prehab) and spinal erectors (hinge work).
+
+  **The fix for the silent-failure problem reintroduced it.** Review
+  mutation-proved that deleting `lats`, `upper-traps` or `chest` from the new
+  sets removed 4–8 real exercises from a facet with the whole suite still
+  green: 17 of the 21 members had no assertion at all. The sets are now held to
+  the catalog by NAME — Cable Fly is a push, Barbell Shrug is a pull — which is
+  a non-circular oracle, plus a check that every member is a muscle string the
+  catalog actually uses, since a typo like `lateral-delt` is otherwise a silent
+  no-op. The generic `shoulders` and `serratus` came back out on the same
+  evidence: this catalog records `shoulders` as a stabiliser, so it was pulling
+  a Kettlebell Windmill and a Suspension Pike into Push.
 - **Review found the coverage test was watching the wrong door.** Its oracle
   was the shipped catalog, so `grappling` — legal in the API's closed
   vocabulary, used by no row — was unmapped and invisible to it. The first

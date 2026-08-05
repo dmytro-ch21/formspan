@@ -153,17 +153,36 @@ export const MOVEMENT_GROUPS: (Facet & { patterns: readonly string[] })[] = [
  * is deliberately in neither, and stays reachable through Isolation and through
  * its muscle group.
  */
-const ISOLATION_PUSH = new Set([
-  'chest', 'upper-chest', 'lower-chest', 'serratus',
+export const ISOLATION_PUSH = new Set([
+  'chest', 'upper-chest', 'lower-chest',
   'triceps',
-  'shoulders', 'delts', 'front-delts', 'lateral-delts',
+  // `front-delts`/`lateral-delts`/`delts` only — NOT the generic `shoulders`.
+  // This catalog uses `shoulders` as a stabiliser recorded as a primary, not as
+  // a delt-isolation marker: it appears on a Kettlebell Windmill, a Halo and a
+  // Suspension Pike, and putting those under Push reads as confused. It also
+  // covers three landmine/medicine-ball presses that genuinely are pushes, but
+  // those are mis-tagged `isolation` upstream, and a missing row is invisible
+  // where a Windmill under Push is not. `serratus` is out for the same reason:
+  // its one isolation row is a Scapular Pull-Up.
+  'delts', 'front-delts', 'lateral-delts',
 ]);
-const ISOLATION_PULL = new Set([
+export const ISOLATION_PULL = new Set([
   'biceps', 'brachialis', 'brachioradialis',
   'lats', 'back', 'upper-back', 'mid-back',
   'rear-delts',
   'traps', 'upper-traps', 'mid-traps', 'lower-traps',
 ]);
+
+/**
+ * Keyed by group so the group names are not repeated as string literals inside
+ * `inMovementGroup` — renaming `push` in `MOVEMENT_GROUPS` would otherwise
+ * leave the derivation silently matching nothing, and the keys are typed
+ * `string`, so the compiler would not see it.
+ */
+const ISOLATION_DERIVED: Record<string, ReadonlySet<string>> = {
+  push: ISOLATION_PUSH,
+  pull: ISOLATION_PULL,
+};
 
 const MUSCLE_TO_GROUP = new Map<string, string>(
   MUSCLE_GROUPS.flatMap((g) => g.muscles.map((m) => [m, g.key] as const)),
@@ -206,7 +225,6 @@ export function inMovementGroup(e: Exercise, group: string): boolean {
   if (!group) return true;
   if (PATTERN_TO_GROUP.get(e.movement_pattern) === group) return true;
   if (e.movement_pattern !== 'isolation') return false;
-  if (group === 'push') return e.primary_muscles.some((m) => ISOLATION_PUSH.has(m));
-  if (group === 'pull') return e.primary_muscles.some((m) => ISOLATION_PULL.has(m));
-  return false;
+  const derived = ISOLATION_DERIVED[group];
+  return derived ? e.primary_muscles.some((m) => derived.has(m)) : false;
 }

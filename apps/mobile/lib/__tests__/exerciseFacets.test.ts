@@ -1,4 +1,6 @@
 import {
+  ISOLATION_PULL,
+  ISOLATION_PUSH,
   MOVEMENT_GROUPS,
   MUSCLE_GROUPS,
   inMovementGroup,
@@ -241,8 +243,76 @@ describe('isolation work answers push and pull too', () => {
     expect(inMovementGroup(mob, 'mobility')).toBe(true);
   });
 
-  test('a compound press is unaffected', () => {
-    expect(inMovementGroup(ex({ movement_pattern: 'horizontal_push' }), 'push')).toBe(true);
+  test('a compound press is not also an isolation', () => {
+    // Only the second assertion carries this. `ex()` defaults to
+    // primary_muscles ['chest'], which IS in ISOLATION_PUSH, so a "push → true"
+    // assertion here passes even with the pattern lookup and the isolation
+    // guard both broken. Review caught that; the push case is covered by
+    // 'folds horizontal and vertical into one push' above.
     expect(inMovementGroup(ex({ movement_pattern: 'horizontal_push' }), 'isolation')).toBe(false);
+  });
+
+  test('a multi-primary isolation row is accepted by every axis it implies', () => {
+    // Dumbbell Pullover, one primary in each set. Genuinely ambiguous, and the
+    // row that documents `.some()` producing double membership on purpose.
+    const pullover = iso(['lats', 'chest']);
+    expect(inMovementGroup(pullover, 'pull')).toBe(true);
+    expect(inMovementGroup(pullover, 'push')).toBe(true);
+  });
+
+  test('a stabiliser recorded as a primary does not drag a core row into Push', () => {
+    // Suspension Pike is ['abdominals', 'shoulders']. `.some()` means ONE
+    // qualifying muscle is enough, so while the generic `shoulders` was in
+    // ISOLATION_PUSH this core exercise appeared under Push. It is out.
+    expect(inMovementGroup(iso(['abdominals', 'shoulders']), 'push')).toBe(false);
+    expect(inMuscleGroup(iso(['abdominals', 'shoulders']), 'core')).toBe(true);
+  });
+});
+
+/**
+ * The isolation sets, held to the real catalog by NAME.
+ *
+ * Review mutation-proved the tests above do not cover this: silently deleting
+ * `lats`, `upper-traps` or `chest` from a set removed 4-8 real exercises from a
+ * facet and the whole suite stayed green — the same "quietly undiscoverable"
+ * failure this file exists to catch, reintroduced by the fix for it. Only 4 of
+ * the 21 members had any assertion at all.
+ *
+ * Named rows are a NON-CIRCULAR oracle: the expectation is what a lifter would
+ * say, not what the map says. Each of these is a real `isolation` row in the
+ * shipped catalog.
+ */
+describe('the isolation sets, against named rows in the real catalog', () => {
+  const find = (name: string) => {
+    const r = rows.find((x) => x.name === name);
+    if (!r) throw new Error(`catalog has no exercise named ${name} — rename or drop this case`);
+    return r;
+  };
+  const asExercise = (name: string) =>
+    ex({
+      movement_pattern: find(name).movement_pattern,
+      primary_muscles: find(name).primary_muscles ?? [],
+    });
+
+  test.each([
+    ['Cable Fly', 'push'],
+    ['Barbell Curl', 'pull'],
+    ['Barbell Shrug', 'pull'],
+    ['Straight-Arm Pulldown', 'pull'],
+  ])('%s is a %s', (name, group) => {
+    expect(inMovementGroup(asExercise(name), group)).toBe(true);
+  });
+
+  test('every member of both sets is a real muscle the catalog uses', () => {
+    // Without this, `lateral-delt` (singular) is a silent no-op that no other
+    // assertion can see — and the excluded-muscle test above would pass for the
+    // wrong reason if it named a muscle that does not exist either.
+    const unreal = [...ISOLATION_PUSH, ...ISOLATION_PULL].filter((m) => muscleGroupOf(m) === null);
+    expect(unreal).toEqual([]);
+  });
+
+  test('no muscle is in both isolation sets', () => {
+    const both = [...ISOLATION_PUSH].filter((m) => ISOLATION_PULL.has(m));
+    expect(both).toEqual([]);
   });
 });
