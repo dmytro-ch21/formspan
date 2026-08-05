@@ -518,7 +518,7 @@ export default function LibraryPage() {
             {/* `eyebrow` already carries the colour — every other section
                 label on this page uses it bare, and matching them is the point:
                 this is a heading over content, not a control. */}
-            <h2 className="eyebrow">New to BJJ? Start with the positions</h2>
+            <h2 className="eyebrow">Start with positions</h2>
             <ul className="flex flex-wrap gap-2">
               {positions.map((p) => {
                 const [code, accent] = positionBadge(p.id);

@@ -819,11 +819,17 @@ export default function LibraryScreen() {
             marks: everything above narrows the list, this opens a page. It sits
             near controls that look superficially similar and behave completely
             differently, so it carries a label and a different shape — without
-            that separation the rows read as one broken control. */}
+            that separation the rows read as one broken control.
+
+            The label is "Start with positions", not "NEW TO BJJ? …". Naming the
+            reader is the problem: it tells anyone who is not new that this row
+            is not for them, when a purple belt looking up Leg Entanglement is exactly
+            who it serves. It also greets a returning athlete as a beginner
+            every time they open the tab. An instruction addresses everyone. */}
         {usesPosition(sport, modules) && positions.length > 0 && (
           <View style={styles.glossary}>
             <Text style={styles.glossaryLabel} accessibilityRole="header">
-              NEW TO BJJ? START WITH THE POSITIONS
+              Start with positions
             </Text>
             <ScrollView
               horizontal
@@ -1270,7 +1276,17 @@ const styles = StyleSheet.create({
   // above narrow a list, and at textDim/10px it measured 3.96:1 on `bg` —
   // under AA, and a step smaller than the chips it has to distinguish itself
   // from. textMuted is 7.19:1 and still reads as secondary.
-  glossaryLabel: { color: vola.textMuted, fontSize: 11, letterSpacing: 1, fontWeight: '800' },
+  // Uppercased by style, not by typing it in caps — the caps are the look, and
+  // a screen reader should still be handed the words. `apps/web`'s `.eyebrow`
+  // does the same with `text-transform`, so both clients now announce the same
+  // accessible name rather than one of them spelling it out.
+  glossaryLabel: {
+    color: vola.textMuted,
+    fontSize: 11,
+    letterSpacing: 1,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
   glossaryRow: { gap: 10, paddingRight: 20 },
   // Fixed width so the names wrap to a predictable two lines and the cards
   // form an even row — "Knee on Belly" and "Mount" cannot share an intrinsic
