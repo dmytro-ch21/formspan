@@ -30,7 +30,7 @@ import { TrainingCalendar } from '@/components/TrainingCalendar';
 import { vola } from '@/constants/Colors';
 import { formatDuration } from '@/lib/history';
 import { addDays, dayString, startOfWeek, weekDays } from '@/lib/calendar';
-import { matchPlans } from '@/lib/adherence';
+import { owedOn } from '@/lib/adherence';
 import { listPlannedBetween, type PlannedSession } from '@/lib/plan';
 import { formatElapsed } from '@/lib/rest';
 import type { LoggedSet, Session } from '@/lib/sessions';
@@ -303,7 +303,22 @@ export default function TodayScreen() {
    * and the trend are all week- or history-scoped — stepping to Thursday to see
    * what is on it should not rewrite what you did this week.
    */
-  const [viewDay, setViewDay] = useState(() => new Date());
+  /**
+   * How many days from today the Upcoming block is describing. 0 is today.
+   *
+   * An OFFSET, not a `Date`, and that is the whole point. Held as a date it is
+   * anchored at mount and refreshed by nothing: `now` re-reads on focus and on
+   * AppState `active`, so leaving the app on this tab overnight and reopening
+   * it moved `now` to the new day while `viewDay` stayed on the old one — and
+   * `isPast` then rendered the main screen in past mode, switcher reading
+   * yesterday, plan cards dimmed and marked "Not logged", without the athlete
+   * having navigated anywhere.
+   *
+   * Deriving it from `now` means every refresh of `now` re-derives it, so the
+   * whole class is gone rather than patched at the two places that happened to
+   * refresh. Same bug `refreshedAnchor` exists for on the Plan tab.
+   */
+  const [dayOffset, setDayOffset] = useState(0);
   /**
    * Plans for `viewDay` alone, resolved to template names.
    *
@@ -363,7 +378,7 @@ export default function TodayScreen() {
     planSeq.current += 1;
     const seq = planSeq.current;
     const days = weekDays(new Date());
-    const viewKey = dayString(viewDay);
+    const viewKey = dayString(addDays(new Date(), dayOffset));
     try {
       // The visible week for the calendar, and the viewed day separately —
       // stepping the switcher can leave the current week entirely, and the
@@ -388,7 +403,7 @@ export default function TodayScreen() {
       // A plan that can't be read is a quieter screen, not a broken one — the
       // unplanned state below is a safe thing to show.
     }
-  }, [userId, viewDay]);
+  }, [userId, dayOffset]);
 
   /**
    * Start what was planned.
@@ -486,23 +501,17 @@ export default function TodayScreen() {
   /**
    * The viewed day's plans that nothing has met yet.
    *
-   * Matched against `weekPlan` AND the viewed day's own rows, de-duplicated.
-   * `weekPlan` alone covers only the current week, so stepping two weeks back
-   * to a day that WAS trained left its plan looking unmet — and `isPast`
-   * renders an unmet past plan as "Not logged", so the screen would have
-   * asserted something false about a day the athlete had trained.
+   * Matched against the viewed day's OWN rows. It used to be matched against
+   * `weekPlan`, which covers only the current week — so stepping two weeks back
+   * to a day that WAS trained left its plan looking unmet, and `isPast` renders
+   * an unmet past plan as "Not logged". The screen asserted something false
+   * about a day the athlete had trained.
    */
-  const owed = useMemo(() => {
-    if (viewPlans.length === 0) return viewPlans;
-    const seen = new Set(weekPlan.map((p) => p.id));
-    const all = [...weekPlan, ...viewPlans.filter((p) => !seen.has(p.id))];
-    const { met } = matchPlans(sessions, all);
-    return viewPlans.filter((p) => !met.has(p.id));
-  }, [viewPlans, weekPlan, sessions]);
+  const owed = useMemo(() => owedOn(sessions, viewPlans), [viewPlans, sessions]);
 
-  const viewKey = dayString(viewDay);
-  const isToday = viewKey === dayString(now);
-  const isPast = viewKey < dayString(now);
+  const viewDay = useMemo(() => addDays(now, dayOffset), [now, dayOffset]);
+  const isToday = dayOffset === 0;
+  const isPast = dayOffset < 0;
 
   /**
    * What the switcher reads. TODAY when it is, the weekday and date otherwise —
@@ -586,7 +595,12 @@ export default function TodayScreen() {
   return (
     <RNView style={styles.screen}>
     <ScrollView
-      contentContainerStyle={[styles.container, { paddingBottom: TAB_BAR_CLEARANCE + fabPad }]}
+      // The pill's clearance only when there is a pill; otherwise it is 64pt of
+      // dead space under the last row.
+      contentContainerStyle={[
+        styles.container,
+        { paddingBottom: TAB_BAR_CLEARANCE + (startable.length > 0 ? fabPad : 0) },
+      ]}
       contentInsetAdjustmentBehavior="never"
       testID="today-screen"
     >
@@ -603,20 +617,26 @@ export default function TodayScreen() {
           it is a readout, because a control that does nothing is worse than no
           control. Same component as the Plan tab's week — see PeriodSwitcher.
         */}
+        {/* Hidden while a session is open, because the only thing it drives —
+            the Upcoming block — is replaced by the resume card below. Left
+            visible it was a control that moved the date line and nothing else,
+            which is the same defect the label's own `onPress` guard avoids. */}
+        {!active && (
         <PeriodSwitcher
           label={dayLabel}
-          onPrev={() => setViewDay((d) => addDays(d, -1))}
-          onNext={() => setViewDay((d) => addDays(d, 1))}
-          onPress={isToday ? undefined : () => setViewDay(new Date())}
+          onPrev={() => setDayOffset((d) => d - 1)}
+          onNext={() => setDayOffset((d) => d + 1)}
+          onPress={isToday ? undefined : () => setDayOffset(0)}
           icon="calendar"
           prevLabel="Previous day"
           nextLabel="Next day"
           pressLabel="Back to today"
           testID="today-day"
         />
+        )}
 
         <Text style={styles.date}>
-          {isToday
+          {isToday || active
             ? todayLabel(now)
             : viewDay.toLocaleDateString(undefined, {
                 weekday: 'long',
@@ -735,16 +755,30 @@ export default function TodayScreen() {
                   key={p.id}
                   style={({ pressed }) => [
                     styles.planCard,
-                    isPast && styles.planCardPast,
                     pressed && !isPast && styles.planCardPressed,
                   ]}
-                  // A past day cannot be started. It was never blocked before
+                  // Note there is no blanket `opacity` on a past card. It had
+                  // one, and opacity composites EVERY ink inside: "Not logged"
+                  // fell to 1.96:1 and the BJJ eyebrow to 2.51:1 — the latter
+                  // being the exact number the palette cites as its reason for
+                  // banning `textDim` from a done row. What is past is said in
+                  // words instead.
+                  //
+                  // A past day cannot be started; a FUTURE one can, and
+                  // deliberately — "start Thursday's workout now" is a normal
+                  // thing to want, and it dates the session today, which is
+                  // true. The past is different only because the plan it looks
+                  // like it satisfies would stay owed, so the card would be
+                  // asserting something the next render contradicts. It was never blocked before
                   // because the screen could only ever show today; the switcher
                   // is what makes "Start" on last Tuesday reachable, and
                   // starting it would date the session today and leave the plan
                   // it appears to satisfy still owed.
                   onPress={isPast ? undefined : () => startPlanned(p)}
-                  disabled={isPast}
+                  // NOT `disabled`: React Native folds it into
+                  // `accessibilityState`, so VoiceOver appends "dimmed" to an
+                  // element already declared `text`. No handler is already
+                  // inert. Same trap `PeriodSwitcher` documents one branch ago.
                   accessibilityRole={isPast ? 'text' : 'button'}
                   accessibilityLabel={
                     isPast
@@ -1092,12 +1126,15 @@ const styles = StyleSheet.create({
   screen: { flex: 1 },
   container: { gap: 12 },
 
-  // Copied in shape from the workouts tab's pill, deliberately: two floating
-  // primary actions that looked different would be two conventions.
+  // The workouts tab's pill, to the point: same radius, same padding, same
+  // `bottom`, same accent shadow. Two floating primary actions that sat at
+  // different heights would jump 16pt as you switched tabs, which is the
+  // "two conventions" this is trying not to be — the first cut had exactly
+  // that, at `TAB_BAR_CLEARANCE + 4` against the other's 16.
   fab: {
     position: 'absolute',
     right: 16,
-    bottom: TAB_BAR_CLEARANCE + 4,
+    bottom: 16,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
@@ -1150,8 +1187,10 @@ const styles = StyleSheet.create({
   // A planned day that has been and gone. Dimmed rather than removed: the plan
   // is still the record of what was meant, and hiding it would make the week
   // read as if nothing had been intended.
-  planCardPast: { opacity: 0.55 },
-  planMissed: { color: vola.textDim, fontSize: 12, fontWeight: '600' },
+  // `warn`, at full strength, because that is what "you missed this" means —
+  // and because it has to carry the distinction between a missed plan and a
+  // startable one on its own now that the card is not dimmed.
+  planMissed: { color: vola.warn, fontSize: 12, fontWeight: '700' },
 
   // Planned and finished. A statement, not a control — there is nothing left
   // to press, and a card that looks pressable and is not is worse than a flat
@@ -1234,14 +1273,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 12,
-  },
-  startPlus: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    borderWidth: 1.5,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   startText: { color: vola.text, fontWeight: '600', fontSize: 16 },
 

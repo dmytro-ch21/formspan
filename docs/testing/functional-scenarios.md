@@ -3154,7 +3154,10 @@ shows. On Plan it is the week; inside the month sheet it is the month.
   must produce visible bars, and two sessions in one day count once.
 - Empty weeks stay as gaps in the ramp rather than being closed up.
 - The current week is drawn hollow — a part-week bar must not read as a slump.
-- One accessibility stop for the whole strip, not fourteen.
+- One accessibility stop for the whole strip, and its label carries the whole
+  series — a sighted reader gets eight values off the bars.
+- **Never more bars than there is data for.** With six weeks of sessions
+  loaded, the strip shows six bars, not eight with two empty ones.
 
 ### A plan that has been met stops being drawn twice
 

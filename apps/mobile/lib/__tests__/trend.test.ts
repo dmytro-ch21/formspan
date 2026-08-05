@@ -4,10 +4,14 @@ import { restLine, weeklyDays } from '../trend';
 /**
  * The strip under Recent, and the line on a day with nothing on it.
  *
- * The suite runs under `TZ=America/Los_Angeles`, which is load-bearing twice
- * over here: a Sunday-evening session placed by its UTC date lands in the
- * following week, and a Monday-morning one lands in the previous. Both render
- * as a bar in the wrong column and neither is visible to a UTC-only test.
+ * The suite runs under `TZ=America/Los_Angeles`, which is load-bearing for
+ * exactly ONE of the two bucketing errors: a Sunday-evening session placed by
+ * its UTC date lands in the following week, and only a zone west of Greenwich
+ * shows it. The mirror error — a Monday-morning session landing in the previous
+ * week — needs a zone EAST of Greenwich, which a single-TZ suite structurally
+ * cannot provide. The Monday case below is kept as documentation of the
+ * intended behaviour, not as a guard; it passes against a UTC implementation
+ * too. Review caught the header claiming otherwise.
  */
 
 let n = 0;
@@ -47,8 +51,39 @@ describe('weeklyDays', () => {
   it('keeps empty weeks rather than closing the gap', () => {
     // A chart that cannot show a lay-off cannot show a comeback. Dropping the
     // blanks would draw a continuous history over a month somebody missed.
+    // Five weeks, because that is how far back the data goes — see the window
+    // test below.
     const w = weeklyDays([session('2026-07-08'), session('2026-08-04')], NOW, 8);
-    expect(w.map((x) => x.days)).toEqual([0, 0, 0, 1, 0, 0, 0, 1]);
+    expect(w.map((x) => x.days)).toEqual([1, 0, 0, 0, 1]);
+    expect(w[0].start).toBe('2026-07-06');
+  });
+
+  describe('the window never runs past the data', () => {
+    it('shortens to what is known rather than inventing empty weeks', () => {
+      // The bug: a capped session read makes eight weeks out of six weeks of
+      // rows by rendering the two oldest as zero — a fortnight off that never
+      // happened, shown to the most consistent athletes first, because their
+      // rows fill the cap fastest. Five honest bars beat eight with three
+      // invented.
+      const w = weeklyDays([session('2026-07-20')], NOW, 8);
+      expect(w).toHaveLength(3);
+      expect(w[0].start).toBe('2026-07-20');
+    });
+
+    it('still stops at the number asked for when the data runs deeper', () => {
+      expect(weeklyDays([session('2025-01-01'), session('2026-08-04')], NOW, 4)).toHaveLength(4);
+    });
+
+    it('shows one week when everything is inside it', () => {
+      expect(weeklyDays([session('2026-08-04')], NOW, 8)).toHaveLength(1);
+    });
+
+    it('shows the asked-for span when there is nothing at all', () => {
+      // Nothing known is not the same as nothing to show: the caller hides the
+      // strip entirely in that case, and collapsing to one bar here would make
+      // the empty state depend on an arbitrary choice made in this function.
+      expect(weeklyDays([], NOW, 8)).toHaveLength(8);
+    });
   });
 
   it('counts days trained, not sessions', () => {
@@ -59,7 +94,7 @@ describe('weeklyDays', () => {
       NOW,
       2,
     );
-    expect(w[1].days).toBe(2);
+    expect(w[w.length - 1].days).toBe(2);
   });
 
   it('caps a week at seven', () => {
@@ -79,8 +114,10 @@ describe('weeklyDays', () => {
   });
 
   it('places a Monday-morning session in its own week, not the previous one', () => {
+    // Documentation, not a guard — see the header. A UTC implementation passes
+    // this too, because 06:00 Monday in Los Angeles is 13:00 Monday in UTC.
     const w = weeklyDays([session('2026-08-03', 6)], NOW, 2);
-    expect(w.map((x) => x.days)).toEqual([0, 1]);
+    expect(w.map((x) => x.days)).toEqual([1]);
   });
 
   it('is empty-safe', () => {
@@ -101,7 +138,9 @@ describe('restLine', () => {
     for (let i = 0; i < 14; i++) {
       seen.add(restLine(new Date(2026, 7, 1 + i)));
     }
-    expect(seen.size).toBeGreaterThan(1);
+    // Every line reachable, not merely "more than one" — the weak version
+    // passes against an implementation that alternates between two of five.
+    expect(seen.size).toBe(5);
     expect(restLine(new Date(2026, 7, 1))).toBe(restLine(new Date(2026, 7, 6)));
   });
 

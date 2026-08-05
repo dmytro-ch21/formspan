@@ -2374,6 +2374,31 @@ included, and a no-op on Android where Expo's `resize` mode already handles it.
 The content also still scrolls by hand, so the worst case is inelegant rather
 than unreachable — which is the property to want when you can't see the screen.
 
+### What review caught, and one thing my own mutation test did
+
+**The screen opened on yesterday.** `viewDay` was a `Date` captured at mount and
+refreshed by nothing, while `now` re-reads on focus and on AppState. Leaving the
+app on Today overnight therefore reopened it in *past mode* — yesterday in the
+switcher, plans dimmed and marked "Not logged" — with the athlete having
+navigated nowhere. It is a day **offset** now, derived from `now`, so every
+refresh re-derives it and the class is gone rather than patched at the two
+places that happened to refresh.
+
+**A blanket `opacity: 0.55` on the past card** composited every ink inside it:
+"Not logged" fell to 1.96:1 and the BJJ eyebrow to 2.51:1 — the latter being the
+exact figure the palette cites as its reason for banning `textDim` from a done
+row, and failing specifically for this app's headline discipline. The card is
+not dimmed at all now; "Not logged" is `warn` at full strength, which is also
+what it means.
+
+And one that arrived from my own mutation testing rather than from review: the
+first fix for the outside-the-week bug passed *two* plan lists and matched their
+union. Three mutations of it stayed green, which is how it came out that the
+wider list was **inert** — `matchPlans` groups by day, so plans on other days
+can never compete for this day's sessions, and plans on the same day are the
+same rows. A parameter that cannot change the answer reads as a safeguard and is
+scenery. `owedOn(sessions, dayPlans)` is what was ever needed.
+
 ### Gaps this leaves
 
 - **No password reset**, which is now the most urgent hole in mobile auth and is
@@ -2480,6 +2505,31 @@ write-only once its only reader turned out to be an unreachable branch. This
 codebase has been bitten by a written-but-never-read flag before (the
 `completed` one that zeroed every session's volume), so a write with no reader
 now gets removed rather than left looking load-bearing.
+
+### What review caught, and one thing my own mutation test did
+
+**The screen opened on yesterday.** `viewDay` was a `Date` captured at mount and
+refreshed by nothing, while `now` re-reads on focus and on AppState. Leaving the
+app on Today overnight therefore reopened it in *past mode* — yesterday in the
+switcher, plans dimmed and marked "Not logged" — with the athlete having
+navigated nowhere. It is a day **offset** now, derived from `now`, so every
+refresh re-derives it and the class is gone rather than patched at the two
+places that happened to refresh.
+
+**A blanket `opacity: 0.55` on the past card** composited every ink inside it:
+"Not logged" fell to 1.96:1 and the BJJ eyebrow to 2.51:1 — the latter being the
+exact figure the palette cites as its reason for banning `textDim` from a done
+row, and failing specifically for this app's headline discipline. The card is
+not dimmed at all now; "Not logged" is `warn` at full strength, which is also
+what it means.
+
+And one that arrived from my own mutation testing rather than from review: the
+first fix for the outside-the-week bug passed *two* plan lists and matched their
+union. Three mutations of it stayed green, which is how it came out that the
+wider list was **inert** — `matchPlans` groups by day, so plans on other days
+can never compete for this day's sessions, and plans on the same day are the
+same rows. A parameter that cannot change the answer reads as a safeguard and is
+scenery. `owedOn(sessions, dayPlans)` is what was ever needed.
 
 ### Gaps this leaves
 
@@ -2764,6 +2814,31 @@ like broken code and neither is: `pod install` dies with a Ruby
 `xctrace` report **different UDIDs for the same phone** — Expo matches
 xctrace's, so the devicectl one yields "No device UDID or name matching" for a
 device sitting plainly connected.
+
+### What review caught, and one thing my own mutation test did
+
+**The screen opened on yesterday.** `viewDay` was a `Date` captured at mount and
+refreshed by nothing, while `now` re-reads on focus and on AppState. Leaving the
+app on Today overnight therefore reopened it in *past mode* — yesterday in the
+switcher, plans dimmed and marked "Not logged" — with the athlete having
+navigated nowhere. It is a day **offset** now, derived from `now`, so every
+refresh re-derives it and the class is gone rather than patched at the two
+places that happened to refresh.
+
+**A blanket `opacity: 0.55` on the past card** composited every ink inside it:
+"Not logged" fell to 1.96:1 and the BJJ eyebrow to 2.51:1 — the latter being the
+exact figure the palette cites as its reason for banning `textDim` from a done
+row, and failing specifically for this app's headline discipline. The card is
+not dimmed at all now; "Not logged" is `warn` at full strength, which is also
+what it means.
+
+And one that arrived from my own mutation testing rather than from review: the
+first fix for the outside-the-week bug passed *two* plan lists and matched their
+union. Three mutations of it stayed green, which is how it came out that the
+wider list was **inert** — `matchPlans` groups by day, so plans on other days
+can never compete for this day's sessions, and plans on the same day are the
+same rows. A parameter that cannot change the answer reads as a safeguard and is
+scenery. `owedOn(sessions, dayPlans)` is what was ever needed.
 
 ### Gaps
 
@@ -6401,6 +6476,31 @@ the screen that exists because detail was being recorded and never shown. The
 grid now carries those rows: there is no editor for them to disagree with, so
 it is the honest place for them.
 
+### What review caught, and one thing my own mutation test did
+
+**The screen opened on yesterday.** `viewDay` was a `Date` captured at mount and
+refreshed by nothing, while `now` re-reads on focus and on AppState. Leaving the
+app on Today overnight therefore reopened it in *past mode* — yesterday in the
+switcher, plans dimmed and marked "Not logged" — with the athlete having
+navigated nowhere. It is a day **offset** now, derived from `now`, so every
+refresh re-derives it and the class is gone rather than patched at the two
+places that happened to refresh.
+
+**A blanket `opacity: 0.55` on the past card** composited every ink inside it:
+"Not logged" fell to 1.96:1 and the BJJ eyebrow to 2.51:1 — the latter being the
+exact figure the palette cites as its reason for banning `textDim` from a done
+row, and failing specifically for this app's headline discipline. The card is
+not dimmed at all now; "Not logged" is `warn` at full strength, which is also
+what it means.
+
+And one that arrived from my own mutation testing rather than from review: the
+first fix for the outside-the-week bug passed *two* plan lists and matched their
+union. Three mutations of it stayed green, which is how it came out that the
+wider list was **inert** — `matchPlans` groups by day, so plans on other days
+can never compete for this day's sessions, and plans on the same day are the
+same rows. A parameter that cannot change the answer reads as a safeguard and is
+scenery. `owedOn(sessions, dayPlans)` is what was ever needed.
+
 ### Gaps this leaves
 
 - **Nothing reads the funnel across sessions yet.** This is the capture half;
@@ -6624,6 +6724,31 @@ Verified the fix the only way that means anything: created a fresh database,
 ran `migrate up` and *not* `seed`, confirmed `count(*) FROM techniques` is 0,
 and ran the whole backend suite against it green.
 
+### What review caught, and one thing my own mutation test did
+
+**The screen opened on yesterday.** `viewDay` was a `Date` captured at mount and
+refreshed by nothing, while `now` re-reads on focus and on AppState. Leaving the
+app on Today overnight therefore reopened it in *past mode* — yesterday in the
+switcher, plans dimmed and marked "Not logged" — with the athlete having
+navigated nowhere. It is a day **offset** now, derived from `now`, so every
+refresh re-derives it and the class is gone rather than patched at the two
+places that happened to refresh.
+
+**A blanket `opacity: 0.55` on the past card** composited every ink inside it:
+"Not logged" fell to 1.96:1 and the BJJ eyebrow to 2.51:1 — the latter being the
+exact figure the palette cites as its reason for banning `textDim` from a done
+row, and failing specifically for this app's headline discipline. The card is
+not dimmed at all now; "Not logged" is `warn` at full strength, which is also
+what it means.
+
+And one that arrived from my own mutation testing rather than from review: the
+first fix for the outside-the-week bug passed *two* plan lists and matched their
+union. Three mutations of it stayed green, which is how it came out that the
+wider list was **inert** — `matchPlans` groups by day, so plans on other days
+can never compete for this day's sessions, and plans on the same day are the
+same rows. A parameter that cannot change the answer reads as a safeguard and is
+scenery. `owedOn(sessions, dayPlans)` is what was ever needed.
+
 ### Gaps this leaves
 
 - **`conceded` has a bucket but still no column.** The "Used on you" filter
@@ -6767,6 +6892,31 @@ fixing one left the other six, and every future assertion would have to
 remember. Both `test:api` and CI now run `go test -p 1`, which kills the class:
 0 in 6 after.
 
+### What review caught, and one thing my own mutation test did
+
+**The screen opened on yesterday.** `viewDay` was a `Date` captured at mount and
+refreshed by nothing, while `now` re-reads on focus and on AppState. Leaving the
+app on Today overnight therefore reopened it in *past mode* — yesterday in the
+switcher, plans dimmed and marked "Not logged" — with the athlete having
+navigated nowhere. It is a day **offset** now, derived from `now`, so every
+refresh re-derives it and the class is gone rather than patched at the two
+places that happened to refresh.
+
+**A blanket `opacity: 0.55` on the past card** composited every ink inside it:
+"Not logged" fell to 1.96:1 and the BJJ eyebrow to 2.51:1 — the latter being the
+exact figure the palette cites as its reason for banning `textDim` from a done
+row, and failing specifically for this app's headline discipline. The card is
+not dimmed at all now; "Not logged" is `warn` at full strength, which is also
+what it means.
+
+And one that arrived from my own mutation testing rather than from review: the
+first fix for the outside-the-week bug passed *two* plan lists and matched their
+union. Three mutations of it stayed green, which is how it came out that the
+wider list was **inert** — `matchPlans` groups by day, so plans on other days
+can never compete for this day's sessions, and plans on the same day are the
+same rows. A parameter that cannot change the answer reads as a safeguard and is
+scenery. `owedOn(sessions, dayPlans)` is what was ever needed.
+
 ### Gaps this leaves
 
 - **`started_on` is stamped from `CURRENT_DATE`, the server's date in UTC.** An
@@ -6876,6 +7026,31 @@ Both now pinned.
 And `removeDrilledTechnique`'s JSDoc still described the behaviour this PR
 inverted — hover text reading as an instruction to restore it.
 
+### What review caught, and one thing my own mutation test did
+
+**The screen opened on yesterday.** `viewDay` was a `Date` captured at mount and
+refreshed by nothing, while `now` re-reads on focus and on AppState. Leaving the
+app on Today overnight therefore reopened it in *past mode* — yesterday in the
+switcher, plans dimmed and marked "Not logged" — with the athlete having
+navigated nowhere. It is a day **offset** now, derived from `now`, so every
+refresh re-derives it and the class is gone rather than patched at the two
+places that happened to refresh.
+
+**A blanket `opacity: 0.55` on the past card** composited every ink inside it:
+"Not logged" fell to 1.96:1 and the BJJ eyebrow to 2.51:1 — the latter being the
+exact figure the palette cites as its reason for banning `textDim` from a done
+row, and failing specifically for this app's headline discipline. The card is
+not dimmed at all now; "Not logged" is `warn` at full strength, which is also
+what it means.
+
+And one that arrived from my own mutation testing rather than from review: the
+first fix for the outside-the-week bug passed *two* plan lists and matched their
+union. Three mutations of it stayed green, which is how it came out that the
+wider list was **inert** — `matchPlans` groups by day, so plans on other days
+can never compete for this day's sessions, and plans on the same day are the
+same rows. A parameter that cannot change the answer reads as a safeguard and is
+scenery. `owedOn(sessions, dayPlans)` is what was ever needed.
+
 ### Gaps this leaves
 
 - **Nothing sets a focus list yet.** The web authoring surface is still
@@ -6961,6 +7136,31 @@ become three channels — load failure, save failure, and the refusal — sharin
 one banner with a "Try again" button. So the one refusal guaranteed to happen
 told the athlete a load had failed that hadn't. Refusals and save failures now
 have their own quieter `role="status"` notice.
+
+### What review caught, and one thing my own mutation test did
+
+**The screen opened on yesterday.** `viewDay` was a `Date` captured at mount and
+refreshed by nothing, while `now` re-reads on focus and on AppState. Leaving the
+app on Today overnight therefore reopened it in *past mode* — yesterday in the
+switcher, plans dimmed and marked "Not logged" — with the athlete having
+navigated nowhere. It is a day **offset** now, derived from `now`, so every
+refresh re-derives it and the class is gone rather than patched at the two
+places that happened to refresh.
+
+**A blanket `opacity: 0.55` on the past card** composited every ink inside it:
+"Not logged" fell to 1.96:1 and the BJJ eyebrow to 2.51:1 — the latter being the
+exact figure the palette cites as its reason for banning `textDim` from a done
+row, and failing specifically for this app's headline discipline. The card is
+not dimmed at all now; "Not logged" is `warn` at full strength, which is also
+what it means.
+
+And one that arrived from my own mutation testing rather than from review: the
+first fix for the outside-the-week bug passed *two* plan lists and matched their
+union. Three mutations of it stayed green, which is how it came out that the
+wider list was **inert** — `matchPlans` groups by day, so plans on other days
+can never compete for this day's sessions, and plans on the same day are the
+same rows. A parameter that cannot change the answer reads as a safeguard and is
+scenery. `owedOn(sessions, dayPlans)` is what was ever needed.
 
 ### Gaps this leaves
 
@@ -7094,6 +7294,31 @@ Also worth recording: the timestamps fix is in SQL, so the handler test cannot
 see it — the fake repository supplies its own timestamps and stays green with
 the projection broken. That assertion lives in the integration test instead, and
 both mutations were checked separately.
+
+### What review caught, and one thing my own mutation test did
+
+**The screen opened on yesterday.** `viewDay` was a `Date` captured at mount and
+refreshed by nothing, while `now` re-reads on focus and on AppState. Leaving the
+app on Today overnight therefore reopened it in *past mode* — yesterday in the
+switcher, plans dimmed and marked "Not logged" — with the athlete having
+navigated nowhere. It is a day **offset** now, derived from `now`, so every
+refresh re-derives it and the class is gone rather than patched at the two
+places that happened to refresh.
+
+**A blanket `opacity: 0.55` on the past card** composited every ink inside it:
+"Not logged" fell to 1.96:1 and the BJJ eyebrow to 2.51:1 — the latter being the
+exact figure the palette cites as its reason for banning `textDim` from a done
+row, and failing specifically for this app's headline discipline. The card is
+not dimmed at all now; "Not logged" is `warn` at full strength, which is also
+what it means.
+
+And one that arrived from my own mutation testing rather than from review: the
+first fix for the outside-the-week bug passed *two* plan lists and matched their
+union. Three mutations of it stayed green, which is how it came out that the
+wider list was **inert** — `matchPlans` groups by day, so plans on other days
+can never compete for this day's sessions, and plans on the same day are the
+same rows. A parameter that cannot change the answer reads as a safeguard and is
+scenery. `owedOn(sessions, dayPlans)` is what was ever needed.
 
 ### Gaps this leaves
 
@@ -7303,6 +7528,31 @@ character. Reachable by pasting prose from an editor that uses U+2028 as a soft
 line break. Consequence is a one-line cosmetic diff on the next re-import, and
 both forms parse identically, so it is recorded rather than fixed.
 
+### What review caught, and one thing my own mutation test did
+
+**The screen opened on yesterday.** `viewDay` was a `Date` captured at mount and
+refreshed by nothing, while `now` re-reads on focus and on AppState. Leaving the
+app on Today overnight therefore reopened it in *past mode* — yesterday in the
+switcher, plans dimmed and marked "Not logged" — with the athlete having
+navigated nowhere. It is a day **offset** now, derived from `now`, so every
+refresh re-derives it and the class is gone rather than patched at the two
+places that happened to refresh.
+
+**A blanket `opacity: 0.55` on the past card** composited every ink inside it:
+"Not logged" fell to 1.96:1 and the BJJ eyebrow to 2.51:1 — the latter being the
+exact figure the palette cites as its reason for banning `textDim` from a done
+row, and failing specifically for this app's headline discipline. The card is
+not dimmed at all now; "Not logged" is `warn` at full strength, which is also
+what it means.
+
+And one that arrived from my own mutation testing rather than from review: the
+first fix for the outside-the-week bug passed *two* plan lists and matched their
+union. Three mutations of it stayed green, which is how it came out that the
+wider list was **inert** — `matchPlans` groups by day, so plans on other days
+can never compete for this day's sessions, and plans on the same day are the
+same rows. A parameter that cannot change the answer reads as a safeguard and is
+scenery. `owedOn(sessions, dayPlans)` is what was ever needed.
+
 ### Gaps this leaves
 
 - **The console UI still does not exist**, so authoring is `curl` and the export
@@ -7460,6 +7710,31 @@ one found a real hole: weakening the field separator from `\n` to a space was
 still green, because the fold collapses whitespace and the span query was glued
 with no space in it. A spaced variant closes it.
 
+
+### What review caught, and one thing my own mutation test did
+
+**The screen opened on yesterday.** `viewDay` was a `Date` captured at mount and
+refreshed by nothing, while `now` re-reads on focus and on AppState. Leaving the
+app on Today overnight therefore reopened it in *past mode* — yesterday in the
+switcher, plans dimmed and marked "Not logged" — with the athlete having
+navigated nowhere. It is a day **offset** now, derived from `now`, so every
+refresh re-derives it and the class is gone rather than patched at the two
+places that happened to refresh.
+
+**A blanket `opacity: 0.55` on the past card** composited every ink inside it:
+"Not logged" fell to 1.96:1 and the BJJ eyebrow to 2.51:1 — the latter being the
+exact figure the palette cites as its reason for banning `textDim` from a done
+row, and failing specifically for this app's headline discipline. The card is
+not dimmed at all now; "Not logged" is `warn` at full strength, which is also
+what it means.
+
+And one that arrived from my own mutation testing rather than from review: the
+first fix for the outside-the-week bug passed *two* plan lists and matched their
+union. Three mutations of it stayed green, which is how it came out that the
+wider list was **inert** — `matchPlans` groups by day, so plans on other days
+can never compete for this day's sessions, and plans on the same day are the
+same rows. A parameter that cannot change the answer reads as a safeguard and is
+scenery. `owedOn(sessions, dayPlans)` is what was ever needed.
 
 ### Gaps this leaves
 
@@ -8071,6 +8346,31 @@ uncovering in order, the mark landing above the finished wordmark, and the fade
 into Today. Worth reusing: a ~1.7s animation is not catchable by taking one
 screenshot and hoping.
 
+### What review caught, and one thing my own mutation test did
+
+**The screen opened on yesterday.** `viewDay` was a `Date` captured at mount and
+refreshed by nothing, while `now` re-reads on focus and on AppState. Leaving the
+app on Today overnight therefore reopened it in *past mode* — yesterday in the
+switcher, plans dimmed and marked "Not logged" — with the athlete having
+navigated nowhere. It is a day **offset** now, derived from `now`, so every
+refresh re-derives it and the class is gone rather than patched at the two
+places that happened to refresh.
+
+**A blanket `opacity: 0.55` on the past card** composited every ink inside it:
+"Not logged" fell to 1.96:1 and the BJJ eyebrow to 2.51:1 — the latter being the
+exact figure the palette cites as its reason for banning `textDim` from a done
+row, and failing specifically for this app's headline discipline. The card is
+not dimmed at all now; "Not logged" is `warn` at full strength, which is also
+what it means.
+
+And one that arrived from my own mutation testing rather than from review: the
+first fix for the outside-the-week bug passed *two* plan lists and matched their
+union. Three mutations of it stayed green, which is how it came out that the
+wider list was **inert** — `matchPlans` groups by day, so plans on other days
+can never compete for this day's sessions, and plans on the same day are the
+same rows. A parameter that cannot change the answer reads as a safeguard and is
+scenery. `owedOn(sessions, dayPlans)` is what was ever needed.
+
 ### Gaps this leaves
 
 `vola-mark.png` was regenerated at 1024px from the brand source — same
@@ -8144,6 +8444,31 @@ under `contain` and quietly shrinks the letters inside their own footprint.
 
 The tick keeps the two jobs it earns: the app icon, and the landing beat of
 `AnimatedSplash`.
+
+### What review caught, and one thing my own mutation test did
+
+**The screen opened on yesterday.** `viewDay` was a `Date` captured at mount and
+refreshed by nothing, while `now` re-reads on focus and on AppState. Leaving the
+app on Today overnight therefore reopened it in *past mode* — yesterday in the
+switcher, plans dimmed and marked "Not logged" — with the athlete having
+navigated nowhere. It is a day **offset** now, derived from `now`, so every
+refresh re-derives it and the class is gone rather than patched at the two
+places that happened to refresh.
+
+**A blanket `opacity: 0.55` on the past card** composited every ink inside it:
+"Not logged" fell to 1.96:1 and the BJJ eyebrow to 2.51:1 — the latter being the
+exact figure the palette cites as its reason for banning `textDim` from a done
+row, and failing specifically for this app's headline discipline. The card is
+not dimmed at all now; "Not logged" is `warn` at full strength, which is also
+what it means.
+
+And one that arrived from my own mutation testing rather than from review: the
+first fix for the outside-the-week bug passed *two* plan lists and matched their
+union. Three mutations of it stayed green, which is how it came out that the
+wider list was **inert** — `matchPlans` groups by day, so plans on other days
+can never compete for this day's sessions, and plans on the same day are the
+same rows. A parameter that cannot change the answer reads as a safeguard and is
+scenery. `owedOn(sessions, dayPlans)` is what was ever needed.
 
 ### Gaps
 
@@ -8237,6 +8562,31 @@ protects it, and a caller who never loads the page can invoke it. The backend's
 `RequireAdmin` is the real boundary and would reject them, but a write path
 gated by coincidence is one refactor from being gated by nothing. The allowlist
 moved to `lib/admin.ts` so `/users`, `/content` and the actions share it.
+
+### What review caught, and one thing my own mutation test did
+
+**The screen opened on yesterday.** `viewDay` was a `Date` captured at mount and
+refreshed by nothing, while `now` re-reads on focus and on AppState. Leaving the
+app on Today overnight therefore reopened it in *past mode* — yesterday in the
+switcher, plans dimmed and marked "Not logged" — with the athlete having
+navigated nowhere. It is a day **offset** now, derived from `now`, so every
+refresh re-derives it and the class is gone rather than patched at the two
+places that happened to refresh.
+
+**A blanket `opacity: 0.55` on the past card** composited every ink inside it:
+"Not logged" fell to 1.96:1 and the BJJ eyebrow to 2.51:1 — the latter being the
+exact figure the palette cites as its reason for banning `textDim` from a done
+row, and failing specifically for this app's headline discipline. The card is
+not dimmed at all now; "Not logged" is `warn` at full strength, which is also
+what it means.
+
+And one that arrived from my own mutation testing rather than from review: the
+first fix for the outside-the-week bug passed *two* plan lists and matched their
+union. Three mutations of it stayed green, which is how it came out that the
+wider list was **inert** — `matchPlans` groups by day, so plans on other days
+can never compete for this day's sessions, and plans on the same day are the
+same rows. A parameter that cannot change the answer reads as a safeguard and is
+scenery. `owedOn(sessions, dayPlans)` is what was ever needed.
 
 ### Gaps this leaves
 
@@ -8379,6 +8729,31 @@ deleted element is not faithfulness.
 `apps/mobile` uses, so the two apps cannot drift. The five starter SVGs are
 deleted after confirming zero references.
 
+### What review caught, and one thing my own mutation test did
+
+**The screen opened on yesterday.** `viewDay` was a `Date` captured at mount and
+refreshed by nothing, while `now` re-reads on focus and on AppState. Leaving the
+app on Today overnight therefore reopened it in *past mode* — yesterday in the
+switcher, plans dimmed and marked "Not logged" — with the athlete having
+navigated nowhere. It is a day **offset** now, derived from `now`, so every
+refresh re-derives it and the class is gone rather than patched at the two
+places that happened to refresh.
+
+**A blanket `opacity: 0.55` on the past card** composited every ink inside it:
+"Not logged" fell to 1.96:1 and the BJJ eyebrow to 2.51:1 — the latter being the
+exact figure the palette cites as its reason for banning `textDim` from a done
+row, and failing specifically for this app's headline discipline. The card is
+not dimmed at all now; "Not logged" is `warn` at full strength, which is also
+what it means.
+
+And one that arrived from my own mutation testing rather than from review: the
+first fix for the outside-the-week bug passed *two* plan lists and matched their
+union. Three mutations of it stayed green, which is how it came out that the
+wider list was **inert** — `matchPlans` groups by day, so plans on other days
+can never compete for this day's sessions, and plans on the same day are the
+same rows. A parameter that cannot change the answer reads as a safeguard and is
+scenery. `owedOn(sessions, dayPlans)` is what was ever needed.
+
 ### Gaps
 
 The lockup sources themselves (`vola-horizontal-color.svg`,
@@ -8449,6 +8824,31 @@ package now would cut across that plan to reach the same end state.
 The cost is stated in the file rather than left implicit: both copies carry a
 comment saying that changing one means changing the other. That is a weak
 guarantee and is meant to be temporary.
+
+### What review caught, and one thing my own mutation test did
+
+**The screen opened on yesterday.** `viewDay` was a `Date` captured at mount and
+refreshed by nothing, while `now` re-reads on focus and on AppState. Leaving the
+app on Today overnight therefore reopened it in *past mode* — yesterday in the
+switcher, plans dimmed and marked "Not logged" — with the athlete having
+navigated nowhere. It is a day **offset** now, derived from `now`, so every
+refresh re-derives it and the class is gone rather than patched at the two
+places that happened to refresh.
+
+**A blanket `opacity: 0.55` on the past card** composited every ink inside it:
+"Not logged" fell to 1.96:1 and the BJJ eyebrow to 2.51:1 — the latter being the
+exact figure the palette cites as its reason for banning `textDim` from a done
+row, and failing specifically for this app's headline discipline. The card is
+not dimmed at all now; "Not logged" is `warn` at full strength, which is also
+what it means.
+
+And one that arrived from my own mutation testing rather than from review: the
+first fix for the outside-the-week bug passed *two* plan lists and matched their
+union. Three mutations of it stayed green, which is how it came out that the
+wider list was **inert** — `matchPlans` groups by day, so plans on other days
+can never compete for this day's sessions, and plans on the same day are the
+same rows. A parameter that cannot change the answer reads as a safeguard and is
+scenery. `owedOn(sessions, dayPlans)` is what was ever needed.
 
 ### Gaps
 
@@ -8680,6 +9080,31 @@ directions.
   A second assertion checks the technique row still renders, so "made the crash
   go away" (an early `return null`) cannot pass for "made the screen work".
 
+### What review caught, and one thing my own mutation test did
+
+**The screen opened on yesterday.** `viewDay` was a `Date` captured at mount and
+refreshed by nothing, while `now` re-reads on focus and on AppState. Leaving the
+app on Today overnight therefore reopened it in *past mode* — yesterday in the
+switcher, plans dimmed and marked "Not logged" — with the athlete having
+navigated nowhere. It is a day **offset** now, derived from `now`, so every
+refresh re-derives it and the class is gone rather than patched at the two
+places that happened to refresh.
+
+**A blanket `opacity: 0.55` on the past card** composited every ink inside it:
+"Not logged" fell to 1.96:1 and the BJJ eyebrow to 2.51:1 — the latter being the
+exact figure the palette cites as its reason for banning `textDim` from a done
+row, and failing specifically for this app's headline discipline. The card is
+not dimmed at all now; "Not logged" is `warn` at full strength, which is also
+what it means.
+
+And one that arrived from my own mutation testing rather than from review: the
+first fix for the outside-the-week bug passed *two* plan lists and matched their
+union. Three mutations of it stayed green, which is how it came out that the
+wider list was **inert** — `matchPlans` groups by day, so plans on other days
+can never compete for this day's sessions, and plans on the same day are the
+same rows. A parameter that cannot change the answer reads as a safeguard and is
+scenery. `owedOn(sessions, dayPlans)` is what was ever needed.
+
 ### Gaps this leaves
 
 - **53 warnings outstanding**, listed above. `react-hooks/refs` in particular
@@ -8798,6 +9223,31 @@ be wary of reasoning about JSX whitespace from any transform other than the one
 in the build. The reason it shipped three times is that nothing catches it but
 reading the rendered page — no typecheck, no lint, no test.
 
+### What review caught, and one thing my own mutation test did
+
+**The screen opened on yesterday.** `viewDay` was a `Date` captured at mount and
+refreshed by nothing, while `now` re-reads on focus and on AppState. Leaving the
+app on Today overnight therefore reopened it in *past mode* — yesterday in the
+switcher, plans dimmed and marked "Not logged" — with the athlete having
+navigated nowhere. It is a day **offset** now, derived from `now`, so every
+refresh re-derives it and the class is gone rather than patched at the two
+places that happened to refresh.
+
+**A blanket `opacity: 0.55` on the past card** composited every ink inside it:
+"Not logged" fell to 1.96:1 and the BJJ eyebrow to 2.51:1 — the latter being the
+exact figure the palette cites as its reason for banning `textDim` from a done
+row, and failing specifically for this app's headline discipline. The card is
+not dimmed at all now; "Not logged" is `warn` at full strength, which is also
+what it means.
+
+And one that arrived from my own mutation testing rather than from review: the
+first fix for the outside-the-week bug passed *two* plan lists and matched their
+union. Three mutations of it stayed green, which is how it came out that the
+wider list was **inert** — `matchPlans` groups by day, so plans on other days
+can never compete for this day's sessions, and plans on the same day are the
+same rows. A parameter that cannot change the answer reads as a safeguard and is
+scenery. `owedOn(sessions, dayPlans)` is what was ever needed.
+
 ### Gaps
 
 **The masthead was never seen above real page content.** Every admin read in
@@ -8898,6 +9348,31 @@ The same review also found that `StatRow`'s `Array.isArray(children)` renders an
 empty slot for a SINGLE falsy child, which is exactly the shape the session's
 `{finished && <Stat/>}` gate has. It happened not to bite (four children, so the
 array branch), but it is now `Children.toArray` and there is a test.
+
+### What review caught, and one thing my own mutation test did
+
+**The screen opened on yesterday.** `viewDay` was a `Date` captured at mount and
+refreshed by nothing, while `now` re-reads on focus and on AppState. Leaving the
+app on Today overnight therefore reopened it in *past mode* — yesterday in the
+switcher, plans dimmed and marked "Not logged" — with the athlete having
+navigated nowhere. It is a day **offset** now, derived from `now`, so every
+refresh re-derives it and the class is gone rather than patched at the two
+places that happened to refresh.
+
+**A blanket `opacity: 0.55` on the past card** composited every ink inside it:
+"Not logged" fell to 1.96:1 and the BJJ eyebrow to 2.51:1 — the latter being the
+exact figure the palette cites as its reason for banning `textDim` from a done
+row, and failing specifically for this app's headline discipline. The card is
+not dimmed at all now; "Not logged" is `warn` at full strength, which is also
+what it means.
+
+And one that arrived from my own mutation testing rather than from review: the
+first fix for the outside-the-week bug passed *two* plan lists and matched their
+union. Three mutations of it stayed green, which is how it came out that the
+wider list was **inert** — `matchPlans` groups by day, so plans on other days
+can never compete for this day's sessions, and plans on the same day are the
+same rows. A parameter that cannot change the answer reads as a safeguard and is
+scenery. `owedOn(sessions, dayPlans)` is what was ever needed.
 
 ### Gaps this leaves
 
@@ -9004,6 +9479,31 @@ database could catch: deleting `AND source = 'admin'` from the UPDATE left the
 entire handler suite green, because the fake repository implements its own
 ownership check.
 
+### What review caught, and one thing my own mutation test did
+
+**The screen opened on yesterday.** `viewDay` was a `Date` captured at mount and
+refreshed by nothing, while `now` re-reads on focus and on AppState. Leaving the
+app on Today overnight therefore reopened it in *past mode* — yesterday in the
+switcher, plans dimmed and marked "Not logged" — with the athlete having
+navigated nowhere. It is a day **offset** now, derived from `now`, so every
+refresh re-derives it and the class is gone rather than patched at the two
+places that happened to refresh.
+
+**A blanket `opacity: 0.55` on the past card** composited every ink inside it:
+"Not logged" fell to 1.96:1 and the BJJ eyebrow to 2.51:1 — the latter being the
+exact figure the palette cites as its reason for banning `textDim` from a done
+row, and failing specifically for this app's headline discipline. The card is
+not dimmed at all now; "Not logged" is `warn` at full strength, which is also
+what it means.
+
+And one that arrived from my own mutation testing rather than from review: the
+first fix for the outside-the-week bug passed *two* plan lists and matched their
+union. Three mutations of it stayed green, which is how it came out that the
+wider list was **inert** — `matchPlans` groups by day, so plans on other days
+can never compete for this day's sessions, and plans on the same day are the
+same rows. A parameter that cannot change the answer reads as a safeguard and is
+scenery. `owedOn(sessions, dayPlans)` is what was ever needed.
+
 ### Gaps this leaves
 
 - **Still no delete, in either catalog.** An exercise authored with a typo in
@@ -9092,6 +9592,31 @@ changeover — and the suite runs pinned to `America/Los_Angeles`, so it held
 under the millisecond version and proved nothing. Rewritten onto 1 November
 (25 hours) and 8 March (23 hours), it fails as it should. All four new guards
 were mutation-checked: each goes red when the code it covers is broken.
+
+### What review caught, and one thing my own mutation test did
+
+**The screen opened on yesterday.** `viewDay` was a `Date` captured at mount and
+refreshed by nothing, while `now` re-reads on focus and on AppState. Leaving the
+app on Today overnight therefore reopened it in *past mode* — yesterday in the
+switcher, plans dimmed and marked "Not logged" — with the athlete having
+navigated nowhere. It is a day **offset** now, derived from `now`, so every
+refresh re-derives it and the class is gone rather than patched at the two
+places that happened to refresh.
+
+**A blanket `opacity: 0.55` on the past card** composited every ink inside it:
+"Not logged" fell to 1.96:1 and the BJJ eyebrow to 2.51:1 — the latter being the
+exact figure the palette cites as its reason for banning `textDim` from a done
+row, and failing specifically for this app's headline discipline. The card is
+not dimmed at all now; "Not logged" is `warn` at full strength, which is also
+what it means.
+
+And one that arrived from my own mutation testing rather than from review: the
+first fix for the outside-the-week bug passed *two* plan lists and matched their
+union. Three mutations of it stayed green, which is how it came out that the
+wider list was **inert** — `matchPlans` groups by day, so plans on other days
+can never compete for this day's sessions, and plans on the same day are the
+same rows. A parameter that cannot change the answer reads as a safeguard and is
+scenery. `owedOn(sessions, dayPlans)` is what was ever needed.
 
 ### Gaps this leaves
 
@@ -9186,6 +9711,31 @@ landmark mid-edit; Escape abandons, since a blur-to-save field otherwise offers
 no way out that does not write. Web has no offline store, so there the server IS
 the save and a refusal restores the old name rather than leaving a rename on
 screen that never happened.
+
+### What review caught, and one thing my own mutation test did
+
+**The screen opened on yesterday.** `viewDay` was a `Date` captured at mount and
+refreshed by nothing, while `now` re-reads on focus and on AppState. Leaving the
+app on Today overnight therefore reopened it in *past mode* — yesterday in the
+switcher, plans dimmed and marked "Not logged" — with the athlete having
+navigated nowhere. It is a day **offset** now, derived from `now`, so every
+refresh re-derives it and the class is gone rather than patched at the two
+places that happened to refresh.
+
+**A blanket `opacity: 0.55` on the past card** composited every ink inside it:
+"Not logged" fell to 1.96:1 and the BJJ eyebrow to 2.51:1 — the latter being the
+exact figure the palette cites as its reason for banning `textDim` from a done
+row, and failing specifically for this app's headline discipline. The card is
+not dimmed at all now; "Not logged" is `warn` at full strength, which is also
+what it means.
+
+And one that arrived from my own mutation testing rather than from review: the
+first fix for the outside-the-week bug passed *two* plan lists and matched their
+union. Three mutations of it stayed green, which is how it came out that the
+wider list was **inert** — `matchPlans` groups by day, so plans on other days
+can never compete for this day's sessions, and plans on the same day are the
+same rows. A parameter that cannot change the answer reads as a safeguard and is
+scenery. `owedOn(sessions, dayPlans)` is what was ever needed.
 
 ### Gaps this leaves
 
@@ -9312,6 +9862,31 @@ scrolling to the end and confirming the final card clears the pill.
 The clearance is unconditional even though only the `mine` scope shows the
 pill — otherwise switching scope changes the scroll extent under the reader's
 thumb.
+
+### What review caught, and one thing my own mutation test did
+
+**The screen opened on yesterday.** `viewDay` was a `Date` captured at mount and
+refreshed by nothing, while `now` re-reads on focus and on AppState. Leaving the
+app on Today overnight therefore reopened it in *past mode* — yesterday in the
+switcher, plans dimmed and marked "Not logged" — with the athlete having
+navigated nowhere. It is a day **offset** now, derived from `now`, so every
+refresh re-derives it and the class is gone rather than patched at the two
+places that happened to refresh.
+
+**A blanket `opacity: 0.55` on the past card** composited every ink inside it:
+"Not logged" fell to 1.96:1 and the BJJ eyebrow to 2.51:1 — the latter being the
+exact figure the palette cites as its reason for banning `textDim` from a done
+row, and failing specifically for this app's headline discipline. The card is
+not dimmed at all now; "Not logged" is `warn` at full strength, which is also
+what it means.
+
+And one that arrived from my own mutation testing rather than from review: the
+first fix for the outside-the-week bug passed *two* plan lists and matched their
+union. Three mutations of it stayed green, which is how it came out that the
+wider list was **inert** — `matchPlans` groups by day, so plans on other days
+can never compete for this day's sessions, and plans on the same day are the
+same rows. A parameter that cannot change the answer reads as a safeguard and is
+scenery. `owedOn(sessions, dayPlans)` is what was ever needed.
 
 ### Gaps this leaves
 
@@ -9580,6 +10155,31 @@ rows already followed.
 rows took a warning with them. That is the direction the ratchet is supposed to
 move and the first time it has.
 
+### What review caught, and one thing my own mutation test did
+
+**The screen opened on yesterday.** `viewDay` was a `Date` captured at mount and
+refreshed by nothing, while `now` re-reads on focus and on AppState. Leaving the
+app on Today overnight therefore reopened it in *past mode* — yesterday in the
+switcher, plans dimmed and marked "Not logged" — with the athlete having
+navigated nowhere. It is a day **offset** now, derived from `now`, so every
+refresh re-derives it and the class is gone rather than patched at the two
+places that happened to refresh.
+
+**A blanket `opacity: 0.55` on the past card** composited every ink inside it:
+"Not logged" fell to 1.96:1 and the BJJ eyebrow to 2.51:1 — the latter being the
+exact figure the palette cites as its reason for banning `textDim` from a done
+row, and failing specifically for this app's headline discipline. The card is
+not dimmed at all now; "Not logged" is `warn` at full strength, which is also
+what it means.
+
+And one that arrived from my own mutation testing rather than from review: the
+first fix for the outside-the-week bug passed *two* plan lists and matched their
+union. Three mutations of it stayed green, which is how it came out that the
+wider list was **inert** — `matchPlans` groups by day, so plans on other days
+can never compete for this day's sessions, and plans on the same day are the
+same rows. A parameter that cannot change the answer reads as a safeguard and is
+scenery. `owedOn(sessions, dayPlans)` is what was ever needed.
+
 ### Gaps this leaves
 
 - Verified on the Simulator against a local API carrying the new registry
@@ -9745,6 +10345,31 @@ not checksum, so this is safe, and the alternative was leaving the file where
 readers look stating the opposite of the behaviour. Worth knowing it was a
 deliberate call rather than an oversight.
 
+### What review caught, and one thing my own mutation test did
+
+**The screen opened on yesterday.** `viewDay` was a `Date` captured at mount and
+refreshed by nothing, while `now` re-reads on focus and on AppState. Leaving the
+app on Today overnight therefore reopened it in *past mode* — yesterday in the
+switcher, plans dimmed and marked "Not logged" — with the athlete having
+navigated nowhere. It is a day **offset** now, derived from `now`, so every
+refresh re-derives it and the class is gone rather than patched at the two
+places that happened to refresh.
+
+**A blanket `opacity: 0.55` on the past card** composited every ink inside it:
+"Not logged" fell to 1.96:1 and the BJJ eyebrow to 2.51:1 — the latter being the
+exact figure the palette cites as its reason for banning `textDim` from a done
+row, and failing specifically for this app's headline discipline. The card is
+not dimmed at all now; "Not logged" is `warn` at full strength, which is also
+what it means.
+
+And one that arrived from my own mutation testing rather than from review: the
+first fix for the outside-the-week bug passed *two* plan lists and matched their
+union. Three mutations of it stayed green, which is how it came out that the
+wider list was **inert** — `matchPlans` groups by day, so plans on other days
+can never compete for this day's sessions, and plans on the same day are the
+same rows. A parameter that cannot change the answer reads as a safeguard and is
+scenery. `owedOn(sessions, dayPlans)` is what was ever needed.
+
 ### Gaps
 
 - **`apps/web`'s calendar has not adopted the rule and still shows both.** Its
@@ -9870,6 +10495,31 @@ to change.
 The strip shows **planned only**. This screen never loads sessions, so a hollow
 ring here would be claiming a distinction it cannot actually make.
 
+### What review caught, and one thing my own mutation test did
+
+**The screen opened on yesterday.** `viewDay` was a `Date` captured at mount and
+refreshed by nothing, while `now` re-reads on focus and on AppState. Leaving the
+app on Today overnight therefore reopened it in *past mode* — yesterday in the
+switcher, plans dimmed and marked "Not logged" — with the athlete having
+navigated nowhere. It is a day **offset** now, derived from `now`, so every
+refresh re-derives it and the class is gone rather than patched at the two
+places that happened to refresh.
+
+**A blanket `opacity: 0.55` on the past card** composited every ink inside it:
+"Not logged" fell to 1.96:1 and the BJJ eyebrow to 2.51:1 — the latter being the
+exact figure the palette cites as its reason for banning `textDim` from a done
+row, and failing specifically for this app's headline discipline. The card is
+not dimmed at all now; "Not logged" is `warn` at full strength, which is also
+what it means.
+
+And one that arrived from my own mutation testing rather than from review: the
+first fix for the outside-the-week bug passed *two* plan lists and matched their
+union. Three mutations of it stayed green, which is how it came out that the
+wider list was **inert** — `matchPlans` groups by day, so plans on other days
+can never compete for this day's sessions, and plans on the same day are the
+same rows. A parameter that cannot change the answer reads as a safeguard and is
+scenery. `owedOn(sessions, dayPlans)` is what was ever needed.
+
 ### Gaps
 
 - **Today has not adopted the switcher yet.** It is the screen the reference
@@ -9973,20 +10623,55 @@ sessions, because two-a-days are normal here and counting sessions makes a heavy
 Tuesday look like a heavy week.
 
 Empty weeks are kept rather than closed up: a chart that cannot show a lay-off
-cannot show a comeback. The current week is drawn hollow because it is not over
+cannot show a comeback. **Which is exactly why the window can never be longer
+than the data.** The first cut asked for eight weeks from a capped session read,
+so the two oldest bars rendered as zero for anyone training five times a week —
+a fortnight off that never happened, shown first to the most consistent
+athletes, whose rows fill the cap fastest. This entry originally called that
+"degrading to a quieter past, never a busier one", and review was right that it
+is nothing of the sort: an under-count is a shorter bar, a missing row is a
+*hole*, and the holes are the whole argument. Five honest bars beat eight with
+three invented. It is the same fabricated zero this app has already deleted
+twice. The current week is drawn hollow because it is not over
 — a part-week bar beside finished ones would report a slump every Monday
 morning. The whole strip is hidden until something has been logged, since eight
 empty columns is a chart telling a new athlete they have failed.
 
+### What review caught, and one thing my own mutation test did
+
+**The screen opened on yesterday.** `viewDay` was a `Date` captured at mount and
+refreshed by nothing, while `now` re-reads on focus and on AppState. Leaving the
+app on Today overnight therefore reopened it in *past mode* — yesterday in the
+switcher, plans dimmed and marked "Not logged" — with the athlete having
+navigated nowhere. It is a day **offset** now, derived from `now`, so every
+refresh re-derives it and the class is gone rather than patched at the two
+places that happened to refresh.
+
+**A blanket `opacity: 0.55` on the past card** composited every ink inside it:
+"Not logged" fell to 1.96:1 and the BJJ eyebrow to 2.51:1 — the latter being the
+exact figure the palette cites as its reason for banning `textDim` from a done
+row, and failing specifically for this app's headline discipline. The card is
+not dimmed at all now; "Not logged" is `warn` at full strength, which is also
+what it means.
+
+And one that arrived from my own mutation testing rather than from review: the
+first fix for the outside-the-week bug passed *two* plan lists and matched their
+union. Three mutations of it stayed green, which is how it came out that the
+wider list was **inert** — `matchPlans` groups by day, so plans on other days
+can never compete for this day's sessions, and plans on the same day are the
+same rows. A parameter that cannot change the answer reads as a safeguard and is
+scenery. `owedOn(sessions, dayPlans)` is what was ever needed.
+
 ### Gaps
 
-- **The trend reads the same capped session list as everything else.** A very
-  heavy eight weeks can under-report the oldest bars. It degrades by drawing a
-  quieter past, never a busier one, which is the right direction for a chart
-  nobody should read as a record — but it is a cap, not a guarantee.
-- **Stepping to a day far in the past can show a met plan as owed**, because
-  adherence is matched against that same capped list. Within the recent weeks
-  anyone actually steps through, it is correct.
+- **The strip still cannot see past the session cap** — it now shortens rather
+  than inventing, so it under-*reports history length* instead of fabricating
+  rest. A dedicated read would let it always show eight.
+- **"Not logged" is only true within the session window.** Step far enough back
+  and a genuinely trained day has no rows loaded to be matched against, so its
+  plan reads as missed. Same cap, and the switcher has no bound, so the
+  falseness is unbounded — the honest fix is a windowed read keyed to the
+  viewed day.
 - **`fabClearance` is now duplicated** between here and the workouts tab,
   deliberately — the two pills are allowed to diverge and a shared constant
   would hide it when they did. If a third appears, share it.

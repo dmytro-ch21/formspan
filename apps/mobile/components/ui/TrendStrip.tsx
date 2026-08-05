@@ -31,8 +31,8 @@ export function TrendStrip({ weeks, testID }: { weeks: TrendWeek[]; testID?: str
     <RNView
       style={styles.wrap}
       testID={testID}
-      // One element, one sentence. Fourteen bars is fourteen stops otherwise,
-      // and "3" repeated has no meaning read out of order.
+      // One element, one sentence. Eight bars is eight stops otherwise, and
+      // "3" repeated has no meaning read out of order.
       accessible
       accessibilityRole="image"
       accessibilityLabel={summarise(weeks)}
@@ -68,7 +68,11 @@ function summarise(weeks: TrendWeek[]): string {
   const days = (n: number) => `${n} ${n === 1 ? 'day' : 'days'}`;
   const head = `Trained ${days(current.days)} so far this week`;
   const tail = previous ? `, ${days(previous.days)} last week` : '';
-  return `${head}${tail}. ${weeks.length} weeks shown, oldest first.`;
+  // The series too, not just the last two. A sighted reader gets eight values
+  // off the bars; a two-point comparison is a different, much weaker chart.
+  const series = weeks.map((w) => w.days).join(', ');
+  const active = weeks.filter((w) => w.days > 0).length;
+  return `${head}${tail}. Trained in ${active} of the last ${weeks.length} weeks. Days per week, oldest first: ${series}.`;
 }
 
 const styles = StyleSheet.create({
@@ -88,7 +92,11 @@ const styles = StyleSheet.create({
   bar: { borderRadius: 3, backgroundColor: vola.green },
   // Not `transparent`: an absent bar and a zero bar are different facts, and
   // the baseline says the week existed and held nothing.
-  barEmpty: { backgroundColor: vola.line },
+  // `gridRest`, the palette's own "untrained day" — 1.46:1 on this card, chosen
+  // when 1.14:1 was rejected as too weak. `line` measures 1.28:1 here, which is
+  // to say the baseline this comment claims says "the week existed and held
+  // nothing" could not be seen at all.
+  barEmpty: { backgroundColor: vola.gridRest },
   // Hollow, because the week is not finished — see the note above. An outline
   // rather than a lighter fill: at 2pt a fill difference is unreadable, and
   // this has to survive greyscale.

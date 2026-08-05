@@ -106,3 +106,25 @@ export function matchPlans(sessions: Session[], planned: PlannedSession[]): Plan
 export function pendingPlans(planned: PlannedSession[], match: PlanMatch): PlannedSession[] {
   return planned.filter((p) => !match.met.has(p.id));
 }
+
+/**
+ * The plans on one day that no session has met.
+ *
+ * A thin wrapper over {@link matchPlans}, and the thinness is the finding. The
+ * caller's bug was matching a day's plans against a list that did not contain
+ * them — Today filtered the viewed day against the current *week*'s plans, so
+ * stepping outside that week left every plan unmatchable, and an unmet past
+ * plan renders "Not logged" on a day the athlete had trained.
+ *
+ * The first fix passed both lists and matched the union. Mutation testing then
+ * showed the wider list was **inert**: `matchPlans` groups by day, so plans on
+ * other days can never compete for this day's sessions, and plans on the same
+ * day are the same rows. A parameter that cannot change the answer is worse
+ * than no parameter — it reads as a safeguard and is scenery. What was ever
+ * needed is that the plans being judged are the plans being matched.
+ */
+export function owedOn<T extends PlannedSession>(sessions: Session[], dayPlans: T[]): T[] {
+  if (dayPlans.length === 0) return dayPlans;
+  const { met } = matchPlans(sessions, dayPlans);
+  return dayPlans.filter((p) => !met.has(p.id));
+}

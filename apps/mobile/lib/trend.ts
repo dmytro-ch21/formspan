@@ -46,8 +46,35 @@ export function weeklyDays(sessions: Session[], now: Date, weeks: number): Trend
     else daysByWeek.set(key, new Set([dayString(when)]));
   }
 
+  /*
+   * Never draw further back than the sessions actually cover.
+   *
+   * The caller reads a capped list, so asking for eight weeks from six weeks of
+   * rows renders the two oldest as **zero** — a fortnight off that never
+   * happened, shown to precisely the most consistent athletes, whose rows fill
+   * the cap fastest. The first version of this called that "degrading to a
+   * quieter past"; it is not. An under-count would be a shorter bar. A missing
+   * row is a HOLE, and this file's whole thesis is that the holes mean
+   * something ("a chart that cannot show a lay-off cannot show a comeback").
+   * A fabricated zero is the same defect this app has already deleted twice —
+   * "0kg volume" and "0 sets".
+   *
+   * So the window is the shorter of what was asked for and what is known:
+   * five honest bars beat eight with three invented.
+   */
+  const oldest = sessions.reduce<number | null>((min, s) => {
+    const t = new Date(s.started_at).getTime();
+    return min === null || t < min ? t : min;
+  }, null);
+  const known =
+    oldest === null
+      ? weeks
+      : Math.floor((thisWeek.getTime() - startOfWeek(new Date(oldest)).getTime()) / 604_800_000) +
+        1;
+  const span = Math.max(1, Math.min(weeks, known));
+
   const out: TrendWeek[] = [];
-  for (let i = weeks - 1; i >= 0; i--) {
+  for (let i = span - 1; i >= 0; i--) {
     const start = new Date(thisWeek);
     start.setDate(start.getDate() - i * 7);
     const key = dayString(start);
@@ -86,8 +113,11 @@ const REST_LINES = [
 export function restLine(day: Date): string {
   // Day-of-epoch, so the sequence advances by one each day rather than jumping
   // about, and so it does not reset at a month or year boundary.
-  const index = Math.floor(
-    new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime() / 86_400_000,
-  );
+  // `Date.UTC` of the LOCAL calendar date, not the local midnight's epoch time.
+  // The latter divides to D for a negative UTC offset and D-1 for a positive
+  // one, so a zone whose offset crosses zero (London, Lisbon) repeats a line at
+  // one DST boundary and skips one at the other. Invisible to a suite pinned to
+  // Los Angeles, which never crosses.
+  const index = Math.floor(Date.UTC(day.getFullYear(), day.getMonth(), day.getDate()) / 86_400_000);
   return REST_LINES[((index % REST_LINES.length) + REST_LINES.length) % REST_LINES.length];
 }
