@@ -11604,6 +11604,77 @@ comment describing a string no card rendered.
   own roadmap is measuring.
 - **Nothing on Today or mobile.** The doc's "out on Today" half does not exist.
 
+## 2026-08-05 — The roadmap picks your focus, and says what it costs
+
+`lib/roadmapFocus.ts` plus a panel on the curriculum detail screen. **No backend
+change at all** — which is the interesting part, and exactly what the design doc
+predicted: "the loop closes through machinery that shipped months ago."
+
+The loop: a roadmap's next techniques become `bjj_focus` rows, focus rows
+already render as one-tap chips in the mobile reflection wizard, those chips
+write technique-tagged events, and those events are precisely what the
+completion criteria read. Everything but the selection existed. The curriculum
+detail response already carries items in roadmap order with a `mastered` flag,
+and `GET`/`PUT /v1/bjj/focus` already existed, so this is two reads and one
+write of endpoints that were already there.
+
+### The rule, and why it is not "replace focus with the roadmap"
+
+**`PUT /v1/bjj/focus` replaces the list wholesale.** A one-tap "put my roadmap
+in focus" would therefore silently delete techniques the athlete had chosen by
+hand — the app taking something without asking, which the UX direction rules
+out. So `proposeFocus` computes a proposal and reports its consequences, and the
+panel shows them before anything is written:
+
+1. A **mastered** roadmap technique leaves. That is the advance — finishing one
+   is what makes room for the next.
+2. Unmastered roadmap **steps** enter, in roadmap order. Order is the content of
+   a syllabus.
+3. Whatever the athlete already had is **kept in the leftover slots**. The
+   roadmap is not entitled to the whole list.
+4. Capped at five, because the bound is the feature.
+
+Rule 3 against rule 4 is where eviction comes from, and the panel distinguishes
+the two reasons in different words: a mastered technique retiring is the machine
+working, an evicted one is the athlete losing a choice to the cap, and only the
+second gets a warning.
+
+Reading items — those with no criteria — are excluded entirely. Focus exists to
+capture live outcomes, so a slot spent on something nothing can complete is a
+category error.
+
+### `apps/web` has tests now, and this is why
+
+It had none. This logic decides what a wholesale-replacing write contains, so a
+wrong branch deletes an athlete's own working set silently — a shorter focus
+list looks exactly like a focus list. Shipping that into a repo whose stated
+discipline is that every guard goes red when its code is deleted was not
+defensible, so **vitest** was added: `pnpm run test:web`, wired into `verify` and
+into the CI web job (per the rule that a CI check must be in `verify` too).
+
+Deliberately narrow — node environment, `src/lib/__tests__` only, pure logic.
+`apps/mobile` earned component tests by shipping two defects that existed only
+in the render path; nothing on web has, and a jsdom setup nobody needs is a
+maintenance cost rather than a safety net. Widen it when a render-path bug
+argues for it.
+
+Eleven cases, and all five guards were mutation-checked: removing the
+mastered-leaves rule, the cap, the duplicate guard, the reading-item exclusion,
+and comparing `unchanged` as a set rather than a sequence each take it red.
+
+### Gaps
+
+- **Still not seen rendering.** Same as the client entry above — Clerk-gated, no
+  credentials entered, so `build:web` and `lint` are the whole evidence base for
+  the panel. The *logic* is now tested; the screen is not.
+- **The advance is manual.** Mastering a technique does not move focus on by
+  itself; the athlete has to come back and apply. Automatic would mean writing
+  to the focus list without being asked, which is the thing rule 3 exists to
+  prevent — but a nudge on Today would close the gap without taking the choice.
+- **One roadmap at a time.** `proposeFocus` takes one curriculum's items. An
+  athlete enrolled in two gets whichever screen they are on, and the second will
+  offer to evict the first. Nothing warns about that.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

@@ -9,10 +9,14 @@ import {
   archiveCurriculumEnrollment,
   deleteCurriculum,
   enrollInCurriculum,
+  getBjjFocus,
   getCurriculum,
+  setBjjFocus,
+  type BjjFocus,
   type Curriculum,
   type CurriculumItem,
 } from "@/lib/api";
+import { proposeFocus } from "@/lib/roadmapFocus";
 
 /**
  * One curriculum, and — if you are working it — how far along you are.
@@ -39,13 +43,22 @@ export default function CurriculumDetailPage() {
   const id = params?.id ?? "";
 
   const [c, setC] = useState<Curriculum | null>(null);
+  const [focus, setFocus] = useState<BjjFocus[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(
     async (signal?: AbortSignal) => {
       try {
-        setC(await getCurriculum(getToken, id, signal));
+        // Both, because the focus panel is a comparison: what the roadmap
+        // wants against what the athlete already holds. One without the other
+        // can only render half the answer.
+        const [curriculum, current] = await Promise.all([
+          getCurriculum(getToken, id, signal),
+          getBjjFocus(getToken, signal),
+        ]);
+        setC(curriculum);
+        setFocus(current);
         setError(null);
       } catch (err) {
         if ((err as Error)?.name === "AbortError") return;
@@ -79,6 +92,20 @@ export default function CurriculumDetailPage() {
       setBusy(false);
     }
   }, [c, getToken, load]);
+
+  const applyFocus = useCallback(async () => {
+    if (!c || !focus) return;
+    setBusy(true);
+    try {
+      const p = proposeFocus(c.items ?? [], focus);
+      await setBjjFocus(getToken, p.next);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }, [c, focus, getToken, load]);
 
   const remove = useCallback(async () => {
     if (!c) return;
@@ -200,6 +227,14 @@ export default function CurriculumDetailPage() {
           {c.countable_items} of these have completion criteria. Start working
           this to begin counting — the clock runs from the day you take it on.
         </p>
+      )}
+
+      {isRoadmap && c.enrolled && focus && (
+        <FocusPanel
+          proposal={proposeFocus(c.items ?? [], focus)}
+          busy={busy}
+          onApply={applyFocus}
+        />
       )}
 
       <section>
@@ -380,5 +415,103 @@ function HitRate({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * The bridge, made visible before it is taken.
+ *
+ * This is the loop the whole feature rests on: a roadmap's next techniques
+ * become focus rows, focus rows already render as one-tap chips in the mobile
+ * reflection wizard, those chips write technique-tagged events, and those
+ * events are precisely what the completion criteria read. Everything but this
+ * selection shipped months ago.
+ *
+ * **It shows the consequence first because `PUT /v1/bjj/focus` replaces the
+ * list wholesale.** A one-tap "put my roadmap in focus" that quietly dropped
+ * three techniques the athlete had chosen by hand would be the app taking
+ * something without asking. So the panel names what leaves, and distinguishes
+ * the two reasons — a mastered technique leaving is the machine working, an
+ * evicted one is the athlete losing a choice to the five-slot cap.
+ */
+function FocusPanel({
+  proposal,
+  busy,
+  onApply,
+}: {
+  proposal: ReturnType<typeof proposeFocus>;
+  busy: boolean;
+  onApply: () => void;
+}) {
+  const evicted = proposal.dropped.filter((d) => d.reason === "evicted");
+  const finished = proposal.dropped.filter((d) => d.reason === "mastered");
+
+  if (proposal.unchanged) {
+    return (
+      <section className="rounded-xl border border-neutral-200 p-4 text-sm dark:border-neutral-800">
+        <h2 className="font-semibold">Focus</h2>
+        <p className="mt-1 text-neutral-600 dark:text-neutral-400">
+          {proposal.next.length === 0
+            ? // Every step mastered, or none has criteria. Either way there is
+              // nothing to work, and offering a button that writes an identical
+              // list would be an action that does nothing.
+              "Nothing left to work on this one."
+            : "Your focus already matches this roadmap — these show as one-tap chips when you log a session."}
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="rounded-xl border border-neutral-200 p-4 dark:border-neutral-800">
+      <h2 className="text-sm font-semibold">Work these next</h2>
+      <p className="mt-1 text-xs text-neutral-600 dark:text-neutral-400">
+        Putting them in your focus list makes them one-tap chips in the phone&apos;s
+        reflection wizard — which is what records the evidence these criteria
+        read. Otherwise you would be naming them by hand out of 466.
+      </p>
+
+      {proposal.added.length > 0 && (
+        <ul className="mt-3 flex flex-wrap gap-2">
+          {proposal.added.map((it) => (
+            <li
+              key={it.technique_id}
+              className="rounded-full border border-neutral-300 px-3 py-1 text-sm dark:border-neutral-700"
+            >
+              {it.name}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {finished.length > 0 && (
+        <p className="mt-3 text-xs text-neutral-600 dark:text-neutral-400">
+          Making room by retiring{" "}
+          {finished.map((d) => d.focus.name).join(", ")} — your record already
+          clears {finished.length === 1 ? "it" : "them"}.
+        </p>
+      )}
+
+      {evicted.length > 0 && (
+        /* The only destructive case, said plainly. Five slots is the cap, and
+           the cap is the feature — a focus list of twenty is the library
+           again. But which five is the athlete's call, so this cannot be a
+           surprise. */
+        <p className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+          This will drop {evicted.map((d) => d.focus.name).join(", ")} from your
+          focus list to stay within five. You can put{" "}
+          {evicted.length === 1 ? "it" : "them"} back from the technique funnel.
+        </p>
+      )}
+
+      <button
+        type="button"
+        onClick={onApply}
+        disabled={busy}
+        className="mt-3 rounded-lg bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-neutral-700 disabled:opacity-50 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-200"
+      >
+        {busy ? "Saving…" : "Put these in my focus"}
+      </button>
+    </section>
   );
 }

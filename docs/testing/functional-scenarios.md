@@ -4546,3 +4546,30 @@ the schema rather than from taste:
   statement about the record now, and a long enough bad run takes it back.
 - Elapsed time on a re-enrolled roadmap has to name the gap, because
   `started_on` spans the months the athlete was away.
+
+### The roadmap → focus bridge
+
+The loop this feature rests on: roadmap → `bjj_focus` → one-tap chips in the
+mobile reflection wizard → technique-tagged events → the criteria. Test it end
+to end across both clients; it is the only path where web and mobile have to
+agree about the same rows.
+
+- **Applying focus makes the roadmap's next unmastered steps appear as chips in
+  the phone's reflection wizard.** The whole point, and the only scenario that
+  crosses clients.
+- **A mastered technique retires from focus** and the next one takes its slot.
+  Without it the list never turns over.
+- **Techniques the athlete set by hand survive** when there is room, and the
+  panel names them when there is not. `PUT /v1/bjj/focus` replaces wholesale, so
+  a silent drop here is data loss the athlete never agreed to.
+- **Reading items never enter focus** — focus captures live outcomes, and an
+  item with no criteria has nothing to complete.
+- **Five is the cap**, and eviction is warned about in different words from
+  retirement: one is the machine working, the other is the athlete losing a
+  choice.
+- **A roadmap already matching focus offers nothing**, rather than a button that
+  writes an identical list. Reordering counts as a change — the chips render in
+  that order.
+- **Two enrolled roadmaps conflict, and nothing warns.** Known gap; worth a
+  scenario so it is found deliberately rather than by an athlete.
+
