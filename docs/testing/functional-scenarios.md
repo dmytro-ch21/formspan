@@ -3120,8 +3120,46 @@ shows. On Plan it is the week; inside the month sheet it is the month.
 - Start a planned day planned as a bare discipline → the normal chooser opens.
 - Plan a BJJ day → the card says **Log**, not Start, and goes to the BJJ log —
   the same `logsAfterwards` predicate everything else uses.
-- Nothing planned → the dashed "Nothing planned for today" card, which routes
-  to Plan. `+ Start something` is present either way.
+- Nothing planned → the dashed rest-day card, which routes to Plan.
+
+### Today steps a day, and says three different things about it
+
+- The switcher reads **TODAY** on today and the weekday + date otherwise, and
+  the line under it follows. Stepping is the only way to see a future day's
+  plan without leaving the tab.
+- **Only the Upcoming block moves.** The calendar, week summary, Recent and the
+  trend must stay on the real week — step to Thursday and this week's stats
+  must not change.
+- On any day but today the label is a button that returns to today; on today it
+  is a readout and must not announce as a control.
+- **A past day offers no Start.** Its plans render dimmed and marked "Not
+  logged". Starting one would date the session today and leave the plan owed.
+- Three distinct states, and the middle one is the one that regressed before:
+  plans owed → cards; **plans all logged → "That is everything planned"**, not
+  "nothing planned"; no plans at all → the rest line.
+- The rest line **never names a day** — it appears under a heading that may read
+  THU, AUG 6 — and never congratulates or scolds. Same day, same line; next
+  day, a different one.
+
+### New Log, and the belt
+
+- `+ New log` floats bottom-right and must never cover the last row, at any
+  text size. It replaces the inline "Start something" card, which should be
+  gone from the top of the screen entirely.
+- The belt hero appears **only on a plan card for a discipline that wears one**
+  — never on a strength card — and is centred, not cropped by the card edge.
+
+### Last 8 weeks
+
+- Hidden entirely until something has been logged.
+- Counts **days trained, not sessions and not tonnage**: a BJJ-only athlete
+  must produce visible bars, and two sessions in one day count once.
+- Empty weeks stay as gaps in the ramp rather than being closed up.
+- The current week is drawn hollow — a part-week bar must not read as a slump.
+- One accessibility stop for the whole strip, and its label carries the whole
+  series — a sighted reader gets eight values off the bars.
+- **Never more bars than there is data for.** With six weeks of sessions
+  loaded, the strip shows six bars, not eight with two empty ones.
 
 ### A plan that has been met stops being drawn twice
 
