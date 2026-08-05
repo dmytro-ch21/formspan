@@ -9678,6 +9678,101 @@ carried the identical string, and leaving one behind is how the two drift.
   the log has flagged before. Shortening its label does not change that; moving
   it into the list's `ListHeaderComponent` so it scrolls away is still the real
   fix, and is still unstarted.
+## 2026-08-05 — The stripes get measured per belt, because a bar is not a rectangle
+
+The rank card shipped with its stripes visibly off the bar — far enough that
+the user marked them on a screenshot. Two separate mistakes, and the second is
+the interesting one.
+
+### One geometry for five different renders
+
+`BeltPhoto` carried a single `BAR` constant — centre, angle, length, width —
+measured off the **black belt's** red bar and applied to all five. The comment
+defending that choice was honest about how it was arrived at (a second attempt
+measured from the purple belt came out worse, so the red bar's numbers won) but
+the conclusion was wrong: the renders share a framing, not a bar position.
+Measured against each render's actual bar, the shared numbers put white's
+stripes ~25px high and purple's ~23px at 1024px wide. Brown and black sit
+noticeably further up the belt than the other three, which is exactly what the
+user described.
+
+### The angle was wrong, and the reason it was wrong is not obvious
+
+The shipped angle was 28.48°. The bars' long edges actually run at 33.6°–38.1°.
+The old figure was not a sloppy measurement — it was the **principal axis of
+the bar's pixels**, computed carefully, and recorded in the comment as a
+deliberate improvement over an earlier bounding-box diagonal.
+
+It was wrong because the bar is not a rectangle on screen. It is a rectangle in
+the world photographed at an angle, so it arrives as a quadrilateral in
+perspective: its two long edges are not parallel, and the angle between long
+and short edges runs from 2.2° off square (brown) to 10.6° (black). **The
+principal axis of a skewed parallelogram is not parallel to its long edges.**
+PCA answers the question correctly and the question was the wrong one.
+
+That also explains why no amount of nudging the centre had fixed it. A single
+`rotate` applies one angle to a shape that has two; whichever end you line up,
+the other hangs off.
+
+### What replaced it
+
+`lib/beltBar.ts` holds a measured quadrilateral per belt, and derives stripes by
+interpolating **between the bar's own two long edges**. That is
+perspective-correct without any perspective arithmetic: the edges already
+converge the way the photograph does, so a stripe drawn between them converges
+with it, and a stripe near the tip comes out fractionally shorter than one near
+the body — as it does on the render. `BeltPhoto` draws them as `react-native-svg`
+polygons, since a rotated `View` cannot express a skew.
+
+Measuring them needed a per-belt threshold rather than one rule: brown's bar is
+only ~36 away from brown in colour distance, white's is ~300 away from white, so
+a single cutoff finds nothing on one belt or selects the whole belt on another.
+Mask, largest connected component, convex hull, simplify to four corners —
+then verified by drawing the corners back over each render, and confirmed on the
+Simulator at the real 215pt.
+
+### The test that is not circular, and the ones that are
+
+Containment — every stripe inside its bar, on every belt, at every count — is
+the load-bearing assertion, and it is **circular by construction**: it checks
+the stripes against the same quads it is testing, so a table measured off the
+wrong artwork satisfies it perfectly. Mutation testing showed this plainly.
+Six mutations of the placement arithmetic all go red; replacing all five quads
+with one belt's does not, and is caught only by a separate identity check.
+
+So the suite also **pins the SHA-256 of the five renders**. If a render is
+replaced the numbers stay valid-looking, the app keeps drawing, and the stripes
+drift off a bar that has moved — invisible in a diff of a binary asset. That
+test failing means re-measure, not update the hash.
+
+One mutation survived the first pass: spacing for `1/slots` instead of
+`1/(slots + 1)` keeps every stripe inside the bar and merely crowds both ends.
+Containment cannot see it because it is not a containment failure. Added an
+explicit clearance assertion for it.
+
+### Gaps this leaves
+
+- **The quads are facts about five specific image files, and re-measuring is
+  still a hand operation.** The hash test says when they go stale; nothing
+  re-derives them. A `scripts/measure_belt_bars.py` was written and then
+  dropped, because it only reproduced four of the five: **brown is the hard
+  case** and any future attempt should start there. Its bar is ~36 away from
+  the belt in colour distance where white's is ~300, which is small enough that
+  the belt's own ribbing and the shadow under the crossed strap outrank it —
+  a fixed threshold, Otsu, and a solidity-scored threshold sweep all pick the
+  strap shadow or fragment the bar into pieces. Colour distance from a global
+  belt median is the wrong feature for brown; something local, or something
+  using darkness rather than distance, probably is not. Shipping a script that
+  needed a hand-tuned exception for one belt would have made the numbers look
+  reproducible without being so.
+- **`Belt.tsx` — the flat drawn belt used in lists — clamps stripes to 6 for
+  every belt** (`Math.max(0, Math.min(belt === 'black' ? degree : stripes, 6))`),
+  while `MAX_STRIPES` is 4. A coloured belt with a bad rank would draw five or
+  six stripes in a list and four on the card. Untouched here: different
+  component, flat geometry, no perspective involved.
+- **The stripe colour is one constant for all five belts.** Correct on the
+  current renders; if a belt is ever supplied with a differently-lit bar it
+  will need its own value, and there is no seam for that.
 
 ## Open items / known gaps as of this entry
 
