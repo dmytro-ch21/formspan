@@ -203,3 +203,46 @@ describe('inMovementGroup', () => {
     expect(inMovementGroup(ex({ movement_pattern: 'kite_flying' }), '')).toBe(true);
   });
 });
+
+describe('isolation work answers push and pull too', () => {
+  // `movement_pattern` is single-valued and `isolation` is 142 of 504 rows, so
+  // taken literally "Pull" returned no biceps curl. That is the data being
+  // faithful and the filter being useless.
+  const iso = (muscles: string[]) =>
+    ex({ movement_pattern: 'isolation', primary_muscles: muscles });
+
+  test('a curl is a pull, and still an isolation', () => {
+    expect(inMovementGroup(iso(['biceps']), 'pull')).toBe(true);
+    expect(inMovementGroup(iso(['biceps']), 'isolation')).toBe(true);
+    expect(inMovementGroup(iso(['biceps']), 'push')).toBe(false);
+  });
+
+  test('a triceps extension and a lateral raise are pushes', () => {
+    expect(inMovementGroup(iso(['triceps']), 'push')).toBe(true);
+    // Abduction, strictly neither — it is in Push because that is the day it
+    // is programmed on. A convention, and the comment says so.
+    expect(inMovementGroup(iso(['lateral-delts']), 'push')).toBe(true);
+    expect(inMovementGroup(iso(['rear-delts']), 'pull')).toBe(true);
+  });
+
+  test('leg and core isolation joins neither, rather than being forced into one', () => {
+    for (const m of ['quadriceps', 'hamstrings', 'calves', 'abdominals', 'forearms']) {
+      expect({ m, push: inMovementGroup(iso([m]), 'push'), pull: inMovementGroup(iso([m]), 'pull') })
+        .toEqual({ m, push: false, pull: false });
+    }
+    // Still reachable — through Isolation, and through its muscle group.
+    expect(inMovementGroup(iso(['quadriceps']), 'isolation')).toBe(true);
+    expect(inMuscleGroup(iso(['quadriceps']), 'legs')).toBe(true);
+  });
+
+  test('ONLY isolation gets the derivation — a mobility drill is not a pull', () => {
+    const mob = ex({ movement_pattern: 'mobility', primary_muscles: ['biceps'] });
+    expect(inMovementGroup(mob, 'pull')).toBe(false);
+    expect(inMovementGroup(mob, 'mobility')).toBe(true);
+  });
+
+  test('a compound press is unaffected', () => {
+    expect(inMovementGroup(ex({ movement_pattern: 'horizontal_push' }), 'push')).toBe(true);
+    expect(inMovementGroup(ex({ movement_pattern: 'horizontal_push' }), 'isolation')).toBe(false);
+  });
+});

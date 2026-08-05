@@ -134,6 +134,37 @@ export const MOVEMENT_GROUPS: (Facet & { patterns: readonly string[] })[] = [
   { key: 'mobility', label: 'Mobility', patterns: ['mobility'] },
 ];
 
+/**
+ * Which isolation work counts as pushing, and which as pulling.
+ *
+ * **`movement_pattern` is single-valued, and `isolation` holds 142 of 504
+ * rows** — 51 of them arms, 28 shoulders. Taken literally that puts every curl,
+ * fly and lateral raise under Isolation and under *neither* Push nor Pull, so
+ * "Pull" returned no biceps curl. The data says so; no lifter would agree, and
+ * push/pull is the thing this filter was asked for.
+ *
+ * So an isolation row also answers the axis its muscle implies. A curl appears
+ * under both Pull and Isolation, which is honest — it is an isolation pull.
+ *
+ * **This is a training convention, not anatomy.** A lateral raise is abduction,
+ * neither pressing nor pulling, and it lands in Push because that is the day it
+ * is programmed on. Rear delts go to Pull on the same reasoning. Anything with
+ * no such convention — quads, hamstrings, calves, abs, forearms, grip, neck —
+ * is deliberately in neither, and stays reachable through Isolation and through
+ * its muscle group.
+ */
+const ISOLATION_PUSH = new Set([
+  'chest', 'upper-chest', 'lower-chest', 'serratus',
+  'triceps',
+  'shoulders', 'delts', 'front-delts', 'lateral-delts',
+]);
+const ISOLATION_PULL = new Set([
+  'biceps', 'brachialis', 'brachioradialis',
+  'lats', 'back', 'upper-back', 'mid-back',
+  'rear-delts',
+  'traps', 'upper-traps', 'mid-traps', 'lower-traps',
+]);
+
 const MUSCLE_TO_GROUP = new Map<string, string>(
   MUSCLE_GROUPS.flatMap((g) => g.muscles.map((m) => [m, g.key] as const)),
 );
@@ -164,8 +195,18 @@ export function inMuscleGroup(e: Exercise, group: string): boolean {
   return e.primary_muscles.some((m) => MUSCLE_TO_GROUP.get(m) === group);
 }
 
-/** Is this exercise that shape of movement? */
+/**
+ * Is this exercise that shape of movement?
+ *
+ * An `isolation` row answers Push or Pull as well as Isolation when its primary
+ * muscle implies one — see `ISOLATION_PUSH`. Nothing else gets that treatment:
+ * a mobility drill for the biceps is not a pull.
+ */
 export function inMovementGroup(e: Exercise, group: string): boolean {
   if (!group) return true;
-  return PATTERN_TO_GROUP.get(e.movement_pattern) === group;
+  if (PATTERN_TO_GROUP.get(e.movement_pattern) === group) return true;
+  if (e.movement_pattern !== 'isolation') return false;
+  if (group === 'push') return e.primary_muscles.some((m) => ISOLATION_PUSH.has(m));
+  if (group === 'pull') return e.primary_muscles.some((m) => ISOLATION_PULL.has(m));
+  return false;
 }

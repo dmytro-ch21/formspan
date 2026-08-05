@@ -9590,15 +9590,18 @@ move and the first time it has.
   same way under BJJ, with the saved belt cap intact. **Note the staging API
   does not carry these facets until this deploys**, so the buttons will not
   appear on a client pointed at it — the registry is the gate.
-- **`Movement → Pull` contains no biceps curl, and that is the mapping
-  decision most likely to read as broken.** `movement_pattern` is
-  single-valued and `isolation` holds 142 of 504 rows — 51 of them Arms, 28
-  Shoulders — so every curl, fly and lateral raise sits under Isolation and
-  under *neither* Push nor Pull. The data says so and the filter reports it
-  faithfully; a lifter would not. Fixing it means deriving push/pull for
-  isolation rows from their primary muscle, which changes what "Pull" *means*
-  rather than fixing a defect, so it is left as a deliberate decision to take
-  rather than one made in passing.
+- **`Movement → Pull` used to contain no biceps curl**, and that was the
+  mapping decision most likely to read as broken. `movement_pattern` is
+  single-valued and `isolation` holds 142 of 504 rows — 51 arms, 28 shoulders —
+  so every curl, fly and lateral raise sat under Isolation and under *neither*
+  Push nor Pull. The data was being reported faithfully and no lifter would
+  have agreed. An isolation row now also answers the axis its muscle implies,
+  so a curl appears under both Pull and Isolation, which is honest: it is an
+  isolation pull. **This is a training convention, not anatomy** — a lateral
+  raise is abduction, neither pressing nor pulling, and it lands in Push
+  because that is the day it is programmed on. Anything with no such
+  convention (quads, hamstrings, calves, abs, forearms, neck) is deliberately
+  in neither and stays reachable through Isolation and its muscle group.
 - **Review found the coverage test was watching the wrong door.** Its oracle
   was the shipped catalog, so `grappling` — legal in the API's closed
   vocabulary, used by no row — was unmapped and invisible to it. The first

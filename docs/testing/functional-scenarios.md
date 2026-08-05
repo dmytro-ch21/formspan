@@ -4001,6 +4001,16 @@ a button that opens a picker rather than a row of pinned options.
   the button now reads that option's name.
 - `Movement → Push` returns both horizontal and vertical pressing — the point
   of the grouping is that "push" is not a value in the data.
+- **`Movement → Pull` must contain biceps curls**, and `Push` must contain
+  triceps and lateral-raise work. Those rows are `movement_pattern:
+  "isolation"`, which is single-valued, so without a derivation they appear
+  under neither — the filter looking broken to anyone who lifts. They appear
+  under Isolation *as well*, which is intended.
+- Leg, core and forearm isolation appears under **neither** Push nor Pull —
+  there is no training convention to derive from — and must still be reachable
+  through `Movement → Isolation` and through its muscle group.
+- A non-isolation row must NOT get the derivation: a mobility drill whose
+  primary muscle is biceps is not a pull.
 - `Muscle → Chest` returns exercises whose **primary** muscles are chest-ish
   (chest, upper-chest, lower-chest, serratus) and NOT things that merely work
   chest secondarily, like a pull-up.
