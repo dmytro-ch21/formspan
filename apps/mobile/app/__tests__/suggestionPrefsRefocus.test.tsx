@@ -5,6 +5,15 @@ import type { Module } from '@/lib/modules';
 import { PREF_SUGGESTIONS, PREF_SUGGESTIONS_OFF, readPref, writePref } from '@/lib/prefs';
 import type { Proficiency } from '@/lib/proficiency';
 
+// The two screens under test. Up here with everything else rather than below the
+// mocks: jest hoists every `jest.mock` above the imports anyway, so ordering them
+// by hand buys nothing and costs two `import/first` warnings against a ratchet
+// with no slack. The factories below only CLOSE OVER their `mock*` fixtures —
+// none reads one at factory time — so no fixture is touched before its
+// declaration has run.
+import SuggestionSettingsScreen from '../settings/suggestions';
+import Today from '../(tabs)/index';
+
 /**
  * Turning suggestions off in Settings has to take effect on Today.
  *
@@ -120,8 +129,12 @@ function focus() {
 // export Today and the settings screen touch has to be re-supplied. Today
 // calls useRouter() and throws without it.
 jest.mock('expo-router', () => {
-  const React = require('react');
-  const { Text } = require('react-native');
+  // `jest.requireActual`, not `require`. Both work inside a hoisted factory,
+  // but bare `require()` is a `@typescript-eslint/no-require-imports` warning
+  // and `lint:mobile` runs at `--max-warnings=54` with no headroom, so a new
+  // test file that reaches for the older idiom fails the gate.
+  const React = jest.requireActual('react');
+  const { Text } = jest.requireActual('react-native');
 
   const useFocusEffect = (effect: () => void | (() => void)) => {
     React.useEffect(() => {
@@ -269,11 +282,6 @@ jest.mock('@/lib/ModulesProvider', () => ({
   useModules: () => ({ modules: mockModules, ready: true, refresh: jest.fn() }),
   ModulesProvider: ({ children }: { children?: unknown }) => children,
 }));
-
-// Imported AFTER the mocks above, which jest hoists — the screens pull
-// `expo-router` and `@/lib/db` at module scope.
-import SuggestionSettingsScreen from '../settings/suggestions';
-import Today from '../(tabs)/index';
 
 const USER = 'u1'; // matches jest.setup.js's Clerk mock
 
