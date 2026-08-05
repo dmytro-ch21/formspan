@@ -476,16 +476,25 @@ export function TrainingCalendar({
             <Text style={styles.sectionLabel}>
               {anchor.toLocaleDateString(undefined, { month: 'long' }).toUpperCase()} SO FAR
             </Text>
+            {/* `fit` on every one: a month's figures are strictly larger than
+                a week's, so this row clips before the week row does — 12,450lb
+                and 553.7k lb both overflow a third-width column without it. */}
             <StatRow>
-              <Stat label="Sessions" value={String(monthTotals.count)} size={22} />
-              <Stat label="Days" value={String(monthTotals.days)} size={22} />
+              <Stat label="Sessions" value={String(monthTotals.count)} size={22} fit />
+              <Stat label="Days" value={String(monthTotals.days)} size={22} fit />
               {monthTotals.volumeKg > 0 ? (
-                <Stat label="Volume" value={formatVolume(monthTotals.volumeKg, units)} size={22} />
+                <Stat
+                  label="Volume"
+                  value={formatVolume(monthTotals.volumeKg, units)}
+                  size={22}
+                  fit
+                />
               ) : (
                 <Stat
                   label="Time"
                   value={monthTotals.seconds > 0 ? formatDuration(monthTotals.seconds) : '—'}
                   size={22}
+                  fit
                 />
               )}
             </StatRow>

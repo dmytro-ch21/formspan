@@ -549,9 +549,33 @@ export default function SessionScreen() {
             a permanent slot in a header read between sets. */}
         {volume && (
           <StatRow testID="session-summary">
-            <Stat label="Time" value={formatElapsed(elapsed)} size={22} fit />
-            <Stat label="Sets" value={String(volume.working_sets)} size={22} fit />
-            <Stat label="Reps" value={String(volume.total_reps)} size={22} fit />
+            {/* The same discs the Today week row uses, and each a different
+                hue for the same reason: these are unrelated measures, not a
+                ramp, so one accent-coloured set would imply a single scale. */}
+            <Stat
+              label="Time"
+              value={formatElapsed(elapsed)}
+              size={22}
+              fit
+              icon="timer"
+              tone={accent.accent}
+            />
+            <Stat
+              label="Sets"
+              value={String(volume.working_sets)}
+              size={22}
+              fit
+              icon="layers"
+              tone={vola.warn}
+            />
+            <Stat
+              label="Reps"
+              value={String(volume.total_reps)}
+              size={22}
+              fit
+              icon="progress"
+              tone={vola.info}
+            />
             {/* Volume is a result, not a readout. Mid-session it's a
                 number nobody acts on — you don't change the next set
                 because the running total crossed 1,500kg — so it appears
@@ -561,6 +585,8 @@ export default function SessionScreen() {
                 label="Volume"
                 size={22}
                 fit
+                icon="barbell"
+                tone={vola.green}
                 value={
                   unitsReady && volume.tonnage_kg > 0
                     ? formatVolume(volume.tonnage_kg, units)
@@ -1343,7 +1369,43 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   centre: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   scroll: { padding: 16, gap: 14, paddingBottom: 48 },
-  group: { gap: 8 },
+  /**
+   * One exercise, as a card.
+   *
+   * It used to be a bare stack separated from the next by an 8pt gap, which is
+   * the same gap that sits between the set rows *inside* it — so where one
+   * movement ended and the next began was carried entirely by a name in bold.
+   * Mid-session, glancing down between sets, that is not enough: the question
+   * is "which block am I in", and a boundary should be a shape.
+   *
+   * Deliberately restrained. This screen is used standing up, one-handed, with
+   * twenty seconds to spare, so it gets *less* decoration than Today rather
+   * than more — a border and a ground, no edge stripe, no icon disc. A sport
+   * rule would be redundant here anyway: every exercise on this screen belongs
+   * to the same session.
+   */
+  group: {
+    gap: 8,
+    // A border and padding, and deliberately NO fill.
+    //
+    // The first version filled the card with `surface` and stepped the set
+    // rows up to `surfaceRaised`. Both halves of that were wrong. The step is
+    // 1.09:1 — the history log already records that exact pair as invisible,
+    // so it bought nothing — and filling the card cost something real: the
+    // done-row tint is solved *against `surface`*, so putting rows on
+    // `surfaceRaised` took done-versus-undone from 1.46:1 to 1.34:1, most of
+    // the margin that justified 15% over the rejected 10%. Re-tinting cannot
+    // recover it: lime@15% re-solved over `surfaceRaised` drops `textMuted`
+    // to 4.17:1, under the 4.5 the original tuning was held to.
+    //
+    // So the boundary is a line, not a ground, and every figure recorded in
+    // `Colors.ts` stays true. `line` rather than `lineSoft` because this sits
+    // on the page rather than on a card.
+    borderWidth: 1,
+    borderColor: vola.line,
+    borderRadius: 16,
+    padding: 12,
+  },
   // Wraps rather than overflows: the header now carries up to six controls
   // (move up/down, rest, unit, swap, remove) beside a name that can be long
   // ("Barbell Bulgarian Split Squat"). On a narrow phone they drop to a

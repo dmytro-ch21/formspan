@@ -5,6 +5,9 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet } from 'react-nati
 
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { Icon } from '@/components/ui/Icon';
+import { sportColor, sportIcon, sportTint } from '@/components/ui/sport';
+import { useAccent } from '@/lib/AccentProvider';
 import { useAuth } from '@clerk/clerk-expo';
 
 import { labelFor } from '@/lib/modules';
@@ -27,6 +30,7 @@ import { listWorkouts, summariseTargets, type Sport, type Workout } from '@/lib/
  * blank list.
  */
 export default function StartSessionScreen() {
+  const accent = useAccent();
   const { modules } = useModules();
   // `workout` arrives only from a planned day on the Today screen: the plan
   // already names the template, so re-asking which one would make "start
@@ -181,6 +185,30 @@ export default function StartSessionScreen() {
                 accessibilityState={{ disabled: starting }}
                 testID={`start-workout-${w.id}`}
               >
+                {/* The same two marks a template carries on the Plan tab: a
+                    rule in the discipline's colour and a tinted disc. This is
+                    the same object in a different place, so it should not be a
+                    different shape. */}
+                <View
+                  style={[
+                    styles.cardRule,
+                    { backgroundColor: sportColor(w.sport) ?? accent.accent },
+                  ]}
+                />
+                {sportIcon(w.sport) && (
+                  <View
+                    style={[
+                      styles.cardBadge,
+                      { backgroundColor: sportTint(sportColor(w.sport) ?? accent.accent) },
+                    ]}
+                  >
+                    <Icon
+                      name={sportIcon(w.sport)!}
+                      size={18}
+                      color={sportColor(w.sport) ?? accent.accent}
+                    />
+                  </View>
+                )}
                 <View style={styles.cardBody}>
                   <Text style={styles.cardTitle}>{w.name}</Text>
                   <Text style={styles.muted}>
@@ -188,7 +216,7 @@ export default function StartSessionScreen() {
                     {w.items[0] ? ` · ${summariseTargets(w.items[0], units)}` : ''}
                   </Text>
                 </View>
-                <Text style={styles.chevron}>›</Text>
+                <Icon name="chevron" size={15} color={vola.textDim} />
               </Pressable>
             ))}
           </>
@@ -224,19 +252,34 @@ const styles = StyleSheet.create({
   scroll: { padding: 16, gap: 10, paddingBottom: 48 },
   loading: { marginTop: 32 },
   sectionLabel: { fontSize: 12, color: vola.textDim, textTransform: 'uppercase', marginTop: 8 },
+  // Geometry copied from the Plan tab's template card rather than approximated:
+  // no `gap` on the row, the disc's own `marginLeft` doing the spacing, and the
+  // body carrying its own padding. Keeping `gap: 12` as well put the disc 24pt
+  // from the rule instead of 12 — the same card, visibly not the same shape.
   card: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
     borderWidth: 1,
     borderColor: vola.line,
     borderRadius: 14,
     backgroundColor: vola.surface,
-    padding: 16,
+    overflow: 'hidden',
+    paddingRight: 16,
   },
-  cardBody: { flex: 1, gap: 3 },
+  cardRule: { width: 3, alignSelf: 'stretch' },
+  cardBadge: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 12,
+  },
+  // `paddingLeft` matches Plan's 14 and also covers the case `sport.ts` says is
+  // legitimate — an unknown discipline draws no disc, and the title would
+  // otherwise sit hard against the rule.
+  cardBody: { flex: 1, gap: 3, paddingVertical: 16, paddingLeft: 14 },
   cardTitle: { fontSize: 16, fontWeight: '600' },
-  chevron: { color: vola.textDim, fontSize: 22 },
   secondary: {
     borderWidth: 1,
     borderColor: vola.line,
