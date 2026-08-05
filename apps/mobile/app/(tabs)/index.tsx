@@ -39,12 +39,17 @@ import { fetchProficiency } from '@/lib/proficiency';
 import {
   funnelGap,
   parseDismissed,
+  parseIdSet,
+  parseMaster,
   serialiseDismissed,
   shouldOfferDetail,
+  suggestionsAllowed,
 } from '@/lib/suggestion';
 import {
   PREF_DETAIL_OFFERS,
   PREF_DISMISSED_SUGGESTIONS,
+  PREF_SUGGESTIONS,
+  PREF_SUGGESTIONS_OFF,
   readPref,
   writePref,
 } from '@/lib/prefs';
@@ -366,6 +371,14 @@ export default function TodayScreen() {
    * is worse than showing nothing for a beat.
    */
   const [dismissed, setDismissed] = useState<ReadonlySet<string> | null>(null);
+  /**
+   * Whether suggestions are allowed at all, and for which disciplines.
+   *
+   * `null` until read, like the two above, and for the same reason: showing a
+   * card to someone who has switched suggestions off — even for one frame — is
+   * the setting not working.
+   */
+  const [policy, setPolicy] = useState<{ master: boolean; off: ReadonlySet<string> } | null>(null);
   const [viewPlans, setViewPlans] = useState<
     (PlannedSession & { workoutName: string | null })[]
   >([]);
@@ -432,6 +445,15 @@ export default function TodayScreen() {
         if (alive) setOffers(Number(v ?? 0) || 0);
       })
       .catch(() => {});
+    Promise.all([readPref(userId, PREF_SUGGESTIONS), readPref(userId, PREF_SUGGESTIONS_OFF)])
+      .then(([m, o]) => {
+        if (alive) setPolicy({ master: parseMaster(m), off: parseIdSet(o) });
+      })
+      // Defaults are on, which is what an unreadable preference has to mean —
+      // the alternative is a feature that silently disables itself.
+      .catch(() => {
+        if (alive) setPolicy({ master: true, off: new Set() });
+      });
     readPref(userId, PREF_DISMISSED_SUGGESTIONS)
       .then((v) => {
         if (alive) setDismissed(parseDismissed(v));
@@ -619,9 +641,20 @@ export default function TodayScreen() {
    * day. `funnel === null` means the read has not landed, which is neither of
    * the two states below.
    */
+  /**
+   * BJJ is the only discipline with a suggestion tier today, so the gate asks
+   * about BJJ. When a second tier lands this becomes per-suggestion rather
+   * than one call — the policy function already takes the sport for that
+   * reason rather than answering a global yes/no.
+   */
+  const suggestionsOn = policy !== null && suggestionsAllowed(policy.master, policy.off, 'bjj');
+
   const suggestion = useMemo(
-    () => (isToday && funnel && dismissed ? funnelGap(funnel, now, dismissed) : null),
-    [isToday, funnel, now, dismissed],
+    () =>
+      isToday && suggestionsOn && funnel && dismissed
+        ? funnelGap(funnel, now, dismissed)
+        : null,
+    [isToday, suggestionsOn, funnel, now, dismissed],
   );
 
   /**
@@ -651,10 +684,13 @@ export default function TodayScreen() {
     [userId, dismissed],
   );
   const offerDetail = useMemo(() => {
-    if (!isToday || !funnel || suggestion || offers === null) return false;
+    // The Tier 0 offer is a suggestion too — switching suggestions off must
+    // silence the thing that asks for more evidence to make them, or "off"
+    // only means "off once it has something to say".
+    if (!isToday || !suggestionsOn || !funnel || suggestion || offers === null) return false;
     const bjj = sessions.filter((x) => logsAfterwards(x.sport, modules)).length;
     return shouldOfferDetail(bjj, funnel.length, offers);
-  }, [isToday, funnel, suggestion, sessions, modules, offers]);
+  }, [isToday, suggestionsOn, funnel, suggestion, sessions, modules, offers]);
 
   /**
    * Count the offer once, when it is actually on screen.

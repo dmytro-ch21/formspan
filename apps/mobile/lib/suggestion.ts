@@ -188,15 +188,15 @@ export function shouldOfferDetail(
 export const MAX_OFFERS = 3;
 
 /**
- * Parse the dismissal set out of its stored string.
+ * Parse a stored set of ids.
  *
  * Total: anything unparseable, or parseable but not an array of strings, reads
- * as an empty set. A corrupt pref must cost the athlete a returning
- * suggestion, never a screen that will not render — this value is read on the
- * app's home tab, and `lib/proficiency.ts` already carries the scar from
- * trusting a shape at a parse boundary.
+ * as an empty set. Both callers store a set of ids in one pref row and both
+ * are read on the app's home tab — `lib/proficiency.ts` already carries the
+ * scar from trusting a shape at a parse boundary, and the cost of a bad value
+ * here has to be a returning suggestion, never a screen that will not render.
  */
-export function parseDismissed(raw: string | null): Set<string> {
+export function parseIdSet(raw: string | null): Set<string> {
   if (!raw) return new Set();
   try {
     const parsed: unknown = JSON.parse(raw);
@@ -207,19 +207,54 @@ export function parseDismissed(raw: string | null): Set<string> {
   }
 }
 
+/** Serialise a set of ids, newest last. */
+export function serialiseIdSet(ids: Iterable<string>, cap = Infinity): string {
+  const out = [...new Set(ids)];
+  return JSON.stringify(cap === Infinity ? out : out.slice(-cap));
+}
+
 /**
- * Add one id, and serialise.
+ * Add one id to a stored set.
  *
- * Capped, newest kept. Unbounded, this is a string in a key/value row that
- * only ever grows — and an athlete who dismisses two hundred techniques has
- * told us something the cap is not the right answer to anyway. Dropping the
- * OLDEST is deliberate: the ones dismissed longest ago are the ones whose
- * evidence is most likely to have changed shape since.
+ * Capped, newest kept. Unbounded, the dismissal list is a string in a
+ * key/value row that only ever grows — and an athlete who dismisses two
+ * hundred techniques has told us something a cap is not the right answer to.
+ * Dropping the OLDEST is deliberate: those are the ones whose evidence is most
+ * likely to have changed shape since.
  */
 export const MAX_DISMISSED = 100;
+
+export const parseDismissed = parseIdSet;
 
 export function serialiseDismissed(current: ReadonlySet<string>, add: string): string {
   const next = [...current].filter((id) => id !== add);
   next.push(add);
-  return JSON.stringify(next.slice(-MAX_DISMISSED));
+  return serialiseIdSet(next, MAX_DISMISSED);
+}
+
+/**
+ * Whether suggestions may be made at all, for one discipline.
+ *
+ * Two switches, and the master wins. "Turn the whole thing off" has to be one
+ * action rather than N — an athlete who wants silence should not have to find
+ * every module — and it must not silently forget which modules they had turned
+ * off individually, so the two are stored separately and combined here rather
+ * than the master rewriting the per-module set.
+ *
+ * **Default on, expressed as an OFF list.** Absence means enabled, so a module
+ * added to the registry later is suggestible without a migration and without
+ * this file having to know the full set of modules. The same reason
+ * `bjj_focus` records what you chose rather than what you did not.
+ */
+export function suggestionsAllowed(
+  master: boolean,
+  offModules: ReadonlySet<string>,
+  sport: string,
+): boolean {
+  return master && !offModules.has(sport);
+}
+
+/** `'0'` is off; absent or anything else is on, so the default needs no write. */
+export function parseMaster(raw: string | null): boolean {
+  return raw !== '0';
 }

@@ -11161,12 +11161,50 @@ rather than papered over with a test that would only be asserting the catch.
 On the Simulator: dismissing "Arm drag" revealed "Scissor sweep" immediately,
 and the dismissal survived a full app restart.
 
+### Settings: a master switch, one per discipline, and the undo
+
+Three answers to "why am I not getting suggestions", on one screen, because
+they are only comprehensible together.
+
+**The master wins, and is not destructive.** Turning everything off has to be
+one action rather than N — an athlete who wants silence should not have to find
+every discipline. But it must not forget which ones they had turned off
+individually, so the two are stored apart and combined on read rather than the
+master rewriting the per-module set. Flipping it back restores exactly what they
+had.
+
+**Default on, expressed as an OFF list.** Absence means enabled, so a discipline
+added to the registry later is suggestible with no migration and this code never
+has to know the full set of modules. Same shape as `bjj_focus` recording what
+you chose rather than what you did not.
+
+**The per-discipline rows stay visible when the master is off**, greyed rather
+than hidden, with a line saying the choices are kept. Hiding them would lose the
+answer to "which ones did I turn off" — which is precisely what someone turning
+the master back on wants to know.
+
+**Undo lists dismissals by name**, resolved from the technique library after the
+rows render, falling back to the id. Best-effort: a name is what makes the row
+useful, but a failed lookup must not stop someone undoing a dismissal they can
+already recognise. Confirmed on the Simulator against a real dismissal whose id
+was not in the library — it rendered the id, exactly as designed.
+
+**The Tier 0 offer is gated by the same switch.** It is a suggestion too, and an
+"off" that still asked for more evidence to make suggestions would only mean
+"off once it has something to say".
+
+Failing OPEN throughout: an unreadable preference reads as enabled. A feature
+that silently disables itself on a bad read is worse than one that shows a card
+someone has to dismiss again.
+
 ### Gaps
 
-- **No way to undo a dismissal.** Nothing in the UI lists what has been
-  dismissed or restores one, so a mis-tap is permanent for that technique. The
-  set is one pref row, so a "suggestions" section in settings is cheap — worth
-  doing before anyone has dismissed something they wanted.
+- **Nothing lists the per-discipline switches on web.** Suggestions are a mobile
+  surface today, so there is nothing to configure there yet — but the settings
+  are device-local, which means they are also *client*-local, and the moment web
+  grows a suggestion the two will disagree.
+- **The greyed-when-master-off state was verified by its tests rather than by
+  eye.** The logic is covered four ways; the opacity is not.
 - **Device-local.** A second device will offer a dismissed technique once more.
   Deliberate, but it becomes wrong if suggestions ever grow past a nudge.
 - **Dismissal is per technique, not per tier.** When the position hot-spot tier

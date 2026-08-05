@@ -104,6 +104,12 @@ export default function SettingsScreen() {
           }}
           testID="settings-auto-rest"
         />
+        <Row
+          label="Suggestions"
+          hint="What VOLA suggests, and what you've told it to stop suggesting."
+          onPress={() => router.push('/settings/suggestions')}
+          testID="settings-suggestions"
+        />
         <Toggle
           label="Track effort"
           hint="RIR and RPE on every set. Off hides them."

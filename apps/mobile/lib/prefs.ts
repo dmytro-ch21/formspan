@@ -147,6 +147,18 @@ export const PREF_DETAIL_OFFERS = 'bjj_detail_offers';
  */
 export const PREF_DISMISSED_SUGGESTIONS = 'bjj_dismissed_suggestions';
 
+/** `'0'` turns every suggestion off. Absent means on — the default needs no write. */
+export const PREF_SUGGESTIONS = 'suggestions_enabled';
+
+/**
+ * Modules with suggestions turned off, as a JSON array of sport keys.
+ *
+ * An OFF list rather than an on list, so a discipline added to the registry
+ * later is suggestible without a migration, and so the master switch can be
+ * flipped without destroying the athlete's per-module choices.
+ */
+export const PREF_SUGGESTIONS_OFF = 'suggestions_off';
+
 export const PREF_AUTO_REST = 'auto_rest';
 export const PREF_TRACK_EFFORT = 'track_effort';
 /**

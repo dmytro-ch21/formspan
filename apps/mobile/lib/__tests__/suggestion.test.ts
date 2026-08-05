@@ -1,6 +1,10 @@
 import type { Proficiency } from '../proficiency';
 import {
   MAX_DISMISSED,
+  parseIdSet,
+  parseMaster,
+  serialiseIdSet,
+  suggestionsAllowed,
   MAX_OFFERS,
   countersInUse,
   funnelGap,
@@ -239,5 +243,59 @@ describe('dismissal', () => {
       expect(parseDismissed(bad)).toEqual(new Set());
     }
     expect(parseDismissed('["a",1,"b"]')).toEqual(new Set(['a', 'b']));
+  });
+});
+
+describe('the switches', () => {
+  /*
+   * Two of them, and the master wins. "Turn the whole thing off" has to be one
+   * action rather than N — and it must not forget which disciplines were
+   * turned off individually, which is why the two are stored apart and
+   * combined here rather than the master rewriting the per-module set.
+   */
+  it('lets the master switch silence everything', () => {
+    expect(suggestionsAllowed(true, new Set(), 'bjj')).toBe(true);
+    expect(suggestionsAllowed(false, new Set(), 'bjj')).toBe(false);
+  });
+
+  it('lets one discipline be silenced without the others', () => {
+    const off = new Set(['bjj']);
+    expect(suggestionsAllowed(true, off, 'bjj')).toBe(false);
+    expect(suggestionsAllowed(true, off, 'strength')).toBe(true);
+  });
+
+  it('remembers per-discipline choices while the master is off', () => {
+    // The master is not allowed to be destructive: flipping it back on has to
+    // restore exactly what the athlete had, not everything.
+    const off = new Set(['bjj']);
+    expect(suggestionsAllowed(false, off, 'strength')).toBe(false);
+    expect(suggestionsAllowed(true, off, 'strength')).toBe(true);
+    expect(suggestionsAllowed(true, off, 'bjj')).toBe(false);
+  });
+
+  it('defaults to on, so nothing needs writing for a new athlete', () => {
+    // Absence means enabled — which is also what makes a discipline added to
+    // the registry later suggestible without a migration.
+    expect(parseMaster(null)).toBe(true);
+    expect(parseMaster('')).toBe(true);
+    expect(parseMaster('1')).toBe(true);
+    expect(parseMaster('anything')).toBe(true);
+    expect(parseMaster('0')).toBe(false);
+    expect(suggestionsAllowed(parseMaster(null), parseIdSet(null), 'newsport')).toBe(true);
+  });
+
+  it('round-trips the off list, and reads a corrupt one as nothing off', () => {
+    const stored = serialiseIdSet(new Set(['bjj', 'running']));
+    expect(parseIdSet(stored)).toEqual(new Set(['bjj', 'running']));
+    // Failing OPEN rather than closed: an unreadable preference must not
+    // silently disable a feature the athlete never turned off.
+    for (const bad of ['not json', '{"a":1}', '[3]', null]) {
+      expect(suggestionsAllowed(true, parseIdSet(bad), 'bjj')).toBe(true);
+    }
+  });
+
+  it('de-duplicates and does not cap the off list', () => {
+    // The off list is bounded by the module registry, unlike dismissals.
+    expect(JSON.parse(serialiseIdSet(['bjj', 'bjj', 'running']))).toEqual(['bjj', 'running']);
   });
 });
