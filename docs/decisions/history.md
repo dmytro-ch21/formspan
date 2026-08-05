@@ -9026,7 +9026,6 @@ ownership check.
   block is reasoned-and-mirrored rather than executed.
 
 
-
 ## 2026-08-04 — The Plan tab gets a week you can move, and four `startOfWeek`s become one
 
 The Plan tab's calendar was pinned to the current week with **no navigation of
@@ -9357,6 +9356,113 @@ thumb.
 - The `Shared` scope still has no empty state distinct from "nobody has
   published anything", which is a content problem the restyle does not touch.
 
+## 2026-08-04 — The belt becomes a photograph, and the accent becomes a setting
+
+Two pieces of the mobile redesign, and both turned into arguments about
+measurement rather than taste.
+
+### The palette gate that was cited for months and never existed
+
+`constants/Colors.ts` and `lib/libraryTiles.ts` had both been telling readers
+to run `validate_palette.js` before adding a colour. It was never committed —
+`git log --diff-filter=A` finds nothing. Every hue added since was justified
+against a tool that did not exist, and the figures in those comments were
+measured once, by hand.
+
+`scripts/validate_palette.mjs` is now that tool: WCAG contrast plus CIEDE2000
+ΔE, the latter recomputed under simulated protanopia, deuteranopia and
+tritanopia. Two safeguards make it trustworthy rather than decorative — it
+**reproduces all seven hand-measured figures already in `Colors.ts` before it
+reports anything**, and it **reads the palette out of `Colors.ts` rather than
+keeping a copy** (the first draft kept a copy and within one edit was
+validating a colour the app no longer used).
+
+It has now refuted three recorded claims, none of which were visible by eye:
+
+- The accent drawn in the mockup (#8B5CF6) fails twice — white on it is
+  4.23:1, under AA for a label like "1M", and it sits ΔE 16.5 from the
+  categorical `info` blue, with pinker purples falling to 14.3. That is the
+  exact collision the note on `info` had been warning about. #7A50EC clears
+  both at 5.02:1 and ΔE 20.7.
+- The first black-belt accent sat **ΔE 8.0 from `danger` under tritanopia**,
+  where reds converge: a black belt's masthead would have been the colour of
+  an error message. A gamut search under every constraint at once found 1099
+  admissible colours; #DF0010 is the most belt-like, and is a truer belt red
+  than the coral it replaced.
+- `LibraryTile` recorded its four intents as clearing "worst adjacent pair ΔE
+  21.7 CVD". Run properly, defend-versus-hold measured **14.7 for a
+  protanope** — a mid blue and a mid grey converge. The neutral moved a step
+  darker into `vola.tileHold`; worst pair is now 19.5.
+
+The sport colours were caught the same way before shipping: BJJ's light purple
+and running's light blue measured **ΔE 4.7 for a deuteranope** while looking
+21.9 apart to me. A mat day would have been indistinguishable from a run in
+the one view meant to separate them.
+
+### The accent is a setting, not a constant
+
+Five themes — green (default), yellow, blue, purple, orange — each validated on
+fill contrast, ink-on-fill and as-text, picked in Settings from swatches rather
+than a sub-screen (a unit system is a fact you verify by reading a word; an
+accent is a look, and tapping a swatch recolours the tab bar two inches below).
+
+The rule that makes a swappable accent safe: **the accent is identity and
+interaction; anything encoding a reading stays fixed.** 77 of 87 `vola.lime`
+references moved. The ten that stayed are the readings — the grid ramp, the
+weekly bars, ticked sets, scored rounds, the planned-day marker, a technique's
+category. A measurement whose colour depends on a preference is a measurement
+nobody can learn to read.
+
+Legibility was never the constraint; every candidate cleared it. What decides
+the set is that the palette already spends hues on meaning — pink is out at ΔE
+3.6 from `danger`, teal at 7.9 from `info`, and orange ships with its
+measurement recorded because `danger` is a filled surface in exactly one
+component and the two never meet as peers.
+
+### Icons stopped being drawn from Views
+
+The rule was that `react-native-svg` is a native dependency and therefore a
+prebuild for everyone. **That premise was wrong for this SDK** — it is in
+Expo's `bundledNativeModules.json`, so it ships inside Expo Go. The old rule
+had a real cost: a check mark drawn from two borders rendered as a downward
+chevron for a stretch, with 241 tests green, caught only by looking at a
+Simulator.
+
+Geometry is now **generated** from `assets/brand/icons/*.svg` by
+`scripts/generate_icons.mjs` — 25 icons, `--check` in `verify`, and the
+generator asserts the kit's own uniformity rather than assuming it.
+
+### The belt, photographed
+
+Five supplied renders, transparent webp, 416KB for the set. The masthead uses
+them; `Belt.tsx` stays for lists, where a 1024px photograph in a 44pt row is
+mush.
+
+**A stripe render was supplied and is deliberately unused.** At the size this
+draws, a photographic stripe's weave is invisible while the arithmetic to place
+0–4 of them is identical — and drawing them makes every combination exact,
+including black-belt degrees on the red bar. Getting the geometry right took
+two wrong turns worth recording: a **bounding-box diagonal is not an angle**
+(42° instead of 28.5°), and a second measurement from the purple belt came out
+at 20.7° because its predicate caught the belt's own shading. Only the black
+belt's red bar segments cleanly; its numbers render correctly on all five,
+confirmed by compositing every belt offline with the component's own
+arithmetic before any of it went into the app.
+
+### Worth keeping
+
+Three of this stretch's defects were found by looking at a Simulator and could
+not have been found any other way: the tab underline clipped by the safe area,
+the same underline then rendering transparent on every tab because the
+navigator sets `aria-selected` rather than `accessibilityState.selected`, and
+future-day bars dimmed to 1.28:1 apart from rest days — a distinction that
+existed in the branch and not on the screen.
+
+And a dev-loop trap that cost real time and looks exactly like a regression:
+**Metro's HMR wedges** on a change that adds a hook across many files, serving
+a stale bundle while logging `ReferenceError` and re-bundling one module at a
+time. Screenshots in that window show the old UI. `expo start --clear` is the
+fix; typecheck stays clean throughout, which is the tell.
 
 ## Open items / known gaps as of this entry
 

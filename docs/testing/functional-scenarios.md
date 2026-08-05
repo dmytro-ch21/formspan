@@ -3772,7 +3772,6 @@ handler suite no matter what the SQL says:
   `UpsertAll` with a different name, assert the admin row is unchanged.
 
 
-
 ## Planning any week, not just this one (mobile, `components/WeekPlanner`)
 
 The Plan tab was pinned to the current week with no navigation. These cover the
@@ -3925,3 +3924,68 @@ a real layout guarantee rather than a preference.
 - At Accessibility text sizes the pill grows; the bottom clearance is derived
   from the font scale so the last list row should still clear it. This is the
   case the original bug lived in, and it is the one least likely to be checked.
+
+## The accent theme and the belt masthead (mobile)
+
+Covers `lib/AccentProvider.tsx`, the picker in `app/settings.tsx`,
+`components/BeltPhoto.tsx`, `components/BjjRankHeader.tsx` and
+`scripts/validate_palette.mjs`.
+
+### Choosing an accent
+
+- Five swatches appear in Settings → Preferences. Tapping one recolours the tab
+  bar's active icon, its label and the underline **without leaving the screen**.
+- **Selection is marked by a ring and a tick, never by colour alone.** That
+  matters more here than anywhere else in the app, because the thing being
+  chosen is colour. Assert the chosen swatch has both.
+- The tick uses each theme's own ink — dark on green and yellow, white on
+  purple. A single hard-coded tick colour fails on at least one theme.
+- The choice survives a cold start. It is stored per account in `prefs` and
+  never synced, so a second device gets the default rather than an inherited
+  colour.
+- **Signing into a second account must not show the first account's accent**,
+  even for one frame. The stored value is tagged with the account it was read
+  for; untagged, the previous choice showed until the new read resolved.
+- Signed out, the auth screens render the default. They deliberately reference
+  the default constant rather than the provider.
+
+### What the accent must NOT touch
+
+Each of these is a reading, and a reading whose colour depends on a preference
+is one nobody can learn. Switch to a non-default theme and assert they are
+unchanged:
+
+- the consistency grid's ramp and its legend
+- the weekly volume bars
+- a completed set's tick, a scored round, "New" on a fresh record
+- the planned-day marker on the calendar
+- a Library tile's category colour
+- `warn` and `danger`
+
+### The palette gate
+
+- `node scripts/validate_palette.mjs` passes, and runs first in `verify`.
+- **It self-checks before reporting**: it reproduces the figures recorded in
+  `Colors.ts` and fails loudly if it cannot. A validator that cannot reproduce
+  known-good measurements is not evidence about anything.
+- It reads the palette from `Colors.ts` rather than holding a copy — change a
+  hex there and the check must notice. Mutate one and confirm it goes red.
+- Adding a theme, a belt accent, a sport colour or a tile intent that fails
+  contrast or CVD separation fails the build rather than shipping.
+
+### The belt masthead
+
+- Renders only for an athlete with BJJ enabled **and** a rank recorded.
+  Otherwise: one quiet row inviting a first promotion. Never both, and never
+  two `/bjj/standing` requests for one screen.
+- The card's accent, its left edge and its wash all come from the athlete's own
+  belt — not the app accent, and not the belt's literal colour (blue, purple,
+  brown and black all measure under 3:1 against the card).
+- **Stripes match the rank exactly**, 0–4 on a coloured belt and 0–6 degrees on
+  a black belt's red bar. Check every count, since a belt that misstates a rank
+  is the worst thing this screen can do.
+- The belt renders without overlapping the disclosure control.
+- The facts come from the *awarding* promotion, and each is omitted rather than
+  shown empty.
+- A promotion dated `2026-04-10` renders as 10 April in a UTC-negative zone —
+  never the 9th.
