@@ -9662,8 +9662,8 @@ of copy and worth the entry, because the problem is not the wording — it is
 that the label **names its reader**.
 
 Naming the reader does two things, both bad. It tells everyone who is not new
-that the row is not for them, when a purple belt looking up the Truck is
-exactly who it serves — the glossary is a reference, not an onboarding step.
+that the row is not for them, when a purple belt looking up Leg
+Entanglement is exactly who it serves — the glossary is a reference, not an onboarding step.
 And it greets a returning athlete as a beginner every time they open the tab,
 which is the one thing `docs/decisions/*` has been explicit about avoiding
 since the UX direction was written down: no shame-based framing.

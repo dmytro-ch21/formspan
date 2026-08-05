@@ -2853,7 +2853,7 @@ conflict story.
 
 ### Reading the glossary, happy path
 
-- With `bjj` enabled, the Library tab shows a "Start with positions" row of ten
+- With `bjj` enabled, the Library tab shows a "Start with positions" row of eleven
   cards, in pedagogical order: Standing first, Turtle last. The label must not
   name the reader ("New to BJJ?") — that told everyone who is not new that the
   row was not for them, and greeted a returning athlete as a beginner on every
