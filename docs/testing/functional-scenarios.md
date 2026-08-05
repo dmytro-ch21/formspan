@@ -2853,9 +2853,11 @@ conflict story.
 
 ### Reading the glossary, happy path
 
-- With `bjj` enabled, the Library tab shows a "New to BJJ? Start with the
-  positions" row of ten cards, in pedagogical order: Standing first, Turtle
-  last. Alphabetical order is the bug to watch for — it opens the row on
+- With `bjj` enabled, the Library tab shows a "Start with positions" row of eleven
+  cards, in pedagogical order: Standing first, Turtle last. The label must not
+  name the reader ("New to BJJ?") — that told everyone who is not new that the
+  row was not for them, and greeted a returning athlete as a beginner on every
+  visit. Alphabetical order is the bug to watch for — it opens the row on
   Back Control.
 - Tapping a card opens the position screen with the header title "Position",
   and it shows the name, its aliases, "What it is", and "What matters here".
