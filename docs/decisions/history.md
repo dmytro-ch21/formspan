@@ -11314,8 +11314,11 @@ Not verified visually: the console is Clerk-gated. `build:admin` compiles the
 page and emits the route, and typecheck and lint pass.
 ## 2026-08-05 — The test that had to be able to fail
 
-Closes the gap the entry above named first: nothing covered the Settings→Today
-wiring, which is where that branch's blocking bug lived.
+Closes the gap **"A suggestion you can say no to"** named first: nothing covered
+the Settings→Today wiring, which is where that branch's blocking bug lived.
+(Named rather than called "the entry above" — another entry landed between the
+two while this branch was open, and a relative reference in a file this long
+silently starts pointing at the wrong thing.)
 `apps/mobile/app/__tests__/suggestionPrefsRefocus.test.tsx`, eight cases.
 
 **The thing worth recording is not the test, it is why the obvious version of it
