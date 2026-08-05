@@ -34,10 +34,18 @@ import { useModules } from "@/lib/ModulesProvider";
  *
  * **Two layers, never conflated.** Green is what happened (from
  * `/sessions/history`, the same per-day rollup the heatmap uses); lime is what
- * was planned (`/plans`). They are deliberately not reconciled — a planned day
- * can be trained twice, ignored, or trained with something else, so a plan is
- * never "consumed" by a session. Adherence is a comparison the reader makes,
- * and later a query, not a status this screen invents.
+ * was planned (`/plans`). A plan is never "consumed" by a session — nothing
+ * writes a status onto one — but the two layers ARE now reconciled for display
+ * on mobile, which stopped drawing a met plan as a second row beside the
+ * session that met it. The rule is `apps/mobile/lib/adherence.ts`: same day,
+ * same sport, matched one-to-one.
+ *
+ * **This screen has not adopted it**, and shows both. That is a real
+ * divergence, not a decision: web's answer to the same duplication was to make
+ * the two chips legibly different (a check glyph vs a hollow ring) rather than
+ * to drop one, which works here because a day is a chip rather than a list.
+ * Worth revisiting together — two clients computing adherence differently is
+ * how the position vocabulary rotted.
  *
  * **Two panes**, matching the workout builder: the grid keeps its shape while
  * the selected day's detail and its planning form sit beside it. A dialog over

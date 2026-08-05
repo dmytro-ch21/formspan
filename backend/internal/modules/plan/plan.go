@@ -6,10 +6,10 @@
 // prescribed-vs-actual answerable: a template has no date, a session is the
 // actual, and neither can say what Tuesday was *for*.
 //
-// A plan is an intention and is never reconciled against a session. See the
-// migration for why — briefly, "does this session count as that plan" has no
-// statable rule, and guessing at one would rewrite the athlete's own record of
-// what they meant to do.
+// A plan is an intention. Nothing here ever marks one done: there is no status
+// field, and the server never joins plans to sessions. Adherence is computed by
+// the client on read — see `apps/mobile/lib/adherence.ts` for the rule and what
+// it gives up, and the migration for why it stayed out of the database.
 package plan
 
 import (

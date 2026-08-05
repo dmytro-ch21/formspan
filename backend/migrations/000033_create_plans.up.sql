@@ -18,6 +18,11 @@
 -- would silently rewrite the athlete's own record of what they meant to do.
 -- Adherence is therefore a *query* over both tables, computed when asked,
 -- rather than a status column that has to be kept true.
+--
+-- That query now exists, client-side, in `apps/mobile/lib/adherence.ts`. This
+-- comment is left as it was written because it was true when it was applied
+-- and this file is versioned; the rule and its trade-offs live where the code
+-- does, not in SQL that nobody re-reads.
 CREATE TABLE plans (
     -- Client-generated, like sessions and activities. This is what makes an
     -- offline plan syncable idempotently: the phone fixes the id before the

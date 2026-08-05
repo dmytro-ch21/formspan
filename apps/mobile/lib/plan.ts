@@ -23,10 +23,17 @@ import type { TokenGetter } from '@/lib/useAuthToken';
  *
  * A plan is an *intention*, never a session. Starting a planned day creates a
  * real session through the ordinary path and the plan row is left alone — so a
- * day can be trained twice, a plan can be ignored, and nothing here has to be
- * reconciled against `local_sessions`. Deleting a session must not silently
- * un-plan the day it was on. The server holds the same line; see the
- * `plans` migration.
+ * day can be trained twice, a plan can be ignored, and deleting a session
+ * cannot silently un-plan the day it was on. **Nothing in this module writes a
+ * completion status, and there is no column for one.** The server holds the
+ * same line; see the `plans` migration.
+ *
+ * What a *reader* sees is a different question, and `lib/adherence.ts` answers
+ * it: a plan met by a logged session stops being drawn as a second, pending
+ * row. That is computed on every read from these rows and the session rows,
+ * so it cannot drift out of step with either. This module deliberately knows
+ * nothing about it — `listPlannedBetween` returns every plan, met or not,
+ * because the Plan tab exists to edit them.
  */
 
 export type PlannedSession = {

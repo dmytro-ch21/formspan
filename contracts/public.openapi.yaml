@@ -933,10 +933,13 @@ components:
         happen and when. A template has no date and a session is the actual,
         so neither can say what Tuesday was for.
 
-        A plan is an intention and is never reconciled against a session:
-        a planned day can be trained twice, ignored, or trained with something
-        else, and all three are ordinary. Adherence is therefore a query over
-        both resources, computed when asked, not a status on this one.
+        A plan is an intention. This resource has no completion status and
+        never gains one — the server does not join plans to sessions, and
+        nothing writes "done" onto a plan. A planned day can be trained twice,
+        ignored, or trained with something else, and all three are ordinary.
+        Adherence is a query over both resources, computed by a client when
+        asked; how a client chooses to match the two is its own decision and
+        is not part of this contract.
       required: [id, user_id, day, sport, workout_id, notes, created_at, updated_at]
       properties:
         id: { type: string }
