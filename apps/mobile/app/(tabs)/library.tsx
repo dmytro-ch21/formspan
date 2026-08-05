@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Modal,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -18,7 +19,14 @@ import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { getStanding } from '@/lib/bjj';
+import { Icon } from '@/components/ui/Icon';
 import { fetchExercises, pickImage, type Exercise } from '@/lib/exercises';
+import {
+  MOVEMENT_GROUPS,
+  MUSCLE_GROUPS,
+  inMovementGroup,
+  inMuscleGroup,
+} from '@/lib/exerciseFacets';
 import { PREF_LIBRARY_BELT, PREF_LIBRARY_SPORT, readPref, writePref } from '@/lib/prefs';
 import { cacheExercises, cachedExercises } from '@/lib/sessionStore';
 import {
@@ -93,6 +101,20 @@ function usesBelt(sport: string, mods: Module[]): boolean {
   const m = moduleFor(mods, sport);
   return (m?.enabled && m.capabilities.facets.includes('belt')) ?? false;
 }
+
+/**
+ * Same reasoning again, for the two strength axes.
+ *
+ * Both read the registry rather than testing `sport === 'strength'`, so a
+ * discipline that later declares `muscle` gets the control for free and one
+ * that drops it loses the control rather than keeping a dead one.
+ */
+function usesFacet(sport: string, mods: Module[], facet: string): boolean {
+  const m = moduleFor(mods, sport);
+  return (m?.enabled && m.capabilities.facets.includes(facet)) ?? false;
+}
+
+type FacetKey = 'position' | 'belt' | 'muscle' | 'movement';
 
 /**
  * One collator, built once.
@@ -227,6 +249,14 @@ export default function LibraryScreen() {
   const [position, setPosition] = useState('');
   const [belt, setBeltState] = useState('');
   const [query, setQuery] = useState('');
+  // The strength axes. Client-side, over the catalog already loaded — see
+  // `lib/exerciseFacets.ts` for why they are groupings and not the raw fields.
+  const [muscle, setMuscle] = useState('');
+  const [movement, setMovement] = useState('');
+  // Which facet's picker is open, or null. One piece of state for all four
+  // sheets, the same way the Plan screen's day sheet serves seven rows.
+  const [openFacet, setOpenFacet] = useState<FacetKey | null>(null);
+
 
   /**
    * The filter is remembered; the search box is not.
@@ -347,6 +377,29 @@ export default function LibraryScreen() {
     },
     [userId],
   );
+
+  /**
+   * The four axes, in the order they are offered.
+   *
+   * Declared as data rather than four near-identical blocks of JSX, because
+   * that is what the two scroll rows were and they had already drifted apart
+   * (one said "Filter by", the other "Filter up to"). One table means one
+   * button, one sheet, and one place to add the fifth.
+   */
+  const FACETS: { key: FacetKey; label: string; options: { key: string; label: string }[] }[] = [
+    { key: 'position', label: 'Position', options: [...POSITIONS] },
+    { key: 'belt', label: 'Belt', options: [...BELT_CAPS] },
+    { key: 'muscle', label: 'Muscle', options: [{ key: '', label: 'All' }, ...MUSCLE_GROUPS] },
+    { key: 'movement', label: 'Movement', options: [{ key: '', label: 'All' }, ...MOVEMENT_GROUPS] },
+  ];
+  const facetValue = (k: FacetKey) =>
+    k === 'position' ? position : k === 'belt' ? belt : k === 'muscle' ? muscle : movement;
+  const setFacetValue = (k: FacetKey, v: string) => {
+    if (k === 'position') setPosition(v);
+    else if (k === 'belt') setBelt(v);
+    else if (k === 'muscle') setMuscle(v);
+    else setMovement(v);
+  };
 
   /**
    * Clear the search on the way out — but not when the way out is a result.
@@ -577,9 +630,18 @@ export default function LibraryScreen() {
    */
   const rows = useMemo<Row[]>(() => {
     const q = query.trim().toLowerCase();
-    const ex = q
+    let ex = q
       ? sortedExercises.filter((e) => e.name.toLowerCase().includes(q))
       : sortedExercises;
+    // Gated on the registry like the technique axes below, so a cap left in
+    // state with its control hidden cannot silently filter an unrelated
+    // catalog — the bug the belt row's comment records.
+    if (usesFacet(sport, modules, 'muscle') && muscle) {
+      ex = ex.filter((e) => inMuscleGroup(e, muscle));
+    }
+    if (usesFacet(sport, modules, 'movement') && movement) {
+      ex = ex.filter((e) => inMovementGroup(e, movement));
+    }
 
     let tq: TechniqueSummary[] = [];
     if (showTechniques) {
@@ -609,7 +671,10 @@ export default function LibraryScreen() {
       }
     }
     return out;
-  }, [sortedExercises, sortedTechniques, showTechniques, sport, position, belt, query]);
+  }, [
+    sortedExercises, sortedTechniques, showTechniques, sport, position, belt, query,
+    muscle, movement, modules,
+  ]);
 
   // Each clause has to match the condition the `rows` memo actually filters
   // on, not just "is this value set". Belt is deliberately NOT cleared when
@@ -620,7 +685,9 @@ export default function LibraryScreen() {
     query.trim() !== '' ||
     sport !== '' ||
     position !== '' ||
-    (usesBelt(sport, modules) && belt !== '');
+    (usesBelt(sport, modules) && belt !== '') ||
+    (usesFacet(sport, modules, 'muscle') && muscle !== '') ||
+    (usesFacet(sport, modules, 'movement') && movement !== '');
 
   return (
     <View style={styles.container} testID="library-screen">
@@ -668,57 +735,52 @@ export default function LibraryScreen() {
           })}
         </View>
 
-        {/* Position is a BJJ-only axis, so it appears only when BJJ content is
-            on screen. A permanently-visible row of positions that does nothing
-            to a strength catalog is worse than no row. */}
-        {usesPosition(sport, modules) && (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.positionRow}
-          >
-            {POSITIONS.map((p) => {
-              const active = position === p.key;
-              return (
-                <Pressable
-                  key={p.key || 'all'}
-                  onPress={() => setPosition(p.key)}
-                  style={[styles.posChip, active && styles.posChipActive]}
-                  hitSlop={8}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Filter by ${p.label}`}
-                  accessibilityState={{ selected: active }}
-                  testID={`library-position-${p.key || 'all'}`}
-                >
-                  <Text style={[styles.posText, active && styles.posTextActive]}>{p.label}</Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-        )}
+        {/*
+          One row of facet buttons, each opening a picker — not every option
+          pinned to the screen.
 
-        {/* Same reasoning as the position row, one axis over: BJJ-only, and
-            hidden rather than shown-and-inert against a strength catalog. */}
-        {usesBelt(sport, modules) && (
+          It was two full horizontal scroll rows (position, then belt), both
+          permanently visible, and strength had no filters at all. The history
+          log already recorded the cost: roughly 300pt of header before the
+          first result, on a screen whose entire job is showing results. Adding
+          muscle and movement as two more rows would have made it worse.
+
+          A button that names its axis and shows its current value collapses
+          each row to one control, so the strength axes are added while the
+          header gets shorter. Which buttons appear is driven by the discipline
+          registry, so a control is never shown against a catalog it cannot
+          filter — the same rule the two scroll rows already followed.
+        */}
+        {FACETS.filter((f) => usesFacet(sport, modules, f.key)).length > 0 && (
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.positionRow}
+            contentContainerStyle={styles.facetRow}
           >
-            {BELT_CAPS.map((b) => {
-              const active = belt === b.key;
+            {FACETS.filter((f) => usesFacet(sport, modules, f.key)).map((f) => {
+              const value = facetValue(f.key);
+              const chosen = f.options.find((o) => o.key === value);
+              const active = value !== '';
               return (
                 <Pressable
-                  key={b.key || 'all'}
-                  onPress={() => setBelt(b.key)}
-                  style={[styles.posChip, active && styles.posChipActive]}
+                  key={f.key}
+                  onPress={() => setOpenFacet(f.key)}
+                  style={[styles.facet, active && styles.facetActive]}
                   hitSlop={8}
                   accessibilityRole="button"
-                  accessibilityLabel={`Filter up to ${b.label}`}
-                  accessibilityState={{ selected: active }}
-                  testID={`library-belt-${b.key || 'all'}`}
+                  // Names the axis AND the value, so a screen reader is not
+                  // left with a bare "Mount" that could be anything.
+                  accessibilityLabel={
+                    active ? `${f.label}: ${chosen?.label ?? value}. Change` : `Filter by ${f.label}`
+                  }
+                  testID={`library-facet-${f.key}`}
                 >
-                  <Text style={[styles.posText, active && styles.posTextActive]}>{b.label}</Text>
+                  <Text style={[styles.facetText, active && styles.facetTextActive]}>
+                    {active ? (chosen?.label ?? value) : f.label}
+                  </Text>
+                  <View style={styles.facetCaret}>
+                    <Icon name="chevron" size={10} color={active ? vola.text : vola.textDim} />
+                  </View>
                 </Pressable>
               );
             })}
@@ -844,6 +906,61 @@ export default function LibraryScreen() {
           }
         />
       )}
+
+      {/*
+        One sheet for all four axes.
+
+        The options for an axis are its own; everything else — the title, the
+        selected mark, dismissal — is identical, so writing it once is what
+        stops the four drifting the way the two scroll rows already had.
+      */}
+      <Modal
+        visible={openFacet !== null}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setOpenFacet(null)}
+      >
+        <View style={styles.sheet} lightColor={vola.bg} darkColor={vola.bg}>
+          <View style={styles.sheetHead}>
+            <Text style={styles.sheetTitle}>
+              {FACETS.find((f) => f.key === openFacet)?.label ?? ''}
+            </Text>
+            <Pressable
+              onPress={() => setOpenFacet(null)}
+              hitSlop={12}
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+              testID="library-facet-close"
+            >
+              <Text style={styles.sheetClose}>Done</Text>
+            </Pressable>
+          </View>
+          <ScrollView contentContainerStyle={styles.sheetBody}>
+            {(FACETS.find((f) => f.key === openFacet)?.options ?? []).map((o) => {
+              const on = openFacet !== null && facetValue(openFacet) === o.key;
+              return (
+                <Pressable
+                  key={o.key || 'all'}
+                  onPress={() => {
+                    if (openFacet) setFacetValue(openFacet, o.key);
+                    setOpenFacet(null);
+                  }}
+                  style={({ pressed }) => [styles.option, pressed && styles.optionPressed]}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: on }}
+                  testID={`library-option-${openFacet}-${o.key || 'all'}`}
+                >
+                  <Text style={[styles.optionText, on && styles.optionTextOn]}>{o.label}</Text>
+                  {/* A mark, not just colour — the row reads as chosen without
+                      relying on the accent being distinguishable. */}
+                  {on && <Icon name="check" size={14} color={accent.accent} />}
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </View>
+      </Modal>
+
     </View>
   );
 }
@@ -955,6 +1072,52 @@ const styles = StyleSheet.create({
   chipTextActive: {},
 
   positionRow: { gap: 8, paddingRight: 20 },
+
+  // The facet buttons. One row, horizontally scrollable, replacing the two
+  // full option rows that used to be pinned here.
+  facetRow: { gap: 8, paddingRight: 20 },
+  facet: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderColor: vola.lineSoft,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  // A set facet is filled, so "something is filtering this list" survives a
+  // glance — the state that used to be one highlighted chip in a long row.
+  facetActive: { borderColor: vola.textMuted, backgroundColor: vola.surfaceRaised },
+  facetText: { color: vola.textDim, fontSize: 12, fontWeight: '600' },
+  facetTextActive: { color: vola.text },
+  facetCaret: { transform: [{ rotate: '90deg' }] },
+
+  sheet: { flex: 1 },
+  sheetHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: vola.line,
+  },
+  sheetTitle: { fontSize: 16, fontWeight: '800' },
+  sheetClose: { fontSize: 14, fontWeight: '700', color: vola.lime },
+  sheetBody: { paddingVertical: 4 },
+  option: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    // 48pt tall, comfortably over the 44 the HIG asks — this is a list of
+    // targets, which is where an undersized row is felt most.
+    paddingVertical: 15,
+  },
+  optionPressed: { backgroundColor: vola.surface },
+  optionText: { fontSize: 15, color: vola.textMuted },
+  optionTextOn: { color: vola.text, fontWeight: '700' },
   posChip: {
     borderWidth: 1,
     borderColor: vola.lineSoft,
