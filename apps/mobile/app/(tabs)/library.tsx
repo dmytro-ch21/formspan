@@ -41,7 +41,7 @@ import {
 } from '@/lib/techniques';
 import { fetchPositions, type Position } from '@/lib/positions';
 import { useModules } from '@/lib/ModulesProvider';
-import { enabledSports, moduleFor, type Module } from '@/lib/modules';
+import { enabledSports, moduleFor, type Module, usesBelt } from '@/lib/modules';
 import { useAuthToken } from '@/lib/useAuthToken';
 
 /**
@@ -97,12 +97,6 @@ function usesPosition(sport: string, mods: Module[]): boolean {
   // (therefore enabled) chip, but that is a property of two other guards
   // rather than of this function, and the next caller won't know that.
   return (m?.enabled && m.capabilities.facets.includes('position')) ?? false;
-}
-
-/** Same reasoning as {@link usesPosition}, for the belt cap. */
-function usesBelt(sport: string, mods: Module[]): boolean {
-  const m = moduleFor(mods, sport);
-  return (m?.enabled && m.capabilities.facets.includes('belt')) ?? false;
 }
 
 /**

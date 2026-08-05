@@ -9884,6 +9884,115 @@ ring here would be claiming a distinction it cannot actually make.
   header. Nothing catches an unused `StyleSheet` key — not the typechecker, not
   ESLint — so they accumulate silently; this lot was found by grepping.
 
+## 2026-08-05 — Today stops being one day, and the escape hatch stops leading
+
+Five changes to the Today screen, from one message. They are one entry because
+they are one argument: the screen was ordered by what was easy to render rather
+than by what an athlete opens it to find out.
+
+### A day you can step
+
+The screen could only ever answer "what is on today", so "am I training
+Thursday" lived in another tab. It now carries the same `PeriodSwitcher` as the
+Plan tab, stepping a day at a time.
+
+**Only the Upcoming block follows it.** The calendar, the week summary, Recent
+and the trend are week- or history-scoped: stepping to Thursday to see what is
+on it must not rewrite what you did this week. `viewDay` is separate from `now`
+for the same reason the Plan tab keeps `anchor` apart from its own `now` — "is
+this day past" is a claim about the real date and cannot move.
+
+The label doubles as the way back: on any other day it is a button reading that
+date, and pressing it returns to today. On today it is a readout, because a
+control that does nothing is worse than no control.
+
+**A past day cannot be started.** That was never reachable before — the screen
+only ever showed today — and the switcher is what makes "Start" on last Tuesday
+possible. Starting it would date the session today and leave the plan it
+appears to satisfy still owed. Past plans render dimmed, marked *Not logged*.
+
+### Upcoming, and three states where there were two
+
+The previous screen had exactly two: a plan, or "Nothing planned for today". The
+plan-reconciliation work made the second one reachable **by finishing your
+plan**, which is the one moment it is flatly untrue. There are three states:
+
+- **Owed** — the plan cards, as before.
+- **Planned and all logged** — "That is everything planned", a statement rather
+  than a control, since there is nothing left to press.
+- **Nothing planned** — a rest line, circulated by date.
+
+The rest lines are keyed on the day, not random: a line that changes on every
+render flickers, and one that changes on every visit cannot be quoted back. None
+congratulate or scold — the recorded UX direction rules out shame, and a
+cheerful "enjoy your rest day!" aimed at someone injured is the same mistake
+wearing a smile.
+
+**One caught on the Simulator:** the first draft's lines said "Today looks like
+a rest day", which went on screen under a heading reading THU, AUG 6 — the line
+contradicting the date directly above it. None of them name the day now, and a
+test enforces it.
+
+### New Log, floating
+
+"Start something" was a dashed full-width card directly under the plan, third
+thing on the screen. Two problems. It spent the most valuable space on the
+*fallback* — the answer to "what should I do today" is the plan, and the escape
+hatch was as loud as it. And it is wanted most often at the *end* of the flow,
+when you came to log something you already did, by which point you had scrolled
+past it.
+
+It is a floating pill now, deliberately the same shape as the workouts tab's:
+two floating primary actions that looked different would be two conventions. Its
+clearance scales with the text size for the same reason that one does — a fixed
+one leaves the pill sitting on the content at the largest accessibility sizes.
+
+### The belt, centred, and only where it belongs
+
+The hero bled off the right edge of *every* plan card, including a squat day,
+where a BJJ belt is decoration claiming something untrue. It is centred and
+`contain` now — a cropped belt reads as a layout accident, which is what it
+looked like — and gated on `usesBelt`.
+
+`usesBelt` moved from `library.tsx` into `lib/modules.ts` rather than being
+copied. A second copy is exactly how the position vocabulary rotted across four
+files.
+
+### Eight weeks, as bars
+
+Recent answers "what did I just do". Nothing answered "have I been showing up",
+which is the only question about training a list cannot answer and the one worth
+putting on a screen whose job is to get you to the gym.
+
+**Days trained, not tonnage.** A tonnage chart is one a BJJ athlete cannot
+appear in: mat time produces no kilograms, so a mixed week renders as a
+strength-only week and a pure BJJ month as an empty chart. This app has already
+shipped that bug, in the week summary that told a BJJ-only athlete "0kg volume".
+Days trained is the one measure every discipline produces — and days rather than
+sessions, because two-a-days are normal here and counting sessions makes a heavy
+Tuesday look like a heavy week.
+
+Empty weeks are kept rather than closed up: a chart that cannot show a lay-off
+cannot show a comeback. The current week is drawn hollow because it is not over
+— a part-week bar beside finished ones would report a slump every Monday
+morning. The whole strip is hidden until something has been logged, since eight
+empty columns is a chart telling a new athlete they have failed.
+
+### Gaps
+
+- **The trend reads the same capped session list as everything else.** A very
+  heavy eight weeks can under-report the oldest bars. It degrades by drawing a
+  quieter past, never a busier one, which is the right direction for a chart
+  nobody should read as a record — but it is a cap, not a guarantee.
+- **Stepping to a day far in the past can show a met plan as owed**, because
+  adherence is matched against that same capped list. Within the recent weeks
+  anyone actually steps through, it is correct.
+- **`fabClearance` is now duplicated** between here and the workouts tab,
+  deliberately — the two pills are allowed to diverge and a shared constant
+  would hide it when they did. If a third appears, share it.
+- **The switcher has no bound.** Nothing stops stepping into 2029 one day at a
+  time. Harmless, and a month jump would be the fix if anyone ever does it.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

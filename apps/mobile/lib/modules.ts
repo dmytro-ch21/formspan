@@ -228,3 +228,16 @@ export function moduleFor(modules: Module[], key: string): Module | undefined {
 export function labelFor(modules: Module[], key: string): string {
   return moduleFor(modules, key)?.label ?? key;
 }
+
+/**
+ * Does this discipline wear a belt?
+ *
+ * `enabled` as well as the facet, so this answers "should belt-shaped UI be
+ * reachable" rather than "does BJJ have belts" — the latter is true even with
+ * BJJ turned off. Lived in `library.tsx` until Today needed it too; a second
+ * copy is how the position vocabulary rotted across four files.
+ */
+export function usesBelt(sport: string, mods: Module[]): boolean {
+  const m = moduleFor(mods, sport);
+  return (m?.enabled && m.capabilities.facets.includes('belt')) ?? false;
+}

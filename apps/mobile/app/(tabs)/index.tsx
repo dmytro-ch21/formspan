@@ -8,10 +8,12 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  useWindowDimensions,
   View as RNView,
 } from 'react-native';
 
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
+
 import { Text, View } from '@/components/Themed';
 import { Image } from 'expo-image';
 
@@ -19,24 +21,41 @@ import { BELT_HERO } from '@/components/BeltPhoto';
 import { Icon } from '@/components/ui/Icon';
 import { sportColor } from '@/components/ui/sport';
 import { PickSessionSheet } from '@/components/ui/PickSessionSheet';
+import { PeriodSwitcher } from '@/components/ui/PeriodSwitcher';
 import { SectionHeader } from '@/components/ui/Section';
+import { TrendStrip } from '@/components/ui/TrendStrip';
 import { SessionCard, type Metric } from '@/components/ui/SessionCard';
 import { Stat, StatRow } from '@/components/ui/Stat';
 import { TrainingCalendar } from '@/components/TrainingCalendar';
 import { vola } from '@/constants/Colors';
 import { formatDuration } from '@/lib/history';
-import { dayString, startOfWeek, weekDays } from '@/lib/calendar';
+import { addDays, dayString, startOfWeek, weekDays } from '@/lib/calendar';
 import { matchPlans } from '@/lib/adherence';
 import { listPlannedBetween, type PlannedSession } from '@/lib/plan';
 import { formatElapsed } from '@/lib/rest';
 import type { LoggedSet, Session } from '@/lib/sessions';
 import { cachedWorkouts, listLocalSessions } from '@/lib/sessionStore';
+import { restLine, weeklyDays } from '@/lib/trend';
 import { formatVolume, type UnitSystem } from '@/lib/units';
-import { enabledSports, labelFor, type Module } from '@/lib/modules';
+import { enabledSports, labelFor, usesBelt, type Module } from '@/lib/modules';
 import { useModules } from '@/lib/ModulesProvider';
 import { useAccent } from '@/lib/AccentProvider';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
+
+/**
+ * Room under the scroll so the floating New Log never covers the last row.
+ *
+ * Scales with the text size, not fixed: the pill grows with its label, and at
+ * the largest accessibility sizes a fixed clearance leaves it sitting on top of
+ * the content it was moved off. Same function and same reasoning as the
+ * workouts tab's — see `fabClearance` there, which this is deliberately a copy
+ * of rather than an import, because the two screens' pills are allowed to
+ * diverge and a shared constant would hide it when they did.
+ */
+function fabClearance(fontScale: number): number {
+  return 44 + 20 * fontScale;
+}
 
 /** Past this, an open session reads as abandoned rather than in progress. */
 const STALE_SESSION_MS = 24 * 60 * 60 * 1000;
@@ -265,17 +284,6 @@ export default function TodayScreen() {
   const [now, setNow] = useState(() => new Date());
   const [picking, setPicking] = useState(false);
   /**
-   * Today's plan, with each entry's template name resolved from the local
-   * workout cache.
-   *
-   * Resolved here rather than stored on the plan row: a template can be
-   * renamed, and a plan holding a stale copy of its name would show the old
-   * one until replanned. The name is presentation, the id is the fact.
-   */
-  const [todaysPlan, setTodaysPlan] = useState<
-    { id: string; sport: string; workoutId: string | null; workoutName: string | null }[]
-  >([]);
-  /**
    * The whole visible week's plan, for the calendar's dots and day list.
    *
    * Read in the same pass as today's, from one query — the lead card and the
@@ -283,6 +291,23 @@ export default function TodayScreen() {
    * would be the same contradiction the week strip and stat row already avoid.
    */
   const [weekPlan, setWeekPlan] = useState<PlannedSession[]>([]);
+  /**
+   * The day the top of the screen is describing, which is not always today.
+   *
+   * Separate from `now`, which stays the real clock: "is this day in the past"
+   * and "which day is highlighted" are claims about the actual date and must
+   * not move when you step away. Same split the Plan tab draws between its
+   * `anchor` and its `now`, and for the same reason.
+   *
+   * Only the Upcoming block follows it. The calendar, the week summary, Recent
+   * and the trend are all week- or history-scoped — stepping to Thursday to see
+   * what is on it should not rewrite what you did this week.
+   */
+  const [viewDay, setViewDay] = useState(() => new Date());
+  /** Plans for `viewDay` alone, resolved to template names. */
+  const [viewPlans, setViewPlans] = useState<
+    { id: string; sport: string; workoutId: string | null; workoutName: string | null }[]
+  >([]);
 
   const refreshSessions = useCallback(async () => {
     if (!userId) return;
@@ -318,29 +343,33 @@ export default function TodayScreen() {
   const refreshPlan = useCallback(async () => {
     if (!userId) return;
     const days = weekDays(new Date());
-    const today = dayString(new Date());
+    const viewKey = dayString(viewDay);
     try {
-      const [week, cached] = await Promise.all([
+      // The visible week for the calendar, and the viewed day separately —
+      // stepping the switcher can leave the current week entirely, and the
+      // calendar underneath must keep showing the week it is labelled with.
+      // Two small reads against the same local table rather than one wide one
+      // whose range depends on how far the athlete has stepped.
+      const [week, viewed, cached] = await Promise.all([
         listPlannedBetween(userId, dayString(days[0]), dayString(days[6])),
+        listPlannedBetween(userId, viewKey, viewKey),
         cachedWorkouts(userId),
       ]);
       setWeekPlan(week);
-      const plans = week.filter((p) => p.day === today);
-      setTodaysPlan(
-        plans.map((p) => ({
-          id: p.id,
-          sport: p.sport,
-          workoutId: p.workoutId,
-          // Null when the plan names a template the cache no longer has. The
-          // card then renders the discipline alone, which is still true.
-          workoutName: cached.find((w) => w.id === p.workoutId)?.name ?? null,
-        })),
-      );
+      const named = (p: PlannedSession) => ({
+        id: p.id,
+        sport: p.sport,
+        workoutId: p.workoutId,
+        // Null when the plan names a template the cache no longer has. The
+        // card then renders the discipline alone, which is still true.
+        workoutName: cached.find((w) => w.id === p.workoutId)?.name ?? null,
+      });
+      setViewPlans(viewed.map(named));
     } catch {
       // A plan that can't be read is a quieter screen, not a broken one — the
       // unplanned state below is a safe thing to show.
     }
-  }, [userId]);
+  }, [userId, viewDay]);
 
   /**
    * Start what was planned.
@@ -420,6 +449,9 @@ export default function TodayScreen() {
 
   // The newest unfinished session. Older unfinished ones stay in the list
   // below rather than vanishing — see `recent`.
+  const { fontScale } = useWindowDimensions();
+  const fabPad = fabClearance(fontScale);
+
   const active = useMemo(() => sessions.find((s) => !s.ended_at) ?? null, [sessions]);
 
   /**
@@ -433,10 +465,35 @@ export default function TodayScreen() {
    * this branch is about, in its second and louder form.
    */
   const owed = useMemo(() => {
-    if (todaysPlan.length === 0) return todaysPlan;
+    if (viewPlans.length === 0) return viewPlans;
     const { met } = matchPlans(sessions, weekPlan);
-    return todaysPlan.filter((p) => !met.has(p.id));
-  }, [todaysPlan, weekPlan, sessions]);
+    return viewPlans.filter((p) => !met.has(p.id));
+  }, [viewPlans, weekPlan, sessions]);
+
+  const viewKey = dayString(viewDay);
+  const isToday = viewKey === dayString(now);
+  const isPast = viewKey < dayString(now);
+
+  /**
+   * What the switcher reads. TODAY when it is, the weekday and date otherwise —
+   * the same rule as the Plan tab's label, and the only thing on this screen
+   * saying you have stepped away from today.
+   */
+  const dayLabel = isToday
+    ? 'TODAY'
+    : viewDay
+        .toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })
+        .toUpperCase();
+
+  /**
+   * Eight weeks of days-trained for the strip under Recent.
+   *
+   * Off the same `sessions` array everything else here uses. That read is
+   * capped, so a very heavy eight weeks can under-report the oldest bars — it
+   * degrades by drawing a quieter past, never a busier one, which is the right
+   * direction for a chart nobody should be reading as a record.
+   */
+  const trend = useMemo(() => weeklyDays(sessions, now, 8), [sessions, now]);
 
   // A session left open overnight was almost certainly abandoned, not paused.
   // Past this the card stops pretending to be a running clock: a resume button
@@ -497,15 +554,46 @@ export default function TodayScreen() {
   }, [getToken, syncing, userId]);
 
   return (
+    <RNView style={styles.screen}>
     <ScrollView
-      contentContainerStyle={styles.container}
+      contentContainerStyle={[styles.container, { paddingBottom: TAB_BAR_CLEARANCE + fabPad }]}
       contentInsetAdjustmentBehavior="never"
       testID="today-screen"
     >
       <ScreenHeader title="Today" />
 
       <View style={styles.body}>
-        <Text style={styles.date}>{todayLabel(now)}</Text>
+        {/*
+          Steps the day the Upcoming block below describes. Before this the
+          screen could only ever answer "what is on today", so the answer to
+          "am I training Thursday" was in another tab.
+
+          The label doubles as the way back: on any other day it is a button
+          reading that day's date, and pressing it returns to today. On today
+          it is a readout, because a control that does nothing is worse than no
+          control. Same component as the Plan tab's week — see PeriodSwitcher.
+        */}
+        <PeriodSwitcher
+          label={dayLabel}
+          onPrev={() => setViewDay((d) => addDays(d, -1))}
+          onNext={() => setViewDay((d) => addDays(d, 1))}
+          onPress={isToday ? undefined : () => setViewDay(new Date())}
+          icon="calendar"
+          prevLabel="Previous day"
+          nextLabel="Next day"
+          pressLabel="Back to today"
+          testID="today-day"
+        />
+
+        <Text style={styles.date}>
+          {isToday
+            ? todayLabel(now)
+            : viewDay.toLocaleDateString(undefined, {
+                weekday: 'long',
+                day: 'numeric',
+                month: 'long',
+              })}
+        </Text>
 
         {sessionError && (
           <Text
@@ -609,14 +697,32 @@ export default function TodayScreen() {
               now; starting something unplanned is still one press away, just
               no longer the first thing the screen says.
             */}
+            <SectionHeader label={isPast ? 'That day' : 'Upcoming'} />
+
             {owed.length > 0 ? (
               owed.map((p) => (
                 <Pressable
                   key={p.id}
-                  style={({ pressed }) => [styles.planCard, pressed && styles.planCardPressed]}
-                  onPress={() => startPlanned(p)}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Start ${p.workoutName ?? labelFor(modules, p.sport)}, planned for today`}
+                  style={({ pressed }) => [
+                    styles.planCard,
+                    isPast && styles.planCardPast,
+                    pressed && !isPast && styles.planCardPressed,
+                  ]}
+                  // A past day cannot be started. It was never blocked before
+                  // because the screen could only ever show today; the switcher
+                  // is what makes "Start" on last Tuesday reachable, and
+                  // starting it would date the session today and leave the plan
+                  // it appears to satisfy still owed.
+                  onPress={isPast ? undefined : () => startPlanned(p)}
+                  disabled={isPast}
+                  accessibilityRole={isPast ? 'text' : 'button'}
+                  accessibilityLabel={
+                    isPast
+                      ? `${p.workoutName ?? labelFor(modules, p.sport)}, planned and not logged`
+                      : `Start ${p.workoutName ?? labelFor(modules, p.sport)}, planned for ${
+                          isToday ? 'today' : dayLabel.toLowerCase()
+                        }`
+                  }
                   testID={`today-plan-${p.id}`}
                 >
                   {/* The discipline's own colour down the edge, matching the
@@ -628,6 +734,28 @@ export default function TodayScreen() {
                       { backgroundColor: sportColor(p.sport) ?? accent.accent },
                     ]}
                   />
+
+                  {/*
+                    The belt, centred behind the card and only on a discipline
+                    that wears one.
+
+                    It used to bleed off the right edge on every plan card,
+                    including a squat day, where a BJJ belt is decoration
+                    claiming something untrue. Centred it reads as the card's
+                    own texture rather than as an image sliding out of frame,
+                    and `usesBelt` keeps it to the sport it belongs to.
+                  */}
+                  {usesBelt(p.sport, modules) && (
+                    <Image
+                      source={BELT_HERO}
+                      style={styles.planHero}
+                      contentFit="contain"
+                      transition={0}
+                      accessibilityElementsHidden
+                      importantForAccessibility="no-hide-descendants"
+                    />
+                  )}
+
                   <View style={styles.planMain}>
                     <Text
                       style={[
@@ -641,71 +769,75 @@ export default function TodayScreen() {
                       {p.workoutName ?? `${labelFor(modules, p.sport)} session`}
                     </Text>
                   </View>
+
                   {/* The accent, not the sport: this is the one thing on the
                       card you are meant to press, and "act here" is the job the
                       accent does everywhere else in the app. A sport-coloured
                       button would make the edge and the action the same signal
                       and leave the primary action unmarked. */}
-                  <View style={[styles.planGo, { backgroundColor: accent.accent }]}>
-                    <Text style={[styles.planGoText, { color: accent.on }]}>
-                      {logsAfterwards(p.sport, modules) ? 'Log' : 'Start'}
-                    </Text>
-                  </View>
-                  <Icon name="chevron" size={14} color={vola.textDim} />
-
-                  {/* Decoration, bleeding off the right edge. One belt on
-                      everyone's screen — it is the texture behind a session
-                      card, not a claim about the athlete's rank, and the card
-                      lays out identically without it. Hidden from assistive
-                      tech for the same reason. */}
-                  <Image
-                    source={BELT_HERO}
-                    style={styles.planHero}
-                    contentFit="cover"
-                    transition={0}
-                    accessibilityElementsHidden
-                    importantForAccessibility="no-hide-descendants"
-                  />
+                  {isPast ? (
+                    <Text style={styles.planMissed}>Not logged</Text>
+                  ) : (
+                    <>
+                      <View style={[styles.planGo, { backgroundColor: accent.accent }]}>
+                        <Text style={[styles.planGoText, { color: accent.on }]}>
+                          {logsAfterwards(p.sport, modules) ? 'Log' : 'Start'}
+                        </Text>
+                      </View>
+                      <Icon name="chevron" size={14} color={vola.textDim} />
+                    </>
+                  )}
                 </Pressable>
               ))
+            ) : viewPlans.length > 0 ? (
+              /*
+                Planned, and all of it done. Distinct from having planned
+                nothing, and the distinction is the whole point: before this
+                the screen said "Nothing planned for today" the moment you
+                finished your last session, which is the one sentence that is
+                flatly untrue at that exact moment.
+              */
+              <View style={styles.planDone} testID="today-all-done">
+                <View style={styles.planMain}>
+                  <Text style={styles.planDoneTitle}>
+                    {isPast ? 'Everything planned was logged.' : 'That is everything planned.'}
+                  </Text>
+                  <Text style={styles.planEmptyMeta}>
+                    {viewPlans.length === 1
+                      ? '1 session'
+                      : `${viewPlans.length} sessions`}{' '}
+                    logged against the plan.
+                  </Text>
+                </View>
+              </View>
             ) : (
-              // Says what is true and offers the fix, rather than leaving a
-              // gap that reads as a screen that failed to load.
+              // Says what is true and offers the fix, rather than leaving a gap
+              // that reads as a screen that failed to load.
               <Pressable
                 style={({ pressed }) => [styles.planEmpty, pressed && styles.planCardPressed]}
                 onPress={() => router.push('/(tabs)/workouts')}
                 accessibilityRole="button"
-                accessibilityLabel="Nothing planned for today. Plan your week."
+                accessibilityLabel={
+                  isPast
+                    ? `${restLine(viewDay)} Nothing was planned, and nothing logged.`
+                    : `${restLine(viewDay)} Open Plan to schedule something.`
+                }
                 testID="today-unplanned"
               >
                 <View style={styles.planMain}>
-                  <Text style={styles.planEmptyTitle}>Nothing planned for today</Text>
-                  <Text style={styles.planEmptyMeta}>Plan your week in Plan</Text>
+                  {/* Circulated by date rather than picked at random — the same
+                      day always says the same thing. See `lib/trend.ts` for why
+                      none of these congratulate or scold. */}
+                  <Text style={styles.planEmptyTitle}>{restLine(viewDay)}</Text>
+                  <Text style={styles.planEmptyMeta}>
+                    {isPast
+                      ? 'Nothing was planned, and nothing logged.'
+                      : 'Plan one here — or log an unplanned session with New log.'}
+                  </Text>
                 </View>
                 <Icon name="chevron" size={16} color={vola.textDim} />
               </Pressable>
             )}
-
-            {/* Deliberately quiet, and deliberately always present: a planned
-                day you don't feel like still needs a way out, and an unplanned
-                one is the common case early on. Outlined rather than filled so
-                it never competes with the plan above it. */}
-            <Pressable
-              style={({ pressed }) => [styles.startButton, pressed && styles.planCardPressed]}
-              onPress={() => setPicking(true)}
-              accessibilityRole="button"
-              accessibilityLabel="Start something"
-              testID="start-something"
-            >
-              {/* The plus is a disc rather than a character. As "+ Start" it
-                  was a glyph doing a button's job — the same weight as the
-                  words, and the only affordance on a dashed card that otherwise
-                  reads as an empty state. */}
-              <RNView style={[styles.startPlus, { borderColor: accent.accent }]}>
-                <Icon name="plus" size={15} color={accent.accent} />
-              </RNView>
-              <Text style={styles.startText}>Start something</Text>
-            </Pressable>
 
             {/* Every discipline off is a reachable state — nothing stops a
                 user turning them all off — and the block rendered nothing at
@@ -811,6 +943,18 @@ export default function TodayScreen() {
           </View>
         )}
 
+        {/* Under Recent, which answers "what did I just do". This answers
+            "have I been showing up", which is the question a list cannot
+            answer and the only one worth putting on a screen whose job is to
+            get you to the gym. Gated on having trained at all: eight empty
+            columns is a chart telling a new athlete they have failed. */}
+        {trend.some((w) => w.days > 0) && (
+          <View style={styles.section}>
+            <SectionHeader label="Last 8 weeks" />
+            <TrendStrip weeks={trend} testID="today-trend" />
+          </View>
+        )}
+
         {/* Only when there is something to say. The old screen showed
             "0 pending · 0 synced" permanently — a number that reassures
             precisely when nobody needed reassuring, and that trained the eye
@@ -860,7 +1004,7 @@ export default function TodayScreen() {
         visible={picking}
         modules={modules}
         userId={userId ?? null}
-        title="Start something"
+        title="New log"
         onClose={() => setPicking(false)}
         onPick={(pick) => {
           // Closed before navigating: leaving the modal mounted over a push
@@ -870,13 +1014,77 @@ export default function TodayScreen() {
         }}
       />
     </ScrollView>
+
+    {/*
+      New Log, floating.
+
+      It was "Start something" — a dashed full-width card sitting directly
+      under the plan, third thing on the screen. Two problems with that. It
+      spent the most valuable space on the *fallback*: the answer to "what
+      should I do today" is the plan, and the escape hatch was as loud as it.
+      And it is needed most often at the END of the flow — you came to log
+      something you already did — by which point you had scrolled past it.
+
+      Floating puts it where a primary action goes on a phone, in reach of a
+      thumb, and takes it out of the reading order at the top entirely. The
+      clearance below matches the workouts tab's, for the same reason: a pill
+      over a scrolling list has to stop covering the last row.
+    */}
+    {startable.length > 0 && (
+      <Pressable
+        style={({ pressed }) => [
+          styles.fab,
+          { backgroundColor: accent.accent, shadowColor: accent.accent },
+          pressed && styles.fabPressed,
+        ]}
+        onPress={() => setPicking(true)}
+        accessibilityRole="button"
+        accessibilityLabel="New log"
+        hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+        testID="today-new-log"
+      >
+        <Icon name="plus" size={16} color={accent.on} />
+        {/* One line, always — at the largest accessibility sizes a second line
+            makes the pill tall enough to cover the list again, which is the
+            bug the clearance exists to prevent. */}
+        <Text numberOfLines={1} style={[styles.fabText, { color: accent.on }]}>
+          New log
+        </Text>
+      </Pressable>
+    )}
+    </RNView>
   );
 }
 
 const styles = StyleSheet.create({
   // No horizontal padding here: the header manages its own, so it can sit
   // flush while the cards below stay inset.
-  container: { gap: 12, paddingBottom: TAB_BAR_CLEARANCE },
+  screen: { flex: 1 },
+  container: { gap: 12 },
+
+  // Copied in shape from the workouts tab's pill, deliberately: two floating
+  // primary actions that looked different would be two conventions.
+  fab: {
+    position: 'absolute',
+    right: 16,
+    bottom: TAB_BAR_CLEARANCE + 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderRadius: 999,
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    // `shadowColor` is set INLINE to the accent, not black: 35% black on this
+    // ground is a 1.02:1 step — invisible — while the accent reads as light
+    // coming off the pill. `height: 0` for the same reason; an offset makes it
+    // a drop shadow rather than light.
+    shadowOpacity: 0.45,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 6,
+  },
+  fabPressed: { opacity: 0.85 },
+  fabText: { fontSize: 15, fontWeight: '800', letterSpacing: 0.2 },
   body: { paddingHorizontal: 20, gap: 16 },
   date: { color: vola.textMuted, fontSize: 13, marginTop: -4 },
 
@@ -909,6 +1117,28 @@ const styles = StyleSheet.create({
 
   startBlock: { gap: 8 },
 
+  // A planned day that has been and gone. Dimmed rather than removed: the plan
+  // is still the record of what was meant, and hiding it would make the week
+  // read as if nothing had been intended.
+  planCardPast: { opacity: 0.55 },
+  planMissed: { color: vola.textDim, fontSize: 12, fontWeight: '600' },
+
+  // Planned and finished. A statement, not a control — there is nothing left
+  // to press, and a card that looks pressable and is not is worse than a flat
+  // one.
+  planDone: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: vola.surface,
+    borderWidth: 1,
+    borderColor: vola.line,
+    borderRadius: 14,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+  },
+  planDoneTitle: { color: vola.text, fontSize: 15, fontWeight: '700' },
+
   // The planned day. A card rather than a filled button: it is a statement
   // about today that happens to be actionable, and the lime is spent on the
   // one word that is the action.
@@ -930,12 +1160,15 @@ const styles = StyleSheet.create({
   // Behind the content, off the right edge, and faint: it is texture. At full
   // strength it competes with the Log button, which is the one thing on this
   // card anyone is meant to press.
+  // Centred, not bled off the right edge. `contain` rather than `cover`, so
+  // the whole belt is in frame — a cropped one reads as a layout accident,
+  // which is what it looked like when it was cut by the card's edge.
   planHero: {
     position: 'absolute',
-    right: -30,
-    top: -20,
-    bottom: -20,
-    width: 190,
+    left: 0,
+    right: 0,
+    top: -14,
+    bottom: -14,
     opacity: 0.22,
     zIndex: -1,
   },
