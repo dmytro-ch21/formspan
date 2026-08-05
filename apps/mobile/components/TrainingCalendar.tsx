@@ -63,6 +63,17 @@ function sessionVolume(s: Session): number {
   return kg;
 }
 
+/** Plans keyed by their day. Module scope so the memos below have no stale dep. */
+function byDayOf(rows: PlannedSession[]): Map<string, PlannedSession[]> {
+  const map = new Map<string, PlannedSession[]>();
+  for (const p of rows) {
+    const list = map.get(p.day);
+    if (list) list.push(p);
+    else map.set(p.day, [p]);
+  }
+  return map;
+}
+
 function durationSeconds(s: Session): number | null {
   if (!s.ended_at) return null;
   return (new Date(s.ended_at).getTime() - new Date(s.started_at).getTime()) / 1000;
@@ -149,18 +160,28 @@ export function TrainingCalendar({
    */
   const adherence = useMemo(() => matchPlans(pool, planned), [pool, planned]);
 
-  const plannedByDay = useMemo(() => {
-    const map = new Map<string, PlannedSession[]>();
-    // Only what is still owed. A met plan is not deleted or hidden from the
-    // Plan tab — it simply stops being drawn a second time next to the session
-    // that met it, which read as two sessions when there was one.
-    for (const p of pendingPlans(planned, adherence)) {
-      const list = map.get(p.day);
-      if (list) list.push(p);
-      else map.set(p.day, [p]);
-    }
-    return map;
-  }, [planned, adherence]);
+  // Only what is still owed. A met plan is not deleted or hidden from the Plan
+  // tab — it simply stops being drawn a second time next to the session that
+  // met it, which read as two sessions when there was one.
+  const plannedByDay = useMemo(
+    () => byDayOf(pendingPlans(planned, adherence)),
+    [planned, adherence],
+  );
+
+  /**
+   * Every plan, met or not — for the SPOKEN labels only.
+   *
+   * The dot can carry one mark and "done outranks planned" decides which. Speech
+   * has no such limit, and the labels below deliberately say both on a day that
+   * is both, because that is the day a reader most needs told. Keying them off
+   * the pending list instead would silently drop "planned" the moment a plan
+   * was met — achieving by filtering exactly what the comments at those two
+   * sites forbid doing by ternary.
+   */
+  const allPlannedByDay = useMemo(
+    () => byDayOf(planned),
+    [planned],
+  );
 
   const openMonth = useCallback(() => {
     setAnchor(new Date(now.getFullYear(), now.getMonth(), 1));
@@ -297,7 +318,7 @@ export function TrainingCalendar({
                 // planned must say both. The dot can only be one colour; the
                 // label has no such limit.
                 byDay.has(key) ? 'trained' : null,
-                plannedByDay.has(key) ? 'planned' : null,
+                allPlannedByDay.has(key) ? 'planned' : null,
               ]
                 .filter(Boolean)
                 .join(', ')}
@@ -451,7 +472,7 @@ export function TrainingCalendar({
                         }),
                         cell.key === todayKey ? 'today' : null,
                         byDay.has(cell.key) ? 'trained' : null,
-                        plannedByDay.has(cell.key) ? 'planned' : null,
+                        allPlannedByDay.has(cell.key) ? 'planned' : null,
                       ]
                         .filter(Boolean)
                         .join(', ')}

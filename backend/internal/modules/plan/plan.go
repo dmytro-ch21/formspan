@@ -8,9 +8,8 @@
 //
 // A plan is an intention. Nothing here ever marks one done: there is no status
 // field, and the server never joins plans to sessions. Adherence is computed by
-// the client on read, from the rule in `apps/mobile/lib/adherence.ts` — a plan
-// is met by a logged session on the same day in the same sport, matched
-// one-to-one. See the migration for why that stayed out of the database.
+// the client on read — see `apps/mobile/lib/adherence.ts` for the rule and what
+// it gives up, and the migration for why it stayed out of the database.
 package plan
 
 import (

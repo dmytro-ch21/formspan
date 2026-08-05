@@ -9677,10 +9677,18 @@ length:
 > what they meant to do. Adherence is therefore a *query* over both tables,
 > computed when asked, rather than a status column that has to be kept true.
 
-That is right about writing and was read as also settling display. It isn't the
-same question. The objection is to **storing** a status; the complaint is about
-**seeing** two rows. And the comment's own second sentence describes the fix:
-adherence as a query, computed when asked. Nobody had written the query.
+The second clause is about **storing** a status, and does not survive contact
+with a read-time query — the complaint is about **seeing** two rows. The
+comment's own last sentence describes the fix, and nobody had written it.
+
+But the first clause is not about storage at all. "Nobody can state the rule"
+is a claim about the *rule*, and an unstatable rule computed on read is still
+unstatable. Answering it means **overturning half that argument, not completing
+it** — legitimate, since the comment asserted rather than proved, but it should
+be recorded as a reversal. Review caught the first draft of this entry framing
+it as a fulfilment. Same for one of the five sites: `apps/web`'s calendar said
+adherence is "a comparison the reader makes", which is a display claim, so the
+blanket "it was only ever about writing" was wrong there specifically.
 
 ### The rule the comment said nobody could state
 
@@ -9694,6 +9702,11 @@ test:
   Workout 1 and did Workout 2; you did your strength session. Requiring the
   template to match would leave "Workout 1 · Planned" sitting next to the
   workout you actually logged, which is the duplication being removed.
+  **This one is a reversal, not a preservation** — the migration listed
+  "trained with something else entirely" among the cases it was protecting and
+  named "same template?" as unanswerable. This answers it *no*, narrowing
+  "something else" to a different sport. The first draft of this entry claimed
+  the case was kept while the test asserted the opposite; both could not stand.
 - **One-to-one.** Two planned BJJ sessions need two logged ones. A two-a-day is
   not half-erased by a single class — and `(user_id, day)` is deliberately not
   unique for exactly this reason.
@@ -9747,6 +9760,23 @@ deliberate call rather than an oversight.
 - **Matching is by sport, so a mislabelled session cannot meet a plan.** Log a
   BJJ class as a strength session and both rows come back. Correct, arguably,
   but it will look like a bug to whoever does it.
+- **An unfinished session meets a plan.** `session/start.tsx` auto-starts a
+  planned template on mount, so opening the chooser is enough to clear the plan
+  from the pending list. Back out and the day shows a session that will read
+  UNFINISHED. Masked on Today (the active session outranks the card) but not in
+  the week list. Undecided rather than decided — an `ended_at` filter is one
+  line, and the argument against it is that a session in progress *is* the plan
+  being met.
+- **Adherence is computed in two places** — `index.tsx` for the lead card and
+  `TrainingCalendar` for the list — against slightly different session lists.
+  They agree today only because the plan list never leaves the current week and
+  the current week is always inside the most recent 30. Should be computed once
+  and passed down; the file already warns against exactly this class of
+  disagreement.
+- **The rule cannot be shared with `apps/web`**, which is why the divergence
+  above has nowhere to land: `apps/web` cannot import from `apps/mobile`.
+  `pnpm-workspace.yaml` already declares `packages/*` with no such directory —
+  that, or a backend-computed answer, is the actual destination.
 
 ## Open items / known gaps as of this entry
 

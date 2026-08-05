@@ -34,6 +34,13 @@ import type { Session } from './sessions';
  *   but you did your strength session, and leaving "Workout 1 · Planned"
  *   sitting beside the workout you actually logged is exactly the duplication
  *   this exists to remove. The template is a starting point, not a contract.
+ *
+ *   **This one is a decision, not a preservation.** The migration listed
+ *   "trained with something else entirely" among the cases it was protecting
+ *   and named "same template?" as one of the questions it could not answer.
+ *   This answers it: no. "Something else" now means a different *sport*, which
+ *   is narrower than what that comment meant. That is a real narrowing and
+ *   worth arguing with rather than assuming settled.
  * - **One-to-one.** Two planned BJJ sessions need two logged ones before both
  *   are met, so a two-a-day is not silently half-erased by a single class.
  *   The migration is explicit that `(user_id, day)` is not unique for this
@@ -52,8 +59,6 @@ export type PlanMatch = {
   metBy: Map<string, string>;
 };
 
-export const NO_MATCHES: PlanMatch = { met: new Set(), metBy: new Map() };
-
 /**
  * Match `planned` against `sessions`, both spanning any range of days.
  *
@@ -69,8 +74,18 @@ export function matchPlans(sessions: Session[], planned: PlannedSession[]): Plan
 
   // Sessions keyed by the day and sport they could satisfy. A queue rather than
   // a count, because the matched session's id is needed to mark its row.
+  //
+  // Sorted here rather than trusted from the caller. `listLocalSessions` orders
+  // `started_at DESC`, so taking the array as given credited the LAST session
+  // of a day: plan a morning class, train morning and evening, and the badge
+  // landed on the evening one. Which *plan* gets credited is genuinely
+  // arbitrary — two same-sport plans differ only by id and render identically —
+  // but which *session* is not, because sessions have names and times and are
+  // sitting on screen next to each other. Earliest wins, and it is a property
+  // of this function rather than of whichever list was passed in.
   const available = new Map<string, string[]>();
-  for (const s of sessions) {
+  const ordered = [...sessions].sort((a, b) => a.started_at.localeCompare(b.started_at));
+  for (const s of ordered) {
     const key = `${dayString(new Date(s.started_at))} ${s.sport}`;
     const queue = available.get(key);
     if (queue) queue.push(s.id);

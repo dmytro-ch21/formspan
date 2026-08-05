@@ -935,11 +935,11 @@ components:
 
         A plan is an intention. This resource has no completion status and
         never gains one — the server does not join plans to sessions, and
-        nothing writes "done" onto a plan. Adherence is a query over both
-        resources, computed by the client when asked: a plan is met by a
-        session on the same day in the same sport, matched one-to-one. A
-        planned day can still be trained twice, ignored, or trained with
-        something else, and all three remain ordinary.
+        nothing writes "done" onto a plan. A planned day can be trained twice,
+        ignored, or trained with something else, and all three are ordinary.
+        Adherence is a query over both resources, computed by a client when
+        asked; how a client chooses to match the two is its own decision and
+        is not part of this contract.
       required: [id, user_id, day, sport, workout_id, notes, created_at, updated_at]
       properties:
         id: { type: string }
