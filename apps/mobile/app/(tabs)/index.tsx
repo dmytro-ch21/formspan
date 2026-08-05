@@ -729,10 +729,19 @@ export default function TodayScreen() {
                 imply they belong to one scale. `heart` for sessions rather
                 than a barbell — a week's count spans every discipline, and a
                 barbell would claim it was all lifting. */}
-            <Stat label="Sessions" value={String(week.sessions)} icon="heart" tone={accent.accent} />
+            <Stat
+              label="Sessions"
+              value={String(week.sessions)}
+              size={22}
+              fit
+              icon="heart"
+              tone={accent.accent}
+            />
             <Stat
               label="Days"
               value={String(week.dayKeys.size)}
+              size={22}
+              fit
               icon="calendar"
               tone={vola.warn}
             />
@@ -745,6 +754,8 @@ export default function TodayScreen() {
               <Stat
                 label="Volume"
                 value={unitsReady ? formatVolume(week.volumeKg, units) : '—'}
+                size={22}
+                fit
                 icon="barbell"
                 tone={vola.info}
               />
@@ -752,6 +763,8 @@ export default function TodayScreen() {
               <Stat
                 label="Time"
                 value={week.seconds > 0 ? formatDuration(week.seconds) : '—'}
+                size={22}
+                fit
                 icon="timer"
                 tone={vola.info}
               />

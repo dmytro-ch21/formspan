@@ -1,4 +1,3 @@
-import { Image } from 'expo-image';
 import { request as requestSync } from '@/lib/sync';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -9,6 +8,7 @@ import { useAuth } from '@clerk/clerk-expo';
 import { Text, View } from '@/components/Themed';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { vola } from '@/constants/Colors';
+import { LibraryTile, patternBadge } from '@/components/LibraryTile';
 import { fetchExercises, pickImage, type Exercise } from '@/lib/exercises';
 import { emptySet, similarTo, swapExercise } from '@/lib/sessions';
 import {
@@ -129,6 +129,12 @@ export default function AddExerciseToSessionScreen() {
     }
   }
 
+  /** `patternBadge` returns a tuple; the tile wants named props. */
+  const patternTile = (pattern: string) => {
+    const [code, accent] = patternBadge(pattern);
+    return { code, accent };
+  };
+
   function Row({ item }: { item: Exercise }) {
     const uri = pickImage(item, 'thumbnail');
     const carries = current ? item.load_type === current.load_type : true;
@@ -142,11 +148,13 @@ export default function AddExerciseToSessionScreen() {
         accessibilityState={{ busy: busy === item.id, disabled: busy !== null }}
         testID={`session-add-${item.id}`}
       >
-        {uri ? (
-          <Image source={{ uri }} style={styles.thumb} contentFit="cover" cachePolicy="memory-disk" alt="" />
-        ) : (
-          <View style={styles.thumb} />
-        )}
+        {/* The same tile the Library draws, and for the reason that component
+            exists: only 4 of 524 exercises have artwork, so rendering an image
+            *when there is one* leaves 520 blank squares. This picker was doing
+            exactly that — the identical bug the Library already solved, in a
+            second place. The tile falls back to a three-letter code for the
+            movement pattern, which is scannable where a blank is not. */}
+        <LibraryTile uri={uri} {...patternTile(item.movement_pattern)} />
         <View style={styles.rowBody}>
           <Text style={styles.name}>{item.name}</Text>
           <Text style={styles.muted}>
@@ -226,7 +234,6 @@ const styles = StyleSheet.create({
   list: { gap: 12, paddingBottom: 32 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 4 },
   dimmed: { opacity: 0.4 },
-  thumb: { width: 52, height: 52, borderRadius: 10, backgroundColor: vola.surfaceRaised },
   rowBody: { flex: 1, gap: 2 },
   name: { fontSize: 15, fontWeight: '600' },
   muted: { color: vola.textMuted, fontSize: 13 },
