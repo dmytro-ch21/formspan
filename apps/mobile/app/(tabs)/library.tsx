@@ -259,6 +259,22 @@ export default function LibraryScreen() {
   // Which facet's picker is open, or null. One piece of state for all four
   // sheets, the same way the Plan screen's day sheet serves seven rows.
   const [openFacet, setOpenFacet] = useState<FacetKey | null>(null);
+  /**
+   * What the sheet is DRAWING, which outlives what is open.
+   *
+   * React Native keeps a modal's children mounted through the iOS dismissal
+   * animation — `_shouldShowModal()` stays true until the native `onDismiss`.
+   * So rendering straight from `openFacet` meant that after picking an option
+   * there was a frame where the title resolved to `''` and the option list to
+   * `[]`: the sheet emptied and, now that it is content-sized rather than
+   * full-screen, collapsed from ~660pt to ~110pt and *then* slid away. On
+   * every single use.
+   *
+   * This is cleared by `onDismiss` instead, so the sheet keeps its contents
+   * until it is actually gone. Android unmounts immediately and never reaches
+   * that callback, which is harmless — the modal is already invisible.
+   */
+  const [shownFacet, setShownFacet] = useState<FacetKey | null>(null);
   // The home indicator's real height, not a guess. `ScreenHeader` already
   // reads insets this way; a hardcoded 28 is right on exactly one device.
   const insets = useSafeAreaInsets();
@@ -770,7 +786,10 @@ export default function LibraryScreen() {
               return (
                 <Pressable
                   key={f.key}
-                  onPress={() => setOpenFacet(f.key)}
+                  onPress={() => {
+                    setShownFacet(f.key);
+                    setOpenFacet(f.key);
+                  }}
                   style={[styles.facet, active && styles.facetActive]}
                   hitSlop={8}
                   accessibilityRole="button"
@@ -935,24 +954,49 @@ export default function LibraryScreen() {
         it and would cost a native view to blur a nearly-flat ground. Glass
         here is a translucent panel, a lit top-left edge, and a wash.
       */}
+      {/* Gated, matching `WeekPlanner`: a Modal's children are constructed by
+          the parent on every render — here, on every keystroke in the search
+          box — whether or not it is showing. `shownFacet` rather than
+          `openFacet` so the subtree survives the dismissal animation. */}
+      {shownFacet !== null && (
       <Modal
         visible={openFacet !== null}
         animationType="slide"
         transparent
         onRequestClose={() => setOpenFacet(null)}
+        // iOS-only, and the point of `shownFacet`: fires once the sheet has
+        // genuinely left the screen.
+        onDismiss={() => setShownFacet(null)}
       >
         {/* Tapping off the sheet closes it — the affordance a bottom sheet is
             expected to have, and which the full-screen version could not offer
             because it had no outside. */}
+        {/*
+          A touch affordance, NOT an accessibility element. As subview 0 it was
+          first in the VoiceOver order and screen-sized, so opening the sheet
+          announced "Close filter options, button" instead of the sheet that
+          had just appeared. Apple's own convention is that a dimming view is
+          not an element; dismissal is the Done button and the two-finger
+          escape, both of which this sheet has.
+        */}
         <Pressable
           style={styles.backdrop}
           onPress={() => setOpenFacet(null)}
-          accessibilityRole="button"
-          accessibilityLabel="Close filter options"
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
           testID="library-facet-backdrop"
         />
-        <View style={styles.sheetWrap} pointerEvents="box-none">
-        <View style={[styles.sheet, { paddingBottom: insets.bottom + 10 }]}>
+        <View
+          style={styles.sheetWrap}
+          pointerEvents="box-none"
+          // `transparent` is an over-full-screen presentation, so unlike the
+          // page sheet it replaced, the screen behind stays in the hierarchy.
+          // This is the one prop that makes focus containment certain rather
+          // than likely.
+          accessibilityViewIsModal
+          onAccessibilityEscape={() => setOpenFacet(null)}
+        >
+        <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 16) + 10 }]}>
           <LinearGradient
             colors={['rgba(255,255,255,0.10)', 'rgba(255,255,255,0.03)', 'transparent']}
             start={{ x: 0, y: 0 }}
@@ -964,7 +1008,7 @@ export default function LibraryScreen() {
           <View style={styles.grabber} />
           <View style={styles.sheetHead}>
             <Text style={styles.sheetTitle}>
-              {FACETS.find((f) => f.key === openFacet)?.label ?? ''}
+              {FACETS.find((f) => f.key === shownFacet)?.label ?? ''}
             </Text>
             <Pressable
               onPress={() => setOpenFacet(null)}
@@ -977,24 +1021,31 @@ export default function LibraryScreen() {
             </Pressable>
           </View>
           <ScrollView contentContainerStyle={styles.sheetBody}>
-            {(FACETS.find((f) => f.key === openFacet)?.options ?? []).map((o) => {
-              const on = openFacet !== null && facetValue(openFacet) === o.key;
+            {(FACETS.find((f) => f.key === shownFacet)?.options ?? []).map((o) => {
+              const on = shownFacet !== null && facetValue(shownFacet) === o.key;
               return (
                 <Pressable
                   key={o.key || 'all'}
                   onPress={() => {
-                    if (openFacet) setFacetValue(openFacet, o.key);
+                    if (shownFacet) setFacetValue(shownFacet, o.key);
                     setOpenFacet(null);
                   }}
                   style={({ pressed }) => [styles.option, pressed && styles.optionPressed]}
                   accessibilityRole="button"
                   accessibilityState={{ selected: on }}
-                  testID={`library-option-${openFacet}-${o.key || 'all'}`}
+                  testID={`library-option-${shownFacet}-${o.key || 'all'}`}
                 >
                   <Text style={[styles.optionText, on && styles.optionTextOn]}>{o.label}</Text>
                   {/* A mark, not just colour — the row reads as chosen without
                       relying on the accent being distinguishable. */}
-                  {on && <Icon name="check" size={14} color={accent.accent} />}
+                  {/* `ink`, not `accent`: the glass composite is lighter than
+                      any surface the palette validator checks, and purple's
+                      FILL measures 2.91:1 here — under the 3:1 the palette's
+                      own contract requires of a graphic that carries meaning.
+                      `ink` exists for precisely that ("fine as a shape, fails
+                      as type"). The row also switches to `text` at weight 700,
+                      so the state was never carried by the mark alone. */}
+                  {on && <Icon name="check" size={14} color={accent.ink} />}
                 </Pressable>
               );
             })}
@@ -1002,6 +1053,7 @@ export default function LibraryScreen() {
         </View>
         </View>
       </Modal>
+      )}
 
     </View>
   );
