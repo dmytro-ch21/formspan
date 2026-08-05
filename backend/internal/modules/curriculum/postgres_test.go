@@ -851,3 +851,77 @@ func TestProgressCountsOnlyItemsThatCarryCriteria(t *testing.T) {
 		t.Fatalf("mastered: got %d, want 1", got.MasteredItems)
 	}
 }
+
+func TestTheListCanTellARoadmapFromAReadingList(t *testing.T) {
+	// The bug this pins shipped a whole screen: the list response left
+	// CountableItems at zero, so a web card built on it called every roadmap
+	// "a reading list" -- the exact property the screen existed to convey,
+	// inverted, on every row. A build cannot see it, because zero satisfies the
+	// type perfectly.
+	//
+	// MasteredItems is deliberately NOT asserted here: it stays zero on the
+	// list because computing it needs the per-curriculum evidence aggregate,
+	// and running that once per row is the wrong trade. If that ever changes,
+	// this test should grow an assertion rather than the client growing an
+	// assumption.
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	cleanupUser(t, pool, "athlete19")
+	a := seedTechnique(t, pool, "test-list-a")
+	b := seedTechnique(t, pool, "test-list-b")
+	c3 := seedTechnique(t, pool, "test-list-c")
+
+	road, err := repo.Create(ctx, "athlete19", NewCurriculum{
+		Name: "Roadmap",
+		Items: []NewItem{
+			{TechniqueID: a, Criteria: &Criteria{TargetScored: intp(25)}},
+			// Defence-only still counts: it is a criterion, and the SQL
+			// predicate has to agree with Countable() about that.
+			{TechniqueID: b, Criteria: &Criteria{TargetDefended: intp(8)}},
+			{TechniqueID: c3},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create roadmap: %v", err)
+	}
+	reading, err := repo.Create(ctx, "athlete19", NewCurriculum{
+		Name:  "Reading",
+		Items: []NewItem{{TechniqueID: a}, {TechniqueID: b}},
+	})
+	if err != nil {
+		t.Fatalf("create reading: %v", err)
+	}
+
+	list, err := repo.List(ctx, "athlete19")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	got := map[string]Curriculum{}
+	for _, c := range list {
+		got[c.ID] = c
+	}
+
+	if r := got[road.ID]; r.ItemCount != 3 || r.CountableItems != 2 {
+		t.Fatalf("roadmap on the list: items=%d countable=%d, want 3/2",
+			r.ItemCount, r.CountableItems)
+	}
+	if r := got[reading.ID]; r.ItemCount != 2 || r.CountableItems != 0 {
+		t.Fatalf("reading list on the list: items=%d countable=%d, want 2/0",
+			r.ItemCount, r.CountableItems)
+	}
+
+	// And the single read agrees with the list about the same curriculum --
+	// two code paths compute this, so they have to be checked against each
+	// other rather than each against my expectations.
+	one, err := repo.Get(ctx, "athlete19", road.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if one.ItemCount != got[road.ID].ItemCount ||
+		one.CountableItems != got[road.ID].CountableItems {
+		t.Fatalf("list and get disagree: get=%d/%d list=%d/%d",
+			one.ItemCount, one.CountableItems,
+			got[road.ID].ItemCount, got[road.ID].CountableItems)
+	}
+}

@@ -2044,8 +2044,8 @@ components:
         to learn, while the suggestion tiers say what your logs report about how
         it is going.
       required:
-        [id, editable, name, description, visibility, enrolled, countable_items,
-         mastered_items, created_at, updated_at]
+        [id, editable, name, description, visibility, enrolled, item_count,
+         countable_items, mastered_items, created_at, updated_at]
       properties:
         id: { type: string }
         editable:
@@ -2076,21 +2076,35 @@ components:
             after archiving keeps the original date.
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+        item_count:
+          type: integer
+          description: >
+            How many techniques are in it. Present on the LIST as well as the
+            single read, so a card can say "12 techniques" without fetching
+            them.
         countable_items:
           type: integer
           description: >
-            How many items carry criteria. THE PROGRESS RULE, shipped rather
-            than left for each client to invent: progress counts only
-            criteria-bearing items, so a ten-item curriculum with three roadmap
-            steps is three items' worth of progress and not three tenths.
-            Dividing `mastered_items` by `items.length` is the silent wrong
-            answer. Zero on the list response, where `items` is absent.
+            How many items carry criteria — i.e. whether this is a roadmap at
+            all. THE PROGRESS RULE, shipped rather than left for each client to
+            invent: progress counts only criteria-bearing items, so a ten-item
+            curriculum with three roadmap steps is three items' worth of
+            progress and not three tenths. Dividing by `item_count` is the
+            silent wrong answer. Present on the list AND the single read.
         mastered_items:
           type: integer
           description: >
             How many countable items the caller's record currently clears.
             "Currently" is load-bearing — mastery is derived, not stored, so
             this can go DOWN.
+
+
+            **Zero on the list response.** It needs the per-curriculum evidence
+            aggregate, which is deliberately not run once per row — so a list
+            card drawing a progress bar from it is rendering a placeholder as
+            fact. That shipped once, in reverse: a card read `countable_items`
+            when it too was absent, and told every athlete their roadmap was a
+            reading list.
         items:
           type: array
           description: Present on a single read, absent from the list response.
