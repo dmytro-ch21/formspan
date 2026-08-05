@@ -1,6 +1,54 @@
 # Curricula, suggestions and the gameplan — design draft
 
-**Status:** draft for review. Nothing built. No schema proposed for merge yet.
+**Status:** the draft below is preserved as written, before anything was built.
+Tier 0 and Tier 1 have since shipped, and the reconciliation immediately below
+records where the built thing diverged from the plan and which of the open
+questions the implementation answered. **Read that first** — the body still
+speaks in the future tense throughout, and taken alone it now misdescribes the
+app.
+
+## What shipped, and where it diverged (2026-08-05)
+
+Landed in #133 (the `defended` event), #134 (Tier 0 and Tier 1) and #135
+(dismissal, and a settings screen to control it).
+
+- **The Tier 1 gate is six drilled classes, not the ~9 the analysis argues
+  for.** The table below is still right — six is defensible only if an athlete
+  would otherwise try a drilled technique live about 40% of the time, and 9 is
+  the safer number at 30%. Six was chosen deliberately anyway: the cost of a
+  wrong funnel-gap suggestion is one ignored card, the cost of never firing is
+  a feature nobody sees, and the copy was softened to claim only what the record
+  supports ("never logged live", not "you never try it"). If the suggestion
+  proves noisy in real use, this number is the first dial to turn.
+- **`MIN_DRILLED` counts separate classes, not tagged events.** The wizard
+  writes `drilled` once per session per technique, so the two coincide today —
+  but the constant means classes, and a future multi-tag-per-session path must
+  not silently turn six classes into six taps.
+- **Tier 1 gained a precondition the draft did not anticipate:** `countersInUse`.
+  The draft's `attempted + scored === 0` test is unfalsifiable for an athlete who
+  has never opened the focus grid, because only that grid writes those counters —
+  so "never tried it live" would have been claimed about every technique of
+  every athlete who logs the fast path. The gap now requires evidence that the
+  counters are in use at all before reading a zero as meaningful.
+- **Tier 2 and Tier 3 are not built.** Nothing here about position hot spots or
+  the gameplan editor has been implemented; those sections remain a proposal.
+
+### Questions the implementation answered
+
+Numbered against the open-questions list at the foot of this document.
+
+1. **Persist or recompute?** Recomputed, as recommended — and the *dismissal*
+   persists, in `bjj_dismissed_suggestions`, device-local.
+2. **One suggestion or a list?** One.
+4. **Does the live grid grow a third column?** No — the conditional option. The
+   `defended` counter appears in `FUNNEL_OUTCOMES` for techniques already in
+   focus, so the 5 × 2 category grid is untouched and only the handful of
+   techniques a roadmap cares about pay for it.
+
+Questions **3** (gate met, nothing stands out) and **5** (marking a technique
+complete by hand) are still open. 3 becomes live as soon as anyone reaches six
+classes of evidence with no gap to report — today that path renders nothing at
+all, which is the silence the question warns against.
 
 Three things get conflated whenever this is discussed, and they have different
 data costs, different failure modes and different homes in the app. This
