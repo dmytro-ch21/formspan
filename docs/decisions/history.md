@@ -9614,6 +9614,19 @@ move and the first time it has.
   no-op. The generic `shoulders` and `serratus` came back out on the same
   evidence: this catalog records `shoulders` as a stabiliser, so it was pulling
   a Kettlebell Windmill and a Suspension Pike into Push.
+- **The picker is a glass sheet, not a page.** It shipped as
+  `presentationStyle="pageSheet"` — the whole display taken over to offer nine
+  short options, a modal context switch for what is really a dropdown. It is
+  `transparent` now, sized to its content, anchored to the bottom, with a grab
+  handle and tap-outside-to-dismiss, so the list you are filtering stays
+  visible behind it. The glass follows `BjjRankHeader`'s recipe including its
+  reasoning — **not** `expo-blur`, because a BlurView samples what is behind it
+  and would cost a native view to blur a nearly-flat ground; glass on a dark
+  ground is a translucent panel, a lit top-left edge and a wash. One deliberate
+  deviation: the rank card uses `0.72` because it sits on empty ground, while
+  this sits over a dense list where the exercise names read straight through
+  the option labels at that value. `0.93` is the brief — enough to see what you
+  are filtering, not enough to read it.
 - **Review found the coverage test was watching the wrong door.** Its oracle
   was the shipped catalog, so `grappling` — legal in the API's closed
   vocabulary, used by no row — was unmapped and invisible to it. The first

@@ -4020,6 +4020,11 @@ a button that opens a picker rather than a row of pinned options.
   behave as the old chip rows did.
 - Choosing the "All" option in a sheet clears that axis, and the button returns
   to naming the axis.
+- The sheet is a **bottom sheet, not a full-screen page**: it is sized to its
+  options, the filtered list stays visible (dimmed) behind it, and tapping
+  outside it closes it without changing the selection. Worth checking the
+  option labels stay legible against whatever is behind — the translucency is
+  tuned for a dense list, which is the worst case.
 - The belt choice still persists across launches; the strength axes are session
   state and are not expected to.
 

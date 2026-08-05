@@ -19,6 +19,8 @@ import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { getStanding } from '@/lib/bjj';
+import { LinearGradient } from 'expo-linear-gradient';
+
 import { Icon } from '@/components/ui/Icon';
 import { fetchExercises, pickImage, type Exercise } from '@/lib/exercises';
 import {
@@ -914,13 +916,48 @@ export default function LibraryScreen() {
         selected mark, dismissal — is identical, so writing it once is what
         stops the four drifting the way the two scroll rows already had.
       */}
+      {/*
+        A compact glass sheet, not a full-screen page.
+
+        `presentationStyle="pageSheet"` took over the whole display to offer
+        nine short options — a modal context switch for what is really a
+        dropdown. This is `transparent` with the card sized to its content and
+        anchored to the bottom, so the list you are filtering stays visible
+        behind it and the sheet reads as attached to this screen rather than
+        as somewhere else.
+
+        The glass follows `BjjRankHeader`'s recipe exactly, including its
+        reasoning: NOT `expo-blur`, because a BlurView samples what is behind
+        it and would cost a native view to blur a nearly-flat ground. Glass
+        here is a translucent panel, a lit top-left edge, and a wash.
+      */}
       <Modal
         visible={openFacet !== null}
         animationType="slide"
-        presentationStyle="pageSheet"
+        transparent
         onRequestClose={() => setOpenFacet(null)}
       >
-        <View style={styles.sheet} lightColor={vola.bg} darkColor={vola.bg}>
+        {/* Tapping off the sheet closes it — the affordance a bottom sheet is
+            expected to have, and which the full-screen version could not offer
+            because it had no outside. */}
+        <Pressable
+          style={styles.backdrop}
+          onPress={() => setOpenFacet(null)}
+          accessibilityRole="button"
+          accessibilityLabel="Close filter options"
+          testID="library-facet-backdrop"
+        />
+        <View style={styles.sheetWrap} pointerEvents="box-none">
+        <View style={styles.sheet}>
+          <LinearGradient
+            colors={['rgba(255,255,255,0.10)', 'rgba(255,255,255,0.03)', 'transparent']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 0.9, y: 1 }}
+            style={StyleSheet.absoluteFill}
+            pointerEvents="none"
+          />
+          {/* The grab handle a sheet of this shape is read by. */}
+          <View style={styles.grabber} />
           <View style={styles.sheetHead}>
             <Text style={styles.sheetTitle}>
               {FACETS.find((f) => f.key === openFacet)?.label ?? ''}
@@ -958,6 +995,7 @@ export default function LibraryScreen() {
               );
             })}
           </ScrollView>
+        </View>
         </View>
       </Modal>
 
@@ -1096,15 +1134,52 @@ const styles = StyleSheet.create({
   facetTextActive: { color: vola.text },
   facetCaret: { transform: [{ rotate: '90deg' }] },
 
-  sheet: { flex: 1 },
+  // Dims the list behind without hiding it — you can still see what you are
+  // filtering, which is the point of not taking the whole screen.
+  backdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(4,6,10,0.62)',
+  },
+  sheetWrap: { flex: 1, justifyContent: 'flex-end' },
+  sheet: {
+    // Same translucency, radius and lit edge as the rank card's glass. It only
+    // reads as glass if some of what is behind shows through, so the fill is
+    // deliberately not opaque.
+    // 0.93, not the rank card's 0.72. That card sits on a flat ground with
+    // nothing behind it to read through; this one sits over a dense list of
+    // exercise names, and at 0.86 they showed through the option labels
+    // clearly enough to fight them. "A little transparent" is the brief —
+    // enough to see what you are filtering, not enough to read it.
+    backgroundColor: 'rgba(23,30,43,0.93)',
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    borderWidth: 1,
+    borderBottomWidth: 0,
+    borderColor: 'rgba(255,255,255,0.07)',
+    paddingBottom: 28,
+    overflow: 'hidden',
+  },
+  grabber: {
+    alignSelf: 'center',
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    marginTop: 8,
+    marginBottom: 4,
+  },
   sheetHead: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: vola.line,
+    borderBottomColor: 'rgba(255,255,255,0.08)',
   },
   sheetTitle: { fontSize: 16, fontWeight: '800' },
   sheetClose: { fontSize: 14, fontWeight: '700', color: vola.lime },
@@ -1114,11 +1189,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    // 48pt tall, comfortably over the 44 the HIG asks — this is a list of
-    // targets, which is where an undersized row is felt most.
-    paddingVertical: 15,
+    // 46pt tall, over the 44 the HIG asks — this is a list of targets, which
+    // is where an undersized row is felt most.
+    paddingVertical: 14,
   },
-  optionPressed: { backgroundColor: vola.surface },
+  optionPressed: { backgroundColor: 'rgba(255,255,255,0.05)' },
   optionText: { fontSize: 15, color: vola.textMuted },
   optionTextOn: { color: vola.text, fontWeight: '700' },
 
