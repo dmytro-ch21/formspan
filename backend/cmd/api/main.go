@@ -17,6 +17,7 @@ import (
 
 	"github.com/dmytro-ch21/vola/backend/internal/modules/activity"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/bjj"
+	"github.com/dmytro-ch21/vola/backend/internal/modules/curriculum"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/exercise"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/featureflag"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/health"
@@ -69,6 +70,7 @@ func main() {
 	bjjSessionHandler := bjj.NewSessionHandler(bjjRepo)
 	bjjProficiencyHandler := bjj.NewProficiencyHandler(bjjRepo)
 	bjjFocusHandler := bjj.NewFocusHandler(bjjRepo)
+	curriculumHandler := curriculum.NewHandler(curriculum.NewPostgresRepository(pool))
 	featureFlagHandler := featureflag.NewHandler(featureflag.NewPostgresRepository(pool))
 	activityHandler := activity.NewHandler(activity.NewPostgresRepository(pool))
 	exerciseRepo := exercise.NewPostgresRepository(pool)
@@ -106,6 +108,21 @@ func main() {
 	// platform split: choosing a focus for the next few weeks is planning.
 	mux.Handle("GET /v1/bjj/focus", verifier.RequireAuth(http.HandlerFunc(bjjFocusHandler.Get)))
 	mux.Handle("PUT /v1/bjj/focus", verifier.RequireAuth(http.HandlerFunc(bjjFocusHandler.Set)))
+
+	// Curricula and the roadmaps built on them. Under /v1/curricula rather than
+	// /v1/bjj/curricula because the sharing model is the workouts one and the
+	// shape is not BJJ-specific -- only today's content is.
+	//
+	// Enrollment is a SUBRESOURCE, not a flag on the curriculum: PUT and DELETE
+	// on .../enrollment say who is acting (the caller, always) without the
+	// request body being able to name somebody else.
+	mux.Handle("GET /v1/curricula", verifier.RequireAuth(http.HandlerFunc(curriculumHandler.List)))
+	mux.Handle("POST /v1/curricula", verifier.RequireAuth(http.HandlerFunc(curriculumHandler.Create)))
+	mux.Handle("GET /v1/curricula/{curriculumID}", verifier.RequireAuth(http.HandlerFunc(curriculumHandler.Get)))
+	mux.Handle("PATCH /v1/curricula/{curriculumID}", verifier.RequireAuth(http.HandlerFunc(curriculumHandler.Update)))
+	mux.Handle("DELETE /v1/curricula/{curriculumID}", verifier.RequireAuth(http.HandlerFunc(curriculumHandler.Delete)))
+	mux.Handle("PUT /v1/curricula/{curriculumID}/enrollment", verifier.RequireAuth(http.HandlerFunc(curriculumHandler.Enroll)))
+	mux.Handle("DELETE /v1/curricula/{curriculumID}/enrollment", verifier.RequireAuth(http.HandlerFunc(curriculumHandler.Archive)))
 
 	mux.Handle("GET /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Get)))
 	mux.Handle("POST /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Create)))

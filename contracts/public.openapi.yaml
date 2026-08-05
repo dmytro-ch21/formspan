@@ -1930,6 +1930,208 @@ components:
             reordering or adding an entry does not reset it — it is what makes
             "you have been on this five weeks, consider rotating" answerable.
 
+    CurriculumCriteria:
+      type: object
+      description: >
+        What mastering one technique takes. Every threshold is measured SINCE
+        THE ATHLETE ENROLLED, never over all time — over all time the hit rate
+        includes the months during which they could not do the technique, so it
+        measures the learning phase it exists to exclude.
+
+
+        There is deliberately no way to mark a technique mastered by hand: it is
+        earned from the record or it is not claimed. Note that the evidence is
+        still self-reported, so these make fabrication tedious rather than
+        impossible.
+      properties:
+        target_scored:
+          type: integer
+          nullable: true
+          example: 25
+          description: >
+            Times landed live. Null on a defence-only criterion — "not get
+            caught in guard pull N times" has no offensive half.
+        target_defended:
+          type: integer
+          nullable: true
+          example: 8
+          description: >
+            Times the athlete stopped the opponent's. Roughly a THIRD of
+            `target_scored`, and not because defence matters less: you do not
+            choose when a technique is attempted on you, so the evidence
+            arrives about 3.2x more slowly (modelled, not measured). Symmetric
+            targets leave a roadmap stuck at three-quarters complete.
+        target_sessions:
+          type: integer
+          nullable: true
+          example: 12
+          description: >
+            Distinct sessions the evidence must span — the guard against one big
+            open mat against a tired partner. Counts LIVE sessions only;
+            drilling never satisfies it.
+        min_hit_rate:
+          type: number
+          format: float
+          nullable: true
+          example: 0.35
+          description: >
+            `scored / (attempted + scored)`, and the reason the word "mastered"
+            is defensible: a volume threshold alone is satisfied by 25-from-30
+            and 25-from-400 alike, and only the first is skill. Requires
+            `target_scored`.
+
+    CurriculumProgress:
+      type: object
+      description: >
+        The caller's evidence against one item's criteria, recomputed on every
+        read and stored nowhere. Absent when the caller is not enrolled — there
+        is no window to measure them over — and when the item has no criteria.
+      required: [scored, defended, sessions, attempts, mastered]
+      properties:
+        scored: { type: integer, example: 26 }
+        defended: { type: integer, example: 9 }
+        sessions: { type: integer, example: 13 }
+        attempts:
+          type: integer
+          example: 66
+          description: scored + attempted — how often they went for it.
+        hit_rate:
+          type: number
+          format: float
+          nullable: true
+          example: 0.394
+          description: >
+            Null when `attempts` is zero. Zero from zero is not a rate, and
+            rendering it as 0% would report a failure the athlete has not had.
+        mastered: { type: boolean }
+
+    CurriculumItem:
+      type: object
+      required: [technique_id, name, position, category, order, notes]
+      properties:
+        technique_id: { type: string, example: arm-drag }
+        name: { type: string, example: Arm Drag }
+        position: { type: string, example: Guard - Bottom }
+        category: { type: string, example: Sweep }
+        order: { type: integer, example: 0 }
+        notes: { type: string }
+        criteria:
+          allOf:
+            - $ref: "#/components/schemas/CurriculumCriteria"
+          type: object
+          nullable: true
+          description: >
+            Null means this item is reading rather than a roadmap step. Progress
+            counts only items that carry criteria.
+        progress:
+          allOf:
+            - $ref: "#/components/schemas/CurriculumProgress"
+          type: object
+          nullable: true
+          description: >
+            Null when the caller is not enrolled, or when the item has no
+            criteria.
+
+    Curriculum:
+      type: object
+      description: >
+        An ordered set of techniques to learn. A curriculum whose items carry
+        completion criteria is a ROADMAP; the nullability is the only
+        distinction, so one engine serves both.
+
+
+        Deliberately NOT a suggestion source: following one says what you intend
+        to learn, while the suggestion tiers say what your logs report about how
+        it is going.
+      required:
+        [id, editable, name, description, visibility, enrolled, countable_items,
+         mastered_items, created_at, updated_at]
+      properties:
+        id: { type: string }
+        editable:
+          type: boolean
+          description: >
+            Whether the CALLER may edit this. Resolved server-side rather than
+            by handing the client an owner id to compare, which is the shape
+            that produces client-side authorization.
+        name: { type: string, example: Blue belt basics }
+        description: { type: string }
+        belt:
+          type: string
+          nullable: true
+          example: blue
+          description: >
+            Which belt's fundamentals this is, or null for an athlete's own
+            list. A HINT FOR ORDERING, never a gate — working white-belt
+            fundamentals at purple is not a mistake.
+        visibility: { type: string, enum: [private, public] }
+        enrolled: { type: boolean }
+        started_on:
+          type: string
+          format: date
+          nullable: true
+          description: >
+            When the caller took this on, and the anchor every criterion is
+            measured from. Null unless enrolled. Picking a curriculum back up
+            after archiving keeps the original date.
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        countable_items:
+          type: integer
+          description: >
+            How many items carry criteria. THE PROGRESS RULE, shipped rather
+            than left for each client to invent: progress counts only
+            criteria-bearing items, so a ten-item curriculum with three roadmap
+            steps is three items' worth of progress and not three tenths.
+            Dividing `mastered_items` by `items.length` is the silent wrong
+            answer. Zero on the list response, where `items` is absent.
+        mastered_items:
+          type: integer
+          description: >
+            How many countable items the caller's record currently clears.
+            "Currently" is load-bearing — mastery is derived, not stored, so
+            this can go DOWN.
+        items:
+          type: array
+          description: Present on a single read, absent from the list response.
+          items:
+            $ref: "#/components/schemas/CurriculumItem"
+
+    CurriculumWrite:
+      type: object
+      description: >
+        Every field optional so PATCH can be partial; POST requires `name`.
+        Omitting `items` leaves the list alone, `[]` empties it, and a list
+        replaces it wholesale.
+
+
+        `id`, `editable`, `enrolled` and all progress are absent by design: the
+        id is the server's, and the rest are facts about the caller rather than
+        about the curriculum.
+      properties:
+        name: { type: string }
+        description: { type: string }
+        belt:
+          type: string
+          nullable: true
+          description: >
+            On PATCH, an explicit `null` CLEARS the belt while omitting the
+            field leaves it alone — the two are different requests.
+        visibility: { type: string, enum: [private, public] }
+        items:
+          type: array
+          maxItems: 60
+          items:
+            type: object
+            required: [technique_id]
+            properties:
+              technique_id: { type: string }
+              notes: { type: string }
+              target_scored: { type: integer, nullable: true }
+              target_defended: { type: integer, nullable: true }
+              target_sessions: { type: integer, nullable: true }
+              min_hit_rate: { type: number, format: float, nullable: true }
+
     ExerciseWrite:
       type: object
       description: >
@@ -2647,6 +2849,179 @@ paths:
         "204": { description: Removed. }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+
+  /curricula:
+    get:
+      summary: Curricula the caller can see
+      operationId: listCurricula
+      description: >
+        The caller's own plus every public one, with `enrolled` and `editable`
+        resolved for them.
+
+
+        Capped at 200 and ordered the caller's OWN rows first, then enrolled,
+        then belt, then name, then id. The ordering matters under the cap: this
+        list spans every user's public curricula, so leading with `enrolled`
+        alone would let strangers' syllabuses evict the caller's own private
+        ones. Sorting belts white-to-black belongs to the client, which knows
+        the athlete's rank. Items are omitted — read one to get them.
+      responses:
+        "200":
+          description: The visible curricula.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [curricula]
+                properties:
+                  curricula:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Curriculum"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      summary: Create a curriculum
+      operationId: createCurriculum
+      description: >
+        Always owned by the caller and private unless `visibility` says
+        otherwise. The id is server-generated: unlike a workout there is no
+        offline-creation case, and a client-chosen id lets a caller probe for
+        existing ones by watching which inserts conflict.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CurriculumWrite"
+      responses:
+        "201":
+          description: The created curriculum, with its items.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Curriculum"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /curricula/{curriculumID}:
+    parameters:
+      - name: curriculumID
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      summary: One curriculum, with items and the caller's progress
+      operationId: getCurriculum
+      description: >
+        Progress is present only when the caller is enrolled — browsing shows
+        what a syllabus asks of you, working one shows how far along you are.
+
+
+        Returns 404, never 403, for a private curriculum the caller does not
+        own: a 403 would confirm the id exists.
+      responses:
+        "200":
+          description: The curriculum.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Curriculum"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      summary: Edit a curriculum the caller owns
+      operationId: updateCurriculum
+      description: >
+        403 for a curriculum the caller can see but does not own — including
+        every VOLA-authored syllabus, which no user may edit however public it
+        is. That leaks nothing, because they can already read it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CurriculumWrite"
+      responses:
+        "200":
+          description: The updated curriculum.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Curriculum"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      summary: Delete a curriculum the caller owns
+      operationId: deleteCurriculum
+      description: >
+        409 when other athletes are working it. Their enrollment is THEIR
+        record, not the publisher's, and cascading would let one person erase
+        another's history of having worked a syllabus.
+      responses:
+        "204":
+          description: Deleted.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /curricula/{curriculumID}/enrollment:
+    parameters:
+      - name: curriculumID
+        in: path
+        required: true
+        schema: { type: string }
+    put:
+      summary: Start working this curriculum
+      operationId: enrollInCurriculum
+      description: >
+        Idempotent, and it un-archives: picking something back up is not an
+        error, and a retry after a dropped response must converge. `started_on`
+        is NOT reset — it is when the athlete first took it on, and every
+        criterion is measured from it.
+
+
+        A subresource rather than a field on the curriculum, so the acting user
+        is always the caller and no request body can name somebody else. Returns
+        404 for a curriculum the caller cannot see; without that check, enrolling
+        would be a read oracle for a stranger's private list.
+      responses:
+        "204":
+          description: Enrolled.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      summary: Put this curriculum down
+      operationId: archiveCurriculumEnrollment
+      description: >
+        Archives rather than deletes. Having worked a syllabus and stopped is a
+        fact about the athlete, and a roadmap that vanishes on abandonment
+        cannot later say "you did three quarters of this". It does NOT mean
+        completed — completion is derived from the evidence.
+      responses:
+        "204":
+          description: Archived.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /bjj/focus:
     get:

@@ -594,8 +594,10 @@ function LiveStep({
                   // Landed and Stopped are both wins — one offensive, one
                   // defensive — and colouring only the first would say the
                   // quiet part out loud about which half the app values.
-                  // Tried is neither a win nor something done to you; it is
-                  // the attempt, which is the behaviour being encouraged.
+                  // Missed is neither a win nor something done to you; it is
+                  // the attempt that did not land, and going for it is still
+                  // the behaviour being encouraged -- hence neutral rather
+                  // than the conceded tone.
                   tone={o.event === 'attempted' ? 'neutral' : 'scored'}
                   onAdd={() =>
                     onChange({ ...detail, tags: bumpTechniqueOutcome(detail.tags, f, o.event, 1) })
@@ -609,8 +611,9 @@ function LiveStep({
             </RNView>
           ))}
           <Text style={styles.footnote}>
-            The techniques you&apos;re working on. “Tried” means you went for it and it didn&apos;t
-            land, so tried plus landed is how often you went for it. “Stopped theirs” is the other
+            The techniques you&apos;re working on. “Missed” means you went for it and it
+            didn&apos;t land, so missed plus landed is how often you went for it — and landed out of
+            that is your hit rate, which is what a roadmap reads. “Stopped theirs” is the other
             direction — they went for it and you shut it down. Record it here rather than in the grid
             below — one row per thing that happened.
           </Text>
@@ -690,7 +693,7 @@ function Counter({
   value: number;
   label: string;
   /** Prefixed to the accessibility label. The focus rows use it because
-   *  adjacency is a VISUAL property — VoiceOver reads a run of "Tried: 0 /
+   *  adjacency is a VISUAL property — VoiceOver reads a run of "Missed: 0 /
    *  Landed: 0" with nothing binding a pair to a technique. The category grid
    *  below omits it because its row label ("Submissions") is already part of
    *  the same announced row. */
@@ -775,7 +778,7 @@ function nameFor(all: TechniqueSummary[], id: string | null | undefined): string
   // the gym, which is the flow this app exists for — `all` is empty and every
   // row rendered as the same word "Technique". That makes the counters
   // unbindable to a technique for a sighted user and turns the funnel
-  // counters' accessibility context into "Technique, Tried: 0" repeated down
+  // counters' accessibility context into "Technique, Missed: 0" repeated down
   // the list, which is exactly the ambiguity that context prop was added to
   // remove. The ids are readable slugs (`armbar-from-guard`), so they are a
   // genuinely useful last resort. Matches the read-back screen's `nameOf`.
@@ -900,7 +903,7 @@ const styles = StyleSheet.create({
   // and the tone should not scold. See the no-shame-messaging stance.
   counterScored: { backgroundColor: vola.setDone },
   counterConceded: { borderColor: vola.warn, backgroundColor: vola.surfaceRaised },
-  // "Tried" is neither a win nor something that happened to you — it is the
+  // "Missed" is neither a win nor something that happened to you — it is the
   // attempt, which is the thing being encouraged. Raised surface, no accent.
   counterNeutral: { borderColor: vola.textMuted, backgroundColor: vola.surfaceRaised },
   counterValue: { fontSize: 20, fontWeight: '800', color: vola.textDim },

@@ -40,15 +40,75 @@ Numbered against the open-questions list at the foot of this document.
 1. **Persist or recompute?** Recomputed, as recommended — and the *dismissal*
    persists, in `bjj_dismissed_suggestions`, device-local.
 2. **One suggestion or a list?** One.
+3. **Gate met, nothing stands out?** Say so, warmly: *keep logging and keep
+   working on yourself — you're doing great.* Decided 2026-08-05. The
+   alternatives were both worse in the ways the question anticipated — silence
+   reads as the feature being broken, and manufacturing a finding to fill the
+   space is the fabricated-zero mistake the Tier 1 `countersInUse` precondition
+   exists to prevent. Note what this message is actually claiming: **not** that
+   the athlete is training well, which the app cannot see, but that there is
+   nothing in the record worth flagging, which it can. The copy has to stay on
+   the right side of that line or it becomes the first thing here that
+   flatters rather than reports.
 4. **Does the live grid grow a third column?** No — the conditional option. The
    `defended` counter appears in `FUNNEL_OUTCOMES` for techniques already in
    focus, so the 5 × 2 category grid is untouched and only the handful of
    techniques a roadmap cares about pay for it.
+5. **Can an athlete mark a technique complete by hand?** **No.** Decided
+   2026-08-05, against this document's own recommendation. Mastery is
+   **earned from the record or it is not claimed** — there is no hand-marking
+   path, and `000034_create_curricula` has no column that could store one.
 
-Questions **3** (gate met, nothing stands out) and **5** (marking a technique
-complete by hand) are still open. 3 becomes live as soon as anyone reaches six
-classes of evidence with no gap to report — today that path renders nothing at
-all, which is the silence the question warns against.
+   The doc argued yes on the grounds that a coach saying "you've got that" beats
+   ten tags and that a roadmap which cannot accept it gets worked around. That
+   is a real cost and it is being paid deliberately, because the thing being
+   protected is worth more: a roadmap whose completions can be self-declared
+   cannot tell an athlete anything they did not already believe. The number has
+   to be able to disappoint them or it means nothing.
+
+   The consequence is that the bar has to be honest, which is what forced the
+   criteria below to be re-derived from scratch.
+
+### What "mastered" now requires, and why it is not easy
+
+The earlier draft modelled ten live scores — about twelve focus-sessions, or a
+month at three sessions a week. A month is not what anybody means by mastering a
+technique, and with no hand-marking to soften it the threshold is now the only
+thing standing between the word and its meaning.
+
+Four criteria, all per technique, all nullable so a curriculum can also just be
+a reading list:
+
+| criterion | default | what it rules out |
+| --- | --- | --- |
+| `target_scored` | 25 | one good week |
+| `target_defended` | 8 | knowing the attack and nothing about the defence |
+| `target_sessions` | 12 | one big open mat against a tired partner |
+| `min_hit_rate` | 0.35 | throwing it constantly and counting the hits |
+
+At the modelled rate (~0.83 scores per focus-session with four techniques in
+focus) 25 lands in roughly 30 focus-sessions — about ten weeks. A
+twelve-technique syllabus worked four at a time therefore runs seven or eight
+months, which is the right order of magnitude for a belt. The defensive eight is
+a third of the offensive target on purpose, because defensive evidence arrives
+about 3.2× more slowly; the two halves complete at about the same moment.
+
+**`min_hit_rate` is what earns the word.** This document argued at length that
+the honest term was "complete", not "mastered", because a volume threshold says
+nothing about the denominator: 25-from-30 and 25-from-400 both satisfy it, and
+only the first is skill. That objection is exact and it is answered by including
+the denominator rather than by weakening the word. It is computable here — and
+only here — because `attempted` and `scored` are kept **disjoint** (000025
+defines `attempted` as "tried it live, it didn't land", not as total tries), so
+`scored / (attempted + scored)` is a real hit rate rather than an estimate.
+
+Verified against Postgres rather than asserted: with 26 scores over 13 sessions
+and 9 defences, at a 0.394 hit rate, the item reads mastered; holding every
+volume number identical and inflating the failed attempts to ~266 drops the rate
+to 0.098 and it does not. The volume alone never decides it.
+
+All five questions are now answered. `000034_create_curricula` is the first
+thing built on them.
 
 Three things get conflated whenever this is discussed, and they have different
 data costs, different failure modes and different homes in the app. This
@@ -294,7 +354,11 @@ scope is "three-to-five things you are developing"):
 
 **Defensive targets should be roughly a third of offensive ones.** Not because
 defence matters less, but because the rate of opportunity differs by about that
-much. A criterion that reads "land it 10 times, defend it 3 times" completes both
+much. *(The 1:3 RATIO is what survived into `000034`; the absolute numbers did
+not. Ten and three clear in about twelve focus-sessions, which is a month — too
+cheap for the word "mastered" once hand-marking was ruled out. The shipped
+defaults are 25 and 8, same ratio, about ten weeks. See the top of this
+document.)* A criterion that reads "land it 10 times, defend it 3 times" completes both
 halves at the same time; "10 and 10" is a roadmap that is 76% offence-complete
 and stuck.
 
@@ -333,6 +397,17 @@ But the word for it is **"complete"**, not **"mastered"**. The evidence supports
 are. The rate claim needs the attempt denominator, which is exactly the ~55
 exchanges the Tier 2 analysis priced — far beyond a per-technique criterion.
 
+*(This objection stands, and `000034` answers it rather than ignoring it: the
+criteria now INCLUDE the denominator, via `min_hit_rate` =
+`scored / (attempted + scored)`. Note the paragraph above conflates two
+different denominators. The ~55 figure prices a POSITION-level claim tested
+against a population baseline — "your concede rate in half guard is worse than
+your baseline" — which is still not built and still should not be. A
+per-technique hit rate compared against a fixed threshold is a much weaker claim
+and needs only the athlete's own attempts, which this schema already records
+disjointly. That is why the word "mastered" is defensible in `000034` and was
+not defensible here.)*
+
 ---
 
 ## How it connects to the existing screens
@@ -369,6 +444,21 @@ technique complete* — small, and completion should be **stored** rather than
 recomputed, unlike suggestions. A technique you completed in March stays
 completed when you stop training it in June; that is the opposite of adherence,
 where recomputation is what keeps it honest.
+
+*(**OVERRULED** — see the top of this document. Completion is DERIVED like
+everything else, and `000034` has no column that could store it. Recording the
+reversal here because this paragraph reads as the plan of record and would
+otherwise be quoted back as one.*
+
+*The consequence it names is real and is accepted: mastery is a statement about
+the record NOW, not a trophy, so a long enough bad run can take it back. Two
+things make that livable rather than cruel. The measurement window means only
+evidence since enrolling counts, so nothing can be un-mastered by history the
+athlete has already moved past. And reaching 25 scores at a 0.35 rate takes
+enough volume that one bad month cannot undo it — the arithmetic has to go
+badly wrong for months. What it does mean is that the copy must say "your record
+shows" rather than "you have earned", because the second promises permanence the
+data model does not offer.)*
 
 ---
 
@@ -420,6 +510,11 @@ gets suggestions, which is most athletes at the start.
 
 ## What I'd want settled before any schema lands
 
+> **All five are settled as of 2026-08-05** — see "Questions the implementation
+> answered" at the top, which records the decision and the reasoning for each.
+> The list below is preserved as the original framing, because the *arguments*
+> for each recommendation are still the reason the answers are what they are.
+
 1. **Does a suggestion persist, or is it recomputed?** Recommend recomputed —
    same argument as `lib/adherence.ts`: a stored suggestion goes stale against
    the evidence it was derived from, and deleting a session should withdraw the
@@ -439,7 +534,9 @@ gets suggestions, which is most athletes at the start.
 5. **Can an athlete mark a technique complete by hand?** A coach saying "you've
    got that" is better evidence than ten tags, and a roadmap that cannot accept
    it will be worked around or abandoned. I lean yes, recorded as a distinct
-   source so the two are never confused.
+   source so the two are never confused. *(Answered NO — see the top of this
+   document. This recommendation was overruled deliberately, and the reasoning
+   for overruling it is recorded there.)*
 
 ## Known gaps in this design
 
