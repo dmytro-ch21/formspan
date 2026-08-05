@@ -110,6 +110,14 @@ func TestCapabilities_AreCoherent(t *testing.T) {
 		if m.Caps.RecordKinds == nil {
 			t.Errorf("%s: nil RecordKinds — use an empty slice so it serialises as [] not null", m.Key)
 		}
+		// A facet is an extra axis on a CATALOG. Declared on a module with no
+		// catalog it is a filter for a list that does not exist — exactly the
+		// "control that does nothing" the mechanism is there to prevent, and
+		// the failure would be a client rendering a dead button rather than
+		// anything the server would notice.
+		if len(m.Caps.Facets) > 0 && m.Caps.Catalog == "" {
+			t.Errorf("%s: declares facets %v but has no catalog to filter", m.Key, m.Caps.Facets)
+		}
 		for _, f := range m.Caps.Facets {
 			if f == "" {
 				t.Errorf("%s: empty facet name", m.Key)

@@ -56,8 +56,15 @@ type Capabilities struct {
 	// "exercises", "techniques", or "" for a module with no catalog at all.
 	Catalog string `json:"catalog"`
 
-	// Facets are extra filter axes beyond the catalog's own. BJJ has
-	// "position" and "belt"; nothing else does yet.
+	// Facets are extra filter axes beyond the catalog's own — BJJ has
+	// "position" and "belt", strength has "muscle" and "movement".
+	//
+	// **Axes, not query parameters.** Nothing server-side reads this: every
+	// facet today is filtered CLIENT-side from fields already on the catalog
+	// row the client has loaded. What the list does is tell a client which
+	// controls to render, so a filter never appears against a catalog it
+	// cannot narrow. The name invites the Solr reading of "faceted search";
+	// it is not that.
 	Facets []string `json:"facets"`
 
 	// HasGoals gates the powerlifting/hypertrophy/endurance picker. Strength
@@ -114,6 +121,17 @@ var modules = []Module{
 			Catalog:        "exercises",
 			HasGoals:       true,
 			HasProgression: true,
+			// Both are CLIENT-SIDE filters, declared here for the same reason
+			// BJJ's position and belt are: the facet list is what tells a
+			// client which axes this discipline is browsed on, so a screen
+			// never renders a control that does nothing to the catalog in
+			// front of it. `movement_pattern` and `primary_muscles` are
+			// already on every row `GET /v1/exercises` returns, so neither
+			// needs a query parameter — see `lib/exerciseFacets.ts`, which
+			// also holds the grouping, because the raw values (58 muscles,
+			// `horizontal_push`) are anatomy rather than anything a person
+			// would filter by.
+			Facets: []string{"muscle", "movement"},
 			RecordKinds: []string{
 				"heaviest_weight", "estimated_1rm", "most_reps",
 			},

@@ -3989,3 +3989,65 @@ unchanged:
   shown empty.
 - A promotion dated `2026-04-10` renders as 10 April in a UTC-negative zone —
   never the 9th.
+## Library facet filters (mobile, `app/(tabs)/library.tsx` + `lib/exerciseFacets.ts`)
+
+Four axes — position and belt for BJJ, muscle and movement for strength — each
+a button that opens a picker rather than a row of pinned options.
+
+### Happy path
+
+- With the sport chip on **Strength**, a `Muscle` and a `Movement` button
+  appear. Tapping one opens a sheet; choosing an option filters the list and
+  the button now reads that option's name.
+- `Movement → Push` returns both horizontal and vertical pressing — the point
+  of the grouping is that "push" is not a value in the data.
+- **`Movement → Pull` must contain biceps curls**, and `Push` must contain
+  triceps and lateral-raise work. Those rows are `movement_pattern:
+  "isolation"`, which is single-valued, so without a derivation they appear
+  under neither — the filter looking broken to anyone who lifts. They appear
+  under Isolation *as well*, which is intended.
+- Leg, core and forearm isolation appears under **neither** Push nor Pull —
+  there is no training convention to derive from — and must still be reachable
+  through `Movement → Isolation` and through its muscle group.
+- A non-isolation row must NOT get the derivation: a mobility drill whose
+  primary muscle is biceps is not a pull.
+- `Muscle → Chest` returns exercises whose **primary** muscles are chest-ish
+  (chest, upper-chest, lower-chest, serratus) and NOT things that merely work
+  chest secondarily, like a pull-up.
+- Two facets combine: `Muscle → Legs` plus `Movement → Hinge` narrows further
+  than either alone.
+- With the sport chip on **BJJ**, `Position` and `Belt` appear instead, and
+  behave as the old chip rows did.
+- Choosing the "All" option in a sheet clears that axis, and the button returns
+  to naming the axis.
+- The sheet is a **bottom sheet, not a full-screen page**: it is sized to its
+  options, the filtered list stays visible (dimmed) behind it, and tapping
+  outside it closes it without changing the selection. Worth checking the
+  option labels stay legible against whatever is behind — the translucency is
+  tuned for a dense list, which is the worst case.
+- The belt choice still persists across launches; the strength axes are session
+  state and are not expected to.
+
+### Edge cases & errors
+
+- **With the sport chip on "All", no facet buttons appear** — no module is
+  selected, so no facet list applies. Consistent with the old behaviour, and
+  worth asserting so it is a decision rather than a surprise.
+- A facet set on one sport must not filter the other's catalog: set
+  `Muscle → Chest`, switch to BJJ, and the technique list must be unfiltered by
+  it. (The state deliberately survives the switch; the guard is that the filter
+  is applied only when the registry says the axis applies.)
+- A combination matching nothing shows the "nothing matches this filter" empty
+  state, not the "empty catalog" one.
+- Search and a facet compose — searching within `Muscle → Back` searches only
+  the filtered set.
+
+### The mapping itself (unit-tested, `lib/__tests__/exerciseFacets.test.ts`)
+
+- **Every `primary_muscles` value and every `movement_pattern` in the shipped
+  catalog maps to a group.** This is the load-bearing one: an unmapped value is
+  silently unreachable through the filter while still appearing in the list, so
+  nothing looks broken. Adding a value to `exercises.json` without adding it to
+  the map must fail this.
+- Every group is reachable — no option that always answers "nothing matches".
+- No raw value is claimed by two groups.

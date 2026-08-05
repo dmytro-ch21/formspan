@@ -9522,6 +9522,137 @@ distinct". They did not — 1.09:1 is not a step. A message that describes an
 intention rather than a measurement is how a wrong change survives review, and
 this one only did not because the reviewer recomputed it.
 
+## 2026-08-04 — The Library gets strength filters, by taking two rows away
+
+"The library for strength should also have filters — muscle group, push/pull.
+They should not be all visible; first they see two things and when clicked they
+can choose a specific filter. Same for BJJ so it's not crowded."
+
+Two requests in one, and they pull against each other: **add** axes to a header
+that is already the screen's biggest problem. The log has recorded that problem
+for a while — search, sport chips, position chips, belt chips and the glossary
+all sit pinned above the list, roughly 300pt before the first result on a screen
+whose entire job is showing results. Two more rows would have made it worse.
+
+So the rows became **buttons**. Each axis is one control that names itself and
+shows its current value; tapping it opens a sheet with the options. Position and
+belt stop being two full scroll rows, muscle and movement arrive without adding
+any, and the header gets shorter while gaining capability.
+
+**The raw fields are unusable as filters, so the grouping is the feature.** The
+catalog carries **58 distinct `primary_muscles`** — `teres-minor`,
+`brachioradialis`, `lateral-neck` — and 15 `movement_pattern`s. Nobody browses a
+gym app looking for their subscapularis. And "push", the thing actually asked
+for, **is not a value in the data at all**: it is `horizontal_push` and
+`vertical_push`. `lib/exerciseFacets.ts` maps both vocabularies to nine muscle
+groups and eleven movement groups, chosen to be things a person would say out
+loud.
+
+Two judgement calls in that map worth recording. **Glutes are their own group
+rather than part of Legs** — anatomically odd, and right here, because `glutes`
+is the single most common primary muscle in the catalog (138 of 504) and folding
+it into Legs makes that group a third of everything. And **only `primary_muscles`
+count**: almost every exercise works almost everything secondarily, so including
+secondaries makes "Chest" return most of the catalog and the filter stops
+meaning anything.
+
+**The mapping is hand-maintained, so a test holds it to the real catalog.** An
+unmapped muscle fails *silently* — its exercises stay in the list, stay
+searchable, and simply cannot be reached through the filter, so nothing looks
+broken and a handful of exercises are quietly undiscoverable. The suite reads
+the shipped `exercises.json` (not a fixture, which would only ever assert that
+the map covers what someone remembered to put in the fixture) and asserts every
+raw value lands in a group, every group is reachable by something, and no value
+is claimed twice. Adding a muscle to the catalog without adding it here turns it
+red. All four failure modes were mutation-checked.
+
+**Client-side, and declared in the registry anyway.** `GET /v1/exercises` takes
+only `q` and `sport`, but `movement_pattern` and `primary_muscles` are already
+on every row the screen has loaded — so this filters data in hand, works
+offline, and needs no query parameter. Strength still gains
+`Facets: ["muscle", "movement"]` in the discipline registry, because that list
+is what tells a client which axes a discipline is browsed on; the buttons are
+driven by it rather than by `sport === 'strength'`, so a control is never
+rendered against a catalog it cannot filter. Same rule the position and belt
+rows already followed.
+
+**The lint ratchet went DOWN**, 55 → 54: deleting the two hand-written scroll
+rows took a warning with them. That is the direction the ratchet is supposed to
+move and the first time it has.
+
+### Gaps this leaves
+
+- Verified on the Simulator against a local API carrying the new registry
+  facets: both buttons appear under Strength, `Muscle → Chest` narrows to chest
+  primaries, and `Movement → Push` composes with it — returning Bench Press
+  (horizontal) and Assisted Dip (vertical) under one option while dropping the
+  isolation work, which is the fold doing its job. Position and Belt render the
+  same way under BJJ, with the saved belt cap intact. **Note the staging API
+  does not carry these facets until this deploys**, so the buttons will not
+  appear on a client pointed at it — the registry is the gate.
+- **`Movement → Pull` used to contain no biceps curl**, and that was the
+  mapping decision most likely to read as broken. `movement_pattern` is
+  single-valued and `isolation` holds 142 of 504 rows — 51 arms, 28 shoulders —
+  so every curl, fly and lateral raise sat under Isolation and under *neither*
+  Push nor Pull. The data was being reported faithfully and no lifter would
+  have agreed. An isolation row now also answers the axis its muscle implies,
+  so a curl appears under both Pull and Isolation, which is honest: it is an
+  isolation pull. **This is a training convention, not anatomy** — a lateral
+  raise is abduction, neither pressing nor pulling, and it lands in Push
+  because that is the day it is programmed on. Anything with no such
+  convention is deliberately in neither and stays reachable through Isolation
+  and its muscle group — including the two upper-body exclusions someone will
+  query, rotator cuff (prehab) and spinal erectors (hinge work).
+
+  **The fix for the silent-failure problem reintroduced it.** Review
+  mutation-proved that deleting `lats`, `upper-traps` or `chest` from the new
+  sets removed 4–8 real exercises from a facet with the whole suite still
+  green: 17 of the 21 members had no assertion at all. The sets are now held to
+  the catalog by NAME — Cable Fly is a push, Barbell Shrug is a pull — which is
+  a non-circular oracle, plus a check that every member is a muscle string the
+  catalog actually uses, since a typo like `lateral-delt` is otherwise a silent
+  no-op. The generic `shoulders` and `serratus` came back out on the same
+  evidence: this catalog records `shoulders` as a stabiliser, so it was pulling
+  a Kettlebell Windmill and a Suspension Pike into Push.
+- **The picker is a glass sheet, not a page.** It shipped as
+  `presentationStyle="pageSheet"` — the whole display taken over to offer nine
+  short options, a modal context switch for what is really a dropdown. It is
+  `transparent` now, sized to its content, anchored to the bottom, with a grab
+  handle and tap-outside-to-dismiss, so the list you are filtering stays
+  visible behind it. The glass follows `BjjRankHeader`'s recipe including its
+  reasoning — **not** `expo-blur`, because a BlurView samples what is behind it
+  and would cost a native view to blur a nearly-flat ground; glass on a dark
+  ground is a translucent panel, a lit top-left edge and a wash. One deliberate
+  deviation: the rank card uses `0.72` because it sits on empty ground, while
+  this sits over a dense list where the exercise names read straight through
+  the option labels at that value. `0.93` is the brief — enough to see what you
+  are filtering, not enough to read it.
+- **Review found the coverage test was watching the wrong door.** Its oracle
+  was the shipped catalog, so `grappling` — legal in the API's closed
+  vocabulary, used by no row — was unmapped and invisible to it. The first
+  console-authored exercise using it would have been silently unreachable,
+  which is precisely the failure the suite exists to prevent. It now asserts
+  the API vocabulary as well as the rows, and reads `exercises.additions.json`
+  too, since that is the file console-authored content actually lands in.
+- **`primary_muscles` is validated against no vocabulary anywhere in the
+  backend** — not in the seed's `validate`, not in `ValidateForWrite`. So the
+  admin console can mint free-text muscles that no test here can see. The
+  coverage guarantee is "everything a deploy ships", not "everything the API
+  accepts", and the module comment now says so.
+- **Only reachable once a sport is chosen.** With the sport chip on "All" no
+  facet buttons appear, because `moduleFor('')` matches no module — exactly the
+  behaviour position and belt already had. It is consistent, and it does mean
+  the strength axes are two taps away rather than one.
+- **`apps/web`'s Library did not get this.** The belt filter went to both
+  clients; this went to mobile only, because the request was about the crowded
+  phone screen. Web still has its own filter row, so the two libraries now
+  differ in what they can narrow by.
+- **Nine muscle groups and eleven movement groups is a lot of options in a
+  sheet**, and no data says these are the right cuts — they are a reading of
+  the catalog, not a measured taxonomy. Worth revisiting once anyone has used
+  it against a real training week.
+
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Modal,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -18,7 +19,17 @@ import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { getStanding } from '@/lib/bjj';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { Icon } from '@/components/ui/Icon';
 import { fetchExercises, pickImage, type Exercise } from '@/lib/exercises';
+import {
+  MOVEMENT_GROUPS,
+  MUSCLE_GROUPS,
+  inMovementGroup,
+  inMuscleGroup,
+} from '@/lib/exerciseFacets';
 import { PREF_LIBRARY_BELT, PREF_LIBRARY_SPORT, readPref, writePref } from '@/lib/prefs';
 import { cacheExercises, cachedExercises } from '@/lib/sessionStore';
 import {
@@ -93,6 +104,20 @@ function usesBelt(sport: string, mods: Module[]): boolean {
   const m = moduleFor(mods, sport);
   return (m?.enabled && m.capabilities.facets.includes('belt')) ?? false;
 }
+
+/**
+ * Same reasoning again, for the two strength axes.
+ *
+ * Both read the registry rather than testing `sport === 'strength'`, so a
+ * discipline that later declares `muscle` gets the control for free and one
+ * that drops it loses the control rather than keeping a dead one.
+ */
+function usesFacet(sport: string, mods: Module[], facet: string): boolean {
+  const m = moduleFor(mods, sport);
+  return (m?.enabled && m.capabilities.facets.includes(facet)) ?? false;
+}
+
+type FacetKey = 'position' | 'belt' | 'muscle' | 'movement';
 
 /**
  * One collator, built once.
@@ -227,6 +252,33 @@ export default function LibraryScreen() {
   const [position, setPosition] = useState('');
   const [belt, setBeltState] = useState('');
   const [query, setQuery] = useState('');
+  // The strength axes. Client-side, over the catalog already loaded — see
+  // `lib/exerciseFacets.ts` for why they are groupings and not the raw fields.
+  const [muscle, setMuscle] = useState('');
+  const [movement, setMovement] = useState('');
+  // Which facet's picker is open, or null. One piece of state for all four
+  // sheets, the same way the Plan screen's day sheet serves seven rows.
+  const [openFacet, setOpenFacet] = useState<FacetKey | null>(null);
+  /**
+   * What the sheet is DRAWING, which outlives what is open.
+   *
+   * React Native keeps a modal's children mounted through the iOS dismissal
+   * animation — `_shouldShowModal()` stays true until the native `onDismiss`.
+   * So rendering straight from `openFacet` meant that after picking an option
+   * there was a frame where the title resolved to `''` and the option list to
+   * `[]`: the sheet emptied and, now that it is content-sized rather than
+   * full-screen, collapsed from ~660pt to ~110pt and *then* slid away. On
+   * every single use.
+   *
+   * This is cleared by `onDismiss` instead, so the sheet keeps its contents
+   * until it is actually gone. Android unmounts immediately and never reaches
+   * that callback, which is harmless — the modal is already invisible.
+   */
+  const [shownFacet, setShownFacet] = useState<FacetKey | null>(null);
+  // The home indicator's real height, not a guess. `ScreenHeader` already
+  // reads insets this way; a hardcoded 28 is right on exactly one device.
+  const insets = useSafeAreaInsets();
+
 
   /**
    * The filter is remembered; the search box is not.
@@ -347,6 +399,29 @@ export default function LibraryScreen() {
     },
     [userId],
   );
+
+  /**
+   * The four axes, in the order they are offered.
+   *
+   * Declared as data rather than four near-identical blocks of JSX, because
+   * that is what the two scroll rows were and they had already drifted apart
+   * (one said "Filter by", the other "Filter up to"). One table means one
+   * button, one sheet, and one place to add the fifth.
+   */
+  const FACETS: { key: FacetKey; label: string; options: { key: string; label: string }[] }[] = [
+    { key: 'position', label: 'Position', options: [...POSITIONS] },
+    { key: 'belt', label: 'Belt', options: [...BELT_CAPS] },
+    { key: 'muscle', label: 'Muscle', options: [{ key: '', label: 'All' }, ...MUSCLE_GROUPS] },
+    { key: 'movement', label: 'Movement', options: [{ key: '', label: 'All' }, ...MOVEMENT_GROUPS] },
+  ];
+  const facetValue = (k: FacetKey) =>
+    k === 'position' ? position : k === 'belt' ? belt : k === 'muscle' ? muscle : movement;
+  const setFacetValue = (k: FacetKey, v: string) => {
+    if (k === 'position') setPosition(v);
+    else if (k === 'belt') setBelt(v);
+    else if (k === 'muscle') setMuscle(v);
+    else setMovement(v);
+  };
 
   /**
    * Clear the search on the way out — but not when the way out is a result.
@@ -577,9 +652,18 @@ export default function LibraryScreen() {
    */
   const rows = useMemo<Row[]>(() => {
     const q = query.trim().toLowerCase();
-    const ex = q
+    let ex = q
       ? sortedExercises.filter((e) => e.name.toLowerCase().includes(q))
       : sortedExercises;
+    // Gated on the registry like the technique axes below, so a cap left in
+    // state with its control hidden cannot silently filter an unrelated
+    // catalog — the bug the belt row's comment records.
+    if (usesFacet(sport, modules, 'muscle') && muscle) {
+      ex = ex.filter((e) => inMuscleGroup(e, muscle));
+    }
+    if (usesFacet(sport, modules, 'movement') && movement) {
+      ex = ex.filter((e) => inMovementGroup(e, movement));
+    }
 
     let tq: TechniqueSummary[] = [];
     if (showTechniques) {
@@ -609,7 +693,10 @@ export default function LibraryScreen() {
       }
     }
     return out;
-  }, [sortedExercises, sortedTechniques, showTechniques, sport, position, belt, query]);
+  }, [
+    sortedExercises, sortedTechniques, showTechniques, sport, position, belt, query,
+    muscle, movement, modules,
+  ]);
 
   // Each clause has to match the condition the `rows` memo actually filters
   // on, not just "is this value set". Belt is deliberately NOT cleared when
@@ -620,7 +707,9 @@ export default function LibraryScreen() {
     query.trim() !== '' ||
     sport !== '' ||
     position !== '' ||
-    (usesBelt(sport, modules) && belt !== '');
+    (usesBelt(sport, modules) && belt !== '') ||
+    (usesFacet(sport, modules, 'muscle') && muscle !== '') ||
+    (usesFacet(sport, modules, 'movement') && movement !== '');
 
   return (
     <View style={styles.container} testID="library-screen">
@@ -668,57 +757,55 @@ export default function LibraryScreen() {
           })}
         </View>
 
-        {/* Position is a BJJ-only axis, so it appears only when BJJ content is
-            on screen. A permanently-visible row of positions that does nothing
-            to a strength catalog is worse than no row. */}
-        {usesPosition(sport, modules) && (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.positionRow}
-          >
-            {POSITIONS.map((p) => {
-              const active = position === p.key;
-              return (
-                <Pressable
-                  key={p.key || 'all'}
-                  onPress={() => setPosition(p.key)}
-                  style={[styles.posChip, active && styles.posChipActive]}
-                  hitSlop={8}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Filter by ${p.label}`}
-                  accessibilityState={{ selected: active }}
-                  testID={`library-position-${p.key || 'all'}`}
-                >
-                  <Text style={[styles.posText, active && styles.posTextActive]}>{p.label}</Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-        )}
+        {/*
+          One row of facet buttons, each opening a picker — not every option
+          pinned to the screen.
 
-        {/* Same reasoning as the position row, one axis over: BJJ-only, and
-            hidden rather than shown-and-inert against a strength catalog. */}
-        {usesBelt(sport, modules) && (
+          It was two full horizontal scroll rows (position, then belt), both
+          permanently visible, and strength had no filters at all. The history
+          log already recorded the cost: roughly 300pt of header before the
+          first result, on a screen whose entire job is showing results. Adding
+          muscle and movement as two more rows would have made it worse.
+
+          A button that names its axis and shows its current value collapses
+          each row to one control, so the strength axes are added while the
+          header gets shorter. Which buttons appear is driven by the discipline
+          registry, so a control is never shown against a catalog it cannot
+          filter — the same rule the two scroll rows already followed.
+        */}
+        {FACETS.filter((f) => usesFacet(sport, modules, f.key)).length > 0 && (
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.positionRow}
+            contentContainerStyle={styles.facetRow}
           >
-            {BELT_CAPS.map((b) => {
-              const active = belt === b.key;
+            {FACETS.filter((f) => usesFacet(sport, modules, f.key)).map((f) => {
+              const value = facetValue(f.key);
+              const chosen = f.options.find((o) => o.key === value);
+              const active = value !== '';
               return (
                 <Pressable
-                  key={b.key || 'all'}
-                  onPress={() => setBelt(b.key)}
-                  style={[styles.posChip, active && styles.posChipActive]}
+                  key={f.key}
+                  onPress={() => {
+                    setShownFacet(f.key);
+                    setOpenFacet(f.key);
+                  }}
+                  style={[styles.facet, active && styles.facetActive]}
                   hitSlop={8}
                   accessibilityRole="button"
-                  accessibilityLabel={`Filter up to ${b.label}`}
-                  accessibilityState={{ selected: active }}
-                  testID={`library-belt-${b.key || 'all'}`}
+                  // Names the axis AND the value, so a screen reader is not
+                  // left with a bare "Mount" that could be anything.
+                  accessibilityLabel={
+                    active ? `${f.label}: ${chosen?.label ?? value}. Change` : `Filter by ${f.label}`
+                  }
+                  testID={`library-facet-${f.key}`}
                 >
-                  <Text style={[styles.posText, active && styles.posTextActive]}>{b.label}</Text>
+                  <Text style={[styles.facetText, active && styles.facetTextActive]}>
+                    {active ? (chosen?.label ?? value) : f.label}
+                  </Text>
+                  <View style={styles.facetCaret}>
+                    <Icon name="chevron" size={10} color={active ? vola.text : vola.textDim} />
+                  </View>
                 </Pressable>
               );
             })}
@@ -844,6 +931,130 @@ export default function LibraryScreen() {
           }
         />
       )}
+
+      {/*
+        One sheet for all four axes.
+
+        The options for an axis are its own; everything else — the title, the
+        selected mark, dismissal — is identical, so writing it once is what
+        stops the four drifting the way the two scroll rows already had.
+      */}
+      {/*
+        A compact glass sheet, not a full-screen page.
+
+        `presentationStyle="pageSheet"` took over the whole display to offer
+        nine short options — a modal context switch for what is really a
+        dropdown. This is `transparent` with the card sized to its content and
+        anchored to the bottom, so the list you are filtering stays visible
+        behind it and the sheet reads as attached to this screen rather than
+        as somewhere else.
+
+        The glass follows `BjjRankHeader`'s recipe exactly, including its
+        reasoning: NOT `expo-blur`, because a BlurView samples what is behind
+        it and would cost a native view to blur a nearly-flat ground. Glass
+        here is a translucent panel, a lit top-left edge, and a wash.
+      */}
+      {/* Gated, matching `WeekPlanner`: a Modal's children are constructed by
+          the parent on every render — here, on every keystroke in the search
+          box — whether or not it is showing. `shownFacet` rather than
+          `openFacet` so the subtree survives the dismissal animation. */}
+      {shownFacet !== null && (
+      <Modal
+        visible={openFacet !== null}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setOpenFacet(null)}
+        // iOS-only, and the point of `shownFacet`: fires once the sheet has
+        // genuinely left the screen.
+        onDismiss={() => setShownFacet(null)}
+      >
+        {/* Tapping off the sheet closes it — the affordance a bottom sheet is
+            expected to have, and which the full-screen version could not offer
+            because it had no outside. */}
+        {/*
+          A touch affordance, NOT an accessibility element. As subview 0 it was
+          first in the VoiceOver order and screen-sized, so opening the sheet
+          announced "Close filter options, button" instead of the sheet that
+          had just appeared. Apple's own convention is that a dimming view is
+          not an element; dismissal is the Done button and the two-finger
+          escape, both of which this sheet has.
+        */}
+        <Pressable
+          style={styles.backdrop}
+          onPress={() => setOpenFacet(null)}
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+          testID="library-facet-backdrop"
+        />
+        <View
+          style={styles.sheetWrap}
+          pointerEvents="box-none"
+          // `transparent` is an over-full-screen presentation, so unlike the
+          // page sheet it replaced, the screen behind stays in the hierarchy.
+          // This is the one prop that makes focus containment certain rather
+          // than likely.
+          accessibilityViewIsModal
+          onAccessibilityEscape={() => setOpenFacet(null)}
+        >
+        <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 16) + 10 }]}>
+          <LinearGradient
+            colors={['rgba(255,255,255,0.10)', 'rgba(255,255,255,0.03)', 'transparent']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 0.9, y: 1 }}
+            style={StyleSheet.absoluteFill}
+            pointerEvents="none"
+          />
+          {/* The grab handle a sheet of this shape is read by. */}
+          <View style={styles.grabber} />
+          <View style={styles.sheetHead}>
+            <Text style={styles.sheetTitle}>
+              {FACETS.find((f) => f.key === shownFacet)?.label ?? ''}
+            </Text>
+            <Pressable
+              onPress={() => setOpenFacet(null)}
+              hitSlop={12}
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+              testID="library-facet-close"
+            >
+              <Text style={styles.sheetClose}>Done</Text>
+            </Pressable>
+          </View>
+          <ScrollView contentContainerStyle={styles.sheetBody}>
+            {(FACETS.find((f) => f.key === shownFacet)?.options ?? []).map((o) => {
+              const on = shownFacet !== null && facetValue(shownFacet) === o.key;
+              return (
+                <Pressable
+                  key={o.key || 'all'}
+                  onPress={() => {
+                    if (shownFacet) setFacetValue(shownFacet, o.key);
+                    setOpenFacet(null);
+                  }}
+                  style={({ pressed }) => [styles.option, pressed && styles.optionPressed]}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: on }}
+                  testID={`library-option-${shownFacet}-${o.key || 'all'}`}
+                >
+                  <Text style={[styles.optionText, on && styles.optionTextOn]}>{o.label}</Text>
+                  {/* A mark, not just colour — the row reads as chosen without
+                      relying on the accent being distinguishable. */}
+                  {/* `ink`, not `accent`: the glass composite is lighter than
+                      any surface the palette validator checks, and purple's
+                      FILL measures 2.91:1 here — under the 3:1 the palette's
+                      own contract requires of a graphic that carries meaning.
+                      `ink` exists for precisely that ("fine as a shape, fails
+                      as type"). The row also switches to `text` at weight 700,
+                      so the state was never carried by the mark alone. */}
+                  {on && <Icon name="check" size={14} color={accent.ink} />}
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </View>
+        </View>
+      </Modal>
+      )}
+
     </View>
   );
 }
@@ -954,17 +1165,97 @@ const styles = StyleSheet.create({
   // Ink set inline: what may be written on the accent is the accent's own.
   chipTextActive: {},
 
-  positionRow: { gap: 8, paddingRight: 20 },
-  posChip: {
+
+  // The facet buttons. One row, horizontally scrollable, replacing the two
+  // full option rows that used to be pinned here.
+  facetRow: { gap: 8, paddingRight: 20 },
+  facet: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     borderWidth: 1,
     borderColor: vola.lineSoft,
-    borderRadius: 8,
-    paddingHorizontal: 11,
-    paddingVertical: 6,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
   },
-  posChipActive: { borderColor: vola.textMuted, backgroundColor: vola.surfaceRaised },
-  posText: { color: vola.textDim, fontSize: 12, fontWeight: '600' },
-  posTextActive: { color: vola.text },
+  // A set facet is filled, so "something is filtering this list" survives a
+  // glance — the state that used to be one highlighted chip in a long row.
+  facetActive: { borderColor: vola.textMuted, backgroundColor: vola.surfaceRaised },
+  // `textMuted` (7.38:1), not `textDim` (3.96:1 — under AA). Inherited from the
+  // `posText` this replaced, where it was one option among a dozen; it is now
+  // the resting state of the only control that names the axis. The glossary
+  // label in this same file was moved off `textDim` for exactly this.
+  facetText: { color: vola.textMuted, fontSize: 12, fontWeight: '600' },
+  facetTextActive: { color: vola.text },
+  facetCaret: { transform: [{ rotate: '90deg' }] },
+
+  // Dims the list behind without hiding it — you can still see what you are
+  // filtering, which is the point of not taking the whole screen.
+  backdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(4,6,10,0.62)',
+  },
+  sheetWrap: { flex: 1, justifyContent: 'flex-end' },
+  sheet: {
+    // Same translucency, radius and lit edge as the rank card's glass. It only
+    // reads as glass if some of what is behind shows through, so the fill is
+    // deliberately not opaque.
+    // 0.93, not the rank card's 0.72. That card sits on a flat ground with
+    // nothing behind it to read through; this one sits over a dense list of
+    // exercise names, and at 0.86 they showed through the option labels
+    // clearly enough to fight them. "A little transparent" is the brief —
+    // enough to see what you are filtering, not enough to read it.
+    backgroundColor: 'rgba(23,30,43,0.93)',
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    borderWidth: 1,
+    borderBottomWidth: 0,
+    borderColor: 'rgba(255,255,255,0.07)',
+    // Capped so the sheet cannot grow past the display: Movement has eleven
+    // options and already fills most of it, and at a larger text size it would
+    // push its own title off the top. The inner ScrollView takes over instead
+    // of the sheet getting taller.
+    maxHeight: '80%',
+    overflow: 'hidden',
+  },
+  grabber: {
+    alignSelf: 'center',
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  sheetHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,255,255,0.08)',
+  },
+  sheetTitle: { fontSize: 16, fontWeight: '800' },
+  sheetClose: { fontSize: 14, fontWeight: '700', color: vola.lime },
+  sheetBody: { paddingVertical: 4 },
+  option: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    // 46pt tall, over the 44 the HIG asks — this is a list of targets, which
+    // is where an undersized row is felt most.
+    paddingVertical: 14,
+  },
+  optionPressed: { backgroundColor: 'rgba(255,255,255,0.05)' },
+  optionText: { fontSize: 15, color: vola.textMuted },
+  optionTextOn: { color: vola.text, fontWeight: '700' },
 
   // The glossary row. A hairline above it, because this is where the header
   // stops being controls and starts being content.
