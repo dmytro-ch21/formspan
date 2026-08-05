@@ -437,8 +437,18 @@ export default function TodayScreen() {
     }
   }, [getToken, userId]);
 
-  useEffect(() => {
-    if (!userId) return;
+  /**
+   * Re-read on FOCUS, not once per mount.
+   *
+   * `/settings/suggestions` is a Stack route pushed over the tabs, and a tab
+   * screen stays mounted for the life of the process — so keyed on `[userId]`
+   * this ran once, ever. Turning suggestions off, silencing a discipline, or
+   * tapping "Suggest again" all appeared to do nothing until the app was
+   * killed. The write direction worked, which is exactly why testing it by
+   * hand missed this: Settings is pushed fresh every time and reads correctly.
+   */
+  const readSuggestionPrefs = useCallback(() => {
+    if (!userId) return () => {};
     let alive = true;
     readPref(userId, PREF_DETAIL_OFFERS)
       .then((v) => {
@@ -459,8 +469,12 @@ export default function TodayScreen() {
         if (alive) setDismissed(parseDismissed(v));
       })
       .catch(() => {
-        // A pref that cannot be read must not silence the suggestion forever;
-        // an empty set is the safe reading, and the athlete can dismiss again.
+        // Empty rather than left null, which is the OPPOSITE of `refreshFunnel`
+        // beside it — and deliberately. A null dismissal set would hide every
+        // suggestion until a successful read; an empty one re-offers something
+        // the athlete said no to. Both are wrong, and the second is now
+        // recoverable in one tap from Settings while the first looks like the
+        // feature is broken.
         if (alive) setDismissed(new Set());
       });
     return () => {
@@ -565,7 +579,10 @@ export default function TodayScreen() {
       // every session ever logged and does not change because you looked at
       // Thursday.
       refreshFunnel();
-    }, [refreshSessions, refreshPlan, refreshFunnel]),
+      // Settings can have changed any of these while this screen sat mounted.
+      const stop = readSuggestionPrefs();
+      return stop;
+    }, [refreshSessions, refreshPlan, refreshFunnel, readSuggestionPrefs]),
   );
 
   // The same staleness arrives without a focus change when the app is
@@ -1097,6 +1114,17 @@ export default function TodayScreen() {
                 onPress={() => router.push(`/technique/${suggestion.techniqueId}`)}
                 accessibilityRole="button"
                 accessibilityLabel={`Suggestion: try ${suggestion.name} live. Drilled in ${suggestion.drilled} sessions and never logged live. Open the technique.`}
+                // The x below is a Pressable INSIDE this one, and UIKit does
+                // not descend into a view that is itself an accessibility
+                // element — so its label and hint are never announced, and
+                // neither VoiceOver nor Voice Control can invoke it. A rotor
+                // action on the card is the way out: it keeps the card one
+                // swipe for a screen-reader user and leaves the visible x for
+                // everyone else.
+                accessibilityActions={[{ name: 'dismiss', label: 'Dismiss this suggestion' }]}
+                onAccessibilityAction={(e) => {
+                  if (e.nativeEvent.actionName === 'dismiss') dismiss(suggestion.techniqueId);
+                }}
                 testID="today-suggestion"
               >
                 <View style={styles.planMain}>
@@ -1127,8 +1155,13 @@ export default function TodayScreen() {
                 */}
                 <Pressable
                   onPress={() => dismiss(suggestion.techniqueId)}
-                  hitSlop={12}
-                  style={({ pressed }) => [styles.dismiss, pressed && styles.planCardPressed]}
+                  // Asymmetric. A symmetric 12 swallowed the whole 12pt gap
+                  // between the meta line and the glyph, so a tap at the right
+                  // edge of the evidence text dismissed the card rather than
+                  // opening it — an invisible destructive target abutting a
+                  // harmless one.
+                  hitSlop={{ top: 12, bottom: 12, right: 12, left: 4 }}
+                  style={({ pressed }) => [styles.dismiss, pressed && styles.dismissPressed]}
                   accessibilityRole="button"
                   accessibilityLabel={`Dismiss the ${suggestion.name} suggestion`}
                   accessibilityHint="Stops VOLA suggesting this technique"
@@ -1507,7 +1540,10 @@ const styles = StyleSheet.create({
   // 44pt of touch with `hitSlop`, so the one control on this card that cannot
   // be undone is not the fiddliest thing on the screen. `textMuted` at 6.85:1
   // rather than `textDim` at 3.67:1 — it is a control, not decoration.
-  dismiss: { padding: 6, marginRight: -6 },
+  dismiss: { padding: 6, marginRight: -6, borderRadius: 14 },
+  // Opacity, not the plan card's square fill — a hard 27pt square flashing
+  // inside a 14pt-radius card reads as a rendering fault.
+  dismissPressed: { opacity: 0.5 },
 
   // The planned day. A card rather than a filled button: it is a statement
   // about today that happens to be actionable, and the lime is spent on the

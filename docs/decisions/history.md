@@ -11197,14 +11197,63 @@ Failing OPEN throughout: an unreadable preference reads as enabled. A feature
 that silently disables itself on a bad read is worse than one that shows a card
 someone has to dismiss again.
 
+### What review caught: the undo silently did not work
+
+**Today never re-read the preferences.** The effect was keyed `[userId]`, and a
+tab screen stays mounted for the life of the process — a fact this same file
+documents two lines away. `/settings/suggestions` is a Stack route pushed over
+the tabs, so after visiting it and coming back: master off still showed the
+card, a silenced discipline still showed the card, and **"Suggest again" did
+nothing**. All three only took effect after killing the app.
+
+The write direction worked, which is exactly why testing it by hand missed it —
+Settings is pushed fresh every time and reads correctly. Worse, this entry and
+`functional-scenarios.md` both *asserted* the behaviour the code did not
+deliver. The reads moved into the existing focus effect.
+
+**The per-discipline switches contradicted their own promise.** They rendered
+`master && !off.has(key)`, so every row read OFF when the master was off — while
+the note beside them said "Your choices are kept" and the comment above said the
+rows stay visible precisely so the athlete does not lose the answer to "which
+ones did I turn off". Rendering them all false lost it as completely as hiding
+them would. `disabled` and the group opacity carry the master state; the value
+carries only the athlete's choice.
+
+**VoiceOver could not reach the ×.** It is a `Pressable` inside a `Pressable`,
+and UIKit does not descend into a view that is itself an accessibility element —
+so its label and hint were never announced and neither VoiceOver nor Voice
+Control could invoke it. The card now carries an `accessibilityActions` rotor
+action, which keeps it one swipe for a screen-reader user and leaves the visible
+× for everyone else.
+
+Also: the settings screen flashed "everything on" before the read landed, so an
+athlete who had switched suggestions off saw the master flip ON then snap OFF on
+every visit; and the ×'s symmetric 12pt `hitSlop` swallowed the whole gap
+between it and the evidence line, putting an invisible destructive target
+against a harmless one.
+
+**And a correction to the last entry's reasoning.** It called the
+`Array.isArray` guard an equivalent mutant because `new Set(42)` throws. The
+equivalence is real but the reason was wrong: it holds because `.filter` is
+absent from every non-array JSON value. `new Set("abc")` does *not* throw — it
+yields three fabricated ids. So `'"abc"'` is now in the corrupt-input table, and
+the guard stays.
+
 ### Gaps
 
 - **Nothing lists the per-discipline switches on web.** Suggestions are a mobile
   surface today, so there is nothing to configure there yet — but the settings
   are device-local, which means they are also *client*-local, and the moment web
   grows a suggestion the two will disagree.
-- **The greyed-when-master-off state was verified by its tests rather than by
-  eye.** The logic is covered four ways; the opacity is not.
+- **The Settings→Today round trip is fixed but NOT confirmed on a device.** The
+  read moved into the focus effect and the reasoning is sound, but the
+  Simulator pass ran out before the toggle could be flipped and the return
+  observed. Given this is the exact path whose failure review had to find,
+  it should be watched by eye before merge — and the missing test for it is
+  the first item below.
+- **No test covers the Settings→Today wiring**, which is where the blocking bug
+  lived and which a pure-logic test structurally cannot reach. `app/__tests__/`
+  already holds five screen tests, so the pattern exists.
 - **Device-local.** A second device will offer a dismissed technique once more.
   Deliberate, but it becomes wrong if suggestions ever grow past a nudge.
 - **Dismissal is per technique, not per tier.** When the position hot-spot tier
