@@ -20,6 +20,7 @@ import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { getStanding } from '@/lib/bjj';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Icon } from '@/components/ui/Icon';
 import { fetchExercises, pickImage, type Exercise } from '@/lib/exercises';
@@ -258,6 +259,9 @@ export default function LibraryScreen() {
   // Which facet's picker is open, or null. One piece of state for all four
   // sheets, the same way the Plan screen's day sheet serves seven rows.
   const [openFacet, setOpenFacet] = useState<FacetKey | null>(null);
+  // The home indicator's real height, not a guess. `ScreenHeader` already
+  // reads insets this way; a hardcoded 28 is right on exactly one device.
+  const insets = useSafeAreaInsets();
 
 
   /**
@@ -948,7 +952,7 @@ export default function LibraryScreen() {
           testID="library-facet-backdrop"
         />
         <View style={styles.sheetWrap} pointerEvents="box-none">
-        <View style={styles.sheet}>
+        <View style={[styles.sheet, { paddingBottom: insets.bottom + 10 }]}>
           <LinearGradient
             colors={['rgba(255,255,255,0.10)', 'rgba(255,255,255,0.03)', 'transparent']}
             start={{ x: 0, y: 0 }}
@@ -1160,7 +1164,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderBottomWidth: 0,
     borderColor: 'rgba(255,255,255,0.07)',
-    paddingBottom: 28,
+    // Capped so the sheet cannot grow past the display: Movement has eleven
+    // options and already fills most of it, and at a larger text size it would
+    // push its own title off the top. The inner ScrollView takes over instead
+    // of the sheet getting taller.
+    maxHeight: '80%',
     overflow: 'hidden',
   },
   grabber: {
