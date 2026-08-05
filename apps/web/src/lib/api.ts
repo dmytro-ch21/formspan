@@ -1773,11 +1773,21 @@ export type Curriculum = {
   /** "YYYY-MM-DD". Null unless enrolled, and the anchor every criterion is
    *  measured from. */
   started_on: string | null;
-  /** How many items carry criteria. THE PROGRESS RULE, shipped by the API so
-   *  no client invents its own: progress counts only these. Dividing
-   *  `mastered_items` by `items.length` is the silent wrong answer. */
+  /** How many techniques are in it. Present on the list too, so a card can say
+   *  "12 techniques" without fetching them. */
+  item_count: number;
+  /** How many items carry criteria — i.e. whether this is a roadmap at all.
+   *  THE PROGRESS RULE, shipped by the API so no client invents its own:
+   *  progress counts only these. Dividing by `item_count` is the silent wrong
+   *  answer. Populated on the list AND the single read. */
   countable_items: number;
-  /** "Currently" is load-bearing — mastery is derived, so this can go down. */
+  /** How many countable items your record currently clears. "Currently" is
+   *  load-bearing — mastery is derived, so this can go down.
+   *
+   *  **ZERO ON THE LIST RESPONSE.** It needs the per-curriculum evidence
+   *  aggregate, which is not run once per row. Only meaningful on a single
+   *  read — a list card that draws a progress bar from it is reading a
+   *  placeholder, which is exactly the bug that shipped here once. */
   mastered_items: number;
   created_at: string;
   updated_at: string;

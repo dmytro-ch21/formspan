@@ -8,6 +8,7 @@ import {
   CRITERIA_DEFAULTS,
   createCurriculum,
   listTechniques,
+  searchTechniques,
   updateCurriculum,
   type Curriculum,
   type CurriculumItemWrite,
@@ -84,19 +85,16 @@ export function CurriculumBuilder({ existing }: { existing?: Curriculum }) {
   );
 
   const results = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    // Unfiltered would render 466 rows on every keystroke. Capped rather than
-    // virtualised: this is a picker, and if what you want is not in the first
-    // 60 the answer is a better search term.
-    const pool = q
-      ? catalog.filter(
-          (t) =>
-            t.name.toLowerCase().includes(q) ||
-            t.position.toLowerCase().includes(q) ||
-            t.aliases.some((a) => a.toLowerCase().includes(q)),
-        )
-      : catalog;
-    return pool.slice(0, 60);
+    // `searchTechniques`, NOT a hand-rolled includes(). Its own doc records why:
+    // "São Paulo Pass" had been in the catalog the whole time and was
+    // unfindable, because a plain toLowerCase().includes() fails "sao paulo"
+    // against "São Paulo". It also folds hyphens, so "half guard" matches
+    // "Half-Guard" -- rolling our own here would make this picker disagree with
+    // the Library screen about the same catalog.
+    //
+    // Capped at 60 rather than virtualised: this is a picker, and if what you
+    // want is not in the first 60 the answer is a better search term.
+    return searchTechniques(catalog, query).slice(0, 60);
   }, [catalog, query]);
 
   const add = useCallback((id: string) => {
@@ -233,7 +231,7 @@ export function CurriculumBuilder({ existing }: { existing?: Curriculum }) {
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search 466 techniques…"
+            placeholder="Search techniques…"
             aria-label="Search the technique library"
             className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-900"
           />
@@ -335,8 +333,25 @@ function BuilderRow({
   onRemove: () => void;
   onPatch: (patch: Partial<CurriculumItemWrite>) => void;
 }) {
+  const [open, setOpen] = useState(false);
+  /*
+   * AN EXPLICIT FLAG, not a derivation from the volume fields.
+   *
+   * Derived, clearing both anchors collapsed the row to "+ Add criteria" — so
+   * it LOOKED like a clean reading item while the state still carried
+   * `target_sessions` and `min_hit_rate`. The server then rejected the save on
+   * the anchoring rule and blamed nothing in particular. Worse in daily use:
+   * on an item with one anchor set, clearing that field to retype it unmounted
+   * the editor under the cursor mid-keystroke.
+   *
+   * Now only "Remove criteria" clears state, and it nulls all four.
+   */
   const hasCriteria =
-    item.target_scored != null || item.target_defended != null;
+    open ||
+    item.target_scored != null ||
+    item.target_defended != null ||
+    item.target_sessions != null ||
+    item.min_hit_rate != null;
 
   return (
     <li className="rounded-xl border border-neutral-200 p-3 dark:border-neutral-800">
@@ -380,14 +395,15 @@ function BuilderRow({
       {!hasCriteria ? (
         <button
           type="button"
-          onClick={() =>
+          onClick={() => {
+            setOpen(true);
             onPatch({
               target_scored: CRITERIA_DEFAULTS.target_scored,
               target_defended: CRITERIA_DEFAULTS.target_defended,
               target_sessions: CRITERIA_DEFAULTS.target_sessions,
               min_hit_rate: CRITERIA_DEFAULTS.min_hit_rate,
-            })
-          }
+            });
+          }}
           className="mt-2 text-sm text-neutral-600 hover:underline dark:text-neutral-400"
         >
           + Add completion criteria
@@ -398,7 +414,16 @@ function BuilderRow({
             <Num
               label="Land it"
               value={item.target_scored}
-              onChange={(v) => onPatch({ target_scored: v })}
+              // Clearing this clears the hit rate WITH it. The rate divides the
+              // offensive attempt count, so the server refuses the pair
+              // (curriculum_items_hit_rate_needs_volume) -- and the refusal
+              // arrives as a generic "items must be unique techniques with
+              // positive targets", naming neither the field nor which of up to
+              // 60 rows. Defence-only is the case that justified recording
+              // `defended` at all; it has to be reachable without a 400.
+              onChange={(v) =>
+                onPatch(v == null ? { target_scored: null, min_hit_rate: null } : { target_scored: v })
+              }
             />
             <Num
               label="Stop theirs"
@@ -412,6 +437,10 @@ function BuilderRow({
             />
             <Num
               label="Hit rate %"
+              // Meaningless without something to be a rate OF, and the schema
+              // says so too. Disabled rather than hidden, so the reason is
+              // visible rather than the field just vanishing.
+              disabled={item.target_scored == null}
               value={
                 item.min_hit_rate == null
                   ? null
@@ -431,14 +460,15 @@ function BuilderRow({
           </p>
           <button
             type="button"
-            onClick={() =>
+            onClick={() => {
+              setOpen(false);
               onPatch({
                 target_scored: null,
                 target_defended: null,
                 target_sessions: null,
                 min_hit_rate: null,
-              })
-            }
+              });
+            }}
             className="text-xs text-neutral-500 hover:underline"
           >
             Remove criteria — just something to study
@@ -453,10 +483,12 @@ function Num({
   label,
   value,
   onChange,
+  disabled,
 }: {
   label: string;
   value: number | null | undefined;
   onChange: (v: number | null) => void;
+  disabled?: boolean;
 }) {
   return (
     <label className="block">
@@ -468,10 +500,19 @@ function Num({
         // Empty clears the target rather than sending 0, which the schema
         // refuses (targets must be positive) and which would mean something
         // different anyway.
-        onChange={(e) =>
-          onChange(e.target.value === "" ? null : Number(e.target.value))
-        }
-        className="mt-0.5 w-full rounded-lg border border-neutral-300 px-2 py-1 text-sm tabular-nums dark:border-neutral-700 dark:bg-neutral-900"
+        disabled={disabled}
+        // Clamped here, not left to `min={1}`: these inputs are not inside a
+        // <form> -- Create is a plain button -- so HTML validation never runs,
+        // and 0, a negative or 2.5 would each reach the wire and come back as
+        // an unactionable 400 (the decimal as "invalid JSON body", since the
+        // field is a Go *int).
+        onChange={(e) => {
+          const raw = e.target.value;
+          if (raw === "") return onChange(null);
+          const n = Math.floor(Number(raw));
+          onChange(Number.isFinite(n) && n > 0 ? n : null);
+        }}
+        className="mt-0.5 w-full rounded-lg border border-neutral-300 px-2 py-1 text-sm tabular-nums disabled:opacity-40 dark:border-neutral-700 dark:bg-neutral-900"
       />
     </label>
   );

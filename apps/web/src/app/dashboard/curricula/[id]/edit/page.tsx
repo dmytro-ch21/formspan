@@ -43,5 +43,11 @@ export default function EditCurriculumPage() {
     );
   }
   if (!c) return <p className="text-sm text-neutral-500">Loading…</p>;
-  return <CurriculumBuilder existing={c} />;
+  // `key`, so navigating edit→edit REMOUNTS rather than reusing the instance.
+  // The gate above only covers the first load: when `id` changes, `c` never
+  // returns to null, so the already-mounted builder keeps the previous
+  // curriculum's initialiser-seeded fields — and a save then writes A's content
+  // over B. Nothing links between edit pages today, so this is hardening, but
+  // it is the exact failure the gate exists to prevent.
+  return <CurriculumBuilder key={c.id} existing={c} />;
 }

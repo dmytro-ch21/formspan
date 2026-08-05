@@ -37,8 +37,28 @@ func (r *PostgresRepository) List(ctx context.Context, userID string) ([]Curricu
 	rows, err := r.pool.Query(ctx, `
 		SELECT c.id, c.owner_user_id, c.name, c.description, c.belt, c.visibility,
 		       c.created_at, c.updated_at,
-		       e.user_id IS NOT NULL AS enrolled, e.started_on
+		       e.user_id IS NOT NULL AS enrolled, e.started_on,
+		       n.items, n.countable
 		FROM curricula c
+		-- Item counts, so a list card can tell a roadmap from a reading list.
+		--
+		-- It could not before, and the client built on that gap shipped a
+		-- screen calling every roadmap "a reading list" -- the exact property
+		-- it existed to convey, inverted, on every card.
+		--
+		-- Two COUNTs and no evidence: cheap enough for a 200-row list. MASTERY
+		-- IS DELIBERATELY NOT HERE, because it is not cheap -- it needs the
+		-- per-curriculum aggregate over bjj_session_tags that items() runs, and
+		-- doing that 200 times to draw progress bars on a list nobody reads
+		-- numbers off is the wrong trade. The list says what a curriculum IS;
+		-- the detail says how far along you are.
+		LEFT JOIN LATERAL (
+		    SELECT count(*) AS items,
+		           count(*) FILTER (
+		               WHERE i.target_scored IS NOT NULL OR i.target_defended IS NOT NULL
+		           ) AS countable
+		    FROM curriculum_items i WHERE i.curriculum_id = c.id
+		) n ON true
 		-- LEFT, and joined on the caller: enrollment decorates the row rather
 		-- than filtering it, because this list is "what could I work on" and
 		-- must include the ones they have not taken on yet.
@@ -85,6 +105,7 @@ func scanCurriculum(rows pgx.Rows, userID string) (*Curriculum, *time.Time, erro
 	if err := rows.Scan(
 		&c.ID, &c.OwnerUserID, &c.Name, &c.Description, &c.Belt, &c.Visibility,
 		&c.CreatedAt, &c.UpdatedAt, &c.Enrolled, &startedOn,
+		&c.ItemCount, &c.CountableItems,
 	); err != nil {
 		return nil, nil, fmt.Errorf("curriculum: scan: %w", err)
 	}
@@ -103,7 +124,12 @@ func (r *PostgresRepository) Get(ctx context.Context, userID, id string) (*Curri
 	rows, err := r.pool.Query(ctx, `
 		SELECT c.id, c.owner_user_id, c.name, c.description, c.belt, c.visibility,
 		       c.created_at, c.updated_at,
-		       e.user_id IS NOT NULL AS enrolled, e.started_on
+		       e.user_id IS NOT NULL AS enrolled, e.started_on,
+		       -- Placeholders, filled below from the items this read fetches
+		       -- anyway. Counting them in SQL here would put the criteria rule
+		       -- in two places -- a WHERE clause and Countable() -- for one
+		       -- number, which is how the two drift apart.
+		       0, 0
 		FROM curricula c
 		LEFT JOIN curriculum_enrollments e
 		       ON e.curriculum_id = c.id AND e.user_id = $1 AND e.archived_on IS NULL
@@ -135,8 +161,12 @@ func (r *PostgresRepository) Get(ctx context.Context, userID, id string) (*Curri
 		return nil, err
 	}
 	c.Items = items
-	// The progress rule, applied here so no client has to. Countable() and
-	// Mastered() are the single definition of both.
+	c.ItemCount = len(items)
+	// Recomputed rather than trusted from the list query above: this read is
+	// the one that also knows mastery, and having two sources for the same
+	// number is how they drift. The progress rule lives in Countable() and
+	// Mastered(), which are its single definition.
+	c.CountableItems = 0
 	for _, it := range items {
 		if it.Countable() {
 			c.CountableItems++

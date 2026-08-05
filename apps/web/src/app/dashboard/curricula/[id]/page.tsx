@@ -82,6 +82,17 @@ export default function CurriculumDetailPage() {
 
   const remove = useCallback(async () => {
     if (!c) return;
+    // Confirmed, matching every other destructive action on this dashboard
+    // (workouts, sessions, the rank section) — all of which use this phrasing.
+    // A single click destroying a syllabus somebody spent months on is not a
+    // house idiom worth breaking.
+    if (
+      !window.confirm(
+        `Delete "${c.name}"? This can't be undone.`,
+      )
+    ) {
+      return;
+    }
     setBusy(true);
     try {
       await deleteCurriculum(getToken, c.id);
@@ -174,7 +185,8 @@ export default function CurriculumDetailPage() {
             surprising, both are correct, and neither is discoverable.
           */}
           <p className="mt-2 max-w-2xl text-xs leading-relaxed text-neutral-600 dark:text-neutral-400">
-            Counted from what you have logged since {c.started_on} — anything
+            Counted from what you have logged since{" "}
+            {c.started_on ? formatDay(c.started_on) : "you started"} — anything
             before that does not count toward this, because a rate measured over
             your whole history mostly measures the months you were still
             learning. Your record decides these, so a long run of misses can
@@ -219,6 +231,19 @@ export default function CurriculumDetailPage() {
       )}
     </div>
   );
+}
+
+/** Local-time construction, not `new Date("2026-08-05")` — that parses as UTC
+ *  midnight and renders as the previous day for anyone west of Greenwich, which
+ *  is the bug `Focus.StartedOn` carries a string for in the first place. */
+function formatDay(day: string): string {
+  const [y, m, d] = day.split("-").map(Number);
+  if (!y || !m || !d) return day;
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
 }
 
 function Back() {

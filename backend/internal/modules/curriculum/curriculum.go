@@ -64,6 +64,10 @@ type Curriculum struct {
 	// syllabus is a dozen techniques and a list is a dozen syllabuses; sending
 	// every item on every list read is the N+1 in its lazy form.
 	Items []Item `json:"items,omitempty"`
+	// ItemCount is how many techniques are in it, present on BOTH the list and
+	// the single read -- a card has to be able to say "12 techniques" without
+	// fetching all of them.
+	ItemCount int `json:"item_count"`
 	// CountableItems and MasteredItems ship THE PROGRESS RULE rather than
 	// leaving each client to invent it.
 	//

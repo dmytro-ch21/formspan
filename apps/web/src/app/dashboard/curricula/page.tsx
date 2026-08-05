@@ -22,8 +22,8 @@ import {
  * The two ideas this screen has to teach, because nothing else will:
  *
  *  - **A roadmap is a curriculum whose items carry criteria.** Not a separate
- *    kind of thing. That is why one card can read "12 techniques · 4 with
- *    criteria" without contradicting itself.
+ *    kind of thing, which is why a card reads "12 techniques · 4 to master"
+ *    rather than picking one label for the whole row.
  *  - **Progress counts only the items that carry criteria.** The API ships
  *    `countable_items` precisely so no client divides by `items.length` and
  *    quietly reports a different number than the next one does.
@@ -41,6 +41,20 @@ function beltRank(belt: string | null): number {
 }
 
 type Scope = "mine" | "shared";
+
+/** A DATE column, rendered in the reader's locale rather than as the wire's
+ *  `YYYY-MM-DD` — the idiom every other dashboard screen uses. */
+function formatDay(day: string): string {
+  const [y, m, d] = day.split("-").map(Number);
+  if (!y || !m || !d) return day;
+  // Constructed in LOCAL time, not `new Date("2026-08-05")`, which parses as
+  // UTC midnight and renders as the previous day for anyone west of Greenwich.
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
 
 export default function CurriculaPage() {
   const { getToken } = useAuth();
@@ -143,7 +157,10 @@ export default function CurriculaPage() {
             key={key}
             type="button"
             onClick={() => setScope(key)}
-            aria-current={scope === key ? "page" : undefined}
+            // `aria-pressed`, not `aria-current="page"` — these filter in
+            // place rather than navigating, and "page" tells a screen reader
+            // this links to where you already are. Matches workouts/page.tsx.
+            aria-pressed={scope === key}
             className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium ${
               scope === key
                 ? "border-neutral-900 text-neutral-900 dark:border-white dark:text-white"
@@ -247,15 +264,25 @@ function CurriculumCard({
       )}
 
       <div className="mt-3 grow">
-        {isRoadmap ? (
-          <Progress mastered={c.mastered_items} countable={c.countable_items} enrolled={c.enrolled} />
-        ) : (
-          /* Not "0%". A curriculum with no criteria cannot be completed, and a
-             zeroed bar reads as failure at something that was never asked. */
-          <p className="text-sm text-neutral-500">
-            A reading list — no completion criteria.
-          </p>
-        )}
+        {/*
+          WHAT IT IS, NOT HOW FAR ALONG. `mastered_items` is zero on the list
+          response by design — computing it needs the per-curriculum evidence
+          aggregate, which is not run once per row — so a progress bar here
+          would render a placeholder as fact. An earlier version of this card
+          did exactly that in reverse: it read `countable_items`, which was also
+          absent then, and told every athlete their roadmap was a reading list.
+          Progress lives on the detail screen, which has the numbers.
+        */}
+        <p className="text-sm text-neutral-600 dark:text-neutral-400">
+          {c.item_count} technique{c.item_count === 1 ? "" : "s"}
+          {isRoadmap ? (
+            <> · {c.countable_items} to master</>
+          ) : (
+            /* Not "0 to master", which reads as a roadmap you have failed at.
+               A curriculum with no criteria was never asking to be completed. */
+            <> · a reading list</>
+          )}
+        </p>
       </div>
 
       <div className="mt-4 flex items-center gap-2">
@@ -273,55 +300,10 @@ function CurriculumCard({
         </button>
         {c.enrolled && c.started_on && (
           <span className="text-xs text-neutral-500">
-            since {c.started_on}
+            since {formatDay(c.started_on)}
           </span>
         )}
       </div>
     </li>
-  );
-}
-
-function Progress({
-  mastered,
-  countable,
-  enrolled,
-}: {
-  mastered: number;
-  countable: number;
-  enrolled: boolean;
-}) {
-  /*
-   * The denominator is `countable_items`, never `items.length`. A ten-item
-   * curriculum with three roadmap steps is three items' worth of progress, not
-   * three tenths — the API ships the count so this cannot drift between
-   * clients.
-   */
-  const pct = countable === 0 ? 0 : Math.round((mastered / countable) * 100);
-  return (
-    <div>
-      <div className="flex items-baseline justify-between text-sm">
-        <span className="font-medium">
-          {enrolled ? `${mastered} of ${countable}` : `${countable} to master`}
-        </span>
-        {enrolled && (
-          <span className="text-neutral-500">{pct}%</span>
-        )}
-      </div>
-      {enrolled && (
-        <div
-          className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-800"
-          role="progressbar"
-          aria-valuenow={mastered}
-          aria-valuemin={0}
-          aria-valuemax={countable}
-          aria-label={`${mastered} of ${countable} techniques mastered`}
-        >
-          <div
-            className="h-full rounded-full bg-lime-500"
-            style={{ width: `${pct}%` }}
-          />
-        </div>
-      )}
-    </div>
   );
 }

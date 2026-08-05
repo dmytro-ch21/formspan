@@ -11542,6 +11542,49 @@ An empty belt select means *not belt-specific* and sends `null`, which the API
 treats as CLEAR — that is what the `json.RawMessage` handling on the server was
 for, and this is its first caller.
 
+### What review found, all of it invisible to a build
+
+Three blocking defects, and the first is the reason the "not seen rendering"
+warning below is not boilerplate.
+
+**The list screen called every roadmap a reading list.** `countable_items` was
+zero on list responses — a fact stated in the OpenAPI description *written for
+this very PR* — and the card branched on it being non-zero. So an athlete
+working a twelve-technique roadmap opened the list and read "A reading list — no
+completion criteria" about their own data: the exact property the screen exists
+to convey, inverted, on every row. Types were perfectly satisfied by zero.
+
+The fix went to the API rather than the card, because a list that cannot tell a
+roadmap from a reading list is missing something real: `List` now carries
+`item_count` and `countable_items` via a `LEFT JOIN LATERAL` of two COUNTs.
+`mastered_items` deliberately stays zero there and is documented as such — it
+needs the per-curriculum evidence aggregate, and running that once per row to
+draw progress bars nobody reads numbers off is the wrong trade. The list says
+what a curriculum IS; the detail says how far along you are.
+
+**Defence-only criteria could not be saved.** "Add criteria" wrote all four
+defaults including the hit rate; clearing "Land it" left the rate set, which the
+server refuses because a rate divides the offensive attempt count — and the
+refusal arrived as a generic message naming neither the field nor which of up to
+sixty rows. That is the case that justified recording `defended` at all.
+Clearing the volume target now clears the rate with it, and the rate input is
+disabled while there is nothing to be a rate of.
+
+**Clearing both volume targets orphaned the other two into an invisible state.**
+The row collapsed to "+ Add criteria" — looking like clean reading — while state
+still carried `target_sessions` and `min_hit_rate`, so the save failed on the
+anchoring rule. Worse day to day: on a row with one anchor, clearing it to
+retype unmounted the editor under the cursor. Criteria visibility is now an
+explicit flag; only "Remove criteria" clears state.
+
+Also from review: the catalog search hand-rolled `includes()` and so
+reintroduced the São Paulo bug this codebase had already fixed and documented —
+now `searchTechniques`; `edit` needed `key={c.id}` or navigating edit→edit would
+write one curriculum over another; delete had no confirmation against a
+consistent house idiom; `aria-current="page"` on filter buttons that do not
+navigate; raw `YYYY-MM-DD` shown to readers; a hardcoded "466 techniques"; and a
+comment describing a string no card rendered.
+
 ### Gaps
 
 - **NOT SEEN RENDERING.** The dashboard is Clerk-gated and I will not enter
