@@ -9582,11 +9582,14 @@ move and the first time it has.
 
 ### Gaps this leaves
 
-- **Not verified on a device.** The Simulator's Clerk session lapsed mid-check
-  and signing in is not something this session will do, so the facet buttons and
-  the sheet have **not been seen rendering with real data**. The layout before
-  the sign-out confirmed the header is shorter; the filtering itself rests on
-  unit tests. This is the one claim here that is reasoned rather than observed.
+- Verified on the Simulator against a local API carrying the new registry
+  facets: both buttons appear under Strength, `Muscle → Chest` narrows to chest
+  primaries, and `Movement → Push` composes with it — returning Bench Press
+  (horizontal) and Assisted Dip (vertical) under one option while dropping the
+  isolation work, which is the fold doing its job. Position and Belt render the
+  same way under BJJ, with the saved belt cap intact. **Note the staging API
+  does not carry these facets until this deploys**, so the buttons will not
+  appear on a client pointed at it — the registry is the gate.
 - **Only reachable once a sport is chosen.** With the sport chip on "All" no
   facet buttons appear, because `moduleFor('')` matches no module — exactly the
   behaviour position and belt already had. It is consistent, and it does mean
