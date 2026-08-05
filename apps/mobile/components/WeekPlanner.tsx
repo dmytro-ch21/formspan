@@ -14,6 +14,7 @@ import { request as requestSync, useSyncState } from '@/lib/sync';
 
 import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
+import { PeriodSwitcher } from '@/components/ui/PeriodSwitcher';
 import { PickSessionSheet } from '@/components/ui/PickSessionSheet';
 import { vola } from '@/constants/Colors';
 import { sportColor, sportIcon, sportTint } from '@/components/ui/sport';
@@ -87,6 +88,17 @@ export function WeekPlanner({
   // actual date and must not move when you navigate away from this week.
   const [anchor, setAnchor] = useState(() => new Date());
   const [monthOpen, setMonthOpen] = useState(false);
+  /**
+   * Whether the seven authoring rows are showing.
+   *
+   * Open by default, which is the opposite of the Today screen's calendar and
+   * deliberate: Today's question is "what day is it and have I trained", and
+   * the rows are an escalation from it. This screen exists to fill the rows
+   * in, so starting collapsed would hide the only thing on it. The collapse is
+   * for reading the shape of a month — step through weeks with the strip
+   * alone, then open the week you want to change.
+   */
+  const [expanded, setExpanded] = useState(true);
   // The month the grid is showing, which is not the anchor's month once you
   // page through it looking for a week without picking one yet.
   const [monthAnchor, setMonthAnchor] = useState(() => startOfMonth(new Date()));
@@ -254,12 +266,30 @@ export function WeekPlanner({
    * the Monday instead calls 29 September – 5 October "September" when six of
    * its seven days are October.
    */
-  const weekLabel = days[3].toLocaleDateString(undefined, {
+  const monthLabel = days[3].toLocaleDateString(undefined, {
     month: 'long',
     // The year only when it is not the current one — "AUGUST 2026" on every
     // screen all year is noise, but a silent jump to next January is a trap.
     ...(days[3].getFullYear() === now.getFullYear() ? {} : { year: 'numeric' }),
   });
+
+  /**
+   * What the switcher reads, and the ONLY thing saying you have navigated.
+   *
+   * The old header carried that in a separate "Today" pill, on the argument
+   * that it was the one thing telling you you had moved. True then; the pill
+   * does not fit a centred three-element row, and it does not have to — a
+   * label that says THIS WEEK on one week and a date range on every other says
+   * the same thing in the place you are already looking. It is text, so it
+   * survives greyscale and a screen reader, which the pill's colour did not.
+   *
+   * Getting back is the month grid, which marks today and is one tap from
+   * here — the same route as jumping anywhere else, rather than a control that
+   * does nothing six days out of seven.
+   */
+  const weekLabel = isCurrentWeek
+    ? 'THIS WEEK'
+    : `${days[0].toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} – ${days[6].toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`.toUpperCase();
 
   function openMonth() {
     setMonthAnchor(startOfMonth(anchor));
@@ -276,81 +306,95 @@ export function WeekPlanner({
   return (
     <RNView style={styles.wrap} testID="week-planner">
       {/*
-        Two controls, kept apart: the title opens the month, the pair on the
-        right steps a week. They were interleaved as `‹ AUGUST › ›` in the first
-        cut, which put two identical right-chevrons side by side with entirely
-        different jobs — the disclosure on the title and the next-week arrow.
-        Grouping the stepper and turning the title's chevron down is what makes
-        the two readable at a glance.
+        One shape for "which week", shared with everything else that changes a
+        period — see `ui/PeriodSwitcher`. It replaces a title on the left, a
+        Today pill in the middle and a stepper pair on the right: three
+        controls doing one job, in three places.
       */}
-      <RNView style={styles.head}>
-        <Pressable
-          onPress={openMonth}
-          hitSlop={14}
-          style={styles.monthButton}
-          accessibilityRole="button"
-          accessibilityLabel={`${weekLabel}, week of ${days[0].toLocaleDateString(undefined, {
-            day: 'numeric',
-            month: 'long',
-          })}. Open the month to jump to another week.`}
-          testID="plan-open-month"
-        >
-          <Text style={styles.month}>{weekLabel.toUpperCase()}</Text>
-          <RNView style={styles.down}>
-            <Icon name="chevron" size={11} color={vola.textDim} />
-          </RNView>
-        </Pressable>
+      <PeriodSwitcher
+        label={weekLabel}
+        onPrev={() => setAnchor(addDays(anchor, -7))}
+        onNext={() => setAnchor(addDays(anchor, 7))}
+        onPress={openMonth}
+        icon="calendar"
+        prevLabel="Previous week"
+        nextLabel="Next week"
+        pressLabel={`${monthLabel}, week of ${days[0].toLocaleDateString(undefined, {
+          day: 'numeric',
+          month: 'long',
+        })}. Open the month to jump to another week.`}
+        testID="plan-week"
+      />
 
-        {/* Only when you are away from it — a "Today" that is always there is
-            a control that does nothing six days out of seven, and it is also
-            the only thing telling you that you have navigated at all. */}
-        {!isCurrentWeek && (
-          <Pressable
-            onPress={() => {
-              // `now` too, not just the anchor. Across a midnight boundary a
-              // stale `now` leaves `isCurrentWeek` false after the jump, so
-              // the pill stays up, no row is marked today, and tapping it
-              // again does nothing.
-              const today = new Date();
-              setNow(today);
-              setAnchor(today);
-            }}
-            hitSlop={14}
-            style={styles.today}
-            accessibilityRole="button"
-            accessibilityLabel="Today, back to this week"
-            testID="plan-this-week"
-          >
-            <Text style={styles.todayText}>Today</Text>
-          </Pressable>
-        )}
+      {/*
+        The compact week, which is what remains when the rows are closed.
 
-        <RNView style={[styles.stepper, isCurrentWeek && styles.stepperAlone]}>
-          <Pressable
-            onPress={() => setAnchor(addDays(anchor, -7))}
-            hitSlop={12}
-            style={styles.step}
-            accessibilityRole="button"
-            accessibilityLabel="Previous week"
-            testID="plan-prev-week"
-          >
-            <RNView style={styles.flip}>
-              <Icon name="chevron" size={14} color={vola.text} />
+        **A hollow ring, not a filled dot.** `TrainingCalendar` spends a legend
+        teaching that shape distinction — filled is what happened, a ring is
+        what is intended — because green and lime are 1.18:1 apart in greyscale
+        and hue alone cannot carry it. This strip looks like that one and knows
+        only about plans, so a filled dot would report every planned day as
+        trained to anyone who learned the legend. The ring claims exactly what
+        this screen can claim, which is the opposite of the first draft's
+        reasoning.
+
+        Fixed `lime` rather than the athlete's accent, for the same reason the
+        palette states: the accent is identity and interaction, and anything
+        encoding a *reading* stays fixed. A marker whose colour follows a
+        preference is one nobody can learn to read — and it would be orange
+        here and lime on Today for the same fact.
+      */}
+      <RNView style={styles.strip}>
+        {days.map((d) => {
+          const key = dayString(d);
+          const isToday = key === todayKey;
+          const has = plans.some((pl) => pl.day === key);
+          return (
+            <RNView
+              key={key}
+              style={styles.stripCell}
+              // One stop per day. Left open, the weekday abbreviation and the
+              // date are two separate stops and the week costs fourteen.
+              accessible
+              accessibilityLabel={`${d.toLocaleDateString(undefined, {
+                weekday: 'long',
+                day: 'numeric',
+                month: 'long',
+              })}${isToday ? ', today' : ''}${has ? ', planned' : ''}`}
+            >
+              <Text style={styles.stripDow}>
+                {d.toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 3).toUpperCase()}
+              </Text>
+              <Text
+                // `ink`, not `accent`: the fill is 3.92:1 on purple against a
+                // 11.25pt bold run, which needs 4.5:1. Every other coloured
+                // string in this file already uses `ink` for that reason.
+                style={[styles.stripDay, isToday && { color: accent.ink }]}
+              >
+                {d.getDate()}
+              </Text>
+              <RNView style={[styles.stripDot, has && styles.stripDotPlanned]} />
             </RNView>
-          </Pressable>
-          <Pressable
-            onPress={() => setAnchor(addDays(anchor, 7))}
-            hitSlop={12}
-            style={styles.step}
-            accessibilityRole="button"
-            accessibilityLabel="Next week"
-            testID="plan-next-week"
-          >
-            <Icon name="chevron" size={14} color={vola.text} />
-          </Pressable>
-        </RNView>
+          );
+        })}
       </RNView>
 
+      <Pressable
+        onPress={() => setExpanded((v) => !v)}
+        hitSlop={10}
+        style={styles.toggle}
+        accessibilityRole="button"
+        accessibilityState={{ expanded }}
+        accessibilityLabel={expanded ? 'Hide the week' : 'Show the week'}
+        testID="plan-toggle-week"
+      >
+        <Text style={styles.toggleText}>{expanded ? 'HIDE WEEK' : 'SHOW WEEK'}</Text>
+        <RNView style={expanded ? styles.up : styles.down}>
+          <Icon name="chevron" size={11} color={vola.textDim} />
+        </RNView>
+      </Pressable>
+
+      {expanded && (
       <View style={styles.card}>
         {days.map((d, i) => {
           const key = dayString(d);
@@ -459,8 +503,11 @@ export function WeekPlanner({
           );
         })}
       </View>
+      )}
 
-      <Text style={styles.hint}>Long-press a planned session to remove it.</Text>
+      {expanded && (
+        <Text style={styles.hint}>Long-press a planned session to remove it.</Text>
+      )}
 
       <PickSessionSheet
         visible={planning !== null}
@@ -500,29 +547,47 @@ export function WeekPlanner({
         {monthOpen && (
         <View style={styles.sheet} lightColor={vola.bg} darkColor={vola.bg}>
           <RNView style={styles.sheetHead}>
+            {/*
+              Today lives HERE, not on the header, and it is what makes losing
+              the header's Today pill an acceptable trade. `openMonth` opens on
+              the *navigated* week's month, so from three months out "tap the
+              label, tap today's cell" is five taps and today is not even on
+              the grid. One button, in the place you already came to jump from.
+
+              It also balances the row: `Done` is on the right, so without
+              something of similar weight on the left the switcher centres
+              itself ~30pt off the sheet's true middle.
+            */}
             <Pressable
-              onPress={() => stepMonth(-1)}
+              onPress={() => {
+                const today = new Date();
+                setNow(today);
+                setAnchor(today);
+                setMonthOpen(false);
+              }}
               hitSlop={12}
+              style={styles.sheetToday}
               accessibilityRole="button"
-              accessibilityLabel="Previous month"
-              testID="plan-month-prev"
+              accessibilityLabel="Today, back to this week"
+              testID="plan-month-today"
             >
-              <RNView style={styles.flip}>
-                <Icon name="chevron" size={16} color={vola.text} />
-              </RNView>
+              <Text style={styles.close}>Today</Text>
             </Pressable>
-            <Text style={styles.sheetTitle}>
-              {monthAnchor.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}
-            </Text>
-            <Pressable
-              onPress={() => stepMonth(1)}
-              hitSlop={12}
-              accessibilityRole="button"
-              accessibilityLabel="Next month"
-              testID="plan-month-next"
-            >
-              <Icon name="chevron" size={16} color={vola.text} />
-            </Pressable>
+
+            {/* Same switcher, without the disclosure icon: this IS the
+                calendar that icon would open. */}
+            <RNView style={styles.sheetSwitcher}>
+              <PeriodSwitcher
+                label={monthAnchor
+                  .toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
+                  .toUpperCase()}
+                onPrev={() => stepMonth(-1)}
+                onNext={() => stepMonth(1)}
+                prevLabel="Previous month"
+                nextLabel="Next month"
+                testID="plan-month"
+              />
+            </RNView>
             <Pressable
               onPress={() => setMonthOpen(false)}
               hitSlop={12}
@@ -614,37 +679,7 @@ export function WeekPlanner({
 const styles = StyleSheet.create({
   wrap: { gap: 8 },
 
-  // 16, not 10: the Today pill and the stepper each claim ~10-12pt of hitSlop
-  // into this gap, and the later-rendered stepper won the overlap — so a tap
-  // just right of "Today" fired "Previous week".
-  head: { flexDirection: 'row', alignItems: 'center', gap: 16, paddingBottom: 2 },
-  // The icon set has one chevron, pointing right. Rotating is what gives the
-  // pair a guaranteed-identical silhouette; a second asset would not.
-  flip: { transform: [{ rotate: '180deg' }] },
   down: { transform: [{ rotate: '90deg' }] },
-  monthButton: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  month: { fontSize: 13, fontWeight: '800', letterSpacing: 1.4 },
-  today: {
-    marginLeft: 'auto',
-    borderWidth: 1,
-    borderColor: vola.lineSoft,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-  },
-  todayText: { fontSize: 11, fontWeight: '700', color: vola.lime },
-  stepper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: vola.lineSoft,
-    borderRadius: 999,
-    overflow: 'hidden',
-  },
-  // The Today pill takes the `marginLeft: auto` when it is there; without it
-  // the stepper needs its own, or it sits against the title.
-  stepperAlone: { marginLeft: 'auto' },
-  step: { paddingHorizontal: 12, paddingVertical: 5 },
 
   card: {
     backgroundColor: vola.surface,
@@ -693,6 +728,19 @@ const styles = StyleSheet.create({
   hint: { fontSize: 11, color: vola.textDim },
 
   sheet: { flex: 1 },
+  strip: { flexDirection: 'row', paddingTop: 10, paddingBottom: 2 },
+  stripCell: { flex: 1, alignItems: 'center', gap: 3 },
+  stripDow: { color: vola.textDim, fontSize: 10, fontWeight: '700', letterSpacing: 0.8 },
+  stripDay: { color: vola.text, fontSize: 15, fontWeight: '700' },
+  // 7pt, and empty days keep the same 7pt of space — a mark that appears and
+  // disappears would shuffle the row's height as you step through weeks.
+  stripDot: { width: 7, height: 7, borderRadius: 3.5, borderWidth: 1.5, borderColor: 'transparent' },
+  stripDotPlanned: { borderColor: vola.lime },
+  toggle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10 },
+  toggleText: { color: vola.textDim, fontSize: 11, fontWeight: '800', letterSpacing: 1.2 },
+  up: { transform: [{ rotate: '-90deg' }] },
+  sheetSwitcher: { flex: 1 },
+  sheetToday: { minWidth: 52 },
   sheetHead: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -702,7 +750,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: vola.line,
   },
-  sheetTitle: { fontSize: 16, fontWeight: '800' },
   sheetClose: { marginLeft: 'auto' },
   close: { fontSize: 14, fontWeight: '700', color: vola.lime },
   sheetBody: { padding: 14, gap: 2 },

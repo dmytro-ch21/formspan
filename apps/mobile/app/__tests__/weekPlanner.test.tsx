@@ -91,13 +91,13 @@ it('reads the week it is showing, not the current one', async () => {
   await waitFor(() => expect(mockListPlannedBetween).toHaveBeenCalled());
   const thisWeek = lastFrom();
 
-  fireEvent.press(screen.getByTestId('plan-next-week'));
+  fireEvent.press(screen.getByTestId('plan-week-next'));
 
   // Exactly seven days later. Under the pinned read this is 0 — the rows move
   // and the query does not, which is the whole bug.
   await waitFor(() => expect(daysBetween(thisWeek, lastFrom())).toBe(7));
 
-  fireEvent.press(screen.getByTestId('plan-prev-week'));
+  fireEvent.press(screen.getByTestId('plan-week-prev'));
   await waitFor(() => expect(daysBetween(thisWeek, lastFrom())).toBe(0));
 });
 
@@ -108,8 +108,8 @@ it('stays on a past week picked from the month grid', async () => {
 
   // Two weeks back, reached with the arrows — the same anchor change the
   // month grid makes, without needing the sheet open.
-  fireEvent.press(screen.getByTestId('plan-prev-week'));
-  fireEvent.press(screen.getByTestId('plan-prev-week'));
+  fireEvent.press(screen.getByTestId('plan-week-prev'));
+  fireEvent.press(screen.getByTestId('plan-week-prev'));
   await waitFor(() => expect(daysBetween(thisWeek, lastFrom())).toBe(-14));
 
   // And it STAYS there. With `[refresh]` on the focus effect, changing the
@@ -120,18 +120,75 @@ it('stays on a past week picked from the month grid', async () => {
   expect(daysBetween(thisWeek, lastFrom())).toBe(-14);
 });
 
-it('offers Today only once the shown week is not the current one', async () => {
+it('names the week in the switcher, which is the only thing saying you moved', async () => {
+  // This replaced a separate "Today" pill that appeared when you navigated
+  // away. The pill was the one thing telling you you had moved, so removing it
+  // needed the label to take that over — and the label is better at it: it is
+  // text, so it survives greyscale and reaches a screen reader, and it says
+  // WHICH week rather than only that it is not this one. Getting back is the
+  // month grid, one tap from the same control.
   render(<WeekPlanner userId="u1" modules={modules} />);
   await waitFor(() => expect(mockListPlannedBetween).toHaveBeenCalled());
-  expect(screen.queryByTestId('plan-this-week')).toBeNull();
+  expect(screen.getByTestId('plan-week-label')).toHaveTextContent('THIS WEEK');
 
-  fireEvent.press(screen.getByTestId('plan-next-week'));
-  await waitFor(() => expect(screen.getByTestId('plan-this-week')).toBeTruthy());
+  fireEvent.press(screen.getByTestId('plan-week-next'));
+  // The actual range, not merely "not THIS WEEK" — that passes against empty
+  // text, and against a range formatted off `now` instead of `anchor`, which
+  // is the class of bug this file exists for.
+  await waitFor(() =>
+    expect(screen.getByTestId('plan-week-label')).toHaveTextContent('AUG 10 – AUG 16'),
+  );
 
-  const thisWeek = lastFrom();
-  fireEvent.press(screen.getByTestId('plan-this-week'));
-  await waitFor(() => expect(daysBetween(thisWeek, lastFrom())).toBe(-7));
-  expect(screen.queryByTestId('plan-this-week')).toBeNull();
+  fireEvent.press(screen.getByTestId('plan-week-prev'));
+  await waitFor(() =>
+    expect(screen.getByTestId('plan-week-label')).toHaveTextContent('THIS WEEK'),
+  );
+});
+
+it('keeps the authoring rows behind a collapse, open by default', async () => {
+  // Open by default is the opposite of the Today screen's calendar and is the
+  // point: this screen exists to fill the rows in, so starting collapsed would
+  // hide the only thing on it.
+  //
+  // Asserting the ROWS, not the toggle's caption. The first version of this
+  // checked only that the label flipped HIDE WEEK → SHOW WEEK, which stays
+  // green if the `{expanded && …}` gate is deleted entirely — it tested the
+  // button, not the collapse.
+  render(<WeekPlanner userId="u1" modules={modules} />);
+  await waitFor(() => expect(mockListPlannedBetween).toHaveBeenCalled());
+  expect(screen.getAllByText('Rest').length).toBeGreaterThan(0);
+  expect(screen.getByTestId('plan-toggle-week')).toHaveTextContent('HIDE WEEK');
+
+  fireEvent.press(screen.getByTestId('plan-toggle-week'));
+  expect(screen.queryAllByText('Rest')).toHaveLength(0);
+  expect(screen.queryByTestId('plan-add-2026-08-05')).toBeNull();
+  expect(screen.getByTestId('plan-toggle-week')).toHaveTextContent('SHOW WEEK');
+
+  // And the strip survives the collapse — it is what the week becomes, so a
+  // collapse that took it too would leave the header alone on the screen.
+  fireEvent.press(screen.getByTestId('plan-toggle-week'));
+  expect(screen.getAllByText('Rest').length).toBeGreaterThan(0);
+});
+
+it('offers a way back to this week from the month sheet', async () => {
+  // The header's Today pill was removed in favour of the switcher's label.
+  // This is where the capability went, and `openMonth` opens on the NAVIGATED
+  // month — so without it, returning from three months out is five taps and
+  // today is not even on the grid.
+  render(<WeekPlanner userId="u1" modules={modules} />);
+  await waitFor(() => expect(mockListPlannedBetween).toHaveBeenCalled());
+
+  fireEvent.press(screen.getByTestId('plan-week-next'));
+  fireEvent.press(screen.getByTestId('plan-week-next'));
+  await waitFor(() =>
+    expect(screen.getByTestId('plan-week-label')).not.toHaveTextContent('THIS WEEK'),
+  );
+
+  fireEvent.press(screen.getByTestId('plan-week-label'));
+  fireEvent.press(await screen.findByTestId('plan-month-today'));
+  await waitFor(() =>
+    expect(screen.getByTestId('plan-week-label')).toHaveTextContent('THIS WEEK'),
+  );
 });
 
 it('does not build the month grid until it is opened', async () => {
@@ -148,13 +205,18 @@ it('does not build the month grid until it is opened', async () => {
     render(<WeekPlanner userId="u1" modules={modules} />);
     await waitFor(() => expect(mockListPlannedBetween).toHaveBeenCalled());
 
-    // Measured, not guessed: 45 with the gate, 195 without, across the two
-    // renders a mount does. 100 sits cleanly between and leaves room for the
-    // rows to grow a label without turning this into a flake.
-    expect(spy.mock.calls.length).toBeLessThan(100);
+    // Measured, not guessed, and RE-measured: 87 with the gate, 237 without,
+    // across the renders a mount does. It was 45/195 when written with a bound
+    // of 100 — the week strip's own seven labels ate most of that headroom, and
+    // a bound with 13 points of slack fails next for a reason unrelated to the
+    // gate it guards. 160 is the midpoint of the current pair, which is the
+    // most room in both directions.
+    //
+    // Re-measure this when the header grows anything; do not just raise it.
+    expect(spy.mock.calls.length).toBeLessThan(160);
 
     spy.mockClear();
-    fireEvent.press(screen.getByTestId('plan-open-month'));
+    fireEvent.press(screen.getByTestId('plan-week-label'));
     await waitFor(() => expect(screen.getByTestId('plan-month-close')).toBeTruthy());
     // And opening it genuinely does the work — otherwise the assertion above
     // would also pass against a grid that had simply stopped rendering.

@@ -9778,6 +9778,112 @@ deliberate call rather than an oversight.
   `pnpm-workspace.yaml` already declares `packages/*` with no such directory —
   that, or a backend-computed answer, is the actual destination.
 
+## 2026-08-05 — One shape for "which period", and the Plan week folds away
+
+> "anything that will be changing other page on a specific view I want this way
+> of doing it, minimal and nice" — with a reference showing `‹ TODAY 📅 ›`.
+> "the calendar should be collapcable in the planning section."
+
+### The switcher
+
+`components/ui/PeriodSwitcher` — a chevron, a label, a chevron. The chevrons
+step; the label, when pressable, opens the calendar that jumps somewhere
+distant. Anything that changes which period a screen shows should use it.
+
+It also resolves an old objection rather than ignoring it. The Plan header's
+first cut was `‹ AUGUST › ›` — the title's disclosure chevron immediately
+followed by the next-week arrow, two identical glyphs side by side doing
+entirely different jobs. The fix at the time was to pull them apart: title
+left, stepper pair right, plus a Today pill in the middle when you had
+navigated. Three controls, three places, one job.
+
+Putting the label *between* the arrows solves the same collision differently:
+exactly one left-chevron and one right-chevron, both steppers, and the
+disclosure carried by an icon inside the label. Nothing looks like anything
+else, and it is one control instead of three.
+
+### The Today pill is gone, and the label took its job
+
+That pill was defended on the grounds that it was the only thing telling you
+you had navigated at all. True, and the label is better at it: it reads
+**THIS WEEK** on the current week and the date range otherwise. Text, so it
+survives greyscale and reaches a screen reader — neither of which the pill's
+colour did — and it says *which* week rather than only that it is not this one.
+
+**The cost is real, and my first estimate of it was wrong.** I priced it at two
+taps. `openMonth` opens on the *navigated* week's month, so from three months
+out today is not even on the grid and it is five — unbounded, really. Review
+caught that, and the fix is in this branch rather than deferred: the month
+sheet now has its own **Today**, which is the place you already came to jump
+from, and which also balances a header that was centring ~30pt off true.
+
+### Three things review caught, all of them real
+
+**`accent.accent` used as text.** The strip's today marker took the accent
+*fill*, which is 3.92:1 on purple against an 11.25pt bold run needing 4.5:1.
+Every other coloured string in the file already used `accent.ink` (7.23:1), and
+the host screen carries the rule verbatim. One token, a measurable AA failure.
+
+**A filled dot for "planned", and my justification was inverted.**
+`TrainingCalendar` spends a legend teaching that filled means trained and a
+hollow ring means intended, because green and lime are 1.18:1 apart in
+greyscale. The new strip looks like that component and used a filled dot for
+plans — reporting every planned day as trained to anyone who learned the
+legend. The comment defending it said a ring "would be claiming a distinction
+it cannot make"; the ring claims *planned*, which is the only thing this strip
+knows. The filled dot was the unsupportable claim. It also used the athlete's
+accent for what is a *reading*, which the palette explicitly reserves fixed
+colours for — a planned day was orange on Plan and lime on Today.
+
+**Label in Name.** The pill's visible text is THIS WEEK; its accessible name
+began "August, week of 11 August…". The visible string was not a substring, so
+Voice Control could not activate it — on the one control that is now the only
+route to the month grid. The visible label leads the name now.
+
+### A contrast bug caught before it shipped
+
+The first cut marked the "you have navigated" state with a border on the pill.
+It measures **1.35:1** against the screen — a state indicator nobody can see,
+and the same mistake as the tab thumb that was 1.09:1 from its own track two
+entries ago. Deleted rather than recoloured: the label already carries the
+fact, and a second channel is not worth a colour that fails.
+
+The pill's own fill is 1.15:1 and that is *fine* — it is decoration. What
+identifies the control is the label and its icon (14:1 and 6.26:1), which is
+what WCAG 1.4.11 asks for. The chevrons are `textDim` at 3.86:1 on the screen,
+clear of the 3:1 a meaningful graphic needs — but note `textDim` is not
+universally safe here: it measures 2.51:1 on a completed set row. This passes
+because of what it sits on.
+
+### The Plan week collapses
+
+Same shape as Today: a compact seven-cell strip with a dot on days that have
+something, and the authoring rows behind a HIDE WEEK / SHOW WEEK toggle.
+
+**Open by default**, which is the opposite of Today's calendar and deliberate.
+Today's question is "what day is it and have I trained", so its rows are an
+escalation from the strip. This screen exists to fill the rows in; starting
+collapsed would hide the only thing on it. The collapse is for reading the
+shape of a month — step weeks with the strip alone, then open the one you want
+to change.
+
+The strip shows **planned only**. This screen never loads sessions, so a hollow
+ring here would be claiming a distinction it cannot actually make.
+
+### Gaps
+
+- **Today has not adopted the switcher yet.** It is the screen the reference
+  screenshot was actually of, and day-stepping there is the next piece.
+- **The month-grid render guard had quietly lost its margin.** It asserted
+  fewer than 100 `toLocaleDateString` calls on mount, measured at 45 gated /
+  195 ungated. The strip's own seven labels moved that to **87 / 237** — 13
+  points of slack, so the next label anywhere in a seven-times-repeated
+  position would have turned it red for a reason unrelated to the gate. Both
+  sides re-measured and the bound restated at the midpoint.
+- **Ten dead style keys** were removed from `WeekPlanner` along with the old
+  header. Nothing catches an unused `StyleSheet` key — not the typechecker, not
+  ESLint — so they accumulate silently; this lot was found by grepping.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

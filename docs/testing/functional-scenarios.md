@@ -3083,6 +3083,33 @@ assert anything about sync, and a second device is expected to show nothing.
 - Renaming a template renames it wherever it is planned, without replanning —
   the plan stores the id, not the name.
 
+### The period switcher, and the week that folds away
+
+One control — `‹ LABEL 📅 ›` — for anything that changes which period a screen
+shows. On Plan it is the week; inside the month sheet it is the month.
+
+- The label reads **THIS WEEK** on the current week and the date range of the
+  shown week otherwise. That label is the only thing saying you have navigated
+  (the old "Today" pill is gone), so it must be right for the week on screen,
+  not for today.
+- Left steps back a week, right steps forward, and they are not swapped.
+- Tapping the label opens the month grid; the grid is not built until then.
+- **The month sheet has its own Today**, which returns to this week and closes.
+  This is the route back now that the header pill is gone — check it from a
+  month far enough away that today is not on the visible grid at all.
+- Inside the sheet the month name is a readout, not a button: it must not be
+  announced as a disabled control.
+- Voice Control: "tap THIS WEEK" must activate the pill — the visible text has
+  to lead the accessible name, and this pill is the only route to the month.
+- The week's authoring rows collapse behind **HIDE WEEK / SHOW WEEK**, and are
+  **open by default**. Collapsed, the rows and every `+ Add` are gone and the
+  compact strip remains.
+- The strip's marker is a **hollow ring**, matching "planned" on the Today
+  calendar, and it is fixed lime rather than the athlete's accent — a planned
+  day must not read as trained, and must not change colour with a preference.
+- Today's date in the strip uses the accent's *ink*, which stays legible on the
+  purple theme where the fill does not.
+
 ### Today reads the plan back
 
 - Plan today, return to Today → the lead card names it and offers **Start**.
