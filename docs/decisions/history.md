@@ -9653,6 +9653,101 @@ move and the first time it has.
   it against a real training week.
 
 
+## 2026-08-05 — A plan stops being drawn twice, by building the query the migration promised
+
+> "when we plan something that workouts should pop up on todays screen as to be
+> completed, currently I had planned and then logged and I see both which is
+> not correct."
+
+A day that was planned and then trained showed two rows: the session, and the
+plan still sitting beside it saying "Planned". It reads as two sessions when
+there was one.
+
+### This was not a merge bug
+
+`TrainingCalendar`'s `DayRow` concatenated `sessions` and `planned` with no
+cross-check, and it did so **deliberately**. Non-reconciliation was documented
+in five independent places — the migration, the Go module, the mobile client,
+the web calendar, and the OpenAPI schema — and the migration argued it at
+length:
+
+> Auto-consuming a plan when a session lands would need a rule for "does this
+> session count as that plan" that nobody can state — same sport? same
+> template? same day? — and would silently rewrite the athlete's own record of
+> what they meant to do. Adherence is therefore a *query* over both tables,
+> computed when asked, rather than a status column that has to be kept true.
+
+That is right about writing and was read as also settling display. It isn't the
+same question. The objection is to **storing** a status; the complaint is about
+**seeing** two rows. And the comment's own second sentence describes the fix:
+adherence as a query, computed when asked. Nobody had written the query.
+
+### The rule the comment said nobody could state
+
+**A plan is met by a logged session on the same day in the same sport, matched
+one-to-one and greedily.** `apps/mobile/lib/adherence.ts`, ~40 lines, pure.
+
+Each clause answers one of the cases the migration was protecting, and each is a
+test:
+
+- **Same day, same sport — the template is not part of it.** You planned
+  Workout 1 and did Workout 2; you did your strength session. Requiring the
+  template to match would leave "Workout 1 · Planned" sitting next to the
+  workout you actually logged, which is the duplication being removed.
+- **One-to-one.** Two planned BJJ sessions need two logged ones. A two-a-day is
+  not half-erased by a single class — and `(user_id, day)` is deliberately not
+  unique for exactly this reason.
+- **A day trained twice, or trained with something else, still shows every
+  session.** Sessions are never hidden by this. Only a *met* plan stops being
+  drawn a second time.
+- **Greedy, in input order.** Which of two indistinguishable same-sport plans
+  gets credited is arbitrary — they differ only by id and render identically.
+
+Nothing writes. There is still no status column, no `session_id`, no
+`completed_at`. Recomputing on read buys something a column could not: **delete
+the session and its plan is pending again**, verified on the Simulator by doing
+exactly that. A stored flag would survive the delete and keep claiming the day
+was trained. That is the strongest argument for the query, and it is the
+migration's own argument, honoured rather than overridden.
+
+The day-list marker moved rather than disappeared: the session that met a plan
+carries `planned` in its meta line, last, because what was done outranks what
+was meant.
+
+### Two surfaces, and the second was louder
+
+The day list was the reported one. The Today lead card was worse: it filtered
+today's plans **inside the loader that read them**, so the answer froze at the
+moment plans were fetched and finishing a session left the card still offering
+"STRENGTH · Strength session · Start" for the class just logged. It is a
+`useMemo` over both lists now, so it cannot go stale.
+
+### What was updated, and one thing worth flagging
+
+All five documentation sites now say what actually ships — storage
+reconciliation still does not happen, display reconciliation does, here is the
+rule. That includes **editing an already-applied migration's comment**
+(`000033_create_plans.up.sql`). `golang-migrate` tracks version numbers and does
+not checksum, so this is safe, and the alternative was leaving the file where
+readers look stating the opposite of the behaviour. Worth knowing it was a
+deliberate call rather than an oversight.
+
+### Gaps
+
+- **`apps/web`'s calendar has not adopted the rule and still shows both.** Its
+  answer to the same duplication was to make the two chips legibly different (a
+  check glyph vs a hollow ring), which works there because a day is a chip
+  rather than a list. But two clients computing adherence differently is
+  precisely how the position vocabulary rotted, and this should be reconciled
+  deliberately rather than left to drift.
+- **"Nothing planned for today" is now reachable by completing your plan**,
+  which is the wrong sentence for that state — you did not have nothing
+  planned, you finished it. The empty state needs to distinguish *nothing
+  scheduled* from *all done*. Being addressed in the Today-surface work.
+- **Matching is by sport, so a mislabelled session cannot meet a plan.** Log a
+  BJJ class as a strength session and both rows come back. Correct, arguably,
+  but it will look like a bug to whoever does it.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

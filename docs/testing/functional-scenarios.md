@@ -3093,6 +3093,37 @@ assert anything about sync, and a second device is expected to show nothing.
   the same `logsAfterwards` predicate everything else uses.
 - Nothing planned → the dashed "Nothing planned for today" card, which routes
   to Plan. `+ Start something` is present either way.
+
+### A plan that has been met stops being drawn twice
+
+The rule is `apps/mobile/lib/adherence.ts`: a plan is met by a logged session on
+the same day in the same sport, matched one-to-one. Nothing is written — every
+one of these is recomputed on read, which is what makes the deletion case work.
+
+- Plan a strength day, then log a strength session on it → the week list shows
+  **one** row (the session, with `planned` in its meta), not the session plus a
+  "Planned" row. The lead card stops offering it.
+- The week strip's dot for that day goes from hollow ring to filled.
+- **Delete that session** → the plan is pending again: the row returns, the dot
+  goes hollow, the lead card offers Start. This is the case a stored
+  `completed` column cannot get right.
+- Plan a BJJ day and log a **strength** session on it → both still show. The
+  plan was not met; nothing was consumed.
+- Plan one BJJ session and log **two** → one plan row disappears, both sessions
+  show. Plan two and log one → one plan row remains.
+- Plan "Workout 1" and log "Workout 2" on that day → the plan is met. The
+  template is a starting point, not a contract.
+- A session logged the **evening before** must not meet the next day's plan, and
+  a 9pm session must meet *its own* day's plan (the day comes from local time,
+  not the UTC date — this is invisible to a UTC-only test).
+- Open the month sheet on a day that was planned and trained → one row there
+  too. The month read is a wider snapshot and must be matched against, not
+  ignored.
+- The **Plan tab still lists every plan**, met or not. Reconciliation is a
+  reading of Today, not a deletion — a met plan must remain editable.
+
+**Not yet true on web.** `apps/web`'s calendar shows both, differentiated by
+glyph. If that changes, these scenarios apply there too.
 - A session already in progress outranks the plan card entirely.
 
 ### The calendar

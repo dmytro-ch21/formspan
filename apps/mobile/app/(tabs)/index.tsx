@@ -26,6 +26,7 @@ import { TrainingCalendar } from '@/components/TrainingCalendar';
 import { vola } from '@/constants/Colors';
 import { formatDuration } from '@/lib/history';
 import { dayString, startOfWeek, weekDays } from '@/lib/calendar';
+import { matchPlans } from '@/lib/adherence';
 import { listPlannedBetween, type PlannedSession } from '@/lib/plan';
 import { formatElapsed } from '@/lib/rest';
 import type { LoggedSet, Session } from '@/lib/sessions';
@@ -421,6 +422,22 @@ export default function TodayScreen() {
   // below rather than vanishing — see `recent`.
   const active = useMemo(() => sessions.find((s) => !s.ended_at) ?? null, [sessions]);
 
+  /**
+   * Today's plans that have not been met yet — what the lead card offers.
+   *
+   * Derived rather than filtered where it is loaded, because it depends on two
+   * things that arrive separately and change independently: the plan list, and
+   * the sessions. Filtering inside the plan loader froze the answer at the
+   * moment plans were read, so finishing a session left the card still saying
+   * "BJJ · Start" for a class that had just been logged — the exact duplicate
+   * this branch is about, in its second and louder form.
+   */
+  const owed = useMemo(() => {
+    if (todaysPlan.length === 0) return todaysPlan;
+    const { met } = matchPlans(sessions, weekPlan);
+    return todaysPlan.filter((p) => !met.has(p.id));
+  }, [todaysPlan, weekPlan, sessions]);
+
   // A session left open overnight was almost certainly abandoned, not paused.
   // Past this the card stops pretending to be a running clock: a resume button
   // reading 506:24:12 is not information, and `formatElapsed` has no upper
@@ -592,8 +609,8 @@ export default function TodayScreen() {
               now; starting something unplanned is still one press away, just
               no longer the first thing the screen says.
             */}
-            {todaysPlan.length > 0 ? (
-              todaysPlan.map((p) => (
+            {owed.length > 0 ? (
+              owed.map((p) => (
                 <Pressable
                   key={p.id}
                   style={({ pressed }) => [styles.planCard, pressed && styles.planCardPressed]}

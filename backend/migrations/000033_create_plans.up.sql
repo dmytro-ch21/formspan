@@ -10,14 +10,21 @@
 -- valuable row in the database: prescribed-vs-actual needs a prescription with
 -- a date on it. A template has no date, and a session is the actual.
 --
--- Deliberately NOT joined to `sessions`. A plan is an intention and is never
--- reconciled: a planned day can be trained twice, ignored, or trained with
--- something else entirely, and all three are ordinary. Auto-consuming a plan
--- when a session lands would need a rule for "does this session count as that
--- plan" that nobody can state — same sport? same template? same day? — and
--- would silently rewrite the athlete's own record of what they meant to do.
--- Adherence is therefore a *query* over both tables, computed when asked,
--- rather than a status column that has to be kept true.
+-- Deliberately NOT joined to `sessions`, and this table still has no status
+-- column, no `session_id` and no `completed_at`. Nothing writes "done" onto a
+-- plan: that would rewrite the athlete's own record of what they meant to do,
+-- and then keep lying — delete the session and the plan would still claim the
+-- day was trained.
+--
+-- The other half of this comment has since been built. It said adherence is a
+-- *query* over both tables, computed when asked, and named the obstacle as
+-- "does this session count as that plan" having no statable rule. It has one,
+-- stated in `apps/mobile/lib/adherence.ts`: a plan is met by a logged session
+-- on the same day in the same sport, matched one-to-one. That keeps every case
+-- this comment was protecting — a day trained twice, a plan ignored, a plan
+-- trained with something else — and each is a test in that file. It is still
+-- computed on read, so deleting a session correctly makes its plan pending
+-- again, which no status column could manage.
 CREATE TABLE plans (
     -- Client-generated, like sessions and activities. This is what makes an
     -- offline plan syncable idempotently: the phone fixes the id before the

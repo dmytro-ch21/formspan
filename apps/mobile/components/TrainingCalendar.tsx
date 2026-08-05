@@ -10,6 +10,7 @@ import { sportColor } from '@/components/ui/sport';
 import { formatDuration } from '@/lib/history';
 import { labelFor, type Module } from '@/lib/modules';
 import { dayString, monthGrid, weekDays } from '@/lib/calendar';
+import { matchPlans, pendingPlans } from '@/lib/adherence';
 import { type PlannedSession } from '@/lib/plan';
 import type { Session } from '@/lib/sessions';
 import { listLocalSessions } from '@/lib/sessionStore';
@@ -138,15 +139,28 @@ export function TrainingCalendar({
     return map;
   }, [pool]);
 
+  /**
+   * Which plans the athlete has already met — computed, never stored. See
+   * `lib/adherence.ts` for the rule and for why it is a query.
+   *
+   * Against `pool` rather than `sessions`, so the month sheet does not report a
+   * plan as still owed on a day it can see was trained. `pool` is the merged
+   * live + month-snapshot list; `sessions` alone is the last 30.
+   */
+  const adherence = useMemo(() => matchPlans(pool, planned), [pool, planned]);
+
   const plannedByDay = useMemo(() => {
     const map = new Map<string, PlannedSession[]>();
-    for (const p of planned) {
+    // Only what is still owed. A met plan is not deleted or hidden from the
+    // Plan tab — it simply stops being drawn a second time next to the session
+    // that met it, which read as two sessions when there was one.
+    for (const p of pendingPlans(planned, adherence)) {
       const list = map.get(p.day);
       if (list) list.push(p);
       else map.set(p.day, [p]);
     }
     return map;
-  }, [planned]);
+  }, [planned, adherence]);
 
   const openMonth = useCallback(() => {
     setAnchor(new Date(now.getFullYear(), now.getMonth(), 1));
@@ -343,6 +357,7 @@ export function TrainingCalendar({
               date={d}
               sessions={byDay.get(dayString(d)) ?? []}
               planned={plannedByDay.get(dayString(d)) ?? []}
+              metBy={adherence.metBy}
               modules={modules}
               units={units}
               onOpenSession={onOpenSession}
@@ -514,6 +529,7 @@ export function TrainingCalendar({
                   date={new Date(`${selected}T00:00:00`)}
                   sessions={byDay.get(selected) ?? []}
                   planned={plannedByDay.get(selected) ?? []}
+                  metBy={adherence.metBy}
                   modules={modules}
                   units={units}
                   onOpenSession={(s) => {
@@ -569,14 +585,18 @@ function DayRow({
   units,
   onOpenSession,
   headless,
+  metBy,
 }: {
   date: Date;
   sessions: Session[];
+  /** Only what is still owed — a met plan is filtered out upstream. */
   planned: PlannedSession[];
   modules: Module[];
   units: UnitSystem;
   onOpenSession: (s: Session) => void;
   headless?: boolean;
+  /** Session id → the plan it met, so a logged row can say it was planned. */
+  metBy?: Map<string, string>;
 }) {
   const accent = useAccent();
   return (
@@ -601,6 +621,10 @@ function DayRow({
               secs != null ? formatDuration(secs) : null,
               n > 0 ? `${n} ${n === 1 ? 'set' : 'sets'}` : null,
               kg > 0 ? formatVolume(kg, units) : null,
+              // The plan that this session met is no longer drawn as its own
+              // row, so the intention would otherwise disappear entirely. It
+              // goes last: what was done outranks what was meant.
+              metBy?.has(s.id) ? 'planned' : null,
             ].filter(Boolean);
             return (
               <Pressable
