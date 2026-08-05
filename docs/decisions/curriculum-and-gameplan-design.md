@@ -6,8 +6,9 @@ Three things get conflated whenever this is discussed, and they have different
 data costs, different failure modes and different homes in the app. This
 separates them:
 
-1. **Curricula** — an ordered set of things to learn. Authored by a coach or by
-   VOLA; the athlete follows one. Content, not inference.
+1. **Curricula** — an ordered set of things to learn. Either picked from a
+   VOLA-authored set of belt-level fundamentals, or built by the athlete.
+   Content, not inference.
 2. **Suggestions** — "work on half-guard retention", derived from what you
    logged. Inference over evidence, and the part with a wrong-answer risk.
 3. **The gameplan** — *your* sequences: from here I go there, and if they do
@@ -194,10 +195,10 @@ on today") is right:
 
 | surface | what | where |
 | --- | --- | --- |
-| **Plan (mobile)** | pick a curriculum, see the current suggestion, put a focus on the week | the way *in* |
+| **Plan (mobile)** | pick or build a curriculum, see the current suggestion, put a focus on the week | the way *in* |
 | **Today (mobile)** | the active suggestion, at most one, alongside Upcoming | the way *out* |
 | **Web** | curriculum authoring, the gameplan graph editor, the full funnel and heatmap | desk work |
-| **Admin** | authoring predefined/academy curricula, same rules as `/content` | already has the pattern |
+| **Admin** | authoring the belt-level fundamentals, same rules as `/content` | already has the pattern |
 
 `bjj_focus` is already the "what I'm working on now" primitive and should be
 what a suggestion writes to when accepted — not a new table. It has
@@ -206,22 +207,63 @@ rotating" is answerable.
 
 ---
 
+## Curricula: no new sharing model needed
+
+**Academies are out of scope.** The earlier draft asked whether academy curricula
+would force `bjj_session_details.academy` to become a shared entity. That
+question is closed — it stays free text, on the reasoning the schema already
+recorded ("not a shared entity until something asks who else trains here").
+Nothing here asks.
+
+There are exactly two sources of a curriculum:
+
+- **VOLA-authored fundamentals** — "White belt basics", "Blue belt basics", and
+  so on. Seeded, like the technique catalog.
+- **The athlete's own** — built in the app, private by default.
+
+**That is the `workouts` model, unchanged.** `000006_create_workouts` already
+solved this: nullable `owner_user_id` where NULL means a VOLA-authored official
+template, plus `visibility`, plus a CHECK that an ownerless row must be public.
+Its own comment says this "covers both sharing cases … without an ACL table,
+which would be premature". A curriculum is structurally a workout template whose
+items are techniques rather than exercises, so it should copy that shape
+verbatim rather than invent a second sharing story.
+
+The consequences fall out for free:
+
+- The Plan tab's **My / Shared** tab strip already exists for workouts and
+  applies here without redesign.
+- Seeding follows the existing content path (`cmd/seed`, `cmd/exportcontent`,
+  the `.json` + `.additions.json` pair) — including the trap that console-authored
+  content must be exported into *both* files or it is lost.
+- Admin authoring of the predefined sets reuses `/content`'s rules: only
+  `source=admin` rows are editable, ownership is membership of that list rather
+  than a field read off the row.
+
+**Belt-level curricula should be offered, not imposed.** The app already knows
+the athlete's rank — `bjj_promotions` exists and `Standing` is derived
+server-side — so "Blue belt basics" can be surfaced first without asking a
+question the app can already answer. It must stay a suggestion: an athlete who
+wants to work white-belt fundamentals at purple is not making a mistake, and the
+recorded UX direction rules out the app implying otherwise.
+
+**A curriculum is not a suggestion source.** Following one tells the app what you
+intend to learn; the suggestion tiers below tell you what your logs say about how
+it is going. Keeping them separate is what stops a curriculum from silently
+becoming a prescription — and it means an athlete following no curriculum still
+gets suggestions, which is most athletes at the start.
+
 ## What I'd want settled before any schema lands
 
-1. **Are academy curricula shared entities?** `bjj_session_details.academy` is
-   free text today, on the recorded reasoning that academies are not a shared
-   entity "until something asks who else trains here". A configurable academy
-   curriculum is that thing asking. This is the one decision here that changes
-   the data model rather than adding to it.
-2. **Does a suggestion persist, or is it recomputed?** Recommend recomputed —
+1. **Does a suggestion persist, or is it recomputed?** Recommend recomputed —
    same argument as `lib/adherence.ts`: a stored suggestion goes stale against
    the evidence it was derived from, and deleting a session should withdraw the
    claim it supported. But a *dismissed* suggestion has to persist, or it comes
    back every launch.
-3. **One suggestion at a time, or a list?** Recommend one. Three suggestions is
+2. **One suggestion at a time, or a list?** Recommend one. Three suggestions is
    a report; one is an instruction, and the whole point is that it changes what
    you do on Wednesday.
-4. **What happens when the evidence gate is met but nothing stands out?** This
+3. **What happens when the evidence gate is met but nothing stands out?** This
    needs an answer that is not silence and not a fabricated finding — probably
    "nothing stands out yet, which is its own kind of good news", stated once.
 
