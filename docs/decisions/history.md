@@ -10798,6 +10798,148 @@ scenery. `owedOn(sessions, dayPlans)` is what was ever needed.
 - **The switcher has no bound.** Nothing stops stepping into 2029 one day at a
   time. Harmless, and a month jump would be the fix if anyone ever does it.
 
+## 2026-08-05 — The first suggestion, and the endpoint shape I assumed instead of read
+
+Tier 1 of the curriculum design: *"you drilled the arm drag nine times and never
+tried it live."* The cheapest tier, deliberately first.
+
+### Why the cheap claim ships before the interesting one
+
+The design doc prices all three. "Where do you concede most?" needs **~18
+position-tagged concede events** before one of nine families can be told from
+noise. A funnel gap is an **absence**, not a rate: if you would normally take a
+drilled technique live 30% of the time, nine drills with zero attempts is
+p<0.05 on its own. It needs no position tagging at all, and it fires at three to
+five detailed sessions rather than eight to fifteen.
+
+It is also the better instruction. "Try the thing you have been drilling" is
+something you can do on Wednesday. "Work on half guard" is a topic.
+
+### No backend
+
+`/v1/bjj/proficiency` already aggregates drilled/attempted/scored/conceded per
+technique with a session count and a `last_seen`, built when the tag table was.
+The whole tier is a client read plus a pure function.
+
+### The rule, and the line that decides whether it is true
+
+    drilled >= 6  &&  attempted + scored === 0  &&  sessions >= 2  &&  seen within 60d
+
+`attempted + scored`, **not `attempted`**. The two are disjoint in this schema —
+`attempted` is "went for it and it did *not* land" — so a technique drilled nine
+times and landed twice has plainly been tried. Gating on `attempted === 0` alone
+would tell that athlete to go and try the thing they are already hitting. That
+is the difference between a suggestion and noise, and it is one `+ r.scored`.
+
+`sessions >= 2` uses the field the endpoint added as "the honesty check on every
+number above": nine reps in one class is one class, not a habit, and a technique
+the coach taught once is not something the athlete is avoiding.
+
+Six drills, not nine. Nine is where the statistics stand alone; six is where the
+*observation* is worth making, and the card shows its evidence rather than
+asserting — "drilled 9 times across 3 sessions, never live" is checkable, where
+"work on your arm drag" is a verdict the recorded design rules out.
+
+### Tier 0, which is the half that creates the evidence
+
+An athlete using the fast path and skipping the wizard is told, once, that the
+detail is what unlocks the rest. Bounded on **both** sides: not on the first
+session, because one is not a habit; never past the fourth, because by then they
+have heard it and are choosing. A prompt that repeats forever is the shame the
+UX direction rules out, however politely worded.
+
+### The bug that only running it could find
+
+`fetchProficiency` was typed `Promise<Proficiency[]>`. The endpoint returns
+`{ techniques, summary }`. It compiled, it passed every check, and it took the
+Today screen down on first render with *"undefined is not a function"* —
+`rows.filter` on a response with no such property.
+
+TypeScript cannot catch this: the cast at a parse boundary is an assertion about
+a server, not a check. `apps/web` had the shape right; I did not read either it
+or the contract. The fix carries the same `?? []` that `bjjFocus.ts` already
+has, and that file's comment describes the consequence exactly — a drifted
+server hands `undefined` to a consumer inside a `useMemo`, taking the render
+down rather than degrading to nothing.
+
+Worth stating plainly because `pnpm run verify` was green through all of it.
+
+### What review caught, and the one that undermined the rule
+
+**The load-bearing gate could not fail.** `attempted + scored === 0` is right
+for the schema and wrong for the capture surface: the only writer of a
+technique-tagged `attempted`/`scored` row is the wizard's "Working on" grid,
+which renders only for techniques on the athlete's `bjj_focus` list — set on
+**web** — plus any already carrying live rows that session. For a technique
+never on that list the value is **structurally zero**, so the rule collapsed to
+"drilled a lot, recently" and the card asserted "never live" about rounds the
+app was never told about. The tier is preconditioned on `countersInUse` now,
+and the copy claims only what the record shows ("never logged live").
+
+**`sessions >= 2` was dead code, and the card said one number twice.** The
+wizard writes `drilled` once per session with a per-session dedupe, so `drilled`
+is a count of *classes*, and the backend's `sessions` is
+`COUNT(DISTINCT session_id)` over the same rows — they are equal, and
+`drilled >= 6` already implies `sessions >= 6`. The gate could never reject
+anything. Removed, and the card reads "Drilled in 6 sessions" rather than
+"drilled 6 times across 6 sessions".
+
+That also reframes the threshold: **six is six separate classes, not six reps**,
+which is a much higher bar than the docstring's "six, not nine" argued for. The
+number was reviewed and kept; the reasoning beside it now describes the right
+quantity.
+
+**Tier 0's bound was computed over the wrong window.** `bjjSessions <= 4` counts
+BJJ sessions among the most recent ~20–30 *local* rows, not a lifetime — so a
+reinstall put a three-year athlete back at "session 2", and for a strength-heavy
+athlete the old BJJ sessions aged out of the window, the count fell back into
+the band, and the prompt returned. Indefinitely, which is the one thing the
+bound exists to prevent. It counts **times shown**, persisted in prefs.
+
+**The Tier 0 card was unreachable by Voice Control** — its accessible name
+shared no words with its visible title (WCAG 2.5.3) and never said what pressing
+it did. And it pushed to the technique *library* while its copy said "add what
+happened in rolling"; the copy and the destination now agree.
+
+Also: the card's justification line was `textDim` at **3.67:1**, under AA at
+12pt, on the one line carrying the evidence the card asks to be judged on.
+`textMuted` is 6.85:1.
+
+The three thresholds were unpinned — the fixture sat at `drilled: 9` and the
+rejection at 5, so `MIN_DRILLED` could be raised to 9, and the window moved
+anywhere in roughly [27, 212] days, with the suite green. Each has its boundary
+pair now, and all five mutations are red.
+
+### Gaps
+
+- **`refreshFunnel` fires on every day-step, not once per focus.** The comment
+  claimed otherwise and was wrong: the focus callback depends on `refreshPlan`,
+  which depends on `dayOffset`, so stepping a week is seven round trips. Harmless
+  (same query, same answer) but wasteful, and the fix is to split the effect.
+- **No seq guard on the funnel read**, unlike the plan read beside it, and
+  `fetchProficiency`'s `signal` has no caller. Concurrent reads are routine
+  because of the above, so last-to-*resolve* wins.
+- **The funnel is not tagged with the account it was read for**, so an account
+  switch can briefly show athlete A's suggestion to athlete B. `AccentProvider`
+  documents this exact class and tags its state `{ for: userId }`.
+- **A stale unfinished session suppresses the suggestion indefinitely** — the
+  card is inside the `!active` branch, and `active` includes a session this
+  screen itself labels UNFINISHED and treats as abandoned.
+- **The funnel is fetched for athletes who do not train BJJ**, on every focus,
+  always answering empty.
+- **Nothing dismisses a suggestion.** It recomputes on every focus, so the same
+  card returns until the evidence changes. The design doc's own answer is that
+  the suggestion should be recomputed but a *dismissal* must persist; that is
+  the next piece and this tier is unpleasant without it.
+- **Tier 0 counts techniques, not sessions.** `funnel.length === 0` is "no
+  technique-level evidence ever", which is the closest signal available on this
+  screen. An athlete who fills the category grid every session but never names a
+  technique is told to add detail they are arguably already adding.
+- **Only on today.** Stepping the day switcher hides the card, on the argument
+  that a suggestion is about what to do next rather than a claim about a day you
+  are looking at. Worth revisiting once anyone uses it.
+- **No web surface.** The funnel page shows the numbers; nothing there says
+  which one is worth acting on.
 ## 2026-08-05 — `defended` completes the 2×2, and an error message stops being able to lie
 
 The roadmap design needs a defensive completion criterion — *"defend the guard

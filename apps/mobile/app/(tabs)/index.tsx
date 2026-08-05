@@ -35,6 +35,9 @@ import { listPlannedBetween, type PlannedSession } from '@/lib/plan';
 import { formatElapsed } from '@/lib/rest';
 import type { LoggedSet, Session } from '@/lib/sessions';
 import { cachedWorkouts, listLocalSessions } from '@/lib/sessionStore';
+import { fetchProficiency } from '@/lib/proficiency';
+import { funnelGap, shouldOfferDetail } from '@/lib/suggestion';
+import { PREF_DETAIL_OFFERS, readPref, writePref } from '@/lib/prefs';
 import { restLine, weeklyDays } from '@/lib/trend';
 import { formatVolume, type UnitSystem } from '@/lib/units';
 import { enabledSports, labelFor, usesBelt, type Module } from '@/lib/modules';
@@ -326,6 +329,25 @@ export default function TodayScreen() {
    * by day internally, and without it a plan on a day outside the current week
    * has nothing to be matched against — see `owed` below.
    */
+  /**
+   * The technique funnel, for the suggestion below it.
+   *
+   * Network-only and best-effort: a suggestion is an offer, so a failed read
+   * means no card, never a banner. `null` is "not read yet" and `[]` is "read,
+   * nothing there" — the Tier 0 prompt turns on the difference, and collapsing
+   * them would flash "log more detail" at an athlete who has plenty while the
+   * request is still in flight.
+   */
+  const [funnel, setFunnel] = useState<Awaited<ReturnType<typeof fetchProficiency>> | null>(null);
+  /**
+   * How many times the Tier 0 offer has been shown, ever. `null` until read.
+   *
+   * Persisted rather than derived from a session count: `sessions` here is the
+   * most recent ~30 local rows, so a reinstall or a strength-heavy stretch put
+   * the old `bjjSessions <= 4` bound back inside its band and the prompt
+   * returned indefinitely — the exact thing the bound exists to stop.
+   */
+  const [offers, setOffers] = useState<number | null>(null);
   const [viewPlans, setViewPlans] = useState<
     (PlannedSession & { workoutName: string | null })[]
   >([]);
@@ -372,6 +394,30 @@ export default function TodayScreen() {
    * there. This screen did not have the problem until the switcher gave it one.
    */
   const planSeq = useRef(0);
+
+  const refreshFunnel = useCallback(async () => {
+    if (!userId) return;
+    try {
+      setFunnel(await fetchProficiency(getToken));
+    } catch {
+      // Deliberately silent, and deliberately NOT setFunnel([]) — an offline
+      // read must not be mistaken for "this athlete has logged no detail",
+      // which is what turns the Tier 0 prompt on.
+    }
+  }, [getToken, userId]);
+
+  useEffect(() => {
+    if (!userId) return;
+    let alive = true;
+    readPref(userId, PREF_DETAIL_OFFERS)
+      .then((v) => {
+        if (alive) setOffers(Number(v ?? 0) || 0);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [userId]);
 
   const refreshPlan = useCallback(async () => {
     if (!userId) return;
@@ -466,7 +512,11 @@ export default function TodayScreen() {
       setNow(new Date());
       refreshSessions();
       refreshPlan();
-    }, [refreshSessions, refreshPlan]),
+      // On focus only, not on every day-step: the funnel is an aggregate over
+      // every session ever logged and does not change because you looked at
+      // Thursday.
+      refreshFunnel();
+    }, [refreshSessions, refreshPlan, refreshFunnel]),
   );
 
   // The same staleness arrives without a focus change when the app is
@@ -533,6 +583,40 @@ export default function TodayScreen() {
    * direction for a chart nobody should be reading as a record.
    */
   const trend = useMemo(() => weeklyDays(sessions, now, 8), [sessions, now]);
+
+  /**
+   * The one suggestion, and the offer that precedes it.
+   *
+   * Deliberately only on today. A suggestion is about what to do next, and
+   * attaching it to a day you have stepped to would read as a claim about that
+   * day. `funnel === null` means the read has not landed, which is neither of
+   * the two states below.
+   */
+  const suggestion = useMemo(
+    () => (isToday && funnel ? funnelGap(funnel, now) : null),
+    [isToday, funnel, now],
+  );
+  const offerDetail = useMemo(() => {
+    if (!isToday || !funnel || suggestion || offers === null) return false;
+    const bjj = sessions.filter((x) => logsAfterwards(x.sport, modules)).length;
+    return shouldOfferDetail(bjj, funnel.length, offers);
+  }, [isToday, funnel, suggestion, sessions, modules, offers]);
+
+  /**
+   * Count the offer once, when it is actually on screen.
+   *
+   * Writes the pref and does NOT touch state. Bumping `offers` here would make
+   * the card vanish under the athlete mid-read on the third showing, and it
+   * would be a `setState` inside an effect — the rule this app's lint ratchet
+   * exists to stop growing. The next launch reads the incremented value, which
+   * is the only moment the bound has to be right.
+   */
+  const counted = useRef(false);
+  useEffect(() => {
+    if (!offerDetail || !userId || offers === null || counted.current) return;
+    counted.current = true;
+    writePref(userId, PREF_DETAIL_OFFERS, String(offers + 1)).catch(() => {});
+  }, [offerDetail, userId, offers]);
 
   // A session left open overnight was almost certainly abandoned, not paused.
   // Past this the card stops pretending to be a running clock: a resume button
@@ -903,6 +987,88 @@ export default function TodayScreen() {
               </Pressable>
             )}
 
+            {/*
+              One suggestion, under the plan rather than above it.
+
+              What you meant to do today outranks what the app noticed about
+              last month — and a suggestion that pushed the plan down the
+              screen would be the app talking over the athlete. At most one:
+              three would be a report, and the point is to change one thing
+              about the next session.
+
+              It shows its own evidence rather than asserting. "Drilled 9 times
+              across 3 sessions, never live" is checkable; "work on your arm
+              drag" is a verdict, and the recorded design rules out
+              self-assessment for the same reason.
+            */}
+            {suggestion && (
+              <Pressable
+                style={({ pressed }) => [styles.suggestion, pressed && styles.planCardPressed]}
+                onPress={() => router.push(`/technique/${suggestion.techniqueId}`)}
+                accessibilityRole="button"
+                accessibilityLabel={`Suggestion: try ${suggestion.name} live. Drilled in ${suggestion.drilled} sessions and never logged live. Open the technique.`}
+                testID="today-suggestion"
+              >
+                <View style={styles.planMain}>
+                  <Text style={[styles.suggestionEyebrow, { color: accent.ink }]}>
+                    WORTH A GO
+                  </Text>
+                  <Text style={styles.planTitle} numberOfLines={2}>
+                    Try {suggestion.name} in a round
+                  </Text>
+                  {/* ONE number. It read "drilled N times across N sessions",
+                      which is the same fact twice: the wizard writes `drilled`
+                      once per session, so the two columns are equal. And the
+                      claim is about the record, not about the athlete — the
+                      app cannot see a round it was not told about. */}
+                  <Text style={styles.suggestionMeta}>
+                    Drilled in {suggestion.drilled} sessions, never logged live
+                  </Text>
+                </View>
+                <Icon name="chevron" size={16} color={vola.textDim} />
+              </Pressable>
+            )}
+
+            {/*
+              Tier 0: the only prompt that CREATES the evidence the rest read.
+
+              Bounded on both sides — not on the first session, because one is
+              not a habit, and never past the fourth, because by then the
+              athlete has heard it and is choosing. A prompt that repeats
+              forever is the shame the UX direction rules out, however politely
+              it is worded.
+            */}
+            {offerDetail && (
+              <Pressable
+                style={({ pressed }) => [styles.suggestion, pressed && styles.planCardPressed]}
+                // The reflection wizard is where detail is added; the library
+                // is a catalog. Sending them to the catalog contradicted the
+                // copy, so this goes to Plan, where the week and its sessions
+                // are.
+                onPress={() => router.push('/(tabs)/workouts')}
+                accessibilityRole="button"
+                // Leads with the visible title — WCAG 2.5.3. Named only by the
+                // sentence version, "tap Add what happened in rolling" did
+                // nothing under Voice Control, and the label never said what
+                // pressing it does.
+                accessibilityLabel="Add what happened in rolling. Naming the techniques you drilled is what lets VOLA suggest what to work on. Opens your recent sessions."
+                testID="today-offer-detail"
+              >
+                <View style={styles.planMain}>
+                  <Text style={[styles.suggestionEyebrow, { color: accent.ink }]}>
+                    ONE MORE STEP
+                  </Text>
+                  <Text style={styles.planTitle} numberOfLines={2}>
+                    Add what happened in rolling
+                  </Text>
+                  <Text style={styles.planEmptyMeta}>
+                    Naming the techniques you drilled is what lets VOLA suggest what to work on.
+                  </Text>
+                </View>
+                <Icon name="chevron" size={16} color={vola.textDim} />
+              </Pressable>
+            )}
+
             {/* Every discipline off is a reachable state — nothing stops a
                 user turning them all off — and the block rendered nothing at
                 all, which reads as a broken screen rather than a choice. */}
@@ -1207,6 +1373,27 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   planDoneTitle: { color: vola.text, fontSize: 15, fontWeight: '700' },
+
+  // Quieter than a plan card and louder than the empty state: a solid surface
+  // with no accent fill and no button. The plan is the thing to act on; this
+  // is the thing to consider.
+  suggestion: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: vola.surface,
+    borderWidth: 1,
+    borderColor: vola.line,
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+  },
+  suggestionEyebrow: { fontSize: 10, fontWeight: '800', letterSpacing: 1.1 },
+  // `textMuted` (6.85:1 here), not `textDim` (3.67:1, under AA at 12pt). This
+  // line carries the card's entire justification — it is the evidence, not
+  // decoration, and a card that asks to be judged on its reasoning has to let
+  // it be read.
+  suggestionMeta: { color: vola.textMuted, fontSize: 12, lineHeight: 16 },
 
   // The planned day. A card rather than a filled button: it is a statement
   // about today that happens to be actionable, and the lime is spent on the
