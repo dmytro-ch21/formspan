@@ -48,7 +48,7 @@ import { MAX_DEGREE, MAX_STRIPES, type Belt } from './bjj';
  */
 export type Point = readonly [x: number, y: number];
 
-/** Four corners, clockwise, starting at the belt-body end of a long edge. */
+/** Any four corners, in order around the shape. */
 export type Quad = readonly [Point, Point, Point, Point];
 
 /**
@@ -125,6 +125,15 @@ const lerp = (a: Point, b: Point, t: number): Point => [
 ];
 
 /**
+ * A drawn stripe. Same fraction space as {@link BAR_QUADS} and the same four
+ * corners in order, but **not the same convention**: `0→1` and `3→2` here are
+ * the *short* edges crossing the bar, and the winding is the opposite way
+ * round. Distinct from {@link Quad} so the two cannot be read for each other —
+ * a bar's corner 1 is along the belt, a stripe's is across it.
+ */
+export type StripeQuad = readonly [Point, Point, Point, Point];
+
+/**
  * The stripes for a belt, as quads in the same fraction space as
  * {@link BAR_QUADS}.
  *
@@ -136,12 +145,14 @@ const lerp = (a: Point, b: Point, t: number): Point => [
  *
  * `count` is clamped rather than trusted — a rank arrives from the API, and a
  * fifth stripe would otherwise be drawn past the end of the bar and onto the
- * belt.
+ * belt. Non-finite counts fall to zero explicitly: `Math.floor(NaN)` does
+ * survive the clamp and then loses `i < NaN`, but that is a reader having to
+ * know NaN's comparison rules to see that a wire value is handled.
  */
-export function stripeQuads(belt: Belt, count: number): Quad[] {
+export function stripeQuads(belt: Belt, count: number): StripeQuad[] {
   const [bodyNear, tipNear, tipFar, bodyFar] = BAR_QUADS[belt];
   const slots = barSlots(belt);
-  const drawn = Math.min(Math.max(Math.floor(count), 0), slots);
+  const drawn = Number.isFinite(count) ? Math.min(Math.max(Math.floor(count), 0), slots) : 0;
 
   // Slots are spaced as if there were one more than there are, so the outermost
   // stripe keeps a slot's clearance from the end of the bar instead of touching
@@ -150,7 +161,7 @@ export function stripeQuads(belt: Belt, count: number): Quad[] {
   const step = 1 / (slots + 1);
   const half = (step * STRIPE_RATIO) / 2;
 
-  const quads: Quad[] = [];
+  const quads: StripeQuad[] = [];
   for (let i = 0; i < drawn; i++) {
     const centre = 0.5 + (i - (drawn - 1) / 2) * step;
     const near = centre - half;

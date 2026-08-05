@@ -9727,9 +9727,19 @@ explicit clearance assertion for it.
 
 ### Gaps this leaves
 
-- **The quads are facts about five specific image files.** The hash test says
-  when they go stale; nothing re-derives them. If the artwork is ever
-  regenerated, someone runs the measurement again by hand.
+- **The quads are facts about five specific image files, and re-measuring is
+  still a hand operation.** The hash test says when they go stale; nothing
+  re-derives them. A `scripts/measure_belt_bars.py` was written and then
+  dropped, because it only reproduced four of the five: **brown is the hard
+  case** and any future attempt should start there. Its bar is ~36 away from
+  the belt in colour distance where white's is ~300, which is small enough that
+  the belt's own ribbing and the shadow under the crossed strap outrank it —
+  a fixed threshold, Otsu, and a solidity-scored threshold sweep all pick the
+  strap shadow or fragment the bar into pieces. Colour distance from a global
+  belt median is the wrong feature for brown; something local, or something
+  using darkness rather than distance, probably is not. Shipping a script that
+  needed a hand-tuned exception for one belt would have made the numbers look
+  reproducible without being so.
 - **`Belt.tsx` — the flat drawn belt used in lists — clamps stripes to 6 for
   every belt** (`Math.max(0, Math.min(belt === 'black' ? degree : stripes, 6))`),
   while `MAX_STRIPES` is 4. A coloured belt with a bad rank would draw five or

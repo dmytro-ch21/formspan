@@ -67,7 +67,10 @@ export function BeltPhoto({
 
   return (
     <View
-      style={[{ width, height }, style]}
+      // Size last: the belt, the stripe geometry and the SVG viewport are all
+      // derived from `width`, so a caller overriding it here would letterbox
+      // the photograph and leave the stripes where they were.
+      style={[style, { width, height }]}
       accessible
       accessibilityRole="image"
       accessibilityLabel={label}
@@ -88,10 +91,20 @@ export function BeltPhoto({
         belt — so a single `rotate` cannot lie a stripe flat on it however the
         centre is placed. See `lib/beltBar.ts`, which owns every number.
 
-        Not `pointerEvents="none"`: the wrapper is one `accessible` element, so
-        nothing inside it is separately touchable to begin with.
+        `pointerEvents="none"` because an `Svg` **is** a hit target across its
+        whole box even where no shape is under the finger — it is the wrapper's
+        `accessible` flag that hides it from a screen reader, and that flag has
+        nothing to do with touch. The rank card works either way, since the
+        responder system bubbles to the `Pressable` above, but relying on that
+        is relying on a detail. The sibling `Svg` in `BjjRankHeader` already
+        passes this.
       */}
-      <Svg width={width} height={height} style={StyleSheet.absoluteFill}>
+      <Svg
+        width={width}
+        height={height}
+        style={StyleSheet.absoluteFill}
+        pointerEvents="none"
+      >
         {stripeQuads(belt, count).map((quad, i) => (
           <Polygon
             key={i}

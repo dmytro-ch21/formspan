@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { BAR_QUADS, barSlots, stripeQuads, type Point, type Quad } from '../beltBar';
-import { BELTS, MAX_DEGREE, MAX_STRIPES } from '../bjj';
+import { BELTS, MAX_DEGREE, MAX_STRIPES, type Belt } from '../bjj';
 
 /**
  * The stripes are drawn, not photographed, so nothing but arithmetic keeps them
@@ -108,7 +108,7 @@ describe('the measured bars', () => {
 });
 
 /** SHA-256 of each render as of the measurement. See the test above. */
-const MEASURED_FROM: Record<string, string> = {
+const MEASURED_FROM: Record<Belt, string> = {
   white: 'c0acdf5990f5e4d5df6094b30b348e0813e434d3405df802c9fea1a89bfe985e',
   blue: '26b99ee0c8d420bc4c188d098fba4006cdc0ca2d928fa1e4f82fff0cb487a2c5',
   purple: '8ff52916d9fde81ebe7e996ee96f0de24b742949009795b5a55ea41bd399ec43',
@@ -120,7 +120,7 @@ describe('stripeQuads', () => {
   const counts = (belt: (typeof BELTS)[number]) =>
     Array.from({ length: barSlots(belt) + 1 }, (_, n) => n);
 
-  it.each(BELTS)('draws %s stripes inside the %s bar, at every count', (belt) => {
+  it.each(BELTS)('draws %s stripes inside its own bar, at every count', (belt) => {
     for (const n of counts(belt)) {
       for (const stripe of stripeQuads(belt, n)) {
         for (const corner of stripe) {
