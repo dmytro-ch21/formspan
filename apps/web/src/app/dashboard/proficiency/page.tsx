@@ -43,7 +43,7 @@ const BUCKETS: { key: Bucket; label: string; blurb: string }[] = [
   {
     key: "against",
     label: "Used on you",
-    blurb: "Caught in it, with nothing of your own recorded",
+    blurb: "Caught in it, with nothing of your own recorded — offensive or defensive",
   },
   {
     key: "untried",
@@ -74,6 +74,14 @@ function bucketOf(p: BjjProficiency): Exclude<Bucket, "all"> {
   const tried = p.attempted + p.scored;
   if (tried > 0) return p.scored > 0 ? "working" : "stalled";
   if (p.drilled > 0) return "untried";
+  // Defending it IS live evidence, and of the athlete succeeding. Before this
+  // line, a technique whose only record was "they went for it and I stopped
+  // them three times" fell through to `against` and was labelled "Caught in
+  // it, with nothing of your own recorded" — the precise inversion of what
+  // happened. `conceded` reaching this bucket is fine because no client can
+  // author one; `defended` is written by every athlete who taps Stopped
+  // theirs, so this is a live path, not a defensive one.
+  if (p.defended > 0) return "working";
   return "against";
 }
 

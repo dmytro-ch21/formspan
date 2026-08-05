@@ -80,7 +80,17 @@ export function focusRows(focus: Focus[], tags: Tag[]): FocusRow[] {
   }
   for (const t of tags) {
     if (!t.technique_id) continue;
-    if (t.event !== 'attempted' && t.event !== 'scored') continue;
+    // Every LIVE technique-tagged event, not just the offensive two. A
+    // technique whose only evidence is `defended` — "I never went for it, I
+    // just kept stopping theirs", which is exactly the athlete the defensive
+    // criterion is for — got no row at all, so three recorded stops were
+    // saved, synced and then invisible and uneditable on reopen. That is the
+    // precise property this function's test calls THE property.
+    //
+    // Reachable without anyone dropping a focus technique: `LiveStep`
+    // swallows a `fetchFocus` failure on purpose, so every offline reflection
+    // at a gym takes this path.
+    if (t.event === 'drilled' || t.event === 'conceded') continue;
     if (byID.has(t.technique_id)) continue;
     byID.set(t.technique_id, {
       technique_id: t.technique_id,

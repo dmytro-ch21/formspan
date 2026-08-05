@@ -123,6 +123,12 @@ func TestListProficiencyFoldsTheFunnelAcrossSessions(t *testing.T) {
 		// it needs an assertion or it can be replaced with 0 and nothing
 		// notices.
 		{"conceded", techID(armbar), 4},
+		// Technique-tagged defended: they went for it, the athlete stopped
+		// them. THREE, deliberately not four — with both arms seeded to the
+		// same count a conceded/defended transposition in the SELECT is
+		// invisible, which is the one mistake the scan-order pairing can make
+		// silently (both are ints, so pgx cannot catch it).
+		{"defended", techID(armbar), 3},
 		// An untagged live-grid row for the SAME category. It must not be
 		// counted here: the same real armbar can be recorded twice, once
 		// technique-tagged and once as the category catch-all, and summing
@@ -158,7 +164,14 @@ func TestListProficiencyFoldsTheFunnelAcrossSessions(t *testing.T) {
 	if a.Conceded != 4 {
 		t.Errorf("armbar conceded = %d, want 4", a.Conceded)
 	}
-	// The Scan is positional over ten columns, so two same-typed neighbours
+	// The defensive half. Untested, the whole arm can be misspelled — every
+	// `defended` count silently 0 forever, and the contract's required field
+	// always zero, with the suite still green. Verified by mutating the arm to
+	// 'defence' and watching this line go red.
+	if a.Defended != 3 {
+		t.Errorf("armbar defended = %d, want 3", a.Defended)
+	}
+	// The Scan is positional over eleven columns, so two same-typed neighbours
 	// swapped in the SELECT list would be invisible without this.
 	if a.Position != "Mount - Top" || a.Category != "Submission" {
 		t.Errorf("position/category = %q/%q, want \"Mount - Top\"/\"Submission\" — "+

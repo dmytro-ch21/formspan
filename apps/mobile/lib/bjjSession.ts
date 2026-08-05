@@ -39,10 +39,20 @@ export type Category = 'submission' | 'sweep' | 'pass' | 'escape' | 'takedown' |
 /**
  * The outcome direction.
  *
- * `drilled → attempted → scored` is the technique funnel; `conceded` is the
- * symmetric half and the one that answers "where do I keep getting stuck".
+ * The four LIVE events are a 2x2 of who started the exchange and whether it
+ * landed:
+ *
+ * |                | it landed  | it did not  |
+ * | -------------- | ---------- | ----------- |
+ * | I initiated    | `scored`   | `attempted` |
+ * | they initiated | `conceded` | `defended`  |
+ *
+ * `defended` was the missing cell, which made defensive success the one
+ * outcome nothing could record — inferable only from absence, and an absence
+ * argues more strongly the LESS you roll. `drilled` sits outside the grid
+ * entirely: it is practice, not an exchange.
  */
-export type Event = 'drilled' | 'attempted' | 'scored' | 'conceded';
+export type Event = 'drilled' | 'attempted' | 'scored' | 'conceded' | 'defended';
 
 /**
  * The live grid, as rendered: one row per category, a scored column and a
@@ -125,9 +135,27 @@ export type TechniqueRef = Pick<Tag, 'technique_id' | 'category' | 'position'>;
  * hit one is `attempted: 3, scored: 1` — so attempts + scores is how often you
  * went for it, and scored/(attempted+scored) is the hit rate.
  */
-export const FUNNEL_OUTCOMES: { event: Extract<Event, 'attempted' | 'scored'>; label: string }[] = [
+export const FUNNEL_OUTCOMES: {
+  event: Extract<Event, 'attempted' | 'scored' | 'defended'>;
+  label: string;
+}[] = [
   { event: 'attempted', label: 'Tried' },
   { event: 'scored', label: 'Landed' },
+  // The defensive half, and it lives HERE rather than in the category grid
+  // below on purpose. The grid is five rows of two counters and is the fastest
+  // structured input in the app; a third column would tax every session to
+  // serve the defensive criteria of a roadmap the athlete may not be on. These
+  // chips only appear for techniques already in focus — which is exactly the
+  // handful a roadmap cares about, and where naming the specific technique is
+  // already worth its cost.
+  //
+  // "Stopped THEIRS", not "Stopped". The other two counters are about the
+  // athlete's own execution of this technique, and a bare "Stopped" silently
+  // flips the subject to the opponent's — so "Armbar · Stopped: 3" reads most
+  // naturally as "my armbar got stopped three times", which is what `attempted`
+  // already means. Two counters that read as synonyms on a screen feeding
+  // completion criteria is not a wording nit; it is inverted evidence.
+  { event: 'defended', label: 'Stopped theirs' },
 ];
 
 /**
@@ -167,7 +195,7 @@ export function techniqueOutcomeCount(
 export function bumpTechniqueOutcome(
   tags: Tag[],
   source: TechniqueRef,
-  event: Extract<Event, 'attempted' | 'scored'>,
+  event: Extract<Event, 'attempted' | 'scored' | 'defended'>,
   delta: number,
 ): Tag[] {
   const techniqueID = source.technique_id;

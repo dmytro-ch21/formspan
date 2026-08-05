@@ -1,4 +1,6 @@
 import {
+  FUNNEL_OUTCOMES,
+  LIVE_ROWS,
   bumpTechniqueOutcome,
   removeDrilledTechnique,
   tagCount,
@@ -239,5 +241,60 @@ describe('techniqueOutcomeCount', () => {
     expect(techniqueOutcomeCount(tags, 'armbar-from-guard', 'attempted')).toBe(5);
     expect(techniqueOutcomeCount(tags, 'armbar-from-guard', 'scored')).toBe(1);
     expect(techniqueOutcomeCount(tags, 'unknown', 'attempted')).toBe(0);
+  });
+});
+
+describe('the defensive half of the funnel', () => {
+  /*
+   * `defended` completes a 2x2 of who started the exchange and whether it
+   * landed. Before it existed, defensive success was the one outcome nothing
+   * could record — inferable only from an absence, and an absence argues more
+   * strongly the LESS you roll.
+   *
+   * Note what is NOT tested here: that `bumpTechniqueOutcome` stores a
+   * `defended` count. It has no event-specific branching — `event` is an
+   * opaque match key — so such a test would pass for `'banana'` too and could
+   * not fail for a defended-specific reason. The behaviour worth pinning is
+   * where the event is offered and where it is deliberately not.
+   */
+  it('offers the defensive counter on the per-technique chips', () => {
+    // Labels, not just events: the label is what the athlete reads, and a bare
+    // "Stopped" was ambiguous enough to invert the data — it reads as "my
+    // technique got stopped", which is what `attempted` already means.
+    expect(FUNNEL_OUTCOMES.map((o) => o.label)).toEqual(['Tried', 'Landed', 'Stopped theirs']);
+    expect(FUNNEL_OUTCOMES.map((o) => o.event)).toEqual(['attempted', 'scored', 'defended']);
+  });
+
+  it('keeps the category grid free of it', () => {
+    // The grid is the fastest structured input in the app. A defensive column
+    // there would tax every session for every athlete to serve a roadmap
+    // criterion most are not on — so it stays five rows of scored/conceded.
+    expect(LIVE_ROWS).toHaveLength(5);
+    for (const r of LIVE_ROWS) {
+      expect(Object.keys(r).sort()).toEqual(['category', 'conceded', 'label', 'scored']);
+    }
+  });
+
+  it('clamps a decrement at zero rather than going negative', () => {
+    const focus = { technique_id: 't1', name: 'Guard pull', position: 'Standing', category: 'sweep' as const };
+    // Bump to one FIRST — decrementing an empty list exits at the early
+    // return and never reaches the clamp this is named for.
+    let tags = bumpTechniqueOutcome([], focus, 'defended', 1);
+    expect(techniqueOutcomeCount(tags, 't1', 'defended')).toBe(1);
+    tags = bumpTechniqueOutcome(tags, focus, 'defended', -1);
+    expect(techniqueOutcomeCount(tags, 't1', 'defended')).toBe(0);
+    // And the row is removed rather than left at zero, so it cannot be PUT as
+    // a meaningless count.
+    expect(tags.filter((t) => t.technique_id === 't1')).toEqual([]);
+  });
+
+  it('does not let a defended count leak into the offensive ones', () => {
+    const focus = { technique_id: 't1', name: 'Guard pull', position: 'Standing', category: 'sweep' as const };
+    const tags = bumpTechniqueOutcome([], focus, 'defended', 2);
+    expect(techniqueOutcomeCount(tags, 't1', 'scored')).toBe(0);
+    expect(techniqueOutcomeCount(tags, 't1', 'attempted')).toBe(0);
+    // The roadmap reads the two directions as separate criteria; one bleeding
+    // into the other would complete the wrong half.
+    expect(techniqueOutcomeCount(tags, 't1', 'defended')).toBe(2);
   });
 });

@@ -10798,6 +10798,157 @@ scenery. `owedOn(sessions, dayPlans)` is what was ever needed.
 - **The switcher has no bound.** Nothing stops stepping into 2029 one day at a
   time. Harmless, and a month jump would be the fix if anyone ever does it.
 
+## 2026-08-05 — `defended` completes the 2×2, and an error message stops being able to lie
+
+The roadmap design needs a defensive completion criterion — *"defend the guard
+pull three times"* — and the schema could not express one.
+
+### The gap, stated as a shape
+
+Every live event answers two questions: who started the exchange, and did it
+land.
+
+|                    | it landed  | it did not  |
+| ------------------ | ---------- | ----------- |
+| **I initiated**    | `scored`   | `attempted` |
+| **they initiated** | `conceded` | *(nothing)* |
+
+Three cells shipped. The fourth — they went for it and you stopped them — did
+not, which made **defensive success the one outcome the app could not record**.
+It could only be inferred from absence ("you weren't caught in it for ten
+sessions"), and an absence argues *more* strongly the less you roll. That is the
+fabricated zero this codebase has deleted twice already, in a new costume.
+
+`defended` fills it. **No migration.** `bjj_session_tags.event` is `TEXT` with
+no `CHECK`, and 000025 said why: the vocabulary is validated in Go so it can
+grow by an enum edit. That stance was taken for `kind` and paid off here.
+
+### Where it is captured, and where it deliberately is not
+
+On the **per-technique funnel chips**, beside Tried and Landed — not as a third
+column in the category grid.
+
+The grid is five rows of two counters and is the fastest structured input in the
+app. A third column taxes every session, for every athlete, to serve a defensive
+criterion belonging to a roadmap they may not be on. The funnel chips only
+render for techniques already in focus — which is exactly the handful a roadmap
+cares about, and the place where naming a specific technique already earns its
+cost.
+
+`defended` is also the mirror of `attempted`, which already lives there. Putting
+the two halves of "it didn't land" in different places would have been the
+strange choice.
+
+Both wins now colour the same: `Landed` and `Stopped` read as `scored`, `Tried`
+stays neutral. Colouring only the offensive one would say the quiet part out
+loud about which half the app values.
+
+### The error message could lie, and now cannot
+
+`session_handler.go` returned a 400 naming every accepted value — with the
+vocabularies **spelled out as a literal**, directly under a comment explaining
+that the message exists because client and server can drift. Adding a fifth
+event made it wrong immediately: `Valid()` accepted `defended` while the
+rejection text still told the client there were four.
+
+It is built from `Kinds()`, `Categories()` and `Events()` now, extracted into
+`invalidInputMessage()` so a test can assert it mentions every value each one
+holds. A message about drift that can itself drift is worse than no message.
+
+### Tests
+
+The 2×2 test asserts the **shape**, not the list: it maps each live event to
+its (who-initiated, did-it-land) cell and fails if any cell is empty or two
+events claim the same one. A test that spelled the five values out would go
+green the moment someone deleted `defended` and updated it to match.
+
+Mutation-checked, and one of the checks was itself wrong first. Removing
+`defended` from the vocabulary goes red. The error-message test originally
+asserted `strings.Contains` over the whole message, and review proved that was
+theatre: **swapping `join(Kinds())` and `join(Events())` — so the 400 told a
+client that kinds were "drilled, attempted, scored…" and events were "class,
+drilling…" — left it green**, because every value was still *somewhere* in the
+string. It asserts per clause now, and that the clause does *not* name another
+vocabulary's values, which is what makes it a claim about identity rather than
+presence. That mutation is red.
+
+Worth being exact about the limit: a five-value literal that happens to be
+correct still passes. No test can tell a correct literal from a derivation —
+which is why deriving it is the fix and the test is only the backstop against
+it going wrong.
+
+### What review caught: the event was threaded forward and not backward
+
+Three blocking findings, and all of them the same shape — `defended` was
+**write-only**. It was added to the type, the wizard and the API, and none of
+the places that read events back were widened with it.
+
+- **`focusRows` narrowed to `attempted|scored`**, so a technique whose *only*
+  evidence was `defended` — "I never went for it, I just kept stopping theirs",
+  exactly the athlete the defensive criterion is for — got no row at all. Three
+  recorded stops were saved, synced, then invisible and uneditable on reopen.
+  That is the property that file's own test calls **THE property**, and it did
+  not need anyone to drop a focus technique: `LiveStep` swallows a `fetchFocus`
+  failure deliberately, so every offline reflection at a gym took that path.
+- **The session read-back screen showed a blank funnel line** for a
+  defended-only technique. The comment three lines above it says writing an
+  event and displaying it nowhere is "the exact defect this feature exists to
+  fix, recreated one screen along". It was recreated one event along. The
+  `·`-joined conditional chain was already awkward at two values and silently
+  wrong at three; it builds a list and joins now.
+- **`apps/web`'s proficiency page bucketed a defensive win as "Used on you —
+  Caught in it, with nothing of your own recorded"**, the precise inversion of
+  what happened, with every funnel column showing a dash. `conceded` reaching
+  that bucket is fine because no client can author one; `defended` is written
+  by every athlete who taps the counter.
+- **The aggregate arm was untested.** Misspelling `'defended'` as `'defence'`
+  in the SQL left the entire package green — every count silently 0 forever,
+  and the contract's newly-required field always zero. The fixture now seeds a
+  defended row at **3 against conceded's 4**: equal counts would make a
+  transposition of the two invisible, since both are ints and pgx cannot catch
+  it. Both mutations are red.
+
+And one wording change that is not cosmetic. The counter read **"Stopped"**,
+which flips the subject: the other two counters are about the athlete's own
+execution, so "Armbar · Stopped: 3" reads most naturally as *my armbar got
+stopped*, which is what `attempted` already means. Two counters reading as
+synonyms on the screen that feeds completion criteria is inverted evidence, not
+a nit. It says **"Stopped theirs"**.
+
+The grid header was also hardcoded as two cells for three counters, so
+"Landed" sat over the Stopped column and actively mislabelled it. It is derived
+from `FUNNEL_OUTCOMES` now.
+
+### Gaps
+
+- **`defended` cannot be recorded without a focus technique, and focus is set
+  on web.** It is the only one of the five events with no capture path outside
+  the per-technique chips — offensive outcomes at least degrade to the category
+  grid's "You" column, and there is no category-level defensive equivalent.
+  So the population that can never record one is not just "athletes who set no
+  focus" but every mobile-only athlete, plus anyone reflecting offline while
+  `fetchFocus` fails silently. Any future defensive-rate query is therefore
+  biased toward web users, and should say so.
+- **`SummariseProficiency`'s `Tried()` excludes `defended`**, so a technique
+  taken into a live round defensively counts toward `techniques` but toward
+  none of drilled/tried_live/landed. Defensible — it was not an attempt — but
+  it means the page's headline undercounts real live evidence. Recorded as a
+  decision rather than left as an accident.
+- **Nothing reads `defended` yet.** `/v1/bjj/proficiency` reports it and the
+  wizard writes it; no roadmap consumes it, because roadmaps do not exist. That
+  is the intended order — the criterion is worthless without months of evidence
+  behind it, so the capture path has to exist first — but it does mean a column
+  that is written and not yet read, which is the failure mode this project has
+  been bitten by before. It is deliberate here, and it should not stay true for
+  long.
+- **The category grid still cannot express a defensive success**, only the
+  per-technique chips can. An athlete who never sets a focus technique produces
+  no `defended` evidence at all. Acceptable while criteria are per-technique;
+  revisit if a position-level defensive claim is ever wanted.
+- **`Proficiency.Conceded` is still unwritable by any client** — the same note
+  it carried before. `defended` did not change that; a technique-tagged
+  `conceded` row still has no capture path.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

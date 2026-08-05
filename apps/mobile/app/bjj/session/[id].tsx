@@ -329,19 +329,38 @@ export default function BjjSessionScreen() {
               // defect this feature exists to fix, recreated one screen along.
               const wasDrilled = drilled.some((d) => d.technique_id === techniqueID);
               const name = techniques.find((x) => x.id === techniqueID)?.name ?? techniqueID;
-              const tried = techniqueOutcomeCount(detail?.tags ?? [], techniqueID, 'attempted');
-              const landed = techniqueOutcomeCount(detail?.tags ?? [], techniqueID, 'scored');
+              const count = (e: 'attempted' | 'scored' | 'defended') =>
+                techniqueOutcomeCount(detail?.tags ?? [], techniqueID, e);
+
+              // Built as a list and joined, rather than as a chain of
+              // conditional separators. The chain was already awkward at two
+              // values and silently wrong at three: adding `defended` to it
+              // meant a technique whose only evidence was defensive rendered
+              // a chip with a completely blank funnel line — written by the
+              // wizard, displayed nowhere, which is the exact defect the
+              // comment above says this feature exists to fix.
+              const parts: React.ReactNode[] = [];
+              // "Drilled" is one fact among several rather than the thing that
+              // puts a technique on this screen at all.
+              if (wasDrilled) parts.push('drilled');
+              if (count('attempted') > 0) parts.push(`${count('attempted')} tried`);
+              if (count('scored') > 0) {
+                parts.push(<Text style={styles.scored}>{count('scored')} landed</Text>);
+              }
+              if (count('defended') > 0) {
+                parts.push(<Text style={styles.scored}>{count('defended')} stopped</Text>);
+              }
+
               return (
                 <RNView key={techniqueID} style={styles.chip}>
                   <Text style={styles.chipText}>{name}</Text>
                   <Text style={styles.chipFunnel}>
-                    {/* "Drilled" is now one fact among several rather than the
-                        thing that puts a technique on this screen at all. */}
-                    {wasDrilled && 'drilled'}
-                    {wasDrilled && tried + landed > 0 ? ' · ' : ''}
-                    {tried > 0 && `${tried} tried`}
-                    {landed > 0 && tried > 0 ? ' · ' : ''}
-                    {landed > 0 && <Text style={styles.scored}>{landed} landed</Text>}
+                    {parts.map((part, i) => (
+                      <Text key={i}>
+                        {i > 0 ? ' · ' : ''}
+                        {part}
+                      </Text>
+                    ))}
                   </Text>
                 </RNView>
               );

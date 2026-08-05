@@ -112,3 +112,38 @@ describe('focusRows', () => {
     expect(focusRows([focus('', 'Nameless', 'Submission', 'Guard - Bottom')], [])).toEqual([]);
   });
 });
+
+describe('defensive-only evidence', () => {
+  /*
+   * THE property again, one event along.
+   *
+   * A technique whose ONLY evidence is `defended` — "I never went for it, I
+   * just kept stopping theirs", which is exactly the athlete the defensive
+   * criterion exists for — produced no row at all while this function narrowed
+   * to attempted|scored. Three recorded stops were saved, synced, and then
+   * invisible and uneditable on reopen.
+   *
+   * And it did not need anyone to drop a focus technique on web: `LiveStep`
+   * swallows a `fetchFocus` failure deliberately, so every offline reflection
+   * at a gym takes this path.
+   */
+  const stopped: Tag = {
+    category: 'submission',
+    event: 'defended',
+    position: 'Guard',
+    technique_id: 'armbar-from-guard',
+    count: 3,
+  };
+
+  it('gives a row to a technique known only from stopping theirs', () => {
+    const rows = focusRows([], [stopped]);
+    expect(rows.map((r) => r.technique_id)).toEqual(['armbar-from-guard']);
+  });
+
+  it('still ignores drilled and conceded, which have their own surfaces', () => {
+    // `drilled` is edited on the previous step; `conceded` is the category
+    // grid's right-hand column and carries no technique.
+    expect(focusRows([], [{ ...stopped, event: 'drilled' }])).toEqual([]);
+    expect(focusRows([], [{ ...stopped, event: 'conceded' }])).toEqual([]);
+  });
+});
