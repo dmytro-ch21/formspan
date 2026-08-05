@@ -34,17 +34,21 @@ import Today from '../(tabs)/index';
  *
  * **Why this file overrides `expo-router` instead of using the shared mock.**
  * This is the whole reason the test is more than four lines, so it is worth
- * being blunt about: under `jest.setup.js` this test would pass against the
- * bug.
+ * being exact about: under `jest.setup.js` this file has **no distinguishing
+ * power at all**. Measured — it fails five of its eight cases against the fixed
+ * code, and fails the *same five* against the bug. Not "it would pass against
+ * the bug": it cannot tell the two apart in either direction.
  *
  * That mock is `useFocusEffect: (cb) => useEffect(() => cb(), [cb])`. Today's
  * focus callback is a `useCallback` keyed on four callbacks that are themselves
  * stable while `userId` is. Substitute it and the fixed code reduces to
- * `useEffect(read, [userId])` — the shipped bug, verbatim. Measured: the read
- * fires 4 times on mount and 4 times after any `rerender`, for both shapes.
- * There is no focus event in that mock at all; nothing subscribes and nothing
- * dispatches, so no action available to a test re-runs the callback without
- * unmounting — and unmounting re-runs the buggy version too.
+ * `useEffect(read, [userId])` — the shipped bug, verbatim. Measured by counting
+ * `prefs` reads through the fixture: 4 on mount and **none thereafter**, for
+ * both shapes. That the count does not move is the point — the callback is
+ * identity-stable, which is exactly why there is no second run. There is no
+ * focus event in that mock at all; nothing subscribes and nothing dispatches,
+ * so no action available to a test re-runs the callback without unmounting —
+ * and unmounting re-runs the buggy version too.
  *
  * So the mock below models the real hook. Not react-navigation's: expo-router
  * 57 **vendors its own fork** (`expo-router/build/useFocusEffect.js`) and
@@ -92,7 +96,7 @@ import Today from '../(tabs)/index';
  * `bjjSessionScreen.test.tsx` documents: the lint rule catches the class, the
  * test catches the runtime behaviour a static rule cannot see.
  *
- * The two cases that stay green under the real bug are the two that assert a
+ * The three cases that stay green under the real bug are the three that assert a
  * card is still *there* — a screen that never re-reads also never hides it.
  * They are negative controls, and a version of this file with only those would
  * be worthless.
@@ -255,10 +259,26 @@ const mockFunnel: Proficiency[] = [
 // disappeared.
 jest.mock('@/lib/proficiency', () => ({ fetchProficiency: jest.fn(async () => mockFunnel) }));
 
-// The settings screen resolves dismissed ids to names through this. Our
-// dismissed set is empty so the effect returns early, but an unmocked network
-// call left pending outlives the test and reports as an open handle.
+// The settings screen resolves dismissed ids to names through this. In most
+// cases here the dismissed set is empty and the effect returns early, but the
+// undo case does populate it — and an unmocked network call left pending
+// outlives the test and reports as an open handle.
 jest.mock('@/lib/techniques', () => ({ fetchTechniques: jest.fn(async () => []) }));
+
+/**
+ * Pinned rather than left real.
+ *
+ * Today calls `requestSync` on every focus, and the real `request()` is inert
+ * here only because its `if (!creds)` guard happens to hold — nothing in this
+ * file configures credentials. That is an implicit dependency on module-level
+ * state staying unconfigured, and it would hand these tests a network path the
+ * day that guard moves, silently.
+ */
+jest.mock('@/lib/sync', () => ({
+  request: jest.fn(),
+  syncNow: jest.fn(async () => ({ pending: 0, deferred: false, lastSyncAt: null })),
+  useSyncState: () => ({ pending: 0, deferred: false, lastSyncAt: null }),
+}));
 
 /**
  * Two disciplines, because the per-discipline switches render one row each from
@@ -450,8 +470,10 @@ describe('the switches in Settings', () => {
     });
 
     // The master is untouched, so a card that vanishes here can only have done
-    // so through the off-list.
-    expect(await readPref(USER, PREF_SUGGESTIONS)).not.toBe('0');
+    // so through the off-list. `toBeNull`, not `not.toBe('0')` — nothing in this
+    // test writes that key, so the negative form asserted `null !== '0'` and
+    // could not fail whatever the screen did.
+    expect(await readPref(USER, PREF_SUGGESTIONS)).toBeNull();
     expect(await readPref(USER, PREF_SUGGESTIONS_OFF)).toBe('["bjj"]');
 
     await act(async () => {
@@ -460,7 +482,35 @@ describe('the switches in Settings', () => {
     await waitFor(() => expect(today.queryByTestId('today-suggestion')).toBeNull());
   });
 
-  it('undo a dismissal, and the suggestion comes back', async () => {
+  it('leaves BJJ alone when a different discipline is silenced', async () => {
+    // Turning Strength off must not silence a BJJ suggestion. Without this,
+    // `suggestionsAllowed` could ignore its `sport` argument entirely and every
+    // other test here would still pass.
+    const today = await renderTodayShowingASuggestion();
+
+    blur();
+    const settings = render(<SuggestionSettingsScreen />);
+    const strength = await waitFor(() => settings.getByTestId('suggestions-strength'));
+    await act(async () => {
+      fireEvent(strength, 'valueChange', false);
+    });
+
+    await act(async () => {
+      focus();
+    });
+    expect(await readPref(USER, PREF_SUGGESTIONS_OFF)).toBe('["strength"]');
+    await waitFor(() => expect(today.queryByTestId('today-suggestion')).toBeTruthy());
+  });
+});
+
+/**
+ * Its own block rather than sitting under the switches: the control here is a
+ * `Pressable` in the dismissed list, not a `Switch`, and it is the only one of
+ * the three whose failure looks like a broken button rather than a setting that
+ * quietly did nothing.
+ */
+describe('the undo', () => {
+  it('brings the suggestion back after a dismissal', async () => {
     /*
      * The whole loop, in the order an athlete does it: dismiss the card on
      * Today, find it under DISMISSED in Settings, tap "Suggest again", come
@@ -497,26 +547,6 @@ describe('the switches in Settings', () => {
     await act(async () => {
       focus();
     });
-    await waitFor(() => expect(today.queryByTestId('today-suggestion')).toBeTruthy());
-  });
-
-  it('leaves BJJ alone when a different discipline is silenced', async () => {
-    // Turning Strength off must not silence a BJJ suggestion. Without this,
-    // `suggestionsAllowed` could ignore its `sport` argument entirely and every
-    // other test here would still pass.
-    const today = await renderTodayShowingASuggestion();
-
-    blur();
-    const settings = render(<SuggestionSettingsScreen />);
-    const strength = await waitFor(() => settings.getByTestId('suggestions-strength'));
-    await act(async () => {
-      fireEvent(strength, 'valueChange', false);
-    });
-
-    await act(async () => {
-      focus();
-    });
-    expect(await readPref(USER, PREF_SUGGESTIONS_OFF)).toBe('["strength"]');
     await waitFor(() => expect(today.queryByTestId('today-suggestion')).toBeTruthy());
   });
 });
