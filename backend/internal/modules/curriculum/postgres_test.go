@@ -90,14 +90,30 @@ func backdateEnrollment(t *testing.T, pool *pgxpool.Pool, userID string, days in
 
 func cleanupUser(t *testing.T, pool *pgxpool.Pool, userIDs ...string) {
 	t.Cleanup(func() {
-		ctx := context.Background()
+		// EVERY user's enrollments before ANY user's curricula. Interleaved per
+		// user, deleting the owner's curricula while a follower listed later in
+		// the same call was still enrolled hit the RESTRICT and failed -- and
+		// the error was discarded, so the rows leaked silently. That left
+		// orphaned PUBLIC curricula in the test database which then appeared in
+		// every later run's List.
 		for _, u := range userIDs {
-			_, _ = pool.Exec(ctx, `DELETE FROM bjj_session_tags WHERE user_id = $1`, u)
-			_, _ = pool.Exec(ctx, `DELETE FROM sessions WHERE user_id = $1`, u)
-			_, _ = pool.Exec(ctx, `DELETE FROM curriculum_enrollments WHERE user_id = $1`, u)
-			_, _ = pool.Exec(ctx, `DELETE FROM curricula WHERE owner_user_id = $1`, u)
+			mustExec(t, pool, `DELETE FROM bjj_session_tags WHERE user_id = $1`, u)
+			mustExec(t, pool, `DELETE FROM sessions WHERE user_id = $1`, u)
+			mustExec(t, pool, `DELETE FROM curriculum_enrollments WHERE user_id = $1`, u)
+		}
+		for _, u := range userIDs {
+			mustExec(t, pool, `DELETE FROM curricula WHERE owner_user_id = $1`, u)
 		}
 	})
+}
+
+// mustExec reports a cleanup failure instead of hiding it. A swallowed error
+// here does not fail the test that caused it -- it poisons every later run.
+func mustExec(t *testing.T, pool *pgxpool.Pool, sql string, args ...any) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(), sql, args...); err != nil {
+		t.Errorf("cleanup %q: %v", sql, err)
+	}
 }
 
 func intp(v int) *int         { return &v }
@@ -306,7 +322,7 @@ func TestEvidenceBeforeEnrollingDoesNotCount(t *testing.T) {
 	}
 	p := got.Items[0].Progress
 	// Only the post-enrollment evidence. If the old fumbling counted, scored
-	// would be 28 and attempts 310 — and the rate would read 0.09 instead of
+	// would be 28 and attempts 330 — and the rate would read 0.09 instead of
 	// 0.8, so a genuinely competent athlete would look hopeless at the exact
 	// technique they had just got good at. That inversion is the reason the
 	// window exists.
@@ -660,5 +676,178 @@ func TestAnUnknownTechniqueIsInvalidInputNotAnInternalError(t *testing.T) {
 	})
 	if err != ErrInvalidInput {
 		t.Fatalf("want ErrInvalidInput, got %v", err)
+	}
+}
+
+func TestAnOwnerCanDeleteACurriculumTheyAreWorkingThemselves(t *testing.T) {
+	// Create a roadmap, start working it, change your mind. The ordinary flow,
+	// and it was impossible: RESTRICT counted the owner's OWN enrollment, so
+	// the API refused with "other athletes are working this" when nobody else
+	// was -- an error that was not merely unhelpful but false.
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	cleanupUser(t, pool, "owner14")
+
+	c, err := repo.Create(ctx, "owner14", NewCurriculum{Name: "Mine"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := repo.Enroll(ctx, "owner14", c.ID); err != nil {
+		t.Fatalf("enroll: %v", err)
+	}
+	if err := repo.Delete(ctx, "owner14", c.ID); err != nil {
+		t.Fatalf("owner deleting their own self-enrolled curriculum: %v", err)
+	}
+	if _, err := repo.Get(ctx, "owner14", c.ID); err != ErrNotFound {
+		t.Fatalf("still there after delete: %v", err)
+	}
+}
+
+func TestARefusedDeleteLeavesTheOwnersEnrollmentIntact(t *testing.T) {
+	// Delete drops the caller's own enrollment before removing the row, so a
+	// refusal has to roll that back -- otherwise asking to delete a followed
+	// curriculum would silently un-enroll you from it.
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	cleanupUser(t, pool, "owner15", "follower15")
+
+	c, err := repo.Create(ctx, "owner15", NewCurriculum{Name: "Popular", Visibility: "public"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	for _, u := range []string{"owner15", "follower15"} {
+		if err := repo.Enroll(ctx, u, c.ID); err != nil {
+			t.Fatalf("enroll %s: %v", u, err)
+		}
+	}
+	if err := repo.Delete(ctx, "owner15", c.ID); err != ErrInUse {
+		t.Fatalf("want ErrInUse, got %v", err)
+	}
+	got, err := repo.Get(ctx, "owner15", c.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if !got.Enrolled {
+		t.Fatal("a refused delete un-enrolled the owner")
+	}
+}
+
+func TestPickingACurriculumBackUpKeepsTheOriginalClock(t *testing.T) {
+	// The ON CONFLICT un-archive branch, which nothing covered.
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	cleanupUser(t, pool, "athlete16")
+
+	c, err := repo.Create(ctx, "athlete16", NewCurriculum{Name: "X"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := repo.Enroll(ctx, "athlete16", c.ID); err != nil {
+		t.Fatalf("enroll: %v", err)
+	}
+	backdateEnrollment(t, pool, "athlete16", 100)
+	if err := repo.Archive(ctx, "athlete16", c.ID); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+	if err := repo.Enroll(ctx, "athlete16", c.ID); err != nil {
+		t.Fatalf("re-enroll: %v", err)
+	}
+
+	got, err := repo.Get(ctx, "athlete16", c.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if !got.Enrolled {
+		t.Fatal("re-enrolling did not un-archive")
+	}
+	// Deliberate, and it has a consequence worth knowing: the measurement
+	// window spans the months they were away.
+	if got.StartedOn == nil {
+		t.Fatal("no started_on after re-enrolling")
+	}
+	started, err := time.Parse("2006-01-02", *got.StartedOn)
+	if err != nil {
+		t.Fatalf("parse started_on: %v", err)
+	}
+	if days := int(time.Since(started).Hours() / 24); days < 99 {
+		t.Fatalf("re-enrolling reset the clock: %d days ago, want ~100", days)
+	}
+}
+
+func TestTheBeltCanBeClearedAndNotOnlySet(t *testing.T) {
+	// `*string` could not tell an absent field from an explicit null, so
+	// "leave the belt alone" and "this is not a belt syllabus after all" were
+	// the same request and the second was impossible.
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	cleanupUser(t, pool, "athlete17")
+
+	c, err := repo.Create(ctx, "athlete17", NewCurriculum{Name: "X", Belt: strp("blue")})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	got, err := repo.Update(ctx, "athlete17", c.ID, Update{Name: strp("Renamed")})
+	if err != nil {
+		t.Fatalf("update without touching belt: %v", err)
+	}
+	if got.Belt == nil || *got.Belt != "blue" {
+		t.Fatalf("an unrelated edit changed the belt: %v", got.Belt)
+	}
+	got, err = repo.Update(ctx, "athlete17", c.ID, Update{SetBelt: true})
+	if err != nil {
+		t.Fatalf("clear belt: %v", err)
+	}
+	if got.Belt != nil {
+		t.Fatalf("belt not cleared: %v", *got.Belt)
+	}
+}
+
+func TestProgressCountsOnlyItemsThatCarryCriteria(t *testing.T) {
+	// The progress rule, shipped in the response so no client invents its own.
+	// Three roadmap steps among ten items is three items' worth of progress,
+	// not three tenths.
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	cleanupUser(t, pool, "athlete18")
+	a := seedTechnique(t, pool, "test-mixed-a")
+	b := seedTechnique(t, pool, "test-mixed-b")
+	c2 := seedTechnique(t, pool, "test-mixed-c")
+
+	c, err := repo.Create(ctx, "athlete18", NewCurriculum{
+		Name: "Mixed",
+		Items: []NewItem{
+			{TechniqueID: a, Criteria: &Criteria{TargetScored: intp(3)}},
+			{TechniqueID: b, Criteria: &Criteria{TargetScored: intp(3)}},
+			{TechniqueID: c2}, // reading, not a roadmap step
+		},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := repo.Enroll(ctx, "athlete18", c.ID); err != nil {
+		t.Fatalf("enroll: %v", err)
+	}
+	backdateEnrollment(t, pool, "athlete18", 50)
+	for i := 1; i <= 3; i++ {
+		logEvidence(t, pool, "athlete18", a, i, map[string]int{"scored": 1})
+	}
+
+	got, err := repo.Get(ctx, "athlete18", c.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if len(got.Items) != 3 {
+		t.Fatalf("items: got %d, want 3", len(got.Items))
+	}
+	if got.CountableItems != 2 {
+		t.Fatalf("countable: got %d, want 2 — the reading item must not count", got.CountableItems)
+	}
+	if got.MasteredItems != 1 {
+		t.Fatalf("mastered: got %d, want 1", got.MasteredItems)
 	}
 }

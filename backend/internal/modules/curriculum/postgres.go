@@ -45,11 +45,21 @@ func (r *PostgresRepository) List(ctx context.Context, userID string) ([]Curricu
 		LEFT JOIN curriculum_enrollments e
 		       ON e.curriculum_id = c.id AND e.user_id = $1 AND e.archived_on IS NULL
 		WHERE `+visibleTo+`
-		-- Enrolled first, then belt, then name. Belt is a text column with no
-		-- ordering of its own, so this is alphabetical within it rather than
-		-- white-to-black; sorting by rank belongs to the client, which knows
-		-- the athlete's own belt and can put theirs at the top.
-		ORDER BY enrolled DESC, c.belt NULLS LAST, c.name`, userID)
+		-- OWN ROWS FIRST, then enrolled, then belt, then name. The ordering is
+		-- not cosmetic under the cap below: this list spans every user's public
+		-- curricula, so leading with `+"`enrolled`"+` alone would let strangers'
+		-- syllabuses evict the caller's own private ones from a truncated
+		-- response. api-conventions.md requires the caller's own rows sort
+		-- first for exactly this reason.
+		--
+		-- `+"`c.id`"+` makes the order TOTAL. Without it two equally-named rows can
+		-- swap between requests, which flaps the ETag body hash for no reason.
+		--
+		-- Belt is a text column with no ordering of its own, so this is
+		-- alphabetical within it rather than white-to-black; sorting by rank
+		-- belongs to the client, which knows the athlete's own belt.
+		ORDER BY (c.owner_user_id = $1) DESC, enrolled DESC, c.belt NULLS LAST, c.name, c.id
+		LIMIT $2`, userID, maxList)
 	if err != nil {
 		return nil, fmt.Errorf("curriculum: list: %w", err)
 	}
@@ -125,6 +135,16 @@ func (r *PostgresRepository) Get(ctx context.Context, userID, id string) (*Curri
 		return nil, err
 	}
 	c.Items = items
+	// The progress rule, applied here so no client has to. Countable() and
+	// Mastered() are the single definition of both.
+	for _, it := range items {
+		if it.Countable() {
+			c.CountableItems++
+			if it.Mastered() {
+				c.MasteredItems++
+			}
+		}
+	}
 	return c, nil
 }
 
@@ -167,6 +187,15 @@ func (r *PostgresRepository) items(ctx context.Context, userID, id string, since
 			JOIN sessions s ON s.id = t.session_id AND s.user_id = t.user_id
 			WHERE t.user_id = $1
 			  AND t.technique_id IS NOT NULL
+			  -- Narrowed to THIS curriculum's techniques, which is the
+			  -- difference between scaling with the roadmap and scaling with
+			  -- the athlete's whole career. Unrestricted it seq-scanned every
+			  -- tag ever logged and discarded all but a dozen groups: measured
+			  -- 22ms against 24k tags, 1.4ms with this line, because it lets
+			  -- bjj_session_tags_user_technique_idx do the work.
+			  AND t.technique_id IN (
+			      SELECT ci.technique_id FROM curriculum_items ci WHERE ci.curriculum_id = $2
+			  )
 			  -- The session's own start, not the tag's created_at: a class
 			  -- logged late still happened when it happened.
 			  AND ($3::date IS NULL OR s.started_at >= $3::date)
@@ -295,16 +324,16 @@ func (r *PostgresRepository) Update(ctx context.Context, userID, id string, in U
 			visibility  = COALESCE($7, visibility),
 			updated_at  = now()
 		WHERE id = $1 AND owner_user_id = $2`,
-		id, userID, in.Name, in.Description, in.Belt != nil, in.Belt, in.Visibility)
+		id, userID, in.Name, in.Description, in.SetBelt, in.Belt, in.Visibility)
 	if err != nil {
 		return nil, translate(err, "update")
 	}
 	if tag.RowsAffected() == 0 {
-		// Distinguished here, and collapsed again at the handler for reads.
-		// Knowing which it was matters for the write path: "you may not edit
-		// the VOLA syllabus you are looking at" is a useful thing to say, and
-		// it leaks nothing, because the caller can already see the row.
-		return nil, r.absentOrForbidden(ctx, userID, id)
+		// On `tx`, not the pool -- see querier. Distinguished here and collapsed
+		// again at the handler for reads: knowing which it was matters for the
+		// write path, and "you may not edit the VOLA syllabus you are looking
+		// at" leaks nothing, because the caller can already see the row.
+		return nil, r.absentOrForbidden(ctx, tx, userID, id)
 	}
 	if in.Items != nil {
 		if err := replaceItems(ctx, tx, id, in.Items); err != nil {
@@ -317,13 +346,28 @@ func (r *PostgresRepository) Update(ctx context.Context, userID, id string, in U
 	return r.Get(ctx, userID, id)
 }
 
+// querier is whatever can run a statement -- the pool, or a transaction that is
+// already holding a connection.
+//
+// This exists because of a real stall, not for tidiness. absentOrForbidden used
+// to take the pool while Update's transaction still held a connection, so N
+// concurrent PATCHes at a missing id each held one and each waited for another
+// to release. pgxpool has no acquire timeout and the server has no write
+// timeout, so it unwound only when clients gave up -- and the pool is shared
+// with every other endpoint, so any authenticated user could stall the whole
+// API by patching an id that does not exist. workout.requireOwner already
+// threads the transaction through for the same reason.
+type querier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
 // absentOrForbidden decides which error a zero-row write deserves.
 //
 // Only ever called after a write has already failed to match, so the extra read
 // costs nothing on the happy path.
-func (r *PostgresRepository) absentOrForbidden(ctx context.Context, userID, id string) error {
+func (r *PostgresRepository) absentOrForbidden(ctx context.Context, q querier, userID, id string) error {
 	var visible bool
-	err := r.pool.QueryRow(ctx, `
+	err := q.QueryRow(ctx, `
 		SELECT true FROM curricula c WHERE c.id = $2 AND `+visibleTo, userID, id).Scan(&visible)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
@@ -337,12 +381,33 @@ func (r *PostgresRepository) absentOrForbidden(ctx context.Context, userID, id s
 }
 
 func (r *PostgresRepository) Delete(ctx context.Context, userID, id string) error {
-	tag, err := r.pool.Exec(ctx, `DELETE FROM curricula WHERE id = $1 AND owner_user_id = $2`, id, userID)
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("curriculum: begin delete: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// The owner's OWN enrollment goes first.
+	//
+	// Without this, building a roadmap and then working it made it permanently
+	// undeletable: the RESTRICT below counts every enrollment including your
+	// own, so the API refused with "other athletes are working this" when
+	// nobody else was. Create -> start -> change your mind is the ordinary
+	// flow, and the error was not just unhelpful but false.
+	//
+	// Scoped to the caller, so this cannot be used to clear anyone else's.
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM curriculum_enrollments WHERE curriculum_id = $1 AND user_id = $2`,
+		id, userID); err != nil {
+		return fmt.Errorf("curriculum: drop own enrollment: %w", err)
+	}
+
+	tag, err := tx.Exec(ctx, `DELETE FROM curricula WHERE id = $1 AND owner_user_id = $2`, id, userID)
 	if err != nil {
 		// curriculum_enrollments references this ON DELETE RESTRICT, so a
-		// curriculum other people are working refuses to go. That is the
-		// intent -- their enrollment is their record, not the publisher's --
-		// and ErrInUse is what lets the handler say so rather than 500.
+		// curriculum OTHER people are working refuses to go -- their enrollment
+		// is their record, not the publisher's. The rollback above puts the
+		// caller's own enrollment back, so a refused delete changes nothing.
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
 			return ErrInUse
@@ -350,9 +415,9 @@ func (r *PostgresRepository) Delete(ctx context.Context, userID, id string) erro
 		return fmt.Errorf("curriculum: delete: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return r.absentOrForbidden(ctx, userID, id)
+		return r.absentOrForbidden(ctx, tx, userID, id)
 	}
-	return nil
+	return tx.Commit(ctx)
 }
 
 // replaceItems rewrites the list wholesale.
@@ -366,6 +431,12 @@ func replaceItems(ctx context.Context, tx pgx.Tx, id string, items []NewItem) er
 	if _, err := tx.Exec(ctx, `DELETE FROM curriculum_items WHERE curriculum_id = $1`, id); err != nil {
 		return fmt.Errorf("curriculum: clear items: %w", err)
 	}
+	if len(items) == 0 {
+		return nil
+	}
+	// One batch rather than up to 60 sequential round trips, matching
+	// workout.insertItems.
+	batch := &pgx.Batch{}
 	for i, it := range items {
 		var (
 			tScored *int
@@ -377,15 +448,24 @@ func replaceItems(ctx context.Context, tx pgx.Tx, id string, items []NewItem) er
 			tScored = it.Criteria.TargetScored
 			tDef, tSess, minRate = it.Criteria.TargetDefended, it.Criteria.TargetSessions, it.Criteria.MinHitRate
 		}
-		_, err := tx.Exec(ctx, `
+		batch.Queue(`
 			INSERT INTO curriculum_items
 				(curriculum_id, technique_id, sort_order, notes,
 				 target_scored, target_defended, target_sessions, min_hit_rate)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
 			id, it.TechniqueID, i, it.Notes, tScored, tDef, tSess, minRate)
-		if err != nil {
+	}
+	results := tx.SendBatch(ctx, batch)
+	for range items {
+		if _, err := results.Exec(); err != nil {
+			// Closed before returning, or the transaction cannot be rolled
+			// back -- the batch owns the connection until it is.
+			_ = results.Close()
 			return translate(err, "insert item")
 		}
+	}
+	if err := results.Close(); err != nil {
+		return translate(err, "insert items")
 	}
 	return nil
 }

@@ -2043,7 +2043,9 @@ components:
         Deliberately NOT a suggestion source: following one says what you intend
         to learn, while the suggestion tiers say what your logs report about how
         it is going.
-      required: [id, editable, name, description, visibility, enrolled, created_at, updated_at]
+      required:
+        [id, editable, name, description, visibility, enrolled, countable_items,
+         mastered_items, created_at, updated_at]
       properties:
         id: { type: string }
         editable:
@@ -2074,6 +2076,21 @@ components:
             after archiving keeps the original date.
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+        countable_items:
+          type: integer
+          description: >
+            How many items carry criteria. THE PROGRESS RULE, shipped rather
+            than left for each client to invent: progress counts only
+            criteria-bearing items, so a ten-item curriculum with three roadmap
+            steps is three items' worth of progress and not three tenths.
+            Dividing `mastered_items` by `items.length` is the silent wrong
+            answer. Zero on the list response, where `items` is absent.
+        mastered_items:
+          type: integer
+          description: >
+            How many countable items the caller's record currently clears.
+            "Currently" is load-bearing — mastery is derived, not stored, so
+            this can go DOWN.
         items:
           type: array
           description: Present on a single read, absent from the list response.
@@ -2094,7 +2111,12 @@ components:
       properties:
         name: { type: string }
         description: { type: string }
-        belt: { type: string, nullable: true }
+        belt:
+          type: string
+          nullable: true
+          description: >
+            On PATCH, an explicit `null` CLEARS the belt while omitting the
+            field leaves it alone — the two are different requests.
         visibility: { type: string, enum: [private, public] }
         items:
           type: array
@@ -2834,9 +2856,15 @@ paths:
       operationId: listCurricula
       description: >
         The caller's own plus every public one, with `enrolled` and `editable`
-        resolved for them. Ordered enrolled-first, then by belt, then by name;
-        sorting belts white-to-black belongs to the client, which knows the
-        athlete's own rank. Items are omitted — read one to get them.
+        resolved for them.
+
+
+        Capped at 200 and ordered the caller's OWN rows first, then enrolled,
+        then belt, then name, then id. The ordering matters under the cap: this
+        list spans every user's public curricula, so leading with `enrolled`
+        alone would let strangers' syllabuses evict the caller's own private
+        ones. Sorting belts white-to-black belongs to the client, which knows
+        the athlete's rank. Items are omitted — read one to get them.
       responses:
         "200":
           description: The visible curricula.

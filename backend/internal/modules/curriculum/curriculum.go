@@ -64,6 +64,17 @@ type Curriculum struct {
 	// syllabus is a dozen techniques and a list is a dozen syllabuses; sending
 	// every item on every list read is the N+1 in its lazy form.
 	Items []Item `json:"items,omitempty"`
+	// CountableItems and MasteredItems ship THE PROGRESS RULE rather than
+	// leaving each client to invent it.
+	//
+	// Progress counts only items that carry criteria, so a ten-item curriculum
+	// with three roadmap steps is three items' worth of progress and not three
+	// tenths. A client handed only `items` and a per-item `mastered` would
+	// divide by len(items) -- which is the silent wrong answer the migration's
+	// comment warns about. Both are zero on list responses, where Items is
+	// absent.
+	CountableItems int `json:"countable_items"`
+	MasteredItems  int `json:"mastered_items"`
 }
 
 // Item is one technique in the list, plus the criteria that decide when it is
@@ -218,6 +229,14 @@ const (
 	// MaxBody is the same ceiling the other small writes here use, raised for
 	// the item array.
 	MaxBody = 64 << 10
+	// maxList caps the list response.
+	//
+	// api-conventions.md is explicit that a list endpoint without a LIMIT
+	// silently unbounds the peak-memory property the conditional-GET buffering
+	// depends on -- and this list is worse than most, because it spans every
+	// user's PUBLIC curricula. Without a cap any user can grow every other
+	// user's response.
+	maxList = 200
 )
 
 // NewCurriculum is the input for creating one. Ownership is not a field: it is
@@ -237,9 +256,13 @@ type NewCurriculum struct {
 type Update struct {
 	Name        *string
 	Description *string
-	Belt        *string
-	Visibility  *string
-	Items       []NewItem
+	// SetBelt distinguishes "leave it alone" from "clear it". Belt is only
+	// consulted when SetBelt is true, so a nil Belt with SetBelt set means
+	// null -- which a lone *string could not express.
+	SetBelt    bool
+	Belt       *string
+	Visibility *string
+	Items      []NewItem
 }
 
 // NewItem is one item as a client sends it. The library fields (name, position,

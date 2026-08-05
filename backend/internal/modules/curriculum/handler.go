@@ -52,10 +52,20 @@ type itemRequest struct {
 
 func (i itemRequest) toDomain() NewItem {
 	out := NewItem{TechniqueID: i.TechniqueID, Notes: i.Notes}
-	// EITHER volume target makes this a criterion. Defence-only is the case
-	// that justified adding the `defended` event: "not get caught in guard pull
-	// N times" has no offensive half.
-	if i.TargetScored != nil || i.TargetDefended != nil {
+	// ANY of the four makes this a criterion, not just a volume target.
+	//
+	// Keyed on the volume fields alone, `{"target_sessions": 12}` and
+	// `{"min_hit_rate": 0.4}` were accepted with 201 and the criterion silently
+	// thrown away -- the database would have refused both, and ValidateItems
+	// exists precisely so the client hears WHICH item is wrong rather than a
+	// constraint name. Building it here and letting ValidateItems reject it is
+	// what makes that promise true.
+	//
+	// EITHER volume target is what makes a criterion legal. Defence-only is the
+	// case that justified adding the `defended` event: "not get caught in guard
+	// pull N times" has no offensive half.
+	if i.TargetScored != nil || i.TargetDefended != nil ||
+		i.TargetSessions != nil || i.MinHitRate != nil {
 		out.Criteria = &Criteria{
 			TargetScored:   i.TargetScored,
 			TargetDefended: i.TargetDefended,
@@ -123,8 +133,13 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 type updateRequest struct {
 	Name        *string `json:"name"`
 	Description *string `json:"description"`
-	Belt        *string `json:"belt"`
-	Visibility  *string `json:"visibility"`
+	// RAW, because `*string` cannot tell an absent field from an explicit null
+	// and both decode to nil -- so "leave the belt alone" and "this is not a
+	// belt syllabus after all" were the same request, and the second was
+	// impossible. `belt: null` is a meaningful state the contract already
+	// advertises as nullable.
+	Belt       json.RawMessage `json:"belt"`
+	Visibility *string         `json:"visibility"`
 	// Pointer to a slice so the three states stay distinct: absent leaves the
 	// list alone, [] empties it, and a list replaces it. A plain slice collapses
 	// the first two, which would make every metadata edit silently delete every
@@ -148,7 +163,18 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	in := Update{Name: req.Name, Description: req.Description, Belt: req.Belt, Visibility: req.Visibility}
+	in := Update{Name: req.Name, Description: req.Description, Visibility: req.Visibility}
+	if req.Belt != nil {
+		in.SetBelt = true
+		if string(req.Belt) != "null" {
+			var belt string
+			if err := json.Unmarshal(req.Belt, &belt); err != nil {
+				apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "belt must be a string or null")
+				return
+			}
+			in.Belt = &belt
+		}
+	}
 	if req.Items != nil {
 		items := make([]NewItem, 0, len(*req.Items))
 		for _, it := range *req.Items {
@@ -219,7 +245,7 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 		// path returns ErrNotFound for anything the caller cannot see, so this
 		// can only mean "you can see it and may not change it" — which leaks
 		// nothing they did not already have.
-		apihttp.WriteError(w, http.StatusForbidden, apihttp.CodeUnauthorized, err.Error())
+		apihttp.WriteError(w, http.StatusForbidden, apihttp.CodeForbidden, err.Error())
 	case errors.Is(err, ErrInUse):
 		// 409, not 403: the caller is allowed to do this and the state says no.
 		apihttp.WriteError(w, http.StatusConflict, apihttp.CodeAlreadyExists, err.Error())

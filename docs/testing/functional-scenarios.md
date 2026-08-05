@@ -4292,3 +4292,209 @@ parser, not only on a page:
   sign-in prompt rather than the guide.
 - A signed-in account not on `ADMIN_USER_IDS` gets "Not authorized". The guide
   is documentation, but it sits inside the console's gate like everything else.
+
+## Curricula and roadmaps (`/v1/curricula`)
+
+Seven routes over three tables, and no screen on any of the three apps yet — so
+every scenario below is an API-level one until a client exists.
+
+Two properties decide how these read. A curriculum is an ordered set of
+techniques, and one whose items carry completion criteria is a **roadmap** — the
+criteria are nullable per ITEM, so that is a property of a row and not of the
+curriculum. And **mastery is derived from `bjj_session_tags` on every read**:
+there is no column that could store it, no endpoint that could set it, and every
+threshold is measured **since the athlete enrolled**. That makes two of the
+scenarios here look like defects to whoever runs them first, which is exactly why
+they are written down.
+
+### Building one (happy path)
+
+- `POST` with a name and no items → `201`, `visibility: private`,
+  `editable: true`, `enrolled: false`. An empty list is legal — a curriculum is
+  named before it is filled.
+- **Items come back in the order they were sent**, and `sort_order` is dense from
+  zero. Assert with a list that is neither alphabetical nor id-order: for a
+  syllabus the sequence IS the content, and an `ORDER BY technique_id` passes
+  every other scenario here.
+- An item with no targets is **reading**: `criteria` null, `progress` null
+  forever. An item with a volume target is a roadmap step.
+- **One curriculum may hold both**, and progress counts only the criteria-bearing
+  items — ten items of which three carry criteria is three items' worth of
+  progress, not three tenths. Assert the MIXED curriculum; the two pure cases
+  pass under either rule, so they prove nothing about which one was picked.
+- A curriculum where **nothing** carries criteria has no progress at all. Not 0%,
+  which reads as failure, and not 100%, which claims something. The assertion is
+  the absence of a number, not a number.
+- `PATCH` without `items` leaves the list alone; `[]` empties it; a list replaces
+  it wholesale. Three distinct states, and the middle one is what a plain slice
+  collapses — a metadata-only edit that silently deletes every item satisfies
+  every other bullet in this section.
+- `GET /v1/curricula` omits `items`; `GET` on one includes them. A dozen
+  syllabuses of a dozen techniques on the list response is the N+1 in its lazy
+  form.
+- The list order is own rows first, then enrolled, then belt, then name, and it
+  is **total** — a curriculum id breaks the tie. Two identically-named public
+  rows that can swap between requests flap the ETag body hash for no reason.
+- `belt` is a hint for ordering and never a gate: a white belt may author, read
+  and enroll in a black-belt curriculum, and nothing refuses it. The server also
+  does not sort belts white-to-black — that ranking belongs to the client, which
+  knows the athlete's own rank.
+
+### Enrolling, archiving, picking it back up
+
+- `PUT .../enrollment` → `204`, and the curriculum now reads `enrolled: true`
+  with `started_on` today.
+- `PUT` twice → `204` both times, never `409`. A retry after a dropped response
+  has to converge, and picking something back up is not an error.
+- **Re-enrolling keeps the ORIGINAL `started_on`.** Backdate an enrollment,
+  archive it, enroll again, assert the old date survived. This is the property
+  the idempotent upsert exists for: resetting the date discards everything the
+  athlete did the first time and silently reopens the measurement window. A
+  delete-then-insert implementation passes every other scenario in this section
+  and fails only this one — the same shape that already bit `bjj_focus`.
+- `DELETE .../enrollment` archives rather than deletes: `enrolled` goes false,
+  the row survives, and re-enrolling proves it did. **Archived does not mean
+  completed** — archive a roadmap two items short of done, pick it back up, and
+  the progress is still there.
+- Archiving when not enrolled → `404`, not a cheerful `204`. "I put this down"
+  and "nothing happened" are different answers, and collapsing them hides a
+  client bug.
+- **Deleting your own curriculum while enrolled in it must work.** Create →
+  enroll → change your mind → `204`. The `ON DELETE RESTRICT` counts the
+  caller's own enrollment too, so before the handler dropped it first this
+  refused with "other athletes are working this" when nobody else was — an error
+  that was not merely unhelpful but false.
+
+### The window: evidence before enrolling does not count
+
+The subtlest behaviour here and the one most likely to be filed as a bug. An
+athlete who has drilled a technique for years starts at zero on enrolling, and
+that is the design: over all time the hit rate includes the months during which
+they could not do the technique, and a belt syllabus is mostly techniques they
+have been failing at.
+
+- Seed an athlete with 40 `scored` armbars over two years, enroll them today,
+  read the curriculum: **`scored: 0`**. Then log one more and it reads `1`.
+- The boundary is the **session's `started_at`**, not the tag's `created_at`. A
+  class logged three days late still happened when it happened — backdate a
+  session to the day before enrollment, write its tags today, and it must not
+  count.
+- A session started **on** `started_on` counts. The comparison is `>=`, and an
+  off-by-one here silently discards the athlete's first day.
+- Not enrolled → criteria are visible, **`progress` is null**. Browsing a
+  syllabus shows what it asks of you; working one shows how far along you are.
+  There is no window to measure an un-enrolled reader over, so a zero-filled
+  progress block would be a lie about a measurement nobody took.
+- Re-enrolling spans the gap: enroll, log evidence, archive for two months,
+  re-enroll — the old evidence still counts, because the window never moved.
+  Deliberate, and the reason a screen rendering "12 weeks in" has to say that
+  some of them were spent away.
+
+### Mastery needs all four, and can be lost
+
+- All four criteria met → `mastered: true`; any single one short → false. Four
+  cases, or one case with four mutations — and the mutation is the point, since
+  a `Met` that ignores a criterion passes the all-met case.
+- **Identical volume with a worse hit rate does NOT master.** Two athletes at 25
+  scored, 8 defended, 12 sessions: one from 60 attempts (0.42), the other from
+  100 (0.25). Only the first is mastered. This is the criterion that earns the
+  word — drop `min_hit_rate` and every other bullet here still passes, which is
+  precisely why it needs its own scenario.
+- Volume is `SUM(count)`, never `COUNT(*)`. "Hit three armbars" is ONE row with
+  `count: 3`, so a row-counting implementation reports a third of the truth for
+  anyone who logs the natural way. Seed multi-count rows, not fifteen ones.
+- **Drilled never satisfies `target_sessions`.** Twelve drilling classes and
+  nothing live → `sessions: 0`. The requirement exists to stop one big open mat
+  carrying an item; letting drills count would master a technique that has never
+  been used on someone resisting.
+- `target_sessions` counts DISTINCT live sessions: fifteen scores in one night is
+  `sessions: 1`, which is the whole point of the criterion.
+- Zero attempts → `hit_rate` null, not `0`. Zero-from-zero is not a rate, and 0%
+  reports a failure the athlete has not had. Null must not clear a rate bar
+  either.
+- **Mastery can be LOST, and this is the scenario nobody thinks to write.**
+  Because it is derived rather than stored, master an item and then keep logging
+  misses until the rate falls under 0.35: it reads `mastered: false` on the next
+  GET, with no write to the curriculum at all. Deleting the sessions that
+  supported it does the same — the claim withdraws itself. A stored flag passes
+  every other scenario in this document and fails only here.
+- **Defence-only items are legal and must complete.** `target_defended` with no
+  `target_scored` — "don't get caught in the guard pull N times" — is the
+  requirement that justified adding the `defended` event at all. Assert it
+  masters on defensive evidence alone, with zero scores logged.
+- `min_hit_rate` without `target_scored` → `400`. A rate divides the offensive
+  attempt count, so on a defence-only item it would gate on an unrelated number.
+- `target_sessions` or `min_hit_rate` with neither volume target → `400`. A
+  criterion is anchored on volume or it is not a criterion.
+
+### Edge cases & errors (writes)
+
+- `POST` with no name → `400`. `PATCH` with `"name": ""` → `400`; `PATCH`
+  without a name leaves the existing one.
+- `visibility` outside `private`/`public` → `400`, and the message names the two
+  legal values.
+- **The same technique twice in one list → `400`**, and the error says which.
+  Two rows would derive their own progress from the same evidence and the item
+  would complete twice. The unique constraint catches it, but a constraint name
+  is not a usable error at item 34 of 60.
+- An unknown technique id → `400`, never `500`, **and the whole write rolls
+  back**. A partly-applied list leaves the athlete holding a curriculum they did
+  not author; on create, no curriculum row may survive at all.
+- 60 items accepted, 61 refused.
+- Zero or negative targets → `400`. `min_hit_rate` of `0` or above `1` → `400`;
+  `1.0` is accepted and means every attempt lands.
+- A body over 64 KB is refused rather than read. An authenticated user is still a
+  stranger, and an unbounded decode of an item array is a memory exhaustion the
+  auth check does nothing about.
+- The list is capped at 200, and the cap matters here more than on a self-scoped
+  list because this response spans **every** user's public curricula — one
+  prolific author grows everybody else's payload. Assert that a cap applies, not
+  the number.
+- Deleting a technique from the library removes it from every curriculum
+  silently (`ON DELETE CASCADE`), with no error anywhere. Nothing deletes
+  techniques today; assert the current behaviour so that the day a prune lands —
+  positions already have one — the consequence is visible rather than
+  discovered.
+
+### Auth / security
+
+- **A private curriculum belonging to someone else is invisible four ways**, and
+  each needs its own assertion: absent from `GET /v1/curricula`, `404` on `GET`,
+  `404` on `PATCH`, `404` on `DELETE`. A `403` anywhere on that list confirms the
+  id exists.
+- **And `404` on `PUT .../enrollment`** — which looks like a fifth copy of the
+  same test and is not. Without the visibility check inside the INSERT, enrolling
+  in a guessed id succeeds, and the following `GET` then passes its own check
+  *because the caller is now enrolled*. Enrollment would be a read oracle for a
+  stranger's private list.
+- A **public** curriculum the caller does not own is readable (`200`,
+  `editable: false`) and refuses writes with `403`, not `404`. Deliberately
+  different from the private case: they can already read the row, so a `404`
+  would disguise a permission problem as a missing one.
+- **A VOLA-authored (ownerless) curriculum is nobody's to edit, however public.**
+  `PATCH` and `DELETE` → `403` for every athlete. Ownership is
+  `owner_user_id = caller`, not "not somebody else's" — an implementation that
+  treats NULL as unowned hands every user the syllabus.
+- **One athlete's evidence never reaches another's progress.** Two athletes
+  enrolled in the same public roadmap, one logs everything: the other still reads
+  zeros. This is the cross-user shape already caught twice in other modules, and
+  the per-caller window makes it easy to reintroduce.
+- Deleting a curriculum other athletes are working → `409` (not `403`: the caller
+  is allowed to do this and the state says no). Assert the refusal **and** that
+  the caller's own enrollment is intact afterwards — the delete drops it first
+  inside the transaction, so a rollback that does not fire loses it on every
+  refused attempt.
+- Unauthenticated on all seven routes → `401`.
+- **`owner_user_id` is never in a response.** `editable` answers the only
+  question a client has, and shipping the owner id is what produces client-side
+  authorization one refactor later.
+
+### When a client finally exists
+
+Two copy properties belong to whichever screen lands first, and both come from
+the schema rather than from taste:
+
+- It must say **"your record shows"**, never "you have earned". Mastery is a
+  statement about the record now, and a long enough bad run takes it back.
+- Elapsed time on a re-enrolled roadmap has to name the gap, because
+  `started_on` spans the months the athlete was away.
