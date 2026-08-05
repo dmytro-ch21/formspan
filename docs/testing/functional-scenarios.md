@@ -3144,6 +3144,18 @@ shows. On Plan it is the week; inside the month sheet it is the month.
 - With the API unreachable, there is **no card and no error banner**. A failed
   read must not be mistaken for "this athlete has logged no detail".
 
+### Dismissing a suggestion
+
+- The card carries an explicit **×**, not a long-press. Tapping it removes that
+  suggestion and the **next-best one appears in its place**, immediately.
+- The dismissal **survives an app restart**, and survives the evidence getting
+  stronger — drill the dismissed technique ten more times and it must not
+  return.
+- Tapping the card body still opens the technique; only the × dismisses.
+- With every candidate dismissed, no card shows — and no error.
+- A corrupt or absent stored value reads as no dismissals: the screen must
+  still render.
+
 ### The cold start (Tier 0)
 
 - After the **2nd** BJJ session logged with no technique-level detail, Today

@@ -36,8 +36,18 @@ import { formatElapsed } from '@/lib/rest';
 import type { LoggedSet, Session } from '@/lib/sessions';
 import { cachedWorkouts, listLocalSessions } from '@/lib/sessionStore';
 import { fetchProficiency } from '@/lib/proficiency';
-import { funnelGap, shouldOfferDetail } from '@/lib/suggestion';
-import { PREF_DETAIL_OFFERS, readPref, writePref } from '@/lib/prefs';
+import {
+  funnelGap,
+  parseDismissed,
+  serialiseDismissed,
+  shouldOfferDetail,
+} from '@/lib/suggestion';
+import {
+  PREF_DETAIL_OFFERS,
+  PREF_DISMISSED_SUGGESTIONS,
+  readPref,
+  writePref,
+} from '@/lib/prefs';
 import { restLine, weeklyDays } from '@/lib/trend';
 import { formatVolume, type UnitSystem } from '@/lib/units';
 import { enabledSports, labelFor, usesBelt, type Module } from '@/lib/modules';
@@ -348,6 +358,14 @@ export default function TodayScreen() {
    * returned indefinitely — the exact thing the bound exists to stop.
    */
   const [offers, setOffers] = useState<number | null>(null);
+  /**
+   * Techniques the athlete has said no to. `null` until read.
+   *
+   * Null matters for the same reason it does on `funnel`: rendering before the
+   * dismissals land would show a card the athlete has already dismissed, which
+   * is worse than showing nothing for a beat.
+   */
+  const [dismissed, setDismissed] = useState<ReadonlySet<string> | null>(null);
   const [viewPlans, setViewPlans] = useState<
     (PlannedSession & { workoutName: string | null })[]
   >([]);
@@ -414,6 +432,15 @@ export default function TodayScreen() {
         if (alive) setOffers(Number(v ?? 0) || 0);
       })
       .catch(() => {});
+    readPref(userId, PREF_DISMISSED_SUGGESTIONS)
+      .then((v) => {
+        if (alive) setDismissed(parseDismissed(v));
+      })
+      .catch(() => {
+        // A pref that cannot be read must not silence the suggestion forever;
+        // an empty set is the safe reading, and the athlete can dismiss again.
+        if (alive) setDismissed(new Set());
+      });
     return () => {
       alive = false;
     };
@@ -593,8 +620,35 @@ export default function TodayScreen() {
    * the two states below.
    */
   const suggestion = useMemo(
-    () => (isToday && funnel ? funnelGap(funnel, now) : null),
-    [isToday, funnel, now],
+    () => (isToday && funnel && dismissed ? funnelGap(funnel, now, dismissed) : null),
+    [isToday, funnel, now, dismissed],
+  );
+
+  /**
+   * Say no to one technique, permanently.
+   *
+   * The SUGGESTION is recomputed every read and the DISMISSAL is stored, which
+   * is the split `lib/adherence.ts` argues for: a stored suggestion goes stale
+   * against the evidence behind it, but a stored "no" is a fact about the
+   * athlete and does not. Deleting the sessions still withdraws the claim; it
+   * simply never gets made again for this technique.
+   *
+   * Optimistic. The next-best suggestion appears immediately rather than after
+   * a round trip to local storage, and a failed write costs one returning card
+   * rather than a screen that ignored a tap.
+   */
+  const dismiss = useCallback(
+    (techniqueId: string) => {
+      if (!userId || !dismissed) return;
+      const next = new Set(dismissed).add(techniqueId);
+      setDismissed(next);
+      writePref(
+        userId,
+        PREF_DISMISSED_SUGGESTIONS,
+        serialiseDismissed(dismissed, techniqueId),
+      ).catch(() => {});
+    },
+    [userId, dismissed],
   );
   const offerDetail = useMemo(() => {
     if (!isToday || !funnel || suggestion || offers === null) return false;
@@ -1025,7 +1079,27 @@ export default function TodayScreen() {
                     Drilled in {suggestion.drilled} sessions, never logged live
                   </Text>
                 </View>
-                <Icon name="chevron" size={16} color={vola.textDim} />
+                {/*
+                  An explicit dismiss, not the long-press this app uses to
+                  remove a planned session. Long-press is right for a row the
+                  athlete deliberately created and is deleting; this is
+                  unsolicited, and the moment anyone wants it gone is the
+                  moment they should not have to discover how. It replaces the
+                  chevron rather than joining it: the chevron said "this
+                  opens", which the card already implies, and two glyphs on a
+                  small card would make the destructive one the quieter.
+                */}
+                <Pressable
+                  onPress={() => dismiss(suggestion.techniqueId)}
+                  hitSlop={12}
+                  style={({ pressed }) => [styles.dismiss, pressed && styles.planCardPressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Dismiss the ${suggestion.name} suggestion`}
+                  accessibilityHint="Stops VOLA suggesting this technique"
+                  testID="today-suggestion-dismiss"
+                >
+                  <Icon name="close" size={15} color={vola.textMuted} />
+                </Pressable>
               </Pressable>
             )}
 
@@ -1394,6 +1468,10 @@ const styles = StyleSheet.create({
   // decoration, and a card that asks to be judged on its reasoning has to let
   // it be read.
   suggestionMeta: { color: vola.textMuted, fontSize: 12, lineHeight: 16 },
+  // 44pt of touch with `hitSlop`, so the one control on this card that cannot
+  // be undone is not the fiddliest thing on the screen. `textMuted` at 6.85:1
+  // rather than `textDim` at 3.67:1 — it is a control, not decoration.
+  dismiss: { padding: 6, marginRight: -6 },
 
   // The planned day. A card rather than a filled button: it is a statement
   // about today that happens to be actionable, and the lime is spent on the

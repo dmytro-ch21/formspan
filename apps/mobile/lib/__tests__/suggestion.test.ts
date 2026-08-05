@@ -1,5 +1,13 @@
 import type { Proficiency } from '../proficiency';
-import { MAX_OFFERS, countersInUse, funnelGap, shouldOfferDetail } from '../suggestion';
+import {
+  MAX_DISMISSED,
+  MAX_OFFERS,
+  countersInUse,
+  funnelGap,
+  parseDismissed,
+  serialiseDismissed,
+  shouldOfferDetail,
+} from '../suggestion';
 
 /**
  * The first suggestion the app ever makes about how to train, which is a
@@ -173,5 +181,63 @@ describe('shouldOfferDetail', () => {
     // One technique with any evidence at all is enough — the list is per
     // technique, not per session.
     expect(shouldOfferDetail(3, 1, 0)).toBe(false);
+  });
+});
+
+describe('dismissal', () => {
+  /*
+   * The suggestion is recomputed on every read and the dismissal is stored —
+   * the split `lib/adherence.ts` argues for. A stored suggestion goes stale
+   * against the evidence behind it; a stored "no" is a fact about the athlete
+   * and does not.
+   */
+  it('drops a dismissed technique and offers the next best instead', () => {
+    const rows = [
+      row({ technique_id: 'a', drilled: 14 }),
+      row({ technique_id: 'b', drilled: 8 }),
+      usesCounters,
+    ];
+    expect(funnelGap(rows, NOW)?.techniqueId).toBe('a');
+    expect(funnelGap(rows, NOW, new Set(['a']))?.techniqueId).toBe('b');
+    expect(funnelGap(rows, NOW, new Set(['a', 'b']))).toBeNull();
+  });
+
+  it('stays dismissed however much stronger the evidence gets', () => {
+    // Deliberate. An athlete who said no to the arm drag has not asked to be
+    // asked again at fourteen drills — a suggestion that returns because you
+    // ignored it is the shape this surface exists not to be.
+    const strong = [row({ technique_id: 'a', drilled: 40, sessions: 40 }), usesCounters];
+    expect(funnelGap(strong, NOW, new Set(['a']))).toBeNull();
+  });
+
+  it('round-trips through storage', () => {
+    const first = serialiseDismissed(new Set(), 'a');
+    expect(parseDismissed(first)).toEqual(new Set(['a']));
+    expect(parseDismissed(serialiseDismissed(parseDismissed(first), 'b'))).toEqual(
+      new Set(['a', 'b']),
+    );
+  });
+
+  it('never adds the same id twice', () => {
+    const once = serialiseDismissed(new Set(['a']), 'a');
+    expect(JSON.parse(once)).toEqual(['a']);
+  });
+
+  it('caps the set, dropping the oldest', () => {
+    const many = new Set(Array.from({ length: MAX_DISMISSED }, (_, i) => `t${i}`));
+    const out: string[] = JSON.parse(serialiseDismissed(many, 'new'));
+    expect(out).toHaveLength(MAX_DISMISSED);
+    expect(out).toContain('new');
+    expect(out).not.toContain('t0');
+  });
+
+  it('reads a corrupt or absent pref as no dismissals, never as a crash', () => {
+    // This is read on the app's home tab. `lib/proficiency.ts` already carries
+    // the scar from trusting a shape at a parse boundary — the cost of a bad
+    // value here has to be a returning card, not a screen that will not render.
+    for (const bad of [null, '', 'not json', '{"a":1}', '42', '[1,2,3]', '[null]', '[""]']) {
+      expect(parseDismissed(bad)).toEqual(new Set());
+    }
+    expect(parseDismissed('["a",1,"b"]')).toEqual(new Set(['a', 'b']));
   });
 });

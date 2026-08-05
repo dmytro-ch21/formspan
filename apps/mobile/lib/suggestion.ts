@@ -95,7 +95,11 @@ export function countersInUse(rows: Proficiency[]): boolean {
   return rows.some((r) => r.attempted + r.scored > 0);
 }
 
-export function funnelGap(rows: Proficiency[], now: Date): Suggestion | null {
+export function funnelGap(
+  rows: Proficiency[],
+  now: Date,
+  dismissed: ReadonlySet<string> = new Set(),
+): Suggestion | null {
   // Without this the rule collapses to "drilled a lot, recently", because
   // nothing could ever have written the counter it checks. See the note above.
   if (!countersInUse(rows)) return null;
@@ -103,6 +107,13 @@ export function funnelGap(rows: Proficiency[], now: Date): Suggestion | null {
   const cutoff = now.getTime() - MAX_AGE_DAYS * 86_400_000;
 
   const candidates = rows.filter((r) => {
+    // Dismissed means dismissed. Not "until the evidence gets stronger" — an
+    // athlete who has said no to the arm drag has not asked to be asked again
+    // at nine drills, and a suggestion that returns because you ignored it is
+    // the shape this whole surface is trying not to be. The cost is that the
+    // dismissal is permanent for that technique; the funnel page still shows
+    // every number, so nothing is hidden, only un-nagged.
+    if (dismissed.has(r.technique_id)) return false;
     if (r.drilled < MIN_DRILLED) return false;
     // Disjoint events — see the rule above. This is the line that decides
     // whether the suggestion is true.
@@ -175,3 +186,40 @@ export function shouldOfferDetail(
  * A count of what actually happened cannot drift like that.
  */
 export const MAX_OFFERS = 3;
+
+/**
+ * Parse the dismissal set out of its stored string.
+ *
+ * Total: anything unparseable, or parseable but not an array of strings, reads
+ * as an empty set. A corrupt pref must cost the athlete a returning
+ * suggestion, never a screen that will not render — this value is read on the
+ * app's home tab, and `lib/proficiency.ts` already carries the scar from
+ * trusting a shape at a parse boundary.
+ */
+export function parseDismissed(raw: string | null): Set<string> {
+  if (!raw) return new Set();
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((x): x is string => typeof x === 'string' && x !== ''));
+  } catch {
+    return new Set();
+  }
+}
+
+/**
+ * Add one id, and serialise.
+ *
+ * Capped, newest kept. Unbounded, this is a string in a key/value row that
+ * only ever grows — and an athlete who dismisses two hundred techniques has
+ * told us something the cap is not the right answer to anyway. Dropping the
+ * OLDEST is deliberate: the ones dismissed longest ago are the ones whose
+ * evidence is most likely to have changed shape since.
+ */
+export const MAX_DISMISSED = 100;
+
+export function serialiseDismissed(current: ReadonlySet<string>, add: string): string {
+  const next = [...current].filter((id) => id !== add);
+  next.push(add);
+  return JSON.stringify(next.slice(-MAX_DISMISSED));
+}

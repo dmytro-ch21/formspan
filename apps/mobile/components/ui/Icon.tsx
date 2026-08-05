@@ -47,6 +47,8 @@ const EXTRA = {
   back: [{ t: 'p', d: 'M15 5l-7 7 7 7' }],
   /** Sets in a session — the "20 sets" meta row. */
   layers: [{ t: 'p', d: 'M4 7h16M4 12h16M4 17h10' }],
+  /** Dismiss. Chrome, like the chevrons — the kit has no close glyph. */
+  close: [{ t: 'p', d: 'M6 6l12 12M18 6L6 18' }],
 } as const satisfies Record<string, readonly Primitive[]>;
 
 /**

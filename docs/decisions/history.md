@@ -11091,6 +11091,88 @@ from `FUNNEL_OUTCOMES` now.
   it carried before. `defended` did not change that; a technique-tagged
   `conceded` row still has no capture path.
 
+## 2026-08-05 — A suggestion you can say no to
+
+Tier 1 shipped without one, and the design doc had already named the
+consequence: the card recomputes on every focus, so the same suggestion
+returns until the evidence changes. On a surface whose whole argument is that
+it must not nag, that was the wrong thing to leave for later.
+
+### The split: recompute the suggestion, store the "no"
+
+The same argument `lib/adherence.ts` makes about plans. A stored *suggestion*
+goes stale against the evidence behind it — delete the sessions and it would
+still be claiming something. A stored *dismissal* is a fact about the athlete
+and cannot go stale. So the suggestion is derived on every read as before, and
+`funnelGap` takes a set of technique ids to skip.
+
+### Dismissed means dismissed
+
+Not "until the evidence gets stronger". An athlete who has said no to the arm
+drag at six classes has not asked to be asked again at fourteen, and a
+suggestion that returns because you ignored it is precisely the shape this
+surface exists not to be.
+
+The cost is that it is permanent for that technique, which is a real trade
+rather than a free one: someone who dismisses early never hears about it again.
+Two things make it acceptable — the funnel page still shows every number, so
+nothing is hidden, only un-nagged; and dismissing is a deliberate tap on an
+explicit control rather than something you can do by accident.
+
+### An explicit ×, not the long-press this app uses elsewhere
+
+Long-press is the established idiom here for removing a *planned session* — a
+row the athlete deliberately created and is deleting, where a hint line can sit
+underneath and discovery is cheap. A suggestion is unsolicited, and the moment
+anyone wants it gone is the moment they should not have to work out how.
+
+It replaces the chevron rather than joining it. The chevron said "this opens",
+which the card already implies, and two glyphs on a small card would have made
+the destructive one the quieter of the two.
+
+### Storage
+
+One pref key holding a JSON array, not a key per technique: the rule needs the
+whole set to pick its *next-best* candidate, and a per-technique key could only
+answer "is this one dismissed". Device-local like the Tier 0 offer count, and
+for the same reason — `writePref` only pushes what is explicitly marked owed,
+and dismissing on a phone then seeing it once more on a tablet is a smaller
+cost than the sync surface.
+
+Capped at 100, dropping the oldest. Unbounded it is a string in a key/value row
+that only ever grows; and the ones dismissed longest ago are the ones whose
+evidence has most likely changed shape since.
+
+`parseDismissed` is total — anything unparseable, or parseable but not an array
+of strings, reads as an empty set. This is read on the app's home tab, and
+`lib/proficiency.ts` already carries the scar from trusting a shape at a parse
+boundary: the cost of a bad value here has to be a returning card, never a
+screen that will not render.
+
+### Verified
+
+Six mutations, five red: removing the filter, inverting it, capping from the
+wrong end, allowing duplicates, and dropping the string check in the parser.
+The sixth — replacing the array guard with a cast — is an **equivalent mutant**:
+`new Set(42)` throws and the existing `try/catch` already returns an empty set,
+so the early return is clarity rather than behaviour. Recorded as equivalent
+rather than papered over with a test that would only be asserting the catch.
+
+On the Simulator: dismissing "Arm drag" revealed "Scissor sweep" immediately,
+and the dismissal survived a full app restart.
+
+### Gaps
+
+- **No way to undo a dismissal.** Nothing in the UI lists what has been
+  dismissed or restores one, so a mis-tap is permanent for that technique. The
+  set is one pref row, so a "suggestions" section in settings is cheap — worth
+  doing before anyone has dismissed something they wanted.
+- **Device-local.** A second device will offer a dismissed technique once more.
+  Deliberate, but it becomes wrong if suggestions ever grow past a nudge.
+- **Dismissal is per technique, not per tier.** When the position hot-spot tier
+  lands there will be nothing that says "stop suggesting positions", and reusing
+  this set for it would silently conflate two different refusals.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
