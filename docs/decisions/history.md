@@ -11316,18 +11316,25 @@ page and emits the route, and typecheck and lint pass.
 
 Closes the gap the entry above named first: nothing covered the Settings→Today
 wiring, which is where that branch's blocking bug lived.
-`apps/mobile/app/__tests__/suggestionPrefsRefocus.test.tsx`, seven cases.
+`apps/mobile/app/__tests__/suggestionPrefsRefocus.test.tsx`, eight cases.
 
 **The thing worth recording is not the test, it is why the obvious version of it
 is worthless.** `jest.setup.js` mocks `useFocusEffect` as
 `useEffect(() => cb(), [cb])`. Today's focus callback is a `useCallback` keyed on
 four callbacks that are themselves identity-stable while `userId` is. Substitute
 the mock and the *fixed* code reduces to `useEffect(read, [userId])` — which is
-the shipped bug, verbatim. Measured both shapes: four reads on mount, four after
-any `rerender`, identical traces. There is no focus event in that mock at all;
-nothing subscribes and nothing dispatches, so no action available to a test
-re-runs the callback without unmounting, and unmounting re-runs the buggy
-version too.
+the shipped bug, verbatim. Measured both shapes: four reads on mount and **none
+thereafter**; the count not moving is itself the finding, because an
+identity-stable callback is precisely what gives the effect nothing to re-run
+on. There is no focus event in that mock at all; nothing subscribes and nothing
+dispatches, so no action available to a test re-runs the callback without
+unmounting, and unmounting re-runs the buggy version too.
+
+Stated precisely, because the first draft of this entry got it wrong in the
+flattering direction: on the shared mock the file does not "pass against the
+bug". It fails five of its eight cases against the **fixed** code and fails the
+same five against the bug — no distinguishing power in either direction, which
+is worse than passing and is the actual argument for replacing the mock.
 
 So the file replaces `expo-router` wholesale with a mock modelled on the hook
 expo-router actually vendors (`expo-router/build/useFocusEffect.js` —
@@ -11362,10 +11369,12 @@ asserted nothing, and stayed green with the code under test deleted. Only the
 mutation run found it.
 
 Also worth noting for whoever writes the next component test here: the comment in
-`todayDaySwitcher.test.tsx` claiming Today cannot practically be rendered under
-jest is **out of date**. `render(<Today />)` needs zero per-file mocks and takes
-~250ms; every SQLite read on that screen is individually `.catch()`ed, so the
-stubbed native module degrades silently. Do not wrap it in the real
+`todayDaySwitcher.test.tsx` — that standing Today up "would mostly test the
+harness" — is a judgement about *value*, and for that file's two arithmetic
+derivations it still holds. What is worth correcting is the impression it leaves
+about *cost*: `render(<Today />)` needs zero per-file mocks and takes ~250ms.
+Every SQLite read on that screen is individually `.catch()`ed, so the stubbed
+native module degrades silently rather than throwing. Do not wrap it in the real
 `ModulesProvider` — its mount effect awaits `readPref` with no `try`/`catch`, so
 the stub's rejection escapes and fails the test; both providers ship usable
 context defaults and omitting them is strictly better.
