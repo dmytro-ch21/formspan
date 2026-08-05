@@ -1,0 +1,664 @@
+package curriculum
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// Gated on TEST_DATABASE_URL and skipping silently without it, like every other
+// integration test here. Point it at a DIFFERENT database from DATABASE_URL.
+func testPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
+	pool, err := pgxpool.New(context.Background(), url)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	// Registered FIRST so it runs LAST: t.Cleanup is LIFO and strictly after
+	// every defer, so a `defer pool.Close()` would shut the pool before the row
+	// cleanup below got to use it. This is the gotcha CLAUDE.md calls out.
+	t.Cleanup(func() { pool.Close() })
+	return pool
+}
+
+// seedTechnique returns a library id, creating one if the catalog is empty so
+// the suite does not depend on the seed having run.
+func seedTechnique(t *testing.T, pool *pgxpool.Pool, id string) string {
+	t.Helper()
+	ctx := context.Background()
+	_, err := pool.Exec(ctx, `
+		INSERT INTO techniques (id, name, category, position)
+		VALUES ($1, $1, 'sweep', 'Guard - Bottom') ON CONFLICT (id) DO NOTHING`, id)
+	if err != nil {
+		t.Fatalf("seed technique: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM techniques WHERE id = $1`, id) })
+	return id
+}
+
+// logEvidence writes one session's worth of tags, dated `daysAgo`.
+//
+// Real rows in the real tables, because the whole point of the mastery query is
+// that it reads the evidence stream the app actually writes.
+func logEvidence(t *testing.T, pool *pgxpool.Pool, userID, techID string, daysAgo int, events map[string]int) {
+	t.Helper()
+	ctx := context.Background()
+	sessionID := fmt.Sprintf("%s-s%d", userID, daysAgo)
+	_, err := pool.Exec(ctx, `
+		INSERT INTO sessions (id, user_id, sport, started_at)
+		VALUES ($1, $2, 'bjj', now() - make_interval(days => $3))
+		ON CONFLICT (id) DO NOTHING`, sessionID, userID, daysAgo)
+	if err != nil {
+		t.Fatalf("seed session: %v", err)
+	}
+	for event, count := range events {
+		if count == 0 {
+			continue
+		}
+		_, err := pool.Exec(ctx, `
+			INSERT INTO bjj_session_tags (session_id, user_id, category, event, technique_id, count)
+			VALUES ($1, $2, 'sweep', $3, $4, $5)`, sessionID, userID, event, techID, count)
+		if err != nil {
+			t.Fatalf("seed tag: %v", err)
+		}
+	}
+}
+
+// backdateEnrollment moves the measurement window back, so a test can log
+// evidence "since enrolling" without waiting months.
+//
+// Needed because the window is real: enrolling today and logging a session
+// dated last week correctly counts for nothing, which is the whole point of the
+// window and was the first thing these tests got wrong.
+func backdateEnrollment(t *testing.T, pool *pgxpool.Pool, userID string, days int) {
+	t.Helper()
+	_, err := pool.Exec(context.Background(), `
+		UPDATE curriculum_enrollments SET started_on = CURRENT_DATE - make_interval(days => $2)
+		WHERE user_id = $1`, userID, days)
+	if err != nil {
+		t.Fatalf("backdate enrollment: %v", err)
+	}
+}
+
+func cleanupUser(t *testing.T, pool *pgxpool.Pool, userIDs ...string) {
+	t.Cleanup(func() {
+		ctx := context.Background()
+		for _, u := range userIDs {
+			_, _ = pool.Exec(ctx, `DELETE FROM bjj_session_tags WHERE user_id = $1`, u)
+			_, _ = pool.Exec(ctx, `DELETE FROM sessions WHERE user_id = $1`, u)
+			_, _ = pool.Exec(ctx, `DELETE FROM curriculum_enrollments WHERE user_id = $1`, u)
+			_, _ = pool.Exec(ctx, `DELETE FROM curricula WHERE owner_user_id = $1`, u)
+		}
+	})
+}
+
+func intp(v int) *int         { return &v }
+func f64p(v float64) *float64 { return &v }
+func strp(v string) *string   { return &v }
+
+// ---------------------------------------------------------------------------
+// Authorization. First, because the same cross-user read has shipped twice here.
+// ---------------------------------------------------------------------------
+
+func TestAPrivateCurriculumIsInvisibleToEveryoneElse(t *testing.T) {
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	cleanupUser(t, pool, "owner1", "stranger1")
+
+	c, err := repo.Create(ctx, "owner1", NewCurriculum{Name: "Mine", Visibility: "private"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// NOT ErrForbidden. A 403 on a private row confirms the id exists, which is
+	// the enumeration oracle the workout module documents having shipped once.
+	if _, err := repo.Get(ctx, "stranger1", c.ID); err != ErrNotFound {
+		t.Fatalf("stranger Get: want ErrNotFound, got %v", err)
+	}
+	list, err := repo.List(ctx, "stranger1")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	for _, got := range list {
+		if got.ID == c.ID {
+			t.Fatal("a stranger's private curriculum appeared in List")
+		}
+	}
+	if _, err := repo.Update(ctx, "stranger1", c.ID, Update{Name: strp("Yours")}); err != ErrNotFound {
+		t.Fatalf("stranger Update: want ErrNotFound, got %v", err)
+	}
+	if err := repo.Delete(ctx, "stranger1", c.ID); err != ErrNotFound {
+		t.Fatalf("stranger Delete: want ErrNotFound, got %v", err)
+	}
+}
+
+func TestEnrollingCannotBeUsedToReachAPrivateCurriculum(t *testing.T) {
+	// The specific attack: ids are guessable, so if Enroll did not check
+	// visibility a stranger could enroll and then read the items through Get,
+	// whose own check would pass because they are now enrolled.
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	cleanupUser(t, pool, "owner2", "stranger2")
+
+	c, err := repo.Create(ctx, "owner2", NewCurriculum{Name: "Mine", Visibility: "private"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := repo.Enroll(ctx, "stranger2", c.ID); err != ErrNotFound {
+		t.Fatalf("stranger Enroll: want ErrNotFound, got %v", err)
+	}
+	if _, err := repo.Get(ctx, "stranger2", c.ID); err != ErrNotFound {
+		t.Fatalf("stranger Get after failed enroll: want ErrNotFound, got %v", err)
+	}
+}
+
+func TestAPublicCurriculumIsReadableButNotEditable(t *testing.T) {
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	cleanupUser(t, pool, "owner3", "stranger3")
+
+	c, err := repo.Create(ctx, "owner3", NewCurriculum{Name: "Shared", Visibility: "public"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	got, err := repo.Get(ctx, "stranger3", c.ID)
+	if err != nil {
+		t.Fatalf("stranger Get on public: %v", err)
+	}
+	if got.Editable {
+		t.Fatal("a stranger was told they may edit somebody else's curriculum")
+	}
+	// ErrForbidden here, not ErrNotFound: they can already see it, so saying
+	// "not yours" leaks nothing and is the useful answer.
+	if _, err := repo.Update(ctx, "stranger3", c.ID, Update{Name: strp("Hijacked")}); err != ErrForbidden {
+		t.Fatalf("stranger Update on public: want ErrForbidden, got %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Mastery. The load-bearing artefact of the whole design.
+// ---------------------------------------------------------------------------
+
+// fullCriteria is the shipped default shape.
+func fullCriteria() *Criteria {
+	return &Criteria{
+		TargetScored:   intp(DefaultTargetScored),
+		TargetDefended: intp(DefaultTargetDefended),
+		TargetSessions: intp(DefaultTargetSessions),
+		MinHitRate:     f64p(DefaultMinHitRate),
+	}
+}
+
+func TestMasteryNeedsVolumeSpreadDefenceAndRate(t *testing.T) {
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	cleanupUser(t, pool, "athlete1")
+	tech := seedTechnique(t, pool, "test-armdrag")
+
+	c, err := repo.Create(ctx, "athlete1", NewCurriculum{
+		Name:  "Roadmap",
+		Items: []NewItem{{TechniqueID: tech, Criteria: fullCriteria()}},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := repo.Enroll(ctx, "athlete1", c.ID); err != nil {
+		t.Fatalf("enroll: %v", err)
+	}
+	backdateEnrollment(t, pool, "athlete1", 200)
+
+	// 26 scores over 13 sessions, 40 misses (rate 0.394), 9 defences.
+	for i := 1; i <= 13; i++ {
+		ev := map[string]int{"scored": 2}
+		if i <= 10 {
+			ev["attempted"] = 4
+		}
+		if i <= 3 {
+			ev["defended"] = 3
+		}
+		logEvidence(t, pool, "athlete1", tech, i, ev)
+	}
+
+	got, err := repo.Get(ctx, "athlete1", c.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	p := got.Items[0].Progress
+	if p == nil {
+		t.Fatal("no progress on an enrolled roadmap item")
+	}
+	if p.Scored != 26 || p.Defended != 9 || p.Sessions != 13 || p.Attempts != 66 {
+		t.Fatalf("counts: got scored=%d defended=%d sessions=%d attempts=%d, want 26/9/13/66",
+			p.Scored, p.Defended, p.Sessions, p.Attempts)
+	}
+	if !p.Mastered {
+		t.Fatalf("not mastered with every criterion met: %+v", p)
+	}
+
+	// THE CLAIM THAT JUSTIFIES THE WORD. Identical volumes, sprayed attempts:
+	// the rate collapses and mastery goes with it. Without this, "mastered"
+	// would mean "did it a lot", which the design doc argued against at length.
+	for i := 1; i <= 10; i++ {
+		logEvidence(t, pool, "athlete1", tech, i+100, map[string]int{"attempted": 20})
+	}
+	got, err = repo.Get(ctx, "athlete1", c.ID)
+	if err != nil {
+		t.Fatalf("get after spray: %v", err)
+	}
+	p = got.Items[0].Progress
+	if p.Scored != 26 {
+		t.Fatalf("volume changed: got %d, want 26", p.Scored)
+	}
+	if p.Mastered {
+		t.Fatalf("still mastered at hit rate %v — the rate criterion does nothing", *p.HitRate)
+	}
+}
+
+func TestEvidenceBeforeEnrollingDoesNotCount(t *testing.T) {
+	// The window, and the reason it exists: over all time the hit rate includes
+	// the months during which the athlete could not do the technique, so it
+	// measures the learning phase it is meant to exclude. A syllabus is mostly
+	// techniques they have been failing at.
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	cleanupUser(t, pool, "athlete2")
+	tech := seedTechnique(t, pool, "test-triangle")
+
+	// A year of fumbling, long before any roadmap: 300 misses, 20 scores.
+	for i := 400; i < 410; i++ {
+		logEvidence(t, pool, "athlete2", tech, i, map[string]int{"attempted": 30, "scored": 2})
+	}
+
+	c, err := repo.Create(ctx, "athlete2", NewCurriculum{
+		Name:  "Roadmap",
+		Items: []NewItem{{TechniqueID: tech, Criteria: fullCriteria()}},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := repo.Enroll(ctx, "athlete2", c.ID); err != nil {
+		t.Fatalf("enroll: %v", err)
+	}
+	backdateEnrollment(t, pool, "athlete2", 100)
+
+	// Since enrolling: 8 from 10, a 0.8 rate.
+	for i := 1; i <= 8; i++ {
+		logEvidence(t, pool, "athlete2", tech, i, map[string]int{"scored": 1})
+	}
+	logEvidence(t, pool, "athlete2", tech, 9, map[string]int{"attempted": 2})
+
+	got, err := repo.Get(ctx, "athlete2", c.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	p := got.Items[0].Progress
+	// Only the post-enrollment evidence. If the old fumbling counted, scored
+	// would be 28 and attempts 310 — and the rate would read 0.09 instead of
+	// 0.8, so a genuinely competent athlete would look hopeless at the exact
+	// technique they had just got good at. That inversion is the reason the
+	// window exists.
+	if p.Scored != 8 || p.Attempts != 10 {
+		t.Fatalf("window not applied: scored=%d attempts=%d, want 8/10", p.Scored, p.Attempts)
+	}
+	if p.HitRate == nil || *p.HitRate < 0.79 {
+		t.Fatalf("hit rate poisoned by pre-enrollment history: %v, want ~0.8", p.HitRate)
+	}
+}
+
+func TestNoAttemptsMeansNoRateRatherThanZero(t *testing.T) {
+	// Zero from zero is not a rate, and rendering it as 0%% would report a
+	// failure the athlete has not had.
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	cleanupUser(t, pool, "athlete14")
+	tech := seedTechnique(t, pool, "test-norate")
+
+	c, err := repo.Create(ctx, "athlete14", NewCurriculum{
+		Name:  "Roadmap",
+		Items: []NewItem{{TechniqueID: tech, Criteria: fullCriteria()}},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := repo.Enroll(ctx, "athlete14", c.ID); err != nil {
+		t.Fatalf("enroll: %v", err)
+	}
+	got, err := repo.Get(ctx, "athlete14", c.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Items[0].Progress.HitRate != nil {
+		t.Fatalf("rate reported with no evidence: %v", *got.Items[0].Progress.HitRate)
+	}
+	if got.Items[0].Progress.Mastered {
+		t.Fatal("mastered with no evidence at all")
+	}
+}
+
+func TestDrilledNeverSatisfiesTheSpreadRequirement(t *testing.T) {
+	// Drilling is practice. A technique that cleared its spread requirement on
+	// drilled classes alone would be mastered without ever being used on
+	// somebody who was resisting.
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	cleanupUser(t, pool, "athlete3")
+	tech := seedTechnique(t, pool, "test-kimura")
+
+	c, err := repo.Create(ctx, "athlete3", NewCurriculum{
+		Name: "Roadmap",
+		Items: []NewItem{{TechniqueID: tech, Criteria: &Criteria{
+			TargetScored:   intp(1),
+			TargetSessions: intp(12),
+		}}},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := repo.Enroll(ctx, "athlete3", c.ID); err != nil {
+		t.Fatalf("enroll: %v", err)
+	}
+	backdateEnrollment(t, pool, "athlete3", 200)
+	// Twenty drilled classes and one live score, all inside the window.
+	for i := 1; i <= 20; i++ {
+		logEvidence(t, pool, "athlete3", tech, i, map[string]int{"drilled": 1})
+	}
+	logEvidence(t, pool, "athlete3", tech, 1, map[string]int{"scored": 1})
+
+	got, err := repo.Get(ctx, "athlete3", c.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Items[0].Progress.Sessions != 1 {
+		t.Fatalf("drilled sessions counted toward spread: got %d, want 1",
+			got.Items[0].Progress.Sessions)
+	}
+	if got.Items[0].Progress.Mastered {
+		t.Fatal("mastered on drilling alone")
+	}
+}
+
+func TestADefenceOnlyCriterionWorks(t *testing.T) {
+	// The requirement that justified adding `defended` at all: "not get caught
+	// in guard pull N times" has no offensive half.
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	cleanupUser(t, pool, "athlete4")
+	tech := seedTechnique(t, pool, "test-guardpull")
+
+	c, err := repo.Create(ctx, "athlete4", NewCurriculum{
+		Name:  "Defence",
+		Items: []NewItem{{TechniqueID: tech, Criteria: &Criteria{TargetDefended: intp(5)}}},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := repo.Enroll(ctx, "athlete4", c.ID); err != nil {
+		t.Fatalf("enroll: %v", err)
+	}
+	backdateEnrollment(t, pool, "athlete4", 200)
+	for i := 1; i <= 5; i++ {
+		logEvidence(t, pool, "athlete4", tech, i, map[string]int{"defended": 1})
+	}
+	got, err := repo.Get(ctx, "athlete4", c.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if !got.Items[0].Progress.Mastered {
+		t.Fatalf("defence-only criterion never completes: %+v", got.Items[0].Progress)
+	}
+}
+
+func TestOneAthletesEvidenceNeverReachesAnothersProgress(t *testing.T) {
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	cleanupUser(t, pool, "athlete5", "athlete6")
+	tech := seedTechnique(t, pool, "test-shared")
+
+	c, err := repo.Create(ctx, "athlete5", NewCurriculum{
+		Name:       "Shared",
+		Visibility: "public",
+		Items:      []NewItem{{TechniqueID: tech, Criteria: &Criteria{TargetScored: intp(5)}}},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	for _, u := range []string{"athlete5", "athlete6"} {
+		if err := repo.Enroll(ctx, u, c.ID); err != nil {
+			t.Fatalf("enroll %s: %v", u, err)
+		}
+		backdateEnrollment(t, pool, u, 200)
+	}
+	// Only athlete5 trains.
+	for i := 1; i <= 5; i++ {
+		logEvidence(t, pool, "athlete5", tech, i, map[string]int{"scored": 1})
+	}
+
+	five, err := repo.Get(ctx, "athlete5", c.ID)
+	if err != nil {
+		t.Fatalf("get 5: %v", err)
+	}
+	six, err := repo.Get(ctx, "athlete6", c.ID)
+	if err != nil {
+		t.Fatalf("get 6: %v", err)
+	}
+	if !five.Items[0].Progress.Mastered {
+		t.Fatal("the athlete who trained is not mastered")
+	}
+	if six.Items[0].Progress.Scored != 0 {
+		t.Fatalf("another athlete's evidence leaked: got %d, want 0", six.Items[0].Progress.Scored)
+	}
+}
+
+func TestBrowsingShowsCriteriaButNoProgress(t *testing.T) {
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	cleanupUser(t, pool, "athlete7")
+	tech := seedTechnique(t, pool, "test-browse")
+
+	c, err := repo.Create(ctx, "athlete7", NewCurriculum{
+		Name:  "Unstarted",
+		Items: []NewItem{{TechniqueID: tech, Criteria: fullCriteria()}},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	got, err := repo.Get(ctx, "athlete7", c.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Items[0].Criteria == nil {
+		t.Fatal("criteria hidden from someone deciding whether to take this on")
+	}
+	if got.Items[0].Progress != nil {
+		t.Fatal("progress reported for someone who has not enrolled — there is no window to measure")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Enrollment lifecycle
+// ---------------------------------------------------------------------------
+
+func TestEnrollingIsIdempotentAndKeepsTheOriginalStartDate(t *testing.T) {
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	cleanupUser(t, pool, "athlete8")
+
+	c, err := repo.Create(ctx, "athlete8", NewCurriculum{Name: "X"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := repo.Enroll(ctx, "athlete8", c.ID); err != nil {
+		t.Fatalf("enroll: %v", err)
+	}
+	// Backdate, so a reset would be visible.
+	if _, err := pool.Exec(ctx, `
+		UPDATE curriculum_enrollments SET started_on = CURRENT_DATE - 100
+		WHERE user_id = 'athlete8'`); err != nil {
+		t.Fatalf("backdate: %v", err)
+	}
+	// A retry after a dropped response must converge, not fail.
+	if err := repo.Enroll(ctx, "athlete8", c.ID); err != nil {
+		t.Fatalf("second enroll: %v", err)
+	}
+	var started time.Time
+	if err := pool.QueryRow(ctx, `
+		SELECT started_on FROM curriculum_enrollments WHERE user_id = 'athlete8'`).Scan(&started); err != nil {
+		t.Fatalf("read started_on: %v", err)
+	}
+	if days := int(time.Since(started).Hours() / 24); days < 99 {
+		t.Fatalf("re-enrolling reset the clock: started_on is %d days ago, want ~100", days)
+	}
+}
+
+func TestArchivingKeepsTheRecordAndUnEnrolls(t *testing.T) {
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	cleanupUser(t, pool, "athlete9")
+
+	c, err := repo.Create(ctx, "athlete9", NewCurriculum{Name: "X"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := repo.Enroll(ctx, "athlete9", c.ID); err != nil {
+		t.Fatalf("enroll: %v", err)
+	}
+	if err := repo.Archive(ctx, "athlete9", c.ID); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+	got, err := repo.Get(ctx, "athlete9", c.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Enrolled {
+		t.Fatal("still enrolled after archiving")
+	}
+	// The row survives — having worked a syllabus and stopped is a fact about
+	// them, and this is what lets the app later say "you did three quarters".
+	var n int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FROM curriculum_enrollments WHERE user_id = 'athlete9'`).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("archive deleted the enrollment record: got %d rows, want 1", n)
+	}
+}
+
+func TestACurriculumOthersAreWorkingCannotBeDeleted(t *testing.T) {
+	// Their enrollment is their record, not the publisher's. Cascading would
+	// let a stranger erase it.
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	cleanupUser(t, pool, "owner10", "follower10")
+
+	c, err := repo.Create(ctx, "owner10", NewCurriculum{Name: "Popular", Visibility: "public"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := repo.Enroll(ctx, "follower10", c.ID); err != nil {
+		t.Fatalf("follower enroll: %v", err)
+	}
+	if err := repo.Delete(ctx, "owner10", c.ID); err != ErrInUse {
+		t.Fatalf("delete a followed curriculum: want ErrInUse, got %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Items
+// ---------------------------------------------------------------------------
+
+func TestUpdatingWithoutItemsLeavesThemAlone(t *testing.T) {
+	// The three-state distinction the handler's *[]itemRequest exists for:
+	// absent leaves the list, [] empties it. Collapsed, every metadata edit
+	// silently deletes every item.
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	cleanupUser(t, pool, "athlete11")
+	tech := seedTechnique(t, pool, "test-keep")
+
+	c, err := repo.Create(ctx, "athlete11", NewCurriculum{
+		Name:  "X",
+		Items: []NewItem{{TechniqueID: tech}},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	got, err := repo.Update(ctx, "athlete11", c.ID, Update{Name: strp("Renamed")})
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if len(got.Items) != 1 {
+		t.Fatalf("a rename deleted the items: got %d, want 1", len(got.Items))
+	}
+	got, err = repo.Update(ctx, "athlete11", c.ID, Update{Items: []NewItem{}})
+	if err != nil {
+		t.Fatalf("update empty: %v", err)
+	}
+	if len(got.Items) != 0 {
+		t.Fatalf("an explicit empty list did not clear: got %d", len(got.Items))
+	}
+}
+
+func TestItemOrderSurvivesAReplace(t *testing.T) {
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	cleanupUser(t, pool, "athlete12")
+	a := seedTechnique(t, pool, "test-a")
+	b := seedTechnique(t, pool, "test-b")
+
+	c, err := repo.Create(ctx, "athlete12", NewCurriculum{
+		Name:  "X",
+		Items: []NewItem{{TechniqueID: a}, {TechniqueID: b}},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if c.Items[0].TechniqueID != a || c.Items[1].TechniqueID != b {
+		t.Fatalf("order not as sent: %v", []string{c.Items[0].TechniqueID, c.Items[1].TechniqueID})
+	}
+	got, err := repo.Update(ctx, "athlete12", c.ID, Update{Items: []NewItem{{TechniqueID: b}, {TechniqueID: a}}})
+	if err != nil {
+		t.Fatalf("reorder: %v", err)
+	}
+	if got.Items[0].TechniqueID != b || got.Items[1].TechniqueID != a {
+		t.Fatalf("reorder did not take: %v", []string{got.Items[0].TechniqueID, got.Items[1].TechniqueID})
+	}
+}
+
+func TestAnUnknownTechniqueIsInvalidInputNotAnInternalError(t *testing.T) {
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	cleanupUser(t, pool, "athlete13")
+
+	_, err := repo.Create(ctx, "athlete13", NewCurriculum{
+		Name:  "X",
+		Items: []NewItem{{TechniqueID: "no-such-technique"}},
+	})
+	if err != ErrInvalidInput {
+		t.Fatalf("want ErrInvalidInput, got %v", err)
+	}
+}

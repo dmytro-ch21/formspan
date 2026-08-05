@@ -139,7 +139,18 @@ export const FUNNEL_OUTCOMES: {
   event: Extract<Event, 'attempted' | 'scored' | 'defended'>;
   label: string;
 }[] = [
-  { event: 'attempted', label: 'Tried' },
+  // "Missed", NOT "Tried".
+  //
+  // The column counts attempts that did NOT land -- the migration's own wording
+  // -- and "Tried" reads as total tries, which silently includes the ones that
+  // worked. Anyone tapping it that way double-counts every score.
+  //
+  // That was a mislabelled tally until curricula arrived. It is now load-bearing:
+  // a roadmap's `min_hit_rate` is scored / (attempted + scored), so the whole
+  // criterion rests on these two being disjoint, and reading this counter as
+  // "tries" biases every athlete's hit rate DOWNWARD -- against them, on the
+  // number that decides whether a technique is mastered.
+  { event: 'attempted', label: 'Missed' },
   { event: 'scored', label: 'Landed' },
   // The defensive half, and it lives HERE rather than in the category grid
   // below on purpose. The grid is five rows of two counters and is the fastest

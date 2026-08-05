@@ -343,7 +343,12 @@ export default function BjjSessionScreen() {
               // "Drilled" is one fact among several rather than the thing that
               // puts a technique on this screen at all.
               if (wasDrilled) parts.push('drilled');
-              if (count('attempted') > 0) parts.push(`${count('attempted')} tried`);
+              // "missed", not "tried": these are the attempts that did not
+              // land, and "3 tried, 1 landed" reads as 3 total of which 1 worked
+              // -- a hit rate of 1/3 where the record says 1/4. Harmless as a
+              // tally, wrong now that a roadmap's mastery criterion divides by
+              // exactly this number.
+              if (count('attempted') > 0) parts.push(`${count('attempted')} missed`);
               if (count('scored') > 0) {
                 parts.push(<Text style={styles.scored}>{count('scored')} landed</Text>);
               }

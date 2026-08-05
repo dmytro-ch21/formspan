@@ -11394,6 +11394,103 @@ context defaults and omitting them is strictly better.
   navigator — which is the only place the actual `useFocusEffect` runs rather
   than a mock of it, however faithful.
 
+## 2026-08-05 — Curricula, and a threshold that can disappoint you
+
+`000034_create_curricula` plus `internal/modules/curriculum`: three tables, six
+endpoints, sixteen integration tests. The first thing built on the five design
+questions, all of which are now answered.
+
+**A curriculum is the `workouts` model, deliberately.** Nullable
+`owner_user_id` (NULL = VOLA-authored), `visibility`, CHECK that an ownerless row
+must be public — 000006 already solved this and copying it means the Plan tab's
+My / Shared strip applies unchanged. What it does NOT buy is the seed path:
+nothing here has ever seeded a table with a nullable owner, and the first draft
+of the migration claimed otherwise until review checked.
+
+**One table for curriculum and roadmap**, with per-item criteria as the only
+distinction. Splitting them would mean two engines and a second-class one. The
+grain needed stating, though: criteria are per ITEM, so a curriculum can be part
+reading list and part roadmap, and "is it a roadmap" has no single answer for
+such a row. The rule is written into the migration and into `Item.Countable`:
+**progress counts only items that carry criteria**, and a curriculum where none
+do has no progress at all — not 0%, which reads as failure, and not 100%.
+
+### Mastery is earned or it is not claimed
+
+The user overruled this document's own recommendation: no hand-marking. There is
+no column that could store one. The cost is real — a coach saying "you've got
+that" beats ten tags — and it is paid deliberately, because a roadmap whose
+completions can be self-declared cannot tell an athlete anything they did not
+already believe. **The number has to be able to disappoint them.**
+
+That forced the bar to be honest. Four criteria: 25 scored, 8 defended, 12
+distinct sessions, and a 0.35 hit rate. The old draft's 10 cleared in a month.
+
+`min_hit_rate` is the one that matters, and it settles an argument this document
+had with itself. The doc insisted the honest word was "complete", not
+"mastered", because volume ignores the denominator — 25-from-30 and 25-from-400
+both pass, and only the first is skill. Including the denominator answers that
+rather than weakening the word, and it is computable only because 000025 keeps
+`attempted` and `scored` disjoint.
+
+**Review caught that the rate measured the learning phase by construction.**
+Over all time it includes the months during which the athlete could not do the
+technique. Concretely: 25 scores at 0.35 permits only 46 lifetime misses, so
+twenty honest early failures force the rest of a career to run at 0.49 — and an
+athlete arriving with 20-from-200 already logged would need several hundred
+further attempts to drag the lifetime figure up. A belt syllabus is *mostly*
+techniques you have been failing at; that is what makes it a syllabus. So every
+threshold is now measured **since enrolling**, anchored on
+`curriculum_enrollments.started_on`, which was already there. The criterion now
+means "you got good at this while working the roadmap", which is the claim
+anyone actually wants.
+
+The consequence is accepted rather than hidden: mastery is a statement about the
+record now, not a trophy, so a long enough bad run can take it back. The window
+stops history the athlete has moved past from doing that, and the volume means
+one bad month cannot. The copy has to say "your record shows", not "you have
+earned".
+
+### The label that quietly decided the arithmetic
+
+The mobile counter for `attempted` was labelled **"Tried"**, and the read-back
+said "3 tried, 1 landed" — which any reader parses as 3 total of which 1 landed,
+a hit rate of 1/3 where the record says 1/4. Harmless as a tally; not harmless
+once a mastery criterion divides by exactly that number, and it biases
+systematically *against* the athlete. Now "Missed". A schema property asserted in
+three comments was being undermined by one word of UI.
+
+### Other things review found that were real
+
+- **Defence-only criteria were inexpressible.** The anchoring CHECK required
+  `target_scored` — so "not get caught in guard pull N times", the requirement
+  that justified adding `defended` in the first place, would have needed an
+  invented offensive target. Now anchored on either volume.
+- **`target_sessions` had no event filter stated**, so twelve *drilled* classes
+  would have satisfied the guard against one big open mat. Live sessions only.
+- **`source` was missing**, and deferring it was the expensive direction: a later
+  `ADD COLUMN source DEFAULT 'seed'` would hand every already-authored
+  curriculum to the deploy to clobber. Added while the tables were empty.
+- **Enrollment cascaded on delete**, so a publisher deleting a curriculum would
+  erase every follower's record of having worked it. Now RESTRICT, and deleting
+  a followed curriculum is a 409.
+
+### Gaps
+
+- **Nothing seeds a belt syllabus yet**, so the list is empty until someone
+  authors one. Building your own works today; "Blue belt basics" is content
+  work, and the seed path for ownerless rows does not exist.
+- **No client.** Six endpoints and no screen on any of the three apps.
+- **The 1:3 offence-to-defence ratio is still modelled, not measured.** It rests
+  on an assumed opportunity rate nobody has data on, and every default here
+  inherits that.
+- **Re-enrolling keeps the original `started_on`**, so the measurement window
+  spans a gap the athlete was away for. Deliberate — the alternative discards
+  everything they did the first time — but a screen rendering elapsed time has
+  to say so.
+- **The evidence is self-reported throughout.** `bjj_session_tags.count` is
+  client-supplied, so these criteria make fabrication tedious, not impossible.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

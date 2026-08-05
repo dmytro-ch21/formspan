@@ -594,8 +594,10 @@ function LiveStep({
                   // Landed and Stopped are both wins — one offensive, one
                   // defensive — and colouring only the first would say the
                   // quiet part out loud about which half the app values.
-                  // Tried is neither a win nor something done to you; it is
-                  // the attempt, which is the behaviour being encouraged.
+                  // Missed is neither a win nor something done to you; it is
+                  // the attempt that did not land, and going for it is still
+                  // the behaviour being encouraged -- hence neutral rather
+                  // than the conceded tone.
                   tone={o.event === 'attempted' ? 'neutral' : 'scored'}
                   onAdd={() =>
                     onChange({ ...detail, tags: bumpTechniqueOutcome(detail.tags, f, o.event, 1) })

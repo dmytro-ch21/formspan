@@ -261,7 +261,14 @@ describe('the defensive half of the funnel', () => {
     // Labels, not just events: the label is what the athlete reads, and a bare
     // "Stopped" was ambiguous enough to invert the data — it reads as "my
     // technique got stopped", which is what `attempted` already means.
-    expect(FUNNEL_OUTCOMES.map((o) => o.label)).toEqual(['Tried', 'Landed', 'Stopped theirs']);
+    //
+    // "Missed", not "Tried", and this one is now load-bearing rather than
+    // cosmetic. The column counts attempts that did NOT land, so "Tried" reads
+    // as total tries and anyone tapping it that way double-counts every score.
+    // A roadmap's `min_hit_rate` is scored / (attempted + scored), so that
+    // misreading biases the hit rate DOWNWARD — against the athlete, on the
+    // number that decides whether a technique is mastered.
+    expect(FUNNEL_OUTCOMES.map((o) => o.label)).toEqual(['Missed', 'Landed', 'Stopped theirs']);
     expect(FUNNEL_OUTCOMES.map((o) => o.event)).toEqual(['attempted', 'scored', 'defended']);
   });
 
