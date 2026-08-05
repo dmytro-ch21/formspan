@@ -4242,3 +4242,42 @@ a button that opens a picker rather than a row of pinned options.
   the map must fail this.
 - Every group is reachable — no option that always answers "nothing matches".
 - No raw value is claimed by two groups.
+
+
+## The technique writing guide (`apps/admin` `/content/guide`)
+
+Covers `apps/admin/src/app/content/guide/page.tsx` and the Description hint on
+`TechniqueForm`.
+
+### Happy path
+
+- `/content/guide` renders for a signed-in admin, reachable from the techniques
+  list and from the Description field's hint.
+- Every example on the page shows the parser's **actual** output. This is the
+  one page whose content is a claim about code: if `executionSteps` changes and
+  the page does not, it is lying.
+
+### The claims it makes, which are testable against `executionSteps`
+
+Each of these is a real input/output pair and belongs in a unit test beside the
+parser, not only on a page:
+
+- `"Grip the far collar deep, step your lead foot across the hip, and fall back
+  while pulling the elbow tight."` → three steps.
+- One step per line, each ending in a full stop → three steps.
+- `"1. Grip the far collar. 2. Step your foot across. 3. Fall back."` → the
+  numerals become steps. Assert the broken shape explicitly, so a future fix to
+  the parser fails this test and the page gets updated with it.
+- `"- Grip\n- Step\n- Fall back"` → no steps.
+- `"Break the grip, step in, and finish."` → **no steps**, because clauses under
+  ten characters fold into the previous one. This is the one that fails
+  silently and the reason the page exists.
+- Fewer than two resulting steps → renders as a paragraph, never a one-item
+  numbered list.
+
+### Auth
+
+- `/content(.*)` is in the `proxy.ts` matcher, so a signed-out visitor gets the
+  sign-in prompt rather than the guide.
+- A signed-in account not on `ADMIN_USER_IDS` gets "Not authorized". The guide
+  is documentation, but it sits inside the console's gate like everything else.
