@@ -3122,6 +3122,33 @@ shows. On Plan it is the week; inside the month sheet it is the month.
   the same `logsAfterwards` predicate everything else uses.
 - Nothing planned → the dashed rest-day card, which routes to Plan.
 
+### The first suggestion (Tier 1: funnel gaps)
+
+*"You drilled the arm drag 9 times and never tried it live."* Read from
+`GET /v1/bjj/proficiency`; no local data involved.
+
+- Fires only when a technique has **6+ drilled, 0 attempted AND 0 scored,
+  across 2+ sessions, seen in the last 60 days.** Each gate is separately
+  observable: land it once and the card must disappear.
+- **Landing it counts as trying it.** A technique drilled 9 times and scored
+  twice must NOT be suggested — `attempted` and `scored` are disjoint, so
+  testing only `attempted` would suggest something the athlete already hits.
+- The card shows its own evidence ("drilled 9 times across 3 sessions, never
+  live"), never a bare verdict.
+- **At most one card**, and it sits UNDER the plan, not above it.
+- It appears only on today — stepping the day switcher hides it.
+- Tapping it opens that technique in the library.
+- With the API unreachable, there is **no card and no error banner**. A failed
+  read must not be mistaken for "this athlete has logged no detail".
+
+### The cold start (Tier 0)
+
+- After the **2nd** BJJ session logged with no technique-level detail, Today
+  offers "Add what happened in rolling". Not after the 1st.
+- It stops after the **4th**, whether or not the athlete acted on it.
+- It never shows to someone with any technique evidence, and never at the same
+  time as a suggestion.
+
 ### Today steps a day, and says three different things about it
 
 - The switcher reads **TODAY** on today and the weekday + date otherwise, and

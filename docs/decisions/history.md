@@ -10798,6 +10798,88 @@ scenery. `owedOn(sessions, dayPlans)` is what was ever needed.
 - **The switcher has no bound.** Nothing stops stepping into 2029 one day at a
   time. Harmless, and a month jump would be the fix if anyone ever does it.
 
+## 2026-08-05 — The first suggestion, and the endpoint shape I assumed instead of read
+
+Tier 1 of the curriculum design: *"you drilled the arm drag nine times and never
+tried it live."* The cheapest tier, deliberately first.
+
+### Why the cheap claim ships before the interesting one
+
+The design doc prices all three. "Where do you concede most?" needs **~18
+position-tagged concede events** before one of nine families can be told from
+noise. A funnel gap is an **absence**, not a rate: if you would normally take a
+drilled technique live 30% of the time, nine drills with zero attempts is
+p<0.05 on its own. It needs no position tagging at all, and it fires at three to
+five detailed sessions rather than eight to fifteen.
+
+It is also the better instruction. "Try the thing you have been drilling" is
+something you can do on Wednesday. "Work on half guard" is a topic.
+
+### No backend
+
+`/v1/bjj/proficiency` already aggregates drilled/attempted/scored/conceded per
+technique with a session count and a `last_seen`, built when the tag table was.
+The whole tier is a client read plus a pure function.
+
+### The rule, and the line that decides whether it is true
+
+    drilled >= 6  &&  attempted + scored === 0  &&  sessions >= 2  &&  seen within 60d
+
+`attempted + scored`, **not `attempted`**. The two are disjoint in this schema —
+`attempted` is "went for it and it did *not* land" — so a technique drilled nine
+times and landed twice has plainly been tried. Gating on `attempted === 0` alone
+would tell that athlete to go and try the thing they are already hitting. That
+is the difference between a suggestion and noise, and it is one `+ r.scored`.
+
+`sessions >= 2` uses the field the endpoint added as "the honesty check on every
+number above": nine reps in one class is one class, not a habit, and a technique
+the coach taught once is not something the athlete is avoiding.
+
+Six drills, not nine. Nine is where the statistics stand alone; six is where the
+*observation* is worth making, and the card shows its evidence rather than
+asserting — "drilled 9 times across 3 sessions, never live" is checkable, where
+"work on your arm drag" is a verdict the recorded design rules out.
+
+### Tier 0, which is the half that creates the evidence
+
+An athlete using the fast path and skipping the wizard is told, once, that the
+detail is what unlocks the rest. Bounded on **both** sides: not on the first
+session, because one is not a habit; never past the fourth, because by then they
+have heard it and are choosing. A prompt that repeats forever is the shame the
+UX direction rules out, however politely worded.
+
+### The bug that only running it could find
+
+`fetchProficiency` was typed `Promise<Proficiency[]>`. The endpoint returns
+`{ techniques, summary }`. It compiled, it passed every check, and it took the
+Today screen down on first render with *"undefined is not a function"* —
+`rows.filter` on a response with no such property.
+
+TypeScript cannot catch this: the cast at a parse boundary is an assertion about
+a server, not a check. `apps/web` had the shape right; I did not read either it
+or the contract. The fix carries the same `?? []` that `bjjFocus.ts` already
+has, and that file's comment describes the consequence exactly — a drifted
+server hands `undefined` to a consumer inside a `useMemo`, taking the render
+down rather than degrading to nothing.
+
+Worth stating plainly because `pnpm run verify` was green through all of it.
+
+### Gaps
+
+- **Nothing dismisses a suggestion.** It recomputes on every focus, so the same
+  card returns until the evidence changes. The design doc's own answer is that
+  the suggestion should be recomputed but a *dismissal* must persist; that is
+  the next piece and this tier is unpleasant without it.
+- **Tier 0 counts techniques, not sessions.** `funnel.length === 0` is "no
+  technique-level evidence ever", which is the closest signal available on this
+  screen. An athlete who fills the category grid every session but never names a
+  technique is told to add detail they are arguably already adding.
+- **Only on today.** Stepping the day switcher hides the card, on the argument
+  that a suggestion is about what to do next rather than a claim about a day you
+  are looking at. Worth revisiting once anyone uses it.
+- **No web surface.** The funnel page shows the numbers; nothing there says
+  which one is worth acting on.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
