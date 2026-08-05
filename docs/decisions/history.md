@@ -11251,9 +11251,8 @@ the guard stays.
   observed. Given this is the exact path whose failure review had to find,
   it should be watched by eye before merge — and the missing test for it is
   the first item below.
-- **No test covers the Settings→Today wiring**, which is where the blocking bug
-  lived and which a pure-logic test structurally cannot reach. `app/__tests__/`
-  already holds five screen tests, so the pattern exists.
+- ~~**No test covers the Settings→Today wiring**~~ — closed the next day by
+  `app/__tests__/suggestionPrefsRefocus.test.tsx`; see the entry below.
 - **Device-local.** A second device will offer a dismissed technique once more.
   Deliberate, but it becomes wrong if suggestions ever grow past a nudge.
 - **Dismissal is per technique, not per tier.** When the position hot-spot tier
@@ -11313,6 +11312,87 @@ pairs should also live, which the functional-scenarios entry now records.
 
 Not verified visually: the console is Clerk-gated. `build:admin` compiles the
 page and emits the route, and typecheck and lint pass.
+## 2026-08-05 — The test that had to be able to fail
+
+Closes the gap **"A suggestion you can say no to"** named first: nothing covered
+the Settings→Today wiring, which is where that branch's blocking bug lived.
+(Named rather than called "the entry above" — another entry landed between the
+two while this branch was open, and a relative reference in a file this long
+silently starts pointing at the wrong thing.)
+`apps/mobile/app/__tests__/suggestionPrefsRefocus.test.tsx`, eight cases.
+
+**The thing worth recording is not the test, it is why the obvious version of it
+is worthless.** `jest.setup.js` mocks `useFocusEffect` as
+`useEffect(() => cb(), [cb])`. Today's focus callback is a `useCallback` keyed on
+four callbacks that are themselves identity-stable while `userId` is. Substitute
+the mock and the *fixed* code reduces to `useEffect(read, [userId])` — which is
+the shipped bug, verbatim. Measured both shapes: four reads on mount and **none
+thereafter**; the count not moving is itself the finding, because an
+identity-stable callback is precisely what gives the effect nothing to re-run
+on. There is no focus event in that mock at all; nothing subscribes and nothing
+dispatches, so no action available to a test re-runs the callback without
+unmounting, and unmounting re-runs the buggy version too.
+
+Stated precisely, because the first draft of this entry got it wrong in the
+flattering direction: on the shared mock the file does not "pass against the
+bug". It fails five of its eight cases against the **fixed** code and fails the
+same five against the bug — no distinguishing power in either direction, which
+is worse than passing and is the actual argument for replacing the mock.
+
+So the file replaces `expo-router` wholesale with a mock modelled on the hook
+expo-router actually vendors (`expo-router/build/useFocusEffect.js` —
+`@react-navigation/native` is not installed in this workspace at all, which is
+worth knowing before anyone reaches for its docs), and drives blur and focus
+itself. That override, not the assertions, is what makes the file mean anything.
+
+Prefs go through a **real migrated SQLite fixture** rather than `jest.fn()`, so
+the settings screen writing and Today reading have to agree on the key and the
+encoding. A fake returns whatever the reader asks for, which makes a diverged
+key structurally invisible — and the `'true'` vs `'0'` mutation below is exactly
+that bug, caught only because the value crosses a real database.
+
+**Mutation results.** The old `useEffect([userId])` shape takes five of the eight
+cases red — and again with the cleanup preserved, so the test keys on *where* the
+read lives rather than on an incidental return value. Eight of nine mutations die.
+The survivor is the focus callback keyed on `[]`: real (it would freeze the
+callback and read the previous account's prefs after a user change) but a
+different bug, unreachable here because the Clerk mock's user never changes, and
+caught instead by `react-hooks/exhaustive-deps` taking `lint:mobile` from 54 to
+55 against `--max-warnings=54`. Same division of labour `bjjSessionScreen.test.tsx`
+already documents: the lint rule catches the class, the test catches the runtime
+behaviour a static rule cannot see. It is recorded in a table in the file rather
+than left implied.
+
+**One case passed for the wrong reason first time**, which is the fourth instance
+of that failure mode this suite has logged and the reason the mutation step is not
+optional. `focus()` on an already-focused screen is a no-op — the real hook guards
+the duplicate focus event navigation fires at mount, and the mock faithfully
+copies that guard — so a case written without a preceding `blur()` sent no read,
+asserted nothing, and stayed green with the code under test deleted. Only the
+mutation run found it.
+
+Also worth noting for whoever writes the next component test here: the comment in
+`todayDaySwitcher.test.tsx` — that standing Today up "would mostly test the
+harness" — is a judgement about *value*, and for that file's two arithmetic
+derivations it still holds. What is worth correcting is the impression it leaves
+about *cost*: `render(<Today />)` needs zero per-file mocks and takes ~250ms.
+Every SQLite read on that screen is individually `.catch()`ed, so the stubbed
+native module degrades silently rather than throwing. Do not wrap it in the real
+`ModulesProvider` — its mount effect awaits `readPref` with no `try`/`catch`, so
+the stub's rejection escapes and fails the test; both providers ship usable
+context defaults and omitting them is strictly better.
+
+### Gaps
+
+- **Account switching is untested.** The one surviving mutant is real behaviour
+  nothing exercises: the Clerk mock's `userId` is a constant, so no test here
+  changes accounts. A shared device is the scenario, and `lib/prefs.ts` is scoped
+  by user precisely because it matters.
+- **The functional-suite version does not exist yet.** The scenario is written up
+  in `docs/testing/functional-scenarios.md` under Settings → Suggestions, but
+  nothing in `tests/functional/` drives two real screens through a real
+  navigator — which is the only place the actual `useFocusEffect` runs rather
+  than a mock of it, however faithful.
 
 ## Open items / known gaps as of this entry
 
