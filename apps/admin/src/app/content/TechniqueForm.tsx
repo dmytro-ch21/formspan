@@ -80,7 +80,7 @@ function Field({
   children,
 }: {
   label: string;
-  hint?: string;
+  hint?: React.ReactNode;
   htmlFor: string;
   children: React.ReactNode;
 }) {
@@ -435,7 +435,21 @@ export function TechniqueForm({
       </Section>
 
       <Section title="Explanation">
-        <Field label="Description" htmlFor="description" hint="The mechanics.">
+        <Field
+          label="Description"
+          htmlFor="description"
+          hint={
+            <>
+              The mechanics, as one sentence with comma-separated clauses — the app splits
+              this into numbered steps. Do not number or bullet them yourself, and keep each
+              clause over ten characters or it silently collapses into a paragraph.{" "}
+              <Link href="/content/guide" className="underline">
+                Writing guide
+              </Link>
+              .
+            </>
+          }
+        >
           <textarea
             id="description"
             name="description"

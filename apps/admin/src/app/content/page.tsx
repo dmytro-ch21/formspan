@@ -35,6 +35,19 @@ export default async function ContentPage() {
       <main className="flex flex-col gap-6 px-10 py-8">
         <OwnershipNote catalog="Techniques" file="techniques.json" />
 
+        {/* The Description field is parsed rather than displayed, and nothing on
+            the form said so until this existed. Linked from the list as well as
+            from the field, because the useful time to read it is before writing
+            a technique rather than halfway through one. */}
+        <p className="text-[13px] text-text-secondary">
+          Writing one for the first time?{" "}
+          <Link href="/content/guide" className="underline">
+            Read the writing guide
+          </Link>{" "}
+          — the description is split into numbered steps, and how you punctuate it decides
+          whether that works.
+        </p>
+
         {techniques.length === 0 ? (
           <p className="rounded-lg border border-border bg-card px-4 py-6 text-[13px] text-text-secondary">
             Nothing authored yet. <Link href="/content/new" className="underline">Add a
