@@ -142,7 +142,12 @@ const FALLBACK: Module[] = [
     enabled: true,
     capabilities: {
       catalog: 'exercises',
-      facets: [],
+      // Mirrored from the registry, the way BJJ's already are four entries
+      // down. It only matters on a genuine first run with no cache and an
+      // unreachable server — but leaving it empty there means the Library
+      // silently offers no strength filters in exactly that case, and the
+      // inconsistency with BJJ is the kind that reads as a bug later.
+      facets: ['muscle', 'movement'],
       has_goals: true,
       has_progression: true,
       record_kinds: ['heaviest_weight', 'estimated_1rm', 'most_reps'],
@@ -170,7 +175,12 @@ const FALLBACK: Module[] = [
     enabled: false,
     capabilities: {
       catalog: 'exercises',
-      facets: [],
+      // Mirrored from the registry, the way BJJ's already are four entries
+      // down. It only matters on a genuine first run with no cache and an
+      // unreachable server — but leaving it empty there means the Library
+      // silently offers no strength filters in exactly that case, and the
+      // inconsistency with BJJ is the kind that reads as a bug later.
+      facets: ['muscle', 'movement'],
       has_goals: false,
       has_progression: false,
       record_kinds: ['longest_time', 'furthest_distance'],

@@ -424,7 +424,12 @@ components:
           nullable: true
           items:
             type: string
-          description: Extra filter axes beyond the catalog's own. BJJ has `position` and `belt`.
+          description: >
+            Extra filter axes beyond the catalog's own — BJJ has `position`
+            and `belt`, strength has `muscle` and `movement`. These are axes a
+            client renders controls for, NOT query parameters: every facet is
+            filtered client-side from fields already present on the catalog
+            rows, so none of them appears in a request.
         has_goals:
           type: boolean
           description: Gates the powerlifting/hypertrophy/endurance picker. Strength only.
