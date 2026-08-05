@@ -569,8 +569,16 @@ function LiveStep({
             importantForAccessibility="no-hide-descendants"
           >
             <Text style={[styles.gridHeadCell, styles.gridHeadSpacer]} />
-            <Text style={styles.gridHeadCell}>Tried</Text>
-            <Text style={styles.gridHeadCell}>Landed</Text>
+            {/* Derived, not spelled out. Hardcoded as two cells for what
+                became three counters, the "Landed" header sat over the
+                "Stopped theirs" column and actively mislabelled it. A header
+                that cannot disagree with its own row is worth more than one
+                that reads more plainly in the source. */}
+            {FUNNEL_OUTCOMES.map((o) => (
+              <Text key={o.event} style={styles.gridHeadCell}>
+                {o.label}
+              </Text>
+            ))}
           </RNView>
           {rows.map((f) => (
             <RNView key={f.technique_id} style={styles.gridRow}>
@@ -602,8 +610,9 @@ function LiveStep({
           ))}
           <Text style={styles.footnote}>
             The techniques you&apos;re working on. “Tried” means you went for it and it didn&apos;t
-            land, so tried plus landed is how often you went for it. Record it here rather than in the
-            grid below — one row per thing that happened.
+            land, so tried plus landed is how often you went for it. “Stopped theirs” is the other
+            direction — they went for it and you shut it down. Record it here rather than in the grid
+            below — one row per thing that happened.
           </Text>
         </>
       )}

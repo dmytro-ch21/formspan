@@ -39,12 +39,6 @@ export type Category = 'submission' | 'sweep' | 'pass' | 'escape' | 'takedown' |
 /**
  * The outcome direction.
  *
- * `drilled → attempted → scored` is the technique funnel; `conceded` is the
- * symmetric half and the one that answers "where do I keep getting stuck".
- */
-/**
- * The outcome direction.
- *
  * The four LIVE events are a 2x2 of who started the exchange and whether it
  * landed:
  *
@@ -154,7 +148,14 @@ export const FUNNEL_OUTCOMES: {
   // chips only appear for techniques already in focus — which is exactly the
   // handful a roadmap cares about, and where naming the specific technique is
   // already worth its cost.
-  { event: 'defended', label: 'Stopped' },
+  //
+  // "Stopped THEIRS", not "Stopped". The other two counters are about the
+  // athlete's own execution of this technique, and a bare "Stopped" silently
+  // flips the subject to the opponent's — so "Armbar · Stopped: 3" reads most
+  // naturally as "my armbar got stopped three times", which is what `attempted`
+  // already means. Two counters that read as synonyms on a screen feeding
+  // completion criteria is not a wording nit; it is inverted evidence.
+  { event: 'defended', label: 'Stopped theirs' },
 ];
 
 /**

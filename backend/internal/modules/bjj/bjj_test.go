@@ -221,21 +221,65 @@ func TestDefendedIsAcceptedAsAnEvent(t *testing.T) {
 // drifted. It used to spell them out LITERALLY, and went stale the moment one
 // grew — telling a rejected client there were four events when there were
 // five. A message about drift that can itself drift is worse than none.
-func TestInvalidInputMessageNamesEveryEventItAccepts(t *testing.T) {
+//
+// Asserted PER CLAUSE, not with a bare Contains over the whole string. The
+// first version of this test did the latter, and review proved it was theatre:
+// swapping join(Kinds()) and join(Events()) inside the message — so the 400
+// told a client that kinds were "drilled, attempted, scored…" and events were
+// "class, drilling…" — left it green. Every value was still *somewhere* in the
+// string. Membership without position proves nothing about a message whose
+// whole job is to say which vocabulary is which.
+func TestInvalidInputMessageNamesEachVocabularyInItsOwnClause(t *testing.T) {
 	msg := invalidInputMessage()
-	for _, e := range Events() {
-		if !strings.Contains(msg, string(e)) {
-			t.Errorf("the invalid-input message does not mention %q", e)
+
+	clause := func(t *testing.T, after string) string {
+		t.Helper()
+		i := strings.Index(msg, after)
+		if i < 0 {
+			t.Fatalf("message has no %q clause: %s", after, msg)
+		}
+		rest := msg[i+len(after):]
+		if j := strings.Index(rest, ";"); j >= 0 {
+			return rest[:j]
+		}
+		return rest
+	}
+
+	kinds := clause(t, "kind must be one of ")
+	cats := clause(t, "tag category one of ")
+	events := clause(t, "tag event one of ")
+
+	for _, c := range []struct {
+		name   string
+		clause string
+		want   []string
+		absent [][]string
+	}{
+		{"kind", kinds, asStrings(Kinds()), [][]string{asStrings(Events())}},
+		{"category", cats, asStrings(Categories()), [][]string{asStrings(Kinds())}},
+		{"event", events, asStrings(Events()), [][]string{asStrings(Kinds()), asStrings(Categories())}},
+	} {
+		for _, v := range c.want {
+			if !strings.Contains(c.clause, v) {
+				t.Errorf("the %s clause (%q) omits %q", c.name, c.clause, v)
+			}
+		}
+		// And nothing from another vocabulary, which is what makes the clause
+		// a claim about identity rather than about presence.
+		for _, other := range c.absent {
+			for _, v := range other {
+				if strings.Contains(c.clause, v) {
+					t.Errorf("the %s clause (%q) wrongly names %q", c.name, c.clause, v)
+				}
+			}
 		}
 	}
-	for _, k := range Kinds() {
-		if !strings.Contains(msg, string(k)) {
-			t.Errorf("the invalid-input message does not mention kind %q", k)
-		}
+}
+
+func asStrings[T ~string](vals []T) []string {
+	out := make([]string, len(vals))
+	for i, v := range vals {
+		out[i] = string(v)
 	}
-	for _, c := range Categories() {
-		if !strings.Contains(msg, string(c)) {
-			t.Errorf("the invalid-input message does not mention category %q", c)
-		}
-	}
+	return out
 }

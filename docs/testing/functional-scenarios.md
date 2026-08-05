@@ -3177,6 +3177,15 @@ landed; `defended` is "they went for it, you stopped them" — the mirror of
 - Long-press to decrement stops at zero rather than going negative.
 - `GET /v1/bjj/proficiency` returns a `defended` count per technique alongside
   drilled/attempted/scored/conceded.
+- **It must be visible after it is written.** Record only "Stopped theirs" for
+  a technique, save, and reopen the reflection: the technique still has a row
+  with its counter editable. Open the session summary: its chip reads
+  "N stopped", not a blank line. On web's proficiency page it is **not**
+  bucketed as "Used on you".
+- The counter reads **"Stopped theirs"**, not "Stopped" — a bare label reads as
+  "my technique got stopped", which is what Tried already means, and would
+  invert the evidence.
+- The column headers line up with the counters beneath them at every text size.
 - Posting a tag with `event: "defended"` is accepted; an unknown event is
   rejected with a 400 whose message **names every accepted value**, including
   `defended`. That message is generated from the vocabulary, so a new event can

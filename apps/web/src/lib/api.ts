@@ -798,6 +798,13 @@ export type BjjProficiency = {
   attempted: number;
   scored: number;
   conceded: number;
+  /**
+   * Them going for it and the athlete stopping them — the mirror of
+   * `attempted`, and the defensive half of the 2x2 the tag vocabulary forms.
+   * Required by the contract; omitting it here let the page treat a defensive
+   * win as evidence of nothing.
+   */
+  defended: number;
   /** How many separate sessions contributed — the honesty check on the rest. */
   sessions: number;
   last_seen: string;

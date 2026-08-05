@@ -10862,11 +10862,78 @@ its (who-initiated, did-it-land) cell and fails if any cell is empty or two
 events claim the same one. A test that spelled the five values out would go
 green the moment someone deleted `defended` and updated it to match.
 
-Mutation-checked: removing `defended` from the vocabulary, and reverting the
-error message to a literal list, both go red.
+Mutation-checked, and one of the checks was itself wrong first. Removing
+`defended` from the vocabulary goes red. The error-message test originally
+asserted `strings.Contains` over the whole message, and review proved that was
+theatre: **swapping `join(Kinds())` and `join(Events())` — so the 400 told a
+client that kinds were "drilled, attempted, scored…" and events were "class,
+drilling…" — left it green**, because every value was still *somewhere* in the
+string. It asserts per clause now, and that the clause does *not* name another
+vocabulary's values, which is what makes it a claim about identity rather than
+presence. That mutation is red.
+
+Worth being exact about the limit: a five-value literal that happens to be
+correct still passes. No test can tell a correct literal from a derivation —
+which is why deriving it is the fix and the test is only the backstop against
+it going wrong.
+
+### What review caught: the event was threaded forward and not backward
+
+Three blocking findings, and all of them the same shape — `defended` was
+**write-only**. It was added to the type, the wizard and the API, and none of
+the places that read events back were widened with it.
+
+- **`focusRows` narrowed to `attempted|scored`**, so a technique whose *only*
+  evidence was `defended` — "I never went for it, I just kept stopping theirs",
+  exactly the athlete the defensive criterion is for — got no row at all. Three
+  recorded stops were saved, synced, then invisible and uneditable on reopen.
+  That is the property that file's own test calls **THE property**, and it did
+  not need anyone to drop a focus technique: `LiveStep` swallows a `fetchFocus`
+  failure deliberately, so every offline reflection at a gym took that path.
+- **The session read-back screen showed a blank funnel line** for a
+  defended-only technique. The comment three lines above it says writing an
+  event and displaying it nowhere is "the exact defect this feature exists to
+  fix, recreated one screen along". It was recreated one event along. The
+  `·`-joined conditional chain was already awkward at two values and silently
+  wrong at three; it builds a list and joins now.
+- **`apps/web`'s proficiency page bucketed a defensive win as "Used on you —
+  Caught in it, with nothing of your own recorded"**, the precise inversion of
+  what happened, with every funnel column showing a dash. `conceded` reaching
+  that bucket is fine because no client can author one; `defended` is written
+  by every athlete who taps the counter.
+- **The aggregate arm was untested.** Misspelling `'defended'` as `'defence'`
+  in the SQL left the entire package green — every count silently 0 forever,
+  and the contract's newly-required field always zero. The fixture now seeds a
+  defended row at **3 against conceded's 4**: equal counts would make a
+  transposition of the two invisible, since both are ints and pgx cannot catch
+  it. Both mutations are red.
+
+And one wording change that is not cosmetic. The counter read **"Stopped"**,
+which flips the subject: the other two counters are about the athlete's own
+execution, so "Armbar · Stopped: 3" reads most naturally as *my armbar got
+stopped*, which is what `attempted` already means. Two counters reading as
+synonyms on the screen that feeds completion criteria is inverted evidence, not
+a nit. It says **"Stopped theirs"**.
+
+The grid header was also hardcoded as two cells for three counters, so
+"Landed" sat over the Stopped column and actively mislabelled it. It is derived
+from `FUNNEL_OUTCOMES` now.
 
 ### Gaps
 
+- **`defended` cannot be recorded without a focus technique, and focus is set
+  on web.** It is the only one of the five events with no capture path outside
+  the per-technique chips — offensive outcomes at least degrade to the category
+  grid's "You" column, and there is no category-level defensive equivalent.
+  So the population that can never record one is not just "athletes who set no
+  focus" but every mobile-only athlete, plus anyone reflecting offline while
+  `fetchFocus` fails silently. Any future defensive-rate query is therefore
+  biased toward web users, and should say so.
+- **`SummariseProficiency`'s `Tried()` excludes `defended`**, so a technique
+  taken into a live round defensively counts toward `techniques` but toward
+  none of drilled/tried_live/landed. Defensible — it was not an attempt — but
+  it means the page's headline undercounts real live evidence. Recorded as a
+  decision rather than left as an accident.
 - **Nothing reads `defended` yet.** `/v1/bjj/proficiency` reports it and the
   wizard writes it; no roadmap consumes it, because roadmaps do not exist. That
   is the intended order — the criterion is worthless without months of evidence
