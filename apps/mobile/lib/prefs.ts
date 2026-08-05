@@ -132,6 +132,33 @@ export const PREF_UNIT_SYSTEM_OWED = 'unit_system_owed';
  */
 export const PREF_DETAIL_OFFERS = 'bjj_detail_offers';
 
+/**
+ * Technique ids the athlete has dismissed a suggestion for, as a JSON array.
+ *
+ * One key holding a set rather than a key per technique, because the
+ * suggestion rule needs the WHOLE set to pick its next-best candidate — a
+ * per-technique key would answer "is this one dismissed" and could not answer
+ * "which is the best one that is not".
+ *
+ * Device-local, like {@link PREF_DETAIL_OFFERS} and for the same reason: it
+ * bounds a nudge. Dismissing on a phone and seeing it once more on a tablet is
+ * a smaller cost than the sync surface, and `writePref` only pushes what is
+ * explicitly marked owed.
+ */
+export const PREF_DISMISSED_SUGGESTIONS = 'bjj_dismissed_suggestions';
+
+/** `'0'` turns every suggestion off. Absent means on — the default needs no write. */
+export const PREF_SUGGESTIONS = 'suggestions_enabled';
+
+/**
+ * Modules with suggestions turned off, as a JSON array of sport keys.
+ *
+ * An OFF list rather than an on list, so a discipline added to the registry
+ * later is suggestible without a migration, and so the master switch can be
+ * flipped without destroying the athlete's per-module choices.
+ */
+export const PREF_SUGGESTIONS_OFF = 'suggestions_off';
+
 export const PREF_AUTO_REST = 'auto_rest';
 export const PREF_TRACK_EFFORT = 'track_effort';
 /**

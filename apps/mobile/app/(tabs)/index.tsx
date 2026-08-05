@@ -36,8 +36,23 @@ import { formatElapsed } from '@/lib/rest';
 import type { LoggedSet, Session } from '@/lib/sessions';
 import { cachedWorkouts, listLocalSessions } from '@/lib/sessionStore';
 import { fetchProficiency } from '@/lib/proficiency';
-import { funnelGap, shouldOfferDetail } from '@/lib/suggestion';
-import { PREF_DETAIL_OFFERS, readPref, writePref } from '@/lib/prefs';
+import {
+  funnelGap,
+  parseDismissed,
+  parseIdSet,
+  parseMaster,
+  serialiseDismissed,
+  shouldOfferDetail,
+  suggestionsAllowed,
+} from '@/lib/suggestion';
+import {
+  PREF_DETAIL_OFFERS,
+  PREF_DISMISSED_SUGGESTIONS,
+  PREF_SUGGESTIONS,
+  PREF_SUGGESTIONS_OFF,
+  readPref,
+  writePref,
+} from '@/lib/prefs';
 import { restLine, weeklyDays } from '@/lib/trend';
 import { formatVolume, type UnitSystem } from '@/lib/units';
 import { enabledSports, labelFor, usesBelt, type Module } from '@/lib/modules';
@@ -348,6 +363,22 @@ export default function TodayScreen() {
    * returned indefinitely — the exact thing the bound exists to stop.
    */
   const [offers, setOffers] = useState<number | null>(null);
+  /**
+   * Techniques the athlete has said no to. `null` until read.
+   *
+   * Null matters for the same reason it does on `funnel`: rendering before the
+   * dismissals land would show a card the athlete has already dismissed, which
+   * is worse than showing nothing for a beat.
+   */
+  const [dismissed, setDismissed] = useState<ReadonlySet<string> | null>(null);
+  /**
+   * Whether suggestions are allowed at all, and for which disciplines.
+   *
+   * `null` until read, like the two above, and for the same reason: showing a
+   * card to someone who has switched suggestions off — even for one frame — is
+   * the setting not working.
+   */
+  const [policy, setPolicy] = useState<{ master: boolean; off: ReadonlySet<string> } | null>(null);
   const [viewPlans, setViewPlans] = useState<
     (PlannedSession & { workoutName: string | null })[]
   >([]);
@@ -406,14 +437,46 @@ export default function TodayScreen() {
     }
   }, [getToken, userId]);
 
-  useEffect(() => {
-    if (!userId) return;
+  /**
+   * Re-read on FOCUS, not once per mount.
+   *
+   * `/settings/suggestions` is a Stack route pushed over the tabs, and a tab
+   * screen stays mounted for the life of the process — so keyed on `[userId]`
+   * this ran once, ever. Turning suggestions off, silencing a discipline, or
+   * tapping "Suggest again" all appeared to do nothing until the app was
+   * killed. The write direction worked, which is exactly why testing it by
+   * hand missed this: Settings is pushed fresh every time and reads correctly.
+   */
+  const readSuggestionPrefs = useCallback(() => {
+    if (!userId) return () => {};
     let alive = true;
     readPref(userId, PREF_DETAIL_OFFERS)
       .then((v) => {
         if (alive) setOffers(Number(v ?? 0) || 0);
       })
       .catch(() => {});
+    Promise.all([readPref(userId, PREF_SUGGESTIONS), readPref(userId, PREF_SUGGESTIONS_OFF)])
+      .then(([m, o]) => {
+        if (alive) setPolicy({ master: parseMaster(m), off: parseIdSet(o) });
+      })
+      // Defaults are on, which is what an unreadable preference has to mean —
+      // the alternative is a feature that silently disables itself.
+      .catch(() => {
+        if (alive) setPolicy({ master: true, off: new Set() });
+      });
+    readPref(userId, PREF_DISMISSED_SUGGESTIONS)
+      .then((v) => {
+        if (alive) setDismissed(parseDismissed(v));
+      })
+      .catch(() => {
+        // Empty rather than left null, which is the OPPOSITE of `refreshFunnel`
+        // beside it — and deliberately. A null dismissal set would hide every
+        // suggestion until a successful read; an empty one re-offers something
+        // the athlete said no to. Both are wrong, and the second is now
+        // recoverable in one tap from Settings while the first looks like the
+        // feature is broken.
+        if (alive) setDismissed(new Set());
+      });
     return () => {
       alive = false;
     };
@@ -516,7 +579,10 @@ export default function TodayScreen() {
       // every session ever logged and does not change because you looked at
       // Thursday.
       refreshFunnel();
-    }, [refreshSessions, refreshPlan, refreshFunnel]),
+      // Settings can have changed any of these while this screen sat mounted.
+      const stop = readSuggestionPrefs();
+      return stop;
+    }, [refreshSessions, refreshPlan, refreshFunnel, readSuggestionPrefs]),
   );
 
   // The same staleness arrives without a focus change when the app is
@@ -592,15 +658,56 @@ export default function TodayScreen() {
    * day. `funnel === null` means the read has not landed, which is neither of
    * the two states below.
    */
+  /**
+   * BJJ is the only discipline with a suggestion tier today, so the gate asks
+   * about BJJ. When a second tier lands this becomes per-suggestion rather
+   * than one call — the policy function already takes the sport for that
+   * reason rather than answering a global yes/no.
+   */
+  const suggestionsOn = policy !== null && suggestionsAllowed(policy.master, policy.off, 'bjj');
+
   const suggestion = useMemo(
-    () => (isToday && funnel ? funnelGap(funnel, now) : null),
-    [isToday, funnel, now],
+    () =>
+      isToday && suggestionsOn && funnel && dismissed
+        ? funnelGap(funnel, now, dismissed)
+        : null,
+    [isToday, suggestionsOn, funnel, now, dismissed],
+  );
+
+  /**
+   * Say no to one technique, permanently.
+   *
+   * The SUGGESTION is recomputed every read and the DISMISSAL is stored, which
+   * is the split `lib/adherence.ts` argues for: a stored suggestion goes stale
+   * against the evidence behind it, but a stored "no" is a fact about the
+   * athlete and does not. Deleting the sessions still withdraws the claim; it
+   * simply never gets made again for this technique.
+   *
+   * Optimistic. The next-best suggestion appears immediately rather than after
+   * a round trip to local storage, and a failed write costs one returning card
+   * rather than a screen that ignored a tap.
+   */
+  const dismiss = useCallback(
+    (techniqueId: string) => {
+      if (!userId || !dismissed) return;
+      const next = new Set(dismissed).add(techniqueId);
+      setDismissed(next);
+      writePref(
+        userId,
+        PREF_DISMISSED_SUGGESTIONS,
+        serialiseDismissed(dismissed, techniqueId),
+      ).catch(() => {});
+    },
+    [userId, dismissed],
   );
   const offerDetail = useMemo(() => {
-    if (!isToday || !funnel || suggestion || offers === null) return false;
+    // The Tier 0 offer is a suggestion too — switching suggestions off must
+    // silence the thing that asks for more evidence to make them, or "off"
+    // only means "off once it has something to say".
+    if (!isToday || !suggestionsOn || !funnel || suggestion || offers === null) return false;
     const bjj = sessions.filter((x) => logsAfterwards(x.sport, modules)).length;
     return shouldOfferDetail(bjj, funnel.length, offers);
-  }, [isToday, funnel, suggestion, sessions, modules, offers]);
+  }, [isToday, suggestionsOn, funnel, suggestion, sessions, modules, offers]);
 
   /**
    * Count the offer once, when it is actually on screen.
@@ -1007,6 +1114,17 @@ export default function TodayScreen() {
                 onPress={() => router.push(`/technique/${suggestion.techniqueId}`)}
                 accessibilityRole="button"
                 accessibilityLabel={`Suggestion: try ${suggestion.name} live. Drilled in ${suggestion.drilled} sessions and never logged live. Open the technique.`}
+                // The x below is a Pressable INSIDE this one, and UIKit does
+                // not descend into a view that is itself an accessibility
+                // element — so its label and hint are never announced, and
+                // neither VoiceOver nor Voice Control can invoke it. A rotor
+                // action on the card is the way out: it keeps the card one
+                // swipe for a screen-reader user and leaves the visible x for
+                // everyone else.
+                accessibilityActions={[{ name: 'dismiss', label: 'Dismiss this suggestion' }]}
+                onAccessibilityAction={(e) => {
+                  if (e.nativeEvent.actionName === 'dismiss') dismiss(suggestion.techniqueId);
+                }}
                 testID="today-suggestion"
               >
                 <View style={styles.planMain}>
@@ -1025,7 +1143,32 @@ export default function TodayScreen() {
                     Drilled in {suggestion.drilled} sessions, never logged live
                   </Text>
                 </View>
-                <Icon name="chevron" size={16} color={vola.textDim} />
+                {/*
+                  An explicit dismiss, not the long-press this app uses to
+                  remove a planned session. Long-press is right for a row the
+                  athlete deliberately created and is deleting; this is
+                  unsolicited, and the moment anyone wants it gone is the
+                  moment they should not have to discover how. It replaces the
+                  chevron rather than joining it: the chevron said "this
+                  opens", which the card already implies, and two glyphs on a
+                  small card would make the destructive one the quieter.
+                */}
+                <Pressable
+                  onPress={() => dismiss(suggestion.techniqueId)}
+                  // Asymmetric. A symmetric 12 swallowed the whole 12pt gap
+                  // between the meta line and the glyph, so a tap at the right
+                  // edge of the evidence text dismissed the card rather than
+                  // opening it — an invisible destructive target abutting a
+                  // harmless one.
+                  hitSlop={{ top: 12, bottom: 12, right: 12, left: 4 }}
+                  style={({ pressed }) => [styles.dismiss, pressed && styles.dismissPressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Dismiss the ${suggestion.name} suggestion`}
+                  accessibilityHint="Stops VOLA suggesting this technique"
+                  testID="today-suggestion-dismiss"
+                >
+                  <Icon name="close" size={15} color={vola.textMuted} />
+                </Pressable>
               </Pressable>
             )}
 
@@ -1394,6 +1537,13 @@ const styles = StyleSheet.create({
   // decoration, and a card that asks to be judged on its reasoning has to let
   // it be read.
   suggestionMeta: { color: vola.textMuted, fontSize: 12, lineHeight: 16 },
+  // 44pt of touch with `hitSlop`, so the one control on this card that cannot
+  // be undone is not the fiddliest thing on the screen. `textMuted` at 6.85:1
+  // rather than `textDim` at 3.67:1 — it is a control, not decoration.
+  dismiss: { padding: 6, marginRight: -6, borderRadius: 14 },
+  // Opacity, not the plan card's square fill — a hard 27pt square flashing
+  // inside a 14pt-radius card reads as a rendering fault.
+  dismissPressed: { opacity: 0.5 },
 
   // The planned day. A card rather than a filled button: it is a statement
   // about today that happens to be actionable, and the lime is spent on the

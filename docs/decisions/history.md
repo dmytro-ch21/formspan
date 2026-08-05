@@ -11091,6 +11091,175 @@ from `FUNNEL_OUTCOMES` now.
   it carried before. `defended` did not change that; a technique-tagged
   `conceded` row still has no capture path.
 
+## 2026-08-05 — A suggestion you can say no to
+
+Tier 1 shipped without one, and the design doc had already named the
+consequence: the card recomputes on every focus, so the same suggestion
+returns until the evidence changes. On a surface whose whole argument is that
+it must not nag, that was the wrong thing to leave for later.
+
+### The split: recompute the suggestion, store the "no"
+
+The same argument `lib/adherence.ts` makes about plans. A stored *suggestion*
+goes stale against the evidence behind it — delete the sessions and it would
+still be claiming something. A stored *dismissal* is a fact about the athlete
+and cannot go stale. So the suggestion is derived on every read as before, and
+`funnelGap` takes a set of technique ids to skip.
+
+### Dismissed means dismissed
+
+Not "until the evidence gets stronger". An athlete who has said no to the arm
+drag at six classes has not asked to be asked again at fourteen, and a
+suggestion that returns because you ignored it is precisely the shape this
+surface exists not to be.
+
+The cost is that it is permanent for that technique, which is a real trade
+rather than a free one: someone who dismisses early never hears about it again.
+Two things make it acceptable — the funnel page still shows every number, so
+nothing is hidden, only un-nagged; and dismissing is a deliberate tap on an
+explicit control rather than something you can do by accident.
+
+### An explicit ×, not the long-press this app uses elsewhere
+
+Long-press is the established idiom here for removing a *planned session* — a
+row the athlete deliberately created and is deleting, where a hint line can sit
+underneath and discovery is cheap. A suggestion is unsolicited, and the moment
+anyone wants it gone is the moment they should not have to work out how.
+
+It replaces the chevron rather than joining it. The chevron said "this opens",
+which the card already implies, and two glyphs on a small card would have made
+the destructive one the quieter of the two.
+
+### Storage
+
+One pref key holding a JSON array, not a key per technique: the rule needs the
+whole set to pick its *next-best* candidate, and a per-technique key could only
+answer "is this one dismissed". Device-local like the Tier 0 offer count, and
+for the same reason — `writePref` only pushes what is explicitly marked owed,
+and dismissing on a phone then seeing it once more on a tablet is a smaller
+cost than the sync surface.
+
+Capped at 100, dropping the oldest. Unbounded it is a string in a key/value row
+that only ever grows; and the ones dismissed longest ago are the ones whose
+evidence has most likely changed shape since.
+
+`parseDismissed` is total — anything unparseable, or parseable but not an array
+of strings, reads as an empty set. This is read on the app's home tab, and
+`lib/proficiency.ts` already carries the scar from trusting a shape at a parse
+boundary: the cost of a bad value here has to be a returning card, never a
+screen that will not render.
+
+### Verified
+
+Six mutations, five red: removing the filter, inverting it, capping from the
+wrong end, allowing duplicates, and dropping the string check in the parser.
+The sixth — replacing the array guard with a cast — is an **equivalent mutant**:
+`new Set(42)` throws and the existing `try/catch` already returns an empty set,
+so the early return is clarity rather than behaviour. Recorded as equivalent
+rather than papered over with a test that would only be asserting the catch.
+
+On the Simulator: dismissing "Arm drag" revealed "Scissor sweep" immediately,
+and the dismissal survived a full app restart.
+
+### Settings: a master switch, one per discipline, and the undo
+
+Three answers to "why am I not getting suggestions", on one screen, because
+they are only comprehensible together.
+
+**The master wins, and is not destructive.** Turning everything off has to be
+one action rather than N — an athlete who wants silence should not have to find
+every discipline. But it must not forget which ones they had turned off
+individually, so the two are stored apart and combined on read rather than the
+master rewriting the per-module set. Flipping it back restores exactly what they
+had.
+
+**Default on, expressed as an OFF list.** Absence means enabled, so a discipline
+added to the registry later is suggestible with no migration and this code never
+has to know the full set of modules. Same shape as `bjj_focus` recording what
+you chose rather than what you did not.
+
+**The per-discipline rows stay visible when the master is off**, greyed rather
+than hidden, with a line saying the choices are kept. Hiding them would lose the
+answer to "which ones did I turn off" — which is precisely what someone turning
+the master back on wants to know.
+
+**Undo lists dismissals by name**, resolved from the technique library after the
+rows render, falling back to the id. Best-effort: a name is what makes the row
+useful, but a failed lookup must not stop someone undoing a dismissal they can
+already recognise. Confirmed on the Simulator against a real dismissal whose id
+was not in the library — it rendered the id, exactly as designed.
+
+**The Tier 0 offer is gated by the same switch.** It is a suggestion too, and an
+"off" that still asked for more evidence to make suggestions would only mean
+"off once it has something to say".
+
+Failing OPEN throughout: an unreadable preference reads as enabled. A feature
+that silently disables itself on a bad read is worse than one that shows a card
+someone has to dismiss again.
+
+### What review caught: the undo silently did not work
+
+**Today never re-read the preferences.** The effect was keyed `[userId]`, and a
+tab screen stays mounted for the life of the process — a fact this same file
+documents two lines away. `/settings/suggestions` is a Stack route pushed over
+the tabs, so after visiting it and coming back: master off still showed the
+card, a silenced discipline still showed the card, and **"Suggest again" did
+nothing**. All three only took effect after killing the app.
+
+The write direction worked, which is exactly why testing it by hand missed it —
+Settings is pushed fresh every time and reads correctly. Worse, this entry and
+`functional-scenarios.md` both *asserted* the behaviour the code did not
+deliver. The reads moved into the existing focus effect.
+
+**The per-discipline switches contradicted their own promise.** They rendered
+`master && !off.has(key)`, so every row read OFF when the master was off — while
+the note beside them said "Your choices are kept" and the comment above said the
+rows stay visible precisely so the athlete does not lose the answer to "which
+ones did I turn off". Rendering them all false lost it as completely as hiding
+them would. `disabled` and the group opacity carry the master state; the value
+carries only the athlete's choice.
+
+**VoiceOver could not reach the ×.** It is a `Pressable` inside a `Pressable`,
+and UIKit does not descend into a view that is itself an accessibility element —
+so its label and hint were never announced and neither VoiceOver nor Voice
+Control could invoke it. The card now carries an `accessibilityActions` rotor
+action, which keeps it one swipe for a screen-reader user and leaves the visible
+× for everyone else.
+
+Also: the settings screen flashed "everything on" before the read landed, so an
+athlete who had switched suggestions off saw the master flip ON then snap OFF on
+every visit; and the ×'s symmetric 12pt `hitSlop` swallowed the whole gap
+between it and the evidence line, putting an invisible destructive target
+against a harmless one.
+
+**And a correction to the last entry's reasoning.** It called the
+`Array.isArray` guard an equivalent mutant because `new Set(42)` throws. The
+equivalence is real but the reason was wrong: it holds because `.filter` is
+absent from every non-array JSON value. `new Set("abc")` does *not* throw — it
+yields three fabricated ids. So `'"abc"'` is now in the corrupt-input table, and
+the guard stays.
+
+### Gaps
+
+- **Nothing lists the per-discipline switches on web.** Suggestions are a mobile
+  surface today, so there is nothing to configure there yet — but the settings
+  are device-local, which means they are also *client*-local, and the moment web
+  grows a suggestion the two will disagree.
+- **The Settings→Today round trip is fixed but NOT confirmed on a device.** The
+  read moved into the focus effect and the reasoning is sound, but the
+  Simulator pass ran out before the toggle could be flipped and the return
+  observed. Given this is the exact path whose failure review had to find,
+  it should be watched by eye before merge — and the missing test for it is
+  the first item below.
+- **No test covers the Settings→Today wiring**, which is where the blocking bug
+  lived and which a pure-logic test structurally cannot reach. `app/__tests__/`
+  already holds five screen tests, so the pattern exists.
+- **Device-local.** A second device will offer a dismissed technique once more.
+  Deliberate, but it becomes wrong if suggestions ever grow past a nudge.
+- **Dismissal is per technique, not per tier.** When the position hot-spot tier
+  lands there will be nothing that says "stop suggesting positions", and reusing
+  this set for it would silently conflate two different refusals.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

@@ -3144,6 +3144,35 @@ shows. On Plan it is the week; inside the month sheet it is the month.
 - With the API unreachable, there is **no card and no error banner**. A failed
   read must not be mistaken for "this athlete has logged no detail".
 
+### Dismissing a suggestion
+
+- The card carries an explicit **×**, not a long-press. Tapping it removes that
+  suggestion and the **next-best one appears in its place**, immediately.
+- The dismissal **survives an app restart**, and survives the evidence getting
+  stronger — drill the dismissed technique ten more times and it must not
+  return.
+- Tapping the card body still opens the technique; only the × dismisses.
+- With every candidate dismissed, no card shows — and no error.
+- A corrupt or absent stored value reads as no dismissals: the screen must
+  still render.
+
+### Settings → Suggestions
+
+- **Master off silences everything**, including the Tier 0 "add what happened in
+  rolling" offer — an off that still nags for evidence is not off.
+- **Master off does not erase the per-discipline choices.** Turn BJJ off, turn
+  the master off, turn the master back on: BJJ must still be off.
+- The per-discipline rows stay **visible and greyed** when the master is off,
+  never hidden.
+- A discipline the athlete has not configured is **on** — a new module in the
+  registry must be suggestible with no migration and no write.
+- **Dismissed techniques are listed by name**, or by id when the library cannot
+  resolve one. "Suggest again" removes it and the technique becomes eligible
+  once more.
+- An unreadable or corrupt preference reads as **enabled**, never as off. A
+  feature must not silently disable itself.
+- The screen says the settings are device-local.
+
 ### The cold start (Tier 0)
 
 - After the **2nd** BJJ session logged with no technique-level detail, Today
