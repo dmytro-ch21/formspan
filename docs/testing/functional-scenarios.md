@@ -4489,7 +4489,55 @@ have been failing at.
   question a client has, and shipping the owner id is what produces client-side
   authorization one refactor later.
 
-### When a client finally exists
+### The web client (`/dashboard/curricula`)
+
+Four routes: the list, the detail, and a two-pane builder shared by `new` and
+`edit`. All of the API scenarios above still apply — these are the ones that can
+only fail in the browser.
+
+- **The denominator is `countable_items`, not the number of rows.** Build a
+  ten-item curriculum where three carry criteria, master one, and the card must
+  read 1 of 3 — never 1 of 10. This is the single most likely place for the two
+  clients to disagree, which is why the API sends the count at all.
+- **A criteria-free curriculum shows no progress bar**, and says it is a reading
+  list. A 0% bar is the wrong answer: it reports failure at something that was
+  never asked.
+- **Mine vs Shared splits on `editable`, not `enrolled`.** A seeded belt
+  syllabus you are working belongs under Shared — putting it under Mine promises
+  an Edit button that 403s.
+- **The Edit button appears only when `editable`.** Never decided by comparing
+  user ids in the browser; the server resolves it.
+- **Un-enrolled detail shows criteria and no progress.** Browsing a syllabus
+  shows what it asks of you; working one shows how far along you are. Zero-filled
+  progress for a non-participant is wrong, not merely ugly.
+- **The hit rate renders `—` and not `0%` when there are no attempts.** The API
+  sends null precisely so the client cannot report a failure the athlete has not
+  had; coercing it back to a number undoes that.
+- **The progress block states the window and the reversibility.** Both are
+  surprising and correct, and a screen that omits them will have the window
+  filed as a bug — an athlete who has drilled something for years sees zero on
+  the day they enrol.
+- **Editing loads before the builder mounts.** The builder seeds its state in
+  `useState` initialisers, which run once, so mounting it against an
+  unresolved curriculum leaves every field empty — and saving then wipes the
+  curriculum. Worth an explicit test: open Edit on a slow connection and save.
+- **Adding a technique adds it as reading**, with no criteria, and the criteria
+  button is per row. Defaulting every addition to a roadmap step puts four
+  numbers in front of someone who wanted a list.
+- **Clearing the offensive target leaves a defence-only criterion**, which is
+  legal and is the case that justified recording `defended` at all. Clearing
+  both makes the row reading again.
+- **An empty belt select sends `null` and clears the belt**, distinct from
+  leaving the field alone. This is the only path that exercises the API's
+  explicit-null handling.
+- **Reordering and removing survive a save**, and order is the content of a
+  syllabus rather than decoration.
+- **Deleting a curriculum other athletes are working shows the API's own 409
+  message** rather than a generic failure — the reason ("their enrollment is
+  their record") is the useful part.
+
+
+### Copy properties the schema dictates
 
 Two copy properties belong to whichever screen lands first, and both come from
 the schema rather than from taste:

@@ -61,6 +61,16 @@ const navItems: {
     needs: (m) => m.some((x) => x.enabled && x.capabilities.catalog !== ""),
   },
   {
+    href: "/dashboard/curricula",
+    label: "Curricula",
+    // Same capability predicate as the funnel below, and the same accepted
+    // over-inclusion: a curriculum is an ordered set of TECHNIQUES, so it needs
+    // a discipline whose catalog is techniques. Gating on `key === "bjj"` is
+    // the check this codebase avoids everywhere else.
+    needs: (m) =>
+      m.some((x) => x.enabled && x.capabilities.catalog === "techniques"),
+  },
+  {
     href: "/dashboard/proficiency",
     label: "Technique funnel",
     // A capability, not a sport name — same reasoning as Records above. The

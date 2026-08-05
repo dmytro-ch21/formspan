@@ -1708,3 +1708,192 @@ export async function deletePlan(getToken: Token, id: string): Promise<void> {
     method: "DELETE",
   });
 }
+
+/* ---------------------------------------------------------------------------
+ * Curricula and roadmaps
+ *
+ * A curriculum is an ordered set of techniques to learn; one whose items carry
+ * completion criteria is a ROADMAP. The distinction is per ITEM — `criteria`
+ * nullable — so the same curriculum can be part reading list and part roadmap.
+ * ------------------------------------------------------------------------ */
+
+/** What mastering one technique takes. Every threshold is measured SINCE the
+ *  athlete enrolled, never over all time. */
+export type CurriculumCriteria = {
+  /** Times landed live. Null on a defence-only criterion. */
+  target_scored: number | null;
+  /** Times you stopped theirs. About a third of `target_scored` — you do not
+   *  choose when a technique is attempted on you. */
+  target_defended: number | null;
+  /** Distinct LIVE sessions the evidence must span. Drilling never counts. */
+  target_sessions: number | null;
+  /** scored / (attempted + scored). The reason the word "mastered" is
+   *  defensible: volume alone is satisfied by 25-from-30 and 25-from-400
+   *  alike, and only the first is skill. */
+  min_hit_rate: number | null;
+};
+
+export type CurriculumProgress = {
+  scored: number;
+  defended: number;
+  sessions: number;
+  /** scored + attempted — how often they went for it. */
+  attempts: number;
+  /** Null when `attempts` is 0. Zero from zero is not a rate, and rendering it
+   *  as 0% reports a failure the athlete has not had. */
+  hit_rate: number | null;
+  mastered: boolean;
+};
+
+export type CurriculumItem = {
+  technique_id: string;
+  name: string;
+  position: string;
+  category: string;
+  order: number;
+  notes: string;
+  /** Null means this item is reading rather than a roadmap step. */
+  criteria: CurriculumCriteria | null;
+  /** Null when the caller is not enrolled, or the item has no criteria. */
+  progress: CurriculumProgress | null;
+};
+
+export type Curriculum = {
+  id: string;
+  /** Resolved server-side. Never compare user ids in the client to decide
+   *  this — that is how client-side authorization happens. */
+  editable: boolean;
+  name: string;
+  description: string;
+  /** A hint for ordering, never a gate. Working white-belt fundamentals at
+   *  purple is not a mistake. */
+  belt: string | null;
+  visibility: Visibility;
+  enrolled: boolean;
+  /** "YYYY-MM-DD". Null unless enrolled, and the anchor every criterion is
+   *  measured from. */
+  started_on: string | null;
+  /** How many items carry criteria. THE PROGRESS RULE, shipped by the API so
+   *  no client invents its own: progress counts only these. Dividing
+   *  `mastered_items` by `items.length` is the silent wrong answer. */
+  countable_items: number;
+  /** "Currently" is load-bearing — mastery is derived, so this can go down. */
+  mastered_items: number;
+  created_at: string;
+  updated_at: string;
+  /** Present on a single read, absent from the list. */
+  items?: CurriculumItem[];
+};
+
+/** One item as the client sends it. Flattened to match the column names, and
+ *  the library fields are absent because they are the catalog's. */
+export type CurriculumItemWrite = {
+  technique_id: string;
+  notes?: string;
+  target_scored?: number | null;
+  target_defended?: number | null;
+  target_sessions?: number | null;
+  min_hit_rate?: number | null;
+};
+
+export type CurriculumWrite = {
+  name?: string;
+  description?: string;
+  belt?: string | null;
+  visibility?: Visibility;
+  /** Omit to leave the list alone; `[]` empties it; a list replaces it. Three
+   *  distinct states — collapsing the first two makes every metadata edit
+   *  delete every item. */
+  items?: CurriculumItemWrite[];
+};
+
+/** The shipped defaults, mirrored from the Go module so a builder can offer
+ *  them without a round trip. Changing one here does NOT change the rule —
+ *  the server decides — but they must not drift. */
+export const CRITERIA_DEFAULTS = {
+  target_scored: 25,
+  target_defended: 8,
+  target_sessions: 12,
+  min_hit_rate: 0.35,
+} as const;
+
+export function listCurricula(
+  getToken: Token,
+  signal?: AbortSignal,
+): Promise<Curriculum[]> {
+  return request<{ curricula: Curriculum[] }>(
+    getToken,
+    "/curricula",
+    {},
+    signal,
+  ).then((b) => b.curricula ?? []);
+}
+
+export function getCurriculum(
+  getToken: Token,
+  id: string,
+  signal?: AbortSignal,
+): Promise<Curriculum> {
+  return request<Curriculum>(
+    getToken,
+    `/curricula/${encodeURIComponent(id)}`,
+    {},
+    signal,
+  );
+}
+
+export function createCurriculum(
+  getToken: Token,
+  input: CurriculumWrite,
+): Promise<Curriculum> {
+  return request<Curriculum>(getToken, "/curricula", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateCurriculum(
+  getToken: Token,
+  id: string,
+  input: CurriculumWrite,
+): Promise<Curriculum> {
+  return request<Curriculum>(getToken, `/curricula/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function deleteCurriculum(
+  getToken: Token,
+  id: string,
+): Promise<void> {
+  await request<void>(getToken, `/curricula/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
+/** Idempotent, and it un-archives. `started_on` is NOT reset — it is when you
+ *  first took it on, and every criterion is measured from it. */
+export async function enrollInCurriculum(
+  getToken: Token,
+  id: string,
+): Promise<void> {
+  await request<void>(
+    getToken,
+    `/curricula/${encodeURIComponent(id)}/enrollment`,
+    { method: "PUT" },
+  );
+}
+
+/** Archives rather than deletes: having worked a syllabus and stopped is a
+ *  fact about the athlete. It does NOT mean completed. */
+export async function archiveCurriculumEnrollment(
+  getToken: Token,
+  id: string,
+): Promise<void> {
+  await request<void>(
+    getToken,
+    `/curricula/${encodeURIComponent(id)}/enrollment`,
+    { method: "DELETE" },
+  );
+}

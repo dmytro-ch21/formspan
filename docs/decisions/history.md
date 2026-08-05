@@ -11491,6 +11491,76 @@ three comments was being undermined by one word of UI.
 - **The evidence is self-reported throughout.** `bjj_session_tags.count` is
   client-supplied, so these criteria make fabrication tedious, not impossible.
 
+## 2026-08-05 — The curriculum client, on web because building is a desk job
+
+Four routes under `/dashboard/curricula`: the list with a My / Shared strip, a
+detail screen with per-criterion progress, and a two-pane builder shared by
+`new` and `edit`. Plus the `lib/api.ts` types and calls, and a nav entry.
+
+**Web, and the design doc had already decided it** — "roadmap *building* and the
+full funnel on web", in on Plan and out on Today. Picking a dozen techniques out
+of 466 and deciding what mastering each one takes is not something anyone does
+between rounds, and the platform rule says to settle this before building rather
+than after.
+
+### What the screens have to teach, because nothing else will
+
+Three properties of the model are surprising enough that showing them badly
+would be worse than not showing them at all.
+
+**Progress counts only items that carry criteria.** The API ships
+`countable_items` and `mastered_items` for exactly this reason, and the client
+uses them as the denominator rather than `items.length`. A ten-item curriculum
+with three roadmap steps is three items' worth of progress, not three tenths. A
+curriculum with no criteria at all renders "a reading list — no completion
+criteria" rather than a zeroed bar, because 0% reads as failure at something
+that was never asked.
+
+**Everything counts only from the day you enrol.** Somebody who has drilled the
+arm drag for two years starts at zero. The detail screen says so in the progress
+block — otherwise it is indistinguishable from a bug, and the first person to
+see it will file it as one.
+
+**Mastery can be lost**, because it is derived rather than stored. The copy says
+"your record decides these, so a long run of misses can take one back", and
+never "you have earned".
+
+### Builder decisions
+
+Criteria are **opt-in per row**, added by a button rather than a form you must
+fill: an item without them is reading, which the schema treats as first-class,
+and defaulting every addition to a roadmap step would put four numbers in front
+of someone who wanted a list. Removing them is offered in the same words —
+"just something to study".
+
+The row explains why the defence figure is lower than the offence one (you do
+not choose when a technique is attempted on you) and why the hit rate is there
+at all (it separates landing it 25 times from throwing it 400). Without that,
+`8` next to `25` reads as a typo.
+
+An empty belt select means *not belt-specific* and sends `null`, which the API
+treats as CLEAR — that is what the `json.RawMessage` handling on the server was
+for, and this is its first caller.
+
+### Gaps
+
+- **NOT SEEN RENDERING.** The dashboard is Clerk-gated and I will not enter
+  credentials, so these screens are verified by `build:web`, `typecheck` and
+  `lint` only. That is exactly the class this project has been bitten by twice
+  — the `useMemo`-below-an-early-return crash and the Settings→Today read —
+  both of which compiled cleanly. **Someone signed in should click through
+  before this is trusted.**
+- **No tests.** `apps/web` has no test infrastructure at all, unlike
+  `apps/mobile`. Nothing here is covered by anything.
+- **Nothing seeds a belt syllabus**, so Shared is empty for everyone and its
+  empty state says so rather than implying the athlete missed something.
+- **`bjj_focus` is not wired.** The design doc's bridge — a roadmap's current
+  techniques becoming focus rows, which then appear as one-tap chips in the
+  reflection wizard — is the thing that closes the loop, and it is not built.
+  Until it is, an athlete has to set focus by hand to feed the criteria their
+  own roadmap is measuring.
+- **Nothing on Today or mobile.** The doc's "out on Today" half does not exist.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
