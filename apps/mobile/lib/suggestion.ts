@@ -57,6 +57,12 @@ export type Suggestion = {
  * athlete judges it rather than taking a verdict. Waiting for nine costs three
  * more weeks of the loop not being demonstrated to a new user, and the cost of
  * being early here is a suggestion someone shrugs at.
+ *
+ * **Raised as the most likely thing to be wrong here, and upheld.** It is a
+ * product call rather than a statistical one — the statistics say nine — so
+ * changing it is a decision about how eager the app should be, not a bug fix.
+ * Anyone tempted to "correct" it to nine is re-opening a settled question and
+ * should have a reason beyond the arithmetic.
  */
 const MIN_DRILLED = 6;
 
