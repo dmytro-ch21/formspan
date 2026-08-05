@@ -187,23 +187,140 @@ closed guard, my sweep is X, and if they posture up I go to Y.
 
 ---
 
-## Where these live
+---
+
+## Roadmaps: mastery criteria, and the two things that decide whether this works
+
+A roadmap is a curriculum with **completion criteria per technique**, worked over
+months. The athlete picks "White belt basics", trains deliberately, logs, and
+techniques tick over to mastered as the evidence arrives. User-built roadmaps get
+the same machinery — which is the right call, because it means one engine and no
+second-class citizens.
+
+Two findings decide whether the shape works. The first is cheap to fix and the
+second is a design constraint that has to be respected rather than solved.
+
+### Finding 1: there is no way to record a defensive success today
+
+The requirement — *"need to not get caught in guard pull N times"* — needs an
+event the vocabulary does not have. `bjj_session_tags.event` is:
+
+    drilled | attempted | scored | conceded
+
+`scored` is "I landed it". `conceded` is "it was done to me". **Neither is "I
+stopped them doing it."** The offensive half of every criterion is already
+recordable; the defensive half is not.
+
+Two ways out, and only one is good:
+
+- **Infer it from absence** — "you weren't caught in it across 10 sessions".
+  Weak: you may simply never have faced it, and the claim gets stronger the less
+  you roll, which is backwards. Rejected.
+- **Add `defended` to the vocabulary.** The column is `TEXT NOT NULL` with **no
+  CHECK constraint**, and the migration is explicit that this is deliberate so
+  the vocabulary can grow by "an enum edit rather than a migration". Adding a
+  fifth event is a Go validation change plus a column in the wizard's live grid.
+
+**Take the second.** It is what the schema was shaped for, and a defensive
+criterion built on absence would be the fabricated-zero mistake in a new costume.
+
+Note this makes the live grid 5 × 3 rather than 5 × 2 (*you / them / stopped
+them*). That is a real cost on the fastest screen in the app and should be
+weighed — possibly the third column only appears for techniques on an active
+roadmap, where the criterion actually needs it.
+
+### Finding 2: the defensive criterion is what stalls the roadmap
+
+You choose when to attempt a guard pull. You do **not** choose when someone
+attempts one on you. So defensive events arrive several times more slowly, and a
+symmetric criterion makes defence the gate on everything.
+
+Modelled at 3 sessions/week with 4 techniques in focus (`bjj_focus`'s own stated
+scope is "three-to-five things you are developing"):
+
+| criterion | offence clears in | defence clears in | defence is |
+| --- | --- | --- | --- |
+| 10 off / 10 def | 12 focus-sessions | 40 | **3.2× the wait** |
+| 10 off / 5 def | 12 | 20 | 1.6× |
+| **10 off / 3 def** | **12** | **12** | **1.0× — balanced** |
+
+**Defensive targets should be roughly a third of offensive ones.** Not because
+defence matters less, but because the rate of opportunity differs by about that
+much. A criterion that reads "land it 10 times, defend it 3 times" completes both
+halves at the same time; "10 and 10" is a roadmap that is 76% offence-complete
+and stuck.
+
+### How long a course actually takes
+
+Same model, whole-course:
+
+| course size | eager | typical | realistic beginner |
+| --- | --- | --- | --- |
+| 20 techniques | ~14 weeks | ~33 weeks | ~1.1 years |
+| 30 techniques | ~21 weeks | ~1.0 year | ~1.6 years |
+| 40 techniques | ~28 weeks | ~1.3 years | ~2.1 years |
+
+**A belt course is a year, not a month.** That is correct — it should be, a belt
+takes years — but it dictates the UX absolutely:
+
+- **Completion cannot be the reward.** Nobody sustains a year of effort for a
+  terminal badge. The unit of progress the athlete feels has to be the
+  *technique*, ticking over every week or two, with the course as the backdrop.
+- **A progress bar at 4% for the first month is discouraging.** Show techniques
+  mastered as a count and the current few as a foreground, not a percentage of a
+  distant whole.
+- **Keep the course size honest.** 20 techniques is a year for a real beginner.
+  A 40-technique "white belt course" is a two-year commitment mislabelled.
+
+### The criteria are volume, not skill, and the copy must not overclaim
+
+"Landed it 10 times" proves you can do it repeatedly. It does **not** prove a
+success *rate*, because it says nothing about attempts — 10 from 12 and 10 from
+90 both satisfy it. That is a fine definition of competence for a fundamentals
+course, and it is cheap to log and trivial to explain, which matters more here
+than statistical purity.
+
+But the word for it is **"complete"**, not **"mastered"**. The evidence supports
+"you have done this ten times"; it does not support a claim about how good you
+are. The rate claim needs the attempt denominator, which is exactly the ~55
+exchanges the Tier 2 analysis priced — far beyond a per-technique criterion.
+
+---
+
+## How it connects to the existing screens
+
+The brief asks for this to be seamless. Most of the connective tissue already
+exists, which is the strongest argument for this shape:
+
+| screen | what it does | what it reuses |
+| --- | --- | --- |
+| **Plan** | pick or build a roadmap; see technique progress | the My / Shared tab strip built for workouts |
+| **Today** | one suggestion, sourced from the active roadmap | the Upcoming block |
+| **Reflect wizard** | roadmap techniques prefill as focus chips | `bjj_focus` accelerator rows already render there |
+| **Library** | a technique shows its criteria and your counts | `/v1/bjj/proficiency` already aggregates the funnel per technique |
+| **You** | techniques complete, current focus | the existing stats surface |
+
+**`bjj_focus` is the bridge, and it already works.** A roadmap's current
+techniques become focus rows; focus rows already appear in the reflection wizard
+as one-tap chips; those chips write technique-tagged events; those events feed
+the criteria. The loop closes through machinery that shipped months ago — the
+roadmap chooses *what* goes into focus instead of the athlete choosing by hand.
+
+`/v1/bjj/proficiency` is already routed and already aggregates
+drilled/attempted/scored/conceded per technique with a session count. **Criteria
+are a read over that endpoint's output**, not a new aggregation. It only needs
+`defended` added to its CASE arms.
 
 Per the platform rule — mobile owns live logging, web owns authoring and
-analysis — this splits cleanly, and the brief's instinct ("in on planning, out
-on today") is right:
+analysis — the split is the brief's own instinct: **in on Plan, out on Today**,
+with roadmap *building* and the full funnel on web, and admin authoring the
+belt-level sets under `/content`'s existing rules.
 
-| surface | what | where |
-| --- | --- | --- |
-| **Plan (mobile)** | pick or build a curriculum, see the current suggestion, put a focus on the week | the way *in* |
-| **Today (mobile)** | the active suggestion, at most one, alongside Upcoming | the way *out* |
-| **Web** | curriculum authoring, the gameplan graph editor, the full funnel and heatmap | desk work |
-| **Admin** | authoring the belt-level fundamentals, same rules as `/content` | already has the pattern |
-
-`bjj_focus` is already the "what I'm working on now" primitive and should be
-what a suggestion writes to when accepted — not a new table. It has
-`started_on` specifically so "you've been on this five weeks, consider
-rotating" is answerable.
+The one genuinely new piece of state is *which roadmap am I on and when did each
+technique complete* — small, and completion should be **stored** rather than
+recomputed, unlike suggestions. A technique you completed in March stays
+completed when you stop training it in June; that is the opposite of adherence,
+where recomputation is what keeps it honest.
 
 ---
 
@@ -266,6 +383,15 @@ gets suggestions, which is most athletes at the start.
 3. **What happens when the evidence gate is met but nothing stands out?** This
    needs an answer that is not silence and not a fabricated finding — probably
    "nothing stands out yet, which is its own kind of good news", stated once.
+4. **Does the live grid grow a third column, or does `defended` appear only for
+   roadmap techniques?** The grid is the fastest screen in the app and 5 × 2 is
+   part of why. Growing it to 5 × 3 for everyone taxes every session to serve
+   the athletes on a roadmap; showing it conditionally is more code and a
+   surface that changes shape. I lean conditional, but it is a real trade.
+5. **Can an athlete mark a technique complete by hand?** A coach saying "you've
+   got that" is better evidence than ten tags, and a roadmap that cannot accept
+   it will be worked around or abandoned. I lean yes, recorded as a distinct
+   source so the two are never confused.
 
 ## Known gaps in this design
 
@@ -282,6 +408,11 @@ gets suggestions, which is most athletes at the start.
   guard early on. Without a population baseline, "you concede most in X" may
   just be describing white belts. Tier 2 may need a belt-adjusted expectation
   before it says anything useful — and there is no population data yet.
+- **The offence:defence 1:3 ratio is modelled, not measured.** It rests on an
+  assumed opportunity rate for defending a given technique, which nobody has
+  data on. It is far better than a symmetric default, and it should be revisited
+  the moment there are real logs — the criteria are content, so correcting them
+  later is a seed edit rather than a migration.
 - **Nothing here has been validated against real logged data**, because there
   isn't any at volume yet. Every number above is derived from the schema's
   shape, not from behaviour.
