@@ -1,7 +1,7 @@
 import { useAuth } from '@clerk/clerk-expo';
 import { request as requestSync, syncNow, useSyncState } from '@/lib/sync';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   AppState,
@@ -304,9 +304,15 @@ export default function TodayScreen() {
    * what is on it should not rewrite what you did this week.
    */
   const [viewDay, setViewDay] = useState(() => new Date());
-  /** Plans for `viewDay` alone, resolved to template names. */
+  /**
+   * Plans for `viewDay` alone, resolved to template names.
+   *
+   * Carries `day` even though every row has the same one: `matchPlans` groups
+   * by day internally, and without it a plan on a day outside the current week
+   * has nothing to be matched against — see `owed` below.
+   */
   const [viewPlans, setViewPlans] = useState<
-    { id: string; sport: string; workoutId: string | null; workoutName: string | null }[]
+    (PlannedSession & { workoutName: string | null })[]
   >([]);
 
   const refreshSessions = useCallback(async () => {
@@ -340,8 +346,22 @@ export default function TodayScreen() {
    * Today's plan, re-read on focus so planning a day and coming straight back
    * shows it — the exact flow the Plan tab's calendar is for.
    */
+  /**
+   * Bumped on every plan read, and captured by each one. A read that resolves
+   * after the day moved is dropped rather than rendered.
+   *
+   * Reachable by tapping the switcher's arrow twice quickly: three reads go out
+   * per step, and the second step's can land before the first's, leaving
+   * Thursday's plans under a heading reading Friday. The Plan tab hit the same
+   * thing with its week arrows and solved it the same way — see `readSeq`
+   * there. This screen did not have the problem until the switcher gave it one.
+   */
+  const planSeq = useRef(0);
+
   const refreshPlan = useCallback(async () => {
     if (!userId) return;
+    planSeq.current += 1;
+    const seq = planSeq.current;
     const days = weekDays(new Date());
     const viewKey = dayString(viewDay);
     try {
@@ -355,11 +375,10 @@ export default function TodayScreen() {
         listPlannedBetween(userId, viewKey, viewKey),
         cachedWorkouts(userId),
       ]);
+      if (seq !== planSeq.current) return;
       setWeekPlan(week);
       const named = (p: PlannedSession) => ({
-        id: p.id,
-        sport: p.sport,
-        workoutId: p.workoutId,
+        ...p,
         // Null when the plan names a template the cache no longer has. The
         // card then renders the discipline alone, which is still true.
         workoutName: cached.find((w) => w.id === p.workoutId)?.name ?? null,
@@ -464,9 +483,20 @@ export default function TodayScreen() {
    * "BJJ · Start" for a class that had just been logged — the exact duplicate
    * this branch is about, in its second and louder form.
    */
+  /**
+   * The viewed day's plans that nothing has met yet.
+   *
+   * Matched against `weekPlan` AND the viewed day's own rows, de-duplicated.
+   * `weekPlan` alone covers only the current week, so stepping two weeks back
+   * to a day that WAS trained left its plan looking unmet — and `isPast`
+   * renders an unmet past plan as "Not logged", so the screen would have
+   * asserted something false about a day the athlete had trained.
+   */
   const owed = useMemo(() => {
     if (viewPlans.length === 0) return viewPlans;
-    const { met } = matchPlans(sessions, weekPlan);
+    const seen = new Set(weekPlan.map((p) => p.id));
+    const all = [...weekPlan, ...viewPlans.filter((p) => !seen.has(p.id))];
+    const { met } = matchPlans(sessions, all);
     return viewPlans.filter((p) => !met.has(p.id));
   }, [viewPlans, weekPlan, sessions]);
 
