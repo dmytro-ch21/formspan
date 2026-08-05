@@ -32,6 +32,11 @@ type Proficiency struct {
 	// (no client can author a technique-tagged conceded row) but the API
 	// accepts one, so it is reported rather than silently dropped.
 	Conceded int `json:"conceded"`
+	// Defended is them going for it and the athlete stopping them — the
+	// mirror of Attempted, and the half a roadmap's defensive criterion is
+	// counted from. Reported alongside Conceded so the pair reads as one
+	// exchange seen from both ends rather than as two unrelated tallies.
+	Defended int `json:"defended"`
 
 	// Sessions is how many separate sessions contributed, which is the
 	// honesty check on every number above: twelve reps in one class is not

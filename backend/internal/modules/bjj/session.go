@@ -100,6 +100,24 @@ func (c Category) Valid() bool {
 // most actionable numbers in the sport. Conceded is the symmetric half and the
 // more valuable one — "where do I keep getting stuck" is the question a schema
 // that recorded only successes could never answer.
+//
+// # The live four are a 2x2, and `defended` is the cell that was missing
+//
+// Every live event answers two questions: who started it, and did it land.
+//
+//	                it landed     it did not
+//	I initiated      scored        attempted
+//	they initiated   conceded      defended
+//
+// Three of those shipped. `defended` — they went for it and you stopped them —
+// did not, which meant the schema could record every way an exchange goes
+// EXCEPT succeeding defensively. That is not a small gap: it made defensive
+// skill the one thing the app could only infer from absence, and an absence
+// gets more convincing the LESS you roll, which is backwards.
+//
+// Adding it needed no migration. `bjj_session_tags.event` is TEXT with no
+// CHECK precisely so this vocabulary could grow in Go — see 000025, which took
+// the same stance for `kind` and said so.
 type Event string
 
 const (
@@ -111,9 +129,12 @@ const (
 	EventScored Event = "scored"
 	// EventConceded is having it done to you.
 	EventConceded Event = "conceded"
+	// EventDefended is them going for it and you stopping them — the mirror
+	// of EventAttempted, and the completion of the 2x2 above.
+	EventDefended Event = "defended"
 )
 
-var events = []Event{EventDrilled, EventAttempted, EventScored, EventConceded}
+var events = []Event{EventDrilled, EventAttempted, EventScored, EventConceded, EventDefended}
 
 func Events() []Event {
 	out := make([]Event, len(events))

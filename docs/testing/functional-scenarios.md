@@ -3161,6 +3161,27 @@ shows. On Plan it is the week; inside the month sheet it is the month.
 - **Never more bars than there is data for.** With six weeks of sessions
   loaded, the strip shows six bars, not eight with two empty ones.
 
+### Recording a defensive success (`defended`)
+
+The four live events are a 2x2 of who started the exchange and whether it
+landed; `defended` is "they went for it, you stopped them" — the mirror of
+`attempted`.
+
+- The **per-technique focus chips** offer three counters: Tried, Landed,
+  **Stopped**. The category grid stays **five rows of two** — Stopped must NOT
+  appear there.
+- Landed and Stopped both read as wins; Tried reads neutral.
+- A Stopped count belongs to its own technique and its own event: bumping it
+  must not move that technique's Landed or Tried, and must not touch another
+  technique.
+- Long-press to decrement stops at zero rather than going negative.
+- `GET /v1/bjj/proficiency` returns a `defended` count per technique alongside
+  drilled/attempted/scored/conceded.
+- Posting a tag with `event: "defended"` is accepted; an unknown event is
+  rejected with a 400 whose message **names every accepted value**, including
+  `defended`. That message is generated from the vocabulary, so a new event can
+  never be accepted while the message still denies it.
+
 ### A plan that has been met stops being drawn twice
 
 The rule is `apps/mobile/lib/adherence.ts`: a plan is met by a logged session on

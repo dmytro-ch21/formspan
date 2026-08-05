@@ -1,6 +1,7 @@
 package bjj
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -169,6 +170,72 @@ func TestTagCountIsBoundedAtBothEnds(t *testing.T) {
 		}
 		if !tc.ok && err == nil {
 			t.Errorf("count %d accepted", tc.count)
+		}
+	}
+}
+
+// The live vocabulary is a 2x2 of who initiated an exchange and whether it
+// landed. `defended` was the missing cell for a long time, which meant a
+// defensive success was the one outcome nothing could record — and the gap was
+// invisible because every OTHER combination worked.
+//
+// Asserting the shape rather than the list: a test that just spelled the five
+// values out would go green if someone deleted `defended` and updated it.
+func TestLiveEventsCoverBothInitiatorsAndBothOutcomes(t *testing.T) {
+	live := map[string]struct{ theirs, landed bool }{
+		"scored":    {theirs: false, landed: true},
+		"attempted": {theirs: false, landed: false},
+		"conceded":  {theirs: true, landed: true},
+		"defended":  {theirs: true, landed: false},
+	}
+
+	seen := map[[2]bool]string{}
+	for _, e := range Events() {
+		cell, ok := live[string(e)]
+		if !ok {
+			continue // `drilled` is practice, not an exchange.
+		}
+		key := [2]bool{cell.theirs, cell.landed}
+		if prev, dup := seen[key]; dup {
+			t.Fatalf("%q and %q describe the same cell of the 2x2", prev, e)
+		}
+		seen[key] = string(e)
+	}
+
+	if len(seen) != 4 {
+		t.Fatalf("the 2x2 has %d of 4 cells filled: %v — a missing cell is an "+
+			"outcome the schema cannot record at all", len(seen), seen)
+	}
+}
+
+func TestDefendedIsAcceptedAsAnEvent(t *testing.T) {
+	if !Event("defended").Valid() {
+		t.Fatal("defended must be a valid event; a roadmap's defensive criterion counts it")
+	}
+	if Event("stopped").Valid() {
+		t.Fatal("Valid() accepts anything, so it is not validating")
+	}
+}
+
+// The 400 message spells the vocabularies out for a client whose picker has
+// drifted. It used to spell them out LITERALLY, and went stale the moment one
+// grew — telling a rejected client there were four events when there were
+// five. A message about drift that can itself drift is worse than none.
+func TestInvalidInputMessageNamesEveryEventItAccepts(t *testing.T) {
+	msg := invalidInputMessage()
+	for _, e := range Events() {
+		if !strings.Contains(msg, string(e)) {
+			t.Errorf("the invalid-input message does not mention %q", e)
+		}
+	}
+	for _, k := range Kinds() {
+		if !strings.Contains(msg, string(k)) {
+			t.Errorf("the invalid-input message does not mention kind %q", k)
+		}
+	}
+	for _, c := range Categories() {
+		if !strings.Contains(msg, string(c)) {
+			t.Errorf("the invalid-input message does not mention category %q", c)
 		}
 	}
 }

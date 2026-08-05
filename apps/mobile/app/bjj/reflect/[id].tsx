@@ -583,9 +583,12 @@ function LiveStep({
                   value={techniqueOutcomeCount(detail.tags, f.technique_id, o.event)}
                   label={o.label}
                   context={f.name}
-                  // Tried is neither a win nor something done to you — it is
+                  // Landed and Stopped are both wins — one offensive, one
+                  // defensive — and colouring only the first would say the
+                  // quiet part out loud about which half the app values.
+                  // Tried is neither a win nor something done to you; it is
                   // the attempt, which is the behaviour being encouraged.
-                  tone={o.event === 'scored' ? 'scored' : 'neutral'}
+                  tone={o.event === 'attempted' ? 'neutral' : 'scored'}
                   onAdd={() =>
                     onChange({ ...detail, tags: bumpTechniqueOutcome(detail.tags, f, o.event, 1) })
                   }

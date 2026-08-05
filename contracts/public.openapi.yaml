@@ -136,12 +136,18 @@ components:
             hit a sweep or be swept; "transition" has no other side.
         event:
           type: string
-          enum: [drilled, attempted, scored, conceded]
+          enum: [drilled, attempted, scored, conceded, defended]
           description: >
             The outcome direction. `drilled → attempted → scored` is the
             technique funnel, whose drop-offs are the actionable numbers;
             `conceded` is the symmetric half and answers "where do I keep
             getting stuck", which a success-only schema never could.
+
+            The four live events are a 2x2 of who initiated and whether it
+            landed: `scored` / `attempted` for the athlete's own attacks,
+            `conceded` / `defended` for the opponent's. `defended` completes
+            it — before it existed, defensive success was the one outcome the
+            schema could not record, and could only be inferred from absence.
         position:
           type: string
           description: >
@@ -1862,7 +1868,7 @@ components:
         design rules out self-assessment, so this is the facts (drilled twelve
         times, went for it three times, landed twice) and a reader forms the
         judgement.
-      required: [technique_id, name, position, category, drilled, attempted, scored, conceded, sessions, last_seen]
+      required: [technique_id, name, position, category, drilled, attempted, scored, conceded, defended, sessions, last_seen]
       properties:
         technique_id: { type: string, example: americana-mount }
         name: { type: string, description: "From the shared library; falls back to the id.", example: Americana from Mount }
@@ -1880,6 +1886,11 @@ components:
           description: >
             This technique done TO the athlete. No client can author one today;
             reported rather than dropped because the API accepts one.
+        defended:
+          type: integer
+          description: >
+            Them going for it and the athlete stopping them — the mirror of
+            `attempted`, and what a roadmap's defensive criterion counts.
         sessions:
           type: integer
           description: >

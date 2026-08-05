@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/auth"
@@ -131,11 +132,14 @@ func writeSessionError(w http.ResponseWriter, r *http.Request, err error) {
 		// Names the vocabulary rather than just refusing. The client renders
 		// pickers over exactly these values, so a rejection means the two have
 		// drifted and the message should say how.
+		//
+		// Built from the vocabularies rather than spelled out. The list was
+		// literal and went stale the first time one grew: `defended` was
+		// accepted by `Valid()` while this line still told a rejected client
+		// there were four events. A message about drift that can itself drift
+		// is worse than no message.
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
-			"kind must be one of class, drilling, positional, rolling; "+
-				"tag category one of submission, sweep, pass, escape, takedown, control; "+
-				"tag event one of drilled, attempted, scored, conceded; "+
-				"session_rpe 1-10; rounds, round_minutes and tag count at least 1")
+			invalidInputMessage())
 	default:
 		apihttp.WriteInternal(w, r, "bjj", err)
 	}
@@ -262,4 +266,26 @@ func (h *FocusHandler) Set(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"focus": list})
+}
+
+// invalidInputMessage names every value this endpoint accepts.
+//
+// A function rather than a literal in the handler branch, for two reasons: it
+// is built from the vocabularies so it cannot fall behind one, and a test can
+// assert that — which is what stops the next value being added without it.
+func invalidInputMessage() string {
+	return "kind must be one of " + join(Kinds()) + "; " +
+		"tag category one of " + join(Categories()) + "; " +
+		"tag event one of " + join(Events()) + "; " +
+		"session_rpe 1-10; rounds, round_minutes and tag count at least 1"
+}
+
+// join renders a vocabulary for the message above. Generic over the
+// string-kinded types so each one does not need its own copy.
+func join[T ~string](vals []T) string {
+	out := make([]string, len(vals))
+	for i, v := range vals {
+		out[i] = string(v)
+	}
+	return strings.Join(out, ", ")
 }

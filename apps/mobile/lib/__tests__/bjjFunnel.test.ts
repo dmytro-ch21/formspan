@@ -1,4 +1,6 @@
 import {
+  FUNNEL_OUTCOMES,
+  LIVE_ROWS,
   bumpTechniqueOutcome,
   removeDrilledTechnique,
   tagCount,
@@ -239,5 +241,42 @@ describe('techniqueOutcomeCount', () => {
     expect(techniqueOutcomeCount(tags, 'armbar-from-guard', 'attempted')).toBe(5);
     expect(techniqueOutcomeCount(tags, 'armbar-from-guard', 'scored')).toBe(1);
     expect(techniqueOutcomeCount(tags, 'unknown', 'attempted')).toBe(0);
+  });
+});
+
+describe('the defensive half of the funnel', () => {
+  /*
+   * `defended` completes a 2x2 of who started the exchange and whether it
+   * landed. Before it existed, defensive success was the one outcome nothing
+   * could record — it could only be inferred from an absence, and an absence
+   * argues more strongly the less you roll, which is backwards.
+   *
+   * It lives on the per-technique chips rather than the category grid on
+   * purpose: the grid is five rows of two counters and is the fastest
+   * structured input in the app, and a third column there would tax every
+   * session to serve a roadmap the athlete may not be on.
+   */
+  it('offers Stopped alongside Tried and Landed, and only there', () => {
+    expect(FUNNEL_OUTCOMES.map((o) => o.event)).toEqual(['attempted', 'scored', 'defended']);
+    // The category grid stays 5x2. If this ever grows, it is a deliberate
+    // decision about the fastest screen in the app and not a side effect.
+    expect(LIVE_ROWS).toHaveLength(5);
+  });
+
+  it('counts a defended event against its own technique', () => {
+    const focus = { technique_id: 't1', name: 'Guard pull', position: 'Standing', category: 'Sweep' };
+    let tags = bumpTechniqueOutcome([], focus as never, 'defended', 1);
+    tags = bumpTechniqueOutcome(tags, focus as never, 'defended', 1);
+    expect(techniqueOutcomeCount(tags, 't1', 'defended')).toBe(2);
+    // And does not leak into the offensive counts, which a roadmap reads
+    // separately — one criterion per direction.
+    expect(techniqueOutcomeCount(tags, 't1', 'scored')).toBe(0);
+    expect(techniqueOutcomeCount(tags, 't1', 'attempted')).toBe(0);
+  });
+
+  it('decrements to zero without going negative', () => {
+    const focus = { technique_id: 't1', name: 'Guard pull', position: 'Standing', category: 'Sweep' };
+    const tags = bumpTechniqueOutcome([], focus as never, 'defended', -1);
+    expect(techniqueOutcomeCount(tags, 't1', 'defended')).toBe(0);
   });
 });

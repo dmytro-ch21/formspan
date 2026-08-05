@@ -10798,6 +10798,90 @@ scenery. `owedOn(sessions, dayPlans)` is what was ever needed.
 - **The switcher has no bound.** Nothing stops stepping into 2029 one day at a
   time. Harmless, and a month jump would be the fix if anyone ever does it.
 
+## 2026-08-05 — `defended` completes the 2×2, and an error message stops being able to lie
+
+The roadmap design needs a defensive completion criterion — *"defend the guard
+pull three times"* — and the schema could not express one.
+
+### The gap, stated as a shape
+
+Every live event answers two questions: who started the exchange, and did it
+land.
+
+|                    | it landed  | it did not  |
+| ------------------ | ---------- | ----------- |
+| **I initiated**    | `scored`   | `attempted` |
+| **they initiated** | `conceded` | *(nothing)* |
+
+Three cells shipped. The fourth — they went for it and you stopped them — did
+not, which made **defensive success the one outcome the app could not record**.
+It could only be inferred from absence ("you weren't caught in it for ten
+sessions"), and an absence argues *more* strongly the less you roll. That is the
+fabricated zero this codebase has deleted twice already, in a new costume.
+
+`defended` fills it. **No migration.** `bjj_session_tags.event` is `TEXT` with
+no `CHECK`, and 000025 said why: the vocabulary is validated in Go so it can
+grow by an enum edit. That stance was taken for `kind` and paid off here.
+
+### Where it is captured, and where it deliberately is not
+
+On the **per-technique funnel chips**, beside Tried and Landed — not as a third
+column in the category grid.
+
+The grid is five rows of two counters and is the fastest structured input in the
+app. A third column taxes every session, for every athlete, to serve a defensive
+criterion belonging to a roadmap they may not be on. The funnel chips only
+render for techniques already in focus — which is exactly the handful a roadmap
+cares about, and the place where naming a specific technique already earns its
+cost.
+
+`defended` is also the mirror of `attempted`, which already lives there. Putting
+the two halves of "it didn't land" in different places would have been the
+strange choice.
+
+Both wins now colour the same: `Landed` and `Stopped` read as `scored`, `Tried`
+stays neutral. Colouring only the offensive one would say the quiet part out
+loud about which half the app values.
+
+### The error message could lie, and now cannot
+
+`session_handler.go` returned a 400 naming every accepted value — with the
+vocabularies **spelled out as a literal**, directly under a comment explaining
+that the message exists because client and server can drift. Adding a fifth
+event made it wrong immediately: `Valid()` accepted `defended` while the
+rejection text still told the client there were four.
+
+It is built from `Kinds()`, `Categories()` and `Events()` now, extracted into
+`invalidInputMessage()` so a test can assert it mentions every value each one
+holds. A message about drift that can itself drift is worse than no message.
+
+### Tests
+
+The 2×2 test asserts the **shape**, not the list: it maps each live event to
+its (who-initiated, did-it-land) cell and fails if any cell is empty or two
+events claim the same one. A test that spelled the five values out would go
+green the moment someone deleted `defended` and updated it to match.
+
+Mutation-checked: removing `defended` from the vocabulary, and reverting the
+error message to a literal list, both go red.
+
+### Gaps
+
+- **Nothing reads `defended` yet.** `/v1/bjj/proficiency` reports it and the
+  wizard writes it; no roadmap consumes it, because roadmaps do not exist. That
+  is the intended order — the criterion is worthless without months of evidence
+  behind it, so the capture path has to exist first — but it does mean a column
+  that is written and not yet read, which is the failure mode this project has
+  been bitten by before. It is deliberate here, and it should not stay true for
+  long.
+- **The category grid still cannot express a defensive success**, only the
+  per-technique chips can. An athlete who never sets a focus technique produces
+  no `defended` evidence at all. Acceptable while criteria are per-technique;
+  revisit if a position-level defensive claim is ever wanted.
+- **`Proficiency.Conceded` is still unwritable by any client** — the same note
+  it carried before. `defended` did not change that; a technique-tagged
+  `conceded` row still has no capture path.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
