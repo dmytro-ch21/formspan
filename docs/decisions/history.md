@@ -11260,6 +11260,60 @@ the guard stays.
   lands there will be nothing that says "stop suggesting positions", and reusing
   this set for it would silently conflate two different refusals.
 
+## 2026-08-05 — The description field was parsed and the form never said so
+
+Authoring a technique in the admin console fills a `Description` box hinted
+only "The mechanics." That text is **not displayed** — `executionSteps` splits
+it into the numbered sequence the mobile technique screen renders, and the two
+ways an author would most naturally write a step list are the two that break.
+
+Measured by running the parser rather than reading it:
+
+- One sentence, comma-separated clauses → clean steps. This is what the seeded
+  library does, and it works for 458 of 466.
+- One step per line, each ending in a full stop → also clean. `\s` covers the
+  newline, so the full stop is what does the splitting.
+- **Numbering them yourself** → the numerals become steps of their own:
+  `"1"`, `"Grip the far collar, 2"`, `"Step your foot across, 3, Fall back"`.
+- **Bullets, or lines with no terminal punctuation** → a line break is not a
+  separator, so the whole thing stays one paragraph with the hyphens in it.
+- **Any clause under ten characters** → folded into the clause before it. So
+  `"Break the grip, step in, and finish."` collapses to a single step, and a
+  single step is deliberately rendered as prose because a one-item numbered
+  list reads as a bug. Ordinary phrasing, no warning, no step list.
+
+The last is the one that justified building something rather than answering the
+question: it is invisible at authoring time and invisible in review.
+
+### What landed
+
+`/content/guide` in the admin console — the rules, and for each authoring style
+the parser's *actual* output rather than an illustration. Linked from the
+techniques list and from the Description field itself. It also covers the other
+fields whose failure mode is silence: graph edges (`setup_from`,
+`common_next_moves`, `common_counters`) match other techniques **by name
+exactly**, and a near-miss is not an error — the edge simply does not resolve;
+`typical_belt` is a filter, so blank hides the technique from anyone using it;
+and category must be the importer's nine or the next spreadsheet re-import
+breaks.
+
+Alongside it, `docs/content/technique-research-prompt.md` — a prompt for
+producing a form-ready entry that carries the same constraints, since a general
+"write me a BJJ technique" prompt produces text that looks right and renders as
+a paragraph. Its most important instruction is to leave a field empty and say
+why rather than guess: an empty field renders as nothing at all, so a blank is
+always safe, and an invented IBJJF legality claim is not.
+
+### Worth keeping
+
+Both files are documentation of *behaviour*, not of intent, and both say so at
+the top. If `executionSteps` or the vocabularies change they are wrong, and
+nothing enforces that — the parser's own test file is where those input/output
+pairs should also live, which the functional-scenarios entry now records.
+
+Not verified visually: the console is Clerk-gated. `build:admin` compiles the
+page and emits the route, and typecheck and lint pass.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
