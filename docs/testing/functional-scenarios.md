@@ -3127,8 +3127,11 @@ shows. On Plan it is the week; inside the month sheet it is the month.
 *"You drilled the arm drag 9 times and never tried it live."* Read from
 `GET /v1/bjj/proficiency`; no local data involved.
 
-- Fires only when a technique has **6+ drilled, 0 attempted AND 0 scored,
-  across 2+ sessions, seen in the last 60 days.** Each gate is separately
+- Fires only when a technique has **6+ drilled (which is 6 separate classes —
+  `drilled` is written once per session), 0 attempted AND 0 scored, seen in the
+  last 60 days** — and only for an athlete who has used the live counters on
+  *some* technique. Without that last condition the gate cannot fail, because
+  nothing but the focus grid can write those counters. Each gate is separately
   observable: land it once and the card must disappear.
 - **Landing it counts as trying it.** A technique drilled 9 times and scored
   twice must NOT be suggested — `attempted` and `scored` are disjoint, so
@@ -3145,7 +3148,11 @@ shows. On Plan it is the week; inside the month sheet it is the month.
 
 - After the **2nd** BJJ session logged with no technique-level detail, Today
   offers "Add what happened in rolling". Not after the 1st.
-- It stops after the **4th**, whether or not the athlete acted on it.
+- It stops after being **shown three times**, counted and persisted — not after
+  a session count, which is computed over a rolling ~30-row window and would let
+  the prompt return forever after a reinstall or a strength-heavy stretch.
+- Its accessible name begins with its visible title, so Voice Control can reach
+  it, and it says where it goes.
 - It never shows to someone with any technique evidence, and never at the same
   time as a suggestion.
 

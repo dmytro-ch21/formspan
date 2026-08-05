@@ -10864,8 +10864,69 @@ down rather than degrading to nothing.
 
 Worth stating plainly because `pnpm run verify` was green through all of it.
 
+### What review caught, and the one that undermined the rule
+
+**The load-bearing gate could not fail.** `attempted + scored === 0` is right
+for the schema and wrong for the capture surface: the only writer of a
+technique-tagged `attempted`/`scored` row is the wizard's "Working on" grid,
+which renders only for techniques on the athlete's `bjj_focus` list — set on
+**web** — plus any already carrying live rows that session. For a technique
+never on that list the value is **structurally zero**, so the rule collapsed to
+"drilled a lot, recently" and the card asserted "never live" about rounds the
+app was never told about. The tier is preconditioned on `countersInUse` now,
+and the copy claims only what the record shows ("never logged live").
+
+**`sessions >= 2` was dead code, and the card said one number twice.** The
+wizard writes `drilled` once per session with a per-session dedupe, so `drilled`
+is a count of *classes*, and the backend's `sessions` is
+`COUNT(DISTINCT session_id)` over the same rows — they are equal, and
+`drilled >= 6` already implies `sessions >= 6`. The gate could never reject
+anything. Removed, and the card reads "Drilled in 6 sessions" rather than
+"drilled 6 times across 6 sessions".
+
+That also reframes the threshold: **six is six separate classes, not six reps**,
+which is a much higher bar than the docstring's "six, not nine" argued for. The
+number was reviewed and kept; the reasoning beside it now describes the right
+quantity.
+
+**Tier 0's bound was computed over the wrong window.** `bjjSessions <= 4` counts
+BJJ sessions among the most recent ~20–30 *local* rows, not a lifetime — so a
+reinstall put a three-year athlete back at "session 2", and for a strength-heavy
+athlete the old BJJ sessions aged out of the window, the count fell back into
+the band, and the prompt returned. Indefinitely, which is the one thing the
+bound exists to prevent. It counts **times shown**, persisted in prefs.
+
+**The Tier 0 card was unreachable by Voice Control** — its accessible name
+shared no words with its visible title (WCAG 2.5.3) and never said what pressing
+it did. And it pushed to the technique *library* while its copy said "add what
+happened in rolling"; the copy and the destination now agree.
+
+Also: the card's justification line was `textDim` at **3.67:1**, under AA at
+12pt, on the one line carrying the evidence the card asks to be judged on.
+`textMuted` is 6.85:1.
+
+The three thresholds were unpinned — the fixture sat at `drilled: 9` and the
+rejection at 5, so `MIN_DRILLED` could be raised to 9, and the window moved
+anywhere in roughly [27, 212] days, with the suite green. Each has its boundary
+pair now, and all five mutations are red.
+
 ### Gaps
 
+- **`refreshFunnel` fires on every day-step, not once per focus.** The comment
+  claimed otherwise and was wrong: the focus callback depends on `refreshPlan`,
+  which depends on `dayOffset`, so stepping a week is seven round trips. Harmless
+  (same query, same answer) but wasteful, and the fix is to split the effect.
+- **No seq guard on the funnel read**, unlike the plan read beside it, and
+  `fetchProficiency`'s `signal` has no caller. Concurrent reads are routine
+  because of the above, so last-to-*resolve* wins.
+- **The funnel is not tagged with the account it was read for**, so an account
+  switch can briefly show athlete A's suggestion to athlete B. `AccentProvider`
+  documents this exact class and tags its state `{ for: userId }`.
+- **A stale unfinished session suppresses the suggestion indefinitely** — the
+  card is inside the `!active` branch, and `active` includes a session this
+  screen itself labels UNFINISHED and treats as abandoned.
+- **The funnel is fetched for athletes who do not train BJJ**, on every focus,
+  always answering empty.
 - **Nothing dismisses a suggestion.** It recomputes on every focus, so the same
   card returns until the evidence changes. The design doc's own answer is that
   the suggestion should be recomputed but a *dismissal* must persist; that is

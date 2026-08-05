@@ -122,6 +122,16 @@ export const PREF_UNIT_SYSTEM_OWED = 'unit_system_owed';
  * behaviour that never surprises; on is there for people whose ticking
  * really is the moment they rack the bar.
  */
+/**
+ * How many times the "add what happened in rolling" offer has been shown.
+ *
+ * A COUNT, not a boolean, because the offer is allowed a few appearances
+ * before it stops for good. Device-local and not synced: it bounds a nudge,
+ * and an athlete on a second device seeing it a few more times is a far
+ * smaller cost than the sync surface for it.
+ */
+export const PREF_DETAIL_OFFERS = 'bjj_detail_offers';
+
 export const PREF_AUTO_REST = 'auto_rest';
 export const PREF_TRACK_EFFORT = 'track_effort';
 /**

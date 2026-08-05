@@ -37,6 +37,7 @@ import type { LoggedSet, Session } from '@/lib/sessions';
 import { cachedWorkouts, listLocalSessions } from '@/lib/sessionStore';
 import { fetchProficiency } from '@/lib/proficiency';
 import { funnelGap, shouldOfferDetail } from '@/lib/suggestion';
+import { PREF_DETAIL_OFFERS, readPref, writePref } from '@/lib/prefs';
 import { restLine, weeklyDays } from '@/lib/trend';
 import { formatVolume, type UnitSystem } from '@/lib/units';
 import { enabledSports, labelFor, usesBelt, type Module } from '@/lib/modules';
@@ -338,6 +339,15 @@ export default function TodayScreen() {
    * request is still in flight.
    */
   const [funnel, setFunnel] = useState<Awaited<ReturnType<typeof fetchProficiency>> | null>(null);
+  /**
+   * How many times the Tier 0 offer has been shown, ever. `null` until read.
+   *
+   * Persisted rather than derived from a session count: `sessions` here is the
+   * most recent ~30 local rows, so a reinstall or a strength-heavy stretch put
+   * the old `bjjSessions <= 4` bound back inside its band and the prompt
+   * returned indefinitely — the exact thing the bound exists to stop.
+   */
+  const [offers, setOffers] = useState<number | null>(null);
   const [viewPlans, setViewPlans] = useState<
     (PlannedSession & { workoutName: string | null })[]
   >([]);
@@ -395,6 +405,19 @@ export default function TodayScreen() {
       // which is what turns the Tier 0 prompt on.
     }
   }, [getToken, userId]);
+
+  useEffect(() => {
+    if (!userId) return;
+    let alive = true;
+    readPref(userId, PREF_DETAIL_OFFERS)
+      .then((v) => {
+        if (alive) setOffers(Number(v ?? 0) || 0);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [userId]);
 
   const refreshPlan = useCallback(async () => {
     if (!userId) return;
@@ -574,10 +597,26 @@ export default function TodayScreen() {
     [isToday, funnel, now],
   );
   const offerDetail = useMemo(() => {
-    if (!isToday || !funnel || suggestion) return false;
+    if (!isToday || !funnel || suggestion || offers === null) return false;
     const bjj = sessions.filter((x) => logsAfterwards(x.sport, modules)).length;
-    return shouldOfferDetail(bjj, funnel.length);
-  }, [isToday, funnel, suggestion, sessions, modules]);
+    return shouldOfferDetail(bjj, funnel.length, offers);
+  }, [isToday, funnel, suggestion, sessions, modules, offers]);
+
+  /**
+   * Count the offer once, when it is actually on screen.
+   *
+   * Writes the pref and does NOT touch state. Bumping `offers` here would make
+   * the card vanish under the athlete mid-read on the third showing, and it
+   * would be a `setState` inside an effect — the rule this app's lint ratchet
+   * exists to stop growing. The next launch reads the incremented value, which
+   * is the only moment the bound has to be right.
+   */
+  const counted = useRef(false);
+  useEffect(() => {
+    if (!offerDetail || !userId || offers === null || counted.current) return;
+    counted.current = true;
+    writePref(userId, PREF_DETAIL_OFFERS, String(offers + 1)).catch(() => {});
+  }, [offerDetail, userId, offers]);
 
   // A session left open overnight was almost certainly abandoned, not paused.
   // Past this the card stops pretending to be a running clock: a resume button
@@ -967,9 +1006,7 @@ export default function TodayScreen() {
                 style={({ pressed }) => [styles.suggestion, pressed && styles.planCardPressed]}
                 onPress={() => router.push(`/technique/${suggestion.techniqueId}`)}
                 accessibilityRole="button"
-                accessibilityLabel={`Suggestion: try ${suggestion.name} live. Drilled ${
-                  suggestion.drilled
-                } times across ${suggestion.sessions} sessions, never tried in a round. Open the technique.`}
+                accessibilityLabel={`Suggestion: try ${suggestion.name} live. Drilled in ${suggestion.drilled} sessions and never logged live. Open the technique.`}
                 testID="today-suggestion"
               >
                 <View style={styles.planMain}>
@@ -979,9 +1016,13 @@ export default function TodayScreen() {
                   <Text style={styles.planTitle} numberOfLines={2}>
                     Try {suggestion.name} in a round
                   </Text>
-                  <Text style={styles.planEmptyMeta}>
-                    Drilled {suggestion.drilled} times across {suggestion.sessions} sessions, never
-                    live
+                  {/* ONE number. It read "drilled N times across N sessions",
+                      which is the same fact twice: the wizard writes `drilled`
+                      once per session, so the two columns are equal. And the
+                      claim is about the record, not about the athlete — the
+                      app cannot see a round it was not told about. */}
+                  <Text style={styles.suggestionMeta}>
+                    Drilled in {suggestion.drilled} sessions, never logged live
                   </Text>
                 </View>
                 <Icon name="chevron" size={16} color={vola.textDim} />
@@ -1000,9 +1041,17 @@ export default function TodayScreen() {
             {offerDetail && (
               <Pressable
                 style={({ pressed }) => [styles.suggestion, pressed && styles.planCardPressed]}
-                onPress={() => router.push('/(tabs)/library')}
+                // The reflection wizard is where detail is added; the library
+                // is a catalog. Sending them to the catalog contradicted the
+                // copy, so this goes to Plan, where the week and its sessions
+                // are.
+                onPress={() => router.push('/(tabs)/workouts')}
                 accessibilityRole="button"
-                accessibilityLabel="Logging what happened in rolling lets VOLA suggest what to work on."
+                // Leads with the visible title — WCAG 2.5.3. Named only by the
+                // sentence version, "tap Add what happened in rolling" did
+                // nothing under Voice Control, and the label never said what
+                // pressing it does.
+                accessibilityLabel="Add what happened in rolling. Naming the techniques you drilled is what lets VOLA suggest what to work on. Opens your recent sessions."
                 testID="today-offer-detail"
               >
                 <View style={styles.planMain}>
@@ -1013,7 +1062,7 @@ export default function TodayScreen() {
                     Add what happened in rolling
                   </Text>
                   <Text style={styles.planEmptyMeta}>
-                    Two minutes after class is what lets VOLA suggest what to work on next.
+                    Naming the techniques you drilled is what lets VOLA suggest what to work on.
                   </Text>
                 </View>
                 <Icon name="chevron" size={16} color={vola.textDim} />
@@ -1340,6 +1389,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   suggestionEyebrow: { fontSize: 10, fontWeight: '800', letterSpacing: 1.1 },
+  // `textMuted` (6.85:1 here), not `textDim` (3.67:1, under AA at 12pt). This
+  // line carries the card's entire justification — it is the evidence, not
+  // decoration, and a card that asks to be judged on its reasoning has to let
+  // it be read.
+  suggestionMeta: { color: vola.textMuted, fontSize: 12, lineHeight: 16 },
 
   // The planned day. A card rather than a filled button: it is a statement
   // about today that happens to be actionable, and the lime is spent on the

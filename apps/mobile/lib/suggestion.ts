@@ -18,25 +18,35 @@ import type { Proficiency } from './proficiency';
  *
  * ## The rule
  *
- * Four gates, and each one is here because dropping it produces a suggestion
- * that is wrong rather than merely weak:
- *
- * 1. **`drilled >= MIN_DRILLED`.** Below this it is not a pattern, it is a
- *    Tuesday.
+ * 1. **`drilled >= MIN_DRILLED`.** Note what `drilled` counts: the wizard
+ *    writes it once per session with a per-session dedupe, so it is the number
+ *    of distinct **classes** in which the technique was tagged, not a rep
+ *    count. Six is therefore six separate sessions, which is a considerably
+ *    higher bar than "six reps" — and the reason the old `sessions >= 2` gate
+ *    was removed rather than kept: `sessions` is `COUNT(DISTINCT session_id)`
+ *    over the same rows, so it equals `drilled` and could never reject
+ *    anything. A gate that cannot fire is worse than no gate; it reads as
+ *    protection.
  * 2. **`attempted + scored === 0`** — not `attempted === 0`. The two are
- *    DISJOINT in this schema: `attempted` is "went for it and it did not
- *    land". A technique drilled nine times and *landed* twice has plainly been
- *    tried, and testing `attempted` alone would tell that athlete to go and try
- *    something they are already hitting.
- * 3. **`sessions >= MIN_SESSIONS`.** Nine reps in one class is one class, not a
- *    habit — and a technique the coach taught once is not something the athlete
- *    is avoiding. `Proficiency.sessions` exists as exactly this honesty check.
- * 4. **Seen recently.** A gap from two years ago is archaeology; nobody is
- *    served by being told to try a technique they have forgotten.
+ *    DISJOINT: `attempted` is "went for it and it did not land". A technique
+ *    drilled six times and *landed* twice has plainly been tried, and testing
+ *    `attempted` alone would tell that athlete to go and try something they are
+ *    already hitting.
+ * 3. **Seen recently.** A gap from two years ago is archaeology.
  *
- * Nothing here is stored. The suggestion is recomputed from the evidence every
- * time it is read, so deleting the sessions behind it withdraws it — the same
- * argument `lib/adherence.ts` makes about plans.
+ * ## What this rule cannot know, and why {@link countersInUse} exists
+ *
+ * The only writer of a technique-tagged `attempted`/`scored` row in the whole
+ * product is the wizard's "Working on" grid, and that grid only renders for
+ * techniques on the athlete's `bjj_focus` list (set on web) plus any already
+ * carrying live rows in that session. For a technique that has never been on
+ * that list, `attempted + scored` is **structurally zero** — not evidence of
+ * anything, just an absence of the surface that could record it.
+ *
+ * So gate 2 is unfalsifiable on its own, and a card asserting "never live"
+ * would be stating as fact something the app has no way to observe. The tier
+ * is therefore preconditioned on the athlete demonstrably using those counters
+ * at all, and the copy claims only what the record shows.
  */
 export type Suggestion = {
   techniqueId: string;
@@ -66,9 +76,6 @@ export type Suggestion = {
  */
 const MIN_DRILLED = 6;
 
-/** Two classes, so one keen Tuesday is not mistaken for a pattern. */
-const MIN_SESSIONS = 2;
-
 /**
  * Beyond this the gap is history rather than an opportunity.
  *
@@ -84,7 +91,15 @@ const MAX_AGE_DAYS = 60;
  * One, not a list. Three suggestions is a report; one is an instruction, and
  * the point is to change what happens at the next session.
  */
+export function countersInUse(rows: Proficiency[]): boolean {
+  return rows.some((r) => r.attempted + r.scored > 0);
+}
+
 export function funnelGap(rows: Proficiency[], now: Date): Suggestion | null {
+  // Without this the rule collapses to "drilled a lot, recently", because
+  // nothing could ever have written the counter it checks. See the note above.
+  if (!countersInUse(rows)) return null;
+
   const cutoff = now.getTime() - MAX_AGE_DAYS * 86_400_000;
 
   const candidates = rows.filter((r) => {
@@ -92,7 +107,6 @@ export function funnelGap(rows: Proficiency[], now: Date): Suggestion | null {
     // Disjoint events — see the rule above. This is the line that decides
     // whether the suggestion is true.
     if (r.attempted + r.scored > 0) return false;
-    if (r.sessions < MIN_SESSIONS) return false;
     const seen = new Date(r.last_seen).getTime();
     return Number.isFinite(seen) && seen >= cutoff;
   });
@@ -100,10 +114,10 @@ export function funnelGap(rows: Proficiency[], now: Date): Suggestion | null {
   if (candidates.length === 0) return null;
 
   // Most-drilled first: the strongest evidence makes the most defensible
-  // suggestion. Ties break on sessions (spread over more classes is better
-  // evidence than the same count in fewer), then on id so the answer is
-  // TOTAL — an unstable order would move the suggestion between two equal
-  // techniques on every refresh.
+  // suggestion. Ties break on sessions — equal to `drilled` today, but the two
+  // are separate columns and a future writer could separate them — then on id
+  // so the answer is TOTAL. An unstable order would move the suggestion
+  // between two equal techniques on every refresh.
   const best = candidates.reduce((a, b) => {
     if (b.drilled !== a.drilled) return b.drilled > a.drilled ? b : a;
     if (b.sessions !== a.sessions) return b.sessions > a.sessions ? b : a;
@@ -139,6 +153,25 @@ export function funnelGap(rows: Proficiency[], now: Date): Suggestion | null {
  * repeats forever is the shame the recorded UX direction rules out, however
  * politely it is worded.
  */
-export function shouldOfferDetail(bjjSessions: number, taggedTechniques: number): boolean {
-  return taggedTechniques === 0 && bjjSessions >= 2 && bjjSessions <= 4;
+export function shouldOfferDetail(
+  bjjSessions: number,
+  taggedTechniques: number,
+  timesShown: number,
+): boolean {
+  return taggedTechniques === 0 && bjjSessions >= 2 && timesShown < MAX_OFFERS;
 }
+
+/**
+ * How many times Tier 0 may ever be shown.
+ *
+ * Counted and persisted, NOT derived from a session count. The first version
+ * bounded it with `bjjSessions <= 4` — and `bjjSessions` is computed over the
+ * most recent ~20-30 local rows, not a lifetime. Two reachable consequences,
+ * both of which are the "prompt that repeats forever" this is supposed to
+ * prevent: a reinstall puts a three-year athlete back at "session 2", and for
+ * a strength-heavy athlete the older BJJ sessions age out of the window, the
+ * count falls back into the 2-4 band, and the prompt returns. Indefinitely.
+ *
+ * A count of what actually happened cannot drift like that.
+ */
+export const MAX_OFFERS = 3;
