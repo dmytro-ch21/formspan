@@ -3172,6 +3172,17 @@ shows. On Plan it is the week; inside the month sheet it is the month.
 - An unreadable or corrupt preference reads as **enabled**, never as off. A
   feature must not silently disable itself.
 - The screen says the settings are device-local.
+- **Every one of the above has to be observed back on Today, after returning to
+  it — not on the settings screen.** This is the scenario that shipped broken and
+  the one every bullet here silently assumed: the settings screen is pushed over
+  the tabs and Today stays mounted behind it, so a Today that reads its
+  preferences once per mount reads them once per *process*. Settings itself is
+  pushed fresh every visit and always reads back what it just wrote, so checking
+  it there proves nothing. Turn the master off, go back, and the card must be
+  gone before the first frame settles; turn it on, go back, and it must return.
+  Covered at unit level by `app/__tests__/suggestionPrefsRefocus.test.tsx`, which
+  has to override the shared `useFocusEffect` mock to be capable of failing —
+  worth reading before writing the functional version.
 
 ### The cold start (Tier 0)
 
