@@ -819,11 +819,17 @@ export default function LibraryScreen() {
             marks: everything above narrows the list, this opens a page. It sits
             near controls that look superficially similar and behave completely
             differently, so it carries a label and a different shape — without
-            that separation the rows read as one broken control. */}
+            that separation the rows read as one broken control.
+
+            The label is "START WITH POSITIONS", not "NEW TO BJJ? …". Naming the
+            reader is the problem: it tells anyone who is not new that this row
+            is not for them, when a purple belt looking up the Truck is exactly
+            who it serves. It also greets a returning athlete as a beginner
+            every time they open the tab. An instruction addresses everyone. */}
         {usesPosition(sport, modules) && positions.length > 0 && (
           <View style={styles.glossary}>
             <Text style={styles.glossaryLabel} accessibilityRole="header">
-              NEW TO BJJ? START WITH THE POSITIONS
+              START WITH POSITIONS
             </Text>
             <ScrollView
               horizontal
