@@ -11341,9 +11341,9 @@ encoding. A fake returns whatever the reader asks for, which makes a diverged
 key structurally invisible — and the `'true'` vs `'0'` mutation below is exactly
 that bug, caught only because the value crosses a real database.
 
-**Mutation results.** The old `useEffect([userId])` shape takes four of the seven
+**Mutation results.** The old `useEffect([userId])` shape takes five of the eight
 cases red — and again with the cleanup preserved, so the test keys on *where* the
-read lives rather than on an incidental return value. Six of seven mutations die.
+read lives rather than on an incidental return value. Eight of nine mutations die.
 The survivor is the focus callback keyed on `[]`: real (it would freeze the
 callback and read the previous account's prefs after a user change) but a
 different bug, unreachable here because the Clerk mock's user never changes, and
@@ -11376,9 +11376,11 @@ context defaults and omitting them is strictly better.
   nothing exercises: the Clerk mock's `userId` is a constant, so no test here
   changes accounts. A shared device is the scenario, and `lib/prefs.ts` is scoped
   by user precisely because it matters.
-- **Only the master and per-discipline switches are covered.** "Suggest again" —
-  the third control on that screen, and the one whose failure was most visible —
-  has no case here.
+- **The functional-suite version does not exist yet.** The scenario is written up
+  in `docs/testing/functional-scenarios.md` under Settings → Suggestions, but
+  nothing in `tests/functional/` drives two real screens through a real
+  navigator — which is the only place the actual `useFocusEffect` runs rather
+  than a mock of it, however faithful.
 
 ## Open items / known gaps as of this entry
 

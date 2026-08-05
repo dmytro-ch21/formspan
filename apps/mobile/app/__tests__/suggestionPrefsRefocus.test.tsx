@@ -72,12 +72,14 @@ import Today from '../(tabs)/index';
  *
  * | mutation | result |
  * | --- | --- |
- * | the pref read moved back to `useEffect([userId])` — the shipped bug | **4 red** |
- * | same, keeping the cleanup — so the test keys on *where*, not on the return | **4 red** |
+ * | the pref read moved back to `useEffect([userId])` — the shipped bug | **5 red** |
+ * | same, keeping the cleanup — so the test keys on *where*, not on the return | **5 red** |
  * | `return stop` dropped from the focus effect | 1 red |
  * | Settings writes the master under a different key | 1 red |
  * | Settings writes `'true'`/`'false'` instead of `'1'`/`'0'` | 1 red |
  * | the per-discipline toggle serialises an empty set | 2 red |
+ * | "Suggest again" does not remove the id from the set | 1 red |
+ * | Today's dismiss never reaches storage | 1 red |
  * | the focus callback keyed on `[]` | **survives** |
  *
  * **The survivor is deliberate, and lint is its guard.** Keyed on `[]` the
@@ -456,6 +458,46 @@ describe('the switches in Settings', () => {
       focus();
     });
     await waitFor(() => expect(today.queryByTestId('today-suggestion')).toBeNull());
+  });
+
+  it('undo a dismissal, and the suggestion comes back', async () => {
+    /*
+     * The whole loop, in the order an athlete does it: dismiss the card on
+     * Today, find it under DISMISSED in Settings, tap "Suggest again", come
+     * back. Three writes and three reads across two screens, and the only one
+     * of the three controls whose failure was *visible* — the other two look
+     * like a setting that did nothing, this one looks like a button that did
+     * nothing.
+     *
+     * Dismissing through the card rather than seeding the preference is
+     * deliberate: it makes the id Today writes and the id Settings lists the
+     * same value, so a change to `serialiseDismissed` has to keep both ends
+     * agreeing rather than only the end this file wrote by hand.
+     */
+    const today = await renderTodayShowingASuggestion();
+
+    await act(async () => {
+      fireEvent.press(today.getByTestId('today-suggestion-dismiss'));
+    });
+    // Optimistic — the card goes immediately rather than after the write lands,
+    // so this says nothing yet about what reached SQLite.
+    await waitFor(() => expect(today.queryByTestId('today-suggestion')).toBeNull());
+
+    blur();
+    const settings = render(<SuggestionSettingsScreen />);
+    // That it is listed at all is the assertion: the id had to survive
+    // serialisation, the database and parsing to get here. `fetchTechniques` is
+    // mocked empty, so the row falls back to the raw id — which is the branch
+    // that matters, since a failed name lookup must not cost the undo.
+    const restore = await waitFor(() => settings.getByTestId('suggestions-restore-arm-drag'));
+    await act(async () => {
+      fireEvent.press(restore);
+    });
+
+    await act(async () => {
+      focus();
+    });
+    await waitFor(() => expect(today.queryByTestId('today-suggestion')).toBeTruthy());
   });
 
   it('leaves BJJ alone when a different discipline is silenced', async () => {
