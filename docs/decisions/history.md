@@ -9590,6 +9590,27 @@ move and the first time it has.
   same way under BJJ, with the saved belt cap intact. **Note the staging API
   does not carry these facets until this deploys**, so the buttons will not
   appear on a client pointed at it — the registry is the gate.
+- **`Movement → Pull` contains no biceps curl, and that is the mapping
+  decision most likely to read as broken.** `movement_pattern` is
+  single-valued and `isolation` holds 142 of 504 rows — 51 of them Arms, 28
+  Shoulders — so every curl, fly and lateral raise sits under Isolation and
+  under *neither* Push nor Pull. The data says so and the filter reports it
+  faithfully; a lifter would not. Fixing it means deriving push/pull for
+  isolation rows from their primary muscle, which changes what "Pull" *means*
+  rather than fixing a defect, so it is left as a deliberate decision to take
+  rather than one made in passing.
+- **Review found the coverage test was watching the wrong door.** Its oracle
+  was the shipped catalog, so `grappling` — legal in the API's closed
+  vocabulary, used by no row — was unmapped and invisible to it. The first
+  console-authored exercise using it would have been silently unreachable,
+  which is precisely the failure the suite exists to prevent. It now asserts
+  the API vocabulary as well as the rows, and reads `exercises.additions.json`
+  too, since that is the file console-authored content actually lands in.
+- **`primary_muscles` is validated against no vocabulary anywhere in the
+  backend** — not in the seed's `validate`, not in `ValidateForWrite`. So the
+  admin console can mint free-text muscles that no test here can see. The
+  coverage guarantee is "everything a deploy ships", not "everything the API
+  accepts", and the module comment now says so.
 - **Only reachable once a sport is chosen.** With the sport chip on "All" no
   facet buttons appear, because `moduleFor('')` matches no module — exactly the
   behaviour position and belt already had. It is consistent, and it does mean

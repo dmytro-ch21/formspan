@@ -1071,7 +1071,6 @@ const styles = StyleSheet.create({
   // Ink set inline: what may be written on the accent is the accent's own.
   chipTextActive: {},
 
-  positionRow: { gap: 8, paddingRight: 20 },
 
   // The facet buttons. One row, horizontally scrollable, replacing the two
   // full option rows that used to be pinned here.
@@ -1089,7 +1088,11 @@ const styles = StyleSheet.create({
   // A set facet is filled, so "something is filtering this list" survives a
   // glance — the state that used to be one highlighted chip in a long row.
   facetActive: { borderColor: vola.textMuted, backgroundColor: vola.surfaceRaised },
-  facetText: { color: vola.textDim, fontSize: 12, fontWeight: '600' },
+  // `textMuted` (7.38:1), not `textDim` (3.96:1 — under AA). Inherited from the
+  // `posText` this replaced, where it was one option among a dozen; it is now
+  // the resting state of the only control that names the axis. The glossary
+  // label in this same file was moved off `textDim` for exactly this.
+  facetText: { color: vola.textMuted, fontSize: 12, fontWeight: '600' },
   facetTextActive: { color: vola.text },
   facetCaret: { transform: [{ rotate: '90deg' }] },
 
@@ -1118,16 +1121,6 @@ const styles = StyleSheet.create({
   optionPressed: { backgroundColor: vola.surface },
   optionText: { fontSize: 15, color: vola.textMuted },
   optionTextOn: { color: vola.text, fontWeight: '700' },
-  posChip: {
-    borderWidth: 1,
-    borderColor: vola.lineSoft,
-    borderRadius: 8,
-    paddingHorizontal: 11,
-    paddingVertical: 6,
-  },
-  posChipActive: { borderColor: vola.textMuted, backgroundColor: vola.surfaceRaised },
-  posText: { color: vola.textDim, fontSize: 12, fontWeight: '600' },
-  posTextActive: { color: vola.text },
 
   // The glossary row. A hairline above it, because this is where the header
   // stops being controls and starts being content.

@@ -10,8 +10,12 @@ import type { Exercise } from '@/lib/exercises';
  * value in the data at all, it is `horizontal_push` and `vertical_push`. So the
  * raw vocabulary is mapped to something a person would ask for.
  *
- * **Every raw value must land in a group.** `exerciseFacets.test.ts` asserts
- * that against the shipped catalog, because the failure mode is silent: an
+ * **Every raw value must land in a group** — asserted against both the shipped
+ * catalog and, for movement, the API's own closed vocabulary. Note the limit of
+ * that guarantee: `primary_muscles` is validated against no vocabulary anywhere
+ * in the backend, so the admin console can mint free-text muscles that no test
+ * here can see. The coverage claim is "everything a deploy ships", not
+ * "everything the API will accept". `exerciseFacets.test.ts` asserts because the failure mode is silent: an
  * unmapped muscle makes its exercises unreachable through the filter while they
  * still exist in the list, so nothing looks broken and a handful of exercises
  * are simply undiscoverable. Adding a muscle to `exercises.json` without adding
@@ -30,8 +34,9 @@ export type Facet = { key: string; label: string };
  *
  * **Glutes are their own group rather than part of Legs**, which looks odd
  * anatomically and is right here: `glutes` is the single most common primary
- * muscle in the catalog (138 of 504), so folding it into Legs makes that group
- * a third of everything and useless to browse. Neck and Full body are small but
+ * muscle in the catalog (138 of 504). Legs is already 159 of 504 on its own —
+ * 31%, the largest group by some way — and merging glutes in takes it to
+ * roughly half the catalog, which is not a filter. Neck and Full body are small but
  * kept honest rather than swept into an "Other" that tells nobody anything.
  */
 export const MUSCLE_GROUPS: (Facet & { muscles: readonly string[] })[] = [
@@ -114,10 +119,18 @@ export const MOVEMENT_GROUPS: (Facet & { patterns: readonly string[] })[] = [
   { key: 'hinge', label: 'Hinge', patterns: ['hinge'] },
   { key: 'lunge', label: 'Lunge', patterns: ['lunge'] },
   { key: 'carry', label: 'Carry', patterns: ['carry'] },
-  { key: 'core', label: 'Core', patterns: ['core', 'rotation'] },
+  // "Trunk", not "Core", because MUSCLE_GROUPS already has a Core: the button
+  // face shows only the chosen value, so setting both gave two adjacent pills
+  // reading "Core" with no way to tell which axis was which.
+  { key: 'core', label: 'Trunk', patterns: ['core', 'rotation'] },
   { key: 'isolation', label: 'Isolation', patterns: ['isolation'] },
   { key: 'power', label: 'Power', patterns: ['olympic', 'jump'] },
-  { key: 'conditioning', label: 'Conditioning', patterns: ['locomotion'] },
+  // `grappling` is in the API's closed vocabulary and shipped by no row today,
+  // so the coverage test — whose oracle is the shipped catalog — was green on
+  // the one hole that actually existed. The first admin-authored exercise using
+  // it would have been silently unreachable. Now mapped, and the vocabulary
+  // itself is asserted alongside the rows.
+  { key: 'conditioning', label: 'Conditioning', patterns: ['locomotion', 'grappling'] },
   { key: 'mobility', label: 'Mobility', patterns: ['mobility'] },
 ];
 

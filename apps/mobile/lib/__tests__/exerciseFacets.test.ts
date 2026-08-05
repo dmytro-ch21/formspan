@@ -34,7 +34,42 @@ type RawExercise = {
   primary_muscles?: string[];
 };
 
-const rows: RawExercise[] = Array.isArray(catalog) ? catalog : (catalog.exercises ?? []);
+const additions = require('../../../../backend/internal/modules/exercise/exercises.additions.json') as
+  | { exercises?: RawExercise[] }
+  | RawExercise[];
+
+/**
+ * Both catalog files, not just the seed one.
+ *
+ * `exercises.additions.json` is where `cmd/exportcontent` writes anything
+ * authored in the admin console — i.e. it is the file that actually produces
+ * NEW vocabulary. Reading only the seed meant the coverage test watched the
+ * door new values do not come through. It is `[]` today, which is exactly when
+ * it is cheap to wire up.
+ */
+const rows: RawExercise[] = [
+  ...(Array.isArray(catalog) ? catalog : (catalog.exercises ?? [])),
+  ...(Array.isArray(additions) ? additions : (additions.exercises ?? [])),
+];
+
+/**
+ * The API's closed vocabulary for `movement_pattern`, mirrored from
+ * `backend/internal/modules/exercise/seed.go`'s `validMovementPatterns`.
+ *
+ * The rows-based test below has a blind spot review found: its oracle is what
+ * SHIPS, so a legal-but-unused value is invisible to it — `grappling` was
+ * exactly that, accepted by the API and mapped by nothing. Asserting the
+ * vocabulary as well as the rows closes it. Hand-mirrored, so it can drift;
+ * the mirror failing loudly is better than the silence it replaces.
+ */
+const API_MOVEMENT_PATTERNS = [
+  'squat', 'hinge', 'lunge',
+  'horizontal_push', 'vertical_push',
+  'horizontal_pull', 'vertical_pull',
+  'carry', 'core', 'rotation',
+  'locomotion', 'grappling', 'olympic',
+  'jump', 'mobility', 'isolation',
+];
 
 it('the shipped catalog is not empty, or every assertion below is vacuous', () => {
   expect(rows.length).toBeGreaterThan(400);
@@ -64,6 +99,15 @@ it('every movement pattern in the catalog belongs to a group', () => {
   expect(Object.fromEntries(unmapped)).toEqual({});
 });
 
+it('every movement pattern the API ACCEPTS belongs to a group, not just the shipped ones', () => {
+  // The catalog is not the contract. `grappling` was legal, unused, and
+  // unmapped — so the first console-authored exercise using it would have been
+  // silently unreachable through the filter, which is the exact failure this
+  // suite exists to prevent, arriving through the door it was not watching.
+  const unmapped = API_MOVEMENT_PATTERNS.filter((p) => movementGroupOf(p) === null);
+  expect(unmapped).toEqual([]);
+});
+
 it('every group is reachable — none is an empty option', () => {
   // A group nobody can select is worse than a missing one: it looks like a
   // working filter and always answers "nothing matches".
@@ -72,7 +116,11 @@ it('every group is reachable — none is an empty option', () => {
     expect({ group: g.key, hit: g.muscles.some((m) => muscles.has(m)) })
       .toEqual({ group: g.key, hit: true });
   }
-  const patterns = new Set(rows.map((r) => r.movement_pattern ?? ''));
+  // Against the API vocabulary, not the shipped rows: `grappling` is legal and
+  // currently unused, so a rows-only check would call Conditioning unreachable
+  // for mapping it. The property that matters is that no group is composed
+  // entirely of values the API would reject.
+  const patterns = new Set(API_MOVEMENT_PATTERNS);
   for (const g of MOVEMENT_GROUPS) {
     expect({ group: g.key, hit: g.patterns.some((p) => patterns.has(p)) })
       .toEqual({ group: g.key, hit: true });
