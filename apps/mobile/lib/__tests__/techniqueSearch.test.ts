@@ -168,7 +168,8 @@ describe('searchTechniques against the real catalog', () => {
     // The previous version derived the set from `fold(f) !== f.toLowerCase()`
     // and claimed an empty set would fail it. Backwards: under an identity
     // fold that predicate is true for anything containing a capital letter, so
-    // the set grew to all 466 and the test passed. Measured, not assumed.
+    // the set grew to the whole catalog and the test passed. Measured, not
+    // assumed.
     const typedForms = (t: TechniqueSummary) =>
       [t.name, ...t.aliases, t.position].map(foldForSearch).filter((f) => f.length > 0);
     const unfoldedWouldFind = (t: TechniqueSummary, typed: string) =>
@@ -267,7 +268,7 @@ describe('the spoken forms of a technique', () => {
     // "to the" strips to nothing. Returning the whole catalog there would be
     // indistinguishable from an empty box, so the joiners are kept as terms.
     // Not a real search, but the athlete typed something and deserves the
-    // honest answer rather than all 466.
+    // honest answer rather than the whole catalog.
     expect(searchTechniques(catalog, 'to the').length).toBeLessThan(catalog.length);
   });
 });
@@ -306,7 +307,8 @@ describe('rankTechniques', () => {
 
   it('reaches techniques through category and function alone', () => {
     // The W_META rung had no behavioural cover in either app: deleting it left
-    // every test green while 418 of 466 rows lost reachability for some term.
+    // every test green while 418 of the 466 rows the library then held lost
+    // reachability for some term.
     // `function` is the half that diverged between the apps, so it is pinned
     // by a query no other field can satisfy — no name or position says
     // "reverse", but every sweep carries function=reverse.

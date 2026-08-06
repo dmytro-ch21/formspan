@@ -199,7 +199,7 @@ func TestPostgresRepository_ListFilters(t *testing.T) {
 	}
 
 	// The catalog holds NO bjj entries, deliberately. BJJ content is the
-	// technique library (`internal/modules/technique`, 466 entries); the 20
+	// technique library (`internal/modules/technique`, 542 entries); the 20
 	// drills that used to live here made "BJJ" in the Library mean two
 	// different things at once. If this ever comes back non-empty, either the
 	// seed regained them or migration 000019 did not run — both of which put

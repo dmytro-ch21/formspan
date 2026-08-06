@@ -205,7 +205,7 @@ func (r *PostgresRepository) Rulesets(ctx context.Context) ([]Ruleset, error) {
 	return out, nil
 }
 
-// Positions returns all ten in reading order. `id` breaks ties so the order is
+// Positions returns all eleven in reading order. `id` breaks ties so the order is
 // total rather than merely sorted — two entries sharing an order_index would
 // otherwise come back in whatever order the scan produced, and a glossary that
 // reshuffles between opens looks broken.

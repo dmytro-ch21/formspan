@@ -8,16 +8,16 @@ const API_BASE = `${API_URL}/v1`;
 /**
  * The BJJ technique library on the phone.
  *
- * Three deliberate shapes here, all of them about keeping a 466-entry library
+ * Three deliberate shapes here, all of them about keeping a 542-entry library
  * feeling instant:
  *
  * 1. **Summary vs Technique.** The list endpoint returns summaries — no prose.
- *    Full rows would be ~274 KB to draw a scrolling list; summaries are ~65 KB.
+ *    Full rows would be ~587 KB to draw a scrolling list; summaries are ~197 KB.
  *    The detail screen fetches the one technique it needs.
  * 2. **Search is local.** Summaries carry `aliases`, so filtering happens in
  *    memory against a list already held. Typing does not hit the network, which
  *    is what makes it feel immediate rather than merely fast.
- * 3. **Rulesets are fetched once.** 25 of them cover all 466 techniques, and
+ * 3. **Rulesets are fetched once.** 25 of them cover all 542 techniques, and
  *    they change with the IBJJF rulebook rather than with the library. Held in
  *    a module-level cache so a legality badge on every row costs no requests.
  */
@@ -35,8 +35,8 @@ export type Ruleset = {
    * A genuine restriction, as opposed to the shape of IBJJF's divisions.
    * Trust this field — do NOT infer restriction by counting belts. Adult no-gi
    * has no white belt division, so a no-gi list of Blue/Purple/Brown/Black is
-   * the baseline; counting marks ~130 ordinary techniques as restricted when
-   * only 20 are.
+   * the baseline; counting marks 441 ordinary techniques as restricted when
+   * only 27 are.
    */
   is_restricted: boolean;
   notes: string;
@@ -108,7 +108,7 @@ export async function fetchTechniques(
   getToken: TokenGetter,
   signal?: AbortSignal,
 ): Promise<TechniqueSummary[]> {
-  // Fetched unfiltered on purpose. The whole library is ~65 KB as summaries,
+  // Fetched unfiltered on purpose. The whole library is ~197 KB as summaries,
   // and holding all of it makes filtering and search local — a per-keystroke
   // request would be slower and would fail offline.
   if (summaryCache) return summaryCache;
@@ -171,11 +171,11 @@ export async function fetchTechnique(
 /**
  * The summaries, cached for the app's lifetime.
  *
- * Originally this existed because the detail screen refetched all 466 (~65 KB)
+ * Originally this existed because the detail screen refetched all 542 (~197 KB)
  * on every open just to decide which edges were tappable. Those links are gone,
  * and so is that fetch — but the cache still earns its keep: the Library holds
  * the whole list to search locally, so returning to the tab is free rather than
- * another ~65 KB, and typing never touches the network.
+ * another ~197 KB, and typing never touches the network.
  *
  * Failures are not cached: a null cache retries, an empty array would look
  * like a library with nothing in it.
@@ -263,8 +263,8 @@ export function foldForSearch(value: string): string {
 /**
  * Folded fields, cached per technique object.
  *
- * Search runs on every keystroke over the whole 466-entry library. Folding
- * name + aliases + position each time is 1592 fold calls per character typed,
+ * Search runs on every keystroke over the whole 542-entry library. Folding
+ * name + aliases + position each time is 2141 fold calls per character typed,
  * measured at 0.774 ms uncached against 0.029 ms cached on Node (27x) — Hermes
  * is several times slower again, which is where it starts to matter on a phone
  * mid-session. Now six fields rather than three, so the cache matters more,
@@ -337,7 +337,7 @@ function queryTokens(query: string): string[] {
   const all = folded.split(' ').filter(Boolean);
   const kept = all.filter((w) => !STOP_WORDS.has(w));
   // A query of nothing BUT joiners ("to the") keeps them rather than becoming
-  // an empty search that returns all 466 — the athlete typed something.
+  // an empty search that returns all 542 — the athlete typed something.
   return kept.length > 0 ? kept : all;
 }
 
@@ -442,25 +442,27 @@ export function rankTechniques(list: TechniqueSummary[], query: string): Techniq
  * line." That is five instructions wearing a paragraph, and it is the single
  * biggest reason the detail screen read as a wall of text.
  *
- * Measured across all 466 before being built on: 458 (98%) split into 2+ steps,
- * clustered at 3–4, averaging 30 characters each, with no step under 10 or over
- * 110 characters. The remaining 8 return `[]` and the caller renders the
- * original prose — a one-item numbered list looks like a bug.
+ * Re-measured across all 542 (2026-08-06): 535 (99%) split into 2+ steps,
+ * clustered at 3–4, averaging 33 characters each and none under 10. The upper
+ * bound this once claimed no longer holds — 11 of 1960 steps run past 110
+ * characters, the longest 169 — so the renderer must wrap rather than assume a
+ * single line. The remaining 7 return `[]` and the caller renders the original
+ * prose — a one-item numbered list looks like a bug.
  *
  * The fragment-folding rule is length-only on purpose. An earlier version also
  * folded anything under three words and swallowed real instructions: "break
  * posture" is a step, not a tail. Length alone separates the two cleanly on
  * this corpus.
 
- * The split deliberately avoids a lookbehind. `(?<=\.)\s+` fired on zero of
- * 466 (trailing periods are stripped anyway), and on web `lib/api.ts` is
+ * The split deliberately avoids a lookbehind. `(?<=\.)\s+` fires on zero of
+ * 542 (trailing periods are stripped anyway), and on web `lib/api.ts` is
  * imported by every dashboard page — a regex literal Next/SWC does not
  * transpile, so an unsupported feature is a parse-time SyntaxError that takes
  * the whole dashboard down on Safari/iOS < 16.4. `\.\s+` is byte-identical on
  * this corpus and carries no engine-support risk.
  *
- * `;` joins the split for the same reason `,` does: 6 of the 8 prose fallbacks
- * were semicolon-joined instruction pairs.
+ * `;` joins the split for the same reason `,` does: on the current corpus a
+ * comma-only split falls back to prose on 9, and `;` rescues 2 of them.
  */
 export function executionSteps(description: string): string[] {
   const raw = (description || '').trim();

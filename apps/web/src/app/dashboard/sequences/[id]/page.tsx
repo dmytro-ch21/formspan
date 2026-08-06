@@ -17,7 +17,7 @@ import { deleteSequence, getSequence, type Sequence } from "@/lib/api";
  * something entirely different.
  *
  * A step whose destination is unrecorded shows as a gap on purpose. That is
- * honest — the library knows `to_position` for 191 of 634 techniques, so most
+ * honest — the library knows `to_position` for 170 of 542 techniques, so most
  * chains genuinely have holes — and it is the prompt to fill one in.
  */
 export default function SequenceDetailPage() {

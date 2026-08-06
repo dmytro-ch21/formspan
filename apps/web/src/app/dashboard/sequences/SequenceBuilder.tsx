@@ -23,7 +23,7 @@ import {
  * The same two-pane shape the curriculum and workout builders use, for the same
  * reason — you are picking from a catalog too big to remember, so it has to
  * stay visible while you assemble. **Web, per the platform rule**: choosing
- * four techniques out of 634 and saying where each one leaves you is a desk
+ * four techniques out of 542 and saying where each one leaves you is a desk
  * activity, not something done between rounds.
  *
  * WHAT THIS SCREEN HAS TO TEACH, because nothing else will:

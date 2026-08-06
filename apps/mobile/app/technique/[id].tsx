@@ -31,7 +31,7 @@ import { useAuthToken } from '@/lib/useAuthToken';
  *
  * 1. **The description is a step list, so it renders as one.** The library
  *    authors it as one comma-separated sentence; `executionSteps` splits it,
- *    which works for 458 of 466 (the rest fall back to prose). This is the
+ *    which works for 535 of 542 (the rest fall back to prose). This is the
  *    difference between a paragraph you re-read and a sequence you can follow
  *    between rounds.
  * 2. **A hero that is a designed object, not a missing photo.** Techniques have
@@ -179,7 +179,7 @@ export default function TechniqueScreen() {
             ))}
           </Card>
         ) : (
-          // 8 of 466 don't split into a sequence. A one-item numbered list
+          // 7 of 542 don't split into a sequence. A one-item numbered list
           // reads as a bug, so those keep their paragraph.
           !!t.description && (
             <Card title="How it works" accent={accent}>
@@ -255,7 +255,7 @@ export default function TechniqueScreen() {
  * The hero — and the media slot.
  *
  * Techniques have no image field yet. Rather than leave a grey rectangle that
- * reads as a failed download on all 466, the band carries the category mark:
+ * reads as a failed download on all 542, the band carries the category mark:
  * the tile, plus an oversized tinted watermark, as a deliberate graphic. When
  * real imagery arrives, pass `heroImage` and it takes over the same space with
  * no layout change — which is the point of building the slot now.
@@ -353,7 +353,7 @@ function Chip({ label }: { label: string }) {
  * `is_restricted` comes from the API and is NOT re-derived here. Adult no-gi
  * has no white belt division, so a no-gi list of "Blue, Purple, Brown, Black"
  * is the baseline rather than a restriction — inferring from belt counts marks
- * ~130 ordinary techniques as restricted when the real number is 20.
+ * 441 ordinary techniques as restricted when the real number is 27.
  */
 function Legality({ ruleset }: { ruleset: Ruleset }) {
   const warn = ruleset.is_restricted;
@@ -398,8 +398,8 @@ function Division({ label, belts, note }: { label: string; belts: string[]; note
  * The graph, as reference text.
  *
  * These were tappable links until the coverage was looked at honestly: only
- * ~80% of `setup_from` entries name a real library entry, and for
- * `common_next_moves` it is ~29%, for `common_counters` ~6%. The rest is prose
+ * ~84% of `setup_from` entries name a real library entry, and for
+ * `common_next_moves` it is ~30%, for `common_counters` ~7%. The rest is prose
  * — "establish grips or inside ties". So most rows were plain text sitting
  * beside a few links, which reads as a feature that half-works rather than a
  * graph.

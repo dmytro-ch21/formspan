@@ -303,7 +303,7 @@ func TestListProficiencyOrderIsTotalAndStable(t *testing.T) {
 	// tiebreak is redundant ONLY while `COUNT(DISTINCT session_id)` keeps the
 	// aggregate sorted. Drop that column and the planner picks a HashAggregate,
 	// whose group output is bucket order — measured on 466 tied techniques,
-	// 459 of 466 positions moved between plans. So the tiebreak is load-bearing
+	// 459 of those 466 positions moved between plans. So the tiebreak is load-bearing
 	// and currently invisible, which is the worst combination to leave
 	// undocumented.
 }

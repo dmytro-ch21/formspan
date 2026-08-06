@@ -824,7 +824,7 @@ export type BjjProficiencySummary = {
  *
  * The list is short (max 5) and turns over every few weeks. It is what makes
  * technique-level capture affordable on the phone: the reflection wizard shows
- * these as one-tap rows instead of asking anyone to search 466 library entries
+ * these as one-tap rows instead of asking anyone to search 542 library entries
  * mid-reflection.
  */
 export type BjjFocus = {
@@ -1124,8 +1124,8 @@ export type Ruleset = {
    * A genuine restriction, as opposed to the shape of IBJJF's divisions.
    * Trust this field — do NOT infer restriction by counting belts. Adult no-gi
    * has no white belt division, so a no-gi list of Blue/Purple/Brown/Black is
-   * the baseline; counting marks ~130 ordinary techniques as restricted when
-   * only 20 are.
+   * the baseline; counting marks 441 ordinary techniques as restricted when
+   * only 27 are.
    */
   is_restricted: boolean;
   notes: string;
@@ -1178,7 +1178,7 @@ export type Technique = TechniqueSummary & {
 /**
  * The whole library, unfiltered and cached for the tab's lifetime.
  *
- * 466 summaries are ~65 KB; full rows would be ~274 KB and carry prose no grid
+ * 542 summaries are ~197 KB; full rows would be ~587 KB and carry prose no grid
  * can show. Fetching once makes search and filtering local, which is what lets
  * the desktop grid update as you type without a request per keystroke.
  *
@@ -1357,7 +1357,7 @@ export async function getPosition(
  * The techniques that happen in a position, resolved locally.
  *
  * This is why `family` exists and why there is no per-position endpoint: the
- * Library already holds all 466 summaries, so the cross-link costs a filter
+ * Library already holds all 542 summaries, so the cross-link costs a filter
  * rather than a request.
  *
  * Two axes, and applying only the first is the bug this shipped with once.
@@ -1388,7 +1388,7 @@ export function techniquesInPosition(
 
 /**
  * One collator, built once — `localeCompare` re-enters ICU per call, and open
- * guard alone sorts 124 entries.
+ * guard alone sorts 138 entries.
  */
 const collator = new Intl.Collator(undefined, { sensitivity: "base" });
 
@@ -1418,7 +1418,7 @@ function queryTokens(query: string): string[] {
   const all = folded.split(" ").filter(Boolean);
   const kept = all.filter((w) => !STOP_WORDS.has(w));
   // A query of nothing BUT joiners ("to the") keeps them rather than becoming
-  // an empty search that returns all 466 — the athlete typed something.
+  // an empty search that returns all 542 — the athlete typed something.
   return kept.length > 0 ? kept : all;
 }
 
@@ -1589,8 +1589,8 @@ type Folded = {
 /**
  * Folded fields, cached per technique object.
  *
- * Search runs on every keystroke over the whole 466-entry library. Folding
- * name + aliases + position each time is 1592 fold calls per character typed,
+ * Search runs on every keystroke over the whole 542-entry library. Folding
+ * name + aliases + position each time is 2141 fold calls per character typed,
  * measured at 0.774 ms uncached against 0.029 ms cached. Now six fields
  * rather than three, so the cache matters more, not less.
  *
@@ -1636,8 +1636,8 @@ function folded(t: TechniqueSummary): Folded {
  * across the shoulder, clamp the knees, and extend the hips through the elbow
  * line." That is five instructions wearing a paragraph.
  *
- * Measured across all 466 before being built on: 458 (98%) split into 2+ steps,
- * clustered at 3–4, averaging 30 characters each. The remaining 8 return `[]`
+ * Re-measured across all 542 (2026-08-06): 535 (99%) split into 2+ steps,
+ * clustered at 3–4, averaging 33 characters each. The remaining 7 return `[]`
  * and the caller renders the original prose — a one-item numbered list looks
  * like a bug.
  *
@@ -1645,15 +1645,15 @@ function folded(t: TechniqueSummary): Folded {
  * `apps/mobile/lib/techniques.ts`; the two screens must not disagree about
  * where a step ends.
 
- * The split deliberately avoids a lookbehind. `(?<=\.)\s+` fired on zero of
- * 466 (trailing periods are stripped anyway), and on web `lib/api.ts` is
+ * The split deliberately avoids a lookbehind. `(?<=\.)\s+` fires on zero of
+ * 542 (trailing periods are stripped anyway), and on web `lib/api.ts` is
  * imported by every dashboard page — a regex literal Next/SWC does not
  * transpile, so an unsupported feature is a parse-time SyntaxError that takes
  * the whole dashboard down on Safari/iOS < 16.4. `\.\s+` is byte-identical on
  * this corpus and carries no engine-support risk.
  *
- * `;` joins the split for the same reason `,` does: 6 of the 8 prose fallbacks
- * were semicolon-joined instruction pairs.
+ * `;` joins the split for the same reason `,` does: on the current corpus a
+ * comma-only split falls back to prose on 9, and `;` rescues 2 of them.
  */
 export function executionSteps(description: string): string[] {
   const raw = (description || "").trim();

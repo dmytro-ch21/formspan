@@ -94,7 +94,7 @@ func TestEverySeededCriterionIsLegal(t *testing.T) {
 // THE ONE THAT NEEDS A DATABASE: every technique_id has to exist in the library.
 //
 // A syllabus pointing at nothing is the failure most likely to ship — ids are
-// hand-authored, the catalog is 466 entries, and nothing else checks. Seeding
+// hand-authored, the catalog is 542 entries, and nothing else checks. Seeding
 // would fail loudly on deploy, which is late.
 func TestEverySeededTechniqueExistsInTheLibrary(t *testing.T) {
 	url := os.Getenv("TEST_DATABASE_URL")

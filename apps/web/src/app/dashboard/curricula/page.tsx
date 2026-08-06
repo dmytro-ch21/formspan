@@ -17,7 +17,7 @@ import {
  *
  * **Web, per the platform rule, and the design doc says so in as many words:**
  * "roadmap *building* and the full funnel on web", in on Plan and out on Today.
- * Choosing a dozen techniques out of a 466-entry catalog and setting what
+ * Choosing a dozen techniques out of a 542-entry catalog and setting what
  * mastering each one takes is not something anyone does between rounds.
  *
  * The two ideas this screen has to teach, because nothing else will:

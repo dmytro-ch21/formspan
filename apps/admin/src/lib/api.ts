@@ -270,7 +270,7 @@ export type Technique = {
 /**
  * The techniques the console owns.
  *
- * Not the whole catalog: PATCH refuses a seeded row, so the other 466 would be
+ * Not the whole catalog: PATCH refuses a seeded row, so the other 542 would be
  * rows that 409 when clicked. The screen says where those live instead.
  */
 export async function listAuthoredTechniques(): Promise<Technique[]> {

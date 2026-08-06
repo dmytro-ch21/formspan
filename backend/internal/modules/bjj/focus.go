@@ -17,7 +17,7 @@ import (
 // than a second row beside it, and there is nowhere left to double-record.
 //
 // It also puts technique-level detail where it earns its cost. Naming a
-// technique means searching 466 library entries; across the whole catalog that
+// technique means searching 542 library entries; across the whole catalog that
 // data is mostly noise, across the three-to-five things you are developing it
 // is the most valuable evidence in the system.
 type Focus struct {

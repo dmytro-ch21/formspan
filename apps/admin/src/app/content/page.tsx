@@ -10,7 +10,7 @@ import { OwnershipNote } from "./ContentNav";
  *
  * Deliberately NOT the whole catalog. `PATCH /v1/admin/techniques/{id}` refuses
  * a seeded row — the JSON owns those and an edit here would be reverted by the
- * next deploy — so listing all 466 would offer hundreds of rows that 409 when
+ * next deploy — so listing all 542 would offer hundreds of rows that 409 when
  * clicked. The empty state and the note below say where the rest live instead.
  */
 export default async function ContentPage() {

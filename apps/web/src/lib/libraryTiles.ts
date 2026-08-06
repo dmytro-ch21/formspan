@@ -83,10 +83,11 @@ export function patternBadge(pattern: string): readonly [string, Accent] {
 /**
  * Position filters, keyed on the *family* rather than the exact position.
  *
- * Exact keys ("Mount - Top") reached 274 of 466 techniques and excluded every
- * bottom and escape position — half the library, and the half a white belt
+ * Exact keys ("Mount - Top") reach 219 of 542 techniques and exclude every
+ * bottom and escape position — most of the library, and the part a white belt
  * needs most. A chip labelled "Mount" that returns only Mount-Top is also a
- * label making a promise the filter doesn't keep. Families cover 465 of 466.
+ * label making a promise the filter doesn't keep. Families cover 539 of 542;
+ * the 3 left out are the catch-all "Other" position.
  *
  * A family missing from this list is now worse than search-only: the glossary
  * row on the same screen advertises the position with a card, so the reader is

@@ -55,8 +55,10 @@ type Ruleset struct {
 	// Whether this is a genuine restriction rather than the shape of IBJJF's
 	// divisions. Adult no-gi has no white belt division, so a no-gi listing of
 	// "Blue, Purple, Brown, Black" is the baseline. Do not re-derive this by
-	// comparing belt lists — that reads ~130 ordinary techniques as restricted
-	// when the true number is 27.
+	// comparing belt lists: treating any non-empty list that omits White as a
+	// restriction flags 21 of the 25 rulesets and 468 techniques — 441 of them
+	// ordinary — because adult no-gi has no white belt division at all. The
+	// true number is 27.
 	IsRestricted bool `json:"is_restricted"`
 
 	Notes   string   `json:"notes"`
@@ -67,19 +69,21 @@ type Ruleset struct {
 // library, and nothing else.
 //
 // The library is 542 techniques and the long prose fields dominate its size —
-// returning full rows from the list endpoint ships ~570 KB to draw a scrolling
-// list. This is ~180 KB. Aliases are included deliberately: the client searches
-// locally, and "kesa gatame" has to find "Scarf Hold".//
-// The numbers, re-measured 2026-08-06 over the seeded 542 (post gap-fill):
-// the summary list is ~180 KB gzipping to ~19 KB, full rows ~570 KB before
-// the embedded ruleset Get adds on top. At 466 they were ~175/~485 KB
-// (~795 KB from Get); they were originally written as "~70 KB / ~550 KB"
-// and drifted 2.3x as the library grew and gained `function`, `setup_from`
-// and `to_position` — which matters because these figures ARE the argument
-// for the split, quoted in a schema description a client author reads.
+// returning full rows from the list endpoint ships ~587 KB to draw a scrolling
+// list. This is ~197 KB. Aliases are included deliberately: the client searches
+// locally, and "kesa gatame" has to find "Scarf Hold".
+//
+// The numbers, re-measured 2026-08-06 over the seeded 542 (post gap-fill) by
+// marshalling the real response envelope: the summary list is 197.3 KB
+// gzipping to 22.2 KB, full rows 587.3 KB before the embedded ruleset Get adds
+// on top. At 466 the same instrument measured 164.2 KB for the list; they were
+// originally written as "~70 KB / ~550 KB" and drifted 2.3x as the library
+// grew and gained `function`, `setup_from` and `to_position` — which matters
+// because these figures ARE the argument for the split, quoted in a schema
+// description a client author reads. Re-measure them; do not re-type them.
 //
 // Worth knowing before optimising the payload further: the backend has no
-// response compression at all, and this list gzips to ~17 KB. One middleware
+// response compression at all, and this list gzips to ~22 KB. One middleware
 // would dwarf any field-level saving here.
 type Summary struct {
 	ID       string   `json:"id"`
@@ -128,8 +132,10 @@ type Summary struct {
 	// a position screen and any "what should I learn next" answer are made of.
 	//
 	// Detail-only, it would cost one request per technique to walk a single
-	// hop. On the summary it costs ~21 KB on a ~149 KB list (+14%), against
-	// ~478 KB for shipping full rows. Names rather than ids, matching the
+	// hop. On the summary it costs ~24 KB on a ~173 KB list (+14%) — measured
+	// against the field being ABSENT, which is what "detail-only" means, not
+	// against an empty array — versus ~587 KB for shipping full rows. Names
+	// rather than ids, matching the
 	// detail payload — see the migration for why.
 	SetupFrom []string `json:"setup_from"`
 }
@@ -248,8 +254,8 @@ type Technique struct {
 	// The graph edges: what this is set up from, what follows it, and what
 	// answers it. Names rather than IDs — see the migration for why.
 	//
-	// Only setup_from is reliably a graph (~80% of its entries name a real
-	// technique). CommonNextMoves resolves ~29% and CommonCounters ~6%; the
+	// Only setup_from is reliably a graph (~84% of its entries name a real
+	// technique). CommonNextMoves resolves ~30% and CommonCounters ~7%; the
 	// rest is prose like "establish grips or inside ties". A client may link
 	// the ones that resolve but must render the others as plain text.
 	SetupFrom       []string `json:"setup_from"`
@@ -281,7 +287,7 @@ type Repository interface {
 	Get(ctx context.Context, id string) (*Technique, error)
 	Rulesets(ctx context.Context) ([]Ruleset, error)
 
-	// Positions returns all ten, ordered pedagogically. GetPosition reports a
+	// Positions returns all eleven, ordered pedagogically. GetPosition reports a
 	// missing id as ErrNotFound — the same sentinel Get uses, because the two
 	// id namespaces are disjoint and a caller always knows which it asked for.
 	Positions(ctx context.Context) ([]Position, error)

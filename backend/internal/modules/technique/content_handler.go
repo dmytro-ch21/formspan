@@ -125,9 +125,11 @@ func (h *ContentHandler) Positions(w http.ResponseWriter, r *http.Request) {
 //
 // Deliberately NOT the whole catalog. The console can only edit admin-authored
 // rows — UpdateTechnique refuses a seeded one, because the JSON owns those and
-// an edit here is reverted by the next deploy — so listing all 466 would offer
-// 466 rows of which 16 are actionable. The screen says where the rest live
-// instead.
+// an edit here is reverted by the next deploy — so listing all 542 would offer
+// 542 rows of which only the handful with `source = 'admin'` are actionable.
+// That count is runtime state, not a property of the seed: it rises as the
+// console authors and drops back to zero on `exportcontent -adopt`. The screen
+// says where the rest live instead.
 //
 // Unbounded, like the export's read of the same set: this grows by hand, one
 // technique at a time, and a console that silently truncated its own content

@@ -145,7 +145,7 @@ export function inPositionFamily(position: string, family: string): boolean {
  * The techniques that happen in a position, resolved locally.
  *
  * This is why `family` exists and why there is no per-position endpoint: the
- * Library already holds all 466 summaries, so the cross-link costs a filter
+ * Library already holds all 542 summaries, so the cross-link costs a filter
  * rather than a request, and works with no connection.
  *
  * Sorted by name because the list endpoint orders by position first, which
@@ -161,7 +161,7 @@ export function techniquesInPosition(
     .filter((t) => {
       if (!inPositionFamily(t.position, family)) return false;
       // The second axis, and the one that stops Closed Guard and Open Guard
-      // being the same 187 rows. `position` is only ever "Guard - Bottom";
+      // being the same 185 rows. `position` is only ever "Guard - Bottom";
       // `position_detail` is what knows which guard. Applying just one of the
       // two silently restores the bug for whichever entry uses the other.
       if (includes.length > 0 && !includes.includes(t.position_detail)) return false;

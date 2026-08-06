@@ -539,10 +539,12 @@ components:
 
 
             SPARSE ON PURPOSE, and absent far more often than present. It is
-            authored rather than derived: name parsing reaches 42% (mostly
-            submissions, whose destination is the end of the exchange), and
-            inverting `setup_from` infers a real position change for only 22
-            of the 466 rows the column was authored over — that edge links
+            authored rather than derived: name parsing reached 42% over the
+            466 rows then held (mostly submissions, whose destination is the
+            end of the exchange), and inverting `setup_from` infers a real
+            position change for only 47 of the 542 rows the column was
+            authored over — of the 184 with followers, 137 have every
+            follower in the SAME position, because that edge links
             control-to-attack WITHIN a position.
             Populated where the destination is both knowable and useful
             (passes, sweeps, back takes, takedowns).
@@ -556,7 +558,7 @@ components:
         setup_from:
           type: array
           description: >
-            Graph edge — positions or techniques this is set up from. About 80%
+            Graph edge — positions or techniques this is set up from. About 84%
             of entries name a real technique in the library.
           items: { type: string }
         common_next_moves:
@@ -598,11 +600,11 @@ components:
       description: >
         The list row. Carries what is needed to render, filter and search the
         library and nothing else — the prose fields are most of the library's
-        bytes and a list needs none of them. Full rows would ship ~570 KB to
-        draw a scrolling list of 542; this is ~180 KB — re-measured
+        bytes and a list needs none of them. Full rows would ship ~587 KB to
+        draw a scrolling list of 542; this is ~197 KB — re-measured
         2026-08-06 after the curriculum gap-fill (previously ~485/~175 over
         466; originally written as ~70 KB and left to drift 2.3x).
-        Gzipped it is ~19 KB, though the API does not currently compress.
+        Gzipped it is ~22 KB, though the API does not currently compress.
 
         Aliases ARE included: the client searches locally, and "kesa gatame"
         must find "Scarf Hold".
@@ -613,7 +615,7 @@ components:
         comes from; a client inverts it once over this list to get the far
         more useful direction — what FOLLOWS from here. Detail-only, that
         would cost one request per technique to walk a single hop. It adds
-        ~21 KB (+14%).
+        ~24 KB (+14%) versus the field being absent entirely.
       required:
         [id, name, aliases, category, position, position_detail, gi_no_gi,
          typical_belt, ibjjf_ruleset_id, setup_from]
@@ -677,9 +679,10 @@ components:
 
 
             SPARSE ON PURPOSE (170 of 542) and hand-authored: name parsing
-            reaches 42%, and inverting `setup_from` infers a real position
-            change for only 22 of the 466 it was authored over, because that edge links
-            control-to-attack WITHIN a position.
+            reached 42% over the 466 rows then held, and inverting
+            `setup_from` infers a real position change for only 47 of the 542
+            it was authored over, because that edge links control-to-attack
+            WITHIN a position.
 
 
             ABSENT means NOT RECORDED, never "goes nowhere" — a technique
@@ -692,7 +695,7 @@ components:
           items: { type: string }
           description: >
             What this technique is commonly set up from, by NAME (matching
-            `name` or an entry in `aliases`), not by id. ~80% resolve to a
+            `name` or an entry in `aliases`), not by id. ~84% resolve to a
             library entry; the rest name a concept the library has no node
             for yet — "Underhook", "Crossface" — so a client should count
             what it could not resolve rather than silently dropping it.
@@ -730,7 +733,7 @@ components:
             Whether this is a GENUINE restriction rather than the shape of
             IBJJF's divisions. Adult no-gi has no white belt division, so a
             no-gi list of "Blue, Purple, Brown, Black" is the BASELINE.
-            Do NOT re-derive this by comparing belt lists — that marks ~130
+            Do NOT re-derive this by comparing belt lists — that marks 468
             ordinary techniques (pummelling, sit-outs) as restricted when the
             true number is 27. Use this field; it is computed at import.
         notes: { type: string }
@@ -2046,7 +2049,7 @@ components:
 
 
             Authored, not derived from the library's own `to_position`: that is
-            populated for 191 of 634 techniques, so deriving the chain would
+            populated for 170 of 542 techniques, so deriving the chain would
             render most sequences with holes.
         ends_at_position_name:
           type: string
