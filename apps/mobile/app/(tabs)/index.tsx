@@ -22,6 +22,7 @@ import { Icon } from '@/components/ui/Icon';
 import { sportColor } from '@/components/ui/sport';
 import { PickSessionSheet } from '@/components/ui/PickSessionSheet';
 import { PeriodSwitcher } from '@/components/ui/PeriodSwitcher';
+import { RoadmapLine } from '@/components/RoadmapLine';
 import { SectionHeader } from '@/components/ui/Section';
 import { TrendStrip } from '@/components/ui/TrendStrip';
 import { SessionCard, type Metric } from '@/components/ui/SessionCard';
@@ -35,6 +36,7 @@ import { listPlannedBetween, type PlannedSession } from '@/lib/plan';
 import { formatElapsed } from '@/lib/rest';
 import type { LoggedSet, Session } from '@/lib/sessions';
 import { cachedWorkouts, listLocalSessions } from '@/lib/sessionStore';
+import { listWorkingCurricula, type Curriculum } from '@/lib/curriculum';
 import { fetchProficiency } from '@/lib/proficiency';
 import {
   funnelGap,
@@ -379,6 +381,11 @@ export default function TodayScreen() {
    * the setting not working.
    */
   const [policy, setPolicy] = useState<{ master: boolean; off: ReadonlySet<string> } | null>(null);
+  /**
+   * The roadmaps being worked. `null` until read, like the rest — rendering an
+   * empty roadmap block for a beat is a claim that they are on none.
+   */
+  const [roadmaps, setRoadmaps] = useState<Curriculum[] | null>(null);
   const [viewPlans, setViewPlans] = useState<
     (PlannedSession & { workoutName: string | null })[]
   >([]);
@@ -425,6 +432,18 @@ export default function TodayScreen() {
    * there. This screen did not have the problem until the switcher gave it one.
    */
   const planSeq = useRef(0);
+
+  const refreshRoadmaps = useCallback(async () => {
+    if (!userId) return;
+    try {
+      setRoadmaps(await listWorkingCurricula(getToken));
+    } catch {
+      // Silent and deliberately NOT setRoadmaps([]) — the same distinction
+      // refreshFunnel makes below. An unreadable answer is not "you are on no
+      // roadmap", and rendering that would quietly retract something the
+      // athlete committed to.
+    }
+  }, [getToken, userId]);
 
   const refreshFunnel = useCallback(async () => {
     if (!userId) return;
@@ -579,10 +598,13 @@ export default function TodayScreen() {
       // every session ever logged and does not change because you looked at
       // Thursday.
       refreshFunnel();
+      // On focus, not on mount: enrolling happens on a screen pushed over these
+      // tabs, and Today stays mounted for the life of the process.
+      refreshRoadmaps();
       // Settings can have changed any of these while this screen sat mounted.
       const stop = readSuggestionPrefs();
       return stop;
-    }, [refreshSessions, refreshPlan, refreshFunnel, readSuggestionPrefs]),
+    }, [refreshSessions, refreshPlan, refreshFunnel, refreshRoadmaps, readSuggestionPrefs]),
   );
 
   // The same staleness arrives without a focus change when the app is
@@ -939,6 +961,20 @@ export default function TodayScreen() {
               no longer the first thing the screen says.
             */}
             <SectionHeader label={isPast ? 'That day' : 'Upcoming'} />
+
+            {/*
+              INSIDE Upcoming and above the plan cards, because a roadmap is
+              the same kind of thing they are: something the athlete decided in
+              advance. It is deliberately NOT beside the suggestion below —
+              that one is inference over evidence, this is a commitment, and
+              the design doc is explicit that conflating them turns a
+              curriculum into a prescription.
+
+              Only on today. A roadmap is not a fact about the Thursday you
+              stepped back to.
+            */}
+            {isToday &&
+              roadmaps?.map((c) => <RoadmapLine key={c.id} curriculum={c} />)}
 
             {owed.length > 0 ? (
               owed.map((p) => (

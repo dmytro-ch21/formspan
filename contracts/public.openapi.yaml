@@ -2935,6 +2935,46 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /curricula/working:
+    get:
+      summary: The roadmaps you are actively on, with progress
+      operationId: listWorkingCurricula
+      parameters:
+        - name: tz
+          in: query
+          required: false
+          schema: { type: string }
+          description: The caller's IANA timezone. Absent means UTC.
+      description: >
+        What Today and You read: active enrollments, each with its items and
+        real progress.
+
+
+        A separate read rather than a flag on the list because the two are
+        bounded by different things. The list spans every public curriculum and
+        is capped at 200, so computing mastery there means the per-curriculum
+        evidence aggregate once per row — to draw numbers nobody reads off a
+        browse screen. This is bounded by how many syllabuses one athlete has
+        taken on, and unlike the list its `mastered_items` is real.
+
+
+        Archived enrollments are excluded: "what am I working" is present tense.
+      responses:
+        "200":
+          description: Active roadmaps, most recently started first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [curricula]
+                properties:
+                  curricula:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Curriculum"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /curricula/{curriculumID}:
     parameters:
       - name: curriculumID

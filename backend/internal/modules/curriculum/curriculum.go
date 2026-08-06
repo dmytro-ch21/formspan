@@ -352,6 +352,17 @@ type Repository interface {
 	// List returns the curricula this caller can see — their own, plus every
 	// public one — with Enrolled and Editable resolved for them.
 	List(ctx context.Context, userID string) ([]Curriculum, error)
+	// Working returns the roadmaps this athlete is ACTIVELY on, each with its
+	// items and progress — the one question Today and You both ask.
+	//
+	// A separate read rather than a flag on List because the two are bounded by
+	// different things. List spans every public curriculum and is capped at 200;
+	// computing mastery there means the per-curriculum evidence aggregate once
+	// per row, to draw numbers nobody reads off a browse screen. This is bounded
+	// by how many syllabuses one athlete has taken on, which is one or two.
+	//
+	// Archived enrollments are excluded: "what am I working" is present tense.
+	Working(ctx context.Context, userID, tz string) ([]Curriculum, error)
 	// Get returns one with its items, and with the caller's progress against
 	// any criteria. Returns ErrNotFound for a private curriculum the caller
 	// does not own — never ErrForbidden, which would confirm it exists.

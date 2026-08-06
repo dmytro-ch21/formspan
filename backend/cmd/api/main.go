@@ -118,6 +118,11 @@ func main() {
 	// request body being able to name somebody else.
 	mux.Handle("GET /v1/curricula", verifier.RequireAuth(http.HandlerFunc(curriculumHandler.List)))
 	mux.Handle("POST /v1/curricula", verifier.RequireAuth(http.HandlerFunc(curriculumHandler.Create)))
+	// BEFORE the {curriculumID} pattern in the file, though the mux does not
+	// care: Go 1.22+ routing prefers the more specific literal segment, so
+	// /v1/curricula/working can never be read as an id. Ordered this way for
+	// the reader, not the router.
+	mux.Handle("GET /v1/curricula/working", verifier.RequireAuth(http.HandlerFunc(curriculumHandler.Working)))
 	mux.Handle("GET /v1/curricula/{curriculumID}", verifier.RequireAuth(http.HandlerFunc(curriculumHandler.Get)))
 	mux.Handle("PATCH /v1/curricula/{curriculumID}", verifier.RequireAuth(http.HandlerFunc(curriculumHandler.Update)))
 	mux.Handle("DELETE /v1/curricula/{curriculumID}", verifier.RequireAuth(http.HandlerFunc(curriculumHandler.Delete)))

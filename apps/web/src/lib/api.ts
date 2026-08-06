@@ -1849,6 +1849,20 @@ export function listCurricula(
  * reported progress "counted from" a date that had not happened and that
  * evening's training fell outside the window.
  */
+/** The roadmaps you are actively on, with real progress — the list response's
+ *  `mastered_items` is deliberately zero, this one's is not. */
+export function listWorkingCurricula(
+  getToken: Token,
+  signal?: AbortSignal,
+): Promise<Curriculum[]> {
+  return request<{ curricula: Curriculum[] }>(
+    getToken,
+    `/curricula/working?tz=${encodeURIComponent(localZone())}`,
+    {},
+    signal,
+  ).then((b) => b.curricula ?? []);
+}
+
 export function getCurriculum(
   getToken: Token,
   id: string,

@@ -59,6 +59,22 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"curricula": list})
 }
 
+// Working is what Today and You read: the roadmaps you are on, with progress.
+func (h *Handler) Working(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.ClaimsFromContext(r.Context())
+	tz, ok := zoneOf(r)
+	if !ok {
+		badZone(w)
+		return
+	}
+	list, err := h.repo.Working(r.Context(), claims.UserID, tz)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"curricula": list})
+}
+
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
 	tz, ok := zoneOf(r)

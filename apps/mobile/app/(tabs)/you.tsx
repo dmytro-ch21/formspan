@@ -5,6 +5,7 @@ import { Pressable, ScrollView, StyleSheet } from 'react-native';
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
 import { BjjRankHeader } from '@/components/BjjRankHeader';
 import { RecordsCard } from '@/components/RecordsCard';
+import { RoadmapSummary } from '@/components/RoadmapSummary';
 import { TrainingSummary } from '@/components/TrainingSummary';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
@@ -141,6 +142,13 @@ export default function YouScreen() {
                 they're the payoff for the logging above, and the thing people
                 actually open this tab to look at. */}
             <RecordsCard getToken={getToken} units={profile?.unit_system ?? 'metric'} />
+
+            {/* After Records, before Profile. Records is what you have lifted;
+                this is what you are learning — both are payoffs for logging,
+                and both belong above the account facts. It renders nothing at
+                all for an athlete on no roadmap with no focus, so a
+                strength-only account never sees an empty BJJ block. */}
+            <RoadmapSummary />
 
             <Text style={styles.sectionLabel}>Profile</Text>
             <View style={styles.card}>

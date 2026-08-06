@@ -123,6 +123,37 @@ export function listCurricula(
  * evening's training fell outside the window. Sending the zone is what makes
  * "since you started" mean the athlete's day rather than the database's.
  */
+/**
+ * The roadmaps you are actively on, with progress — what Today and You read.
+ *
+ * A separate endpoint rather than filtering the list, because the two are
+ * bounded by different things: the list spans every public curriculum, this is
+ * bounded by how many syllabuses one athlete has taken on. It also carries real
+ * `mastered_items`, which the list deliberately does not.
+ */
+export function listWorkingCurricula(
+  getToken: TokenGetter,
+  signal?: AbortSignal,
+): Promise<Curriculum[]> {
+  return apiRequest<{ curricula?: Curriculum[] }>(
+    getToken,
+    `/curricula/working?tz=${encodeURIComponent(localZone())}`,
+    { signal },
+  ).then((r) => r.curricula ?? []);
+}
+
+/**
+ * The next thing to work on a roadmap: the first unmastered step, in order.
+ *
+ * Order is the content of a syllabus, so "next" means next in the author's
+ * sequence rather than closest to done — someone put the retention before the
+ * sweep on purpose. Returns null when everything is mastered, or when the
+ * curriculum is a reading list.
+ */
+export function nextStep(c: Curriculum): CurriculumItem | null {
+  return (c.items ?? []).find((i) => i.criteria !== null && !(i.progress?.mastered ?? false)) ?? null;
+}
+
 export function getCurriculum(
   getToken: TokenGetter,
   id: string,
