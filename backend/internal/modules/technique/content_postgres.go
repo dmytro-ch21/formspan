@@ -2,6 +2,7 @@ package technique
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -48,12 +49,18 @@ func (r *PostgresRepository) KnownPositions(ctx context.Context) ([]string, erro
 	return out, rows.Err()
 }
 
-func (r *PostgresRepository) CreateTechnique(ctx context.Context, t Technique) (Technique, error) {
+func (r *PostgresRepository) CreateTechnique(ctx context.Context, t Technique, actor string) (Technique, error) {
+	return r.writeWithRevision(ctx, actor, ActionCreate, func(tx pgx.Tx) (Technique, error) {
+		return createWithin(ctx, tx, t)
+	})
+}
+
+func createWithin(ctx context.Context, tx pgx.Tx, t Technique) (Technique, error) {
 	// No ON CONFLICT. A collision has to surface as an error rather than
 	// quietly become an update: the id may already be a foreign key in
 	// somebody's training record, so rewriting the technique behind it changes
 	// what their history says they did.
-	row := r.pool.QueryRow(ctx, `
+	row := tx.QueryRow(ctx, `
 		INSERT INTO techniques (
 			id, name, aliases, category, position, position_detail, gi_no_gi,
 			typical_belt, description, setup_from, common_counters, when_to_use,
@@ -83,46 +90,35 @@ func (r *PostgresRepository) CreateTechnique(ctx context.Context, t Technique) (
 	return out, nil
 }
 
-func (r *PostgresRepository) UpdateTechnique(ctx context.Context, t Technique) (Technique, error) {
-	// ANY row is editable here, and the write TAKES OWNERSHIP of it.
-	//
-	// `source = 'admin'` used to sit in the WHERE, refusing seeded rows: an
-	// edit to one would be reverted by the next deploy's re-seed — silently,
-	// and only for the fields the change-detection tuple covers, which is the
-	// worst kind of half-applied. That was the right refusal while the
-	// spreadsheet owned 450 of the 542 and a JSON edit could not stick either.
-	//
-	// With the spreadsheet retired the refusal has no remedy to point at, so it
-	// moves to the SET clause instead: the row becomes admin-owned by the act
-	// of editing it, and the seed's own `WHERE source = 'seed'` then skips it
-	// forever after. That is what makes this safe rather than merely permitted
-	// — remove `source = 'admin'` from the SET and the next deploy quietly
-	// undoes every edit made here, which is exactly the hazard the WHERE was
-	// guarding against.
-	//
-	// Getting the row back under the deploy is `exportcontent -adopt`, after
-	// the JSON is committed and shipped. Still one statement, so it cannot
-	// race.
-	row := r.pool.QueryRow(ctx, `
-		UPDATE techniques SET
-			name = $2, aliases = $3, category = $4, position = $5,
-			position_detail = $6, gi_no_gi = $7, typical_belt = $8,
-			description = $9, setup_from = $10, common_counters = $11,
-			when_to_use = $12, common_next_moves = $13, video_reference = $14,
-			source_notes = $15, ibjjf_ruleset_id = NULLIF($16, ''),
-			function = NULLIF($17, ''), to_position = NULLIF($18, ''),
-			source = 'admin', updated_at = now()
-		WHERE id = $1
-		RETURNING `+contentReturning,
+// updateSQL is shared by the edit path and Restore, which must write the row
+// exactly the same way — a restore that misses a column is a rollback to a
+// state that never existed.
+const updateSQL = `
+	UPDATE techniques SET
+		name = $2, aliases = $3, category = $4, position = $5,
+		position_detail = $6, gi_no_gi = $7, typical_belt = $8,
+		description = $9, setup_from = $10, common_counters = $11,
+		when_to_use = $12, common_next_moves = $13, video_reference = $14,
+		source_notes = $15, ibjjf_ruleset_id = NULLIF($16, ''),
+		function = NULLIF($17, ''), to_position = NULLIF($18, ''),
+		source = 'admin', updated_at = now()
+	WHERE id = $1
+	RETURNING ` + contentReturning
+
+// updateWithin runs the edit inside a caller's transaction, so the write and
+// its revision commit together.
+//
+// `status` is absent from the SET on purpose, in both callers: editing a
+// published technique must not withdraw it, and restoring an old revision must
+// not unpublish it. Visibility changes only through Publish.
+func updateWithin(ctx context.Context, tx pgx.Tx, t Technique) (Technique, error) {
+	row := tx.QueryRow(ctx, updateSQL,
 		t.ID, t.Name, t.Aliases, t.Category, t.Position, t.PositionDetail, t.GiNoGi,
 		t.TypicalBelt, t.Description, t.SetupFrom, t.CommonCounters, t.WhenToUse,
 		t.CommonNextMoves, t.VideoReference, t.SourceNotes, t.IBJJFRulesetID,
 		t.Function, t.ToPosition)
-
 	out, err := scanContent(row)
 	if errors.Is(err, pgx.ErrNoRows) {
-		// Now means exactly one thing — no such id. It used to also mean "that
-		// one is seeded", which the handler looked up to explain.
 		return Technique{}, ErrNotFound
 	}
 	if err != nil {
@@ -135,31 +131,165 @@ func (r *PostgresRepository) UpdateTechnique(ctx context.Context, t Technique) (
 	return out, nil
 }
 
+// UpdateTechnique edits ANY row and TAKES OWNERSHIP of it.
+//
+// `source = 'admin'` used to sit in the WHERE, refusing seeded rows: an edit to
+// one would be reverted by the next deploy's re-seed — silently, and only for
+// the fields the change-detection tuple covers, which is the worst kind of
+// half-applied. That was the right refusal while the spreadsheet owned 450 of
+// the 542 and a JSON edit could not stick either.
+//
+// With the spreadsheet retired the refusal has no remedy to point at, so it
+// moved to the SET clause: the row becomes admin-owned by the act of editing
+// it, and the seed's own `WHERE source = 'seed'` skips it forever after. Remove
+// `source = 'admin'` from the SET and the next deploy quietly undoes every edit
+// made here. `exportcontent -adopt` is how a row goes back under the deploy.
+//
+// A transaction now, because the edit and its revision have to land together.
+func (r *PostgresRepository) UpdateTechnique(ctx context.Context, t Technique, actor string) (Technique, error) {
+	return r.writeWithRevision(ctx, actor, ActionUpdate, func(tx pgx.Tx) (Technique, error) {
+		return updateWithin(ctx, tx, t)
+	})
+}
+
 // Publish makes a draft visible to athletes. One-way, deliberately.
 //
 // There is no unpublish. Withdrawing a LIVE technique is a different and much
 // riskier operation than finishing a new one: training records tag it by id,
-// curricula list it, and the focus screen resolves it — none of which this
-// column filters, correctly, because an athlete's own history must not develop
-// holes when a curator changes their mind. Hiding a live technique from the
-// library while all of that still points at it is a half-state nobody asked
-// for, and building it casually is how it would arrive. If a published
-// technique is genuinely wrong, editing it is the fix.
+// curricula list it, and the focus screen resolves it — none of which filter on
+// status, correctly, because an athlete's own history must not develop holes
+// when a curator changes their mind. Hiding a live technique from the library
+// while all of that still points at it is a half-state nobody asked for, and
+// building it casually is how it would arrive. If a published technique is
+// wrong, editing it is the fix.
 //
 // `WHERE status = 'draft'` rather than an unconditional SET so that publishing
 // something already published is ErrNotFound rather than a silent no-op that
 // reports success — the caller learns its view is stale.
-func (r *PostgresRepository) Publish(ctx context.Context, id string) (Technique, error) {
-	row := r.pool.QueryRow(ctx, `
-		UPDATE techniques SET status = 'published', updated_at = now()
-		WHERE id = $1 AND status = 'draft'
-		RETURNING `+contentReturning, id)
-	out, err := scanContent(row)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return Technique{}, ErrNotFound
-	}
+func (r *PostgresRepository) Publish(ctx context.Context, id, actor string) (Technique, error) {
+	return r.writeWithRevision(ctx, actor, ActionPublish, func(tx pgx.Tx) (Technique, error) {
+		row := tx.QueryRow(ctx, `
+			UPDATE techniques SET status = 'published', updated_at = now()
+			WHERE id = $1 AND status = 'draft'
+			RETURNING `+contentReturning, id)
+		out, err := scanContent(row)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Technique{}, ErrNotFound
+		}
+		if err != nil {
+			return Technique{}, fmt.Errorf("technique: publish: %w", err)
+		}
+		return out, nil
+	})
+}
+
+// recordRevision appends the technique's post-write state to its history.
+//
+// Takes a tx rather than the pool, and every caller passes the one it wrote
+// through: an update that lands without its revision is an edit nobody can see
+// or undo, which is precisely the state this table exists to make impossible.
+// Atomic or neither.
+//
+// The revision number is computed inside the transaction from the rows already
+// there. Two concurrent writers could read the same MAX and collide — which the
+// UNIQUE constraint turns into a failed transaction rather than a lost history.
+// One author today, so it will not fire; a silently overwritten revision if it
+// ever did would be the worst possible failure for an audit trail.
+func recordRevision(ctx context.Context, tx pgx.Tx, t Technique, actor, action string) error {
+	payload, err := json.Marshal(t)
 	if err != nil {
-		return Technique{}, fmt.Errorf("technique: publish: %w", err)
+		return fmt.Errorf("technique: marshal revision: %w", err)
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO technique_revisions (technique_id, revision, actor, action, payload)
+		VALUES ($1,
+			COALESCE((SELECT MAX(revision) FROM technique_revisions WHERE technique_id = $1), 0) + 1,
+			$2, $3, $4)`, t.ID, actor, action, payload)
+	if err != nil {
+		return fmt.Errorf("technique: record revision: %w", err)
+	}
+	return nil
+}
+
+// Revisions returns the history, newest first.
+func (r *PostgresRepository) Revisions(ctx context.Context, id string) ([]Revision, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT revision, actor, action, payload, created_at
+		FROM technique_revisions WHERE technique_id = $1
+		ORDER BY revision DESC`, id)
+	if err != nil {
+		return nil, fmt.Errorf("technique: revisions: %w", err)
+	}
+	defer rows.Close()
+	out := []Revision{}
+	for rows.Next() {
+		var rev Revision
+		var payload []byte
+		if err := rows.Scan(&rev.Revision, &rev.Actor, &rev.Action, &payload, &rev.CreatedAt); err != nil {
+			return nil, fmt.Errorf("technique: scan revision: %w", err)
+		}
+		if err := json.Unmarshal(payload, &rev.Payload); err != nil {
+			return nil, fmt.Errorf("technique: parse revision %d: %w", rev.Revision, err)
+		}
+		out = append(out, rev)
+	}
+	return out, rows.Err()
+}
+
+// Restore writes an earlier revision's content back over the current row.
+//
+// CONTENT ONLY — `status` is not restored, because `updateWithin` does not set
+// it. Rolling back to a revision from before the technique was published would
+// otherwise unpublish it, and there is no unpublish (see Publish). An operator
+// restoring wording would silently withdraw the technique from every athlete's
+// library, which is not what "undo my last edit" means to anyone.
+//
+// Appends rather than truncates: the state you rolled back FROM stays in the
+// history, so a restore is itself undoable. A rollback that erases its own
+// evidence is how an audit trail becomes a rumour.
+func (r *PostgresRepository) Restore(ctx context.Context, id string, revision int, actor string) (Technique, error) {
+	return r.writeWithRevision(ctx, actor, ActionRestore, func(tx pgx.Tx) (Technique, error) {
+		var payload []byte
+		err := tx.QueryRow(ctx, `
+			SELECT payload FROM technique_revisions
+			WHERE technique_id = $1 AND revision = $2`, id, revision).Scan(&payload)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Technique{}, ErrNotFound
+		}
+		if err != nil {
+			return Technique{}, fmt.Errorf("technique: read revision: %w", err)
+		}
+		var want Technique
+		if err := json.Unmarshal(payload, &want); err != nil {
+			return Technique{}, fmt.Errorf("technique: parse revision %d: %w", revision, err)
+		}
+		// The id comes from the PATH, not the payload: a revision whose payload
+		// carried a different id would otherwise rewrite some other technique.
+		want.ID = id
+		return updateWithin(ctx, tx, want)
+	})
+}
+
+// writeWithRevision is the one place a console write and its history are tied
+// together. Every caller goes through it so none can forget.
+func (r *PostgresRepository) writeWithRevision(
+	ctx context.Context, actor, action string, write func(pgx.Tx) (Technique, error),
+) (Technique, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return Technique{}, fmt.Errorf("technique: begin %s: %w", action, err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op once Commit succeeds
+
+	out, err := write(tx)
+	if err != nil {
+		return Technique{}, err
+	}
+	if err := recordRevision(ctx, tx, out, actor, action); err != nil {
+		return Technique{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Technique{}, fmt.Errorf("technique: commit %s: %w", action, err)
 	}
 	return out, nil
 }

@@ -1,9 +1,20 @@
 import { notFound } from "next/navigation";
 
-import { ApiError, getTechnique, listAuthoredTechniques, listPositions } from "@/lib/api";
+import {
+  ApiError,
+  getTechnique,
+  listAuthoredTechniques,
+  listPositions,
+  listRevisions,
+} from "@/lib/api";
 import { AdminMasthead } from "../../AdminMasthead";
-import { publishTechniqueAction, updateTechniqueAction } from "../actions";
+import {
+  publishTechniqueAction,
+  restoreRevisionAction,
+  updateTechniqueAction,
+} from "../actions";
 import { PublishButton } from "../PublishButton";
+import { RevisionHistory } from "../RevisionHistory";
 import { TechniqueForm } from "../TechniqueForm";
 
 /**
@@ -39,9 +50,13 @@ export default async function EditTechniquePage({
 }) {
   const { id } = await params;
 
-  const [authored, positions] = await Promise.all([
+  const [authored, positions, revisions] = await Promise.all([
     listAuthoredTechniques(),
     listPositions(),
+    // Fetched alongside rather than after: it is independent of which branch
+    // below the technique falls into, and a seeded row's empty history costs
+    // the same request as a populated one.
+    listRevisions(id),
   ]);
   const technique = authored.find((t) => t.id === id);
 
@@ -114,6 +129,21 @@ export default async function EditTechniquePage({
           initial={initial}
           action={updateTechniqueAction.bind(null, initial.id)}
         />
+
+        <section className="flex flex-col gap-3">
+          <h2 className="font-barlow-condensed text-[11px] font-bold tracking-[0.16em] text-text-muted uppercase">
+            History
+          </h2>
+          <p className="text-[13px] text-text-secondary">
+            Every console write, newest first. Restoring copies that revision&rsquo;s content
+            back and records the restore — it never deletes what came after, and never changes
+            whether athletes can see the technique.
+          </p>
+          <RevisionHistory
+            revisions={revisions}
+            restore={(revision) => restoreRevisionAction.bind(null, initial.id, revision)}
+          />
+        </section>
       </main>
     </div>
   );

@@ -23,11 +23,17 @@ type fakeContentRepo struct {
 	// lastWritten is what the handler actually asked to store, which is the
 	// thing the partial-update test has to inspect.
 	lastWritten Technique
+	// lastActor is who the HANDLER said made the write. The audit trail's whole
+	// value is that this comes from the request's claims rather than its body,
+	// so a test has to be able to see what the handler passed.
+	lastActor string
+	revisions map[string][]Revision
 }
 
 func newFakeRepo() *fakeContentRepo {
 	return &fakeContentRepo{
 		stored:    map[string]Technique{},
+		revisions: map[string][]Revision{},
 		sources:   map[string]string{},
 		positions: []string{"Half Guard - Top", "Guard - Bottom"},
 	}
@@ -53,7 +59,7 @@ func (f *fakeContentRepo) Source(_ context.Context, id string) (string, error) {
 	return s, nil
 }
 
-func (f *fakeContentRepo) Publish(_ context.Context, id string) (Technique, error) {
+func (f *fakeContentRepo) Publish(_ context.Context, id, actor string) (Technique, error) {
 	t, ok := f.stored[id]
 	// Mirrors the SQL's `WHERE status = 'draft'`: publishing something already
 	// published is ErrNotFound, not a quiet success.
@@ -63,6 +69,32 @@ func (f *fakeContentRepo) Publish(_ context.Context, id string) (Technique, erro
 	t.Status = StatusPublished
 	f.stored[id] = t
 	return t, nil
+}
+
+func (f *fakeContentRepo) Revisions(_ context.Context, id string) ([]Revision, error) {
+	return f.revisions[id], nil
+}
+
+func (f *fakeContentRepo) Restore(_ context.Context, id string, revision int, actor string) (Technique, error) {
+	for _, rev := range f.revisions[id] {
+		if rev.Revision == revision {
+			t := rev.Payload
+			// Mirrors the SQL: content only, never status.
+			t.Status = f.stored[id].Status
+			f.stored[id] = t
+			f.record(id, actor, ActionRestore, t)
+			return t, nil
+		}
+	}
+	return Technique{}, ErrNotFound
+}
+
+// record mirrors recordRevision so the fake's history behaves like the real
+// one — including that the actor is whatever the HANDLER passed.
+func (f *fakeContentRepo) record(id, actor, action string, t Technique) {
+	f.revisions[id] = append([]Revision{{
+		Revision: len(f.revisions[id]) + 1, Actor: actor, Action: action, Payload: t,
+	}}, f.revisions[id]...)
 }
 
 func (f *fakeContentRepo) SearchAll(_ context.Context, q string) ([]Technique, error) {
@@ -88,11 +120,12 @@ func (f *fakeContentRepo) AdminAuthored(context.Context) ([]Technique, error) {
 	return out, nil
 }
 
-func (f *fakeContentRepo) CreateTechnique(_ context.Context, t Technique) (Technique, error) {
+func (f *fakeContentRepo) CreateTechnique(_ context.Context, t Technique, actor string) (Technique, error) {
 	if _, taken := f.stored[t.ID]; taken {
 		return Technique{}, ErrAlreadyExists
 	}
 	f.lastWritten = t
+	f.lastActor = actor
 	t.Source = "admin"
 	t.CreatedAt = time.Now()
 	t.UpdatedAt = t.CreatedAt
@@ -101,7 +134,7 @@ func (f *fakeContentRepo) CreateTechnique(_ context.Context, t Technique) (Techn
 	return t, nil
 }
 
-func (f *fakeContentRepo) UpdateTechnique(_ context.Context, t Technique) (Technique, error) {
+func (f *fakeContentRepo) UpdateTechnique(_ context.Context, t Technique, actor string) (Technique, error) {
 	// Absent means absent — the ONLY 404 left. It used to also refuse a row
 	// whose source was "seed"; the console edits any row now and the write
 	// takes ownership, which is what the next line models.
@@ -109,6 +142,7 @@ func (f *fakeContentRepo) UpdateTechnique(_ context.Context, t Technique) (Techn
 		return Technique{}, ErrNotFound
 	}
 	f.lastWritten = t
+	f.lastActor = actor
 	t.Source = "admin"
 	t.UpdatedAt = time.Now()
 	f.stored[t.ID] = t
@@ -256,6 +290,37 @@ func TestCreateDerivesTheIDAndIgnoresAnyTheClientSends(t *testing.T) {
 // rows; with the spreadsheet retired the console is the way to change any of
 // them, so the only 404 left is an id that does not exist.
 // Publishing is a route, and a stale view gets a 404 rather than a fake success.
+// The audit trail's whole value is that the actor cannot be chosen by the thing
+// being audited.
+//
+// This asserts the negative, which is the one that matters: a body field named
+// `actor` must not reach the revision. It cannot assert the positive — the
+// claims context key is unexported, so a test in this package cannot inject a
+// signed-in caller, and `actorOf` falls back to "unknown". The integration test
+// covers attribution with a real actor; this covers the attack.
+func TestTheRequestBodyCannotChooseTheActor(t *testing.T) {
+	repo := newFakeRepo()
+	repo.stored["editable"] = Technique{
+		ID: "editable", Name: "Editable", Category: "Pass",
+		Position: "Half Guard - Top", GiNoGi: "Both", Source: "admin",
+	}
+	repo.sources["editable"] = "admin"
+
+	res := patch(t, NewContentHandler(repo), "editable",
+		`{"name":"Edited","actor":"impostor","source":"seed"}`)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("patch = %d, want 200", res.StatusCode)
+	}
+	if repo.lastActor == "impostor" {
+		t.Error("the request body set the actor — an audit trail the writer can " +
+			"forge records nothing")
+	}
+	// ...and `source` is equally not the body's to set.
+	if repo.stored["editable"].Source != "admin" {
+		t.Errorf("source = %q — the body changed ownership", repo.stored["editable"].Source)
+	}
+}
+
 func TestPublishMakesADraftLiveAndRefusesASecondTime(t *testing.T) {
 	repo := newFakeRepo()
 	repo.stored["half-written"] = Technique{

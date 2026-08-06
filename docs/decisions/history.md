@@ -13264,6 +13264,65 @@ else can see. Removing the explicit `'draft'` from the INSERT is the other one.
   failure mode this feature trades for the one it fixes, and it is the quieter
   of the two.
 
+## 2026-08-06 — Step 5: revisions, and rollback as a forward operation
+
+`technique_revisions`: every console write to a technique, kept. With no pull
+request between a save and the athlete library, the three things a PR was
+quietly providing — who changed what, a diff, and a revert — had nowhere else
+to live.
+
+**Snapshots, not diffs.** Each row holds the technique as it looked AFTER the
+write, whole. A diff would be smaller and would make restoring a
+reconstruction: replay every revision in order and hope none was lost or
+reordered. At one author and ~4 KB a row the storage argument does not exist
+and the correctness one is decisive — restoring is a copy, not a computation.
+JSONB rather than a typed mirror for the same reason the catalog gained four
+columns in four months: a mirror would need a migration each time, and a
+revision written before a column existed would silently restore its zero value.
+
+**Rollback appends.** Restoring writes the old content back as a NEW revision,
+so the state you rolled back from stays readable and the rollback is itself
+undoable. A rollback that erases its own evidence is how an audit trail becomes
+a rumour.
+
+**Restore is content-only.** `status` is not restored, which falls out of
+`updateWithin` not setting it. Rolling back to a revision from before the
+technique was published would otherwise unpublish it — and there is no
+unpublish, so an operator restoring wording would silently withdraw the
+technique from every athlete's library. That is not what "undo my last edit"
+means to anyone.
+
+**The actor is a parameter, not a field.** `CreateTechnique`, `UpdateTechnique`
+and `Publish` all take it explicitly, read from the request's own claims. It is
+deliberately NOT on the `Technique` struct: a field there is a field a JSON body
+can set, and an audit trail the writer can forge records nothing. There is a
+test for exactly that attack, and it asserts the negative — the claims context
+key is unexported, so a package-level test cannot inject a signed-in caller, and
+the integration test covers attribution with a real one instead.
+
+**The deploy writes no history.** `cmd/seed` runs over 542 rows on every
+release; recording that would add 542 revisions per deploy and bury the handful
+an operator actually made. The deploy's history is the git log — this table is
+for the writer that does not have one.
+
+Mutation-tested on the two properties that would rot silently: making restore
+set `status` (which unpublishes on rollback), and making it truncate rather than
+append. Both go red.
+
+### Gaps
+
+- **No diff view.** The history lists what each revision was; comparing two is
+  eyeballing them. Snapshots make a real diff easy to add later, which was part
+  of choosing them.
+- **Restoring is per-technique, never bulk.** No "roll the catalog back to
+  Tuesday". That is a different feature over the same data, and the design doc
+  called it out as a separate question from "undo my last edit".
+- **Revisions are unbounded.** Nothing prunes them. At this volume that is
+  years away, and pruning an audit trail deserves its own decision rather than
+  a default.
+- **Techniques only**, like drafts. The exercise catalog has neither, and for
+  the same reason: half a feature is worse than none.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

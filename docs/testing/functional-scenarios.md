@@ -2681,6 +2681,32 @@ own, so none of them is redundant with "the FK exists".
   release.
 - **...and the seed must still update its own rows.** The inverse failure is a
   content freeze that looks exactly like "nothing changed".
+### Revision history and rollback
+
+Every console write leaves a revision. The deploy leaves none.
+
+- **Create, update and publish each append one**, numbered from 1 per technique,
+  newest first on read.
+- **The payload is the state AFTER that write**, so reading the history needs no
+  replay. Assert an old revision's payload still carries the old name.
+- **`actor` comes from the request's claims, never the body.** Send
+  `{"actor":"impostor"}` and assert it is not what gets recorded — an audit
+  trail the writer can forge records nothing.
+- **A re-seed writes no revisions.** Run `cmd/seed` and assert the count is
+  unchanged; 542 rows per release would bury the operator's own edits.
+- **A seeded technique has an empty history**, and that is a 200 with `[]`
+  rather than a 404.
+- **Restoring APPENDS.** After restoring revision 1 of a 3-revision technique
+  there are 4, and the newest action is `restore`. The regression is a restore
+  that truncates — the state rolled back from disappears and the rollback
+  cannot itself be undone.
+- **Restoring does NOT change `status`.** Restore a revision from before the
+  technique was published and assert it is still published: a content rollback
+  that withdraws a live technique from the library is not an undo.
+- **Restoring a revision that does not exist is 404**, and writes nothing.
+- **The write and its revision are atomic.** They share a transaction; an edit
+  that lands without its revision is an edit nobody can see or undo.
+
 ### Drafts (`status`)
 
 A console-created technique is a **draft** and athletes cannot see it. Publishing
