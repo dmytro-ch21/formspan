@@ -12201,6 +12201,77 @@ five in-file duplicates in the curriculum were reported, not authored.
   this branch; the curated verdict report itself was session-scratch and is
   not committed.
 
+## 2026-08-06 — The alias merge: 204 strings the sheet has to carry
+
+The follow-up the gap-fill entry recorded. The curriculum's `(aka ...)`
+parentheticals are search vocabulary the library does not have — "arm bar"
+returned nothing while `Armbar from Closed Guard` sat there, because no alias
+carried the two-word spelling, and the list endpoint's summary has **no
+description field**, so `name` and `aliases` are the only text a client can
+search against.
+
+The 92 rows this repo owns (`techniques.additions.json`) got their aliases at
+authoring. The sheet's other 450 cannot: `techniques.json` is regenerated from the spreadsheet as a full
+replacement and `cmd/exportcontent` refuses to write a sheet-owned id into the
+additions file, so a JSON edit to a seeded row survives until the next
+re-import and then vanishes with nothing reporting a fault. Hence a **merge
+list** rather than a commit that changes the catalog:
+`scripts/build-alias-merge.py` emits `docs/content/technique-alias-merge.csv`
+(paste-ready `aliases` cells, keyed on `technique_id`) with
+`technique-alias-merge.md` beside it explaining the route and the drops.
+
+**202 aliases across 130 sheet-owned rows**, of which — measured against the
+shipped scorer — **99 are strings that return zero results today** and land on
+the right technique after the merge ("honey hole" 0 → 2, "rodeo ride" 0 → 1,
+"turk" 0 → 1); the rest buy ranking rather than reachability, since an exact
+alias match is worth +4,000. Note what this is NOT: the search work that landed
+alongside matches each query term as a substring, so "arm bar" already finds
+`Armbar from Closed Guard` unaided. Spelling variants are solved; *different
+words for the same thing* are what remained, and that is precisely what a
+curriculum's `aka` parentheticals hold. Mapping is exact-fold-match plus a
+hand-curated table, deliberately NOT the scanner: `scan-library.py` matches
+MOVE × POSITION, which is right for finding gaps and wrong for deciding which
+single row a synonym belongs to.
+
+**88 alias strings were dropped**, and the split is the interesting part: 46
+already existed somewhere in the catalog (a duplicate resolves ambiguously),
+and 42 were generic or named a *different* technique the library already has.
+That last class is the one worth remembering, because nothing automatic
+catches it — a duplicate-name check does not fire when the strings differ:
+"Far Side Armbar" was offered for the NEAR-side armbar row while
+`Far-Side Armbar from Side Control` exists as its own technique; "Waiter Sweep
+from Guard" for the lumberjack sweep when the waiter sweep is deep half;
+"Granby Roll Escape" for the bridge-and-roll; "Tekubi Hishigi" for the toe
+hold, which in judo is a **wrist** lock. A generator pass now flags any alias
+whose tokens all appear in some other row's name — that is what caught the
+armbar — and six survivors were reviewed and kept as correct. Review caught two
+more of the same shape that the pass had missed because the strings only
+*overlap* a row rather than sit inside its name: "Half Smash Pass" on the
+generic smash pass when `Knee-Shield Smash Pass` is the half-guard one, and
+"Crab Ride to Twister" on the calf slicer when the twister is its own row.
+
+An alias on the wrong row is worse than a missing one: it is invisible until
+search answers with the wrong technique, and by then nobody connects the two.
+
+### Gaps
+
+- **Nothing is applied yet.** The CSV is an instruction for the spreadsheet;
+  until it is pasted and re-imported, the 450 sheet-owned rows have the same
+  aliases they had before.
+- **189 curriculum lines with aliases mapped to nothing** — mostly rows this
+  repo owns or techniques deliberately not added, so expected, but the list is
+  only in the generator's output, not committed.
+- Five judgment calls are carried on purpose and documented in the md: "hip
+  heist" goes from three rows to five, "sickle sweep" is attached to the
+  pendulum sweep, "Leg Drag from Half" sits on the leg-WEAVE pass, "Stand-Up in
+  Base" is read one way as an alias and another as a mapping, and family names
+  ("Double Wristlock") land on the most-taught member because an alias can live
+  on only one row.
+- **The generator has no CI coverage** — nothing in `verify` lints or runs
+  Python, so a green suite says nothing about the 430 lines that produced the
+  CSV. Acceptable for a one-shot whose output is committed and reviewable;
+  worth revisiting if it is ever re-run against a changed curriculum.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
