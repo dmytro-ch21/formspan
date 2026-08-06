@@ -226,9 +226,23 @@ func TestTechniqueEnrichment(t *testing.T) {
 	// crank (prohibited), the Suloev stretch, toe hold from 50/50, kneebar
 	// from guard top and banana split (brown/black), heel hook defense
 	// (brown/black no-gi), and wrist lock from closed guard (blue+).
+	// The RULESET count stays exact, and it is the one that matters: rulesets
+	// are seed-only (nothing but Seed calls UpsertRulesets, and the console
+	// cannot author one), so console content cannot move this number — while
+	// the bad derivation moves it from 8 to 21, which this catches on its own.
+	//
+	// The TECHNIQUE count is a bound, not a pin, and that is a deliberate
+	// weakening: an authored technique referencing a restricted ruleset moves
+	// it, so pinning it made a legitimate content snapshot fail — measured
+	// while rehearsing the snapshot job, same as the guard partition below.
+	// The bound still discriminates, which is what the original comment
+	// (rightly) demanded of any non-exact assertion: the true value is 27 and
+	// the regression produces 468, so anything under a hundred is unambiguously
+	// not the bug. It is not "0 < n < all"; it is "nowhere near the failure
+	// mode", with room for the restricted catalog to triple first.
 	const (
-		wantRestrictedRulesets   = 8
-		wantRestrictedTechniques = 27
+		wantRestrictedRulesets  = 8
+		maxRestrictedTechniques = 100
 	)
 	restricted := 0
 	for _, rs := range rulesets {
@@ -268,9 +282,10 @@ func TestTechniqueEnrichment(t *testing.T) {
 			nRestricted++
 		}
 	}
-	if nRestricted != wantRestrictedTechniques {
-		t.Errorf("techniques under a restricted ruleset = %d, want %d",
-			nRestricted, wantRestrictedTechniques)
+	if nRestricted == 0 || nRestricted > maxRestrictedTechniques {
+		t.Errorf("techniques under a restricted ruleset = %d, want between 1 and %d "+
+			"(the belt-count derivation would give 468)",
+			nRestricted, maxRestrictedTechniques)
 	}
 
 	// setup_from must name techniques, not carry raw ids. The sheet writes ids;
@@ -444,59 +459,90 @@ func TestPositionsResolveAgainstTheLibrary(t *testing.T) {
 		}
 	}
 
-	// The whole point of the detail filters. EXACT counts, not "these differ" —
-	// the weaker assertion passes on the very regression this guards:
-	// deleting closed-guard's detail_includes puts it back on the whole
-	// 161-technique family while open-guard stays at 124, so the two are still
-	// unequal and nothing fails. Same lesson, and the same fix, as the pinned
-	// wantRestrictedRulesets above.
+	// The whole point of the detail filters, asserted as PROPERTIES rather than
+	// as two pinned numbers.
 	//
-	// The guard family is 185. The split is 47 closed ("Closed Guard" plus
-	// "Rubber Guard") and 138 open (the rest), and 47+138 == 185 is the check
-	// that the two partition the family rather than merely differing.
+	// It was `wantClosedGuard = 47` / `wantOpenGuard = 138` — exact, and
+	// deliberately so: the comment here argued at length that "these two differ"
+	// passes the very regression the check exists for. That argument was right,
+	// and the numbers were the correct answer while the catalog changed only by
+	// deliberate PR. The admin console can now author a technique without one
+	// (see docs/decisions/content-authoring-design.md), so a legitimate new
+	// open-guard row makes this test fail for no reason — measured, not
+	// predicted: one authored row turned this red while rehearsing the content
+	// snapshot job.
 	//
-	// It was 187/150 until the leg entanglements were promoted out of it. The
-	// 26 ashi garami entries — saddle, 50/50, backside 50/50, single-leg X —
-	// used to be filed as "Guard - Bottom" and therefore resolved as open
-	// guard, which put a heel hook from the saddle on the same screen as a
-	// spider-guard sweep. They are their own position now, so the family they
-	// left is smaller by exactly that many. Then 37/124 until the curriculum
-	// gap-fill of 2026-08 added 10 closed-guard rows (gogoplata, americana,
-	// wrist lock, reverse triangle, bow-and-arrow, kimura sweep, the
-	// can-opener, the rubber guard matrix, and the two no-gi overhook-family
-	// controls) and 14 open. If this number moves again without a position
-	// being added or removed, something has drifted rather than been decided.
-	const (
-		wantClosedGuard = 47
-		wantOpenGuard   = 138
-	)
-	scoped := func(id string) int {
-		n := 0
-		for _, p := range positions {
-			if p.ID != id {
-				continue
-			}
-			for _, tq := range techniques {
-				if inFamily(tq.Position, p.Family) && inScope(p, tq.PositionDetail) {
-					n++
-				}
+	// So the numbers go and the properties they were standing in for are
+	// asserted directly. Each survives content growth and none is vacuous:
+	//
+	//   PARTITION — every Guard-family technique resolves to EXACTLY ONE of the
+	//   two. This is what catches the original regression: delete
+	//   closed-guard's detail_includes and it matches the whole family while
+	//   open-guard keeps its excludes, so techniques resolve to both.
+	//
+	//   DIRECTION — a "Closed Guard" technique lands on closed-guard, not open.
+	//   Partition alone cannot see a SWAP of the two vocabularies (the halves
+	//   would still partition), and the exact counts caught that only by
+	//   accident. The literal detail strings here are the point: reading them
+	//   back out of the config would assert the config against itself.
+	//
+	//   NON-EMPTY — both sides have members, so "resolves to nothing" cannot
+	//   pass as a partition of zero.
+	closedIn := func(id string) *Position {
+		for i := range positions {
+			if positions[i].ID == id {
+				return &positions[i]
 			}
 		}
-		return n
+		t.Fatalf("no %q position — the glossary lost an entry this test needs", id)
+		return nil
 	}
-	closed, open := scoped("closed-guard"), scoped("open-guard")
-	if closed != wantClosedGuard {
-		t.Errorf("closed guard resolves to %d techniques, want %d", closed, wantClosedGuard)
-	}
-	if open != wantOpenGuard {
-		t.Errorf("open guard resolves to %d techniques, want %d", open, wantOpenGuard)
+	cg, og := closedIn("closed-guard"), closedIn("open-guard")
+
+	var closed, open, family int
+	for _, tq := range techniques {
+		if !inFamily(tq.Position, "Guard") {
+			continue
+		}
+		family++
+		inClosed, inOpen := inScope(*cg, tq.PositionDetail), inScope(*og, tq.PositionDetail)
+		switch {
+		case inClosed && inOpen:
+			t.Errorf("%q (detail %q) resolves to BOTH closed and open guard — "+
+				"the two must partition the family, not overlap",
+				tq.ID, tq.PositionDetail)
+		case !inClosed && !inOpen:
+			t.Errorf("%q (detail %q) resolves to NEITHER closed nor open guard — "+
+				"it is in the Guard family and no glossary entry explains it",
+				tq.ID, tq.PositionDetail)
+		}
+		if inClosed {
+			closed++
+		}
+		if inOpen {
+			open++
+		}
 	}
 
-	family := 0
-	for _, tq := range techniques {
-		if inFamily(tq.Position, "Guard") {
-			family++
+	// DIRECTION, against literals rather than against the config.
+	for detail, wantClosed := range map[string]bool{
+		"Closed Guard": true, "Rubber Guard": true,
+		"Open Guard": false, "Butterfly Guard": false, "De La Riva": false,
+	} {
+		if got := inScope(*cg, detail); got != wantClosed {
+			t.Errorf("closed guard %s %q — the two detail vocabularies look swapped",
+				map[bool]string{true: "should match but does not", false: "matches but should not"}[wantClosed],
+				detail)
 		}
+		if got := inScope(*og, detail); got == wantClosed {
+			t.Errorf("open guard disagrees with closed guard about %q; they must be complements",
+				detail)
+		}
+	}
+
+	if closed == 0 || open == 0 {
+		t.Errorf("closed=%d open=%d — a side that resolves to nothing is a dead "+
+			"cross-link, not a partition", closed, open)
 	}
 	if closed+open != family {
 		t.Errorf("the two guards cover %d of the family's %d — they must partition it",

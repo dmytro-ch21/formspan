@@ -122,10 +122,12 @@ jobs:
       # technique moves the number. Rehearsed against a real database before this
       # workflow shipped: a single authored row turned the package red.
       #
-      # Those counts going stale on main is a real consequence of authoring in
-      # the console, and it needs a decision rather than a workaround — see the
-      # gap recorded in docs/decisions/history.md. This job must not be the thing
-      # that rediscovers it every morning.
+      # The counts themselves were replaced by properties shortly after this
+      # workflow landed (see history.md, "The pinned counts become properties"),
+      # so the whole package would mostly pass now. This stays scoped anyway:
+      # the job's question is "can this export seed?", and answering a narrower
+      # question with a narrower check is the right shape regardless of what the
+      # rest of the suite happens to assert this month.
       - name: Validate the exported catalog
         if: steps.guard.outputs.configured == 'true' && steps.changed.outputs.any == 'true'
         working-directory: backend
