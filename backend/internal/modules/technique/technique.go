@@ -7,7 +7,7 @@
 //     "3 sets of armbar at 60kg" — techniques aren't measured at all. They're
 //     reference knowledge that gets tagged onto a session.
 //   - A technique lives in a graph: it comes from a position, and it's
-//     answered by counters. In the seeded library 444 of 450 techniques
+//     answered by counters. In the seeded library 529 of 542 techniques
 //     carry setup_from edges and every one carries counters, so that graph
 //     is the substance of the thing rather than a nice-to-have.
 //
@@ -36,7 +36,7 @@ var (
 )
 
 // Ruleset is one IBJJF competition ruling, shared by every technique it
-// applies to. 25 of these cover all 466 techniques — see the migration for why
+// applies to. 25 of these cover all 542 techniques — see the migration for why
 // they are a table rather than columns.
 type Ruleset struct {
 	ID       string `json:"id"`
@@ -56,7 +56,7 @@ type Ruleset struct {
 	// divisions. Adult no-gi has no white belt division, so a no-gi listing of
 	// "Blue, Purple, Brown, Black" is the baseline. Do not re-derive this by
 	// comparing belt lists — that reads ~130 ordinary techniques as restricted
-	// when the true number is 20.
+	// when the true number is 27.
 	IsRestricted bool `json:"is_restricted"`
 
 	Notes   string   `json:"notes"`
@@ -66,13 +66,14 @@ type Ruleset struct {
 // Summary is the list row: everything needed to render, filter and search the
 // library, and nothing else.
 //
-// The library is 466 techniques and the long prose fields dominate its size —
-// returning full rows from the list endpoint ships ~485 KB to draw a scrolling
-// list. This is ~175 KB. Aliases are included deliberately: the client searches
+// The library is 542 techniques and the long prose fields dominate its size —
+// returning full rows from the list endpoint ships ~570 KB to draw a scrolling
+// list. This is ~180 KB. Aliases are included deliberately: the client searches
 // locally, and "kesa gatame" has to find "Scarf Hold".//
-// The numbers, re-measured 2026-08-03 over the seeded 466: the summary list
-// is ~175 KB and full rows ~485 KB (~795 KB as Get returns them, since the
-// embedded ruleset is real payload). They were written as "~70 KB / ~550 KB"
+// The numbers, re-measured 2026-08-06 over the seeded 542 (post gap-fill):
+// the summary list is ~180 KB gzipping to ~19 KB, full rows ~570 KB before
+// the embedded ruleset Get adds on top. At 466 they were ~175/~485 KB
+// (~795 KB from Get); they were originally written as "~70 KB / ~550 KB"
 // and drifted 2.3x as the library grew and gained `function`, `setup_from`
 // and `to_position` — which matters because these figures ARE the argument
 // for the split, quoted in a schema description a client author reads.
@@ -120,7 +121,7 @@ type Summary struct {
 
 	// The graph edge, carried on the SUMMARY and not only the detail row.
 	//
-	// This is what makes the library a traversable graph rather than 466
+	// This is what makes the library a traversable graph rather than 542
 	// isolated entries. `setup_from` names what a technique comes FROM; a
 	// client inverts it once over the list it already holds to get the far
 	// more useful direction — what FOLLOWS from here — which is the question
@@ -163,7 +164,7 @@ type Position struct {
 	//
 	// Family alone cannot separate closed guard from open guard: the technique
 	// rows say only "Guard - Bottom". PositionDetail can — it carries "Closed
-	// Guard" on 35 and "Open Guard" on 37 — so these two express which side of
+	// Guard" on 44 and "Open Guard" on 42 — so these two express which side of
 	// that split a position wants.
 	//
 	// Includes is a whitelist (empty means "the whole family"), Excludes a

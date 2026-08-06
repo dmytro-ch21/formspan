@@ -542,7 +542,8 @@ components:
             authored rather than derived: name parsing reaches 42% (mostly
             submissions, whose destination is the end of the exchange), and
             inverting `setup_from` infers a real position change for only 22
-            of 466 — that edge links control-to-attack WITHIN a position.
+            of the 466 rows the column was authored over — that edge links
+            control-to-attack WITHIN a position.
             Populated where the destination is both knowable and useful
             (passes, sweeps, back takes, takedowns).
 
@@ -597,18 +598,18 @@ components:
       description: >
         The list row. Carries what is needed to render, filter and search the
         library and nothing else — the prose fields are most of the library's
-        bytes and a list needs none of them. Full rows would ship ~485 KB to
-        draw a scrolling list of 466; this is ~175 KB — re-measured
-        2026-08-03, having been written as ~70 KB and drifted 2.3x as the
-        library grew and gained `function`, `setup_from` and `to_position`.
-        Gzipped it is ~17 KB, though the API does not currently compress.
+        bytes and a list needs none of them. Full rows would ship ~570 KB to
+        draw a scrolling list of 542; this is ~180 KB — re-measured
+        2026-08-06 after the curriculum gap-fill (previously ~485/~175 over
+        466; originally written as ~70 KB and left to drift 2.3x).
+        Gzipped it is ~19 KB, though the API does not currently compress.
 
         Aliases ARE included: the client searches locally, and "kesa gatame"
         must find "Scarf Hold".
 
 
         `setup_from` is included too, which is what makes the library a
-        GRAPH rather than 466 isolated entries. It names what a technique
+        GRAPH rather than 542 isolated entries. It names what a technique
         comes from; a client inverts it once over this list to get the far
         more useful direction — what FOLLOWS from here. Detail-only, that
         would cost one request per technique to walk a single hop. It adds
@@ -671,13 +672,13 @@ components:
           description: >
             Where the technique LEAVES you. Declared here as well as on the
             detail schema because the LIST is where a graph consumer reads it
-            — walking the transition map from 466 detail calls is not a thing
+            — walking the transition map from 542 detail calls is not a thing
             anyone would do.
 
 
-            SPARSE ON PURPOSE (149 of 466) and hand-authored: name parsing
+            SPARSE ON PURPOSE (170 of 542) and hand-authored: name parsing
             reaches 42%, and inverting `setup_from` infers a real position
-            change for only 22 of 466, because that edge links
+            change for only 22 of the 466 it was authored over, because that edge links
             control-to-attack WITHIN a position.
 
 
@@ -701,7 +702,7 @@ components:
       type: object
       description: >
         One IBJJF competition ruling, shared by every technique it applies to.
-        25 of these cover all 466 techniques — normalised because `age_scope`
+        25 of these cover all 542 techniques — normalised because `age_scope`
         has one distinct value library-wide and the most common `notes` string
         repeats 359 times at ~200 characters.
       required:
@@ -731,7 +732,7 @@ components:
             no-gi list of "Blue, Purple, Brown, Black" is the BASELINE.
             Do NOT re-derive this by comparing belt lists — that marks ~130
             ordinary techniques (pummelling, sit-outs) as restricted when the
-            true number is 20. Use this field; it is computed at import.
+            true number is 27. Use this field; it is computed at import.
         notes: { type: string }
         sources:
           type: array
@@ -3202,8 +3203,8 @@ paths:
         technique-tagged rows: the same real event can also be recorded as an
         untagged category row by the live grid, so a technique-tagged row is
         the specific record and an untagged one the catch-all — summing both
-        would count one submission twice. Capped at 500 with no pagination,
-        which cannot bind in practice (the library holds 466 techniques).
+        would count one submission twice. Capped at 800 with no pagination,
+        which cannot bind in practice (the library holds 542 techniques).
       parameters:
         - $ref: "#/components/parameters/IfNoneMatch"
       responses:

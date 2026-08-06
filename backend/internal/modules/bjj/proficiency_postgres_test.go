@@ -285,7 +285,7 @@ func TestListProficiencyOrderIsTotalAndStable(t *testing.T) {
 	// Two things this test does NOT cover, stated rather than implied.
 	//
 	// The LIMIT never binds here and cannot bind in production either:
-	// maxProficiencyRows is 500 and the shared library holds 466 techniques, so
+	// maxProficiencyRows is 800 and the shared library holds 542 techniques, so
 	// only a client inventing ids could reach it. It is a memory backstop (see
 	// the const), not a page size — nothing truncates a real athlete's funnel.
 	//

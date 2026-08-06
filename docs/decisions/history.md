@@ -11974,6 +11974,94 @@ clear them.
   LIMIT 20 on enrollments; twenty roadmaps of sixty items each would be twenty
   evidence queries. Bounded, but not cheap.
 
+## 2026-08-06 — The curriculum sweep: 76 techniques, and knee-on-belly stops being a destination
+
+The user brought a 464-technique master curriculum (a structured wanted-list
+covering every position, with aliases and gi/no-gi flags per line) and asked
+for it to be reconciled against the library. The reconciliation ran through
+`scripts/scan-library.py` — committed this branch — which matches a technique
+as MOVE × POSITION with rarity-weighted token scoring rather than by name,
+because "Armbar" already exists five times and name-matching would have filed
+"Armbar from Knee-on-Belly" as a duplicate.
+
+**The headline finding: ~85% of the curriculum already existed**, usually
+under a different name, and the library is *deeper* than the curriculum in
+most modern areas (rubber guard's Mission Control, berimbolo + baby bolo, the
+truck, the crucifix, the full lockdown series, seven wrestle-up rows). The
+scanner's raw verdicts needed hand-curation in both directions — generic
+names ("50/50 Sweep") false-NEW'd against specific rows, and top/bottom
+conflation false-HAVE'd genuine gaps — so every verdict was verified against
+the actual JSON before authoring. The genuine gaps clustered exactly where
+the earlier audit predicted: knee-on-belly, and named techniques with no row
+anywhere.
+
+**76 rows were authored** (466 → 542), drafted from standard BJJ knowledge in
+the library's voice for the user's review, after he chose the maximal scope
+(A-tier + all confirmables + solo drills + niche guard systems):
+
+- **The knee-on-belly set (8)** is the flagship: control, armbar,
+  baseball-bat choke, cross-collar choke, triangle, the mount transition, and
+  two escapes. The curated glossary position had **zero** resident techniques
+  — it was only ever a transition destination, with 44 dangling
+  `common_next_moves` strings pointing at it — and its description said so
+  out loud ("the list below is side control's"). That paragraph is gone;
+  `positions.json` now gives knee-on-belly `detail_includes: ["Knee on
+  Belly"]` and side control the matching exclude, so the two partition the
+  Side Control family the way closed/open guard already partition Guard.
+- **Named submissions that simply didn't exist (10):** gogoplata ×3
+  (closed guard, mount, north-south), tarikoplata, Japanese necktie, Von
+  Flue, ninja choke, bulldog choke, Suloev stretch, and the can-opener neck
+  crank — the last recorded with the `prohibited` ruleset, same policy as the
+  twister: loggable where trained, legality shown honestly.
+- **The first defensive leg-entanglement rows (2):** heel-hook defense and
+  the underhook wrestle-out. 26 attacking rows predated any defense.
+- **Structural completions:** kimura from mount (existed from five positions,
+  not mount), collar drags (standing + seated — zero rows despite three
+  curriculum mentions), knee-shield triangle/omoplata (the position had
+  control and recovery but no attacks), butterfly triangle, the kimura-trap
+  half-guard pass (a rare *top-game* add), deep-half back take, toe hold from
+  50/50 (the position's gi finish), six judo throws, four solo drills
+  (joining the breakfalls as function-less `Other` rows), and control rows
+  for seven guard systems (coyote, mantis, spider-lasso, rubber guard matrix,
+  gubber, high-elbow, arm-wrap).
+
+**Mechanics worth remembering.** Rows were spliced into *both*
+`techniques.json` and `techniques.additions.json` (the exportcontent
+invariant — one without the other is lost by a different route each time),
+appended at the end with new ids sorted among themselves, existing bytes
+untouched: 4,958 insertions, 0 deletions. Every `setup_from` resolves 100% to
+a real technique name (validated programmatically, catalog + new batch);
+`common_next_moves` mostly resolve; counters reuse the established prose
+vocabulary where an equivalent existed. Ruleset ids were mirrored from named
+sibling rows rather than hand-copied hashes. Four pinned test constants moved,
+each with its comment updated: the closed/open guard partition (37/124 →
+47/138 of a 185-row family), restricted techniques (20 → 27), the
+function-less fundamentals set (4 → 8), and `maxProficiencyRows` (500 → 800 —
+the bjj funnel's memory backstop, whose own test caught the library crossing
+its cap exactly as designed).
+
+**Deliberately not done:** ~200 of the curriculum's `aka` strings would be
+gold as aliases on *existing* rows ("Upa", "Flower Sweep", "Mata Leão"), but
+seeded rows are spreadsheet-owned — a JSON edit is deleted by the next
+re-import, and exportcontent refuses sheet-owned ids in the additions file.
+Alias enrichment of the 466 has to go through the spreadsheet, recorded here
+as the follow-up it is. Umbrella rows ("Passing X-Guard", "Front Headlock
+Series") were skipped in favour of the specific techniques they name; the
+five in-file duplicates in the curriculum were reported, not authored.
+
+### Gaps
+
+- The 76 rows are drafted, not yet athlete-reviewed — the user chose
+  draft-then-review, so field-level corrections (belts especially) are
+  expected on the PR rather than pre-agreed.
+- Inbound edges: new rows point at seeded rows, but seeded rows cannot point
+  back (same sheet-ownership rule), so the 44 dangling "Knee-on-Belly" prose
+  strings still don't resolve as graph edges — the position now has residents,
+  the prose is still prose until a re-import fixes it sheet-side.
+- The scanner's position vocabulary and the driver's curation notes live in
+  this branch; the curated verdict report itself was session-scratch and is
+  not committed.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

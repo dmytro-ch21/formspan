@@ -95,16 +95,18 @@ func SummariseProficiency(rows []Proficiency) ProficiencySummary {
 // if nothing is unbounded.
 //
 // It cannot bind today: the GROUP BY is on technique_id, which has an FK to
-// `techniques`, so the row count is capped by the library — 466 entries. A
-// client CANNOT reach this by inventing ids, as an earlier version of this
-// comment claimed; the FK rejects them as invalid input.
+// `techniques`, so the row count is capped by the library — 542 entries after
+// the 2026-08 curriculum gap-fill (466 before it). A client CANNOT reach this
+// by inventing ids, as an earlier version of this comment claimed; the FK
+// rejects them as invalid input.
 //
-// The only way it ever binds is the LIBRARY growing past 500, at which point
-// the funnel starts truncating silently — no pagination, no error, and the
-// summary folds from the truncated rows so it under-reports in step. That is
-// pinned by a test asserting the catalog stays under this number, which is the
-// version of this guard that can actually fail.
-const maxProficiencyRows = 500
+// The only way it ever binds is the LIBRARY growing past the cap, at which
+// point the funnel starts truncating silently — no pagination, no error, and
+// the summary folds from the truncated rows so it under-reports in step. That
+// is pinned by a test asserting the catalog stays under this number, which is
+// the version of this guard that can actually fail. Raised 500 → 800 when the
+// gap-fill pushed the library past the old cap.
+const maxProficiencyRows = 800
 
 // ProficiencyRepository is the read side of the technique funnel.
 type ProficiencyRepository interface {

@@ -316,7 +316,7 @@ Domain: user-owned workout *templates* — an ordered list of exercises with tar
 
 ## BJJ technique library (`/v1/techniques`)
 
-Domain: the BJJ technique library — 450 entries with position, category, gi/no-gi, and the graph edges (`setup_from`, `common_counters`). Reference content, read-only, seeded from version-controlled JSON generated from the authored spreadsheet.
+Domain: the BJJ technique library — 542 entries with position, category, gi/no-gi, and the graph edges (`setup_from`, `common_counters`). Reference content, read-only, seeded from version-controlled JSON generated from the authored spreadsheet plus the curriculum gap-fill of 2026-08 (76 hand-authored rows carried in `techniques.additions.json`).
 
 **Happy path**
 - `GET /v1/techniques` returns the library ordered by position, then category, then name.
@@ -324,7 +324,7 @@ Domain: the BJJ technique library — 450 entries with position, category, gi/no
 - `GET /v1/techniques/{id}` returns one entry with its full edge lists.
 
 **Edge cases & errors**
-- **`?gi=Gi Only` must also return techniques marked `Both`** — 304 of 450 are `Both`, so a filter that excluded them would hide most of the library rather than narrow it. Tested explicitly in both directions: `Both` entries appear, `No-Gi Only` ones don't.
+- **`?gi=Gi Only` must also return techniques marked `Both`** — 377 of 542 are `Both`, so a filter that excluded them would hide most of the library rather than narrow it. Tested explicitly in both directions: `Both` entries appear, `No-Gi Only` ones don't.
 - An invalid `?gi=` value → `400`, rather than silently returning nothing.
 - LIKE metacharacters are literal: `?q=%` matches nothing.
 - `?q=` over 100 characters → `400`.
@@ -350,10 +350,27 @@ The verb axis, separate from `category`. Test the properties, not the counts —
 except where a count is the property.
 
 - **Every technique has a `function`, except the movement fundamentals.** The
-  four exceptions (Side Breakfall, Backward Breakfall, Forward Shoulder Roll,
-  Grappling Stance and Motion) are library content rather than techniques and
-  carry none. A *fifth* entry with no function should fail: it is far more
-  likely an oversight than a new fundamental.
+  eight exceptions (Side Breakfall, Backward Breakfall, Forward Shoulder Roll,
+  Grappling Stance and Motion, and — since the 2026-08 gap-fill — Alligator
+  Walk, Backward Roll, Bridge Drill (Upa), Penetration Step) are library
+  content rather than techniques and carry none. A *ninth* entry with no
+  function should fail: it is far more likely an oversight than a new
+  fundamental.
+
+### Knee-on-belly — a glossary position with resident techniques (2026-08)
+
+Knee on belly was a curated glossary position with **zero** techniques of its
+own — only ever a transition destination. The gap-fill gave it eight resident
+rows (`position_detail: "Knee on Belly"`), and `positions.json` now partitions
+the Side Control family the way closed/open guard partition Guard.
+
+- **The knee-on-belly glossary entry resolves exactly its own rows** — the
+  eight `Knee on Belly`-detail techniques, not all of side control's.
+- **Side control's entry excludes them** — the two lists partition the family:
+  their counts sum to the Side Control family total, same invariant the
+  closed/open guard split already pins.
+- A `detail_includes`/`detail_excludes` string that no technique carries must
+  fail seeding-side validation (a typo empties a list silently otherwise).
 - **`function` is one of the five** — advance, reverse, escape, control,
   finish. The column has no CHECK constraint, so seed validation is the only
   thing between a typo and a value no client can render.
