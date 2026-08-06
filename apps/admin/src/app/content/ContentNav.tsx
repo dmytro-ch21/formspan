@@ -15,19 +15,14 @@ export function OwnershipNote({ catalog, file }: { catalog: string; file: string
       <strong className="text-text">
         A release does not carry them either until they are exported.
       </strong>{" "}
-      Run <code className="font-mono">go run ./cmd/exportcontent</code> to write them into the
-      seed files, review that diff, and merge it.
+      Run <code className="font-mono">go run ./cmd/exportcontent</code> to write them into{" "}
+      <code className="font-mono">{file}</code>, review that diff, and merge it.
       <br />
       <br />
-      The rest of the library — everything from the spreadsheet — is owned by the deploy and is
-      not editable here. Changing one of those means editing{" "}
-      <code className="font-mono">{file}</code> and releasing —{" "}
-      <strong className="text-text">
-        and that edit survives only until the next spreadsheet import
-      </strong>
-      , which regenerates the file wholesale. A durable change to a sheet-sourced row means
-      changing the sheet. Only the <code className="font-mono">*.additions.json</code> files
-      survive an import, which is why the export writes both.
+      The rest of the library is owned by the deploy and is not editable here yet. Changing one
+      of those means editing <code className="font-mono">{file}</code> and releasing — which is
+      now a durable change, since that file is the source of truth rather than a build artifact.
+      The authoring spreadsheet that used to regenerate it wholesale was retired in August 2026.
     </p>
   );
 }

@@ -23,6 +23,13 @@ import type { Exercise } from '../exercises';
  * It reads the real `exercises.json` rather than a fixture on purpose: a
  * fixture would only ever assert that the map covers the values someone
  * remembered to put in the fixture.
+ *
+ * It used to read `exercises.additions.json` as well, on the reasoning that new
+ * vocabulary arrives through the console rather than the seed. That file was
+ * deleted when the authoring spreadsheet was retired in 2026-08 — with nothing
+ * regenerating the seed file, `cmd/exportcontent` now writes console-authored
+ * rows straight into `exercises.json`, so this reads the one door they all come
+ * through. See docs/decisions/content-authoring-design.md.
  */
 
 const catalog = require('../../../../backend/internal/modules/exercise/exercises.json') as
@@ -36,23 +43,7 @@ type RawExercise = {
   primary_muscles?: string[];
 };
 
-const additions = require('../../../../backend/internal/modules/exercise/exercises.additions.json') as
-  | { exercises?: RawExercise[] }
-  | RawExercise[];
-
-/**
- * Both catalog files, not just the seed one.
- *
- * `exercises.additions.json` is where `cmd/exportcontent` writes anything
- * authored in the admin console — i.e. it is the file that actually produces
- * NEW vocabulary. Reading only the seed meant the coverage test watched the
- * door new values do not come through. It is `[]` today, which is exactly when
- * it is cheap to wire up.
- */
-const rows: RawExercise[] = [
-  ...(Array.isArray(catalog) ? catalog : (catalog.exercises ?? [])),
-  ...(Array.isArray(additions) ? additions : (additions.exercises ?? [])),
-];
+const rows: RawExercise[] = Array.isArray(catalog) ? catalog : (catalog.exercises ?? []);
 
 /**
  * The API's closed vocabulary for `movement_pattern`, mirrored from

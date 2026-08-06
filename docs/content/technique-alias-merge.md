@@ -13,16 +13,24 @@ applied by [`scripts/apply-alias-merge.py`](../../scripts/apply-alias-merge.py);
 the artifact between them is
 [`technique-alias-merge.csv`](technique-alias-merge.csv).
 
-**Why it is a spreadsheet task and not a code change.** `techniques.json` is a
-build artifact. `scripts/import-exercise-catalog.py` regenerates it from the
-authoring spreadsheet as a **full replacement**, and `cmd/exportcontent`
-refuses to write a sheet-owned id into `techniques.additions.json`. So an alias
-added to a seeded row by editing JSON survives exactly until the next
-re-import, then disappears with nothing reporting a fault. The sheet is the
-only durable route for these 130 rows. (Of the 542 techniques, 92 are carried
-in `techniques.additions.json` and this repo owns them — they already have
-their aliases. The other 450 are the sheet's, and these 130 are the subset the
+**Why it was a spreadsheet task and not a code change** — *as of August 2026;
+none of this paragraph is true any more, see below.* `techniques.json` **was** a
+build artifact: `scripts/import-exercise-catalog.py` regenerated it from the
+authoring spreadsheet as a **full replacement**, and `cmd/exportcontent` refused
+to write a sheet-owned id into `techniques.additions.json`. So an alias added to
+a seeded row by editing JSON survived only until the next re-import, then
+disappeared with nothing reporting a fault. The sheet was the only durable route
+for these 130 rows. (Of the 542 techniques, 92 were carried in
+`techniques.additions.json` and this repo owned them — they already had their
+aliases. The other 450 were the sheet's, and these 130 are the subset the
 curriculum had vocabulary for.)
+
+**The spreadsheet was retired days later** — see
+[content-authoring-design.md](../decisions/content-authoring-design.md). The
+additions file is gone, the importer refuses to run, and `techniques.json` is
+now the source of truth, so a change like this one would today be an ordinary
+edit to that file. This document stays as the record of how these 202 aliases
+got there.
 
 ## Why aliases and not descriptions
 

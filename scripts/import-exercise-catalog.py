@@ -1,14 +1,30 @@
 #!/usr/bin/env python3
 """Convert the authored XLSX catalogs into the seed JSON the backend embeds.
 
+RETIRED 2026-08, and it does not run any more — see
+docs/decisions/content-authoring-design.md.
+
+It cannot produce a correct catalog again, which is why there is no override
+flag. The sheet holds 450 techniques; the shipped catalog holds 542. The other
+92 were authored in this repo and lived in techniques.additions.json, which the
+retirement deleted because its only job was surviving a re-import. So a re-import
+now yields 450 rows and drops 92 — silently, since the sheet is a full
+replacement rather than a patch. An override would be an override of
+correctness, not of caution.
+
+Kept in-tree rather than deleted because it is the record of how the catalog
+was built, and because the derivations below (the IBJJF ruleset collapse, the
+movement-pattern and load-type mappings) document decisions nothing else
+explains. The one rule here that is a genuine invariant rather than a
+build-time derivation — an entanglement `position_detail` implies the Leg
+Entanglement `position` — moved into the Go seed validator, where it runs in
+CI. The `function` regexes deliberately did NOT move; see the comment on
+`entanglementDetails` in backend/internal/modules/technique/seed.go.
+
 Run from the repo root:
     python3 scripts/import-exercise-catalog.py <catalog.xlsx|-> [techniques.xlsx]
 
 Pass `-` for the catalog to import techniques only.
-
-Kept as a script rather than a one-off because the spreadsheets are the
-authoring surface: when they change, this regenerates the seed rather than
-anyone hand-editing 500 JSON objects.
 
 The two mappings that matter, and why they're lossy on purpose:
 
@@ -507,8 +523,19 @@ def convert_techniques(path: Path) -> tuple[list[dict], list[dict]]:
 
 
 def main() -> None:
-    if len(sys.argv) < 2:
-        sys.exit(__doc__)
+    sys.exit(
+        "import-exercise-catalog.py is RETIRED (2026-08) and no longer runs.\n\n"
+        "The spreadsheet is not the authoring surface any more. It holds 450 "
+        "techniques; the shipped catalog holds 542. The other 92 were authored "
+        "in this repo and lived in techniques.additions.json, which was deleted "
+        "with the retirement — so re-importing would yield 450 rows and silently "
+        "drop 92, the sheet being a full replacement rather than a patch.\n\n"
+        "Edit backend/internal/modules/technique/techniques.json directly, or "
+        "author in the admin console and run cmd/exportcontent.\n\n"
+        "See docs/decisions/content-authoring-design.md.")
+
+
+def _unreachable_after_retirement() -> None:
     root = Path(__file__).resolve().parent.parent
 
     # `-` skips the exercise catalog. The two libraries are authored in

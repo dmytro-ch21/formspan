@@ -1,6 +1,7 @@
 # Content authoring — retiring the spreadsheet, and publishing without a PR
 
-Status: **proposal, 2026-08-06.** Nothing here is built. It complements
+Status: **proposal, 2026-08-06. Step 1 is built** (see history.md); steps 2–6
+are not. It complements
 [history.md](history.md) (what was decided and when) and describes where the
 content pipeline should end up, in two phases that can land months apart.
 
@@ -77,7 +78,7 @@ What it costs now, measured on this week rather than imagined:
 
 ---
 
-## 3. Phase 1 — retire the spreadsheet
+## 3. Phase 1 — retire the spreadsheet — **DONE**
 
 **This is smaller than it looks, and smaller than I first described it.** The
 only reason a JSON edit to a seeded row fails to stick is that someone might
@@ -99,12 +100,16 @@ change to how anything is seeded.
    deleted.** Its entire purpose is surviving a re-import. With no re-import,
    two files where one will do is just a second place to forget. Same for
    `exercises.additions.json`, which is already empty.
-4. **The taxonomy moves or is frozen.** `apply_taxonomy` derives `function` and
-   the leg-entanglement `position` at import time. With no import, either the
-   values simply live in the JSON (they already do), or the rules move into the
-   Go seed validator so they keep being checked. **Prefer moving them**: the
-   agreement guard added in #150 is exactly the check that should run in CI, and
-   in Go it would.
+4. **The taxonomy moves or is frozen.** *(Built — and only half of it moved,
+   deliberately.)* `apply_taxonomy` did two things. The leg-entanglement
+   `position` rule is a genuine invariant and is now a biconditional check in
+   the Go seed validator, running in CI on every `SeedData()`. The `function`
+   regexes did **not** move: as a build step over a sheet with no function
+   column they were reasonable, but as a validator they would make a name
+   pattern a hard requirement for new content — authoring "Cement Mixer" in the
+   console would be rejected for matching no rule, which is precisely how the
+   gap-fill broke the importer. `function` is authored data now, checked against
+   the vocabulary and nothing more.
 5. **The console's write surface widens.** Once the deploy is the only other
    writer, there is no reason `/content` cannot edit any row — see phase 2 for
    what that requires.
@@ -124,8 +129,11 @@ is an ownership claim that costs you every other day.
   `docs/content/` as an archive, or keep the files where they are and note the
   path.
 - **The one-way door.** Once the JSON diverges from the sheet, re-importing
-  becomes destructive. Mitigation: make the importer refuse to run unless
-  `--i-know-this-is-retired` is passed, rather than trusting a comment.
+  becomes destructive. *(Built, and harder than proposed: the importer refuses
+  unconditionally, with no override. An override was drafted and then removed on
+  the evidence — the sheet holds 450 rows and the catalog 542, so a re-import
+  can only ever drop the 92 this repo authored. That is an override of
+  correctness, not of caution.)*
 
 ---
 

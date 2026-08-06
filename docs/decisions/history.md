@@ -12866,6 +12866,90 @@ step is safe to stop at.
 - Whether the exercise catalog follows techniques is left open — same mechanism,
   much less pressure.
 
+## 2026-08-06 — Step 1: the spreadsheet is retired
+
+[content-authoring-design.md](content-authoring-design.md) step 1, built. The
+authoring spreadsheet is no longer the source of truth for anything;
+`techniques.json` and `exercises.json` are, and every one of the 542 techniques
+is now equally repo-owned.
+
+**No data migration, exactly as the proposal predicted.** The only reason a JSON
+edit to a seeded row failed to stick was that the importer might re-run as a
+full replacement. Take the importer off the authoring path and the hazard is
+gone by construction — nothing about seeding, ownership or the 450 permanent
+ids changed.
+
+What went with it:
+
+- **`techniques.additions.json` and `exercises.additions.json` are deleted.**
+  Their entire purpose was surviving a re-import. Nothing embeds them
+  (`//go:embed` only ever took the seed files), so deleting them is
+  runtime-inert — every one of the 92 rows was already in `techniques.json`.
+- **`cmd/exportcontent` writes one file per catalog instead of two.** The
+  staging dance across two writes, the "both files or neither" invariant and
+  `refuseSheetOwned` are all gone. That last one mattered for a second reason:
+  it *blocked* exporting a console edit to a sheet-owned row, so deleting it is
+  what unblocks step 2.
+- **The importer refuses to run.** Unconditionally, with no override flag. One
+  was written first, and then the evidence removed it: the sheet holds 450 rows
+  and the catalog holds 542, so a re-import can only ever produce a file that
+  drops the 92 this repo authored. An override there would be an override of
+  correctness rather than of caution. The script stays in-tree because its
+  comments document real decisions — the IBJJF ruleset collapse, the
+  movement-pattern and load-type mappings — that nothing else explains.
+
+**Only half the taxonomy moved into Go, and the half left behind is the
+interesting one.** `apply_taxonomy` did two jobs. The leg-entanglement rule — an
+entanglement `position_detail` implies the Leg Entanglement `position` — is a
+genuine invariant, so it is now a biconditional check in `validate()`, running
+in CI on every `SeedData()` rather than only when a human re-imports. Written as
+a biconditional on purpose: the obvious one-way check misses a row claiming Leg
+Entanglement with some unrelated detail, which joins a position whose glossary
+entry cannot explain it. Mutation-tested — replace the case with `case false:`
+and it goes red.
+
+The `function` regexes deliberately did **not** move. As a build step over a
+sheet with no function column, guessing the verb from the name was reasonable.
+As a validator it would make a name pattern a hard requirement for new content:
+authoring "Cement Mixer" in the console would be rejected for matching no rule.
+That is not hypothetical — it is exactly how the gap-fill broke the importer two
+entries ago. `function` is authored data now, checked against the vocabulary by
+`ValidateFields` and nothing further. **A derivation that was fine as a build
+step can be hostile as a gate**, and the difference is whether a human is
+waiting on the other side of it.
+
+One thing this closes for free: PR #152 had just spun out a follow-up about
+`scripts/scan-library.py` building its corpus as `techniques.json +
+techniques.additions.json`, which double-counted 16 rows and skewed every
+word-rarity figure its threshold was calibrated against. Deleting the additions
+file deletes the double-count. The threshold is left where it is and the
+comment now says why: the script is retired, its output is committed, and
+re-tuning a constant nobody will run again is motion rather than work.
+
+Review moved the entanglement rule from `validate()` into `ValidateFields`,
+which is the right call for a reason worth writing down: it is a per-row rule
+and needs no view of the catalog, and the two paths that skip `validate()` are
+exactly the ones that most need it — the console write path, which would
+otherwise put a violating row live in that environment immediately, and
+`exportcontent`, whose whole promise is refusing an entry that cannot seed
+*before* writing it to the file a deploy embeds. Review also caught the test for
+it passing for the wrong reason: the console-path case set `position` to a value
+the fixture's known-positions list did not contain, so it was rejected by the
+unknown-position check and would have stayed green with the new rule deleted.
+Mutation confirmed one of the two cases was doing nothing.
+
+### Gaps
+
+- **The console still cannot edit the 450.** That is step 2, and it is now
+  unblocked rather than done.
+- `scripts/build-alias-merge.py` is marked retired rather than deleted: it reads
+  the additions file to tell repo-owned rows from sheet-owned ones, and that
+  distinction no longer exists. Its output is committed; the script is a record.
+- Nothing regenerates the seed files any more, which is the point — but it also
+  means nothing checks them against an independent source. The Go validators are
+  now the only guard, which is a stronger position than a build step nobody ran,
+  and a weaker one than both.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

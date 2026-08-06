@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 """Build the technique alias-merge list from a curriculum document.
 
+RETIRED, kept as the record of how the 2026-08 alias merge was built. It cannot
+run as written: the spreadsheet it existed to work around was retired, and
+techniques.additions.json — which it reads to tell sheet-owned rows from
+repo-owned ones — was deleted with it. Every row is repo-owned now, so the
+distinction it is built on no longer exists. The output it produced is
+committed at docs/content/technique-alias-merge.csv.
+
+
     python3 scripts/build-alias-merge.py <curriculum.md>
 
 Writes docs/content/technique-alias-merge.csv — the aliases to paste into the
@@ -341,6 +349,13 @@ def parse_curriculum(path: Path):
 
 
 def main():
+    if not (SRC / "techniques.additions.json").exists():
+        sys.exit(
+            "build-alias-merge.py is RETIRED. It tells sheet-owned rows from "
+            "repo-owned ones by reading techniques.additions.json, which was "
+            "deleted when the spreadsheet was retired — every row is repo-owned "
+            "now, so the distinction it is built on no longer exists.\n\n"
+            "Its output is committed at docs/content/technique-alias-merge.csv.")
     if len(sys.argv) < 2:
         sys.exit(__doc__.strip().splitlines()[2].strip())
     curriculum = Path(sys.argv[1])

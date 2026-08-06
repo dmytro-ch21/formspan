@@ -316,7 +316,7 @@ Domain: user-owned workout *templates* — an ordered list of exercises with tar
 
 ## BJJ technique library (`/v1/techniques`)
 
-Domain: the BJJ technique library — 542 entries with position, category, gi/no-gi, and the graph edges (`setup_from`, `common_counters`). Reference content, read-only, seeded from version-controlled JSON generated from the authored spreadsheet plus the curriculum gap-fill of 2026-08 (76 hand-authored rows carried in `techniques.additions.json`).
+Domain: the BJJ technique library — 542 entries with position, category, gi/no-gi, and the graph edges (`setup_from`, `common_counters`). Reference content, read-only, seeded from `techniques.json`, which is hand-authored in the repo. It was generated from a spreadsheet until that was retired in 2026-08 — see docs/decisions/content-authoring-design.md.
 
 **Happy path**
 - `GET /v1/techniques` returns the library ordered by position, then category, then name.
@@ -388,12 +388,11 @@ the Side Control family the way closed/open guard partition Guard.
   was written but never read back. Test the **upgrade** path specifically —
   seed, `UPDATE techniques SET function = NULL`, re-seed — because a fresh
   seed into an empty table populates the column either way and proves nothing.
-- **A re-import reproduces the library.** `techniques.json` is a build
-  artifact, so running `import-exercise-catalog.py` over the same sheet must
-  reproduce it — including the derived `function` values and the
-  leg-entanglement positions, neither of which the spreadsheet carries. If a
-  hand-edit ever survives only in the artifact, the next import reverts it
-  silently and the comment claiming it is generated is a lie.
+- ~~A re-import reproduces the library.~~ **Retired 2026-08** along with the
+  spreadsheet: `techniques.json` is the source of truth now, not a build
+  artifact, and `import-exercise-catalog.py` refuses to run. What replaced this
+  scenario is the entanglement biconditional in `ValidateFields` — the one rule
+  of the import-time derivation that is an invariant rather than a guess.
 
 ### Destination — where a technique leaves you (`to_position`)
 
@@ -418,10 +417,10 @@ Sparse ON PURPOSE (170 of 542). Test the invariants, not the coverage.
   authored data was
   lost rather than a decision being made — the values are hand-authored and
   exist nowhere else.
-- **A re-import preserves them.** The spreadsheet does not carry this column,
-  so `import-exercise-catalog.py` must carry destinations forward from the
-  existing artifact. Without it the next import silently blanks every one, and
-  `seed.go` still claims the file is generated.
+- ~~A re-import preserves them.~~ **Retired 2026-08**: nothing regenerates the
+  file, so there is no longer anything for `to_position` to be carried forward
+  THROUGH. The values live in `techniques.json` and are only lost if someone
+  deletes them.
 - **Changing only `to_position` still bumps `updated_at`** — it is in the seed
   upsert's `IS DISTINCT FROM` tuple. A field missing from that tuple updates
   nothing and no delta-syncing client ever learns.
@@ -451,7 +450,7 @@ Sparse ON PURPOSE (170 of 542). Test the invariants, not the coverage.
 
 ## Exercise catalog (`/v1/exercises`)
 
-Domain: the global, operator-authored exercise catalog — 524 entries imported from the authored spreadsheet — reference content shared by every user, with no owner. Read-only over HTTP; seeded from version-controlled JSON via `cmd/seed`.
+Domain: the global, operator-authored exercise catalog — 504 entries in `exercises.json`, hand-authored in the repo (imported from a spreadsheet until that was retired in 2026-08) — reference content shared by every user, with no owner. Read-only over HTTP; seeded from version-controlled JSON via `cmd/seed`.
 
 **Happy path**
 - `GET /v1/exercises` with a valid token returns the whole catalog, ordered by sport then name.
@@ -1519,8 +1518,8 @@ auth screens cannot exercise this at all. `expo run:ios --device`.
 > apply as written; for the mobile UI see "Unified Library" at the end of this
 > document.
 
-The property: **every field the authoring spreadsheet carries is readable when
-a technique is opened, and the library stays instant as it grows.**
+The property: **every field a technique carries is readable when it is opened,
+and the library stays instant as it grows.**
 
 **Happy path**
 
@@ -1562,8 +1561,9 @@ a technique is opened, and the library stays instant as it grows.**
 - Rulesets upsert before techniques (techniques carry the FK); a dangling
   reference fails with the technique named, not an opaque constraint error.
 - Re-seeding is value-idempotent: `updated_at` must not move on a no-op.
-- Re-importing the spreadsheet must not delete the 16 techniques in
-  `techniques.additions.json`.
+- An entanglement `position_detail` and the `Leg Entanglement` position imply
+  each other, in both directions. Ported from the retired importer, and the
+  reverse half is the one a one-way check misses.
 
 ## Not yet covered (tracked here so it isn't lost, not because it's blocking)
 
@@ -2610,18 +2610,15 @@ own, so none of them is redundant with "the FK exists".
   rewritten, not reformatted. Assert this against the real shipped files, not a
   fixture: the property is "matches what Python wrote", and a fixture only
   proves the code agrees with itself.
-- An authored technique appears in **both** `techniques.json` (the deploy
-  artifact, embedded and seeded) and `techniques.additions.json` (the record the
-  importer merges back in). One without the other is lost — the deploy will not
-  carry it, or the next re-import deletes it.
+- An authored technique is merged into `techniques.json` — the deploy artifact,
+  embedded and seeded — without disturbing the 542 entries already there.
 - The diff for one new technique is **one entry**, in the file's own key order.
-  A whole-file reorder is the failure: Go sorts map keys, the files are written
-  in semantic order, and 634 reordered entries across the two files bury the
-  change.
+  A whole-file reorder is the failure: Go sorts map keys, the file is written
+  in semantic order, and 542 reordered entries bury the change.
 - **`function` and `to_position` sit in their interior slots** — after `category`
   and after `position_detail` respectively, which is where 538 and 170 of the
   shipped entries put them. Appending them to the end seeds and renders fine and
-  is invisible until the next spreadsheet re-import relocates them on every
+  is invisible until something rewrites the file and relocates them on every
   entry the export wrote. Assert the order as a SUBSEQUENCE across entries: an
   index-for-index check against an entry that omits both optional keys passes
   whatever the order is, and that is what pinned the wrong one in place.
@@ -2645,16 +2642,13 @@ own, so none of them is redundant with "the FK exists".
 
 **Edge cases and errors**
 
-- An id the **spreadsheet** owns — present in `techniques.json` but not in the
-  additions file — is refused, naming the ids. The next import would revert the
-  edit, and the importer exits on "additions collide with sheet ids", both far
-  from here. An id in **both** files is ours and must be allowed: that is the
-  normal update path, and every one of the 16 shipped additions is in that
-  state, so a rule of "refuse anything already seeded" refuses all of them.
+- Re-exporting an id the file already carries is the normal update path and
+  must be allowed. (There was a rule refusing spreadsheet-owned ids; it was
+  deleted with the spreadsheet in 2026-08, since every row is repo-owned now.)
 - Ampersands and angle brackets survive **unescaped**. Go escapes them by
   default; neither catalog file contains one today, so nothing exercises this
   until someone types "Over-Under & Stack Pass" into the console.
-- A malformed additions file is refused, not overwritten — a stray character
+- A malformed catalog file is refused, not overwritten — a stray character
   must not cost hand-authored content.
 - A missing file (or directory) is created rather than fatal.
 - Only `function` and `to_position` are omitted when empty — everything else is
@@ -3952,9 +3946,8 @@ catalog adds.
   one cannot be refused.
 - An exercise created here is immediately in `GET /v1/exercises` and on both
   clients.
-- **`cmd/exportcontent` carries it into both `exercises.json` and
-  `exercises.additions.json`.** One without the other is lost: the deploy will
-  not carry it, or the next spreadsheet re-import deletes it.
+- **`cmd/exportcontent` merges it into `exercises.json`**, the file the deploy
+  embeds and seeds, leaving the 504 entries already there untouched.
 - The exported file seeds. Run `cmd/seed` from it and count the rows.
 
 ### Edge cases & errors

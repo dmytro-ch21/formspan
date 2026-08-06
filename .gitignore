@@ -41,3 +41,9 @@ secrets.txt
 # once. Ignored so that cannot happen again.
 __pycache__/
 *.pyc
+
+# Output of scripts/import-exercise-catalog.py, which is retired. Ignored
+# because a `git add -A` committed one of these once: a second copy of a
+# catalog that nothing reads and nothing keeps in step, in the very PR that
+# deleted the last such file.
+*.generated.json

@@ -202,7 +202,11 @@ func TestValidateForWriteRejectsAVocabularyTheClientsCannotRender(t *testing.T) 
 	// The worst data this catalog can hold: it writes, it renders, and it
 	// returns an empty list forever with nothing reporting a fault. The admin
 	// path must apply the SAME rules the seeder does, from the same place.
-	known := []string{"Half Guard - Top", "Guard - Bottom"}
+	// "Leg Entanglement" is here so the entanglement cases below are rejected by
+	// the RULE rather than by the unknown-position check. Without it the second
+	// one passes for the wrong reason — verified by mutation: delete the
+	// biconditional and only the first case goes red.
+	known := []string{"Half Guard - Top", "Guard - Bottom", "Leg Entanglement"}
 
 	base := aTechnique("x", "X")
 	if err := ValidateForWrite(base, known); err != nil {
@@ -215,6 +219,20 @@ func TestValidateForWriteRejectsAVocabularyTheClientsCannotRender(t *testing.T) 
 		"missing name":     func(t Technique) Technique { t.Name = ""; return t },
 		"missing category": func(t Technique) Technique { t.Category = ""; return t },
 		"bad to_position":  func(t Technique) Technique { t.ToPosition = "Nowhere"; return t },
+		// Both halves of the entanglement biconditional. It lives in
+		// ValidateFields precisely so the CONSOLE write path enforces it, and
+		// this is the test that says so — validate()'s own cases cover the
+		// seeder, and a rule that only ran there would let the console author a
+		// row that goes live in that environment immediately.
+		"entanglement detail under another position": func(t Technique) Technique {
+			t.PositionDetail = "Single-Leg X"
+			return t
+		},
+		"leg entanglement with an unrelated detail": func(t Technique) Technique {
+			t.Position = "Leg Entanglement"
+			t.PositionDetail = "Closed Guard"
+			return t
+		},
 	} {
 		if err := ValidateForWrite(mutate(base), known); err == nil {
 			t.Errorf("%s was accepted", name)
