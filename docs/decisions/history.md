@@ -11973,6 +11973,145 @@ clear them.
 - **`Working` has no cap on how much it aggregates per curriculum** beyond the
   LIMIT 20 on enrollments; twenty roadmaps of sixty items each would be twenty
   evidence queries. Bounded, but not cheap.
+## 2026-08-06 — The library was not missing the techniques, the search was
+
+An athlete came out of a beginners' closed-guard passing class — top posture,
+standing break with a cross-sleeve grip and knee pressure, knee cut, side
+control, knee on belly, armbar or kimura when the knee gets defended — opened
+the reflection wizard and could not enter a single step of it. The conclusion
+was reasonable and wrong: *the library is incomplete and overcomplicated.*
+
+It held almost all of it. `Standing Guard Break to Knee Cut` describes that
+exact class in one row. `Closed-Guard Top Posture`, `Knee-Cut Pass`,
+`Crossface–Underhook Side Control`, `Kimura from Side Control` and three
+separate armbars from side control were all there.
+
+### What the search actually did
+
+`searchTechniques` folded name, aliases and position into ONE `\n`-joined
+string and ran `.includes()` on it. Every query therefore had to be a
+contiguous substring of a single field. Measured against the shipped catalog:
+
+| typed | hits |
+|---|---|
+| `arm bar` | **0** |
+| `armbar` | 21 |
+| `break the guard` | **0** |
+| `guard break` | 5 |
+| `pass the guard` | **0** |
+| `side control` | 50, of which the picker showed 8 |
+
+`arm bar` returning nothing while `armbar` returns 21 is the whole defect in one
+line: a space the catalog does not have.
+
+### Terms, not substrings
+
+Queries now tokenise. Every term must match somewhere (ANDed — `knee belly`
+must not return all 19 knee techniques), matched within one field, and the
+fields are kept apart rather than joined so a match knows WHERE it landed.
+Joiners are dropped from the query only: `break the guard` and `pass the guard`
+are how the moves are said out loud and no catalog name contains "the".
+
+The old separator existed to stop a query matching across two fields, and
+`armbar guard` failing to find `Armbar from Closed Guard` was the cost. That is
+now the feature. The property that survives — a single TERM cannot straddle a
+field boundary — is still pinned; the reversal is asserted explicitly rather
+than left as a test that quietly changed meaning.
+
+Also indexed now: `position_detail`, `category` and `function`, all of which the
+summary payload already carried and none of which search read.
+
+### `rankTechniques`, deliberately separate
+
+Both Library screens merge search output against the exercise catalog with a
+**linear merge of two name-sorted runs**. Returning by relevance from
+`searchTechniques` would corrupt that interleave into a jumble with no type
+error and nothing failing. So ranking is a second function, used by the two
+surfaces that cap — the reflect picker (8 → 20) and the curriculum builder (60).
+
+That cap was never the problem. `side control` matches 50, and taking the first
+8 in seed-file order handed an athlete who had just drilled side control three
+closed-guard armbars. Name beats alias beats position beats category, with
+contiguity bonuses so an exact name lands first.
+
+### Both apps, and something that had been true and no longer was
+
+The search is duplicated in `apps/web/src/lib/api.ts` — the apps share no
+package and mobile needs its copy offline. Both copies carry the comment
+*"nothing enforces it, `verify` runs no web tests."* The second half was stale:
+`apps/web` gained vitest with the roadmap-focus work and `verify` runs it. So
+the web copy got the mobile suite's cases ported rather than a workaround —
+19 real behavioural tests where there had been none.
+
+`searchParity.test.ts` still compares the two copies' tuned values by reading
+source, because behavioural suites assert a handful of queries each and would
+let the copies drift in RANKING while both stayed green.
+
+Every guard was mutation-checked: stop-words not stripped (2 red), terms ORed
+(4 red), ranking unsorted (3 red), fields rejoined the old way (5 red), and each
+parity extractor against a deliberately divergent web copy.
+
+### What `/pre-merge` caught, and why the parity test did not
+
+The reviewer found the one blocking defect, and it was introduced by this
+change: web's `TechniqueSummary` type omitted `function`, so mobile indexed the
+field and web did not. Measured over the shipped catalog, the same query
+returned different SETS on the two platforms —
+
+| query | mobile | web |
+|---|---|---|
+| `advance` | 131 | **0** |
+| `finish` | 105 | 10 |
+| `side control` | 62 | 58 |
+
+`side control` is the query this whole change was written for, and the top three
+results agreed, so the divergence was invisible at a glance.
+
+The API had always sent `function`; only the web *type* omitted it, and nothing
+consulted it before, so the omission cost nothing until search started reading
+that field. The fix is four lines.
+
+**The interesting part is why all three guards missed it.** The behavioural
+suites could not: web cannot exercise a field web does not search, so its tests
+were green and correct about a smaller search. And `searchParity.test.ts`
+compared stop words, weights and bonus ladder — the *tuning* — while the copies
+differed in *shape*. Comparing the constants is not comparing the search.
+
+Parity now also compares the folded field set and the sequence of fields each
+scoring rung consults, plus the tie-break comparator (mobile has no
+`Intl.Collator`, so an identical result set could still have ordered
+differently). Reintroducing the exact bug takes it red. Cross-app equality is
+now measured rather than argued: ten queries, identical counts and identical
+top-three ranking on both.
+
+Two other review points were taken: the ranking tests guarded their assertion
+behind `if (firstNonName !== -1)` and would have passed vacuously after a
+catalog edit — now asserted outright — and the `W_META` rung (category and
+function) had no behavioural cover in either app, so deleting it left every
+test green while 418 of 466 rows lost reachability for some term.
+
+### Gaps
+
+- **Grips are still unsearchable.** `cross sleeve` finds nothing, because the
+  summary payload carries no `description` and grips are named nowhere else.
+  Aliases are the only searchable place for them and that is content work, not
+  search work — it belongs with the library-content pass.
+- **The library is written from the bottom player's perspective**, and that is
+  the real content gap this investigation surfaced: Guard-Bottom 119 techniques
+  against Guard-Top 44, Closed Guard bottom 28 against top **7**, Half Guard
+  bottom 35 against top 14. A passing class hits the thinnest slice in the
+  catalog. Knee-on-Belly is a curated position with **zero** techniques.
+- **The graph is prose, not links.** `common_next_moves` resolves to a real
+  technique 470 times out of 1680; `common_counters` twice out of 1434.
+  About 40% of the dangling strings are not techniques at all ("Stabilize top
+  position" appears 97 times). Most of the rest are naming mismatches —
+  "Armbar", "Omoplata", "Knee-on-Belly" all exist under longer names. Only four
+  are genuinely absent. Resolving these is what a sequence feature would stand
+  on, and none of it is done here.
+- **Ranking is tuned by argument, not by measurement.** The weights are ordered
+  sensibly and the tests pin the orderings that matter, but nothing measures
+  them against real queries — there is no query log to measure against.
+
 
 ## Open items / known gaps as of this entry
 

@@ -31,7 +31,7 @@ import {
 import { readLocalBjjDetail, saveLocalBjjDetail } from '@/lib/sessionStore';
 import { request as requestSync } from '@/lib/sync';
 import { fetchFocus, focusRows, type Focus } from '@/lib/bjjFocus';
-import { fetchTechniques, searchTechniques, type TechniqueSummary } from '@/lib/techniques';
+import { fetchTechniques, rankTechniques, type TechniqueSummary } from '@/lib/techniques';
 import { useAuthToken } from '@/lib/useAuthToken';
 
 /**
@@ -312,10 +312,13 @@ function DrilledStep({
 
   const drilled = detail.tags.filter((t) => t.event === 'drilled');
 
-  const results = useMemo(() => {
-    if (!query.trim()) return [];
-    return searchTechniques(all, query).slice(0, 8);
-  }, [all, query]);
+  // Ranked, not filtered. The cap only works if the ones it keeps are the best
+  // ones: "side control" matches 50 techniques, and taking the first 8 in seed
+  // order put three closed-guard armbars above every side-control one for an
+  // athlete who had just drilled side control. 20 rather than 8 because the
+  // shortlist is now worth scrolling.
+  const matches = useMemo(() => (query.trim() ? rankTechniques(all, query) : []), [all, query]);
+  const results = useMemo(() => matches.slice(0, 20), [matches]);
 
   function add(t: TechniqueSummary) {
     if (drilled.some((d) => d.technique_id === t.id)) return;
@@ -403,6 +406,19 @@ function DrilledStep({
           </Pressable>
         );
       })}
+
+      {/*
+        Say when the list is cut off. "side control" matches 62 and shows 20;
+        without this the twentieth row is indistinguishable from the last one
+        that exists, which on THIS screen reads as "the library doesn't have
+        it" — the same false negative the empty-state copy above exists to
+        prevent, arrived at from a third direction.
+      */}
+      {matches.length > results.length && (
+        <Text style={styles.muted} testID="bjj-drilled-truncated">
+          Showing the {results.length} best matches of {matches.length}. Keep typing to narrow it.
+        </Text>
+      )}
 
       {drilled.length > 0 && (
         <>

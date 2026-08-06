@@ -1,7 +1,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
-import { foldForSearch, searchTechniques, type TechniqueSummary } from '../techniques';
+import { foldForSearch, rankTechniques, searchTechniques, type TechniqueSummary } from '../techniques';
 
 /**
  * Searching the technique library.
@@ -119,19 +119,30 @@ describe('searchTechniques against the real catalog', () => {
     expect(searchTechniques(catalog, ' — ')).toHaveLength(catalog.length);
   });
 
-  it('does not match a query spanning two fields', () => {
-    // The haystack joins name/aliases/position, so without a separator a query
-    // could match across the seam and return a technique whose name ends how
-    // the query starts and whose position begins how it ends.
+  it('does not match a single term that straddles two fields', () => {
+    // A term is matched WITHIN one field, never across the boundary of two, so
+    // a technique whose name ends how the term starts and whose alias begins
+    // how it ends is not a match.
     const t = catalog.find((x) => x.aliases.length > 0);
     expect(t).toBeDefined();
     const glued = `${foldForSearch(t!.name)}${foldForSearch(t!.aliases[0])}`;
     expect(searchTechniques(catalog, glued).map((x) => x.id)).not.toContain(t!.id);
-    // ...and with a space, which is the mutation the glued form misses: the
-    // fold collapses whitespace, so `.join(' ')` would put exactly one space
-    // where this query has one and the seam would silently reopen.
+  });
+
+  it('DOES match separate terms living in different fields', () => {
+    // The deliberate reversal. Under the single-joined-haystack search this
+    // was asserted NOT to match, and the separator existed to prevent it —
+    // which also meant "armbar guard" could not find "Armbar from Closed
+    // Guard", because no one field contains both words contiguously. Spanning
+    // fields is the feature now; only spanning them mid-TERM is not.
+    const t = catalog.find((x) => x.aliases.length > 0);
+    expect(t).toBeDefined();
     const spaced = `${foldForSearch(t!.name)} ${foldForSearch(t!.aliases[0])}`;
-    expect(searchTechniques(catalog, spaced).map((x) => x.id)).not.toContain(t!.id);
+    expect(searchTechniques(catalog, spaced).map((x) => x.id)).toContain(t!.id);
+
+    // The case that motivated it, spelled out: name word + position word.
+    const ids = searchTechniques(catalog, 'armbar guard').map((x) => x.id);
+    expect(ids).toContain('armbar-closed-guard');
   });
 
   it('the memo caches the haystack, not the answer', () => {
@@ -202,4 +213,142 @@ describe('searchTechniques against the real catalog', () => {
     expect(searchTechniques(catalog, 'mata leao').map((t) => t.id)).toContain('rear-naked-choke');
   });
 
+});
+
+/**
+ * The queries a beginners' class actually produced.
+ *
+ * Same discipline as the S\u00e3o Paulo cases above, and the same failure repeating:
+ * an athlete came out of a closed-guard passing class, could not enter a single
+ * step of it, and concluded the library was incomplete. It was not. Every one
+ * of these queries returned NOTHING against a library that held the answer,
+ * because the search demanded the typed string be a contiguous substring of one
+ * field:
+ *
+ *   "arm bar"          0 hits, while "armbar"      returned 21
+ *   "break the guard"  0 hits, while "guard break" returned 5
+ *   "pass the guard"   0 hits
+ *
+ * Derived from the defect, not from the fix: each case is a real spelling a
+ * real person typed, asserted against the shipped catalog.
+ */
+describe('the spoken forms of a technique', () => {
+  const catalog = realCatalog();
+
+  it.each([
+    ['arm bar', 'armbar-closed-guard', 'one word in the catalog, two on the keyboard'],
+    ['knee cut', 'knee-cut-pass', 'hyphenated in the catalog'],
+    ['break the guard', 'closed-guard-standing-break', 'a joiner the name does not contain'],
+    ['guard break', 'closed-guard-standing-break', 'the words in the other order'],
+    ['pass the guard', 'knee-cut-pass', 'spoken form of a whole category'],
+    ['kimura side control', 'kimura-side-control', 'name plus position, no joiner'],
+  ])('%p finds %p (%s)', (query, id) => {
+    expect(searchTechniques(catalog, query).map((t) => t.id)).toContain(id);
+  });
+
+  it('ANDs the terms rather than ORing them', () => {
+    // The cheap way to make the above pass is to match ANY term, which would
+    // turn every search into a firehose: "knee belly" would return all 19
+    // techniques whose name merely contains "knee". The whole point is that
+    // adding a word narrows.
+    const knee = searchTechniques(catalog, 'knee');
+    const kneeBelly = searchTechniques(catalog, 'knee belly');
+    expect(knee.length).toBeGreaterThan(kneeBelly.length);
+    expect(kneeBelly.every((t) => searchTechniques([t], 'knee').length === 1)).toBe(true);
+  });
+
+  it('a term that matches nothing rejects the row outright', () => {
+    // The other half of ANDing, and the one an OR would pass: a real word
+    // paired with nonsense must return nothing at all, not the real word's hits.
+    expect(searchTechniques(catalog, 'armbar zzzznotathing')).toHaveLength(0);
+  });
+
+  it('does not drop a query made only of joiners', () => {
+    // "to the" strips to nothing. Returning the whole catalog there would be
+    // indistinguishable from an empty box, so the joiners are kept as terms.
+    // Not a real search, but the athlete typed something and deserves the
+    // honest answer rather than all 466.
+    expect(searchTechniques(catalog, 'to the').length).toBeLessThan(catalog.length);
+  });
+});
+
+/**
+ * Ranking, which is what makes a capped picker honest.
+ *
+ * The reflect picker showed the first 8 matches in SEED-FILE order. "side
+ * control" matches 50 techniques, so an athlete who had just drilled side
+ * control got three closed-guard armbars and no side-control ones \u2014 the cap
+ * was never the problem, the arbitrary choice of which 8 was.
+ */
+describe('rankTechniques', () => {
+  const catalog = realCatalog();
+
+  it('puts an exact name match first', () => {
+    expect(rankTechniques(catalog, 'Knee-Cut Pass')[0].id).toBe('knee-cut-pass');
+    expect(rankTechniques(catalog, 'kimura from side control')[0].id).toBe('kimura-side-control');
+  });
+
+  it('ranks a name match above a match found only in another field', () => {
+    // "armbar" hits 20 names, and three more rows only through their ALIASES
+    // (Choi Bar, S-Mount Control, Mount to S-Mount). Without the field weights
+    // those interleave by catalog order and the top of the list is noise.
+    const ranked = rankTechniques(catalog, 'armbar');
+    const isName = ranked.map((t) => foldForSearch(t.name).includes('armbar'));
+    const firstNonName = isName.indexOf(false);
+
+    // ASSERTED, not guarded. This was `if (firstNonName !== -1)`, which is one
+    // catalog edit away from asserting nothing at all and passing — the exact
+    // shape of vacuous test this repo keeps finding. If every match is a name
+    // match the scenario has evaporated and this must go red, not green.
+    expect(firstNonName).not.toBe(-1);
+    expect(isName.lastIndexOf(true)).toBeLessThan(firstNonName);
+  });
+
+  it('reaches techniques through category and function alone', () => {
+    // The W_META rung had no behavioural cover in either app: deleting it left
+    // every test green while 418 of 466 rows lost reachability for some term.
+    // `function` is the half that diverged between the apps, so it is pinned
+    // by a query no other field can satisfy — no name or position says
+    // "reverse", but every sweep carries function=reverse.
+    const reverse = searchTechniques(catalog, 'reverse');
+    const viaFunctionOnly = reverse.filter(
+      (t) =>
+        !foldForSearch(t.name).includes('reverse') &&
+        !foldForSearch(t.position).includes('reverse') &&
+        !t.aliases.some((a) => foldForSearch(a).includes('reverse')),
+    );
+    expect(viaFunctionOnly.length).toBeGreaterThan(20);
+    expect(viaFunctionOnly.every((t) => t.function === 'reverse')).toBe(true);
+
+    // ...and the category half of the same rung.
+    const viaCategory = searchTechniques(catalog, 'submission').filter(
+      (t) => !foldForSearch(t.name).includes('submission'),
+    );
+    expect(viaCategory.length).toBeGreaterThan(20);
+  });
+
+  it('returns the same set as searchTechniques, only reordered', () => {
+    // Two definitions of "matches" would drift, and the drift would show as a
+    // technique findable in the Library but not in the picker.
+    for (const q of ['armbar', 'knee cut', 'break the guard', 'side control']) {
+      const a = searchTechniques(catalog, q).map((t) => t.id).sort();
+      const b = rankTechniques(catalog, q).map((t) => t.id).sort();
+      expect(b).toEqual(a);
+    }
+  });
+
+  it('searchTechniques preserves the caller\u2019s order and rankTechniques does not', () => {
+    // LOAD-BEARING. Both Library screens merge search output against the
+    // exercise catalog with a linear merge of two NAME-SORTED runs. Ranking
+    // inside searchTechniques would corrupt that interleave into a jumble \u2014
+    // no type error, no other failing test. This is the only thing pinning it.
+    const byName = [...catalog].sort((a, b) => a.name.localeCompare(b.name));
+    const filtered = searchTechniques(byName, 'guard').map((t) => t.name);
+    expect(filtered).toEqual([...filtered].sort((a, b) => a.localeCompare(b)));
+
+    // ...and the ranked variant genuinely reorders, or the assertion above is
+    // passing because nothing sorts at all.
+    const ranked = rankTechniques(byName, 'guard').map((t) => t.name);
+    expect(ranked).not.toEqual(filtered);
+  });
 });

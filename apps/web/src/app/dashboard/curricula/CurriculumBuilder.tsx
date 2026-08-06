@@ -8,7 +8,7 @@ import {
   CRITERIA_DEFAULTS,
   createCurriculum,
   listTechniques,
-  searchTechniques,
+  rankTechniques,
   updateCurriculum,
   type Curriculum,
   type CurriculumItemWrite,
@@ -85,7 +85,7 @@ export function CurriculumBuilder({ existing }: { existing?: Curriculum }) {
   );
 
   const results = useMemo(() => {
-    // `searchTechniques`, NOT a hand-rolled includes(). Its own doc records why:
+    // `rankTechniques`, NOT a hand-rolled includes(). Its own doc records why:
     // "São Paulo Pass" had been in the catalog the whole time and was
     // unfindable, because a plain toLowerCase().includes() fails "sao paulo"
     // against "São Paulo". It also folds hyphens, so "half guard" matches
@@ -93,8 +93,11 @@ export function CurriculumBuilder({ existing }: { existing?: Curriculum }) {
     // the Library screen about the same catalog.
     //
     // Capped at 60 rather than virtualised: this is a picker, and if what you
-    // want is not in the first 60 the answer is a better search term.
-    return searchTechniques(catalog, query).slice(0, 60);
+    // want is not in the first 60 the answer is a better search term. The
+    // ranked variant is what makes that claim true — under the old unranked
+    // filter the first 60 were whichever the seed file listed first, so a
+    // better search term was not always available.
+    return rankTechniques(catalog, query).slice(0, 60);
   }, [catalog, query]);
 
   const add = useCallback((id: string) => {
