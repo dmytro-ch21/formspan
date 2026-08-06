@@ -1,4 +1,4 @@
-import type { TechniqueSummary } from './techniques';
+import { foldForSearch, type TechniqueSummary } from './techniques';
 
 /**
  * The technique library as a traversable graph.
@@ -124,4 +124,62 @@ export function groupByFunction(
   // content rather than techniques, so they get no group rather than an
   // "Other" bucket that would imply the taxonomy failed to classify them.
   return out;
+}
+
+
+/**
+ * Name -> technique, for turning a cross-reference string into a link.
+ *
+ * `setup_from`, `common_next_moves` and `common_counters` store NAMES, not
+ * ids — so rendering one as tappable means resolving it first. This is the
+ * index that does it.
+ *
+ * FOLDED KEYS, unlike `buildTechniqueGraph`'s exact-string map above. The gain
+ * is small and specific: over the 542 seeded techniques it resolves 2 more
+ * `setup_from` and 24 more `common_next_moves` references, and they are all
+ * the same class of miss the search fold
+ * exists for — `North-South Control` and `Front-Headlock Go-Behind` written
+ * with a hyphen where the catalog holds an en dash. Two spellings of one name
+ * should not decide whether a row is navigable.
+ *
+ * Aliases second, so a real name always beats another entry's alias — same
+ * precedence `buildTechniqueGraph` uses, and for the same reason.
+ */
+export function buildEdgeIndex(techniques: TechniqueSummary[]): Map<string, TechniqueSummary> {
+  const byName = new Map<string, TechniqueSummary>();
+  for (const t of techniques) {
+    const k = foldForSearch(t.name);
+    if (!byName.has(k)) byName.set(k, t);
+  }
+  for (const t of techniques) {
+    for (const a of t.aliases ?? []) {
+      const k = foldForSearch(a);
+      if (!byName.has(k)) byName.set(k, t);
+    }
+  }
+  return byName;
+}
+
+/**
+ * Resolve one cross-reference, or null when it names something the library
+ * does not contain.
+ *
+ * NULL IS THE COMMON CASE FOR SOME FIELDS AND THAT IS CORRECT, not a data gap
+ * to close. Measured over the 542-entry catalog: `setup_from` resolves 84%,
+ * `common_next_moves` 31%, `common_counters` 10%. The rest are concepts rather
+ * than techniques — "Sprawl", "Crossface", "Hand fight", "Stabilize top
+ * position" — and inventing library entries for them would be worse than
+ * leaving them as the prose they are.
+ *
+ * A self-reference resolves to null too: a row that navigates to the screen it
+ * is already on is a dead control that looks live.
+ */
+export function resolveEdge(
+  index: Map<string, TechniqueSummary>,
+  raw: string,
+  selfID?: string,
+): TechniqueSummary | null {
+  const hit = index.get(foldForSearch(raw));
+  if (!hit || hit.id === selfID) return null;
+  return hit;
 }

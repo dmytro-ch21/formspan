@@ -4650,6 +4650,57 @@ pass proves the least interesting half.
 - **No browse or detail screen on mobile.** Chains are reachable only from
   inside the reflection wizard; reading one back is unbuilt.
 - A captured chain has no step destinations until someone opens it on web.
+## Linked cross-references in the technique library (web + mobile)
+
+`setup_from` and `common_next_moves` rows navigate where they name a real
+technique. `common_counters` never does. **The platforms deliberately differ**
+on next-moves — see below.
+
+### Happy path
+
+- Open a technique with a populated `Set up from`. Most rows are tappable
+  (84% of references resolve); the rest are plain text with no affordance.
+- Tapping a row opens that technique. Its own `Set up from` is then tappable
+  too — the graph is walkable.
+- A tappable row shows the **library's own name**, which can differ from the
+  reference string when the reference used an alias or the other dash. Not a
+  bug; verify it is not confusing.
+
+### The platform difference (deliberate — check both)
+
+- **Web**: `Common next moves` links, at ~31%. Web has no "Leads to" section,
+  so this is its only forward-graph surface.
+- **Mobile**: `Common next moves` does **not** link, and must not. The phone
+  already shows a fully-linked "Leads to" above it, which promotes out exactly
+  the rows that would resolve — leaving 17% linked and **295 of 505 screens
+  with zero links in that section**. A section that occasionally links is the
+  half-works feel this exists to avoid.
+- **Both**: `Common counters` is never tappable (10% resolve).
+
+### Edge cases
+
+- A technique whose `setup_from` names only concepts ("Overhook", "Open guard
+  entry") shows an all-prose block with no tappable row — correct, not broken.
+- A reference naming the technique you are already on renders inert. A row that
+  navigates to the screen you are on is a dead control that looks live.
+- A reference written with the keyboard hyphen where the catalog stores an en
+  dash (`North-South Control`) still resolves.
+- Mobile: following a link **replaces** the current screen rather than pushing,
+  so Back returns to the Library from any depth. Confirm that is what you want
+  after three or four hops.
+- Mobile: a technique with no `ibjjf_ruleset_id` must not inherit the previous
+  one's legality table (in-place navigation reuses the screen).
+
+### Accessibility
+
+- Tappable and inert rows are distinguishable **without colour** — a real
+  button/link role, a chevron, and a heavier weight than the prose rows.
+- Linked rows meet the 44pt touch target; they must not be smaller than the
+  inert rows beside them.
+- The announced name matches the visible text (both are the library's name, not
+  the raw reference).
+- Web: following a link inside the panel remounts it — focus must land on the
+  panel heading, not on `<body>`.
 
 ## Sequences (`/v1/sequences`)
 

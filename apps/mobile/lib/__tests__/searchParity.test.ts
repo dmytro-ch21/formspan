@@ -38,6 +38,10 @@ import { join } from 'path';
 
 const MOBILE = join(__dirname, '../techniques.ts');
 const WEB = join(__dirname, '../../../web/src/lib/api.ts');
+// The resolver lives in a DIFFERENT file on each side — techniqueGraph.ts on
+// the phone, api.ts on the desktop — which is itself worth knowing: a reader
+// looking for the mobile copy beside the search will not find it.
+const MOBILE_GRAPH = join(__dirname, '../techniqueGraph.ts');
 
 /** Pull `const NAME = <number>;` out of a source file. */
 function numericConst(src: string, name: string): string {
@@ -56,6 +60,7 @@ function stopWords(src: string): string[] {
 describe('mobile and web search stay in step', () => {
   const mobile = readFileSync(MOBILE, 'utf8');
   const web = readFileSync(WEB, 'utf8');
+  const mobileGraph = readFileSync(MOBILE_GRAPH, 'utf8');
 
   it('found both copies to compare', () => {
     // If a refactor moves either file this test would otherwise pass by
@@ -111,6 +116,29 @@ describe('mobile and web search stay in step', () => {
     const m = rungs(mobile);
     expect(m).toContain('fn');
     expect(rungs(web)).toEqual(m);
+  });
+
+  it('resolves cross-references the same way', () => {
+    // `buildEdgeIndex`/`resolveEdge` are the third thing duplicated across the
+    // two apps, and the one whose divergence would be quietest: a link that
+    // works on the desktop and is inert on the phone looks like a rendering
+    // bug, not a resolver one.
+    const idx = (src: string) => {
+      const m = src.match(/export function buildEdgeIndex[\s\S]*?\n\}/);
+      if (!m) throw new Error('buildEdgeIndex not found — was it renamed?');
+      // Compare the SHAPE: which key function, and whether alias precedence
+      // is guarded. Whitespace and quote style differ between the apps.
+      return {
+        folds: /foldForSearch\(/.test(m[0]),
+        guardsPrecedence: (m[0].match(/if \(!byName\.has\(k\)\)/g) ?? []).length,
+      };
+    };
+    expect(idx(mobileGraph).folds).toBe(true);
+    expect(idx(web)).toEqual(idx(mobileGraph));
+
+    const self = (src: string) => /hit\.id === selfID/.test(src);
+    expect(self(web)).toBe(true);
+    expect(self(web)).toBe(self(mobileGraph));
   });
 
   it('breaks ties the same way', () => {

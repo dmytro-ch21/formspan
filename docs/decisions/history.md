@@ -13177,6 +13177,96 @@ unrelated global-count assertions, which is what those exist for.
   export, pointing the console at production) are untouched. Until then a
   console edit still needs `exportcontent` plus a PR to reach another
   environment — the no-PR flow is not built.
+## 2026-08-06 — The library's cross-references become links again, selectively
+
+`setup_from`, `common_next_moves` and `common_counters` store technique NAMES,
+and both clients rendered all three as inert text. They were **links once**, and
+both `Edges` components carry the comment explaining why they stopped:
+
+> These were buttons that swapped the panel until the coverage was looked at
+> honestly… Most rows were plain text sitting beside a few links, which reads
+> as a feature that half-works.
+
+That was right, and the reason has not gone away. Re-measured over the current
+542-entry catalog (the old comments cited 466-era figures):
+
+| field | references | resolve to exactly one technique |
+|---|---|---|
+| `setup_from` | 658 | **555 (84%)** |
+| `common_next_moves` | 1828 | 573 (31%) |
+| `common_counters` | 1607 | 154 (10%) |
+
+**These were measured over 634 first, which is not a number** — the double-count
+this log corrected two entries above, `techniques.json` plus a
+`techniques.additions.json` whose 92 rows are all already in it. Caught in
+review. The percentages barely moved (86/32/8 against 84/31/10) and no decision
+changed, which is exactly why it was worth catching: a wrong figure that
+supports the right conclusion is the kind that survives. The old comment's
+"~84%" for `setup_from` had been right all along, so the claim that the alias
+merge lifted it was an artifact of my arithmetic, not a finding.
+
+### What changed is the affordance, not the coverage
+
+The mobile comment set a condition — reconsider "if coverage ever reaches the
+point where nearly every entry resolves". **It has not, and this is not that.**
+Worth stating plainly rather than implying the bar was cleared.
+
+The original failure was that a resolved row and a prose row looked identical,
+so a reader had to guess which was tappable and learned not to try. Made
+visually distinct — button role, chevron, hover — the mixture is honest: part
+of the field names techniques and part of it is advice, which is what it holds.
+
+So `setup_from` and `common_next_moves` link where they resolve.
+**`common_counters` deliberately does not**: at 8%, one navigable row in twelve
+is exactly the half-works feel the links were removed for. `index` is an
+optional prop and its absence is the mechanism — counters are simply called
+without it.
+
+### The unresolved majority is not a data gap
+
+Worth recording because it looks like one. The top unresolved counters are
+`Sprawl`, `Posture-up`, `Crossface`, `Hand fight`, `Backstep`; the top
+unresolved next-moves are `Stabilize top position`, `submit`, `Settle Side
+Control`. These are grips, reactions and advice — **not** techniques missing
+from the library. Authoring entries for them to raise a percentage would make
+the catalog worse. 91% unlinked counters is the field honestly mixing two kinds
+of thing.
+
+### Folding, for 28 references
+
+The resolver keys on `foldForSearch` where `buildTechniqueGraph` uses exact
+strings. Measured, the gain is small — 3 more `setup_from` and 25 more
+`common_next_moves` — but they are all one class: `North-South Control` and
+`Front-Headlock Go-Behind` written with the keyboard hyphen where the catalog
+holds an en dash. Two spellings of one name should not decide whether a row is
+navigable, and it is the same fold the search already runs.
+
+### A vacuous test, caught by mutation
+
+The alias-precedence test searched the shipped catalog for a name/alias
+collision, found none, and asserted nothing — it **passed with the precedence
+deliberately inverted**. Rewritten against a fixture that contains the
+collision, and it now fails when the guard is removed. A guard the data happens
+not to exercise still has to be tested; it just has to be tested somewhere the
+case exists.
+
+The resolver is duplicated across the apps like the search, so `searchParity`
+now compares it too — including that it folds and that it refuses a
+self-reference. It reads `techniqueGraph.ts` on the phone and `api.ts` on the
+desktop, because the resolver lives in a different file on each side.
+
+### Gaps
+
+- **Not seen in a browser or on a device.** Typechecked, linted, and the
+  resolver is covered against the real catalog on both sides; nothing has
+  rendered a linked row.
+- **`common_counters` stays inert**, and if the content work ever lifts it much
+  above 8% this is the place to revisit — the mechanism is one prop.
+- **A link shows the library's own name, not the reference string.** They differ
+  when the reference used an alias or the other dash. Intentional — showing
+  where you are going beats echoing what was written — but it means the text
+  can change under a reader who is looking for the words they saw.
+
 
 ## 2026-08-06 — Decided: content is authored in production
 

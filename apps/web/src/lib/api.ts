@@ -2231,3 +2231,57 @@ export async function archiveCurriculumEnrollment(
     { method: "DELETE" },
   );
 }
+
+/**
+ * Name -> technique, for turning a cross-reference string into a link.
+ *
+ * `setup_from`, `common_next_moves` and `common_counters` store NAMES, not
+ * ids, so rendering one as navigable means resolving it first.
+ *
+ * DUPLICATED in apps/mobile/lib/techniqueGraph.ts, for the reason the whole
+ * search is: the two apps share no package and mobile needs its copy offline.
+ * Keyed on `foldForSearch` so the two spellings of one name — `North-South
+ * Control` with a hyphen against the en dash the catalog stores — do not
+ * decide whether a row is navigable.
+ *
+ * Aliases second, so a real name always beats another entry's alias.
+ */
+export function buildEdgeIndex(
+  techniques: TechniqueSummary[],
+): Map<string, TechniqueSummary> {
+  const byName = new Map<string, TechniqueSummary>();
+  for (const t of techniques) {
+    const k = foldForSearch(t.name);
+    if (!byName.has(k)) byName.set(k, t);
+  }
+  for (const t of techniques) {
+    for (const a of t.aliases ?? []) {
+      const k = foldForSearch(a);
+      if (!byName.has(k)) byName.set(k, t);
+    }
+  }
+  return byName;
+}
+
+/**
+ * Resolve one cross-reference, or null when it names something the library
+ * does not contain.
+ *
+ * NULL IS THE COMMON CASE FOR SOME FIELDS AND THAT IS CORRECT. Measured over
+ * the 542-entry catalog: `setup_from` resolves 84%, `common_next_moves` 31%,
+ * `common_counters` 10%. The rest are concepts rather than techniques —
+ * "Sprawl", "Crossface", "Stabilize top position" — and inventing library
+ * entries for them would be worse than leaving them the prose they are.
+ *
+ * A self-reference resolves to null: a row that navigates to the panel it is
+ * already in is a dead control that looks live.
+ */
+export function resolveEdge(
+  index: Map<string, TechniqueSummary>,
+  raw: string,
+  selfID?: string,
+): TechniqueSummary | null {
+  const hit = index.get(foldForSearch(raw));
+  if (!hit || hit.id === selfID) return null;
+  return hit;
+}
