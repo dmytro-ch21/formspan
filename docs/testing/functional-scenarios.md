@@ -2681,6 +2681,35 @@ own, so none of them is redundant with "the FK exists".
   release.
 - **...and the seed must still update its own rows.** The inverse failure is a
   content freeze that looks exactly like "nothing changed".
+### Drafts (`status`)
+
+A console-created technique is a **draft** and athletes cannot see it. Publishing
+is a separate, one-way action.
+
+- **A draft is absent from `GET /v1/techniques`** and `GET /v1/techniques/{id}`
+  returns 404 for one. The 404 rather than 403 is the point: a caller has no
+  business learning an id exists before it is published.
+- **There is no parameter that includes drafts.** Assert that adding one
+  (`?status=draft`, `?include_drafts=true`) changes nothing — a draft that
+  becomes visible by passing a query string is not a draft.
+- **The console CAN see its own drafts**, or they would be unfinishable.
+- **Creating through the console produces a draft**, not a published row. The
+  column default is `published` because it has to describe the 542 backfilled
+  rows, so this is the write path being explicit — delete `'draft'` from the
+  INSERT and it silently publishes instead.
+- **Publishing makes it appear** in the public list and detail.
+- **Publishing twice is a 404**, not a silent success: the caller is working
+  from a stale view and should learn that. Same for publishing an absent id.
+- **Editing a published technique leaves it published.** The regression is a
+  design that returns an edited row to draft — every typo fix would withdraw the
+  technique from the library until someone re-published it.
+- **A re-seed must not publish a draft.** Seed a row whose id matches an
+  unfinished console draft and assert the draft stays a draft; the `source`
+  guard is what stops it.
+- **Deleting the status filter from the public list leaves the rest of the suite
+  green** — the console paths return drafts on purpose. That is why this section
+  exists rather than relying on coverage elsewhere.
+
 - **Editing a SEEDED technique takes ownership of it.** PATCH one, assert
   `source` became `admin`, then run `cmd/seed` with the ORIGINAL content and
   assert the edit survives. The re-seed is the whole test: without the

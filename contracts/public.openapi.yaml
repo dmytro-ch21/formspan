@@ -663,6 +663,24 @@ components:
             deploy's reach or demote a seeded one into it. Note a PATCH through
             `/admin/*` moves a row from `seed` to `admin` as a side effect: that
             is what stops the next release reverting the edit.
+        status:
+          type: string
+          enum: [draft, published]
+          description: >
+            Whether athletes can see it. `published` is in the public catalog;
+            `draft` is visible only through `/admin/*` — not in
+            `GET /techniques`, not findable, not taggable.
+
+
+            **Present only on `/admin/*` responses**, and for a stronger reason
+            than `source`: a technique read the public way is published by
+            definition, because the API filters drafts out entirely.
+
+
+            The console CREATES as `draft`. Editing a published technique leaves
+            it published — a typo fix should reach athletes rather than withdraw
+            the technique. Publishing is `POST /admin/techniques/{id}/publish`
+            and is ONE-WAY; see that operation for why.
 
 
             **Present only on `/admin/*` responses.** It is ABSENT from
@@ -2773,6 +2791,11 @@ paths:
     get:
       summary: List the BJJ technique library
       operationId: listTechniques
+      description: >
+        **Published techniques only.** Drafts — console content not yet finished
+        — are excluded here and from `GET /techniques/{techniqueID}`, which
+        returns `404` for one. There is no parameter to include them: a draft
+        that becomes visible by passing a query string is not a draft.
       parameters:
         - $ref: "#/components/parameters/IfNoneMatch"
         - name: position
@@ -4841,6 +4864,53 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+
+  /admin/techniques/{techniqueID}/publish:
+    post:
+      summary: Publish a draft technique
+      operationId: publishTechnique
+      description: >
+        Makes a draft visible to athletes. **One-way — there is no unpublish.**
+
+
+        Withdrawing a LIVE technique is a different and much riskier operation
+        than finishing a new one: training records tag it by id, curricula list
+        it and the focus screen resolves it, and none of those reads filter on
+        status — correctly, because an athlete's own history must not develop
+        holes when a curator changes their mind. Hiding a live technique from
+        the library while all of that still points at it is a half-state nobody
+        asked for. If a published technique is wrong, edit it.
+
+
+        A separate operation rather than a field on `PATCH`, so that a partial
+        update of eighteen fields cannot change visibility by accident.
+
+
+        `404` covers both "no such id" and "already published": the caller is
+        working from a stale view either way, and reporting a success it did not
+        cause is worse than a refusal it can refresh past.
+      parameters:
+        - name: techniqueID
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The published technique.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [technique]
+                properties:
+                  technique:
+                    $ref: "#/components/schemas/Technique"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /admin/techniques/{techniqueID}:
     patch:

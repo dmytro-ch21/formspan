@@ -13199,6 +13199,71 @@ simulating the bad derivation: both assertions fire.
   always a secondary function of the assertion, and history.md carries the
   figures for anyone who wants them.
 
+## 2026-08-06 — Step 4: drafts, and the two things that make them real
+
+`status` on techniques: `draft` or `published`, with the public catalog filtered
+to published. A console write used to be live the instant it committed, which
+was fine while a pull request stood between the write and production — the
+review WAS the draft state. Authoring in production removes that step, so a
+technique saved with a name and nothing else reached the library immediately.
+
+Three decisions carry the design:
+
+**The column defaults to `published`, and the console writes `draft`
+explicitly.** The default has to describe the 542 rows the migration backfills —
+defaulting to `draft` empties the library the moment it runs, which is a
+catastrophe rather than a bug. So the default means exactly the wrong thing for
+a new row, and the CREATE path cannot rely on it. Same shape as 000032's
+`source`.
+
+**Editing a published technique leaves it published.** The tempting design —
+an edit returns a row to draft until re-published — makes every typo fix
+withdraw the technique from the library until someone remembers a second step.
+Draft protects content that has never been live, which is the only content
+nobody is relying on.
+
+**Publishing is one-way and has no inverse.** Withdrawing a LIVE technique is a
+different and much riskier operation: training records tag it by id, curricula
+list it, the focus screen resolves it — and none of those reads filter on
+status, correctly, because an athlete's history must not develop holes when a
+curator changes their mind. Hiding a live technique while all of that still
+points at it is a half-state nobody asked for, and building it casually is how
+it would arrive.
+
+It is also its own endpoint (`POST .../publish`) rather than a field on PATCH,
+and its own form in the console rather than a second submit button: the edit
+path is a read-modify-write over eighteen fields, and "visible to athletes" does
+not belong in the same request as fixing a typo. Publishing twice is a 404
+rather than a silent success — the caller is working from a stale view and
+should learn that.
+
+**Techniques only, and the exercise column was removed rather than left.** The
+first draft of the migration added `status` to both catalogs, because the
+exercise console has the same write surface and the same exposure. But a column
+is not the feature: without a create-as-draft path, a public filter and a
+publish button, `exercises.status` is a column nothing reads and the first
+person to trust it is wrong. Worse, half of it — drafts without a publish
+control — creates exercises that can never go live. Neither is better than
+both.
+
+Mutation-tested where it matters: removing the List filter leaves every other
+test in the package green, because the console paths return drafts on purpose,
+so a draft leaking into the public catalog is precisely the regression nothing
+else can see. Removing the explicit `'draft'` from the INSERT is the other one.
+
+### Gaps
+
+- **The exercise catalog has no drafts.** A new exercise authored in the console
+  is live immediately — the same exposure this fixes for techniques. Deliberate
+  scope, recorded rather than discovered.
+- **No bulk publish.** Authoring six techniques after a seminar means six
+  clicks. Fine now; annoying at volume.
+- **Nothing surfaces drafts globally.** They are visible on the list they were
+  authored into and marked with a badge, but there is no "you have 3 unfinished
+  techniques" anywhere, so a draft can be forgotten indefinitely. That is the
+  failure mode this feature trades for the one it fixes, and it is the quieter
+  of the two.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

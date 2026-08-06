@@ -33,6 +33,12 @@ func SeedData() ([]Technique, error) {
 	if err := json.Unmarshal(seedJSON, &techniques); err != nil {
 		return nil, fmt.Errorf("technique: parse seed: %w", err)
 	}
+	// Normalised HERE so every consumer — the seeder, the export's validator,
+	// the tests — sees a real value rather than the convention. The JSON keeps
+	// its 542 absences; nothing after this point has to know about them.
+	for i := range techniques {
+		techniques[i].Status = NormalizeStatus(techniques[i].Status)
+	}
 	if err := validate(techniques); err != nil {
 		return nil, err
 	}
@@ -74,6 +80,29 @@ func RulesetSeedData() ([]Ruleset, error) {
 	return rulesets, nil
 }
 
+// The two publication states. Exported because the console write path and the
+// public read path both need them, and a third string literal is how the two
+// stop agreeing.
+const (
+	StatusPublished = "published"
+	StatusDraft     = "draft"
+)
+
+// NormalizeStatus resolves the empty-means-published convention.
+//
+// One function rather than `if s == "" { s = "published" }` scattered about:
+// the convention is load-bearing (see Technique.Status) and a single place that
+// gets it wrong is findable, while five places that mostly get it right are not.
+func NormalizeStatus(s string) string {
+	if s == "" {
+		return StatusPublished
+	}
+	return s
+}
+
+//nolint:gochecknoglobals // vocabulary, not state
+var validStatuses = map[string]bool{StatusPublished: true, StatusDraft: true}
+
 // gi_no_gi is the one field with a DB-level CHECK, so a bad value would
 // otherwise fail mid-deploy against the constraint rather than here with a
 // name attached.
@@ -110,6 +139,11 @@ func ValidateFields(t Technique) error {
 		return fmt.Errorf("technique: %q name is too long (max %d)", t.ID, maxNameLen)
 	case !validGiNoGi[t.GiNoGi]:
 		return fmt.Errorf("technique: %q has unknown gi_no_gi %q", t.ID, t.GiNoGi)
+	case !validStatuses[NormalizeStatus(t.Status)]:
+		// The column has a CHECK, so a bad value fails at the write either way
+		// — but it fails naming a constraint, from inside a batch, rather than
+		// naming the technique. Same reasoning as gi_no_gi above.
+		return fmt.Errorf("technique: %q has unknown status %q", t.ID, t.Status)
 	case entanglementDetails[t.PositionDetail] != (t.Position == positionLegEntanglement):
 		// The one rule the retired spreadsheet importer applied that is a
 		// genuine invariant rather than a derivation. It used to live in

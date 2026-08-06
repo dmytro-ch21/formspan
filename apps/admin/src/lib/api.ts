@@ -263,6 +263,12 @@ export type Technique = {
    * deploy-owned. Use membership of `listAuthoredTechniques()` instead.
    */
   source?: string;
+  /**
+   * "published" or "draft"; absent means published. Only present on `/admin/*`
+   * responses — the public read does not select it, and a technique fetched the
+   * public way is published by definition, because the API filters drafts out.
+   */
+  status?: string;
   created_at?: string;
   updated_at?: string;
 };
@@ -343,6 +349,22 @@ export async function createTechnique(body: TechniqueWrite): Promise<Technique> 
  * the failure the backend's pointer-typed request exists to survive — a form
  * that omits `description` erasing the prose.
  */
+/**
+ * Publish a draft. One-way, and a separate call rather than a field on the
+ * PATCH body — the backend refuses to make visibility something a partial
+ * update can change by accident.
+ *
+ * A 404 here means "no draft with that id", which in practice means it was
+ * already published and this page is stale.
+ */
+export async function publishTechnique(id: string): Promise<Technique> {
+  const data = await adminFetch<{ technique: Technique }>(
+    `/admin/techniques/${encodeURIComponent(id)}/publish`,
+    { method: "POST", body: {} },
+  );
+  return data.technique;
+}
+
 export async function updateTechnique(
   id: string,
   body: TechniqueWrite,
@@ -377,6 +399,12 @@ export type Exercise = {
   /** "admin" for everything this console lists. Same caveat as Technique.source:
    *  populated only on /admin/*, so never derive ownership from it elsewhere. */
   source?: string;
+  /**
+   * "published" or "draft"; absent means published. Only present on `/admin/*`
+   * responses — the public read does not select it, and a technique fetched the
+   * public way is published by definition, because the API filters drafts out.
+   */
+  status?: string;
   created_at?: string;
   updated_at?: string;
 };

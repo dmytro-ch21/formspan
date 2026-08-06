@@ -130,10 +130,19 @@ func (r *PostgresRepository) List(ctx context.Context, f Filter) ([]Summary, err
 			database.LikeClause("a", n)+"))")
 	}
 
+	// DRAFTS ARE NOT PUBLIC, and this is one of exactly two places that has to
+	// know it — here and Get. Deliberately not a filter the caller can turn
+	// off: there is no `?status=` and no admin bypass on this route, because
+	// the one thing worse than an invisible draft is a draft that becomes
+	// visible when somebody passes a query parameter they found in the
+	// contract.
+	//
+	// Prepended rather than appended so it survives every filter combination
+	// above, including none of them — which is why the `if len(where)` is gone.
+	where = append([]string{"t.status = '" + StatusPublished + "'"}, where...)
+
 	q := `SELECT ` + summaryColumns + ` FROM techniques t`
-	if len(where) > 0 {
-		q += ` WHERE ` + strings.Join(where, " AND ")
-	}
+	q += ` WHERE ` + strings.Join(where, " AND ")
 	q += ` ORDER BY t.position, t.category, t.name`
 
 	rows, err := r.pool.Query(ctx, q, args...)
@@ -157,7 +166,10 @@ func (r *PostgresRepository) List(ctx context.Context, f Filter) ([]Summary, err
 }
 
 func (r *PostgresRepository) Get(ctx context.Context, id string) (*Technique, error) {
-	row := r.pool.QueryRow(ctx, `SELECT `+detailColumns+` FROM techniques t WHERE t.id = $1`, id)
+	// A draft is ErrNotFound, not a 403: the caller has no business knowing an
+	// id exists before it is published, and a 403 would confirm it.
+	row := r.pool.QueryRow(ctx, `SELECT `+detailColumns+` FROM techniques t
+		WHERE t.id = $1 AND t.status = '`+StatusPublished+`'`, id)
 	t, err := scanTechnique(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -414,9 +426,9 @@ const upsertSQL = `
 		id, name, aliases, category, position, position_detail, gi_no_gi,
 		typical_belt, description, setup_from, common_counters,
 		when_to_use, common_next_moves, video_reference, source_notes,
-		ibjjf_ruleset_id, function, to_position
+		ibjjf_ruleset_id, function, to_position, status
 	) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-		NULLIF($16, ''), NULLIF($17, ''), NULLIF($18, ''))
+		NULLIF($16, ''), NULLIF($17, ''), NULLIF($18, ''), $19)
 	ON CONFLICT (id) DO UPDATE SET
 		name            = EXCLUDED.name,
 		aliases         = EXCLUDED.aliases,
@@ -435,6 +447,7 @@ const upsertSQL = `
 		video_reference   = EXCLUDED.video_reference,
 		source_notes      = EXCLUDED.source_notes,
 		ibjjf_ruleset_id  = EXCLUDED.ibjjf_ruleset_id,
+		status            = EXCLUDED.status,
 		updated_at      = now()
 	WHERE techniques.source = 'seed' AND (
 		techniques.name, techniques.aliases, techniques.category,
@@ -443,7 +456,8 @@ const upsertSQL = `
 		techniques.setup_from, techniques.common_counters,
 		techniques.when_to_use, techniques.common_next_moves,
 		techniques.video_reference, techniques.source_notes,
-		techniques.ibjjf_ruleset_id, techniques.function, techniques.to_position
+		techniques.ibjjf_ruleset_id, techniques.function, techniques.to_position,
+		techniques.status
 	) IS DISTINCT FROM (
 		EXCLUDED.name, EXCLUDED.aliases, EXCLUDED.category,
 		EXCLUDED.position, EXCLUDED.position_detail, EXCLUDED.gi_no_gi,
@@ -451,7 +465,8 @@ const upsertSQL = `
 		EXCLUDED.setup_from, EXCLUDED.common_counters,
 		EXCLUDED.when_to_use, EXCLUDED.common_next_moves,
 		EXCLUDED.video_reference, EXCLUDED.source_notes,
-		EXCLUDED.ibjjf_ruleset_id, EXCLUDED.function, EXCLUDED.to_position
+		EXCLUDED.ibjjf_ruleset_id, EXCLUDED.function, EXCLUDED.to_position,
+		EXCLUDED.status
 	)`
 
 // UpsertAll writes the whole library in one transaction, so a deploy either
@@ -469,7 +484,7 @@ func (r *PostgresRepository) UpsertAll(ctx context.Context, techniques []Techniq
 			t.PositionDetail, t.GiNoGi, t.TypicalBelt, t.Description,
 			t.SetupFrom, t.CommonCounters, t.WhenToUse, t.CommonNextMoves,
 			t.VideoReference, t.SourceNotes, t.IBJJFRulesetID, t.Function,
-			t.ToPosition)
+			t.ToPosition, NormalizeStatus(t.Status))
 	}
 
 	results := tx.SendBatch(ctx, batch)

@@ -2,7 +2,8 @@ import { notFound } from "next/navigation";
 
 import { ApiError, getTechnique, listAuthoredTechniques, listPositions } from "@/lib/api";
 import { AdminMasthead } from "../../AdminMasthead";
-import { updateTechniqueAction } from "../actions";
+import { publishTechniqueAction, updateTechniqueAction } from "../actions";
+import { PublishButton } from "../PublishButton";
 import { TechniqueForm } from "../TechniqueForm";
 
 /**
@@ -65,6 +66,25 @@ export default async function EditTechniquePage({
       />
 
       <main className="flex max-w-4xl flex-col gap-5 px-10 py-8">
+        {/* A draft is invisible to athletes, which is the useful thing to know
+            before editing and the easy thing to forget after. Above the form,
+            because it changes what the Save button means. */}
+        {initial.status === "draft" ? (
+          <div className="flex flex-col gap-3 rounded-lg border border-accent-dark bg-card px-5 py-4 text-[13px] text-text-secondary">
+            <p>
+              <strong className="text-text">This is a draft — athletes cannot see it.</strong>{" "}
+              It is not in the library, not searchable and not taggable. Saving keeps it that
+              way; publishing is a separate, deliberate step.
+            </p>
+            <p>
+              There is no unpublish. Withdrawing a live technique would leave training records,
+              curricula and focus lists pointing at something the library no longer shows, so
+              publishing is one-way — take the time you need here first.
+            </p>
+            <PublishButton action={publishTechniqueAction.bind(null, initial.id)} />
+          </div>
+        ) : null}
+
         {seeded ? (
           // Deliberately a warning rather than a refusal, and deliberately
           // BEFORE the form: the transfer happens on save, so the place to say

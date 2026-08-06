@@ -90,7 +90,11 @@ func TestCreateWritesAnAdminRowThatSeedingCannotTouch(t *testing.T) {
 		t.Fatalf("upsert: %v", err)
 	}
 
-	after, err := repo.Get(ctx, "test-content-sao-paulo")
+	// GetTechnique, the CONSOLE read, not the public Get. A console-created
+	// technique is a draft and the public read filters those out — this test is
+	// about the seeder not clobbering admin content, and reading it the public
+	// way would fail for an unrelated reason and read like a regression here.
+	after, err := repo.GetTechnique(ctx, "test-content-sao-paulo")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -105,6 +109,13 @@ func TestCreateWritesAnAdminRowThatSeedingCannotTouch(t *testing.T) {
 	}
 	if source != "admin" {
 		t.Errorf("source became %q — the row was adopted by the seed", source)
+	}
+	// The seed carries status too, so a clashing seed row could publish a draft
+	// the console has not finished. The source guard is what stops it; this is
+	// the assertion that would notice if that stopped being true.
+	if after.Status != StatusDraft {
+		t.Errorf("status became %q — a re-seed published an unfinished technique",
+			after.Status)
 	}
 }
 
@@ -250,6 +261,101 @@ func TestSearchAllReachesSeededRowsAndAliases(t *testing.T) {
 	// A trailing backslash must not escape the pattern's own closing `%`.
 	if len(ids(`Kesa\`)) != 0 {
 		t.Error("a trailing backslash was not escaped")
+	}
+}
+
+// The whole point of the column: a draft is invisible to athletes, and
+// publishing is what makes it visible.
+//
+// The two negative assertions are the load-bearing ones. Deleting the status
+// filter from List leaves every other test in this package green — the console
+// paths return drafts on purpose — so a draft leaking into the public catalog
+// is exactly the regression nothing else here can see.
+func TestADraftIsInvisibleUntilPublished(t *testing.T) {
+	repo, _ := contentFixture(t)
+	ctx := context.Background()
+
+	created, err := repo.CreateTechnique(ctx, aTechnique("test-content-draft", "Half Written"))
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// The console creates DRAFTS. The column default is 'published' because it
+	// has to describe the 542 rows the migration backfilled, so this is the
+	// write path being explicit rather than the schema being helpful — delete
+	// `'draft'` from the INSERT and it silently publishes instead.
+	if created.Status != StatusDraft {
+		t.Fatalf("a console-created technique has status %q, want draft — "+
+			"unfinished content is live the moment it saves", created.Status)
+	}
+
+	inList := func() bool {
+		t.Helper()
+		all, err := repo.List(ctx, Filter{})
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		for _, s := range all {
+			if s.ID == "test-content-draft" {
+				return true
+			}
+		}
+		return false
+	}
+
+	if inList() {
+		t.Error("a draft is in the public list — athletes can see unfinished content")
+	}
+	if _, err := repo.Get(ctx, "test-content-draft"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("public Get of a draft = %v, want ErrNotFound", err)
+	}
+	// It is not hidden from the console, which would make it unfinishable.
+	if _, err := repo.GetTechnique(ctx, "test-content-draft"); err != nil {
+		t.Errorf("the console cannot see its own draft: %v", err)
+	}
+
+	published, err := repo.Publish(ctx, "test-content-draft")
+	if err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if published.Status != StatusPublished {
+		t.Errorf("after publish, status = %q", published.Status)
+	}
+	if !inList() {
+		t.Error("a published technique is still missing from the public list")
+	}
+	if _, err := repo.Get(ctx, "test-content-draft"); err != nil {
+		t.Errorf("public Get after publish: %v", err)
+	}
+
+	// Publishing twice is ErrNotFound, not a silent success: the caller is
+	// working from a stale view and should learn that.
+	if _, err := repo.Publish(ctx, "test-content-draft"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("re-publishing = %v, want ErrNotFound", err)
+	}
+}
+
+// Editing a published technique must NOT withdraw it.
+//
+// The tempting design — an edit returns a row to draft until re-published —
+// makes every typo fix remove the technique from the library until someone
+// remembers a second step. Draft protects content that has never been live;
+// this is the assertion that says so out loud.
+func TestEditingAPublishedTechniqueKeepsItVisible(t *testing.T) {
+	repo, _ := contentFixture(t)
+	ctx := context.Background()
+
+	if err := repo.UpsertAll(ctx, []Technique{aTechnique("test-content-live", "Live")}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := repo.UpdateTechnique(ctx, aTechnique("test-content-live", "Live, Corrected")); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	got, err := repo.Get(ctx, "test-content-live")
+	if err != nil {
+		t.Fatalf("the edit withdrew a live technique from the catalog: %v", err)
+	}
+	if got.Name != "Live, Corrected" {
+		t.Errorf("name = %q, want the edit to have landed", got.Name)
 	}
 }
 
