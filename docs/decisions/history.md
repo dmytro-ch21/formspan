@@ -13144,6 +13144,61 @@ decision rather than a workaround.
   staleness, which is the loss window above. The edge is real but it is smaller
   than written, and mis-stating which risk is sharpest is worth correcting.
 
+## 2026-08-06 — The pinned counts become properties
+
+The decision the snapshot entry left open, taken: `TestPositionsResolveAgainstTheLibrary`
+no longer pins `wantClosedGuard = 47` / `wantOpenGuard = 138`, and
+`TestTechniqueEnrichment` no longer pins the restricted-technique count.
+
+**Why they existed, and why that reasoning expired.** The comment on those
+constants argued at length that "these two differ" passes the very regression
+the check exists for — delete closed-guard's `detail_includes` and it matches
+the whole family while open-guard keeps its excludes, so the halves are still
+unequal and nothing fails. That argument was correct, and exact counts were the
+right answer while the catalog changed only by deliberate PR. The console can
+now author a technique without one, so a legitimate new open-guard row makes the
+test fail for no reason. Measured, not predicted: one authored row turned the
+package red while rehearsing the snapshot job.
+
+**What replaced them are the properties the numbers were standing in for**, each
+immune to content growth and none vacuous:
+
+- **Partition** — every Guard-family technique resolves to exactly one of the
+  two positions. This is what catches the original regression, and it catches it
+  harder: 139 failing assertions rather than one wrong number.
+- **Direction** — a "Closed Guard" technique lands on closed-guard, asserted
+  against literal detail strings rather than read back out of the config, which
+  would be asserting the config against itself. This is the case partition alone
+  cannot see: swap the two vocabularies and the halves still partition. The
+  exact counts caught that only by accident; this catches it on purpose, and
+  was mutation-tested by performing the swap.
+- **Non-empty** — a side resolving to nothing is a dead cross-link, not a
+  partition of zero.
+
+**The restricted count needed a different answer.** Its regression — deriving
+restriction by comparing belt lists — moves the RULESET count from 8 to 21, and
+rulesets are seed-only: nothing but `Seed` calls `UpsertRulesets` and the console
+cannot author one. So the exact ruleset pin stays and is what actually guards the
+column. The technique count becomes a bound, which the original comment's own
+standard permits: it demanded that a non-exact assertion still discriminate, and
+27-against-a-ceiling-of-100 does, since the regression produces 468. Verified by
+simulating the bad derivation: both assertions fire.
+
+### Gaps
+
+- **One landmine deliberately left armed.** `TestEveryTechniqueHasAFunctionExceptTheFundamentals`
+  pins the exact set of function-less rows, and the console's function dropdown
+  offers "— none —", so authoring a technique without one will redden main. Left
+  alone because a blank function on an authored technique is genuinely
+  suspicious rather than routine, drills are rare, and the fix is a one-line
+  addition to the list. Weakening a good test to spare an unlikely inconvenience
+  is the wrong trade — but it IS a case where main goes red for content reasons,
+  so it is written down rather than discovered.
+- The guard-family split is no longer stated anywhere as a number, so the "did
+  something drift?" tripwire the exact counts also provided is gone. That was
+  always a secondary function of the assertion, and history.md carries the
+  figures for anyone who wants them.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
