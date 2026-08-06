@@ -660,7 +660,9 @@ components:
             embedded JSON rewrites it on every release), `admin` means it was
             authored in the console and the database owns it. Read-only — the
             server sets it, so a client cannot promote its own row out of the
-            deploy's reach or demote a seeded one into it.
+            deploy's reach or demote a seeded one into it. Note a PATCH through
+            `/admin/*` moves a row from `seed` to `admin` as a side effect: that
+            is what stops the next release reverting the edit.
 
 
             **Present only on `/admin/*` responses.** It is ABSENT from
@@ -4554,10 +4556,11 @@ paths:
       summary: List the exercises the console can edit
       operationId: listAuthoredExercises
       description: >
-        Every exercise with `source: "admin"` — what the console owns and can
-        edit — and deliberately not the whole catalog. `PATCH` refuses a seeded
-        row, because the seed JSON owns those and an edit would be reverted by
-        the next deploy.
+        Every exercise with `source: "admin"` — what the console has authored.
+        Deliberately not the whole catalog, though `PATCH` accepts any row since
+        the authoring spreadsheet was retired in 2026-08; the exercise catalog
+        has no search equivalent to the technique one yet, so a deploy-owned
+        exercise is reachable by id but not listed.
 
 
         Unbounded, for the same reason as the technique equivalent: the set
@@ -4679,9 +4682,10 @@ paths:
         because renaming must not orphan the training records pointing at it.
 
 
-        Refuses a **seeded** exercise with 409 rather than editing it: the seed
-        JSON owns those, and a change here would be reverted on the next
-        release. Edit `exercises.json` and deploy instead.
+        ANY row, seeded or admin-authored, and the write TAKES OWNERSHIP: it
+        sets `source` to `admin`, so the next release's re-seed skips it. The
+        spreadsheet that used to own the catalog was retired in 2026-08; before
+        that this refused a seeded exercise with a 409.
       parameters:
         - name: exerciseID
           in: path
@@ -4712,38 +4716,44 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
-        "409":
-          description: That exercise is seeded, so a deploy owns it.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
 
   /admin/techniques:
     get:
-      summary: List the techniques the console can edit
+      summary: List or search the techniques the console can edit
       operationId: listAuthoredTechniques
       description: >
-        Every technique with `source: "admin"` — what the console owns and can
-        edit — and deliberately not the whole catalog. `PATCH` refuses a seeded
-        row, because the seed JSON owns those and an edit would be reverted by
-        the next deploy, so listing all of them would offer hundreds of rows of
-        which a handful are actionable.
+        Without `q`: every technique with `source: "admin"` — what the console
+        has authored — ordered by id and **unbounded**, because that set grows
+        by hand one row at a time and a console that silently truncated its own
+        content would be worse than a slow one. It is also exactly what
+        `cmd/exportcontent` reads.
+
+
+        With `q`: the WHOLE catalog, seeded rows included, matched on name, id
+        or alias and ordered by name. Every row is editable since the authoring
+        spreadsheet was retired in 2026-08, so a screen that could only list the
+        handful it authored could not reach the row an operator came to fix.
+        **Capped at 100** — a result set of exactly 100 may be truncated, and
+        the response carries no total, so treat it as "first 100".
 
 
         This exists because the public `GET /techniques` cannot answer the
         question: its `Summary` carries no `source`, and adding one would put
         the string "seed" on every entry of every client's catalog to serve one
         admin screen.
-
-
-        Unbounded. This set grows by hand, one technique at a time, and a
-        console that silently truncated its own content would be worse than a
-        slow one.
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: >
+            Search the whole catalog by name, id or alias. Omit it to get the
+            admin-authored set instead. Whitespace-only is treated as omitted.
+          schema: { type: string }
       responses:
         "200":
           description: >
-            The authored techniques, ordered by id. `[]` when nothing has been
+            Without `q`, the authored techniques ordered by id; with `q`, the
+            matching techniques ordered by name. `[]` when nothing has been
             authored yet — an empty array, never null.
           content:
             application/json:
@@ -4834,13 +4844,21 @@ paths:
 
   /admin/techniques/{techniqueID}:
     patch:
-      summary: Edit an admin-authored technique
+      summary: Edit any technique
       operationId: updateTechnique
       description: >
-        Only `source: "admin"` rows. A seeded technique belongs to the deploy —
-        editing it here would be reverted by the next release's re-seed, so it
-        is refused with a 409 explaining that `techniques.json` is the way to
-        change it. The id comes from the path and is never moved.
+        ANY row, seeded or admin-authored, and the write TAKES OWNERSHIP: it
+        sets `source` to `admin`, which the seeder's own `WHERE source = 'seed'`
+        then skips forever after. Without that flip the next release would
+        quietly revert the edit, which is why this used to refuse a seeded row
+        with a 409 instead — a refusal that made sense while an authoring
+        spreadsheet owned most of the catalog and a JSON edit could not stick
+        either. That spreadsheet was retired in 2026-08.
+
+
+        `cmd/exportcontent` carries the row back into `techniques.json`, and
+        `-adopt` hands it to the deploy again once that is shipped. The id comes
+        from the path and is never moved.
       parameters:
         - name: techniqueID
           in: path
@@ -4871,12 +4889,6 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
-        "409":
-          description: The technique is seeded, so a deploy owns it.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
 
   /admin/users:
     get:

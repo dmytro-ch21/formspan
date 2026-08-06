@@ -82,17 +82,31 @@ func (r *PostgresRepository) CreateExercise(ctx context.Context, e Exercise) (Ex
 }
 
 func (r *PostgresRepository) UpdateExercise(ctx context.Context, e Exercise) (Exercise, error) {
-	// `source = 'admin'` sits in the WHERE rather than a check in Go, so this is
-	// one statement and cannot race. Editing a SEEDED row here would be reverted
-	// by the next deploy's re-seed — silently, and only for the fields the
-	// change-detection tuple covers, which is the worst kind of half-applied.
+	// ANY row is editable here, and the write TAKES OWNERSHIP of it — the same
+	// change the technique catalog made when the authoring spreadsheet was
+	// retired, for the same reason and with the same load-bearing detail.
+	//
+	// `source = 'admin'` used to sit in the WHERE, refusing seeded rows,
+	// because an edit to one would be reverted by the next deploy's re-seed.
+	// It now sits in the SET instead: editing a row makes it admin-owned, and
+	// the seed's own `WHERE source = 'seed'` skips it from then on. Remove it
+	// from the SET and the next deploy quietly undoes every edit made here.
+	//
+	// Still one statement, so it cannot race. `exportcontent -adopt` is how a
+	// row goes back under the deploy.
+	//
+	// NOTE the media caveat that already applies to admin-owned rows now
+	// applies to these too: `upsertMedia`'s prune is not scoped by source, so a
+	// re-seed of a row whose JSON says `"media": []` still removes its media.
+	// That is why exportcontent preserves the key.
 	row := r.pool.QueryRow(ctx, `
 		UPDATE exercises SET
 			name = $2, sport = $3, movement_pattern = $4,
 			movement_pattern_detail = $5, primary_muscles = $6,
 			secondary_muscles = $7, equipment = $8, load_type = $9,
-			is_unilateral = $10, instructions = $11, updated_at = now()
-		WHERE id = $1 AND source = 'admin'
+			is_unilateral = $10, instructions = $11,
+			source = 'admin', updated_at = now()
+		WHERE id = $1
 		RETURNING `+contentReturning,
 		e.ID, e.Name, e.Sport, e.MovementPattern, e.MovementPatternDetail,
 		nonNil(e.PrimaryMuscles), nonNil(e.SecondaryMuscles), nonNil(e.Equipment),

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/dmytro-ch21/vola/backend/internal/platform/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -83,12 +84,25 @@ func (r *PostgresRepository) CreateTechnique(ctx context.Context, t Technique) (
 }
 
 func (r *PostgresRepository) UpdateTechnique(ctx context.Context, t Technique) (Technique, error) {
-	// `source = 'admin'` sits in the WHERE rather than a check in Go, so this
-	// is one statement and cannot race. Editing a SEEDED row here would be
-	// reverted by the next deploy's re-seed — silently, and only for the
-	// fields the change-detection tuple covers, which is the worst kind of
-	// half-applied. Refused outright; the JSON stays the way to change seeded
-	// content.
+	// ANY row is editable here, and the write TAKES OWNERSHIP of it.
+	//
+	// `source = 'admin'` used to sit in the WHERE, refusing seeded rows: an
+	// edit to one would be reverted by the next deploy's re-seed — silently,
+	// and only for the fields the change-detection tuple covers, which is the
+	// worst kind of half-applied. That was the right refusal while the
+	// spreadsheet owned 450 of the 542 and a JSON edit could not stick either.
+	//
+	// With the spreadsheet retired the refusal has no remedy to point at, so it
+	// moves to the SET clause instead: the row becomes admin-owned by the act
+	// of editing it, and the seed's own `WHERE source = 'seed'` then skips it
+	// forever after. That is what makes this safe rather than merely permitted
+	// — remove `source = 'admin'` from the SET and the next deploy quietly
+	// undoes every edit made here, which is exactly the hazard the WHERE was
+	// guarding against.
+	//
+	// Getting the row back under the deploy is `exportcontent -adopt`, after
+	// the JSON is committed and shipped. Still one statement, so it cannot
+	// race.
 	row := r.pool.QueryRow(ctx, `
 		UPDATE techniques SET
 			name = $2, aliases = $3, category = $4, position = $5,
@@ -97,8 +111,8 @@ func (r *PostgresRepository) UpdateTechnique(ctx context.Context, t Technique) (
 			when_to_use = $12, common_next_moves = $13, video_reference = $14,
 			source_notes = $15, ibjjf_ruleset_id = NULLIF($16, ''),
 			function = NULLIF($17, ''), to_position = NULLIF($18, ''),
-			updated_at = now()
-		WHERE id = $1 AND source = 'admin'
+			source = 'admin', updated_at = now()
+		WHERE id = $1
 		RETURNING `+contentReturning,
 		t.ID, t.Name, t.Aliases, t.Category, t.Position, t.PositionDetail, t.GiNoGi,
 		t.TypicalBelt, t.Description, t.SetupFrom, t.CommonCounters, t.WhenToUse,
@@ -107,10 +121,8 @@ func (r *PostgresRepository) UpdateTechnique(ctx context.Context, t Technique) (
 
 	out, err := scanContent(row)
 	if errors.Is(err, pgx.ErrNoRows) {
-		// Covers both "no such technique" and "that one is seeded". Told apart
-		// in the handler, which looks the id up to say which — the two need
-		// different advice, and a bare 404 for a row the console is displaying
-		// reads as a bug.
+		// Now means exactly one thing — no such id. It used to also mean "that
+		// one is seeded", which the handler looked up to explain.
 		return Technique{}, ErrNotFound
 	}
 	if err != nil {
@@ -169,6 +181,53 @@ func scanContent(s scannable) (Technique, error) {
 // Ordered by id so the exported file is byte-stable across runs — a re-export
 // with no changes must produce no diff, or the review step the promotion path
 // depends on becomes noise nobody reads.
+// maxConsoleSearch bounds the console's search.
+//
+// AdminAuthored above is deliberately unbounded — it grows one technique at a
+// time and the export must see all of it. This one reads the WHOLE catalog, so
+// it needs a ceiling: 542 full rows is ~570 KB of mostly prose the console
+// renders none of.
+const maxConsoleSearch = 100
+
+// SearchAll finds any technique by name, id or alias, seeded ones included.
+//
+// The console could not offer this before: PATCH refused a seeded row, so
+// listing rows that 409 when clicked would have been worse than not listing
+// them. Now that every row is editable, the opposite is true — a console that
+// can only show you the handful it authored cannot fix the typo you came to
+// fix.
+//
+// Separate from the public List, which returns summaries and no `source`. The
+// console needs the ownership badge, and it is already admin-gated.
+func (r *PostgresRepository) SearchAll(ctx context.Context, query string) ([]Technique, error) {
+	// database.LikeTerm, not the raw string — the same helper the public List
+	// uses, for the same reason. Unescaped, a `_` matches any character (so
+	// "half_guard" finds "half-guard"), a `%` matches everything, and a
+	// trailing backslash escapes this pattern's own closing `%` and turns a
+	// contains-search into ends-with-a-literal-percent. No injection — the
+	// value is bound — but wrong results with nothing reporting it.
+	rows, err := r.pool.Query(ctx, `
+		SELECT `+contentReturning+` FROM techniques
+		WHERE `+database.LikeClause("name", 1)+`
+		   OR `+database.LikeClause("id", 1)+`
+		   OR EXISTS (SELECT 1 FROM unnest(aliases) a WHERE `+database.LikeClause("a", 1)+`)
+		ORDER BY name
+		LIMIT $2`, database.LikeTerm(query), maxConsoleSearch)
+	if err != nil {
+		return nil, fmt.Errorf("technique: console search: %w", err)
+	}
+	defer rows.Close()
+	out := []Technique{}
+	for rows.Next() {
+		t, err := scanContent(rows)
+		if err != nil {
+			return nil, fmt.Errorf("technique: scan search: %w", err)
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
 func (r *PostgresRepository) AdminAuthored(ctx context.Context) ([]Technique, error) {
 	rows, err := r.pool.Query(ctx,
 		`SELECT `+contentReturning+` FROM techniques WHERE source = 'admin' ORDER BY id`)

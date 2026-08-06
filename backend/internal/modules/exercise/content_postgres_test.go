@@ -106,11 +106,17 @@ func TestCreateWritesAnAdminRowThatSeedingCannotTouch(t *testing.T) {
 	}
 }
 
-// The mutation that survived the handler suite: without `AND source = 'admin'`
-// in the UPDATE, the console could edit seeded content — and the edit would be
-// silently reverted by the next deploy, for only the fields the seeder's
-// change-detection tuple covers. The worst kind of half-applied.
-func TestUpdateRefusesASeededRow(t *testing.T) {
+// Editing a seeded row is allowed now, and the write TAKES OWNERSHIP.
+//
+// The inverse of the test it replaces. The old rule refused the edit because
+// the next deploy's re-seed would silently revert it, for only the fields the
+// change-detection tuple covers. The write now flips `source` to 'admin', and
+// the seeder's own `WHERE source = 'seed'` leaves it alone from then on.
+//
+// The re-seed at the end is the load-bearing half: drop `source = 'admin'` from
+// the SET clause and everything above it still passes while the deploy quietly
+// undoes the edit.
+func TestUpdatingASeededRowTakesOwnershipOfIt(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 	const id = "test-seeded-row"
@@ -118,18 +124,32 @@ func TestUpdateRefusesASeededRow(t *testing.T) {
 
 	edited := seeded
 	edited.Name = "Edited In The Console"
-	_, err := repo.UpdateExercise(ctx, edited)
-	if !errors.Is(err, ErrNotFound) {
-		t.Fatalf("update of a seeded row returned %v, want ErrNotFound", err)
+	if _, err := repo.UpdateExercise(ctx, edited); err != nil {
+		t.Fatalf("update of a seeded row = %v, want it to succeed now", err)
 	}
-
-	// ...and nothing moved.
 	after, err := repo.GetExercise(ctx, id)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if after.Name != seeded.Name {
-		t.Errorf("the seeded row changed to %q despite the refusal", after.Name)
+	if after.Name != "Edited In The Console" {
+		t.Fatalf("the edit did not land: %q", after.Name)
+	}
+	if after.Source != "admin" {
+		t.Fatalf("source = %q, want admin — the edit must take ownership, or the "+
+			"next deploy reverts it", after.Source)
+	}
+
+	// The deploy runs on every release and must now skip this row.
+	if err := repo.UpsertAll(ctx, []Exercise{seeded}); err != nil {
+		t.Fatalf("re-seed: %v", err)
+	}
+	final, err := repo.GetExercise(ctx, id)
+	if err != nil {
+		t.Fatalf("get after re-seed: %v", err)
+	}
+	if final.Name != "Edited In The Console" {
+		t.Errorf("the re-seed reverted the console edit to %q — the UPDATE is not "+
+			"taking ownership", final.Name)
 	}
 }
 

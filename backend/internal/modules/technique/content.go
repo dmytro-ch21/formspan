@@ -70,12 +70,15 @@ type ContentRepository interface {
 	// would be reverted by the next deploy in the confusing half-way sense
 	// (the upsert skips it, so the two disagree forever).
 	CreateTechnique(ctx context.Context, t Technique) (Technique, error)
-	// UpdateTechnique edits an admin-authored technique.
+	// UpdateTechnique edits ANY technique and takes ownership of it.
 	//
-	// Refuses to touch a seeded row: the JSON owns those, and an edit here
-	// would be silently reverted on the next deploy. Editing seeded content
-	// means editing the JSON.
+	// The write sets `source` to "admin", which the seeder skips — without
+	// that, the next deploy would silently revert the edit. Returns ErrNotFound
+	// only when the id does not exist.
 	UpdateTechnique(ctx context.Context, t Technique) (Technique, error)
+	// SearchAll finds any technique by name, id or alias, seeded included, so
+	// the console can reach the whole catalog rather than only what it wrote.
+	SearchAll(ctx context.Context, query string) ([]Technique, error)
 	// KnownPositions returns the distinct `position` values in the catalog.
 	//
 	// The vocabulary is derived from the library rather than hardcoded — the
@@ -87,11 +90,6 @@ type ContentRepository interface {
 	// GetTechnique reads the current row, so a partial update can overlay onto
 	// it rather than replacing it.
 	GetTechnique(ctx context.Context, id string) (Technique, error)
-	// Source reports where a technique came from, so a refusal can explain
-	// itself rather than 404 at an id that plainly exists. On the interface so
-	// the handler can be faked — taking the concrete type is why the handler
-	// layer had no tests and shipped three defects.
-	Source(ctx context.Context, id string) (string, error)
 	// AdminAuthored returns every console-authored technique.
 	//
 	// The console needs it to list what it can edit, and nothing else can

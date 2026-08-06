@@ -1,7 +1,7 @@
 # Content authoring — retiring the spreadsheet, and publishing without a PR
 
-Status: **proposal, 2026-08-06. Step 1 is built** (see history.md); steps 2–6
-are not. It complements
+Status: **proposal, 2026-08-06. Steps 1 and 2 are built** (see history.md);
+steps 3–6 are not. It complements
 [history.md](history.md) (what was decided and when) and describes where the
 content pipeline should end up, in two phases that can land months apart.
 
@@ -201,7 +201,7 @@ A CMS. A workflow engine. Multi-user approvals. There is one author.
 | Step | Depends on | Rough size |
 | --- | --- | --- |
 | 1. Retire the importer; fold the additions files in; move the taxonomy into Go | nothing | small |
-| 2. Widen the console to edit any row (drop the `source = 'admin'` restriction on update) | 1 | small |
+| 2. Widen the console to edit any row — **DONE**, and note it is not a "drop the restriction": the clause MOVES to the SET clause, or the next deploy reverts every edit | 1 | small |
 | 3. `content_revisions` + audit + rollback in the console | 2 | medium |
 | 4. `status` draft/published, API filters to published | 2 | medium |
 | 5. Scheduled snapshot export as a bot commit; restore path preserves `source` | 3, 4 | medium |

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
 )
@@ -121,21 +122,35 @@ func (h *ContentHandler) Positions(w http.ResponseWriter, r *http.Request) {
 	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"positions": known})
 }
 
-// List serves the techniques the console owns.
+// List serves what the console authored, or — with `?q=` — searches the lot.
 //
-// Deliberately NOT the whole catalog. The console can only edit admin-authored
-// rows — UpdateTechnique refuses a seeded one, because the JSON owns those and
-// an edit here is reverted by the next deploy — so listing all 542 would offer
-// 542 rows of which only the handful with `source = 'admin'` are actionable.
-// That count is runtime state, not a property of the seed: it rises as the
-// console authors and drops back to zero on `exportcontent -adopt`. The screen
-// says where the rest live instead.
+// The default is deliberately NOT the whole catalog, but the reason changed:
+// every row is editable now, so it is no longer "the rest would 409 when
+// clicked", it is simply that 542 full rows is ~570 KB of prose to render a
+// list. The authored set is also runtime state rather than a property of the
+// seed — it rises as the console writes, gains any seeded row someone edits
+// (the write takes ownership), and drains on `exportcontent -adopt`.
 //
-// Unbounded, like the export's read of the same set: this grows by hand, one
-// technique at a time, and a console that silently truncated its own content
-// would be worse than a slow one.
+// The authored branch is unbounded, like the export's read of the same set:
+// it grows by hand, one technique at a time, and a console that silently
+// truncated its own content would be worse than a slow one. The search branch
+// IS capped — see maxConsoleSearch.
 func (h *ContentHandler) List(w http.ResponseWriter, r *http.Request) {
-	authored, err := h.repo.AdminAuthored(r.Context())
+	// `?q=` searches the WHOLE catalog; without it the list is what the console
+	// authored. Two behaviours behind one endpoint on purpose: the authored set
+	// is the useful default (it is what you were just working on, and it is
+	// what `-adopt` drains), while search is how you reach the other 450 now
+	// that they are editable. Returning all 542 by default would be ~570 KB of
+	// prose to render a list.
+	var (
+		authored []Technique
+		err      error
+	)
+	if q := strings.TrimSpace(r.URL.Query().Get("q")); q != "" {
+		authored, err = h.repo.SearchAll(r.Context(), q)
+	} else {
+		authored, err = h.repo.AdminAuthored(r.Context())
+	}
 	if err != nil {
 		apihttp.WriteInternal(w, r, "technique", err)
 		return
@@ -244,20 +259,15 @@ func (h *ContentHandler) write(
 	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"technique": out})
 }
 
-// explainNotFound tells "no such id" apart from "that one is seeded".
+// explainNotFound is a plain 404 now.
 //
-// A bare 404 at an id the console is literally displaying reads as a bug, and
-// the fix for the second case is completely different: seeded content is
-// changed in the JSON and deployed, because an edit here would be reverted by
-// the next re-seed.
-func (h *ContentHandler) explainNotFound(w http.ResponseWriter, r *http.Request, id string) {
-	source, err := h.repo.Source(r.Context(), id)
-	if err == nil && source != "admin" {
-		apihttp.WriteError(w, http.StatusConflict, apihttp.CodeAlreadyExists,
-			"that technique comes from the seeded library, so a deploy owns it — "+
-				"edit techniques.json and re-deploy, or an edit here is reverted on the next release")
-		return
-	}
+// It used to tell "no such id" apart from "that one is seeded" and return a
+// 409 for the second, because the console refused to edit a seeded row. Since
+// the spreadsheet was retired the console edits any row and the write takes
+// ownership of it, so the only way to reach here is an id that does not exist.
+// Kept as a function rather than inlined: both call sites read better naming
+// the case, and step 2's whole point is that there is now only one.
+func (h *ContentHandler) explainNotFound(w http.ResponseWriter, r *http.Request, _ string) {
 	apihttp.WriteError(w, http.StatusNotFound, apihttp.CodeNotFound, "technique not found")
 }
 
