@@ -11,6 +11,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// The actor every console write in these tests is attributed to. A constant so
+// the audit assertions read as "this specific caller" rather than a string
+// repeated eleven times.
+const testActor = "user_test_admin"
+
 func contentFixture(t *testing.T) (*PostgresRepository, *pgxpool.Pool) {
 	t.Helper()
 	databaseURL := os.Getenv("TEST_DATABASE_URL")
@@ -66,7 +71,7 @@ func TestCreateWritesAnAdminRowThatSeedingCannotTouch(t *testing.T) {
 	repo, pool := contentFixture(t)
 	ctx := context.Background()
 
-	created, err := repo.CreateTechnique(ctx, aTechnique("test-content-sao-paulo", "São Paulo Pass"))
+	created, err := repo.CreateTechnique(ctx, aTechnique("test-content-sao-paulo", "São Paulo Pass"), testActor)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -153,10 +158,10 @@ func TestCreateRefusesAnIDThatAlreadyExists(t *testing.T) {
 	repo, _ := contentFixture(t)
 	ctx := context.Background()
 
-	if _, err := repo.CreateTechnique(ctx, aTechnique("test-content-dup", "Dup")); err != nil {
+	if _, err := repo.CreateTechnique(ctx, aTechnique("test-content-dup", "Dup"), testActor); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	_, err := repo.CreateTechnique(ctx, aTechnique("test-content-dup", "Dup"))
+	_, err := repo.CreateTechnique(ctx, aTechnique("test-content-dup", "Dup"), testActor)
 	if !errors.Is(err, ErrAlreadyExists) {
 		t.Fatalf("second create = %v, want ErrAlreadyExists", err)
 	}
@@ -182,7 +187,7 @@ func TestUpdatingASeededRowTakesOwnershipOfIt(t *testing.T) {
 	if err := repo.UpsertAll(ctx, []Technique{aTechnique("test-content-ro", "Seeded Name")}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if _, err := repo.UpdateTechnique(ctx, aTechnique("test-content-ro", "Edited In The Console")); err != nil {
+	if _, err := repo.UpdateTechnique(ctx, aTechnique("test-content-ro", "Edited In The Console"), testActor); err != nil {
 		t.Fatalf("update of a seeded row = %v, want it to succeed now", err)
 	}
 	got, _ := repo.Get(ctx, "test-content-ro")
@@ -264,6 +269,105 @@ func TestSearchAllReachesSeededRowsAndAliases(t *testing.T) {
 	}
 }
 
+// The audit trail: every console write leaves one, and a restore is a forward
+// operation that never erases what it rolled back from.
+func TestEveryConsoleWriteLeavesARevision(t *testing.T) {
+	repo, pool := contentFixture(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		// Before the technique rows go (LIFO), or the FK blocks their delete.
+		if _, err := pool.Exec(ctx,
+			`DELETE FROM technique_revisions WHERE technique_id LIKE 'test-content-%'`); err != nil {
+			t.Logf("cleanup revisions: %v", err)
+		}
+	})
+
+	if _, err := repo.CreateTechnique(ctx, aTechnique("test-content-hist", "First Draft"), testActor); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := repo.UpdateTechnique(ctx, aTechnique("test-content-hist", "Second Name"), testActor); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if _, err := repo.Publish(ctx, "test-content-hist", testActor); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	revs, err := repo.Revisions(ctx, "test-content-hist")
+	if err != nil {
+		t.Fatalf("revisions: %v", err)
+	}
+	if len(revs) != 3 {
+		t.Fatalf("got %d revisions, want 3 (create, update, publish) — a write "+
+			"without a revision is an edit nobody can see or undo", len(revs))
+	}
+	// Newest first, numbered from 1, and the actions tell the story.
+	if revs[0].Revision != 3 || revs[0].Action != ActionPublish {
+		t.Errorf("newest = revision %d / %q, want 3 / publish", revs[0].Revision, revs[0].Action)
+	}
+	if revs[2].Revision != 1 || revs[2].Action != ActionCreate {
+		t.Errorf("oldest = revision %d / %q, want 1 / create", revs[2].Revision, revs[2].Action)
+	}
+	for _, rev := range revs {
+		if rev.Actor != testActor {
+			t.Errorf("revision %d attributed to %q, want %q", rev.Revision, rev.Actor, testActor)
+		}
+	}
+	// The payload is the row AFTER that write, so the history is readable
+	// without replaying anything.
+	if revs[2].Payload.Name != "First Draft" {
+		t.Errorf("revision 1 payload name = %q, want the state at that time", revs[2].Payload.Name)
+	}
+
+	// Restore an earlier revision. It APPENDS — the state rolled back from
+	// stays readable, so the rollback is itself undoable.
+	restored, err := repo.Restore(ctx, "test-content-hist", 1, testActor)
+	if err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	if restored.Name != "First Draft" {
+		t.Errorf("restored name = %q, want the revision-1 content", restored.Name)
+	}
+	// ...and it did NOT unpublish. Rolling back to a revision from before the
+	// technique was published would otherwise withdraw it from every athlete's
+	// library, which is not what "undo my last edit" means.
+	if restored.Status != StatusPublished {
+		t.Errorf("restoring an old revision set status to %q — a content rollback "+
+			"must not change visibility", restored.Status)
+	}
+	after, err := repo.Revisions(ctx, "test-content-hist")
+	if err != nil {
+		t.Fatalf("revisions after restore: %v", err)
+	}
+	if len(after) != 4 || after[0].Action != ActionRestore {
+		t.Errorf("after restore: %d revisions, newest %q — a rollback that erases "+
+			"its own evidence is not an audit trail", len(after), after[0].Action)
+	}
+
+	// A revision that does not exist is ErrNotFound, not a partial write.
+	if _, err := repo.Restore(ctx, "test-content-hist", 99, testActor); !errors.Is(err, ErrNotFound) {
+		t.Errorf("restoring a missing revision = %v, want ErrNotFound", err)
+	}
+}
+
+// A technique the console has never touched has no history, and that is not an
+// error — 542 of them are in exactly that state.
+func TestASeededTechniqueHasNoHistoryUntilItIsEdited(t *testing.T) {
+	repo, _ := contentFixture(t)
+	ctx := context.Background()
+
+	if err := repo.UpsertAll(ctx, []Technique{aTechnique("test-content-untouched", "Untouched")}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	revs, err := repo.Revisions(ctx, "test-content-untouched")
+	if err != nil {
+		t.Fatalf("revisions: %v", err)
+	}
+	if len(revs) != 0 {
+		t.Errorf("a seeded technique has %d revisions — the deploy must not write "+
+			"history, or every release buries the operator's own edits", len(revs))
+	}
+}
+
 // The whole point of the column: a draft is invisible to athletes, and
 // publishing is what makes it visible.
 //
@@ -275,7 +379,7 @@ func TestADraftIsInvisibleUntilPublished(t *testing.T) {
 	repo, _ := contentFixture(t)
 	ctx := context.Background()
 
-	created, err := repo.CreateTechnique(ctx, aTechnique("test-content-draft", "Half Written"))
+	created, err := repo.CreateTechnique(ctx, aTechnique("test-content-draft", "Half Written"), testActor)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -313,7 +417,7 @@ func TestADraftIsInvisibleUntilPublished(t *testing.T) {
 		t.Errorf("the console cannot see its own draft: %v", err)
 	}
 
-	published, err := repo.Publish(ctx, "test-content-draft")
+	published, err := repo.Publish(ctx, "test-content-draft", testActor)
 	if err != nil {
 		t.Fatalf("publish: %v", err)
 	}
@@ -329,7 +433,7 @@ func TestADraftIsInvisibleUntilPublished(t *testing.T) {
 
 	// Publishing twice is ErrNotFound, not a silent success: the caller is
 	// working from a stale view and should learn that.
-	if _, err := repo.Publish(ctx, "test-content-draft"); !errors.Is(err, ErrNotFound) {
+	if _, err := repo.Publish(ctx, "test-content-draft", testActor); !errors.Is(err, ErrNotFound) {
 		t.Errorf("re-publishing = %v, want ErrNotFound", err)
 	}
 }
@@ -347,7 +451,7 @@ func TestEditingAPublishedTechniqueKeepsItVisible(t *testing.T) {
 	if err := repo.UpsertAll(ctx, []Technique{aTechnique("test-content-live", "Live")}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if _, err := repo.UpdateTechnique(ctx, aTechnique("test-content-live", "Live, Corrected")); err != nil {
+	if _, err := repo.UpdateTechnique(ctx, aTechnique("test-content-live", "Live, Corrected"), testActor); err != nil {
 		t.Fatalf("update: %v", err)
 	}
 	got, err := repo.Get(ctx, "test-content-live")
@@ -363,12 +467,12 @@ func TestUpdateEditsAnAdminRow(t *testing.T) {
 	repo, _ := contentFixture(t)
 	ctx := context.Background()
 
-	if _, err := repo.CreateTechnique(ctx, aTechnique("test-content-edit", "Before")); err != nil {
+	if _, err := repo.CreateTechnique(ctx, aTechnique("test-content-edit", "Before"), testActor); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	edit := aTechnique("test-content-edit", "After")
 	edit.Description = "now with detail"
-	out, err := repo.UpdateTechnique(ctx, edit)
+	out, err := repo.UpdateTechnique(ctx, edit, testActor)
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}
@@ -431,7 +535,7 @@ func TestKnownPositionsComesFromTheCatalog(t *testing.T) {
 	repo, _ := contentFixture(t)
 	ctx := context.Background()
 
-	if _, err := repo.CreateTechnique(ctx, aTechnique("test-content-pos", "Pos")); err != nil {
+	if _, err := repo.CreateTechnique(ctx, aTechnique("test-content-pos", "Pos"), testActor); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	got, err := repo.KnownPositions(ctx)
@@ -460,7 +564,7 @@ func TestAdoptHandsRowsToTheDeployAndOnlyAdminOnes(t *testing.T) {
 	repo, pool := contentFixture(t)
 	ctx := context.Background()
 
-	if _, err := repo.CreateTechnique(ctx, aTechnique("test-content-adopt", "Adopt Me")); err != nil {
+	if _, err := repo.CreateTechnique(ctx, aTechnique("test-content-adopt", "Adopt Me"), testActor); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	if err := repo.UpsertAll(ctx, []Technique{aTechnique("test-content-notmine", "Seeded")}); err != nil {
@@ -537,7 +641,7 @@ func TestAdoptHandsRowsToTheDeployAndOnlyAdminOnes(t *testing.T) {
 	// The console can still edit it — that is the point of step 2 — but doing so
 	// takes it straight back off the deploy, which is what keeps the two
 	// writers from fighting over the row.
-	if _, err := repo.UpdateTechnique(ctx, aTechnique("test-content-adopt", "Edited Again")); err != nil {
+	if _, err := repo.UpdateTechnique(ctx, aTechnique("test-content-adopt", "Edited Again"), testActor); err != nil {
 		t.Errorf("an adopted row should be editable again: %v", err)
 	}
 	var back string

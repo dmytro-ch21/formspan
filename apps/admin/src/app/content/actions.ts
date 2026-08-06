@@ -7,6 +7,7 @@ import {
   ApiError,
   createTechnique,
   publishTechnique,
+  restoreRevision,
   updateTechnique,
   type TechniqueWrite,
 } from "@/lib/api";
@@ -159,6 +160,23 @@ export type PublishResult =
  * Publishing is its own action for the same reason it is its own endpoint: it
  * is a decision, not a field. Nothing about the edit form can trigger it.
  */
+export async function restoreRevisionAction(
+  id: string,
+  revision: number,
+  _prev: PublishResult,
+  _form: FormData,
+): Promise<PublishResult> {
+  try {
+    await assertAdmin();
+    await restoreRevision(id, revision);
+    revalidatePath("/content");
+    revalidatePath(`/content/${id}`);
+    return { status: "ok" };
+  } catch (err) {
+    return { status: "error", message: explain(err) };
+  }
+}
+
 export async function publishTechniqueAction(
   id: string,
   _prev: PublishResult,

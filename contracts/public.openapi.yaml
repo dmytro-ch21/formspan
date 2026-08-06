@@ -4865,6 +4865,117 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
+  /admin/techniques/{techniqueID}/revisions:
+    get:
+      summary: A technique's revision history
+      operationId: listTechniqueRevisions
+      description: >
+        Every console write to this technique, newest first. Each entry is the
+        technique as it looked AFTER that write — a snapshot, not a diff — so
+        reading the history needs no replay and restoring is a copy.
+
+
+        **Empty is the normal case**, not an error: a technique the console has
+        never touched has no history, which is true of everything the deploy
+        seeded. `cmd/seed` deliberately writes no revisions — it runs over the
+        whole catalog on every release, and recording that would bury the
+        handful of entries an operator actually made.
+
+
+        `actor` is the Clerk user id taken from the request's own claims at
+        write time, never a value a client supplied.
+      parameters:
+        - name: techniqueID
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The history, newest first. `[]` when there is none.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revisions]
+                properties:
+                  revisions:
+                    type: array
+                    items:
+                      type: object
+                      required: [revision, actor, action, payload, created_at]
+                      properties:
+                        revision:
+                          type: integer
+                          description: Monotonic per technique, from 1.
+                        actor: { type: string }
+                        action:
+                          type: string
+                          enum: [create, update, publish, restore]
+                        payload:
+                          $ref: "#/components/schemas/Technique"
+                        created_at: { type: string, format: date-time }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /admin/techniques/{techniqueID}/revisions/{revision}/restore:
+    post:
+      summary: Roll a technique back to an earlier revision
+      operationId: restoreTechniqueRevision
+      description: >
+        Copies that revision's CONTENT back over the current row and records the
+        restore as a new revision.
+
+
+        **Appends, never truncates.** The state you rolled back from stays in
+        the history, so a restore is itself undoable — a rollback that erased its
+        own evidence would not be an audit trail.
+
+
+        **Content only: `status` is not restored.** Rolling back to a revision
+        from before the technique was published would otherwise unpublish it,
+        and there is no unpublish. An operator restoring wording would silently
+        withdraw the technique from every athlete's library, which is not what
+        "undo my last edit" means.
+
+
+        POST rather than PUT because it is not idempotent: restoring the same
+        revision twice produces two history entries, which is the honest record
+        of what happened.
+      parameters:
+        - name: techniqueID
+          in: path
+          required: true
+          schema: { type: string }
+        - name: revision
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        "200":
+          description: The technique after the restore.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [technique]
+                properties:
+                  technique:
+                    $ref: "#/components/schemas/Technique"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: No such technique, or no such revision of it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /admin/techniques/{techniqueID}/publish:
     post:
       summary: Publish a draft technique

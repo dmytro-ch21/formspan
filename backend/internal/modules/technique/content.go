@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // Authoring the catalog from the admin console rather than from a deploy.
@@ -62,6 +63,28 @@ var foldASCII = map[rune]string{
 }
 
 // ContentRepository is the write side of the catalog.
+// Revision is one recorded state of a technique, as it looked after a console
+// write.
+//
+// Payload is the whole technique rather than a diff — see migration 000037 for
+// why restoring should be a copy and not a replay.
+type Revision struct {
+	Revision  int       `json:"revision"`
+	Actor     string    `json:"actor"`
+	Action    string    `json:"action"`
+	Payload   Technique `json:"payload"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// The four things that produce a revision. Coarse on purpose: enough to read
+// the history as a story, not so fine that adding a verb needs a migration.
+const (
+	ActionCreate  = "create"
+	ActionUpdate  = "update"
+	ActionPublish = "publish"
+	ActionRestore = "restore"
+)
+
 type ContentRepository interface {
 	// CreateTechnique writes a new admin-authored technique.
 	//
@@ -69,13 +92,19 @@ type ContentRepository interface {
 	// which is the collision that matters: an admin row shadowing a seeded id
 	// would be reverted by the next deploy in the confusing half-way sense
 	// (the upsert skips it, so the two disagree forever).
-	CreateTechnique(ctx context.Context, t Technique) (Technique, error)
+	//
+	// `actor` is the caller's own id from the request's claims, never a value a
+	// client sent — a self-reported actor audits nothing. It is a parameter
+	// rather than a field on Technique because it is a fact about the REQUEST,
+	// and putting it on the domain type would make it something a JSON body
+	// could set.
+	CreateTechnique(ctx context.Context, t Technique, actor string) (Technique, error)
 	// UpdateTechnique edits ANY technique and takes ownership of it.
 	//
 	// The write sets `source` to "admin", which the seeder skips — without
 	// that, the next deploy would silently revert the edit. Returns ErrNotFound
 	// only when the id does not exist.
-	UpdateTechnique(ctx context.Context, t Technique) (Technique, error)
+	UpdateTechnique(ctx context.Context, t Technique, actor string) (Technique, error)
 	// SearchAll finds any technique by name, id or alias, seeded included, so
 	// the console can reach the whole catalog rather than only what it wrote.
 	SearchAll(ctx context.Context, query string) ([]Technique, error)
@@ -85,7 +114,15 @@ type ContentRepository interface {
 	// ErrNotFound covers both "no such id" and "already published": the caller
 	// is acting on a stale view either way, and a success it did not cause is
 	// worse than a 404 it can refresh past.
-	Publish(ctx context.Context, id string) (Technique, error)
+	Publish(ctx context.Context, id, actor string) (Technique, error)
+	// Revisions returns a technique's history, newest first. Empty for a row
+	// the console has never touched — the 542 seeded ones start with no
+	// history, and that absence is honest rather than a gap to backfill.
+	Revisions(ctx context.Context, id string) ([]Revision, error)
+	// Restore writes an earlier revision's CONTENT back over the current row,
+	// as a new revision. Never deletes: rollback is a forward operation, so the
+	// thing you rolled back from stays readable.
+	Restore(ctx context.Context, id string, revision int, actor string) (Technique, error)
 	// KnownPositions returns the distinct `position` values in the catalog.
 	//
 	// The vocabulary is derived from the library rather than hardcoded — the

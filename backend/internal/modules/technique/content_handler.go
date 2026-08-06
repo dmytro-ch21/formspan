@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/dmytro-ch21/vola/backend/internal/platform/auth"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
@@ -223,6 +225,59 @@ func (h *ContentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	h.write(w, r, next, h.repo.UpdateTechnique)
 }
 
+// actorOf reads the caller's id from the request's own claims.
+//
+// Never from the body or a header. The audit trail's whole value is that the
+// actor cannot be chosen by the thing being audited — and RequireAdmin has
+// already run, so the claims are there.
+func actorOf(r *http.Request) string {
+	claims, _ := auth.ClaimsFromContext(r.Context())
+	if claims == nil {
+		// Unreachable behind RequireAdmin. Recorded rather than defaulted to
+		// something plausible: a revision attributed to a guessed actor is
+		// worse than one that admits it does not know.
+		return "unknown"
+	}
+	return claims.UserID
+}
+
+// Revisions serves a technique's history, newest first.
+func (h *ContentHandler) Revisions(w http.ResponseWriter, r *http.Request) {
+	out, err := h.repo.Revisions(r.Context(), r.PathValue("techniqueID"))
+	if err != nil {
+		apihttp.WriteInternal(w, r, "technique", err)
+		return
+	}
+	// `[]`, never null — a console mapping over it would throw where an empty
+	// state should render, and empty is the NORMAL case: the 542 seeded rows
+	// have no history until someone edits one.
+	if out == nil {
+		out = []Revision{}
+	}
+	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"revisions": out})
+}
+
+// Restore rolls a technique back to an earlier revision, as a new revision.
+func (h *ContentHandler) Restore(w http.ResponseWriter, r *http.Request) {
+	revision, err := strconv.Atoi(r.PathValue("revision"))
+	if err != nil || revision < 1 {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"revision must be a positive whole number")
+		return
+	}
+	out, err := h.repo.Restore(r.Context(), r.PathValue("techniqueID"), revision, actorOf(r))
+	if errors.Is(err, ErrNotFound) {
+		apihttp.WriteError(w, http.StatusNotFound, apihttp.CodeNotFound,
+			"no such technique or revision")
+		return
+	}
+	if err != nil {
+		apihttp.WriteInternal(w, r, "technique", err)
+		return
+	}
+	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"technique": out})
+}
+
 // Publish is a separate verb, not a field on PATCH.
 //
 // A status you can PATCH is a status a partial update can change by accident:
@@ -230,7 +285,7 @@ func (h *ContentHandler) Update(w http.ResponseWriter, r *http.Request) {
 // athletes" does not belong in the same request as fixing a typo. Its own route
 // means the console has to mean it.
 func (h *ContentHandler) Publish(w http.ResponseWriter, r *http.Request) {
-	out, err := h.repo.Publish(r.Context(), r.PathValue("techniqueID"))
+	out, err := h.repo.Publish(r.Context(), r.PathValue("techniqueID"), actorOf(r))
 	if errors.Is(err, ErrNotFound) {
 		apihttp.WriteError(w, http.StatusNotFound, apihttp.CodeNotFound,
 			"no draft technique with that id — it may already be published")
@@ -245,7 +300,7 @@ func (h *ContentHandler) Publish(w http.ResponseWriter, r *http.Request) {
 
 func (h *ContentHandler) write(
 	w http.ResponseWriter, r *http.Request, t Technique,
-	store func(context.Context, Technique) (Technique, error),
+	store func(context.Context, Technique, string) (Technique, error),
 ) {
 	known, err := h.repo.KnownPositions(r.Context())
 	if err != nil {
@@ -260,7 +315,7 @@ func (h *ContentHandler) write(
 		return
 	}
 
-	out, err := store(r.Context(), t)
+	out, err := store(r.Context(), t, actorOf(r))
 	switch {
 	case errors.Is(err, ErrAlreadyExists):
 		apihttp.WriteError(w, http.StatusConflict, apihttp.CodeAlreadyExists,

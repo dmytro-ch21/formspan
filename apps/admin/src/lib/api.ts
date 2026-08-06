@@ -357,6 +357,42 @@ export async function createTechnique(body: TechniqueWrite): Promise<Technique> 
  * A 404 here means "no draft with that id", which in practice means it was
  * already published and this page is stale.
  */
+/** One recorded state of a technique, as it looked after a console write. */
+export type Revision = {
+  revision: number;
+  actor: string;
+  action: "create" | "update" | "publish" | "restore";
+  payload: Technique;
+  created_at: string;
+};
+
+/**
+ * A technique's history, newest first.
+ *
+ * Empty is the NORMAL case, not an error: the 542 seeded techniques have no
+ * history until someone edits one, so the screen has to render "nothing yet"
+ * rather than treat it as a fault.
+ */
+export async function listRevisions(id: string): Promise<Revision[]> {
+  const data = await adminFetch<{ revisions: Revision[] }>(
+    `/admin/techniques/${encodeURIComponent(id)}/revisions`,
+  );
+  return data.revisions;
+}
+
+/**
+ * Roll a technique back to an earlier revision. Appends rather than truncates,
+ * so the state you rolled back from stays in the history and the rollback is
+ * itself undoable. Content only — it never changes whether athletes can see it.
+ */
+export async function restoreRevision(id: string, revision: number): Promise<Technique> {
+  const data = await adminFetch<{ technique: Technique }>(
+    `/admin/techniques/${encodeURIComponent(id)}/revisions/${revision}/restore`,
+    { method: "POST", body: {} },
+  );
+  return data.technique;
+}
+
 export async function publishTechnique(id: string): Promise<Technique> {
   const data = await adminFetch<{ technique: Technique }>(
     `/admin/techniques/${encodeURIComponent(id)}/publish`,
