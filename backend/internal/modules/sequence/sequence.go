@@ -38,6 +38,10 @@ import (
 var (
 	ErrNotFound     = errors.New("sequence: not found")
 	ErrInvalidInput = errors.New("sequence: invalid input")
+	// ErrAlreadyExists means a client-supplied id is taken BY SOMEBODY ELSE.
+	// The same owner re-sending the same id is an idempotent retry and
+	// succeeds — that is the whole point of accepting a client id.
+	ErrAlreadyExists = errors.New("sequence: already exists")
 	// ErrForbidden is reachable only from a WRITE, and the handler answers it
 	// 403. It means exactly one thing: a VOLA-authored reference chain, which
 	// EVERY caller can already read, so 403 discloses nothing they did not have.
@@ -155,6 +159,20 @@ type Step struct {
 // always the caller, and a request that could name an owner is a request that
 // could name somebody else.
 type NewSequence struct {
+	// ID is CLIENT-SUPPLIED and optional, empty meaning "server, pick one".
+	//
+	// This module shipped a day ago asserting the opposite — "a sequence is
+	// authored at a desk against a catalog the client had to fetch anyway, so
+	// there is no offline creation to make idempotent". That was true of the
+	// web builder and wrong within a day: the phone captures a chain in the
+	// changing room after class, which is exactly a gym dead-spot, and an
+	// offline create needs a stable id to make its sync retry idempotent.
+	// Same reasoning and same mechanism as workouts and activities.
+	//
+	// The cost is the one workouts documents: a client-chosen id lets a caller
+	// PROBE for existing ones by watching which inserts conflict. Create's
+	// conflict path is therefore scoped to the caller — see postgres.go.
+	ID              string
 	Name            string
 	Description     string
 	StartPositionID *string
@@ -199,6 +217,12 @@ func (n NewSequence) Validate() error {
 	if err := validateText(n.Name, n.Description); err != nil {
 		return err
 	}
+	// A client id is optional, but a supplied one has to be sane: it is a
+	// primary key, it lands in URLs, and an unbounded string here is an
+	// unbounded key. Empty means "server picks", which is the web path.
+	if n.ID != "" && !validClientID(n.ID) {
+		return ErrInvalidInput
+	}
 	// A name is the only thing a list row can render, so an unnamed sequence is
 	// an unopenable one. Description is genuinely optional.
 	if n.Name == "" {
@@ -223,6 +247,32 @@ func (u Update) Validate() error {
 		return ValidateSteps(u.Steps)
 	}
 	return nil
+}
+
+// validClientID guards what a caller may make a primary key.
+//
+// Length in RUNES, not bytes: the contract says minLength/maxLength, which
+// OpenAPI counts in code points, and `len()` on a Go string counts bytes — so
+// a byte check makes the server and the contract disagree about the same value
+// (workout/handler_test.go documents the identical trap for names).
+//
+// The charset restriction is the more useful half. This value becomes a
+// primary key, a URL path segment and eventually a share link, so whitespace,
+// control characters, `/` and `#` have no business in it. The phone sends
+// `randomUUID()` — 36 characters of [0-9a-f-] — so no real client loses
+// anything. The rest of this family checks non-empty only; this is not
+// inheriting that gap rather than fixing a live defect.
+func validClientID(id string) bool {
+	n := 0
+	for _, r := range id {
+		n++
+		ok := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '-' || r == '_'
+		if !ok {
+			return false
+		}
+	}
+	return n >= 8 && n <= 64
 }
 
 func validateText(name, description string) error {

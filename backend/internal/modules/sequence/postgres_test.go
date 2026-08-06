@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -513,5 +514,174 @@ func TestReferenceChainIsReadableAndNotWritable(t *testing.T) {
 	// and the same caller.
 	if err := repo.Delete(ctx, id, uid); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("delete of a reference chain: want ErrForbidden, got %v", err)
+	}
+}
+
+// Offline capture sends a client-generated id so its sync retry is idempotent.
+// This is the pair of tests that make that safe rather than merely working.
+func TestClientSuppliedIDIsIdempotentForTheSameOwner(t *testing.T) {
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	uid := user(t, pool)
+	steps, _ := chain(t, pool)
+	const id = "seq-test-client-generated-id"
+
+	first, err := repo.Create(ctx, uid, NewSequence{ID: id, Name: "From the mat", Steps: steps})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if first.ID != id {
+		t.Fatalf("client id not honoured: got %q", first.ID)
+	}
+
+	// The retry a flaky gym connection produces. Must succeed, not 409.
+	again, err := repo.Create(ctx, uid, NewSequence{ID: id, Name: "From the mat", Steps: steps})
+	if err != nil {
+		t.Fatalf("replay by the same owner must be idempotent, got %v", err)
+	}
+	if again.ID != id || again.StepCount != 2 {
+		t.Fatalf("replay changed the row: id=%q steps=%d", again.ID, again.StepCount)
+	}
+
+	// THE PROPERTY THAT ACTUALLY NEEDS A TEST, and it is not "no duplicate
+	// steps" — UNIQUE (sequence_id, sort_order) makes duplication impossible
+	// whatever the code does, so asserting it proves the constraint and not
+	// the short-circuit. (Measured: mutating the replay path to re-insert
+	// leaves that assertion green.)
+	//
+	// The real hazard is REVERSION. The athlete captures a chain on the mat,
+	// refines it at a desk, and only then does the phone get signal and push
+	// its original copy. A replay that rewrites the row silently throws the
+	// desk edit away, and the athlete never sees it happen.
+	if _, err := repo.Update(ctx, id, uid, Update{
+		Name:  ptr("Refined at a desk"),
+		Steps: []NewStep{steps[0]},
+	}); err != nil {
+		t.Fatalf("edit: %v", err)
+	}
+	replayed, err := repo.Create(ctx, uid, NewSequence{ID: id, Name: "From the mat", Steps: steps})
+	if err != nil {
+		t.Fatalf("replay after edit: %v", err)
+	}
+	if replayed.Name != "Refined at a desk" {
+		t.Errorf("a late sync retry reverted the name to the captured one: %q", replayed.Name)
+	}
+	if replayed.StepCount != 1 {
+		t.Errorf("a late sync retry restored the captured steps over the edit: %d", replayed.StepCount)
+	}
+}
+
+func TestClientSuppliedIDCannotStealAnotherUsersSequence(t *testing.T) {
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	owner := user(t, pool)
+	steps, _ := chain(t, pool)
+	const id = "seq-test-contested-id"
+
+	if _, err := repo.Create(ctx, owner, NewSequence{ID: id, Name: "Mine", Steps: steps}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// THE IDOR A CLIENT-SUPPLIED ID MAKES REACHABLE. Without the owner
+	// predicate on the conflict path this hands the attacker the owner's
+	// sequence, which is the bug the activity module shipped once already.
+	intruder := "seq-test-id-thief"
+	got, err := repo.Create(ctx, intruder, NewSequence{ID: id, Name: "Mine now", Steps: steps})
+	if !errors.Is(err, ErrAlreadyExists) {
+		t.Fatalf("want ErrAlreadyExists for a taken id, got err=%v seq=%+v", err, got)
+	}
+	if got.Name != "" {
+		t.Fatalf("the conflict path leaked another user's sequence: %q", got.Name)
+	}
+
+	// The owner's row is untouched.
+	still, err := repo.Get(ctx, id, owner)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if still.Name != "Mine" {
+		t.Errorf("owner's sequence was overwritten: %q", still.Name)
+	}
+}
+
+func TestServerPicksAnIDWhenTheClientDoesNot(t *testing.T) {
+	// The web path, unchanged by any of the above.
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	uid := user(t, pool)
+	steps, _ := chain(t, pool)
+
+	a, err := repo.Create(ctx, uid, NewSequence{Name: "No id", Steps: steps})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	b, err := repo.Create(ctx, uid, NewSequence{Name: "No id either", Steps: steps})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if a.ID == "" || b.ID == "" || a.ID == b.ID {
+		t.Fatalf("server ids must be present and distinct: %q vs %q", a.ID, b.ID)
+	}
+}
+
+// The one conflict arm with no coverage, and the easiest collision to hit in
+// practice: reference-chain ids are handed to every caller by List, so they are
+// the ids a client provably knows.
+func TestClientIDCannotClaimAReferenceChain(t *testing.T) {
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	uid := user(t, pool)
+	steps, _ := chain(t, pool)
+
+	var id string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO bjj_sequences (owner_user_id, source, name)
+		VALUES (NULL, 'seed', 'Reference chain') RETURNING id`).Scan(&id); err != nil {
+		t.Fatalf("seed reference sequence: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM bjj_sequences WHERE id = $1`, id) })
+
+	got, err := repo.Create(ctx, uid, NewSequence{ID: id, Name: "Mine now", Steps: steps})
+	if !errors.Is(err, ErrAlreadyExists) {
+		t.Fatalf("want ErrAlreadyExists for a reference id, got err=%v seq=%+v", err, got)
+	}
+	if got.Name != "" {
+		t.Errorf("the conflict path leaked the reference chain: %q", got.Name)
+	}
+	// And it is untouched.
+	still, err := repo.Get(ctx, id, uid)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if still.Name != "Reference chain" || still.StepCount != 0 {
+		t.Errorf("reference chain was modified: %q / %d steps", still.Name, still.StepCount)
+	}
+}
+
+func TestClientIDCharsetAndLength(t *testing.T) {
+	// Pure logic; runs without a database.
+	ok := []string{"abcdefgh", "0e2f4a6c-1b3d-4e5f-8a9b-0c1d2e3f4a5b", strings.Repeat("a", 64)}
+	for _, id := range ok {
+		if err := (NewSequence{ID: id, Name: "n"}).Validate(); err != nil {
+			t.Errorf("%q should be a legal client id: %v", id, err)
+		}
+	}
+	bad := []string{
+		"short",                 // under 8
+		strings.Repeat("a", 65), // over 64
+		"has space",             // whitespace in a URL segment
+		"has/slash",             // path separator
+		"has#hash",              // fragment
+		"tab\there",             // control character
+		"ünïcodeeee",            // outside the allowed set
+	}
+	for _, id := range bad {
+		if err := (NewSequence{ID: id, Name: "n"}).Validate(); !errors.Is(err, ErrInvalidInput) {
+			t.Errorf("%q should be refused as a client id, got %v", id, err)
+		}
 	}
 }

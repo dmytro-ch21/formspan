@@ -36,6 +36,15 @@ import { readLocalBjjDetail, saveLocalBjjDetail } from '@/lib/sessionStore';
 import { request as requestSync } from '@/lib/sync';
 import { fetchFocus, focusRows, type Focus } from '@/lib/bjjFocus';
 import { fetchTechniques, rankTechniques, type TechniqueSummary } from '@/lib/techniques';
+import {
+  MAX_SEQUENCE_NAME,
+  MAX_SEQUENCE_STEPS,
+  captureSequence,
+  getSequence,
+  listSequences,
+  pendingSequences,
+  type Sequence,
+} from '@/lib/sequences';
 import { useAuthToken } from '@/lib/useAuthToken';
 
 /**
@@ -243,7 +252,9 @@ export default function ReflectScreen() {
         <Text style={styles.stepBlurb}>{current.blurb}</Text>
 
         {current.key === 'drilled' && (
-          <DrilledStep detail={detail} onChange={persist} getToken={getToken} />
+          <DrilledStep
+            userID={userId ?? ''}
+            detail={detail} onChange={persist} getToken={getToken} />
         )}
         {current.key === 'live' && <LiveStep detail={detail} onChange={persist} getToken={getToken} />}
         {current.key === 'note' && <NoteStep detail={detail} onChange={persistSoon} />}
@@ -294,10 +305,12 @@ function DrilledStep({
   detail,
   onChange,
   getToken,
+  userID,
 }: {
   detail: SessionDetail;
   onChange: (d: SessionDetail) => void;
   getToken: ReturnType<typeof useAuthToken>;
+  userID: string;
 }) {
   // `accent` is taken below for the technique badge's own colour.
   const ui = useAccent();
@@ -325,6 +338,41 @@ function DrilledStep({
   const matches = useMemo(() => (query.trim() ? rankTechniques(all, query) : []), [all, query]);
   const results = useMemo(() => matches.slice(0, 20), [matches]);
 
+  // Sequences the athlete already has. `null` is still loading and `[]` is
+  // genuinely none — collapsing them shows "no sequences" for a moment on
+  // every open, which reads as "you have none" to someone who has plenty.
+  const [sequences, setSequences] = useState<Sequence[] | null>(null);
+  const [capturing, setCapturing] = useState(false);
+  const [chainName, setChainName] = useState('');
+  const [savingChain, setSavingChain] = useState(false);
+  const [chainSaved, setChainSaved] = useState(false);
+  const [chainError, setChainError] = useState<string | null>(null);
+  const [chainBusy, setChainBusy] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    listSequences(userID, getToken)
+      .then((list) => {
+        if (!cancelled) setSequences(list);
+      })
+      // A server fault must not hide the chains this phone is still holding.
+      // `listSequences` rejects the WHOLE promise on a 500 — including the
+      // local half it had already read — so degrading to `[]` meant an outage
+      // hid your own captures, while being offline showed them. Inconsistent,
+      // and the wrong way round.
+      .catch(async () => {
+        if (cancelled) return;
+        try {
+          setSequences(await pendingSequences(userID));
+        } catch {
+          setSequences([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userID, getToken]);
+
   function add(t: TechniqueSummary) {
     if (drilled.some((d) => d.technique_id === t.id)) return;
     onChange({
@@ -350,8 +398,167 @@ function DrilledStep({
     onChange({ ...detail, tags: removeDrilledTechnique(detail.tags, techniqueID) });
   }
 
+  /**
+   * Add every technique in a chain at once.
+   *
+   * Expands to ORDINARY drilled tags rather than recording "this sequence was
+   * drilled". That is deliberate: the funnel, mastery, curricula progress and
+   * every other read are built on technique tags, so a sequence-shaped tag
+   * would be invisible to all of them. The chain is how you entered it, not a
+   * different kind of evidence.
+   *
+   * The library lookup is the source of truth for category and position, with
+   * the server's own step fields as the fallback — on a cold launch with no
+   * signal `all` is empty, and a tag with a wrong category is worse than a
+   * slightly generic one.
+   */
+  async function addChain(seq: Sequence) {
+    setChainBusy(seq.id);
+    setChainError(null);
+    try {
+      // Steps are fetched here rather than read off the list row: the list
+      // omits them. Locally-captured chains short-circuit inside
+      // `getSequence` from the outbox, so this costs no request offline for
+      // the chains you just made — but a SYNCED chain genuinely needs the
+      // network, and there is no local cache of one. Says so rather than
+      // silently adding nothing.
+      const full = seq.steps?.length ? seq : await getSequence(userID, seq.id, getToken);
+      const steps = full?.steps ?? [];
+      if (steps.length === 0) {
+        setChainError(
+          full === null
+            ? 'Needs signal to open a synced sequence. What you captured on this phone still works offline.'
+            : 'That sequence has no steps yet.',
+        );
+        return;
+      }
+
+      // The Set GROWS as we go. A snapshot let a chain that repeats a
+      // technique — which the API explicitly allows, because sweep/get
+      // passed/sweep again is ordinary grappling — add the same tag twice:
+      // a double-counted `drilled` stage in the funnel, and two React rows
+      // with the same key.
+      const seen = new Set(drilled.map((d) => d.technique_id));
+      const added = [];
+      for (const st of steps) {
+        if (!st.technique_id || seen.has(st.technique_id)) continue;
+        seen.add(st.technique_id);
+        const lib = all.find((t) => t.id === st.technique_id);
+        added.push({
+          category: toCategory(lib?.category ?? st.category ?? ''),
+          event: 'drilled' as const,
+          position: familyOf(lib?.position ?? st.position ?? ''),
+          technique_id: st.technique_id,
+          count: 1,
+        });
+      }
+      if (added.length === 0) return;
+      onChange({ ...detail, tags: [...detail.tags, ...added] });
+    } catch (err) {
+      setChainError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setChainBusy(null);
+    }
+  }
+
+  /**
+   * Capture what was just drilled as a new chain.
+   *
+   * Local write first — the changing room is a dead-spot more often than not,
+   * and this is the one moment the chain is still in the athlete's head. The
+   * outbox owes it to the server; the id is generated on device so the retry
+   * is idempotent.
+   *
+   * Steps carry no destinations. Naming where each move leaves you is the
+   * refining half and belongs at a desk, per the platform rule — this records
+   * the ORDER, which is the part that is lost by tomorrow.
+   */
+  async function saveChain() {
+    const name = chainName.trim();
+    if (!name || drilled.length < 2) return;
+    // Guarded, because a capture written under an empty user id is selected by
+    // NO query afterwards — not the list, not the count, not the push. It
+    // would be permanently invisible and silently never sync. Narrow window
+    // (Clerk going null with this screen mounted), permanent consequence.
+    if (!userID) {
+      setChainError('Sign-in state was lost. Reopen this step and try again.');
+      return;
+    }
+    // The server caps these; a violation comes back 4xx, which the outbox
+    // classifies permanent and retires — after the copy already said "Saved
+    // to this phone". Keeping the permanent path rare is the premise the
+    // whole outbox design rests on.
+    if (name.length > MAX_SEQUENCE_NAME) {
+      setChainError(`Keep the name under ${MAX_SEQUENCE_NAME} characters.`);
+      return;
+    }
+    const steps = drilled.filter((d) => d.technique_id);
+    if (steps.length > MAX_SEQUENCE_STEPS) {
+      setChainError(
+        `A sequence holds ${MAX_SEQUENCE_STEPS} steps. Remove a few, or save this as two chains.`,
+      );
+      return;
+    }
+    setSavingChain(true);
+    try {
+      await captureSequence(userID, {
+        name,
+        steps: steps.map((d) => ({ technique_id: d.technique_id as string })),
+      });
+      requestSync('bjj-sequence-captured');
+      setChainName('');
+      setCapturing(false);
+      setChainSaved(true);
+    } catch (err) {
+      setChainError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSavingChain(false);
+    }
+  }
+
+  // `step_count`, NOT `steps.length`. The list endpoint OMITS steps by design
+  // — it is a list of fifty chains and shipping every step of every one is the
+  // N+1 in its lazy form — so filtering on `steps` dropped every server-side
+  // chain and, worse, made a captured chain VANISH from this bar the moment it
+  // synced: it leaves the outbox, and the server copy carries no steps. That
+  // looked exactly like data loss. `step_count` is on both list and detail.
+  const usable = (sequences ?? []).filter((sq) => sq.step_count > 0);
+
   return (
     <RNView style={styles.stepBody}>
+      {usable.length > 0 && (
+        <RNView style={styles.chainBar}>
+          <Text style={styles.label}>Drilled a sequence?</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            {usable.map((sq) => (
+              <Pressable
+                key={sq.id}
+                onPress={() => void addChain(sq)}
+                disabled={chainBusy !== null}
+                style={[styles.chainChip, chainBusy === sq.id && styles.chainChipBusy]}
+                accessibilityRole="button"
+                accessibilityLabel={`Add all ${sq.step_count} techniques from ${sq.name}`}
+                testID={`bjj-chain-add-${sq.id}`}
+              >
+                <Text style={styles.chainChipName} numberOfLines={1}>
+                  {sq.name}
+                </Text>
+                <Text style={styles.chainChipMeta}>
+                  {chainBusy === sq.id
+                    ? 'Opening…'
+                    : `${sq.step_count} steps${sq.pending ? ' · not synced' : ''}`}
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+          {chainError && (
+            <Text style={styles.muted} testID="bjj-chain-add-error">
+              {chainError}
+            </Text>
+          )}
+        </RNView>
+      )}
+
       <TextInput
         style={styles.search}
         value={query}
@@ -450,6 +657,88 @@ function DrilledStep({
               </RNView>
             );
           })}
+          {/* Capture, and only once there is a CHAIN to capture. One technique
+              is not a sequence, so the affordance stays hidden rather than
+              appearing disabled — an offer you cannot take is noise on a step
+              that is already optional. */}
+          {drilled.length >= 2 && !chainSaved && (
+            <RNView style={styles.captureBox}>
+              {!capturing ? (
+                <Pressable
+                  onPress={() => setCapturing(true)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Save these techniques as a sequence"
+                  testID="bjj-chain-capture-open"
+                >
+                  <Text style={[styles.captureCta, { color: ui.ink }]}>
+                    Save these {drilled.length} as a sequence
+                  </Text>
+                </Pressable>
+              ) : (
+                <>
+                  <TextInput
+                    style={styles.search}
+                    value={chainName}
+                    onChangeText={setChainName}
+                    placeholder="Closed guard to side control"
+                    placeholderTextColor={vola.textDim}
+                    accessibilityLabel="Name this sequence"
+                    maxLength={MAX_SEQUENCE_NAME}
+                    autoFocus
+                    testID="bjj-chain-name"
+                  />
+                  <Text style={styles.footnote}>
+                    Saved in the order above. Where each move leaves you is added later on the
+                    web app — this is the part that is gone by tomorrow.
+                  </Text>
+                  <RNView style={styles.captureRow}>
+                    <Pressable
+                      onPress={saveChain}
+                      disabled={savingChain || chainName.trim() === ''}
+                      accessibilityRole="button"
+                      testID="bjj-chain-save"
+                    >
+                      <Text
+                        style={[
+                          styles.captureCta,
+                          { color: ui.ink },
+                          (savingChain || chainName.trim() === '') && styles.captureDisabled,
+                        ]}
+                      >
+                        {savingChain ? 'Saving…' : 'Save'}
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => {
+                        setCapturing(false);
+                        setChainName('');
+                      }}
+                      accessibilityRole="button"
+                      testID="bjj-chain-cancel"
+                    >
+                      <Text style={styles.captureCancel}>Cancel</Text>
+                    </Pressable>
+                  </RNView>
+                </>
+              )}
+              {chainError && (
+                <Text style={styles.footnote} testID="bjj-chain-error">
+                  {chainError}
+                </Text>
+              )}
+            </RNView>
+          )}
+
+          {/* Says "saved", never "synced". The row is in the outbox and may sit
+              there until the phone has signal, and claiming otherwise is the
+              reassurance that must not be false. */}
+          {chainSaved && (
+            <Text style={styles.footnote} testID="bjj-chain-saved">
+              Saved to this phone. It uploads with everything else when you have signal, and you
+              can tidy it up on the web app.
+            </Text>
+          )}
+
           <Text style={styles.footnote}>
             Just what was covered. Whether any of it worked live is recorded on the next step,
             beside everything else that happened — so nothing gets logged twice.
@@ -807,6 +1096,29 @@ function nameFor(all: TechniqueSummary[], id: string | null | undefined): string
 }
 
 const styles = StyleSheet.create({
+  chainBar: { marginBottom: 12, gap: 6 },
+  chainChip: {
+    marginRight: 8,
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: vola.line,
+    maxWidth: 200,
+  },
+  chainChipBusy: { opacity: 0.5 },
+  chainChipName: { fontWeight: '600', fontSize: 14 },
+  chainChipMeta: { fontSize: 11, color: vola.textMuted, marginTop: 2 },
+  captureBox: { marginTop: 12, gap: 8 },
+  // minHeight/padding so Save and Cancel clear the 44pt target the sibling
+  // pills in this file already enforce. Bare text at 15pt did not.
+  captureCta: { fontWeight: '700', fontSize: 15, minHeight: 44, paddingVertical: 12 },
+  captureDisabled: { opacity: 0.4 },
+  captureRow: { flexDirection: 'row', alignItems: 'center', gap: 20 },
+  captureCancel: { color: vola.textMuted, fontSize: 15, minHeight: 44, paddingVertical: 12 },
+
   container: { flex: 1 },
   scroll: { padding: 20, gap: 8, paddingBottom: 32 },
   centre: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 8 },

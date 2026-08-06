@@ -72,6 +72,9 @@ func toNewSteps(in []stepBody) []NewStep {
 }
 
 type createBody struct {
+	// Optional. Supplied by the phone so an offline capture's sync retry is
+	// idempotent; omitted by web, where the server picks.
+	ID              string     `json:"id"`
 	Name            string     `json:"name"`
 	Description     string     `json:"description"`
 	StartPositionID *string    `json:"start_position_id"`
@@ -86,6 +89,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in := NewSequence{
+		ID:              body.ID,
 		Name:            body.Name,
 		Description:     body.Description,
 		StartPositionID: body.StartPositionID,
@@ -211,6 +215,10 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 		// caller cannot see, so this can only mean "you can see it and may not
 		// change it", which leaks nothing they did not already have.
 		apihttp.WriteError(w, http.StatusForbidden, apihttp.CodeForbidden, err.Error())
+	case errors.Is(err, ErrAlreadyExists):
+		// A client-supplied id that belongs to somebody else. 409 rather than
+		// 403: the caller is allowed to create sequences, the id is taken.
+		apihttp.WriteError(w, http.StatusConflict, apihttp.CodeAlreadyExists, err.Error())
 	case errors.Is(err, ErrInvalidInput):
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, err.Error())
 	default:
