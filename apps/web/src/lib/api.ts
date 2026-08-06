@@ -2072,6 +2072,140 @@ export async function deleteCurriculum(
   });
 }
 
+/**
+ * Sequences: the chain a class actually taught, in the order it flows.
+ *
+ * Distinct from a Curriculum, though both are ordered technique lists. A
+ * curriculum's order is PEDAGOGICAL — learn this before that, over months. A
+ * sequence's is CAUSAL: this move puts you where the next one starts, so
+ * reordering it produces something that does not work on the mat. That is why
+ * there are no criteria and no progress here — a chain is not a thing you
+ * complete, and the mastery of its parts is already tracked per technique.
+ */
+
+export type SequenceStep = {
+  technique_id: string;
+  /** Resolved from the library on every read, never stored on the step — which
+   *  is what makes a renamed technique read correctly everywhere. Absent from
+   *  the write type for the same reason. */
+  name: string;
+  position: string;
+  category: string;
+  /** advance | reverse | escape | control | finish. Absent for the movement
+   *  fundamentals, which genuinely have none.
+   *
+   *  LOAD-BEARING FOR RENDERING: it is what distinguishes a step that ENDS the
+   *  exchange from one whose destination was simply never recorded. Both carry
+   *  a null `ends_at_position_id`, and drawing them the same way tells the
+   *  athlete a submission left them nowhere. */
+  function?: string;
+  /** Zero-based, assigned by the server from array order. */
+  order: number;
+  /** Where this step leaves you. Null means NOT RECORDED **or** ENDS THE
+   *  EXCHANGE — see `function` for how to tell them apart. */
+  ends_at_position_id: string | null;
+  ends_at_position_name?: string;
+  notes: string;
+};
+
+export type Sequence = {
+  id: string;
+  /** Whether the CALLER may change this — resolved server-side so no client
+   *  compares user ids to decide whether to show an edit affordance. False
+   *  only for VOLA-authored reference chains. */
+  editable: boolean;
+  name: string;
+  description: string;
+  start_position_id: string | null;
+  start_position_name?: string;
+  created_at: string;
+  updated_at: string;
+  /** On BOTH the list and the single read, so a card says "4 steps" without
+   *  fetching them. */
+  step_count: number;
+  /** Absent on list responses, present on a single read. */
+  steps?: SequenceStep[];
+};
+
+export type SequenceStepWrite = {
+  technique_id: string;
+  ends_at_position_id?: string | null;
+  notes?: string;
+};
+
+export type SequenceWrite = {
+  name?: string;
+  description?: string;
+  /** Omit to leave it alone; explicit `null` clears it. A single nullable
+   *  field cannot express both, which is why the server keys off key
+   *  PRESENCE rather than the value. */
+  start_position_id?: string | null;
+  /** Omit to leave the chain alone; `[]` clears it; a list replaces it
+   *  wholesale. Three distinct states — collapsing the first two makes every
+   *  rename delete every step. Replace-all rather than per-step patching
+   *  because the ORDER is the content. */
+  steps?: SequenceStepWrite[];
+};
+
+/** Mirrored from the Go module. The server decides; this exists so a builder
+ *  can stop the athlete at the cap instead of showing them a 400. */
+export const MAX_SEQUENCE_STEPS = 20;
+
+export function listSequences(
+  getToken: Token,
+  signal?: AbortSignal,
+): Promise<Sequence[]> {
+  return request<{ sequences: Sequence[] }>(
+    getToken,
+    "/sequences",
+    {},
+    signal,
+  ).then((b) => b.sequences ?? []);
+}
+
+export function getSequence(
+  getToken: Token,
+  id: string,
+  signal?: AbortSignal,
+): Promise<Sequence> {
+  return request<Sequence>(
+    getToken,
+    `/sequences/${encodeURIComponent(id)}`,
+    {},
+    signal,
+  );
+}
+
+export function createSequence(
+  getToken: Token,
+  input: SequenceWrite,
+): Promise<Sequence> {
+  return request<Sequence>(getToken, "/sequences", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateSequence(
+  getToken: Token,
+  id: string,
+  input: SequenceWrite,
+): Promise<Sequence> {
+  return request<Sequence>(getToken, `/sequences/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function deleteSequence(
+  getToken: Token,
+  id: string,
+): Promise<void> {
+  await request<void>(getToken, `/sequences/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
 /** Idempotent, and it un-archives. `started_on` is NOT reset — it is when you
  *  first took it on, and every criterion is measured from it. */
 export async function enrollInCurriculum(

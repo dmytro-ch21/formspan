@@ -71,6 +71,22 @@ const navItems: {
       m.some((x) => x.enabled && x.capabilities.catalog === "techniques"),
   },
   {
+    href: "/dashboard/sequences",
+    label: "Sequences",
+    // Directly after Curricula, because the two are neighbours in kind: both
+    // are ordered sets of techniques the athlete owns. What differs is what the
+    // order MEANS — pedagogical there, causal here — and putting them side by
+    // side is what makes that difference legible rather than filing one under
+    // Library as though it were reference content.
+    //
+    // Same capability predicate as Curricula, and the same accepted
+    // over-inclusion: a sequence is a chain of TECHNIQUES, so it needs a
+    // discipline whose catalog is techniques. Gating on `key === "bjj"` is the
+    // check this codebase avoids everywhere else.
+    needs: (m) =>
+      m.some((x) => x.enabled && x.capabilities.catalog === "techniques"),
+  },
+  {
     href: "/dashboard/proficiency",
     label: "Technique funnel",
     // A capability, not a sport name — same reasoning as Records above. The
