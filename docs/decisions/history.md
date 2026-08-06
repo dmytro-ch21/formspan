@@ -11774,6 +11774,83 @@ statement about who may work it.
   review in this session ran on Opus. Both reviewer agents now pin
   `model: fable`.
 
+## 2026-08-05 — The roadmap reaches the phone, and rendering finds what reading did not
+
+Plan gets a Roadmaps strip, `app/curriculum/[id].tsx` gets the detail and the
+focus action, and `lib/curriculum.ts` + `lib/roadmapFocus.ts` carry the client
+half. **No builder** — picking twelve techniques out of 466 and setting four
+numeric criteria each stays a desk job.
+
+**This corrects a mistake in how the split was described.** The platform rule
+was invoked as though mobile getting nothing were the design. It was not: the
+design doc's own connective table lists roadmap surfaces on Plan, Today, the
+reflect wizard, Library and You — and those are the mobile tabs. Only *building*
+and the full funnel were ever reserved for web. The web half shipped first and
+the gap was logged, but in conversation it kept being framed as principled
+rather than unfinished.
+
+The sharpest symptom was the loop: roadmap → `bjj_focus` → one-tap chips in the
+wizard → tagged events → criteria. Three of those four steps were already on the
+phone. Only "choose the focus" was web-only, so an athlete who trains and logs
+entirely on their phone had to open a laptop to advance their own roadmap.
+
+### Verified by actually running it
+
+First end-to-end verification of this whole feature, on the Simulator against
+real staging: the strip renders with the belt photographs and the right
+`countable_items`; the detail shows targets when browsing and progress when
+enrolled; enrolling flips the copy; the focus action writes and the panel
+becomes "your focus already matches this roadmap"; and the hit rate renders `—`
+rather than `0%` with no attempts.
+
+Getting there took three wrong turns worth recording. The strip first rendered
+nothing, which looked like a bug and was not: the app points at **staging**, and
+staging had no syllabuses yet. The local API was also running a binary that
+predated the routes, so `/v1/curricula` 404ed there. And an attempt to point the
+app at a local API by exporting `EXPO_PUBLIC_API_URL` **silently did nothing** —
+Expo loads `.env.local` over the shell environment, so everything verified was
+against staging after all. Worth knowing before the next person tries the same.
+
+The silent `catch` in the strip made all of that harder than it needed to be: a
+failed fetch and "no syllabuses" render identically. Kept silent for the athlete
+— a banner about something they did not ask for would make an offline Plan tab
+look broken — but it cost real diagnosis time.
+
+### The bug rendering found
+
+**`started_on` came back as tomorrow.** Enrolling at 22:00 EDT stamped
+`2026-08-06`, so the screen read "counted from what you have logged since
+2026-08-06" — a future date, on the athlete's own progress block. Staging's
+Postgres runs UTC and `started_on` defaults to `CURRENT_DATE`.
+
+The backend review had flagged this comparison as a suggestion, judging it
+"harmless over a months-long window". Rendered, it is worse than that: evidence
+logged tonight does not count toward a roadmap enrolled tonight, and the copy
+says so in a way that reads as broken. `/v1/sessions/history` already does
+timezone-aware rollups, so the precedent for fixing it exists.
+
+### The rule is duplicated, and that is now three
+
+`proposeFocus` exists in both `apps/web` and here, with its own test in each.
+The two cannot be byte-compared — different type names, different imports — so
+the guard is behavioural: eleven cases each, and all five mutations die,
+including excluding defence-only steps, which would silently empty the brown
+belt's focus since six of its fourteen items have no `target_scored`.
+
+This is the third pure rule copied by hand across apps, after the proficiency
+types and adherence. The next one should force a `packages/` instead.
+
+### Gaps
+
+- **`started_on` is a day ahead for anyone west of UTC.** Named above; not fixed
+  here.
+- **Today and You have no roadmap surface**, so the doc's "out on Today" half is
+  still missing.
+- **The strip fails silently.** Deliberate, but it means a broken endpoint and an
+  empty catalog are indistinguishable to the athlete.
+- **No component test.** The logic is covered; the screens are not, and
+  `app/__tests__/` has the pattern.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

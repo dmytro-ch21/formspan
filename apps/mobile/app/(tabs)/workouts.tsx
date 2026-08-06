@@ -17,6 +17,7 @@ import {
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
 import { Text, View } from '@/components/Themed';
 import { SectionHeader } from '@/components/ui/Section';
+import { CurriculaStrip } from '@/components/CurriculaStrip';
 import { WeekPlanner } from '@/components/WeekPlanner';
 import { enabledSports, labelFor, moduleFor } from '@/lib/modules';
 import { useModules } from '@/lib/ModulesProvider';
@@ -273,6 +274,15 @@ export default function WorkoutsScreen() {
             scope === 'mine' ? (
               <View style={styles.planHeader}>
                 <WeekPlanner userId={userId ?? null} modules={modules} />
+                {/* Between the week and the templates: a roadmap is what you
+                    are working over months, which sits naturally after "this
+                    week" and before "what do I run today". Gated on a
+                    discipline whose catalog is TECHNIQUES rather than on
+                    `key === 'bjj'` — the same predicate the web nav uses, and
+                    the check this codebase avoids everywhere else. */}
+                {modules.some(
+                  (m) => m.enabled && m.capabilities.catalog === 'techniques',
+                ) && <CurriculaStrip />}
                 <SectionHeader label="Templates" />
               </View>
             ) : null
