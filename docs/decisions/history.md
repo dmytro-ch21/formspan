@@ -13323,6 +13323,74 @@ append. Both go red.
 - **Techniques only**, like drafts. The exercise catalog has neither, and for
   the same reason: half a feature is worse than none.
 
+## 2026-08-06 — Step 6: the console says which environment it is writing to
+
+The last step of [content-authoring-design.md](content-authoring-design.md),
+landed against **staging** rather than production — which does not exist — with
+the environment made a variable rather than a wait.
+
+**The switch already existed.** `NEXT_PUBLIC_API_URL` has always decided which
+backend the console talks to; pointing it at staging is one env var. So the
+work was not a config mechanism. It was the half that was missing: **the
+console could not say which database it was writing to.**
+
+That gap matters here in a way it would not in a read-only console. Content
+saved here is live to athletes immediately — no PR, no deploy, no review — and
+the console is a URL you leave open in a tab. Editing production while
+believing you are on staging is the same class of silent mistake the previous
+five steps spent their effort on, and it is the only one where none of them
+helps: the revision history faithfully records that you did it, in the wrong
+place.
+
+So `NEXT_PUBLIC_CONTENT_ENV` names the environment and a badge sits beside the
+mark in the masthead, on every screen. Two choices in it are deliberate:
+
+- **Explicit, not derived from the API hostname.** A guess is a rule that holds
+  until someone adds a domain, and being wrong is exactly what the badge exists
+  to prevent.
+- **Loud where it is dangerous, quiet where it is not.** A localhost API needs
+  no warning and gets muted styling; an unset variable against a REMOTE API is
+  the genuinely dangerous state and says "Unlabelled environment" in red. A
+  banner that shouts on every local `pnpm dev` is a banner nobody reads by
+  Thursday, which is how a warning stops working on the day it matters. An
+  unrecognised value ("prod", "PROD-EU") gets the same treatment as unset
+  rather than falling through to something calm.
+
+**And the other half of step 6 turned out to be already done, and better done
+than proposed.** The doc said "stop reseeding content on deploy". Reading the
+seeder: its upsert is scoped `WHERE techniques.source = 'seed'`, so a deploy
+already cannot touch console-owned rows — selectively, which is the right
+shape. Switching the seed off wholesale would have broken the thing it is for:
+a fresh environment still has to be bootstrapped from the embedded JSON. The
+proposal asked for a blunter version of something migration 000032 had already
+solved.
+
+**`apps/admin` got its first test**, and its first test runner, for the same
+reason `apps/web` got one: the badge's classification has three branches and no
+other guard, and a badge that says "Staging" over a production API is worse than
+no badge — a wrong answer to a question the operator has stopped asking. Node
+environment, pure logic, mirroring web's config. `test:admin` is in `verify` and
+in CI, per the rule that a check in one belongs in both.
+
+### Gaps
+
+- **The badge was not seen rendered.** The admin app will not boot from a git
+  worktree — `@clerk/backend` reports a missing publishable key even with
+  `.env.local` copied in, which is unrelated to this change and the same family
+  of worktree/env trap CLAUDE.md already records for `apps/mobile`. What was
+  verified is the classification (five unit tests) and that the console builds
+  and server-renders. The visual is a `<span>` using tokens already in that
+  file, so the risk is low, but it is untested rather than verified.
+- **Nothing enforces that the two variables agree.** `NEXT_PUBLIC_API_URL`
+  pointing at production while `NEXT_PUBLIC_CONTENT_ENV` says `staging` gives a
+  confidently wrong badge — the worst possible state for this control. Deriving
+  the label would trade that for a different wrongness; a startup assertion
+  that the hostname and the label are consistent is the real answer and is not
+  built.
+- **Staging is still doing double duty** for dev, testing and now content
+  authoring. That is fine while it is one person, and it is the reason "author
+  in production" remains the recorded intent rather than the current state.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

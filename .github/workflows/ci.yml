@@ -123,6 +123,9 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck:admin
 
+      - name: Test
+        run: pnpm run test:admin
+
       # apps/web and apps/admin hold deliberate copies of the brand components.
       # A comment saying "change both" held for exactly one commit, so the
       # invariant is enforced here instead. Lives in the admin job because that
