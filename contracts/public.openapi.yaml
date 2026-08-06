@@ -2006,6 +2006,142 @@ components:
             rendering it as 0% would report a failure the athlete has not had.
         mastered: { type: boolean }
 
+    SequenceStep:
+      type: object
+      description: >
+        One move in the chain, and where it leaves you.
+
+
+        `name`, `position`, `category` and `function` are RESOLVED from the
+        shared library on every read, never stored on the step — so a renamed
+        technique reads correctly everywhere. They are absent from
+        `SequenceWrite` for the same reason: accepting them would let a client
+        store a name that disagrees with the catalog.
+      required: [technique_id, name, position, category, order, notes]
+      properties:
+        technique_id: { type: string }
+        name: { type: string, description: From the library. }
+        position: { type: string, description: From the library. }
+        category: { type: string, description: From the library. }
+        function:
+          type: string
+          description: >
+            What the technique does — advance | reverse | escape | control |
+            finish. Absent for the movement fundamentals, which genuinely have
+            none. Load-bearing for rendering: it is what distinguishes a step
+            that ENDS the exchange from one whose destination was simply never
+            recorded.
+        order: { type: integer, description: Zero-based. Assigned by the server from array order. }
+        ends_at_position_id:
+          type: string
+          nullable: true
+          description: >
+            Where this step leaves you, and therefore where the next one starts.
+
+
+            Null means NOT RECORDED **or** ENDS THE EXCHANGE. The ambiguity is
+            deliberate — a submission finishes the chain and leaves you in no
+            position at all, and `function` already tells the two apart, so a
+            second field would encode one fact twice and could disagree.
+
+
+            Authored, not derived from the library's own `to_position`: that is
+            populated for 191 of 634 techniques, so deriving the chain would
+            render most sequences with holes.
+        ends_at_position_name:
+          type: string
+          description: Resolved from the position glossary. Absent when the id is null.
+        notes:
+          type: string
+          description: The athlete's own note. The only part of a step that is theirs.
+
+    Sequence:
+      type: object
+      description: >
+        A chain: what a class actually taught, in the order it flows.
+
+
+        Distinct from a Curriculum, though both are ordered technique lists. A
+        curriculum's order is PEDAGOGICAL — learn this before that, over months.
+        A sequence's is CAUSAL: this move puts you where the next one starts,
+        and reordering it produces something that does not work on the mat.
+        Sequences carry no criteria and no progress; a chain is not a thing you
+        complete.
+
+
+        Sequences are LINEAR. A class ending "…and if he defends, armbar OR
+        kimura" is two sequences sharing a prefix, not one with a branch.
+      required: [id, editable, name, description, created_at, updated_at, step_count]
+      properties:
+        id: { type: string }
+        editable:
+          type: boolean
+          description: >
+            Whether the CALLER may change this. Resolved server-side so a client
+            never compares user ids to decide whether to show an edit
+            affordance — that shape is how client-side authorization gets
+            written by accident. False only for VOLA-authored reference chains.
+        name: { type: string }
+        description: { type: string }
+        start_position_id:
+          type: string
+          nullable: true
+          description: >
+            Where the chain begins, as a curated position id. Null is legal — a
+            chain whose start nobody named is still a chain.
+        start_position_name: { type: string, description: Resolved. Absent when the id is null. }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        step_count:
+          type: integer
+          description: Present on BOTH the list and the single read, so a card can say "4 steps" without fetching them.
+        steps:
+          type: array
+          description: >
+            Omitted on list responses. Present on a single read whenever the
+            chain has any steps — and ABSENT rather than `[]` when it has none,
+            which is Go's `omitempty` and not worth fighting the encoder over.
+            Read `step_count` to tell "no steps" from "not sent"; it is present
+            on every response either way.
+          items:
+            $ref: "#/components/schemas/SequenceStep"
+
+    SequenceStepWrite:
+      type: object
+      required: [technique_id]
+      properties:
+        technique_id: { type: string }
+        ends_at_position_id: { type: string, nullable: true }
+        notes: { type: string }
+
+    SequenceWrite:
+      type: object
+      description: >
+        Ownership is not a field: a sequence is always the caller's, and a
+        request that could name an owner is a request that could name somebody
+        else.
+
+
+        On PATCH every field is optional. `steps` OMITTED leaves the chain
+        alone; `steps` present (including `[]`) REPLACES it wholesale — order is
+        the content, so per-step patching would let two clients interleave into
+        a chain neither authored. `start_position_id` distinguishes omitted
+        (leave it) from explicit `null` (clear it).
+      properties:
+        name: { type: string, maxLength: 120 }
+        description: { type: string, maxLength: 2000 }
+        start_position_id: { type: string, nullable: true }
+        steps:
+          type: array
+          maxItems: 20
+          description: >
+            Capped at 20. Real chains are 3-6 steps; something 40 long is a
+            curriculum wearing the wrong shape. A repeated technique is LEGAL,
+            unlike curriculum items — sweep, get passed, sweep again is ordinary
+            grappling and a chain that records it is more accurate.
+          items:
+            $ref: "#/components/schemas/SequenceStepWrite"
+
     CurriculumItem:
       type: object
       required: [technique_id, name, position, category, order, notes]
@@ -2860,6 +2996,134 @@ paths:
         Removing the promotion that set the current rank lowers it, because
         rank is derived from what remains.
       operationId: deleteBjjPromotion
+      responses:
+        "204": { description: Removed. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /sequences:
+    get:
+      summary: Sequences the caller can see
+      operationId: listSequences
+      description: >
+        The caller's own, plus any VOLA-authored reference chains, newest first
+        and capped at 200.
+
+
+        There is NO public arm here, unlike `/curricula`: sequences are never
+        published. Sharing copies a chain to the recipient rather than widening
+        who may read this one, so a recipient's edits and the author's diverge
+        from the moment it lands. Steps are omitted — read one to get them.
+      responses:
+        "200":
+          description: The visible sequences.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sequences]
+                properties:
+                  sequences:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Sequence"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      summary: Create a sequence
+      operationId: createSequence
+      description: >
+        Always owned by the caller. The id is server-generated: there is no
+        offline-creation case for something authored at a desk against a
+        catalog, and a client-chosen id lets a caller probe for existing ones by
+        watching which inserts conflict.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SequenceWrite"
+      responses:
+        "201":
+          description: The created sequence, with its steps.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Sequence"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          description: >
+            Body over 256 KB. This module caps the body before parsing because
+            the step limit can only be checked once the whole request is in
+            memory; other modules let the decoder answer 400 instead, so a
+            client should treat this as a 400 variant rather than a convention.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /sequences/{sequenceID}:
+    parameters:
+    - name: sequenceID
+      in: path
+      required: true
+      schema: { type: string }
+    get:
+      summary: One sequence, with its steps
+      operationId: getSequence
+      description: >
+        404 for a sequence that does not exist AND for one belonging to somebody
+        else — identically, and deliberately. Distinguishing them tells a caller
+        that an id they guessed is real.
+      responses:
+        "200":
+          description: The sequence.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Sequence"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      summary: Update a sequence
+      operationId: updateSequence
+      description: >
+        Partial. See `SequenceWrite` for how omitted, null and empty differ —
+        the distinction between leaving a chain alone and clearing it lives
+        there.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SequenceWrite"
+      responses:
+        "200":
+          description: The updated sequence.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Sequence"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: >
+            A VOLA-authored reference chain, which the caller can read and may
+            not change. Only ever reachable from a write — every read answers
+            404 for anything invisible, so this leaks nothing the caller did not
+            already have.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      summary: Delete a sequence
+      operationId: deleteSequence
+      description: Steps go with it. 404 for anything the caller does not own.
       responses:
         "204": { description: Removed. }
         "401": { $ref: "#/components/responses/Unauthorized" }

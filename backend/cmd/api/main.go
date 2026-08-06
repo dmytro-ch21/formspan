@@ -23,6 +23,7 @@ import (
 	"github.com/dmytro-ch21/vola/backend/internal/modules/health"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/plan"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/profile"
+	"github.com/dmytro-ch21/vola/backend/internal/modules/sequence"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/session"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/technique"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/workout"
@@ -71,6 +72,7 @@ func main() {
 	bjjProficiencyHandler := bjj.NewProficiencyHandler(bjjRepo)
 	bjjFocusHandler := bjj.NewFocusHandler(bjjRepo)
 	curriculumHandler := curriculum.NewHandler(curriculum.NewPostgresRepository(pool))
+	sequenceHandler := sequence.NewHandler(sequence.NewPostgresRepository(pool))
 	featureFlagHandler := featureflag.NewHandler(featureflag.NewPostgresRepository(pool))
 	activityHandler := activity.NewHandler(activity.NewPostgresRepository(pool))
 	exerciseRepo := exercise.NewPostgresRepository(pool)
@@ -128,6 +130,22 @@ func main() {
 	mux.Handle("DELETE /v1/curricula/{curriculumID}", verifier.RequireAuth(http.HandlerFunc(curriculumHandler.Delete)))
 	mux.Handle("PUT /v1/curricula/{curriculumID}/enrollment", verifier.RequireAuth(http.HandlerFunc(curriculumHandler.Enroll)))
 	mux.Handle("DELETE /v1/curricula/{curriculumID}/enrollment", verifier.RequireAuth(http.HandlerFunc(curriculumHandler.Archive)))
+
+	// Sequences: the chain a class actually taught, in the order it flows.
+	//
+	// Under /v1/sequences rather than /v1/bjj/sequences, matching curricula:
+	// the shape is an ordered list of library references and is not
+	// BJJ-specific -- only today's content is.
+	//
+	// NO /v1/sequences/{id}/share HERE, deliberately. Sharing is one capability
+	// over every ownable thing in the app and gets its own /v1/shares surface;
+	// a per-resource share verb would be the fourth private implementation of
+	// one idea and would have to be undone.
+	mux.Handle("GET /v1/sequences", verifier.RequireAuth(http.HandlerFunc(sequenceHandler.List)))
+	mux.Handle("POST /v1/sequences", verifier.RequireAuth(http.HandlerFunc(sequenceHandler.Create)))
+	mux.Handle("GET /v1/sequences/{sequenceID}", verifier.RequireAuth(http.HandlerFunc(sequenceHandler.Get)))
+	mux.Handle("PATCH /v1/sequences/{sequenceID}", verifier.RequireAuth(http.HandlerFunc(sequenceHandler.Update)))
+	mux.Handle("DELETE /v1/sequences/{sequenceID}", verifier.RequireAuth(http.HandlerFunc(sequenceHandler.Delete)))
 
 	mux.Handle("GET /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Get)))
 	mux.Handle("POST /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Create)))

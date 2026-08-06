@@ -4382,6 +4382,83 @@ substring of ONE field. The techniques were all present.
   carries no description, and no alias names a grip. Add scenarios when the
   library-content pass adds grip aliases.
 
+## Sequences (`/v1/sequences`)
+
+A sequence is a chain: what a class taught, in the order it flows. Backend only
+so far — no client renders one yet, so these are API-level scenarios.
+
+### Happy path — recording the class that motivated the feature
+
+- Create with `start_position_id` = closed-guard and four steps (standing break,
+  knee cut ending at side control, side control to knee-on-belly, armbar).
+  Read it back: `step_count` is 4, `order` runs 0..3, and `name`, `position`,
+  `category` and `function` on each step come from the **library**, not the
+  request.
+- Rename a technique in the catalog and re-read the sequence — the new name
+  shows. Library fields are resolved on read, never stored on the step.
+- A step with no `ends_at_position_id` reads back as `null`, not `""`. A client
+  rendering `""` as a position called "" is the failure this prevents.
+- `GET /v1/sequences` omits `steps` and includes `step_count`. Creating fifty
+  sequences must not make the list carry every step of every one.
+
+### Ordering — the content, not a presentation detail
+
+- `order` is assigned server-side from array position. A client sending its own
+  ordinals cannot collide with `UNIQUE (sequence_id, sort_order)`.
+- Replace a 4-step chain with 1 step: the survivor is at `order` 0, re-indexed.
+  Leaving it at its old ordinal collides on the next write and renders a gap.
+- Reorder the steps and read back — the new order persists exactly.
+
+### The omitted / null / empty distinction (regression-prone)
+
+- `PATCH` with **no** `steps` key leaves the chain untouched. This is the one a
+  client loses silently, and it wipes an athlete's work.
+- `PATCH` with `steps: []` **clears** it.
+- `PATCH` with **no** `start_position_id` key leaves it; `start_position_id:
+  null` **clears** it. A single nullable field cannot express both.
+
+### Edge cases & errors
+
+- 21 steps → 400. The cap is 20.
+- A step with an empty or unknown `technique_id` → 400 (`invalid_input`), never
+  a raw SQL or constraint message.
+- An unknown `ends_at_position_id` → 400.
+- A sequence with no name → 400. A name is all a list row can render.
+- A **repeated technique in one chain is legal** — sweep, get passed, sweep
+  again. Unlike curriculum items, this must NOT be rejected.
+- Notes over 1000 chars, name over 120, description over 2000 → 400.
+- A body larger than 256 KB → 413, before any parsing.
+- Deleting a sequence deletes its steps (no orphans left in
+  `bjj_sequence_steps`).
+- **A pruned position must not delete the chain.** Remove a position from
+  `positions.json` and re-seed: sequences referencing it survive with the id
+  nulled, both on the sequence's start and on any step. Both FKs are
+  `ON DELETE SET NULL` for this reason, and `UpsertPositions` genuinely prunes.
+
+### Auth / security
+
+- Every endpoint requires auth → 401 unauthenticated.
+- `GET /v1/sequences/{id}` for **another user's** sequence returns **404**, and
+  it must be indistinguishable from a `{id}` that never existed. A 403 here
+  would confirm that a guessed id is real — the ID-enumeration shape review has
+  already caught twice in this codebase.
+- `GET /v1/sequences` never includes another user's rows.
+- `PATCH` and `DELETE` by a non-owner fail **and leave the sequence unmodified**.
+  Assert the second part — an error response alone does not prove nothing was
+  written.
+- A VOLA-authored (ownerless) sequence is readable by everyone with
+  `editable: false`, and writing to it returns 403. That is the only
+  visible-but-unowned case, which is what makes 403 safe here.
+- The response must never carry `owner_user_id`. `editable` is the only
+  ownership signal a client gets, so no client is ever tempted to compare user
+  ids itself.
+
+### Not covered yet
+
+- **Sharing.** No share endpoint exists here by design — it is a generic
+  `/v1/shares` surface over every ownable resource, and it needs usernames
+  first. Add scenarios with that module.
+
 ## Curricula and roadmaps (`/v1/curricula`)
 
 Seven routes over three tables, and no screen on any of the three apps yet — so

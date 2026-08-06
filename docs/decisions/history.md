@@ -12200,6 +12200,175 @@ five in-file duplicates in the curriculum were reported, not authored.
 - The scanner's position vocabulary and the driver's curation notes live in
   this branch; the curated verdict report itself was session-scratch and is
   not committed.
+## 2026-08-06 — Sequences: the chain a class actually taught
+
+Six technique tags cannot say that they connect, and the connection is the
+lesson. The beginners' class that started the library work ran closed guard top
+→ standing break → knee cut → side control → knee on belly → armbar; every one
+of those exists in the library, and nothing anywhere could record that the knee
+cut came off a broken closed guard. "Knee cut" and "knee cut from a broken
+closed guard" are different things to learn.
+
+Backend only so far: `internal/modules/sequence`, migration 000035, five
+endpoints under `/v1/sequences`. No client yet.
+
+### A step is a technique AND where it leaves you
+
+The one idea worth the migration. `bjj_sequence_steps` carries
+`ends_at_position_id` alongside `technique_id`, authored rather than read from
+`techniques.to_position`.
+
+Deriving it was the obvious design and does not work: 000029 populated
+`to_position` for 191 of 634 techniques and documents at length why the rest
+cannot be derived without inventing data. Deriving the chain would render most
+sequences with holes in them.
+
+Authoring runs the debt down instead of around it — every sequence written is a
+human asserting a real transition, so the table accumulates exactly the evidence
+`to_position` lacks. Harvesting it back is not done here and must not be
+automatic: one athlete's assertion is not library-grade.
+
+`NULL` there means NOT RECORDED **or** ENDS THE EXCHANGE. That ambiguity is
+deliberate rather than split into two columns — a submission finishes the chain
+and leaves you in no position at all, and the technique's own `function` already
+distinguishes the cases. 000028 made the same argument against `category`
+carrying the where-half a second time.
+
+### Why not a curriculum, which is also an ordered technique list
+
+Because the two orders mean different things and would silently merge. A
+curriculum's order is **pedagogical** — learn this before that, over months —
+and reordering it changes advice. A sequence's is **causal**: this move puts you
+where the next one starts, and reordering it produces something that does not
+work on the mat.
+
+Hence no criteria, no progress, no mastery in this module: a chain is not a
+thing you complete, and the mastery of its parts is already tracked per
+technique. Hence also the `UNIQUE (sequence_id, sort_order)` that
+`curriculum_items` has no equivalent of — a reading list with two items at index
+3 renders in some order and nothing is wrong, but here the order IS the content,
+so an ambiguous one is corrupt.
+
+Duplicate techniques ARE allowed, unlike curriculum items. Sweep, get passed,
+sweep again is ordinary grappling, and a chain that records it is more accurate.
+
+### Sequences are linear, and that is a product decision
+
+A class ending "…and if he defends the knee, armbar OR kimura" is **two
+sequences sharing a prefix**, not one sequence with a branch. Branch points are
+harder to author, much harder to read on a phone, and the fork stays visible
+either way.
+
+### What this module deliberately does not know about
+
+**Sharing.** There is no `visibility` column, no `shared_with`, and no
+`/v1/sequences/{id}/share`. Sharing is being built once, generically, over every
+ownable thing in the app — plans, workouts, curricula, sequences — as a `shares`
+envelope plus a per-module copier registered in `main.go`. A share verb here
+would be the fourth private implementation of one idea and would have to be
+undone. All this module owes that system is a stable id and an owner.
+
+Note the sharing model differs from curricula's on purpose: `curricula` share by
+making one row publicly readable, so every reader sees the author's later edits.
+A sequence records what a class taught, so a recipient gets an independent
+snapshot. That is why `visibleTo` here has no `visibility = 'public'` arm.
+
+### Two authorization shapes, both mutation-checked
+
+`visibleTo` is composed into every read rather than retyped — the same rule
+written twice is what produced a cross-user enumeration bug in two other modules
+here, each time by one query being updated and the other not. Reads collapse
+"does not exist" and "is not yours" into one 404, because distinguishing them
+tells a caller that a guessed id is real.
+
+`Update` resolves ownership inside the transaction with `SELECT … FOR UPDATE`
+rather than as a `WHERE` clause on the UPDATE: the steps-replace is a separate
+statement that would otherwise repeat the predicate, and the row lock stops a
+concurrent delete landing between check and write.
+
+Ten integration tests, and every guard was mutated to confirm it can fail —
+dropping the owner clause from `visibleTo` (2 red), letting nil `Steps` replace
+rather than leave alone (1 red), swapping the start-position `CASE` for a
+`COALESCE` that cannot express "clear" (2 red), and dropping ownership from
+`Delete` (1 red).
+
+### What `/pre-merge` caught: the same bug, a third time
+
+The backend reviewer found one blocking defect, and it is this codebase's
+signature failure in a new location. `Update` resolved ownership and then did:
+
+```go
+if owner == nil || *owner != userID {
+    return Sequence{}, ErrForbidden   // handler maps this to 403
+}
+```
+
+So `PATCH /v1/sequences/{id}` answered **404 for an id that is not real and 403
+for one that exists but belongs to somebody else** — a cross-user existence
+oracle, identical in shape to the two this project has already shipped and
+fixed, moved to the write path where the read-path guard could not see it.
+
+Three things made it survive to review:
+
+- The comment sitting on that branch claimed *"the handler decides the client
+  hears 404."* The handler contained no such decision. A comment asserting an
+  invariant the code does not uphold is worse than no comment, because it stops
+  the next reader checking.
+- `sequence.go` and the OpenAPI 403 description both stated the invariant as
+  fact — so the wrong behaviour was documented in three places as correct.
+- **The test accepted any error.** `TestWritesRefuseAnotherUsersSequence`
+  asserted `err == nil` for the intruder's update, which is true of
+  `ErrForbidden` and `ErrNotFound` alike. It is now pinned to `ErrNotFound`,
+  and asserts the nonexistent-id case in the same test — because the leak is the
+  DIFFERENCE between those two answers and neither alone can show it.
+
+`curriculum` had this right already (`absentOrForbidden`); this module cited
+curriculum as its model and diverged on the one line that mattered.
+
+The fix splits the branch: an ownerless VOLA row → `ErrForbidden` (every caller
+can already read it, so 403 discloses nothing), a foreign row → `ErrNotFound`.
+`Delete` was made to agree — it had been answering 404 for a reference chain
+that `Update` answered 403 for, one module giving two answers about one
+permission. A new test covers the 403 path, which had none.
+
+### Smaller things review found
+
+- **A duplicate index.** `bjj_sequence_steps_sequence_idx` on
+  `(sequence_id, sort_order)` was exactly the index the `UNIQUE` constraint on
+  those columns already builds — maintained on every insert, for nothing.
+  Dropped. Migration 000018 removed an index from `techniques` for being merely
+  unused; this one was redundant.
+- **A dead deep link.** Step names linked to
+  `/dashboard/library?technique=…` and the Library page reads no such param, so
+  it looked like "open this technique" and delivered the top of the grid. Now
+  plain text.
+- **`<ol>` containing a `<div>`** in the detail view — invalid, since `<ol>`
+  permits only `li`. The builder's equivalent was legal (fragments flatten);
+  the two screens had diverged.
+- **A finish styled as missing data.** "Ends the exchange" and "Not recorded"
+  are both a null destination and were both rendered in the faded italic that
+  means *gap*, so a completed submission read as an omission.
+- **413 for every body-read failure**, including a dropped connection, which
+  told those clients their request was too large.
+
+### Gaps
+
+- **No client.** Web authoring beside Curricula is next, then the mobile
+  reflect-wizard integration. Nothing renders a sequence today.
+- **Nothing validates that step N ends where step N+1 starts**, and that is
+  deliberate — the library's position vocabulary is 16 free-text values at a
+  different grain than the 11 curated positions, techniques are routinely taught
+  from places the catalog does not list, and a coach's variation is not a
+  validation error. The athlete is the authority on what their class did.
+- **Sharing needs usernames, which do not exist.** `profiles.display_name` is
+  nullable and non-unique. The agreed scope is: unique usernames → search by
+  username → friend request → accept → share to a friend, arriving pending and
+  copied on accept.
+- **"Share a technique" presumes athlete-authored techniques, which do not
+  exist.** `/content` in the admin console is the only write path and it refuses
+  seeded rows, so that share type will have nothing to carry until athletes can
+  author techniques — a separate feature, not part of sharing.
+
 
 ## 2026-08-06 — The alias merge: 204 strings the sheet has to carry
 
