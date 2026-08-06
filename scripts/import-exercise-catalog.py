@@ -352,10 +352,15 @@ TRANSITION_RULES = [
     (r"to Mount|to S-Mount|to Knee-on-Belly", "advance"),
     (r"Pass|Guard Break|Leg Drag|Toreando", "advance"),
     (r"Guard Pull|Pull$", "advance"),
-    (r"Arm Drag|Throw-By|Duck-Under|Snapdown", "advance"),
+    (r"Arm Drag|Collar Drag|Throw-By|Duck-Under|Snapdown", "advance"),
+    # A turtle breakdown that ends in a pin. No family to generalise over —
+    # the only other one in the library is a Control/Pin, which never reaches
+    # here.
+    (r"Cement Mixer", "advance"),
     (r"to North–South|Backstep to Side Control", "control"),
     (r"Angle Change|Whip-Up|Underhook Entry|to Dogfight", "control"),
-    (r"to X Guard|to Single-Leg X|to Reverse X|to Saddle|to Backside 50/50|Entry", "control"),
+    (r"to X Guard|to Single-Leg X|to Reverse X|to Saddle|to Backside 50/50|Entry"
+     r"|to Leg Lock", "control"),
 ]
 
 
@@ -419,11 +424,33 @@ def apply_taxonomy(records: list) -> list:
         position = r["position"]
         if r.get("position_detail") in ENTANGLEMENT_DETAILS:
             position = "Leg Entanglement"
+        fn = derive_function(r["category"], r["name"])
+
+        # A record that ALREADY carries a function must agree with the rules.
+        #
+        # The additions file is authored by hand and does carry one, so from
+        # here on there are two sources for one field — the thing this
+        # derivation exists to avoid. Left unchecked they diverge silently and
+        # in a way no diff shows, because the loop below writes the derived
+        # value at `category` and the record's own value overwrites it at
+        # `function`: the STORED value wins, and which one wins at all depends
+        # on nothing more than the order the keys happen to serialize in.
+        #
+        # Loud rather than clever. The gap-fill of 2026-08 shipped two rows
+        # whose authored `advance` disagreed with the rules' `control`, and
+        # nothing anywhere reported it — not the seed validator, which does not
+        # run the taxonomy, and not the test suite, which does not run the
+        # importer.
+        if r.get("function", fn) != fn:
+            sys.exit(
+                f"technique taxonomy: {r['name']!r} carries function "
+                f"{r['function']!r} but the rules derive {fn!r} — fix the row "
+                f"or the rule, do not leave them disagreeing")
+
         rebuilt = {}
         for k, v in r.items():
             rebuilt[k] = position if k == "position" else v
             if k == "category":
-                fn = derive_function(r["category"], r["name"])
                 if fn:
                     rebuilt["function"] = fn
         out.append(rebuilt)

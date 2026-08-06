@@ -1605,7 +1605,7 @@
       "Berimbolo to legs"
     ],
     "category": "Transition",
-    "function": "advance",
+    "function": "control",
     "position": "Guard - Bottom",
     "position_detail": "Open Guard",
     "to_position": "Leg Entanglement",
@@ -2551,7 +2551,7 @@
       "Shin-to-shin leg entry"
     ],
     "category": "Transition",
-    "function": "advance",
+    "function": "control",
     "position": "Guard - Bottom",
     "position_detail": "Shin-to-Shin",
     "to_position": "Leg Entanglement",
@@ -2688,7 +2688,7 @@
       "Standing ashi entry"
     ],
     "category": "Transition",
-    "function": "advance",
+    "function": "control",
     "position": "Standing",
     "position_detail": "Open Space",
     "to_position": "Leg Entanglement",

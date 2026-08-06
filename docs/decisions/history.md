@@ -12370,7 +12370,7 @@ permission. A new test covers the 403 path, which had none.
   author techniques — a separate feature, not part of sharing.
 
 
-## 2026-08-06 — The alias merge: 204 strings the sheet has to carry
+## 2026-08-06 — The alias merge: 202 strings the sheet has to carry
 
 The follow-up the gap-fill entry recorded. The curriculum's `(aka ...)`
 parentheticals are search vocabulary the library does not have — "arm bar"
@@ -12645,6 +12645,64 @@ checks both now; the tightest is black at 3.30 raised / 3.61 surface.
 - **The redesigned screens have not been seen since the fixes.** The Simulator
   pass predates them, so the near-miss rule state is proven in jest and has
   never been looked at.
+
+## 2026-08-06 — The aliases land, and the re-import turns out to have been broken
+
+The merge list applied. `scripts/apply-alias-merge.py` writes the CSV's cells
+into the spreadsheet, `import-exercise-catalog.py` regenerates from it, and the
+result was promoted over `techniques.json`: 130 rows richer, **855 aliases to
+1,057**. Verified as a pure append — no row lost an alias, and the only
+non-alias change in the whole 542-row diff was three deliberate function fixes.
+
+**Finding the spreadsheet was itself the first check.** Six candidate `.xlsx`
+files existed across `~/Downloads` and `~/Documents/Codex`; two carried the
+current 21-column schema and were byte-identical to each other (same MD5). What
+identified them as the live authoring surface rather than stale exports was
+running the importer and getting `techniques.json` back **byte-for-byte, all 542
+rows**. Both were updated, both with a timestamped `.bak` first.
+
+**And that run is how we learned the gap-fill had broken the re-import.**
+`apply_taxonomy` derives `function` from the name for every `Transition` row,
+including the additions — "the additions are authored in the sheet's shape and
+get the same derivation, so there is one rule rather than two that can
+disagree", as the importer puts it. Three of the eight new `Transition` rows matched
+no rule at all, so the importer **exited**: `no rule matches transition 'Cement
+Mixer'`. Two more derived `control` where the row said `advance` — and that
+half is subtler than it first looks. The rebuild loop writes the derived value
+at the `category` key and the row's own value overwrites it at `function`, so
+the **stored** value silently wins, and which one wins at all depends on nothing
+more than the order the keys happen to serialize in. Not a rewrite, then: a
+divergence that no diff shows, sitting on a coin-flip.
+
+Nothing caught this. The seed validator does not run the taxonomy, the test
+suite does not invoke the importer, and both reviewers checked the catalog
+rather than the pipeline that regenerates it. The defect was invisible until
+somebody actually re-imported — which is exactly the "content that is not here
+is deleted by the next re-import, silently" failure the additions file exists to
+prevent, one layer up. **A row can satisfy every validator the repo has and
+still be unable to survive a round-trip through its own build.**
+
+Fixed by adding the three missing rules and correcting three rows to `control`
+— chosen that way round deliberately: eleven existing sheet rows of the same
+shape ("Butterfly Guard to Single-Leg X", "Shin-to-Shin to Single-Leg X") are
+all `control`, so the pipeline was right and the authored value was wrong.
+Changing the rule instead would have flipped those eleven. Each new pattern was
+checked against the whole catalog first to confirm it matches only the intended
+row.
+
+### Gaps
+
+- **No test invokes the importer**, so the new agreement guard only fires when
+  someone re-imports. The round-trip that caught this was manual. There is no
+  Python test runner in the repo and `verify` has no Python step, which is the
+  real reason the pipeline is unguarded in CI while the catalog it produces is
+  well covered.
+- The `.generated.json` files are untracked scratch that a human promotes by
+  hand; nothing enforces that the committed artifact actually equals what the
+  sheet produces. It does right now, and that was verified here, but only
+  because someone looked.
+- The spreadsheet lives outside the repo in two hand-synced copies. Nothing
+  detects them drifting apart.
 
 ## Open items / known gaps as of this entry
 
