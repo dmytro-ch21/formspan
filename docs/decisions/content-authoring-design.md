@@ -1,7 +1,7 @@
 # Content authoring — retiring the spreadsheet, and publishing without a PR
 
-Status: **proposal, 2026-08-06. Steps 1 and 2 are built** (see history.md);
-steps 3–6 are not. It complements
+Status: **proposal, 2026-08-06. Steps 1–3 are built** (see history.md); steps
+4–6 are not. It complements
 [history.md](history.md) (what was decided and when) and describes where the
 content pipeline should end up, in two phases that can land months apart.
 
@@ -214,7 +214,7 @@ A CMS. A workflow engine. Multi-user approvals. There is one author.
 | --- | --- | --- |
 | 1. Retire the importer; fold the additions files in; move the taxonomy into Go | nothing | small |
 | 2. Widen the console to edit any row — **DONE**, and note it is not a "drop the restriction": the clause MOVES to the SET clause, or the next deploy reverts every edit | 1 | small |
-| 3. Scheduled snapshot export as a bot commit; restore path preserves `source` | 2 | medium |
+| 3. Scheduled snapshot export — **DONE** (`.github/workflows/content-snapshot.yml`), as a bot PR rather than a bot commit: the files it writes are the bootstrap, so they get CI-equivalent validation before landing | 2 | medium |
 | 4. `status` draft/published, API filters to published | 2 | medium |
 | 5. `content_revisions` + audit + rollback in the console | 2 | medium |
 | 6. Point the console at production, and stop reseeding content on deploy | 3, 4, 5, **and a production environment existing** | small, scary |
