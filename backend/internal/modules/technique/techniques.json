@@ -34,7 +34,9 @@
     "name": "Backward Breakfall",
     "aliases": [
       "Back breakfall",
-      "Ushiro ukemi"
+      "Ushiro ukemi",
+      "Ushiro Ukemi Flat",
+      "Back Fall"
     ],
     "category": "Other",
     "position": "Standing",
@@ -90,7 +92,9 @@
     "name": "Forward Shoulder Roll",
     "aliases": [
       "Forward roll",
-      "Zenpo kaiten ukemi"
+      "Zenpo kaiten ukemi",
+      "Mae Ukemi",
+      "Forward Breakfall"
     ],
     "category": "Other",
     "position": "Standing",
@@ -118,7 +122,9 @@
     "name": "Technical Stand-Up",
     "aliases": [
       "Combat base stand-up",
-      "Technical lift"
+      "Technical lift",
+      "Base Recovery",
+      "Stand-Up in Base"
     ],
     "category": "Transition",
     "function": "escape",
@@ -313,7 +319,9 @@
     "id": "standing-arm-drag",
     "name": "Standing Arm Drag",
     "aliases": [
-      "Two-on-one drag"
+      "Two-on-one drag",
+      "Arm Drag to Single",
+      "Clinch Arm Drag to Back"
     ],
     "category": "Transition",
     "function": "advance",
@@ -346,7 +354,8 @@
     "name": "Duck-Under",
     "aliases": [
       "Duckunder",
-      "Inside tie duck"
+      "Inside tie duck",
+      "Duck Under to Back"
     ],
     "category": "Transition",
     "function": "advance",
@@ -445,7 +454,9 @@
     "name": "Front Headlock Go-Behind",
     "aliases": [
       "Spin behind",
-      "Circling go-behind"
+      "Circling go-behind",
+      "Go Behind Back Take",
+      "Go-Behind in Scramble"
     ],
     "category": "Takedown",
     "function": "advance",
@@ -614,7 +625,8 @@
     "aliases": [
       "Head-inside single",
       "Sweep single entry",
-      "Kuchiki-taoshi (Japanese one-hand drop)"
+      "Kuchiki-taoshi (Japanese one-hand drop)",
+      "High Single"
     ],
     "category": "Takedown",
     "function": "advance",
@@ -847,7 +859,9 @@
     "name": "Ankle Pick",
     "aliases": [
       "Low ankle pick",
-      "Kibisu-gaeshi (Japanese heel reversal)"
+      "Kibisu-gaeshi (Japanese heel reversal)",
+      "Foot Pick",
+      "Ankle Grab"
     ],
     "category": "Takedown",
     "function": "advance",
@@ -1376,7 +1390,8 @@
     "id": "ippon-seoi-nage",
     "name": "Ippon Seoi Nage",
     "aliases": [
-      "One-arm shoulder throw"
+      "One-arm shoulder throw",
+      "Seoi Nage from Clinch"
     ],
     "category": "Takedown",
     "function": "advance",
@@ -2062,7 +2077,8 @@
     "name": "Closed-Guard Overhook Control",
     "aliases": [
       "Overhook guard",
-      "Clamp"
+      "Clamp",
+      "Whizzer Guard"
     ],
     "category": "Control/Pin",
     "function": "control",
@@ -2126,7 +2142,9 @@
     "id": "closed-guard-arm-drag-back-take",
     "name": "Closed-Guard Arm-Drag Back Take",
     "aliases": [
-      "Two-on-one back take"
+      "Two-on-one back take",
+      "Guard Arm Drag Back Take",
+      "Arm Drag Back Take from Guard"
     ],
     "category": "Transition",
     "function": "advance",
@@ -2162,7 +2180,8 @@
     "aliases": [
       "Juji gatame",
       "Straight armbar",
-      "Juji-gatame family"
+      "Juji-gatame family",
+      "Juji-Gatame from Guard"
     ],
     "category": "Submission",
     "function": "finish",
@@ -2197,7 +2216,9 @@
     "aliases": [
       "Sankaku jime",
       "Front triangle",
-      "Sankaku-jime family"
+      "Sankaku-jime family",
+      "Sankaku-Jime from Guard",
+      "Triangle from Guard"
     ],
     "category": "Submission",
     "function": "finish",
@@ -2232,7 +2253,11 @@
     "aliases": [
       "Figure-four shoulder lock",
       "Ude garami",
-      "Ude-garami family"
+      "Ude-garami family",
+      "Double Wristlock from Guard",
+      "Figure-Four from Guard",
+      "Double Wristlock",
+      "Gyaku Ude Garami"
     ],
     "category": "Submission",
     "function": "finish",
@@ -2265,7 +2290,9 @@
     "name": "Guillotine from Closed Guard",
     "aliases": [
       "Front choke",
-      "Arm-in guillotine"
+      "Arm-in guillotine",
+      "Guard Guillotine",
+      "Mae Hadaka Jime"
     ],
     "category": "Submission",
     "function": "finish",
@@ -2297,7 +2324,10 @@
     "id": "omoplata-closed-guard",
     "name": "Omoplata from Closed Guard",
     "aliases": [
-      "Shoulder entanglement"
+      "Shoulder entanglement",
+      "Shoulder Lock from Guard",
+      "Ashi Sankaku from Guard",
+      "Shoulder Lock"
     ],
     "category": "Submission",
     "function": "finish",
@@ -2332,7 +2362,9 @@
     "aliases": [
       "X choke",
       "Nami juji jime",
-      "Gyaku-juji-jime variation"
+      "Gyaku-juji-jime variation",
+      "Cross Choke from Guard",
+      "Juji Jime"
     ],
     "category": "Submission",
     "function": "finish",
@@ -2363,7 +2395,10 @@
     "id": "loop-choke-closed-guard",
     "name": "Loop Choke from Closed Guard",
     "aliases": [
-      "Looping collar choke"
+      "Looping collar choke",
+      "Lasso Loop Choke",
+      "Guard Loop Choke",
+      "Running Loop Choke"
     ],
     "category": "Submission",
     "function": "finish",
@@ -2492,7 +2527,9 @@
     "id": "scissor-sweep-closed-guard",
     "name": "Scissor Sweep",
     "aliases": [
-      "Knee-shield scissor sweep"
+      "Knee-shield scissor sweep",
+      "Scissors Sweep",
+      "Kani Basami Sweep"
     ],
     "category": "Sweep",
     "function": "reverse",
@@ -2526,7 +2563,8 @@
     "name": "Knee-Push Sweep",
     "aliases": [
       "Push sweep",
-      "Scissor variation"
+      "Scissor variation",
+      "Hip Heist Sweep from Guard"
     ],
     "category": "Sweep",
     "function": "reverse",
@@ -2559,7 +2597,8 @@
     "name": "Pendulum Sweep",
     "aliases": [
       "Flower sweep",
-      "Underhook leg sweep"
+      "Underhook leg sweep",
+      "Sickle Sweep from Closed Guard"
     ],
     "category": "Sweep",
     "function": "reverse",
@@ -2624,7 +2663,8 @@
     "id": "lumberjack-sweep-closed-guard",
     "name": "Lumberjack Sweep",
     "aliases": [
-      "Double-ankle sweep"
+      "Double-ankle sweep",
+      "Overhead Collar Sweep"
     ],
     "category": "Sweep",
     "function": "reverse",
@@ -2753,7 +2793,8 @@
     "name": "Hip-Bump to Kimura",
     "aliases": [
       "Kimura trap from sit-up sweep",
-      "Ude-garami family"
+      "Ude-garami family",
+      "Sit-Up Sweep to Kimura"
     ],
     "category": "Submission",
     "function": "finish",
@@ -2785,7 +2826,9 @@
     "name": "Armbar–Triangle–Omoplata Chain",
     "aliases": [
       "Closed-guard submission chain",
-      "Juji-gatame family"
+      "Juji-gatame family",
+      "Triangle Armbar Combo",
+      "Triangle Omoplata"
     ],
     "category": "Transition",
     "function": "finish",
@@ -2852,7 +2895,9 @@
     "id": "rubber-guard-mission-control",
     "name": "Rubber Guard Mission Control",
     "aliases": [
-      "High guard overhook"
+      "High guard overhook",
+      "High Guard",
+      "Zombie Position"
     ],
     "category": "Control/Pin",
     "function": "control",
@@ -2915,7 +2960,9 @@
     "id": "shoulder-crunch-sweep-closed-guard",
     "name": "Shoulder-Crunch Sweep from Closed Guard",
     "aliases": [
-      "Shoulder clamp sweep"
+      "Shoulder clamp sweep",
+      "Chicken Wing",
+      "Shoulder Lock Pinch"
     ],
     "category": "Sweep",
     "function": "reverse",
@@ -2982,7 +3029,9 @@
     "aliases": [
       "Shrimp to guard",
       "Elbow escape movement",
-      "Ebi movement (Japanese shrimping)"
+      "Ebi movement (Japanese shrimping)",
+      "Shrimp",
+      "Ebi"
     ],
     "category": "Guard Retention",
     "function": "escape",
@@ -3141,7 +3190,9 @@
     "id": "granby-guard-recovery",
     "name": "Granby Guard Recovery",
     "aliases": [
-      "Shoulder roll recovery"
+      "Shoulder roll recovery",
+      "Sit-Out Roll",
+      "Back Roll Recovery"
     ],
     "category": "Guard Retention",
     "function": "escape",
@@ -3367,7 +3418,9 @@
     "name": "Basic Butterfly Sweep",
     "aliases": [
       "Hook sweep",
-      "Sumi-gaeshi-style sweep"
+      "Sumi-gaeshi-style sweep",
+      "Butterfly Hook Sweep",
+      "Marcelo Sweep"
     ],
     "category": "Sweep",
     "function": "reverse",
@@ -3821,7 +3874,8 @@
     "id": "shin-to-shin-control",
     "name": "Shin-to-Shin Guard Control",
     "aliases": [
-      "Shin-on-shin guard"
+      "Shin-on-shin guard",
+      "Knee Battle Guard"
     ],
     "category": "Control/Pin",
     "function": "control",
@@ -4606,7 +4660,8 @@
     "name": "De La Riva Berimbolo",
     "aliases": [
       "Bolo",
-      "Inverted back take"
+      "Inverted back take",
+      "Inversão"
     ],
     "category": "Transition",
     "function": "advance",
@@ -4810,7 +4865,8 @@
     "id": "reverse-de-la-riva-tripod-sweep",
     "name": "Reverse De La Riva Tripod Sweep",
     "aliases": [
-      "RDLR tilt sweep"
+      "RDLR tilt sweep",
+      "RDLR Sweep"
     ],
     "category": "Sweep",
     "function": "reverse",
@@ -5162,7 +5218,8 @@
     "id": "spider-guard-tripod-sweep",
     "name": "Spider Guard Tripod Sweep",
     "aliases": [
-      "Spider ankle sweep"
+      "Spider ankle sweep",
+      "Spider Tripod Sweep"
     ],
     "category": "Sweep",
     "function": "reverse",
@@ -5194,7 +5251,8 @@
     "id": "spider-guard-omoplata",
     "name": "Spider Guard Omoplata",
     "aliases": [
-      "Spider shoulder lock"
+      "Spider shoulder lock",
+      "Spider to Omoplata"
     ],
     "category": "Submission",
     "function": "finish",
@@ -5226,7 +5284,8 @@
     "name": "Spider Guard Triangle",
     "aliases": [
       "Spider triangle choke",
-      "Sankaku-jime family"
+      "Sankaku-jime family",
+      "Spider to Triangle"
     ],
     "category": "Submission",
     "function": "finish",
@@ -5290,7 +5349,8 @@
     "id": "lasso-guard-sweep",
     "name": "Lasso Guard Sweep",
     "aliases": [
-      "Lasso tilt sweep"
+      "Lasso tilt sweep",
+      "Lasso Sweep"
     ],
     "category": "Sweep",
     "function": "reverse",
@@ -5418,7 +5478,9 @@
     "id": "worm-guard-control",
     "name": "Worm Guard Control",
     "aliases": [
-      "Lapel wrap guard"
+      "Lapel wrap guard",
+      "Lapel Guard",
+      "Keenan Worm Guard"
     ],
     "category": "Control/Pin",
     "function": "control",
@@ -5450,7 +5512,8 @@
     "id": "worm-guard-sweep",
     "name": "Worm Guard Sweep",
     "aliases": [
-      "Lapel tilt sweep"
+      "Lapel tilt sweep",
+      "Lapel Guard Sweep"
     ],
     "category": "Sweep",
     "function": "reverse",
@@ -5515,7 +5578,8 @@
     "id": "squid-guard-control",
     "name": "Squid Guard Control",
     "aliases": [
-      "Lapel-under-leg guard"
+      "Lapel-under-leg guard",
+      "Squid Guard Lapel"
     ],
     "category": "Control/Pin",
     "function": "control",
@@ -6044,7 +6108,9 @@
     "name": "Crab-Ride Control",
     "aliases": [
       "Double outside hooks",
-      "Hip ride"
+      "Hip ride",
+      "Back Exposure",
+      "Rodeo Ride"
     ],
     "category": "Control/Pin",
     "function": "control",
@@ -6243,7 +6309,8 @@
     "id": "high-knee-shield-recovery",
     "name": "High Knee-Shield Recovery",
     "aliases": [
-      "High Z guard"
+      "High Z guard",
+      "Re-Establish Knee Shield"
     ],
     "category": "Guard Retention",
     "function": "escape",
@@ -6374,7 +6441,8 @@
     "name": "Old-School Sweep",
     "aliases": [
       "Toe grab sweep",
-      "Old school"
+      "Old school",
+      "Hip Heist Sweep"
     ],
     "category": "Sweep",
     "function": "reverse",
@@ -6406,7 +6474,9 @@
     "id": "dogfight-plan-b-sweep",
     "name": "Plan B Sweep",
     "aliases": [
-      "Roll-under dogfight sweep"
+      "Roll-under dogfight sweep",
+      "Half Guard Plan B",
+      "Roll-Over Sweep from Half"
     ],
     "category": "Sweep",
     "function": "reverse",
@@ -6438,7 +6508,9 @@
     "id": "dogfight-limp-arm-backtake",
     "name": "Dogfight Limp-Arm Back Take",
     "aliases": [
-      "Limp-arm from half guard"
+      "Limp-arm from half guard",
+      "Dogfight Back Take",
+      "Underhook Back Take from Half"
     ],
     "category": "Transition",
     "function": "advance",
@@ -6537,7 +6609,8 @@
     "name": "Half-Guard Kimura Sweep",
     "aliases": [
       "Kimura trap sweep",
-      "Ude-garami family"
+      "Ude-garami family",
+      "Half Guard Kimura"
     ],
     "category": "Sweep",
     "function": "reverse",
@@ -6604,7 +6677,8 @@
     "id": "half-guard-guillotine",
     "name": "Guillotine from Half Guard",
     "aliases": [
-      "Half-guard front choke"
+      "Half-guard front choke",
+      "Half Guard Guillotine"
     ],
     "category": "Submission",
     "function": "finish",
@@ -6861,7 +6935,8 @@
     "id": "deep-half-waiter-sweep",
     "name": "Deep-Half Waiter Sweep",
     "aliases": [
-      "Waiter lift from deep half"
+      "Waiter lift from deep half",
+      "Jeff Glover Sweep"
     ],
     "category": "Sweep",
     "function": "reverse",
@@ -6990,7 +7065,8 @@
     "id": "lockdown-whip-up",
     "name": "Lockdown Whip-Up",
     "aliases": [
-      "Whip-up underhooks"
+      "Whip-up underhooks",
+      "Lockdown Whip Up Sweep"
     ],
     "category": "Transition",
     "function": "control",
@@ -7022,7 +7098,11 @@
     "id": "electric-chair-sweep",
     "name": "Electric Chair Sweep",
     "aliases": [
-      "Lockdown leg-underhook sweep"
+      "Lockdown leg-underhook sweep",
+      "Grapevine Stretch",
+      "Half Guard Electric Chair",
+      "Lockdown Electric Chair",
+      "Stretch from Lockdown"
     ],
     "category": "Sweep",
     "function": "reverse",
@@ -7276,7 +7356,9 @@
     "id": "closed-guard-knee-tailbone-break",
     "name": "Knee-in-Tailbone Guard Break",
     "aliases": [
-      "Seated guard opening"
+      "Seated guard opening",
+      "Knee Slice Guard Open",
+      "Torreando Guard Open"
     ],
     "category": "Transition",
     "function": "advance",
@@ -7310,7 +7392,9 @@
     "id": "closed-guard-standing-break",
     "name": "Standing Closed-Guard Break",
     "aliases": [
-      "Stand-to-open guard"
+      "Stand-to-open guard",
+      "Stand and Break Guard",
+      "Stand to Break"
     ],
     "category": "Transition",
     "function": "advance",
@@ -7343,7 +7427,9 @@
     "id": "closed-guard-elbow-knee-break",
     "name": "Elbow-to-Knee Closed-Guard Break",
     "aliases": [
-      "Knee wedge opening"
+      "Knee wedge opening",
+      "Posture Break",
+      "Elbow Push Guard Break"
     ],
     "category": "Transition",
     "function": "advance",
@@ -7473,7 +7559,8 @@
     "id": "double-under-pass",
     "name": "Double-Under Pass",
     "aliases": [
-      "Double-under stack pass"
+      "Double-under stack pass",
+      "Both Legs Under"
     ],
     "category": "Pass",
     "function": "advance",
@@ -7537,7 +7624,9 @@
     "id": "over-under-pass",
     "name": "Over-Under Pass",
     "aliases": [
-      "Pressure pass"
+      "Pressure pass",
+      "Rodolfo Vieira Pass",
+      "O/U Pass"
     ],
     "category": "Pass",
     "function": "advance",
@@ -7701,7 +7790,8 @@
     "name": "Knee-Cut Pass",
     "aliases": [
       "Knee slice",
-      "Knee-through pass"
+      "Knee-through pass",
+      "Knee Slide Pass"
     ],
     "category": "Pass",
     "function": "advance",
@@ -7735,7 +7825,8 @@
     "id": "knee-cut-underhook-pass",
     "name": "Underhook Knee-Cut Pass",
     "aliases": [
-      "Crossface knee slice"
+      "Crossface knee slice",
+      "Underhook Guard Pass"
     ],
     "category": "Pass",
     "function": "advance",
@@ -7799,7 +7890,8 @@
     "id": "leg-drag-pass",
     "name": "Leg-Drag Pass",
     "aliases": [
-      "Outside leg drag"
+      "Outside leg drag",
+      "Leg Drag"
     ],
     "category": "Pass",
     "function": "advance",
@@ -7899,7 +7991,9 @@
     "name": "Headquarters Passing Position",
     "aliases": [
       "HQ position",
-      "Split squat passing"
+      "Split squat passing",
+      "HQ Pass",
+      "3/4 Mount Pass"
     ],
     "category": "Control/Pin",
     "function": "control",
@@ -7995,7 +8089,8 @@
     "id": "headquarters-backstep",
     "name": "Headquarters Backstep Pass",
     "aliases": [
-      "Backstep from HQ"
+      "Backstep from HQ",
+      "Backstep Pass"
     ],
     "category": "Pass",
     "function": "advance",
@@ -8027,7 +8122,9 @@
     "id": "body-lock-pass",
     "name": "Body-Lock Pass",
     "aliases": [
-      "Double-under body lock pass"
+      "Double-under body lock pass",
+      "Body Fold Pass",
+      "Bear Hug Pass"
     ],
     "category": "Pass",
     "function": "advance",
@@ -8258,7 +8355,8 @@
     "name": "Smash Pass",
     "aliases": [
       "Double-leg smash",
-      "Hip-switch pass"
+      "Hip-switch pass",
+      "Leg Drag Smash"
     ],
     "category": "Pass",
     "function": "advance",
@@ -8292,7 +8390,8 @@
     "id": "long-step-pass",
     "name": "Long-Step Pass",
     "aliases": [
-      "Long backstep pass"
+      "Long backstep pass",
+      "Long Step Around"
     ],
     "category": "Pass",
     "function": "advance",
@@ -8359,7 +8458,9 @@
     "id": "cartwheel-pass",
     "name": "Cartwheel Pass",
     "aliases": [
-      "Aerial cartwheel pass"
+      "Aerial cartwheel pass",
+      "Roll Over Pass",
+      "Cartwheeling Over Guard"
     ],
     "category": "Pass",
     "function": "advance",
@@ -8816,7 +8917,9 @@
     "id": "knee-shield-smash-pass",
     "name": "Knee-Shield Smash Pass",
     "aliases": [
-      "Z-guard smash"
+      "Z-guard smash",
+      "Knee Slice from Half",
+      "Smash Pass from Half"
     ],
     "category": "Pass",
     "function": "advance",
@@ -8848,7 +8951,9 @@
     "id": "knee-shield-leg-weave-pass",
     "name": "Knee-Shield Leg-Weave Pass",
     "aliases": [
-      "Z-guard weave"
+      "Z-guard weave",
+      "Leg Drag from Half",
+      "Leg Weave Half Guard Pass"
     ],
     "category": "Pass",
     "function": "advance",
@@ -8880,7 +8985,9 @@
     "id": "knee-shield-over-under-pass",
     "name": "Knee-Shield Over-Under Pass",
     "aliases": [
-      "Z-guard pressure pass"
+      "Z-guard pressure pass",
+      "Over-Under from Half",
+      "O/U Half Pass"
     ],
     "category": "Pass",
     "function": "advance",
@@ -9043,7 +9150,8 @@
     "id": "kesa-gatame-control",
     "name": "Kesa Gatame Control",
     "aliases": [
-      "Scarf hold"
+      "Scarf hold",
+      "Headlock Control"
     ],
     "category": "Control/Pin",
     "function": "control",
@@ -9108,7 +9216,9 @@
     "id": "reverse-kesa-gatame",
     "name": "Reverse Kesa Gatame",
     "aliases": [
-      "Reverse scarf hold"
+      "Reverse scarf hold",
+      "Gyaku Kesa",
+      "Reverse Side Control Transition"
     ],
     "category": "Control/Pin",
     "function": "control",
@@ -9139,7 +9249,8 @@
     "id": "side-control-knee-on-belly",
     "name": "Side Control to Knee-on-Belly",
     "aliases": [
-      "Knee ride transition"
+      "Knee ride transition",
+      "KOB from Side"
     ],
     "category": "Transition",
     "function": "advance",
@@ -9170,7 +9281,8 @@
     "id": "side-control-to-mount",
     "name": "Side Control to Mount",
     "aliases": [
-      "Knee-slide mount transition"
+      "Knee-slide mount transition",
+      "Step Over to Mount from Side"
     ],
     "category": "Transition",
     "function": "advance",
@@ -9202,7 +9314,8 @@
     "id": "side-control-to-north-south",
     "name": "Side Control to North–South",
     "aliases": [
-      "Head-switch transition"
+      "Head-switch transition",
+      "Side to North-South Transition"
     ],
     "category": "Transition",
     "function": "control",
@@ -9235,7 +9348,8 @@
     "name": "Near-Side Armbar from Side Control",
     "aliases": [
       "Near arm juji gatame",
-      "Juji-gatame family"
+      "Juji-gatame family",
+      "Near Side Armbar"
     ],
     "category": "Submission",
     "function": "finish",
@@ -9300,7 +9414,9 @@
     "aliases": [
       "Keylock",
       "Figure-four shoulder lock",
-      "Ude-garami family"
+      "Ude-garami family",
+      "Ude Garami from Side",
+      "Keylock from Side"
     ],
     "category": "Submission",
     "function": "finish",
@@ -9334,7 +9450,8 @@
     "aliases": [
       "Reverse figure-four",
       "Ude garami",
-      "Ude-garami family"
+      "Ude-garami family",
+      "Side Kimura"
     ],
     "category": "Submission",
     "function": "finish",
@@ -9368,7 +9485,8 @@
     "aliases": [
       "Ude gatame",
       "Paintbrush straight armbar",
-      "Juji-gatame family"
+      "Juji-gatame family",
+      "Standing Armbar"
     ],
     "category": "Submission",
     "function": "finish",
@@ -9401,7 +9519,8 @@
     "aliases": [
       "Kata gatame",
       "Head-and-arm choke",
-      "Sankaku-jime family"
+      "Sankaku-jime family",
+      "Kata Gatame from Side"
     ],
     "category": "Submission",
     "function": "finish",
@@ -9432,7 +9551,10 @@
     "id": "paper-cutter-choke",
     "name": "Paper-Cutter Choke",
     "aliases": [
-      "Bread-cutter choke"
+      "Bread-cutter choke",
+      "Bread Cutter",
+      "Paper Cutter",
+      "Lapel Choke from Side"
     ],
     "category": "Submission",
     "function": "finish",
@@ -9463,7 +9585,8 @@
     "id": "baseball-bat-choke-side-control",
     "name": "Baseball-Bat Choke from Side Control",
     "aliases": [
-      "Baseball choke"
+      "Baseball choke",
+      "Side Baseball Choke"
     ],
     "category": "Submission",
     "function": "finish",
@@ -9621,7 +9744,10 @@
     "id": "side-control-wristlock",
     "name": "Wrist Lock from Side Control",
     "aliases": [
-      "Gooseneck wrist lock"
+      "Gooseneck wrist lock",
+      "Side Wrist Lock",
+      "Kote Gaeshi",
+      "Wrist Bend"
     ],
     "category": "Submission",
     "function": "finish",
@@ -9747,7 +9873,9 @@
     "id": "side-control-top-backtake",
     "name": "Side-Control Back Take",
     "aliases": [
-      "Chair-sit from side pin"
+      "Chair-sit from side pin",
+      "Side Control to Back",
+      "Back Take from Side"
     ],
     "category": "Transition",
     "function": "advance",
@@ -9780,7 +9908,8 @@
     "name": "Frame-and-Hip-Escape from Side Control",
     "aliases": [
       "Shrimp escape to guard",
-      "Ebi escape (Japanese shrimping)"
+      "Ebi escape (Japanese shrimping)",
+      "Frame Escape from Side"
     ],
     "category": "Escape",
     "function": "escape",
@@ -9874,7 +10003,9 @@
     "id": "side-control-ghost-escape",
     "name": "Ghost Escape",
     "aliases": [
-      "Under-arm spin escape"
+      "Under-arm spin escape",
+      "Leg Through Escape",
+      "Zombie Escape"
     ],
     "category": "Escape",
     "function": "escape",
@@ -9937,7 +10068,8 @@
     "name": "Elbow-Push Side-Control Escape",
     "aliases": [
       "Elbow escape",
-      "Marcelo-style elbow push"
+      "Marcelo-style elbow push",
+      "Push Frame Escape from Side"
     ],
     "category": "Escape",
     "function": "escape",
@@ -10219,7 +10351,8 @@
     "id": "north-south-choke",
     "name": "North–South Choke",
     "aliases": [
-      "North-south strangulation"
+      "North-south strangulation",
+      "NS Choke"
     ],
     "category": "Submission",
     "function": "finish",
@@ -10251,7 +10384,8 @@
     "name": "Kimura from North–South",
     "aliases": [
       "North-south figure-four",
-      "Ude-garami family"
+      "Ude-garami family",
+      "NS Kimura"
     ],
     "category": "Submission",
     "function": "finish",
@@ -10284,7 +10418,8 @@
     "name": "Armbar from North–South",
     "aliases": [
       "Spinning north-south armbar",
-      "Juji-gatame family"
+      "Juji-gatame family",
+      "NS Armbar"
     ],
     "category": "Submission",
     "function": "finish",
@@ -10348,7 +10483,8 @@
     "id": "north-south-to-mount",
     "name": "North–South to Mount",
     "aliases": [
-      "Head-side mount transition"
+      "Head-side mount transition",
+      "NS to Mount Transition"
     ],
     "category": "Transition",
     "function": "advance",
@@ -10510,7 +10646,9 @@
     "name": "High Mount Control",
     "aliases": [
       "Armpit mount",
-      "High tate-shiho-gatame"
+      "High tate-shiho-gatame",
+      "Chest Mount",
+      "High Guard Mount"
     ],
     "category": "Control/Pin",
     "function": "control",
@@ -10575,7 +10713,8 @@
     "name": "Technical Mount Control",
     "aliases": [
       "Modified mount",
-      "Side mount"
+      "Side mount",
+      "Single Arm Trap Mount"
     ],
     "category": "Control/Pin",
     "function": "control",
@@ -10641,7 +10780,8 @@
     "name": "Americana from Mount",
     "aliases": [
       "Keylock from mount",
-      "Ude-garami family"
+      "Ude-garami family",
+      "Ude Garami from Mount"
     ],
     "category": "Submission",
     "function": "finish",
@@ -10707,7 +10847,8 @@
     "aliases": [
       "Kata gatame from mount",
       "Kata-gatame",
-      "Sankaku-jime family"
+      "Sankaku-jime family",
+      "Head and Arm Choke from Mount"
     ],
     "category": "Submission",
     "function": "finish",
@@ -10739,7 +10880,9 @@
     "name": "Armbar from Mount",
     "aliases": [
       "Mounted juji gatame",
-      "Juji-gatame family"
+      "Juji-gatame family",
+      "Juji-Gatame from Mount",
+      "High Mount Armbar"
     ],
     "category": "Submission",
     "function": "finish",
@@ -10773,7 +10916,9 @@
     "aliases": [
       "Top triangle",
       "Mounted sankaku",
-      "Sankaku-jime family"
+      "Sankaku-jime family",
+      "Triangle Choke from Mount",
+      "Triangle Setup from Side Control"
     ],
     "category": "Submission",
     "function": "finish",
@@ -10839,7 +10984,9 @@
     "aliases": [
       "X choke from mount",
       "Nami-juji-jime",
-      "Gyaku-juji-jime variation"
+      "Gyaku-juji-jime variation",
+      "Cross Choke from Mount",
+      "Mount Cross Choke"
     ],
     "category": "Submission",
     "function": "finish",
@@ -10870,7 +11017,9 @@
     "id": "ezekiel-choke-mount",
     "name": "Ezekiel Choke from Mount",
     "aliases": [
-      "Sode guruma jime"
+      "Sode guruma jime",
+      "Sode Guruma Jime from Mount",
+      "Mount Ezekiel"
     ],
     "category": "Submission",
     "function": "finish",
@@ -11095,7 +11244,8 @@
     "id": "technical-mount-bow-arrow",
     "name": "Bow-and-Arrow Choke from Technical Mount",
     "aliases": [
-      "Technical-mount collar choke"
+      "Technical-mount collar choke",
+      "Mount Bow and Arrow"
     ],
     "category": "Submission",
     "function": "finish",
@@ -11127,7 +11277,8 @@
     "id": "mounted-wristlock",
     "name": "Wrist Lock from Mount",
     "aliases": [
-      "Gooseneck wrist lock"
+      "Gooseneck wrist lock",
+      "Mount Wrist Lock"
     ],
     "category": "Submission",
     "function": "finish",
@@ -11253,7 +11404,8 @@
     "id": "mount-trap-roll-escape",
     "name": "Trap-and-Roll Mount Escape",
     "aliases": [
-      "Upa escape"
+      "Upa escape",
+      "Trap and Roll"
     ],
     "category": "Escape",
     "function": "escape",
@@ -11287,7 +11439,9 @@
     "aliases": [
       "Shrimp escape",
       "Knee-elbow escape",
-      "Ebi escape (Japanese shrimping)"
+      "Ebi escape (Japanese shrimping)",
+      "Hip Escape from Mount",
+      "Shrimping Out of Mount"
     ],
     "category": "Escape",
     "function": "escape",
@@ -11351,7 +11505,9 @@
     "id": "mount-heel-drag-escape",
     "name": "Heel-Drag Mount Escape",
     "aliases": [
-      "Foot-drag mount escape"
+      "Foot-drag mount escape",
+      "Leg Hook Escape",
+      "Heel Drag Escape"
     ],
     "category": "Escape",
     "function": "escape",
@@ -11668,7 +11824,9 @@
     "name": "Seatbelt Back Control",
     "aliases": [
       "Harness",
-      "Over-under back control"
+      "Over-under back control",
+      "Seatbelt Grip",
+      "Over-Under Hooks"
     ],
     "category": "Control/Pin",
     "function": "control",
@@ -11733,7 +11891,9 @@
     "name": "Body-Triangle Back Control",
     "aliases": [
       "Figure-four body lock",
-      "Sankaku-jime family"
+      "Sankaku-jime family",
+      "Body Lock from Back",
+      "Body Triangle Control"
     ],
     "category": "Control/Pin",
     "function": "control",
@@ -12030,7 +12190,8 @@
     "name": "Armbar from Back Control",
     "aliases": [
       "Back-control juji gatame",
-      "Juji-gatame family"
+      "Juji-gatame family",
+      "Back Armbar"
     ],
     "category": "Submission",
     "function": "finish",
@@ -12096,7 +12257,9 @@
     "name": "Bow-and-Arrow Choke",
     "aliases": [
       "Berimbau choke",
-      "Okuri-eri-jime variation"
+      "Okuri-eri-jime variation",
+      "Yumi Uchi Otoshi",
+      "Bow and Arrow"
     ],
     "category": "Submission",
     "function": "finish",
@@ -12128,7 +12291,8 @@
     "id": "sliding-collar-choke-back",
     "name": "Sliding-Collar Choke from Back",
     "aliases": [
-      "Okuri eri jime"
+      "Okuri eri jime",
+      "Single Collar Back Choke"
     ],
     "category": "Submission",
     "function": "finish",
@@ -12225,7 +12389,9 @@
     "id": "back-control-wristlock",
     "name": "Wrist Lock from Back Control",
     "aliases": [
-      "Rear gooseneck wrist lock"
+      "Rear gooseneck wrist lock",
+      "Back Wrist Control",
+      "Wrist Control from Back No-Gi"
     ],
     "category": "Submission",
     "function": "finish",
@@ -12289,7 +12455,9 @@
     "name": "Rear Body-Lock Ride",
     "aliases": [
       "Back ride",
-      "Mat return ride"
+      "Mat return ride",
+      "Rear Body Lock",
+      "Body Lock Back"
     ],
     "category": "Control/Pin",
     "function": "control",
@@ -12578,7 +12746,9 @@
     "id": "back-escape-turn-into-guard",
     "name": "Back Escape by Turning into Guard",
     "aliases": [
-      "Turn-in escape"
+      "Turn-in escape",
+      "Sit Out from Back",
+      "Back Escape Sit Out"
     ],
     "category": "Escape",
     "function": "escape",
@@ -12798,7 +12968,8 @@
     "id": "turtle-seatbelt-control",
     "name": "Seatbelt Control from Turtle",
     "aliases": [
-      "Harness from turtle"
+      "Harness from turtle",
+      "Hook Insertion from Turtle"
     ],
     "category": "Control/Pin",
     "function": "control",
@@ -12865,7 +13036,9 @@
     "name": "Spiral Ride",
     "aliases": [
       "Inside-thigh spiral",
-      "Wrestling spiral"
+      "Wrestling spiral",
+      "Spiral Ride Control",
+      "Bar Arm Spiral"
     ],
     "category": "Control/Pin",
     "function": "control",
@@ -13056,7 +13229,8 @@
     "id": "turtle-chair-sit-backtake",
     "name": "Chair-Sit Back Take from Turtle",
     "aliases": [
-      "Turtle chair sit"
+      "Turtle chair sit",
+      "Turtle Back Take"
     ],
     "category": "Transition",
     "function": "advance",
@@ -13156,7 +13330,8 @@
     "id": "clock-choke-turtle",
     "name": "Clock Choke",
     "aliases": [
-      "Turtle clock choke"
+      "Turtle clock choke",
+      "Clock Choke from Turtle"
     ],
     "category": "Submission",
     "function": "finish",
@@ -13219,7 +13394,8 @@
     "id": "crucifix-from-turtle",
     "name": "Crucifix from Turtle",
     "aliases": [
-      "Rear crucifix"
+      "Rear crucifix",
+      "Turtle to Crucifix"
     ],
     "category": "Control/Pin",
     "function": "control",
@@ -13283,7 +13459,8 @@
     "name": "Armbar from Crucifix",
     "aliases": [
       "Crucifix straight arm lock",
-      "Juji-gatame family"
+      "Juji-gatame family",
+      "Crucifix Armbar"
     ],
     "category": "Submission",
     "function": "finish",
@@ -13349,7 +13526,9 @@
     "name": "Guillotine from Front Headlock",
     "aliases": [
       "High-elbow guillotine",
-      "Marcelotine"
+      "Marcelotine",
+      "Top Turtle Guillotine",
+      "Arm-In Guillotine from Turtle"
     ],
     "category": "Submission",
     "function": "finish",
@@ -13411,7 +13590,9 @@
     "id": "anaconda-choke-front-headlock",
     "name": "Anaconda Choke",
     "aliases": [
-      "Arm-triangle roll choke"
+      "Arm-triangle roll choke",
+      "Gator Roll Choke",
+      "Turtle Anaconda"
     ],
     "category": "Submission",
     "function": "finish",
@@ -13604,7 +13785,8 @@
     "id": "turtle-switch-escape",
     "name": "Standing Switch from Turtle",
     "aliases": [
-      "Wrestling switch"
+      "Wrestling switch",
+      "Base Switch"
     ],
     "category": "Escape",
     "function": "escape",
@@ -13636,7 +13818,8 @@
     "name": "Stand-Up from Turtle",
     "aliases": [
       "Base-up escape",
-      "Quadpod stand"
+      "Quadpod stand",
+      "Pop-Up from Turtle"
     ],
     "category": "Escape",
     "function": "escape",
@@ -13894,7 +14077,9 @@
     "name": "Outside Ashi Control",
     "aliases": [
       "Outside ashi garami",
-      "Double outside ashi"
+      "Double outside ashi",
+      "Reverse Ashi Garami",
+      "Outside Ashi"
     ],
     "category": "Control/Pin",
     "function": "control",
@@ -13928,7 +14113,8 @@
     "aliases": [
       "Saddle",
       "411",
-      "Inside sankaku"
+      "Inside sankaku",
+      "Honey Hole"
     ],
     "category": "Control/Pin",
     "function": "control",
@@ -14031,7 +14217,8 @@
     "aliases": [
       "Achilles lock",
       "Straight foot lock",
-      "Straight ashi-garami foot lock"
+      "Straight ashi-garami foot lock",
+      "SLX Ankle Lock"
     ],
     "category": "Submission",
     "function": "finish",
@@ -14129,7 +14316,9 @@
     "name": "Belly-Down Straight Ankle Lock",
     "aliases": [
       "Prone ankle lock",
-      "Straight ashi-garami foot lock"
+      "Straight ashi-garami foot lock",
+      "Turk Ankle Lock",
+      "Turk"
     ],
     "category": "Submission",
     "function": "finish",
@@ -14192,7 +14381,8 @@
     "id": "estima-lock",
     "name": "Estima Lock",
     "aliases": [
-      "Inverted toe hold from top"
+      "Inverted toe hold from top",
+      "Estima Footlock"
     ],
     "category": "Submission",
     "function": "finish",
@@ -14223,7 +14413,10 @@
     "id": "outside-heel-hook-outside-ashi",
     "name": "Outside Heel Hook from Outside Ashi",
     "aliases": [
-      "Outside heel hook"
+      "Outside heel hook",
+      "Outside Ashi Heel Hook",
+      "Reverse Ashi Heel Hook",
+      "OHH"
     ],
     "category": "Submission",
     "function": "finish",
@@ -14255,7 +14448,10 @@
     "name": "Inside Heel Hook from Saddle",
     "aliases": [
       "Inside heel hook",
-      "Reverse heel hook"
+      "Reverse heel hook",
+      "Honey Hole Heel Hook",
+      "Inside Sankaku Heel Hook",
+      "IHH"
     ],
     "category": "Submission",
     "function": "finish",
@@ -14317,7 +14513,8 @@
     "id": "fifty-fifty-heel-hook",
     "name": "Heel Hook from 50/50",
     "aliases": [
-      "Fifty-fifty outside heel hook"
+      "Fifty-fifty outside heel hook",
+      "50/50 Heel Hook"
     ],
     "category": "Submission",
     "function": "finish",
@@ -14348,7 +14545,9 @@
     "id": "kneebar-saddle",
     "name": "Kneebar from Saddle",
     "aliases": [
-      "Straight knee bar from cross ashi"
+      "Straight knee bar from cross ashi",
+      "Hiza Hishigi",
+      "Straight Kneebar"
     ],
     "category": "Submission",
     "function": "finish",
@@ -14411,7 +14610,8 @@
     "name": "Kneebar from Bottom Half Guard",
     "aliases": [
       "Rolling kneebar",
-      "Half-guard kneebar"
+      "Half-guard kneebar",
+      "Kneebar Roll Entry"
     ],
     "category": "Submission",
     "function": "finish",
@@ -14507,7 +14707,8 @@
     "name": "Calf Slicer from Half Guard",
     "aliases": [
       "Calf crusher",
-      "Knee compression"
+      "Knee compression",
+      "Half Guard Calf Slicer"
     ],
     "category": "Submission",
     "function": "finish",
@@ -14538,7 +14739,8 @@
     "id": "calf-slicer-truck",
     "name": "Calf Slicer from the Truck",
     "aliases": [
-      "Truck calf crank"
+      "Truck calf crank",
+      "Truck Roll"
     ],
     "category": "Submission",
     "function": "finish",
@@ -16220,7 +16422,7 @@
       "Berimbolo to legs"
     ],
     "category": "Transition",
-    "function": "advance",
+    "function": "control",
     "position": "Guard - Bottom",
     "position_detail": "Open Guard",
     "to_position": "Leg Entanglement",
@@ -17166,7 +17368,7 @@
       "Shin-to-shin leg entry"
     ],
     "category": "Transition",
-    "function": "advance",
+    "function": "control",
     "position": "Guard - Bottom",
     "position_detail": "Shin-to-Shin",
     "to_position": "Leg Entanglement",
@@ -17303,7 +17505,7 @@
       "Standing ashi entry"
     ],
     "category": "Transition",
-    "function": "advance",
+    "function": "control",
     "position": "Standing",
     "position_detail": "Open Space",
     "to_position": "Leg Entanglement",
