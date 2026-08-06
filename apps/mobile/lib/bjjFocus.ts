@@ -42,6 +42,36 @@ export function fetchFocus(getToken: TokenGetter, signal?: AbortSignal): Promise
   );
 }
 
+/**
+ * The cap, mirrored from the backend's own `maxFocus`.
+ *
+ * The bound IS the feature: a focus list of twenty is the library again, and
+ * the wizard would be back to searching 466 entries. Duplicated rather than
+ * fetched because it is a product decision, not data — but if the server's
+ * value ever moves, this is the second place to change.
+ */
+export const MAX_FOCUS = 5;
+
+/**
+ * Replace the focus list.
+ *
+ * **REPLACES WHOLESALE**, matching the endpoint. That is the fact every caller
+ * has to carry: sending a shorter list deletes the difference, silently, and a
+ * shorter focus list looks exactly like a focus list. `lib/roadmapFocus.ts`
+ * exists to compute what to send without destroying anything the athlete chose
+ * by hand.
+ *
+ * This app could only READ focus until now — the write lived on web, which is
+ * why advancing a roadmap needed a laptop even though every other step of the
+ * loop was already here.
+ */
+export function setFocus(getToken: TokenGetter, techniqueIDs: string[]): Promise<void> {
+  return apiRequest<void>(getToken, '/bjj/focus', {
+    method: 'PUT',
+    body: JSON.stringify({ technique_ids: techniqueIDs }),
+  });
+}
+
 /** A technique row in the live step: what to record against, and its label. */
 export type FocusRow = TechniqueRef & { name: string };
 

@@ -4570,6 +4570,27 @@ the schema rather than from taste:
   exercises: six items with `target_scored` null. Confirm they render, count
   toward `countable_items`, and can be completed with `defended` evidence alone.
 
+
+### Roadmaps on the phone
+
+- **The Plan tab's Roadmaps strip shows belt syllabuses with their covers**, and
+  the count is `countable_items` — how many have criteria — never the item count.
+- **Tapping one opens the roadmap**, which shows TARGETS when browsing and
+  PROGRESS when enrolled. Zero-filled progress for a non-participant is wrong.
+- **"Put these in my focus" writes the focus list**, and the panel then says it
+  already matches. Those techniques must then appear as one-tap chips in the
+  reflection wizard — the only scenario that spans both halves of the loop.
+- **Evicting hand-set focus asks first.** `PUT /v1/bjj/focus` replaces wholesale,
+  so with five techniques already held and a roadmap wanting three, the athlete
+  is asked before three of theirs go.
+- **The hit rate shows `—`, not `0%`**, before any attempt.
+- **`started_on` must not be in the future.** Enrol late in the evening from a
+  timezone behind UTC: the progress block currently reads "counted since
+  <tomorrow>", and evidence logged that night does not count. Known bug.
+- **The strip fails silently** when the endpoint is unreachable — it renders
+  nothing rather than an error. Deliberate; test that an offline Plan tab still
+  shows its templates.
+
 ### The roadmap → focus bridge
 
 The loop this feature rests on: roadmap → `bjj_focus` → one-tap chips in the
