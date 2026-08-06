@@ -4293,6 +4293,78 @@ parser, not only on a page:
 - A signed-in account not on `ADMIN_USER_IDS` gets "Not authorized". The guide
   is documentation, but it sits inside the console's gate like everything else.
 
+## Searching the technique library (`searchTechniques` / `rankTechniques`, both apps)
+
+Covers the reflection wizard's drilled-technique picker (mobile), the Library
+tab (mobile + web) and the curriculum builder's catalog pane (web). All four
+search the same 466-entry catalog through one pair of functions, duplicated per
+app.
+
+The defect these exist for: a beginners' closed-guard passing class could not be
+logged at all, because search required the typed string to be a contiguous
+substring of ONE field. The techniques were all present.
+
+### Happy path — the spoken form of a technique finds it
+
+- `arm bar` finds the armbars. The catalog spells it `Armbar`; the keyboard
+  produces two words. **This returned zero results while `armbar` returned 21.**
+- `break the guard` and `pass the guard` find the guard breaks and passes,
+  despite no catalog name containing "the".
+- `guard break` and `break guard` both work — term order does not matter.
+- `kimura side control` finds `Kimura from Side Control` with no joiner typed.
+- `armbar guard` finds `Armbar from Closed Guard` — the name supplies one term
+  and the position the other, which no single field holds contiguously.
+- The original fold cases still hold: `sao paulo`, `north-south pass` with the
+  keyboard hyphen against the catalog's en dash, `mata leao` by alias.
+
+### Ranking — what a capped picker shows
+
+- Searching `side control` in the reflect picker (50 matches, 20 shown) surfaces
+  side-control techniques, not closed-guard ones. **Before ranking the first 8
+  were whichever the seed file listed first.**
+- An exact name typed in full lands first: `Knee-Cut Pass` → `knee-cut-pass`.
+- Every name match precedes every position-only match for `armbar`.
+- Re-typing the same query does not reshuffle equal-scoring rows under a thumb
+  already moving toward one.
+
+### Edge cases & errors
+
+- Empty query, whitespace-only, and a lone `-` (which folds to nothing) all
+  return the whole catalog rather than nothing.
+- A query of nothing but joiners (`to the`) returns a narrowed list, not all 466
+  — the athlete typed something.
+- `armbar zzzznotathing` returns **nothing**. A real term paired with nonsense
+  must not fall back to the real term's hits; that is the difference between
+  ANDing and ORing the terms.
+- `knee belly` returns strictly fewer than `knee` — adding a word narrows.
+- A single term cannot straddle two fields: the name glued to its own alias with
+  no space finds nothing.
+- Search still runs with no network. It is entirely local over a list already
+  held, so a gym dead-spot does not break it — but see the known gap: the
+  catalog is memory-only, so a cold launch offline has nothing to search.
+
+### Ordering (regression-prone, invisible when broken)
+
+- `searchTechniques` returns **in the caller's order**. Both Library screens
+  merge its output against the exercise catalog with a linear merge of two
+  name-sorted runs; ranking inside it corrupts that interleave into an unsorted
+  jumble with no error anywhere. Worth a scenario because the visible symptom
+  (a jumbled Library list) looks unrelated to search.
+- `rankTechniques` returns the same SET, reordered. A technique findable in the
+  Library must be findable in the picker.
+
+### Cross-app parity
+
+- The same query returns the same techniques in the same order on web and
+  mobile. The two apps carry independent copies of the search; a stop word or
+  weight changed in one and not the other diverges them silently.
+
+### Not covered yet
+
+- **Grips are unsearchable.** `cross sleeve` finds nothing — the summary payload
+  carries no description, and no alias names a grip. Add scenarios when the
+  library-content pass adds grip aliases.
+
 ## Curricula and roadmaps (`/v1/curricula`)
 
 Seven routes over three tables, and no screen on any of the three apps yet — so

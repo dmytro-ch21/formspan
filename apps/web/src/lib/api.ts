@@ -1137,6 +1137,22 @@ export type TechniqueSummary = {
   name: string;
   aliases: string[];
   category: string;
+  /**
+   * What the technique DOES: advance | reverse | escape | control | finish.
+   *
+   * The contract has always promised this on the list response, and the
+   * runtime objects have always carried it — only this type omitted it, so it
+   * was invisible to every caller here. That omission was not free: when
+   * search started indexing `function`, mobile got it and web did not, and the
+   * same query returned different SETS on the two platforms ("advance" — 131
+   * on the phone, 0 on the desktop) with nothing able to see the difference.
+   *
+   * Optional because the movement fundamentals (breakfalls, grappling stance)
+   * genuinely have none — the API omits the key rather than sending "".
+   * Note it cannot be destructured (`const { function } = t` is a syntax
+   * error); read it as `t.function`.
+   */
+  function?: string;
   position: string;
   position_detail: string;
   gi_no_gi: string;
@@ -1377,7 +1393,95 @@ export function techniquesInPosition(
 const collator = new Intl.Collator(undefined, { sensitivity: "base" });
 
 /**
- * Local search across name, aliases and position.
+ * Words that carry no identity, dropped from the QUERY only.
+ *
+ * "break the guard" and "pass the guard" are how the moves get said out loud,
+ * and neither appears anywhere in the catalog's naming — the rows are
+ * "Standing Closed-Guard Break" and "Knee-Cut Pass". Requiring the joiner to
+ * appear is what made the spoken form return nothing at all.
+ *
+ * Dropped from the query and NOT from the fields: a stored name is data and
+ * gets to keep its words. Stripping both sides would let "side control" match
+ * "side" alone.
+ *
+ * DUPLICATED in apps/mobile/lib/techniques.ts, along with everything else in
+ * this search — see foldForSearch's note for why the two apps carry copies.
+ */
+const STOP_WORDS = new Set([
+  "a", "an", "the", "from", "to", "of", "and", "or", "in", "on", "at", "into",
+  "with", "for",
+]);
+
+function queryTokens(query: string): string[] {
+  const folded = foldForSearch(query.trim());
+  if (!folded) return [];
+  const all = folded.split(" ").filter(Boolean);
+  const kept = all.filter((w) => !STOP_WORDS.has(w));
+  // A query of nothing BUT joiners ("to the") keeps them rather than becoming
+  // an empty search that returns all 466 — the athlete typed something.
+  return kept.length > 0 ? kept : all;
+}
+
+// What a token is worth by where it landed. Name beats alias beats position,
+// so "armbar" ranks the armbars above every technique that merely happens to
+// sit in a position whose text contains it.
+const W_NAME = 100;
+const W_ALIAS = 60;
+const W_POSITION = 30;
+const W_META = 12;
+
+/**
+ * Score one technique against pre-tokenised query terms.
+ *
+ * Returns 0 when ANY term matches nothing — terms are ANDed, so "knee belly"
+ * does not return every knee technique. A non-zero score is both "this
+ * matches" and "this is how well", which keeps filtering and ranking from
+ * drifting apart into two definitions of a match.
+ */
+function scoreTechnique(
+  t: TechniqueSummary,
+  terms: string[],
+  whole: string,
+): number {
+  const f = folded(t);
+  let score = 0;
+
+  for (const term of terms) {
+    let best = 0;
+    if (f.name.includes(term)) best = W_NAME;
+    else if (f.aliases.some((a) => a.includes(term))) best = W_ALIAS;
+    else if (f.position.includes(term) || f.detail.includes(term))
+      best = W_POSITION;
+    else if (f.category.includes(term) || f.fn.includes(term)) best = W_META;
+    // One unmatched term disqualifies the row entirely.
+    if (best === 0) return 0;
+    score += best;
+  }
+
+  // Contiguity bonuses, in order of how strongly they say "this is the one".
+  // Without them "armbar" ranks 21 techniques by nothing but term count and
+  // the top slots go to whichever the seed file happened to list first.
+  if (f.name === whole) score += 10_000;
+  else if (f.name.startsWith(whole)) score += 5_000;
+  else if (f.name.includes(whole)) score += 2_000;
+  else if (f.aliases.some((a) => a === whole)) score += 4_000;
+  else if (f.aliases.some((a) => a.includes(whole))) score += 1_000;
+
+  // Every term in the name outranks a row that needed position or category to
+  // complete the match.
+  if (terms.every((term) => f.name.includes(term))) score += 500;
+
+  return score;
+}
+
+/**
+ * Local search across name, aliases, position, detail and category.
+ *
+ * ORDER IS THE CALLER'S, DELIBERATELY. The Library merges this output against
+ * the exercise catalog with a linear merge of two name-sorted runs — returning
+ * by relevance silently corrupts that interleave into an unsorted jumble, with
+ * no type error and no test to catch it. Use `rankTechniques` where the best
+ * few matter; this stays a filter.
  *
  * Aliases matter more than they look: half this library is known by two names,
  * and someone searching "scarf hold" will never find "Kesa-Gatame Escape"
@@ -1387,9 +1491,40 @@ export function searchTechniques(
   list: TechniqueSummary[],
   query: string,
 ): TechniqueSummary[] {
-  const q = foldForSearch(query.trim());
-  if (!q) return list;
-  return list.filter((t) => haystack(t).includes(q));
+  const terms = queryTokens(query);
+  if (terms.length === 0) return list;
+  const whole = foldForSearch(query.trim());
+  return list.filter((t) => scoreTechnique(t, terms, whole) > 0);
+}
+
+/**
+ * The same matches, best first.
+ *
+ * For the surfaces that show a handful and drop the rest — the curriculum
+ * builder's 60, the reflect picker on mobile. A cap over UNRANKED results is
+ * what made "side control" (50 matches) look like the library was missing the
+ * obvious ones; the cap was never the problem, the arbitrary choice of which
+ * ones was.
+ *
+ * Ties break on name so the order is stable across keystrokes rather than
+ * reshuffling equal-scoring rows underneath a cursor already moving to one.
+ */
+export function rankTechniques(
+  list: TechniqueSummary[],
+  query: string,
+): TechniqueSummary[] {
+  const terms = queryTokens(query);
+  if (terms.length === 0) return list;
+  const whole = foldForSearch(query.trim());
+  return list
+    .map((t) => ({ t, score: scoreTechnique(t, terms, whole) }))
+    .filter((r) => r.score > 0)
+    // localeCompare, NOT the module's `collator` (sensitivity: "base"). Not a
+    // style choice — mobile has no Intl.Collator and ties must break the same
+    // way on both platforms or the two apps rank an identical result set
+    // differently. Nothing else compares this; searchParity does.
+    .sort((a, b) => b.score - a.score || a.t.name.localeCompare(b.t.name))
+    .map((r) => r.t);
 }
 
 /**
@@ -1424,8 +1559,13 @@ export function searchTechniques(
  *
  * DUPLICATED in apps/mobile/lib/techniques.ts. The two apps share no package, and mobile
  * needs its copy to work offline — the same reason the position vocabulary
- * is duplicated four ways. Change one, change the other: nothing enforces it,
- * `verify` runs no web tests, and a silent divergence here is invisible.
+ * is duplicated four ways. Change one, change the other.
+ *
+ * That used to be enforced by nothing at all. It now has two guards: each app
+ * runs the same behavioural cases against the real catalog (this app's are in
+ * src/lib/__tests__/techniqueSearch.test.ts), and mobile's searchParity.test.ts
+ * compares the tuning values both copies carry — behaviour tests would let the
+ * two rank differently while both stayed green.
  */
 export function foldForSearch(value: string): string {
   return value
@@ -1437,12 +1577,22 @@ export function foldForSearch(value: string): string {
     .trim();
 }
 
+type Folded = {
+  name: string;
+  aliases: string[];
+  position: string;
+  detail: string;
+  category: string;
+  fn: string;
+};
+
 /**
- * Folded haystacks, cached per technique object.
+ * Folded fields, cached per technique object.
  *
  * Search runs on every keystroke over the whole 466-entry library. Folding
  * name + aliases + position each time is 1592 fold calls per character typed,
- * measured at 0.774 ms uncached against 0.029 ms cached.
+ * measured at 0.774 ms uncached against 0.029 ms cached. Now six fields
+ * rather than three, so the cache matters more, not less.
  *
  * A WeakMap keyed on the technique object is what makes this safe: the catalog
  * objects are built once in listTechniques and never written to, so a refetch
@@ -1450,18 +1600,30 @@ export function foldForSearch(value: string): string {
  * immutability is the load-bearing assumption and it is a CONVENTION, not
  * something enforced — mutate a summary in place and search silently keeps
  * answering from the pre-mutation text. Build a new object instead.
+ *
+ * Kept APART rather than joined into one string. They used to be one
+ * `\n`-joined haystack, which forced every query to be a contiguous substring
+ * of a single field — the reason `arm bar` found nothing while `armbar` found
+ * 21, and `break the guard` found nothing while `guard break` found 5.
+ * Separate fields let a query match token-by-token and let a match know WHICH
+ * field it landed in, which is what ranking needs.
  */
-const foldedCache = new WeakMap<object, string>();
+const foldedCache = new WeakMap<object, Folded>();
 
-function haystack(t: TechniqueSummary): string {
+function folded(t: TechniqueSummary): Folded {
   const hit = foldedCache.get(t);
   if (hit !== undefined) return hit;
-  // Joined with a separator so a query cannot match across two fields.
-  const built = [
-    foldForSearch(t.name),
-    ...t.aliases.map(foldForSearch),
-    foldForSearch(t.position),
-  ].join("\n");
+  const built: Folded = {
+    name: foldForSearch(t.name),
+    aliases: t.aliases.map(foldForSearch),
+    position: foldForSearch(t.position),
+    detail: foldForSearch(t.position_detail),
+    // `?? ''` on both, matching the defaulting every other searched field gets
+    // at the parse boundary: a server predating the enrichment omits them, and
+    // foldForSearch(undefined) throws mid-keystroke inside the filter.
+    category: foldForSearch(t.category ?? ""),
+    fn: foldForSearch(t.function ?? ""),
+  };
   foldedCache.set(t, built);
   return built;
 }
