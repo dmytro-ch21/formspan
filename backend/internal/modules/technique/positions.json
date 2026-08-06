@@ -71,6 +71,9 @@
       "100 kilos"
     ],
     "family": "Side Control",
+    "detail_excludes": [
+      "Knee on Belly"
+    ],
     "order_index": 40,
     "description": "The top player lies perpendicular across their opponent's chest, with no legs between them — you have passed the guard and this is where you land. The pass that gets you here is worth three points; holding the position itself scores nothing further. It is, in practice, the first genuinely dominant position most beginners experience from both sides. On the bottom it is also the first position that feels genuinely awful: heavy, hard to breathe under, and hard to see a way out of.",
     "priorities": "Top: connection before attacks. Chest to chest, hips low, a crossface on one side and an underhook or arm blocking the hip on the other — the pair matters more than either alone, because it stops them turning in and turning away at the same time. Kill the far arm before you go looking for a submission. Your knees should pinch toward them so there is no space to insert a knee or a frame.\n\nBottom: frames and hips. Get a forearm into their neck and a hand on their hip to make space, and turn onto your side toward them, never away — turning away gives up your back. Bridge to disrupt their base and shrimp into the space it makes. Do not reach across your own body for a grip; that is how the far arm gets isolated."
@@ -84,8 +87,11 @@
       "KOB"
     ],
     "family": "Side Control",
+    "detail_includes": [
+      "Knee on Belly"
+    ],
     "order_index": 50,
-    "description": "From side control, the top player posts one knee on their opponent's stomach or ribs and lifts the other foot off the mat, standing over them. It scores two points and it is deliberately uncomfortable: the whole point is that lying still becomes unattractive, so the bottom player moves and gives you something. It is a transitional control rather than a resting place — the top player is mobile and light here, not settled, and typically uses it to move to mount, back, or a submission the reaction opens up.\n\nBecause it is a transition, the technique library has no knee-on-belly heading of its own — the list below is side control's, which is where you reach this from and where it returns.",
+    "description": "From side control, the top player posts one knee on their opponent's stomach or ribs and lifts the other foot off the mat, standing over them. It scores two points and it is deliberately uncomfortable: the whole point is that lying still becomes unattractive, so the bottom player moves and gives you something. It is a transitional control rather than a resting place — the top player is mobile and light here, not settled, and typically uses it to move to mount, back, or a submission the reaction opens up.",
     "priorities": "Top: stay tall and stay light. Your posture is what makes the position work — hunching over gives them your collar and your balance. Keep the near knee driving into the soft space below the ribs, the other leg wide and posted for base, and your hands ready rather than committed. Expect to move: this position is worth points and pressure, not a pin.\n\nBottom: do not lie there absorbing it. Turn onto your side toward them and frame on the knee, hip escape to make space and recover a guard, or bridge into them if the knee is high. The one thing that never works is flattening out and waiting for it to pass."
   },
   {

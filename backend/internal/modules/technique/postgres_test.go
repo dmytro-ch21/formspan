@@ -209,9 +209,14 @@ func TestTechniqueEnrichment(t *testing.T) {
 	// rulesets and ~130 techniques. A "0 < n < all" assertion passes that
 	// happily, which makes it worse than no test. These move only when the
 	// IBJJF rulebook or the library changes, and both are version-controlled.
+	// wantRestrictedTechniques was 20 until the 2026-08 curriculum gap-fill
+	// added seven rows referencing restricted rulesets: the can-opener neck
+	// crank (prohibited), the Suloev stretch, toe hold from 50/50, kneebar
+	// from guard top and banana split (brown/black), heel hook defense
+	// (brown/black no-gi), and wrist lock from closed guard (blue+).
 	const (
 		wantRestrictedRulesets   = 8
-		wantRestrictedTechniques = 20
+		wantRestrictedTechniques = 27
 	)
 	restricted := 0
 	for _, rs := range rulesets {
@@ -434,8 +439,8 @@ func TestPositionsResolveAgainstTheLibrary(t *testing.T) {
 	// unequal and nothing fails. Same lesson, and the same fix, as the pinned
 	// wantRestrictedRulesets above.
 	//
-	// The guard family is 161. The split is 37 closed ("Closed Guard" plus
-	// "Rubber Guard") and 124 open (the rest), and 37+124 == 161 is the check
+	// The guard family is 185. The split is 47 closed ("Closed Guard" plus
+	// "Rubber Guard") and 138 open (the rest), and 47+138 == 185 is the check
 	// that the two partition the family rather than merely differing.
 	//
 	// It was 187/150 until the leg entanglements were promoted out of it. The
@@ -443,12 +448,15 @@ func TestPositionsResolveAgainstTheLibrary(t *testing.T) {
 	// used to be filed as "Guard - Bottom" and therefore resolved as open
 	// guard, which put a heel hook from the saddle on the same screen as a
 	// spider-guard sweep. They are their own position now, so the family they
-	// left is smaller by exactly that many. If this number moves again without
-	// a position being added or removed, something has drifted rather than
-	// been decided.
+	// left is smaller by exactly that many. Then 37/124 until the curriculum
+	// gap-fill of 2026-08 added 10 closed-guard rows (gogoplata, americana,
+	// wrist lock, reverse triangle, bow-and-arrow, kimura sweep, the
+	// can-opener, the rubber guard matrix, and the two no-gi overhook-family
+	// controls) and 14 open. If this number moves again without a position
+	// being added or removed, something has drifted rather than been decided.
 	const (
-		wantClosedGuard = 37
-		wantOpenGuard   = 124
+		wantClosedGuard = 47
+		wantOpenGuard   = 138
 	)
 	scoped := func(id string) int {
 		n := 0
@@ -485,8 +493,9 @@ func TestPositionsResolveAgainstTheLibrary(t *testing.T) {
 
 	// The reverse direction. A technique position with no glossary entry behind
 	// it means the Library offers a filter family the glossary cannot explain.
-	// "Other" is the one genuine orphan in the current library (1 of 466) and is
-	// not a position anyone would look up.
+	// "Other" is the one genuine orphan in the current library (3 of 542 —
+	// the technical stand-up and two solo drills) and is not a position
+	// anyone would look up.
 	for _, tq := range techniques {
 		if tq.Position != "Other" && !covered[tq.Position] {
 			t.Errorf("technique position %q has no glossary entry behind it", tq.Position)
@@ -590,11 +599,17 @@ func TestEveryTechniqueHasAFunctionExceptTheFundamentals(t *testing.T) {
 
 	// Movement fundamentals: library content that is not a technique, so it
 	// has no noun and no verb. Asserting one would make the taxonomy lie.
+	// The last four are the solo drills added by the 2026-08 curriculum
+	// gap-fill; they join this set for the same reason the breakfalls did.
 	wantBlank := map[string]bool{
 		"Grappling Stance and Motion": true,
 		"Backward Breakfall":          true,
 		"Side Breakfall":              true,
 		"Forward Shoulder Roll":       true,
+		"Alligator Walk":              true,
+		"Backward Roll":               true,
+		"Bridge Drill (Upa)":          true,
+		"Penetration Step":            true,
 	}
 
 	var blank []string
