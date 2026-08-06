@@ -120,6 +120,72 @@ func scanCurriculum(rows pgx.Rows, userID string) (*Curriculum, *time.Time, erro
 	return &c, startedOn, nil
 }
 
+func (r *PostgresRepository) Working(ctx context.Context, userID, tz string) ([]Curriculum, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT c.id, c.owner_user_id, c.name, c.description, c.belt, c.visibility,
+		       c.created_at, c.updated_at,
+		       true AS enrolled, e.started_on,
+		       -- Filled from the items below, like Get: counting criteria in SQL
+		       -- as well would put the rule in two places for one number.
+		       0, 0
+		FROM curriculum_enrollments e
+		JOIN curricula c ON c.id = e.curriculum_id
+		-- INNER on the enrollment, so this is "mine" by construction rather than
+		-- by a filter someone could later drop. visibleTo is still composed in:
+		-- a curriculum can be published, enrolled in, and then made private, and
+		-- the athlete should stop seeing it rather than keep a copy.
+		WHERE e.user_id = $1 AND e.archived_on IS NULL AND `+visibleTo+`
+		ORDER BY e.started_on DESC, c.id
+		-- Bounded like every other list here. Nobody works twenty syllabuses at
+		-- once, but "nobody would" is not a limit.
+		LIMIT 20`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("curriculum: working: %w", err)
+	}
+	defer rows.Close()
+
+	type pending struct {
+		c       Curriculum
+		started *time.Time
+	}
+	var found []pending
+	for rows.Next() {
+		c, started, err := scanCurriculum(rows, userID)
+		if err != nil {
+			return nil, err
+		}
+		found = append(found, pending{c: *c, started: started})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("curriculum: working: %w", err)
+	}
+	// Closed before the per-curriculum reads below: pgx holds the connection
+	// for the lifetime of a Rows, and querying inside the loop would take a
+	// second one from the pool while this one is still open -- the same nested
+	// acquire that could stall the API from Update.
+	rows.Close()
+
+	out := make([]Curriculum, 0, len(found))
+	for _, p := range found {
+		items, err := r.items(ctx, userID, p.c.ID, p.started, tz)
+		if err != nil {
+			return nil, err
+		}
+		p.c.Items = items
+		p.c.ItemCount = len(items)
+		for _, it := range items {
+			if it.Countable() {
+				p.c.CountableItems++
+				if it.Mastered() {
+					p.c.MasteredItems++
+				}
+			}
+		}
+		out = append(out, p.c)
+	}
+	return out, nil
+}
+
 func (r *PostgresRepository) Get(ctx context.Context, userID, id, tz string) (*Curriculum, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT c.id, c.owner_user_id, c.name, c.description, c.belt, c.visibility,

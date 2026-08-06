@@ -1024,3 +1024,71 @@ func TestEvidenceOnTheEnrollmentDayCountsInTheAthletesZone(t *testing.T) {
 			got.Items[0].Progress.Scored)
 	}
 }
+
+func TestWorkingReturnsOnlyActiveEnrollmentsWithProgress(t *testing.T) {
+	// What Today and You read. Three properties, and each has a way of being
+	// quietly wrong: it must be scoped to the caller, exclude archived
+	// enrollments, and carry real mastery rather than the zero the LIST
+	// response deliberately sends.
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	cleanupUser(t, pool, "work1", "work2")
+	tech := seedTechnique(t, pool, "test-working")
+
+	mine, err := repo.Create(ctx, "work1", "", NewCurriculum{
+		Name:  "Active",
+		Items: []NewItem{{TechniqueID: tech, Criteria: &Criteria{TargetScored: intp(2)}}},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	dropped, err := repo.Create(ctx, "work1", "", NewCurriculum{Name: "Dropped"})
+	if err != nil {
+		t.Fatalf("create dropped: %v", err)
+	}
+	theirs, err := repo.Create(ctx, "work2", "", NewCurriculum{Name: "Theirs", Visibility: "public"})
+	if err != nil {
+		t.Fatalf("create theirs: %v", err)
+	}
+
+	for _, id := range []string{mine.ID, dropped.ID} {
+		if err := repo.Enroll(ctx, "work1", id, ""); err != nil {
+			t.Fatalf("enroll: %v", err)
+		}
+	}
+	if err := repo.Enroll(ctx, "work2", theirs.ID, ""); err != nil {
+		t.Fatalf("enroll theirs: %v", err)
+	}
+	if err := repo.Archive(ctx, "work1", dropped.ID); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+	backdateEnrollment(t, pool, "work1", 30)
+	for i := 1; i <= 2; i++ {
+		logEvidence(t, pool, "work1", tech, i, map[string]int{"scored": 1})
+	}
+
+	got, err := repo.Working(ctx, "work1", "")
+	if err != nil {
+		t.Fatalf("working: %v", err)
+	}
+	if len(got) != 1 {
+		var names []string
+		for _, c := range got {
+			names = append(names, c.Name)
+		}
+		t.Fatalf("working returned %v, want just the active one", names)
+	}
+	if got[0].ID != mine.ID {
+		t.Fatalf("wrong curriculum: %s", got[0].Name)
+	}
+	// The reason this endpoint exists rather than a flag on List: mastery is
+	// real here. On the list it is deliberately zero.
+	if got[0].CountableItems != 1 || got[0].MasteredItems != 1 {
+		t.Fatalf("progress not computed: countable=%d mastered=%d, want 1/1",
+			got[0].CountableItems, got[0].MasteredItems)
+	}
+	if len(got[0].Items) != 1 || got[0].Items[0].Progress == nil {
+		t.Fatal("items or progress missing — Today cannot say what to work next without them")
+	}
+}

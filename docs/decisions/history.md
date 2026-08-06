@@ -11907,6 +11907,73 @@ counts. Reverting either half of the fix takes the corresponding test red.
   in. Right for someone who moved; slightly wrong for someone on holiday, and
   nothing records which.
 
+## 2026-08-05 — Today and You get the roadmap, and the doc's contradiction gets settled
+
+`GET /v1/curricula/working` plus two mobile surfaces: a roadmap line inside
+Today's Upcoming block, and a Roadmap section on You carrying mastered count and
+current focus. The doc's connective table is now built in full.
+
+### The doc contradicts itself, and this picks a side
+
+Its table says **Today** shows "one suggestion, sourced from the active
+roadmap". Sixty lines later, with reasoning: *"A curriculum is not a suggestion
+source. Following one tells the app what you intend to learn; the suggestion
+tiers tell you what your logs say about how it is going. Keeping them separate
+is what stops a curriculum from silently becoming a prescription."*
+
+**The second wins**, because it is the one with an argument behind it and the
+table entry reads as shorthand written before the principle was articulated. So
+the roadmap appears on Today — honouring what the table wanted — but it never
+phrases itself as advice. It says "Next up: Arm drag · 3 of 14" and never "you
+should work the arm drag". The evidence-driven suggestion card below is still
+free to disagree with it, and that disagreement is information: one is a plan,
+the other is a reading of the record.
+
+### A dedicated read rather than a flag on the list
+
+`Working` returns active enrollments with items and real progress. The list
+spans every public curriculum and is capped at 200, so computing mastery there
+means the per-curriculum evidence aggregate once per row — to draw numbers
+nobody reads off a browse screen. This is bounded by how many syllabuses one
+athlete has taken on, which is one or two, and unlike the list its
+`mastered_items` is real.
+
+It also closes a connection-pool trap the last review taught: the outer `Rows`
+is closed before the per-curriculum reads, because pgx holds a connection for
+the lifetime of a `Rows` and querying inside the loop would take a second one —
+the same nested acquire that could stall the whole API from `Update`.
+
+### Verified by running it
+
+You renders: "0 of 14 techniques mastered", the roadmap link, and the sentence
+that keeps it honest — *"Your record decides these, so they can move both
+ways."* The focus block correctly does not render when focus is empty.
+
+**Today's roadmap line was NOT seen**, and the reason is worth recording: it
+lives inside the Upcoming block, and an unfinished session replaces that whole
+block with the resume card. My own test data left several unfinished sessions in
+the Simulator's local SQLite, so the branch never rendered. That is pre-existing
+behaviour working as designed — but it means the roadmap line is invisible for
+as long as a session is open, which may be wrong: a resume card is an action,
+the roadmap line is context, and hiding context to focus an action is a
+different trade from hiding a competing action.
+
+Three environment facts, learned expensively and worth passing on: exporting
+`EXPO_PUBLIC_API_URL` **does not** override `apps/mobile/.env.local` — Expo
+loads the file over the shell, so pointing the app at a local API means editing
+that file (and restoring it). The app talks to **staging** by default, so a
+screen that renders nothing may simply be reading a database without the data.
+And unfinished sessions live in the device's SQLite, so fixing Postgres does not
+clear them.
+
+### Gaps
+
+- **Today's line is unverified**, and is hidden whenever a session is open.
+- **No component test** for either surface.
+- **`Working` has no cap on how much it aggregates per curriculum** beyond the
+  LIMIT 20 on enrollments; twenty roadmaps of sixty items each would be twenty
+  evidence queries. Bounded, but not cheap.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

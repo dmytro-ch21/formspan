@@ -4571,6 +4571,26 @@ the schema rather than from taste:
   toward `countable_items`, and can be completed with `defended` evidence alone.
 
 
+
+### Roadmaps on Today and You
+
+- **Today shows the roadmap as context, never as advice.** It says what is next
+  in the syllabus order and how far along you are; it must not phrase itself as
+  a recommendation, and it must not replace or compete with the suggestion card.
+  The two are allowed to disagree — one is a plan, the other reads the evidence.
+- **Today's roadmap line is hidden while a session is unfinished**, because the
+  resume card replaces the whole Upcoming block. Worth deciding deliberately
+  rather than discovering: a resume card is an action, the roadmap line is
+  context.
+- **Only on today.** Stepping the day switcher must hide it — a roadmap is not a
+  fact about the Thursday you stepped to.
+- **You shows mastered across roadmaps and the current focus chips**, and says
+  the numbers can move both ways. It renders NOTHING for an athlete on no
+  roadmap with no focus — a strength-only account must never see an empty BJJ
+  block.
+- **`/v1/curricula/working` excludes archived enrollments** and carries real
+  `mastered_items`, unlike the list response where it is zero.
+
 ### Roadmaps on the phone
 
 - **The Plan tab's Roadmaps strip shows belt syllabuses with their covers**, and
