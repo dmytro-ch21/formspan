@@ -4547,6 +4547,29 @@ the schema rather than from taste:
 - Elapsed time on a re-enrolled roadmap has to name the gap, because
   `started_on` spans the months the athlete was away.
 
+
+### The seeded belt syllabuses
+
+- **`cmd/seed` is idempotent.** Run it twice: four curricula, 56 items, no
+  duplicates. The stable ids in `curricula.json` are what make this an upsert.
+- **Re-seeding after editing a syllabus keeps every enrollment**, because
+  enrollment references the curriculum id and items are replaced beneath it.
+  Enrol, reseed, and confirm you are still enrolled with the same `started_on`.
+- **Re-seeding cannot destroy progress.** Log evidence against a syllabus
+  technique, reseed, and the progress is unchanged — it lives in
+  `bjj_session_tags` and is recomputed.
+- **The seed refuses an unknown technique id** rather than writing a syllabus
+  that points at nothing. Break one id in the JSON and confirm the seed fails
+  naming that id and that curriculum.
+- **A seeded syllabus cannot be edited or deleted by any athlete** — it is
+  ownerless, so `editable` is false for everyone and writes 403.
+- **The seed only ever touches `source = 'seed'` rows.** Author a curriculum in
+  the admin console (when that exists) with a colliding id and confirm a deploy
+  does not overwrite it.
+- **Brown is mostly defence-only**, which is the case no other syllabus
+  exercises: six items with `target_scored` null. Confirm they render, count
+  toward `countable_items`, and can be completed with `defended` evidence alone.
+
 ### The roadmap → focus bridge
 
 The loop this feature rests on: roadmap → `bjj_focus` → one-tap chips in the

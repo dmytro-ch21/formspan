@@ -22,6 +22,7 @@
  * react-native-svg" — no longer holds: it turned out to ship inside Expo Go,
  * so the mobile app renders real SVG now and a generator can reach it too.
  */
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 const MARKER = "import type { CSSProperties }";
@@ -64,6 +65,44 @@ if (web.body !== admin.body) {
   process.exit(1);
 }
 
+/**
+ * The belt renders, which are copied rather than shared for a different reason.
+ *
+ * They are supplied artwork with no SVG upstream — see `BeltPhoto.tsx` — so
+ * unlike the icon set there is nothing to generate them from, and unlike the
+ * Brand components there is nothing to compare but the bytes. `apps/web` needs
+ * them for the curriculum cards and cannot reach into `apps/mobile/assets`, so
+ * there are two copies of each.
+ *
+ * Hashed rather than eyeballed because the failure is silent: a re-export at a
+ * different size or with a different background leaves an app rendering a belt
+ * that does not match the one beside it, and nothing complains.
+ */
+const BELT_COPIES = ["white", "blue", "purple", "brown", "black"].map((belt) => ({
+  belt,
+  mobile: `apps/mobile/assets/images/belts/${belt}.webp`,
+  web: `apps/web/public/belts/${belt}.webp`,
+}));
+
+const sha = (file) => createHash("sha256").update(readFileSync(file)).digest("hex");
+
+for (const { belt, mobile, web: webCopy } of BELT_COPIES) {
+  const a = sha(mobile);
+  const b = sha(webCopy);
+  if (a !== b) {
+    console.error(
+      `check-brand-copies: the ${belt} belt render has drifted.\n` +
+        `  ${mobile}: ${a.slice(0, 12)}\n` +
+        `  ${webCopy}: ${b.slice(0, 12)}\n\n` +
+        "These are byte-identical copies of supplied artwork. Re-export once " +
+        "and copy to both, or the two apps render different belts.",
+    );
+    process.exit(1);
+  }
+}
+
 console.log(
-  `check-brand-copies: ${FILES.length} copies identical (${web.body.split("\n").length} lines compared)`,
+  `check-brand-copies: ${FILES.length} copies identical ` +
+    `(${web.body.split("\n").length} lines compared), ` +
+    `${BELT_COPIES.length} belt renders identical`,
 );

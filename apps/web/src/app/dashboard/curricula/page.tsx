@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@clerk/nextjs";
@@ -32,12 +33,42 @@ import {
 /** Belts in rank order, so a list sorts the way an athlete thinks. The API
  *  deliberately does not do this — `belt` is unconstrained TEXT so the kids
  *  belts stay an enum edit — which makes ordering the client's job. */
-const BELT_ORDER = ["white", "blue", "purple", "brown", "black"];
+const BELT_ORDER = ["white", "blue", "purple", "brown", "black"] as const;
+
+type Belt = (typeof BELT_ORDER)[number];
+
+/**
+ * The belt renders, as card covers.
+ *
+ * The artwork is a cut-out on a TRANSPARENT ground, so it needs something
+ * behind it — hence the band colour per belt. These are deliberately muted
+ * rather than the belt's own colour at full strength: the card is mostly text,
+ * and a saturated purple band would make the syllabus harder to read than the
+ * one next to it, which is the opposite of what a cover is for.
+ *
+ * White gets a warm grey rather than white-on-white, and black a lifted
+ * charcoal rather than pure black, so both belts stay visible against the
+ * card in either theme.
+ */
+const BELT_BAND: Record<Belt, string> = {
+  white: "bg-stone-200 dark:bg-stone-800",
+  blue: "bg-sky-100 dark:bg-sky-950",
+  purple: "bg-violet-100 dark:bg-violet-950",
+  brown: "bg-amber-100 dark:bg-amber-950",
+  black: "bg-neutral-200 dark:bg-neutral-800",
+};
+
+function beltOf(belt: string | null): Belt | null {
+  if (!belt) return null;
+  const b = belt.toLowerCase();
+  return (BELT_ORDER as readonly string[]).includes(b) ? (b as Belt) : null;
+}
 
 function beltRank(belt: string | null): number {
-  if (!belt) return BELT_ORDER.length;
-  const i = BELT_ORDER.indexOf(belt.toLowerCase());
-  return i === -1 ? BELT_ORDER.length : i;
+  const b = beltOf(belt);
+  // Unranked belts sort last rather than first: an athlete's own curriculum has
+  // no belt at all, and `indexOf` returning -1 would float it above white.
+  return b === null ? BELT_ORDER.length : BELT_ORDER.indexOf(b);
 }
 
 type Scope = "mine" | "shared";
@@ -240,9 +271,36 @@ function CurriculumCard({
   onToggleEnrollment: () => void;
 }) {
   const isRoadmap = c.countable_items > 0;
+  const belt = beltOf(c.belt);
 
   return (
-    <li className="flex flex-col rounded-xl border border-neutral-200 p-4 dark:border-neutral-800">
+    <li className="flex flex-col overflow-hidden rounded-xl border border-neutral-200 dark:border-neutral-800">
+      {belt && (
+        /*
+          Only for belt syllabuses. An athlete's own "guard passing for the
+          winter" has no belt and gets no cover — putting one there would imply
+          a rank it never claimed, and the belt field is explicitly a hint for
+          ordering rather than a statement about who may work this.
+        */
+        <div className={`flex h-24 items-center justify-center ${BELT_BAND[belt]}`}>
+          <Image
+            src={`/belts/${belt}.webp`}
+            // Decorative: the belt is named in the pill beside the title and
+            // again in the card's own text, so announcing it here would make a
+            // screen reader say it three times.
+            alt=""
+            aria-hidden="true"
+            width={1024}
+            height={683}
+            // The render is 1024×683; this draws it at ~220px, so the intrinsic
+            // size is for aspect and the sizes hint stops Next serving the full
+            // width to a card two-up on a phone.
+            sizes="(max-width: 640px) 90vw, 320px"
+            className="h-auto w-[70%] max-w-[220px] object-contain drop-shadow-sm"
+          />
+        </div>
+      )}
+      <div className="flex grow flex-col p-4">
       <div className="flex items-start justify-between gap-3">
         <Link
           href={`/dashboard/curricula/${c.id}`}
@@ -303,6 +361,7 @@ function CurriculumCard({
             since {formatDay(c.started_on)}
           </span>
         )}
+      </div>
       </div>
     </li>
   );
