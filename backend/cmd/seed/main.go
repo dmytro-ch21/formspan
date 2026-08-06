@@ -19,6 +19,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/dmytro-ch21/vola/backend/internal/modules/curriculum"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/exercise"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/health"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/technique"
@@ -60,6 +61,16 @@ func main() {
 		log.Fatalf("seed: positions: %v", err)
 	}
 	log.Printf("seed: positions: %d upserted", pn)
+
+	// AFTER techniques, and the order is load-bearing rather than tidy: every
+	// syllabus item is a foreign key into the library, so seeding these first
+	// would fail on a fresh database with an error about a technique that is
+	// merely not written yet.
+	cn, err := curriculum.Seed(ctx, pool)
+	if err != nil {
+		log.Fatalf("seed curricula: %v", err)
+	}
+	log.Printf("seed: curricula: %d upserted", cn)
 
 	// Bound health_events while we're here. The seed is the only thing this
 	// project runs on a schedule (predeploy, every deploy), and the table had

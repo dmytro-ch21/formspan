@@ -11675,6 +11675,105 @@ and comparing `unchanged` as a set rather than a sequence each take it red.
   athlete enrolled in two gets whichever screen they are on, and the second will
   offer to evict the first. Nothing warns about that.
 
+## 2026-08-05 — Four belt syllabuses, and a brown belt that is mostly defence
+
+`curricula.json` embedded and seeded by `cmd/seed`, plus belt renders as card
+covers on web. The shared list stops being empty.
+
+**White, Blue, Purple, Brown. No Black**, on the user's own reasoning: black is
+"more about mastering stuff and getting strategy wise better", which is not a
+technique list. The catalog agrees — it labels exactly one technique Black.
+
+### The brown belt is the interesting one
+
+The catalog labels only 15 techniques Brown out of 465, and the first instinct —
+that this is a gap to pad around — is wrong. It is a fact about the belt. Brown
+is not twelve new moves; it is owning what you already have against people who
+know what you are doing, and not getting caught any more.
+
+So brown deliberately **re-uses techniques from the earlier syllabuses at harder
+standards**, and **six of its fourteen items are defence-only** — `target_scored`
+null, `target_defended` set. "At white you learned to land the triangle; at brown
+nobody lands it on you" is the same catalog row carrying a different meaning,
+which is exactly what the nullable-criteria model was for. The `defended` event
+added in #133 finally earns its keep here: without it, more than a third of this
+syllabus would be inexpressible.
+
+The contrast across belts is the evidence the curation was real rather than a
+filter over `typical_belt`:
+
+| | items | defence-only |
+| --- | --- | --- |
+| White | 14 | 0 |
+| Blue | 14 | 0 |
+| Purple | 14 | 1 |
+| Brown | 14 | 6 |
+
+### Criteria are tuned per technique, not defaulted
+
+The shipped defaults (25 / 8 / 12 / 0.35) are right for a guard pass and wrong
+for a takedown. The double-leg asks **8 landed at a 0.20 hit rate** because most
+hobbyists start rolls from the knees and rarely wrestle; side-control frames ask
+**25 across 15 sessions at 0.40**, because you get those reps every single
+session. Purple carries one item with no criteria at all — reading, deliberately,
+for something the evidence stream cannot fairly measure.
+
+### Seeding
+
+Ownerless, public, `source = 'seed'`, stable ids from the JSON. That last one is
+what makes it an upsert rather than a duplicate factory: re-running after editing
+a syllabus updates in place and **every athlete's enrollment survives**, because
+enrollment references the id. Verified — a second `cmd/seed` leaves it at 4
+curricula and 56 items.
+
+Items are replaced wholesale on every run, which is safe for a reason worth
+stating: progress lives in `bjj_session_tags` and is recomputed on read, so
+rewriting the syllabus cannot destroy anybody's evidence. That property is what
+the derived-mastery decision bought.
+
+The upsert is scoped `WHERE curricula.source = 'seed'`, so an id collision with
+something the admin console authored cannot let a deploy silently overwrite it —
+the failure 000032's `source` column exists to prevent, applied before there is
+a second writer.
+
+Three tests, two of which need no database: the file parses and is shaped, every
+criterion is legal under both CHECK constraints (enforced in Go so a bad
+syllabus fails a test run rather than a production seed), and — with
+`TEST_DATABASE_URL` — every one of the 50 technique ids exists in the library.
+That last one **skips rather than passes** on an empty catalog, since "every id
+is missing" says nothing about the syllabuses.
+
+### Belt renders on web
+
+The five 1024×683 cut-outs are copied from `apps/mobile/assets/images/belts/`
+into `apps/web/public/belts/`. They are supplied artwork with no SVG upstream —
+see `BeltPhoto.tsx` — so there is nothing to generate and nothing to compare but
+the bytes; `check-brand-copies` now hash-compares them, and appending one byte
+fails it.
+
+Cards show the render on a muted per-belt band. Muted rather than the belt's own
+colour at full strength, because the card is mostly text and a saturated purple
+band makes one syllabus harder to read than the one beside it. The image is
+`alt=""` and `aria-hidden` — the belt is already named in the pill and the body
+text. **A curriculum with no belt gets no cover**: an athlete's own list has
+never claimed a rank, and the belt field is a hint for ordering rather than a
+statement about who may work it.
+
+### Gaps
+
+- **Still not seen rendering.** The covers, like everything else on
+  `/dashboard/curricula`, are verified by `build:web` and nothing else.
+- **No Black syllabus**, deliberately. If one is ever wanted it should be a
+  different kind of object — a strategy or gameplan surface, which is the doc's
+  unbuilt Tier 3.
+- **The criteria are unvalidated against real logs**, because there are none at
+  volume. Every number is a modelled estimate, and the first athlete to work a
+  syllabus end to end is the experiment.
+- **The reviewers were running on the wrong model all session.** Their
+  frontmatter said `model: inherit` while the project note said Fable, so every
+  review in this session ran on Opus. Both reviewer agents now pin
+  `model: fable`.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

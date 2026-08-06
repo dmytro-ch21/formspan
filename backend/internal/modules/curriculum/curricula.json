@@ -1,0 +1,453 @@
+[
+  {
+    "id": "white-belt-basics",
+    "name": "White belt basics",
+    "belt": "white",
+    "description": "The first year, in the order it actually goes wrong: get out of the bad places first, then stop losing the guard you have, then the handful of attacks that genuinely work at white belt — finishing with the pin you passed to and the one submission you can hit from it.",
+    "items": [
+      {
+        "technique_id": "side-control-bottom-frames",
+        "notes": "Being pinned is uncomfortable rather than dangerous, and you can keep it that way.",
+        "target_scored": 25,
+        "target_sessions": 15,
+        "min_hit_rate": 0.4
+      },
+      {
+        "technique_id": "side-control-frame-hip-escape",
+        "notes": "You can turn frames into space and get your guard back.",
+        "target_scored": 25,
+        "target_sessions": 12,
+        "min_hit_rate": 0.4
+      },
+      {
+        "technique_id": "mount-trap-roll-escape",
+        "notes": "When someone mounts you and reaches for something, you can put them underneath you.",
+        "target_scored": 15,
+        "target_sessions": 12,
+        "min_hit_rate": 0.35
+      },
+      {
+        "technique_id": "rear-naked-choke-early-defense",
+        "notes": "Losing your back costs you position, not the round.",
+        "target_scored": 12,
+        "target_sessions": 10,
+        "min_hit_rate": 0.35
+      },
+      {
+        "technique_id": "double-leg-takedown",
+        "notes": "When the round starts standing, you have a way in.",
+        "target_scored": 8,
+        "target_defended": 5,
+        "target_sessions": 6,
+        "min_hit_rate": 0.2
+      },
+      {
+        "technique_id": "hip-escape-guard-recovery",
+        "notes": "When someone starts to pass, you can move your hips and take your guard back.",
+        "target_scored": 25,
+        "target_sessions": 12,
+        "min_hit_rate": 0.4
+      },
+      {
+        "technique_id": "closed-guard-posture-control",
+        "notes": "Nobody stands up and opens your guard on their terms.",
+        "target_scored": 20,
+        "target_sessions": 12,
+        "min_hit_rate": 0.4
+      },
+      {
+        "technique_id": "scissor-sweep-closed-guard",
+        "notes": "You can sweep from closed guard and end up on top.",
+        "target_scored": 20,
+        "target_defended": 5,
+        "target_sessions": 12,
+        "min_hit_rate": 0.3
+      },
+      {
+        "technique_id": "cross-collar-choke-closed-guard",
+        "notes": "You have one choke from guard that people have to respect.",
+        "target_scored": 12,
+        "target_defended": 4,
+        "target_sessions": 10,
+        "min_hit_rate": 0.25
+      },
+      {
+        "technique_id": "triangle-closed-guard",
+        "notes": "When they leave an arm in and posture up, the triangle is already there.",
+        "target_scored": 12,
+        "target_defended": 5,
+        "target_sessions": 10,
+        "min_hit_rate": 0.25
+      },
+      {
+        "technique_id": "armbar-closed-guard",
+        "notes": "When they give you the arm you take it, and you know what it costs when you miss.",
+        "target_scored": 10,
+        "target_defended": 6,
+        "target_sessions": 10,
+        "min_hit_rate": 0.25
+      },
+      {
+        "technique_id": "standing-guard-break-knee-cut",
+        "notes": "A closed guard does not stop you: you can open it standing and cut straight through.",
+        "target_scored": 15,
+        "target_defended": 5,
+        "target_sessions": 12,
+        "min_hit_rate": 0.3
+      },
+      {
+        "technique_id": "side-control-crossface-underhook",
+        "notes": "What you passed to, you keep.",
+        "target_scored": 15,
+        "target_sessions": 12,
+        "min_hit_rate": 0.4
+      },
+      {
+        "technique_id": "americana-side-control",
+        "notes": "Holding the pin is not the end of the round — you have something to do from there.",
+        "target_scored": 12,
+        "target_defended": 6,
+        "target_sessions": 10,
+        "min_hit_rate": 0.3
+      }
+    ]
+  },
+  {
+    "id": "blue-belt-basics",
+    "name": "Blue belt: building a game",
+    "belt": "blue",
+    "description": "You already know how to survive — this belt is about choosing where the fight happens. One guard you play on purpose, one pass you trust, and attacks that connect to each other instead of arriving one at a time.",
+    "items": [
+      {
+        "technique_id": "high-leg-guard-recovery",
+        "notes": "Your legs get back in front of them before they can settle into the pass.",
+        "target_scored": 40,
+        "target_sessions": 16,
+        "min_hit_rate": 0.4
+      },
+      {
+        "technique_id": "de-la-riva-control",
+        "notes": "You have a guard you go to on purpose, not the one you end up in.",
+        "target_scored": 30,
+        "target_sessions": 15,
+        "min_hit_rate": 0.4
+      },
+      {
+        "technique_id": "de-la-riva-tripod-sweep",
+        "notes": "When they stand up to pass, you take them down instead.",
+        "target_scored": 25,
+        "target_defended": 5,
+        "target_sessions": 12,
+        "min_hit_rate": 0.4
+      },
+      {
+        "technique_id": "ankle-pick",
+        "notes": "You can start the match on your feet and finish the exchange on top.",
+        "target_scored": 10,
+        "target_sessions": 8,
+        "min_hit_rate": 0.25
+      },
+      {
+        "technique_id": "armbar-triangle-omoplata-chain",
+        "notes": "One trapped arm gives you three finishes, and their defence to each one opens the next.",
+        "target_scored": 25,
+        "target_sessions": 15,
+        "min_hit_rate": 0.35
+      },
+      {
+        "technique_id": "dogfight-old-school-sweep",
+        "notes": "Half guard stops being where you get stuck and becomes where you get on top.",
+        "target_scored": 25,
+        "target_defended": 8,
+        "target_sessions": 12,
+        "min_hit_rate": 0.4
+      },
+      {
+        "technique_id": "headquarters-position",
+        "notes": "You pass from one place you know, instead of improvising every time.",
+        "target_scored": 25,
+        "target_sessions": 12,
+        "min_hit_rate": 0.4
+      },
+      {
+        "technique_id": "knee-cut-long-step-chain",
+        "notes": "You have a pass you trust, and a ready answer for the way people stop it.",
+        "target_scored": 30,
+        "target_defended": 8,
+        "target_sessions": 15,
+        "min_hit_rate": 0.4
+      },
+      {
+        "technique_id": "knee-shield-leg-weave-pass",
+        "notes": "A knee in your chest stops being the end of your passing.",
+        "target_scored": 18,
+        "target_defended": 5,
+        "target_sessions": 12,
+        "min_hit_rate": 0.35
+      },
+      {
+        "technique_id": "side-control-top-backtake",
+        "notes": "When they turn away from the pin, you are already behind them.",
+        "target_scored": 15,
+        "target_defended": 5,
+        "target_sessions": 12,
+        "min_hit_rate": 0.45
+      },
+      {
+        "technique_id": "seatbelt-back-control",
+        "notes": "Once you have the back you keep it, without racing for a finish.",
+        "target_scored": 15,
+        "target_sessions": 12,
+        "min_hit_rate": 0.4
+      },
+      {
+        "technique_id": "bow-arrow-choke-back",
+        "notes": "You can finish from the back against someone who knows exactly what is coming.",
+        "target_scored": 15,
+        "target_defended": 8,
+        "target_sessions": 12,
+        "min_hit_rate": 0.4
+      },
+      {
+        "technique_id": "back-escape-shoulder-to-shoulder",
+        "notes": "Having your back taken stops being the end of the round.",
+        "target_scored": 20,
+        "target_sessions": 12,
+        "min_hit_rate": 0.35
+      },
+      {
+        "technique_id": "rear-naked-choke-late-defense",
+        "notes": "The arm is under your chin and you still get out.",
+        "target_scored": 12,
+        "target_sessions": 10,
+        "min_hit_rate": 0.3
+      }
+    ]
+  },
+  {
+    "id": "purple-belt-basics",
+    "name": "Purple belt: connections",
+    "belt": "purple",
+    "description": "Purple is less about new moves than about joining up the ones you already have. This one stops the leaks first, then takes a single guard from entry all the way to the back, and a single pass all the way to its counter.",
+    "items": [
+      {
+        "technique_id": "inversion-guard-retention",
+        "notes": "Your guard is hard to pass because you can turn upside down and still find their legs.",
+        "target_scored": 30,
+        "target_defended": 10,
+        "target_sessions": 16,
+        "min_hit_rate": 0.4
+      },
+      {
+        "technique_id": "turtle-bottom-granby-recovery",
+        "notes": "Turtle stops being somewhere you wait and becomes somewhere you leave.",
+        "target_scored": 18,
+        "target_sessions": 14,
+        "min_hit_rate": 0.35
+      },
+      {
+        "technique_id": "guillotine-front-headlock",
+        "notes": "Someone locking a guillotine on your neck is a problem you solve, not a tap.",
+        "target_defended": 15,
+        "target_sessions": 12
+      },
+      {
+        "technique_id": "back-escape-body-triangle",
+        "notes": "Locked legs around your waist are a problem you solve, not one you survive.",
+        "target_scored": 15,
+        "target_sessions": 12,
+        "min_hit_rate": 0.3
+      },
+      {
+        "technique_id": "inside-heel-hook-saddle",
+        "notes": "You know the saddle when you are in it, and you tap early rather than test your knee against it."
+      },
+      {
+        "technique_id": "single-leg-crackdown-finish",
+        "notes": "You finish the single you already have, even against a good whizzer.",
+        "target_scored": 8,
+        "target_sessions": 6,
+        "min_hit_rate": 0.2
+      },
+      {
+        "technique_id": "k-guard-entry-from-closed-guard",
+        "notes": "You can leave closed guard on your terms instead of waiting to be opened.",
+        "target_scored": 20,
+        "target_sessions": 12,
+        "min_hit_rate": 0.35
+      },
+      {
+        "technique_id": "k-guard-wrestleup",
+        "notes": "You get up and get on top from underneath, without giving up the leg.",
+        "target_scored": 25,
+        "target_defended": 8,
+        "target_sessions": 12,
+        "min_hit_rate": 0.35
+      },
+      {
+        "technique_id": "k-guard-matrix-back-take",
+        "notes": "When they defend the sweep, you end up behind them instead.",
+        "target_scored": 12,
+        "target_sessions": 10,
+        "min_hit_rate": 0.3
+      },
+      {
+        "technique_id": "straightjacket-back-control",
+        "notes": "Once you take the back, they stay there while you work.",
+        "target_scored": 20,
+        "target_defended": 6,
+        "target_sessions": 12,
+        "min_hit_rate": 0.4
+      },
+      {
+        "technique_id": "trap-triangle-back-control",
+        "notes": "Their own defensive hand becomes the thing that finishes them.",
+        "target_scored": 12,
+        "target_sessions": 10,
+        "min_hit_rate": 0.25
+      },
+      {
+        "technique_id": "float-pass",
+        "notes": "You pass by staying light on top rather than by out-muscling their guard.",
+        "target_scored": 25,
+        "target_defended": 8,
+        "target_sessions": 12,
+        "min_hit_rate": 0.35
+      },
+      {
+        "technique_id": "float-pass-backstep",
+        "notes": "When the float gets read, you change direction instead of restarting.",
+        "target_scored": 15,
+        "target_sessions": 12,
+        "min_hit_rate": 0.45
+      },
+      {
+        "technique_id": "brabo-choke-side-control",
+        "notes": "Turning in to escape your pass becomes the mistake that ends the round.",
+        "target_scored": 10,
+        "target_sessions": 8,
+        "min_hit_rate": 0.3
+      }
+    ]
+  },
+  {
+    "id": "brown-belt-basics",
+    "name": "Brown belt: one game, no leaks",
+    "belt": "brown",
+    "description": "Almost nothing here is new — it is material you have had for years, held to a standard nobody applies at blue. Nearly half of it is scored on attacks that never land rather than on ones you hit, and the rest is a single connected game where every escape goes somewhere and the pass, the back and the mount are one motion. It runs from the deepest hole outwards and finishes on your feet, where the round starts.",
+    "items": [
+      {
+        "technique_id": "rear-naked-choke",
+        "notes": "You learned the early escape at white and the late one at blue — now the strangle simply does not land.",
+        "target_scored": null,
+        "target_defended": 18,
+        "target_sessions": 16,
+        "min_hit_rate": null
+      },
+      {
+        "technique_id": "back-escape-body-triangle",
+        "notes": "Purple made the body triangle solvable; brown means you are out before their hands finish.",
+        "target_scored": 20,
+        "target_defended": null,
+        "target_sessions": 14,
+        "min_hit_rate": 0.45
+      },
+      {
+        "technique_id": "mount-bridge-to-single-leg-x",
+        "notes": "Being mounted ends with you attacking a leg, not with you back in guard.",
+        "target_scored": 20,
+        "target_defended": null,
+        "target_sessions": 14,
+        "min_hit_rate": 0.4
+      },
+      {
+        "technique_id": "inside-heel-hook-saddle",
+        "notes": "At purple you knew the saddle and tapped early — now you get the leg back instead.",
+        "target_scored": null,
+        "target_defended": 15,
+        "target_sessions": 14,
+        "min_hit_rate": null
+      },
+      {
+        "technique_id": "side-control-frame-hip-escape",
+        "notes": "The escape you learned in your first month, now working more often than it fails.",
+        "target_scored": 40,
+        "target_defended": null,
+        "target_sessions": 20,
+        "min_hit_rate": 0.5
+      },
+      {
+        "technique_id": "darce-side-control",
+        "notes": "Turning in to get out stops being the thing that gets you strangled.",
+        "target_scored": null,
+        "target_defended": 10,
+        "target_sessions": 12,
+        "min_hit_rate": null
+      },
+      {
+        "technique_id": "elbow-knee-connection-retention",
+        "notes": "Nothing gets past your knee, and it has not for a long time.",
+        "target_scored": 45,
+        "target_defended": null,
+        "target_sessions": 20,
+        "min_hit_rate": 0.55
+      },
+      {
+        "technique_id": "knee-cut-pass",
+        "notes": "The most common pass in the room does not work on you.",
+        "target_scored": null,
+        "target_defended": 20,
+        "target_sessions": 18,
+        "min_hit_rate": null
+      },
+      {
+        "technique_id": "inside-passing-chain",
+        "notes": "You do not have a pass — you have a sequence, and it does not stop when the first one fails.",
+        "target_scored": 45,
+        "target_defended": 15,
+        "target_sessions": 20,
+        "min_hit_rate": 0.5
+      },
+      {
+        "technique_id": "triangle-closed-guard",
+        "notes": "At white you learned to land this; at brown nobody lands it on you.",
+        "target_scored": null,
+        "target_defended": 20,
+        "target_sessions": 18,
+        "min_hit_rate": null
+      },
+      {
+        "technique_id": "leg-drag-to-backtake",
+        "notes": "The leg drag stops ending in side control and starts ending behind them.",
+        "target_scored": 30,
+        "target_defended": 10,
+        "target_sessions": 16,
+        "min_hit_rate": 0.45
+      },
+      {
+        "technique_id": "straightjacket-back-control",
+        "notes": "Purple kept the back through their first escape; brown keeps it through their best one.",
+        "target_scored": 32,
+        "target_defended": 10,
+        "target_sessions": 16,
+        "min_hit_rate": 0.5
+      },
+      {
+        "technique_id": "back-control-to-mount",
+        "notes": "When they slip the back they slip into mount, never into your guard.",
+        "target_scored": 20,
+        "target_defended": null,
+        "target_sessions": 14,
+        "min_hit_rate": 0.5
+      },
+      {
+        "technique_id": "double-leg-takedown",
+        "notes": "At white this was your way in; now it is simply that nobody gets in on you.",
+        "target_scored": null,
+        "target_defended": 15,
+        "target_sessions": 14,
+        "min_hit_rate": null
+      }
+    ]
+  }
+]
