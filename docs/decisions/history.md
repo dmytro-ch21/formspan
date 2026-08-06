@@ -13033,6 +13033,47 @@ unrelated global-count assertions, which is what those exist for.
   console edit still needs `exportcontent` plus a PR to reach another
   environment — the no-PR flow is not built.
 
+## 2026-08-06 — Decided: content is authored in production
+
+The question [content-authoring-design.md](content-authoring-design.md) said
+everything in phase 2 followed from, answered: **production is where content
+gets authored.** Staging becomes a place to try the console rather than a place
+content flows from, and cross-environment promotion is off the design board —
+there is one place content is written, so there is nothing to promote.
+
+**It reordered the remaining plan, for a reason worth stating.** The snapshot
+export was step 5, behind draft/published and revisions. It is now step 3,
+because the three remaining features answer different risks and only one of them
+fails silently:
+
+- **Content exists in one database and is lost** — the snapshot export is the
+  only answer, and nothing in this repo documents a backup. Silent and total.
+- **A half-written technique is live to athletes** — draft/published. Visible,
+  and self-correcting.
+- **An edit needs undoing** — revisions and rollback. Inconvenient; re-editing
+  already works.
+
+Durability before features. The moment content is authored in any console the
+database is its only copy, and that exposure is live now rather than at the end
+of the sequence.
+
+**And the decision exposed a gating fact: there is no production Postgres.**
+Only `staging`, currently doing double duty for dev and testing. So the final
+step — pointing the console at production and stopping the deploy from reseeding
+content — is blocked on infrastructure that does not exist, while all three
+steps it depends on are buildable today. Worth knowing before anyone plans
+around "author in production" as though it were a thing that could happen this
+week.
+
+### Gaps
+
+- No production environment, and no documented backup of the staging Postgres
+  that is currently standing in for one.
+- The `source`-is-database-state edge is still unaddressed and gets sharper
+  here: a restore re-seeds every row as `seed`, silently re-granting deploy
+  ownership of content the console owned. The snapshot has to carry `source`,
+  or the restore has to re-flip it.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
