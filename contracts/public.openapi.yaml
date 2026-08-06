@@ -2897,6 +2897,21 @@ paths:
     post:
       summary: Create a curriculum
       operationId: createCurriculum
+      parameters:
+      - name: tz
+        in: query
+        required: false
+        schema: { type: string }
+        description: >
+          The caller's IANA timezone, e.g. `Europe/Berlin`. Absent means UTC.
+
+
+          **Not cosmetic.** Progress is measured from the enrollment date, and
+          both ends of that comparison used to resolve in the server's zone —
+          UTC in every deployed environment. Enrolling at 22:00 in New York
+          stamped tomorrow, so the athlete was told their progress counted from
+          a date that had not happened and that evening's training fell outside
+          the window. Same `?tz=` convention as `/v1/sessions/history`.
       description: >
         Always owned by the caller and private unless `visibility` says
         otherwise. The id is server-generated: unlike a workout there is no
@@ -2926,6 +2941,20 @@ paths:
         in: path
         required: true
         schema: { type: string }
+      - name: tz
+        in: query
+        required: false
+        schema: { type: string }
+        description: >
+          The caller's IANA timezone, e.g. `Europe/Berlin`. Absent means UTC.
+
+
+          **Not cosmetic.** Progress is measured from the enrollment date, and
+          both ends of that comparison used to resolve in the server's zone —
+          UTC in every deployed environment. Enrolling at 22:00 in New York
+          stamped tomorrow, so the athlete was told their progress counted from
+          a date that had not happened and that evening's training fell outside
+          the window. Same `?tz=` convention as `/v1/sessions/history`.
     get:
       summary: One curriculum, with items and the caller's progress
       operationId: getCurriculum
@@ -3000,6 +3029,20 @@ paths:
         in: path
         required: true
         schema: { type: string }
+      - name: tz
+        in: query
+        required: false
+        schema: { type: string }
+        description: >
+          The caller's IANA timezone, e.g. `Europe/Berlin`. Absent means UTC.
+
+
+          **Not cosmetic.** Progress is measured from the enrollment date, and
+          both ends of that comparison used to resolve in the server's zone —
+          UTC in every deployed environment. Enrolling at 22:00 in New York
+          stamped tomorrow, so the athlete was told their progress counted from
+          a date that had not happened and that evening's training fell outside
+          the window. Same `?tz=` convention as `/v1/sessions/history`.
     put:
       summary: Start working this curriculum
       operationId: enrollInCurriculum

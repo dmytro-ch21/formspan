@@ -120,7 +120,7 @@ func scanCurriculum(rows pgx.Rows, userID string) (*Curriculum, *time.Time, erro
 	return &c, startedOn, nil
 }
 
-func (r *PostgresRepository) Get(ctx context.Context, userID, id string) (*Curriculum, error) {
+func (r *PostgresRepository) Get(ctx context.Context, userID, id, tz string) (*Curriculum, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT c.id, c.owner_user_id, c.name, c.description, c.belt, c.visibility,
 		       c.created_at, c.updated_at,
@@ -156,7 +156,7 @@ func (r *PostgresRepository) Get(ctx context.Context, userID, id string) (*Curri
 	// `started` is nil when the caller is not enrolled, which is what makes
 	// items() return criteria with no progress: browsing a syllabus shows what
 	// it asks of you, working one shows how far along you are.
-	items, err := r.items(ctx, userID, id, started)
+	items, err := r.items(ctx, userID, id, started, tz)
 	if err != nil {
 		return nil, err
 	}
@@ -183,7 +183,7 @@ func (r *PostgresRepository) Get(ctx context.Context, userID, id string) (*Curri
 //
 // ONE QUERY, not one per item. A syllabus is a dozen techniques and a per-item
 // aggregate would be a dozen scans of bjj_session_tags for one screen.
-func (r *PostgresRepository) items(ctx context.Context, userID, id string, since *time.Time) ([]Item, error) {
+func (r *PostgresRepository) items(ctx context.Context, userID, id string, since *time.Time, tz string) ([]Item, error) {
 	rows, err := r.pool.Query(ctx, `
 		WITH ev AS (
 			-- The caller's evidence, per technique, SINCE THEY ENROLLED.
@@ -228,7 +228,13 @@ func (r *PostgresRepository) items(ctx context.Context, userID, id string, since
 			  )
 			  -- The session's own start, not the tag's created_at: a class
 			  -- logged late still happened when it happened.
-			  AND ($3::date IS NULL OR s.started_at >= $3::date)
+			  --
+			  -- Compared as LOCAL DATES on both sides. Against a bare
+			  -- timestamptz the boundary was UTC midnight, so a class trained
+			  -- on the evening of the enrollment day fell outside a window that
+			  -- was supposed to start that morning.
+			  AND ($3::date IS NULL
+			       OR (s.started_at AT TIME ZONE $4)::date >= $3::date)
 			GROUP BY t.technique_id
 		)
 		SELECT i.technique_id, lib.name, lib.position, lib.category, i.sort_order, i.notes,
@@ -242,7 +248,7 @@ func (r *PostgresRepository) items(ctx context.Context, userID, id string, since
 		JOIN techniques lib ON lib.id = i.technique_id
 		LEFT JOIN ev ON ev.technique_id = i.technique_id
 		WHERE i.curriculum_id = $2
-		ORDER BY i.sort_order`, userID, id, since)
+		ORDER BY i.sort_order`, userID, id, since, zone(tz))
 	if err != nil {
 		return nil, fmt.Errorf("curriculum: items: %w", err)
 	}
@@ -296,7 +302,7 @@ func (r *PostgresRepository) items(ctx context.Context, userID, id string, since
 	return out, rows.Err()
 }
 
-func (r *PostgresRepository) Create(ctx context.Context, userID string, in NewCurriculum) (*Curriculum, error) {
+func (r *PostgresRepository) Create(ctx context.Context, userID, tz string, in NewCurriculum) (*Curriculum, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("curriculum: begin create: %w", err)
@@ -329,10 +335,10 @@ func (r *PostgresRepository) Create(ctx context.Context, userID string, in NewCu
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("curriculum: commit create: %w", err)
 	}
-	return r.Get(ctx, userID, id)
+	return r.Get(ctx, userID, id, tz)
 }
 
-func (r *PostgresRepository) Update(ctx context.Context, userID, id string, in Update) (*Curriculum, error) {
+func (r *PostgresRepository) Update(ctx context.Context, userID, id, tz string, in Update) (*Curriculum, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("curriculum: begin update: %w", err)
@@ -373,7 +379,7 @@ func (r *PostgresRepository) Update(ctx context.Context, userID, id string, in U
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("curriculum: commit update: %w", err)
 	}
-	return r.Get(ctx, userID, id)
+	return r.Get(ctx, userID, id, tz)
 }
 
 // querier is whatever can run a statement -- the pool, or a transaction that is
@@ -500,20 +506,25 @@ func replaceItems(ctx context.Context, tx pgx.Tx, id string, items []NewItem) er
 	return nil
 }
 
-func (r *PostgresRepository) Enroll(ctx context.Context, userID, id string) error {
+func (r *PostgresRepository) Enroll(ctx context.Context, userID, id, tz string) error {
 	// The visibility check is part of the INSERT rather than a prior read, for
 	// the same race reason as Update — and it is load-bearing here in a way it
 	// is not there: without it anyone could enroll in a private curriculum by
 	// guessing its id, and then read its items through Get, whose own check
 	// would pass because they are now enrolled.
 	tag, err := r.pool.Exec(ctx, `
-		INSERT INTO curriculum_enrollments (user_id, curriculum_id)
-		SELECT $1, c.id FROM curricula c WHERE c.id = $2 AND `+visibleTo+`
+		-- The caller's local date, not the server's. CURRENT_DATE here is UTC
+		-- in every deployed environment, so an athlete enrolling at 22:00 in
+		-- New York was stamped with tomorrow -- and told their progress counted
+		-- from a date that had not arrived.
+		INSERT INTO curriculum_enrollments (user_id, curriculum_id, started_on)
+		SELECT $1, c.id, (now() AT TIME ZONE $3)::date
+		FROM curricula c WHERE c.id = $2 AND `+visibleTo+`
 		-- Idempotent, and it clears an archive: enrolling again after putting
 		-- something down is picking it back up, not an error. started_on is
 		-- deliberately NOT reset — it is when they first took it on.
 		ON CONFLICT (user_id, curriculum_id) DO UPDATE SET archived_on = NULL`,
-		userID, id)
+		userID, id, zone(tz))
 	if err != nil {
 		return translate(err, "enroll")
 	}
@@ -534,6 +545,19 @@ func (r *PostgresRepository) Archive(ctx context.Context, userID, id string) err
 		return ErrNotFound
 	}
 	return nil
+}
+
+// zone normalises an IANA timezone for SQL.
+//
+// Empty means UTC, which is what every caller predating this got. Validated at
+// the handler with time.LoadLocation, so an unknown name is a 400 rather than a
+// Postgres error -- but defaulted here too, because a repository that takes an
+// empty string and produces a silently wrong date is the bug this fixes.
+func zone(tz string) string {
+	if tz == "" {
+		return "UTC"
+	}
+	return tz
 }
 
 // translate turns Postgres constraint violations into domain errors, so no raw

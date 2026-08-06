@@ -340,24 +340,33 @@ func ValidateItems(items []NewItem) error {
 // that does not know who is asking cannot enforce the second half. The same
 // omission has produced a cross-user enumeration bug in two other modules here.
 type Repository interface {
+	// EVERY DATE HERE IS THE ATHLETE'S, NOT THE SERVER'S. `tz` is an IANA name
+	// and the empty string means UTC, which is the old behaviour.
+	//
+	// This is not a nicety. `started_on` used to default to Postgres's
+	// CURRENT_DATE, and Postgres runs UTC in every deployed environment — so an
+	// athlete enrolling at 22:00 in New York was stamped with TOMORROW, and the
+	// screen told them their progress was "counted from" a date that had not
+	// happened. Everything logged that evening then fell outside the window.
+	//
 	// List returns the curricula this caller can see — their own, plus every
 	// public one — with Enrolled and Editable resolved for them.
 	List(ctx context.Context, userID string) ([]Curriculum, error)
 	// Get returns one with its items, and with the caller's progress against
 	// any criteria. Returns ErrNotFound for a private curriculum the caller
 	// does not own — never ErrForbidden, which would confirm it exists.
-	Get(ctx context.Context, userID, id string) (*Curriculum, error)
+	Get(ctx context.Context, userID, id, tz string) (*Curriculum, error)
 	// Create stores a new curriculum owned by the caller.
-	Create(ctx context.Context, userID string, in NewCurriculum) (*Curriculum, error)
+	Create(ctx context.Context, userID, tz string, in NewCurriculum) (*Curriculum, error)
 	// Update edits one the caller owns. ErrForbidden for a VOLA-authored row,
 	// which no user may edit however public it is.
-	Update(ctx context.Context, userID, id string, in Update) (*Curriculum, error)
+	Update(ctx context.Context, userID, id, tz string, in Update) (*Curriculum, error)
 	// Delete removes one the caller owns.
 	Delete(ctx context.Context, userID, id string) error
 	// Enroll starts the caller working this curriculum, or un-archives it.
 	// Idempotent: enrolling twice is not an error, because a retry after a
 	// dropped response must converge rather than fail.
-	Enroll(ctx context.Context, userID, id string) error
+	Enroll(ctx context.Context, userID, id, tz string) error
 	// Archive records that the caller put it down. Deliberately not a delete —
 	// having worked a syllabus and stopped is a fact about them, and a roadmap
 	// that vanishes cannot later say "you did three quarters of this".

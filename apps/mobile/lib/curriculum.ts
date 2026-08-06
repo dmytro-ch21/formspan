@@ -1,4 +1,5 @@
 import { apiRequest } from './apiRequest';
+import { localZone } from './history';
 import type { TokenGetter } from './useAuthToken';
 
 /**
@@ -112,20 +113,36 @@ export function listCurricula(
   );
 }
 
+/**
+ * `tz` on every call that touches a date, and it is not optional in practice.
+ *
+ * Progress is measured from the enrollment date, and both ends of that
+ * comparison used to be resolved in the SERVER's zone — which is UTC in every
+ * deployed environment. Enrolling at 22:00 in New York stamped TOMORROW, so the
+ * screen said progress was counted from a date that had not happened and the
+ * evening's training fell outside the window. Sending the zone is what makes
+ * "since you started" mean the athlete's day rather than the database's.
+ */
 export function getCurriculum(
   getToken: TokenGetter,
   id: string,
   signal?: AbortSignal,
 ): Promise<Curriculum> {
-  return apiRequest<Curriculum>(getToken, `/curricula/${encodeURIComponent(id)}`, { signal });
+  return apiRequest<Curriculum>(
+    getToken,
+    `/curricula/${encodeURIComponent(id)}?tz=${encodeURIComponent(localZone())}`,
+    { signal },
+  );
 }
 
 /** Idempotent, and it un-archives. `started_on` is NOT reset — it is when you
  *  first took it on, and every criterion is measured from it. */
 export function enrollInCurriculum(getToken: TokenGetter, id: string): Promise<void> {
-  return apiRequest<void>(getToken, `/curricula/${encodeURIComponent(id)}/enrollment`, {
-    method: 'PUT',
-  });
+  return apiRequest<void>(
+    getToken,
+    `/curricula/${encodeURIComponent(id)}/enrollment?tz=${encodeURIComponent(localZone())}`,
+    { method: 'PUT' },
+  );
 }
 
 /** Archives rather than deletes: having worked a syllabus and stopped is a fact

@@ -130,14 +130,14 @@ func TestAPrivateCurriculumIsInvisibleToEveryoneElse(t *testing.T) {
 	ctx := context.Background()
 	cleanupUser(t, pool, "owner1", "stranger1")
 
-	c, err := repo.Create(ctx, "owner1", NewCurriculum{Name: "Mine", Visibility: "private"})
+	c, err := repo.Create(ctx, "owner1", "", NewCurriculum{Name: "Mine", Visibility: "private"})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
 	// NOT ErrForbidden. A 403 on a private row confirms the id exists, which is
 	// the enumeration oracle the workout module documents having shipped once.
-	if _, err := repo.Get(ctx, "stranger1", c.ID); err != ErrNotFound {
+	if _, err := repo.Get(ctx, "stranger1", c.ID, ""); err != ErrNotFound {
 		t.Fatalf("stranger Get: want ErrNotFound, got %v", err)
 	}
 	list, err := repo.List(ctx, "stranger1")
@@ -149,7 +149,7 @@ func TestAPrivateCurriculumIsInvisibleToEveryoneElse(t *testing.T) {
 			t.Fatal("a stranger's private curriculum appeared in List")
 		}
 	}
-	if _, err := repo.Update(ctx, "stranger1", c.ID, Update{Name: strp("Yours")}); err != ErrNotFound {
+	if _, err := repo.Update(ctx, "stranger1", c.ID, "", Update{Name: strp("Yours")}); err != ErrNotFound {
 		t.Fatalf("stranger Update: want ErrNotFound, got %v", err)
 	}
 	if err := repo.Delete(ctx, "stranger1", c.ID); err != ErrNotFound {
@@ -166,14 +166,14 @@ func TestEnrollingCannotBeUsedToReachAPrivateCurriculum(t *testing.T) {
 	ctx := context.Background()
 	cleanupUser(t, pool, "owner2", "stranger2")
 
-	c, err := repo.Create(ctx, "owner2", NewCurriculum{Name: "Mine", Visibility: "private"})
+	c, err := repo.Create(ctx, "owner2", "", NewCurriculum{Name: "Mine", Visibility: "private"})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if err := repo.Enroll(ctx, "stranger2", c.ID); err != ErrNotFound {
+	if err := repo.Enroll(ctx, "stranger2", c.ID, ""); err != ErrNotFound {
 		t.Fatalf("stranger Enroll: want ErrNotFound, got %v", err)
 	}
-	if _, err := repo.Get(ctx, "stranger2", c.ID); err != ErrNotFound {
+	if _, err := repo.Get(ctx, "stranger2", c.ID, ""); err != ErrNotFound {
 		t.Fatalf("stranger Get after failed enroll: want ErrNotFound, got %v", err)
 	}
 }
@@ -184,11 +184,11 @@ func TestAPublicCurriculumIsReadableButNotEditable(t *testing.T) {
 	ctx := context.Background()
 	cleanupUser(t, pool, "owner3", "stranger3")
 
-	c, err := repo.Create(ctx, "owner3", NewCurriculum{Name: "Shared", Visibility: "public"})
+	c, err := repo.Create(ctx, "owner3", "", NewCurriculum{Name: "Shared", Visibility: "public"})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	got, err := repo.Get(ctx, "stranger3", c.ID)
+	got, err := repo.Get(ctx, "stranger3", c.ID, "")
 	if err != nil {
 		t.Fatalf("stranger Get on public: %v", err)
 	}
@@ -197,7 +197,7 @@ func TestAPublicCurriculumIsReadableButNotEditable(t *testing.T) {
 	}
 	// ErrForbidden here, not ErrNotFound: they can already see it, so saying
 	// "not yours" leaks nothing and is the useful answer.
-	if _, err := repo.Update(ctx, "stranger3", c.ID, Update{Name: strp("Hijacked")}); err != ErrForbidden {
+	if _, err := repo.Update(ctx, "stranger3", c.ID, "", Update{Name: strp("Hijacked")}); err != ErrForbidden {
 		t.Fatalf("stranger Update on public: want ErrForbidden, got %v", err)
 	}
 }
@@ -223,14 +223,14 @@ func TestMasteryNeedsVolumeSpreadDefenceAndRate(t *testing.T) {
 	cleanupUser(t, pool, "athlete1")
 	tech := seedTechnique(t, pool, "test-armdrag")
 
-	c, err := repo.Create(ctx, "athlete1", NewCurriculum{
+	c, err := repo.Create(ctx, "athlete1", "", NewCurriculum{
 		Name:  "Roadmap",
 		Items: []NewItem{{TechniqueID: tech, Criteria: fullCriteria()}},
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if err := repo.Enroll(ctx, "athlete1", c.ID); err != nil {
+	if err := repo.Enroll(ctx, "athlete1", c.ID, ""); err != nil {
 		t.Fatalf("enroll: %v", err)
 	}
 	backdateEnrollment(t, pool, "athlete1", 200)
@@ -247,7 +247,7 @@ func TestMasteryNeedsVolumeSpreadDefenceAndRate(t *testing.T) {
 		logEvidence(t, pool, "athlete1", tech, i, ev)
 	}
 
-	got, err := repo.Get(ctx, "athlete1", c.ID)
+	got, err := repo.Get(ctx, "athlete1", c.ID, "")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -269,7 +269,7 @@ func TestMasteryNeedsVolumeSpreadDefenceAndRate(t *testing.T) {
 	for i := 1; i <= 10; i++ {
 		logEvidence(t, pool, "athlete1", tech, i+100, map[string]int{"attempted": 20})
 	}
-	got, err = repo.Get(ctx, "athlete1", c.ID)
+	got, err = repo.Get(ctx, "athlete1", c.ID, "")
 	if err != nil {
 		t.Fatalf("get after spray: %v", err)
 	}
@@ -298,14 +298,14 @@ func TestEvidenceBeforeEnrollingDoesNotCount(t *testing.T) {
 		logEvidence(t, pool, "athlete2", tech, i, map[string]int{"attempted": 30, "scored": 2})
 	}
 
-	c, err := repo.Create(ctx, "athlete2", NewCurriculum{
+	c, err := repo.Create(ctx, "athlete2", "", NewCurriculum{
 		Name:  "Roadmap",
 		Items: []NewItem{{TechniqueID: tech, Criteria: fullCriteria()}},
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if err := repo.Enroll(ctx, "athlete2", c.ID); err != nil {
+	if err := repo.Enroll(ctx, "athlete2", c.ID, ""); err != nil {
 		t.Fatalf("enroll: %v", err)
 	}
 	backdateEnrollment(t, pool, "athlete2", 100)
@@ -316,7 +316,7 @@ func TestEvidenceBeforeEnrollingDoesNotCount(t *testing.T) {
 	}
 	logEvidence(t, pool, "athlete2", tech, 9, map[string]int{"attempted": 2})
 
-	got, err := repo.Get(ctx, "athlete2", c.ID)
+	got, err := repo.Get(ctx, "athlete2", c.ID, "")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -343,17 +343,17 @@ func TestNoAttemptsMeansNoRateRatherThanZero(t *testing.T) {
 	cleanupUser(t, pool, "athlete14")
 	tech := seedTechnique(t, pool, "test-norate")
 
-	c, err := repo.Create(ctx, "athlete14", NewCurriculum{
+	c, err := repo.Create(ctx, "athlete14", "", NewCurriculum{
 		Name:  "Roadmap",
 		Items: []NewItem{{TechniqueID: tech, Criteria: fullCriteria()}},
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if err := repo.Enroll(ctx, "athlete14", c.ID); err != nil {
+	if err := repo.Enroll(ctx, "athlete14", c.ID, ""); err != nil {
 		t.Fatalf("enroll: %v", err)
 	}
-	got, err := repo.Get(ctx, "athlete14", c.ID)
+	got, err := repo.Get(ctx, "athlete14", c.ID, "")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -375,7 +375,7 @@ func TestDrilledNeverSatisfiesTheSpreadRequirement(t *testing.T) {
 	cleanupUser(t, pool, "athlete3")
 	tech := seedTechnique(t, pool, "test-kimura")
 
-	c, err := repo.Create(ctx, "athlete3", NewCurriculum{
+	c, err := repo.Create(ctx, "athlete3", "", NewCurriculum{
 		Name: "Roadmap",
 		Items: []NewItem{{TechniqueID: tech, Criteria: &Criteria{
 			TargetScored:   intp(1),
@@ -385,7 +385,7 @@ func TestDrilledNeverSatisfiesTheSpreadRequirement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if err := repo.Enroll(ctx, "athlete3", c.ID); err != nil {
+	if err := repo.Enroll(ctx, "athlete3", c.ID, ""); err != nil {
 		t.Fatalf("enroll: %v", err)
 	}
 	backdateEnrollment(t, pool, "athlete3", 200)
@@ -395,7 +395,7 @@ func TestDrilledNeverSatisfiesTheSpreadRequirement(t *testing.T) {
 	}
 	logEvidence(t, pool, "athlete3", tech, 1, map[string]int{"scored": 1})
 
-	got, err := repo.Get(ctx, "athlete3", c.ID)
+	got, err := repo.Get(ctx, "athlete3", c.ID, "")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -417,21 +417,21 @@ func TestADefenceOnlyCriterionWorks(t *testing.T) {
 	cleanupUser(t, pool, "athlete4")
 	tech := seedTechnique(t, pool, "test-guardpull")
 
-	c, err := repo.Create(ctx, "athlete4", NewCurriculum{
+	c, err := repo.Create(ctx, "athlete4", "", NewCurriculum{
 		Name:  "Defence",
 		Items: []NewItem{{TechniqueID: tech, Criteria: &Criteria{TargetDefended: intp(5)}}},
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if err := repo.Enroll(ctx, "athlete4", c.ID); err != nil {
+	if err := repo.Enroll(ctx, "athlete4", c.ID, ""); err != nil {
 		t.Fatalf("enroll: %v", err)
 	}
 	backdateEnrollment(t, pool, "athlete4", 200)
 	for i := 1; i <= 5; i++ {
 		logEvidence(t, pool, "athlete4", tech, i, map[string]int{"defended": 1})
 	}
-	got, err := repo.Get(ctx, "athlete4", c.ID)
+	got, err := repo.Get(ctx, "athlete4", c.ID, "")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -447,7 +447,7 @@ func TestOneAthletesEvidenceNeverReachesAnothersProgress(t *testing.T) {
 	cleanupUser(t, pool, "athlete5", "athlete6")
 	tech := seedTechnique(t, pool, "test-shared")
 
-	c, err := repo.Create(ctx, "athlete5", NewCurriculum{
+	c, err := repo.Create(ctx, "athlete5", "", NewCurriculum{
 		Name:       "Shared",
 		Visibility: "public",
 		Items:      []NewItem{{TechniqueID: tech, Criteria: &Criteria{TargetScored: intp(5)}}},
@@ -456,7 +456,7 @@ func TestOneAthletesEvidenceNeverReachesAnothersProgress(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 	for _, u := range []string{"athlete5", "athlete6"} {
-		if err := repo.Enroll(ctx, u, c.ID); err != nil {
+		if err := repo.Enroll(ctx, u, c.ID, ""); err != nil {
 			t.Fatalf("enroll %s: %v", u, err)
 		}
 		backdateEnrollment(t, pool, u, 200)
@@ -466,11 +466,11 @@ func TestOneAthletesEvidenceNeverReachesAnothersProgress(t *testing.T) {
 		logEvidence(t, pool, "athlete5", tech, i, map[string]int{"scored": 1})
 	}
 
-	five, err := repo.Get(ctx, "athlete5", c.ID)
+	five, err := repo.Get(ctx, "athlete5", c.ID, "")
 	if err != nil {
 		t.Fatalf("get 5: %v", err)
 	}
-	six, err := repo.Get(ctx, "athlete6", c.ID)
+	six, err := repo.Get(ctx, "athlete6", c.ID, "")
 	if err != nil {
 		t.Fatalf("get 6: %v", err)
 	}
@@ -489,14 +489,14 @@ func TestBrowsingShowsCriteriaButNoProgress(t *testing.T) {
 	cleanupUser(t, pool, "athlete7")
 	tech := seedTechnique(t, pool, "test-browse")
 
-	c, err := repo.Create(ctx, "athlete7", NewCurriculum{
+	c, err := repo.Create(ctx, "athlete7", "", NewCurriculum{
 		Name:  "Unstarted",
 		Items: []NewItem{{TechniqueID: tech, Criteria: fullCriteria()}},
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	got, err := repo.Get(ctx, "athlete7", c.ID)
+	got, err := repo.Get(ctx, "athlete7", c.ID, "")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -518,11 +518,11 @@ func TestEnrollingIsIdempotentAndKeepsTheOriginalStartDate(t *testing.T) {
 	ctx := context.Background()
 	cleanupUser(t, pool, "athlete8")
 
-	c, err := repo.Create(ctx, "athlete8", NewCurriculum{Name: "X"})
+	c, err := repo.Create(ctx, "athlete8", "", NewCurriculum{Name: "X"})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if err := repo.Enroll(ctx, "athlete8", c.ID); err != nil {
+	if err := repo.Enroll(ctx, "athlete8", c.ID, ""); err != nil {
 		t.Fatalf("enroll: %v", err)
 	}
 	// Backdate, so a reset would be visible.
@@ -532,7 +532,7 @@ func TestEnrollingIsIdempotentAndKeepsTheOriginalStartDate(t *testing.T) {
 		t.Fatalf("backdate: %v", err)
 	}
 	// A retry after a dropped response must converge, not fail.
-	if err := repo.Enroll(ctx, "athlete8", c.ID); err != nil {
+	if err := repo.Enroll(ctx, "athlete8", c.ID, ""); err != nil {
 		t.Fatalf("second enroll: %v", err)
 	}
 	var started time.Time
@@ -551,17 +551,17 @@ func TestArchivingKeepsTheRecordAndUnEnrolls(t *testing.T) {
 	ctx := context.Background()
 	cleanupUser(t, pool, "athlete9")
 
-	c, err := repo.Create(ctx, "athlete9", NewCurriculum{Name: "X"})
+	c, err := repo.Create(ctx, "athlete9", "", NewCurriculum{Name: "X"})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if err := repo.Enroll(ctx, "athlete9", c.ID); err != nil {
+	if err := repo.Enroll(ctx, "athlete9", c.ID, ""); err != nil {
 		t.Fatalf("enroll: %v", err)
 	}
 	if err := repo.Archive(ctx, "athlete9", c.ID); err != nil {
 		t.Fatalf("archive: %v", err)
 	}
-	got, err := repo.Get(ctx, "athlete9", c.ID)
+	got, err := repo.Get(ctx, "athlete9", c.ID, "")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -588,11 +588,11 @@ func TestACurriculumOthersAreWorkingCannotBeDeleted(t *testing.T) {
 	ctx := context.Background()
 	cleanupUser(t, pool, "owner10", "follower10")
 
-	c, err := repo.Create(ctx, "owner10", NewCurriculum{Name: "Popular", Visibility: "public"})
+	c, err := repo.Create(ctx, "owner10", "", NewCurriculum{Name: "Popular", Visibility: "public"})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if err := repo.Enroll(ctx, "follower10", c.ID); err != nil {
+	if err := repo.Enroll(ctx, "follower10", c.ID, ""); err != nil {
 		t.Fatalf("follower enroll: %v", err)
 	}
 	if err := repo.Delete(ctx, "owner10", c.ID); err != ErrInUse {
@@ -614,21 +614,21 @@ func TestUpdatingWithoutItemsLeavesThemAlone(t *testing.T) {
 	cleanupUser(t, pool, "athlete11")
 	tech := seedTechnique(t, pool, "test-keep")
 
-	c, err := repo.Create(ctx, "athlete11", NewCurriculum{
+	c, err := repo.Create(ctx, "athlete11", "", NewCurriculum{
 		Name:  "X",
 		Items: []NewItem{{TechniqueID: tech}},
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	got, err := repo.Update(ctx, "athlete11", c.ID, Update{Name: strp("Renamed")})
+	got, err := repo.Update(ctx, "athlete11", c.ID, "", Update{Name: strp("Renamed")})
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}
 	if len(got.Items) != 1 {
 		t.Fatalf("a rename deleted the items: got %d, want 1", len(got.Items))
 	}
-	got, err = repo.Update(ctx, "athlete11", c.ID, Update{Items: []NewItem{}})
+	got, err = repo.Update(ctx, "athlete11", c.ID, "", Update{Items: []NewItem{}})
 	if err != nil {
 		t.Fatalf("update empty: %v", err)
 	}
@@ -645,7 +645,7 @@ func TestItemOrderSurvivesAReplace(t *testing.T) {
 	a := seedTechnique(t, pool, "test-a")
 	b := seedTechnique(t, pool, "test-b")
 
-	c, err := repo.Create(ctx, "athlete12", NewCurriculum{
+	c, err := repo.Create(ctx, "athlete12", "", NewCurriculum{
 		Name:  "X",
 		Items: []NewItem{{TechniqueID: a}, {TechniqueID: b}},
 	})
@@ -655,7 +655,7 @@ func TestItemOrderSurvivesAReplace(t *testing.T) {
 	if c.Items[0].TechniqueID != a || c.Items[1].TechniqueID != b {
 		t.Fatalf("order not as sent: %v", []string{c.Items[0].TechniqueID, c.Items[1].TechniqueID})
 	}
-	got, err := repo.Update(ctx, "athlete12", c.ID, Update{Items: []NewItem{{TechniqueID: b}, {TechniqueID: a}}})
+	got, err := repo.Update(ctx, "athlete12", c.ID, "", Update{Items: []NewItem{{TechniqueID: b}, {TechniqueID: a}}})
 	if err != nil {
 		t.Fatalf("reorder: %v", err)
 	}
@@ -670,7 +670,7 @@ func TestAnUnknownTechniqueIsInvalidInputNotAnInternalError(t *testing.T) {
 	ctx := context.Background()
 	cleanupUser(t, pool, "athlete13")
 
-	_, err := repo.Create(ctx, "athlete13", NewCurriculum{
+	_, err := repo.Create(ctx, "athlete13", "", NewCurriculum{
 		Name:  "X",
 		Items: []NewItem{{TechniqueID: "no-such-technique"}},
 	})
@@ -689,17 +689,17 @@ func TestAnOwnerCanDeleteACurriculumTheyAreWorkingThemselves(t *testing.T) {
 	ctx := context.Background()
 	cleanupUser(t, pool, "owner14")
 
-	c, err := repo.Create(ctx, "owner14", NewCurriculum{Name: "Mine"})
+	c, err := repo.Create(ctx, "owner14", "", NewCurriculum{Name: "Mine"})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if err := repo.Enroll(ctx, "owner14", c.ID); err != nil {
+	if err := repo.Enroll(ctx, "owner14", c.ID, ""); err != nil {
 		t.Fatalf("enroll: %v", err)
 	}
 	if err := repo.Delete(ctx, "owner14", c.ID); err != nil {
 		t.Fatalf("owner deleting their own self-enrolled curriculum: %v", err)
 	}
-	if _, err := repo.Get(ctx, "owner14", c.ID); err != ErrNotFound {
+	if _, err := repo.Get(ctx, "owner14", c.ID, ""); err != ErrNotFound {
 		t.Fatalf("still there after delete: %v", err)
 	}
 }
@@ -713,19 +713,19 @@ func TestARefusedDeleteLeavesTheOwnersEnrollmentIntact(t *testing.T) {
 	ctx := context.Background()
 	cleanupUser(t, pool, "owner15", "follower15")
 
-	c, err := repo.Create(ctx, "owner15", NewCurriculum{Name: "Popular", Visibility: "public"})
+	c, err := repo.Create(ctx, "owner15", "", NewCurriculum{Name: "Popular", Visibility: "public"})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	for _, u := range []string{"owner15", "follower15"} {
-		if err := repo.Enroll(ctx, u, c.ID); err != nil {
+		if err := repo.Enroll(ctx, u, c.ID, ""); err != nil {
 			t.Fatalf("enroll %s: %v", u, err)
 		}
 	}
 	if err := repo.Delete(ctx, "owner15", c.ID); err != ErrInUse {
 		t.Fatalf("want ErrInUse, got %v", err)
 	}
-	got, err := repo.Get(ctx, "owner15", c.ID)
+	got, err := repo.Get(ctx, "owner15", c.ID, "")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -741,22 +741,22 @@ func TestPickingACurriculumBackUpKeepsTheOriginalClock(t *testing.T) {
 	ctx := context.Background()
 	cleanupUser(t, pool, "athlete16")
 
-	c, err := repo.Create(ctx, "athlete16", NewCurriculum{Name: "X"})
+	c, err := repo.Create(ctx, "athlete16", "", NewCurriculum{Name: "X"})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if err := repo.Enroll(ctx, "athlete16", c.ID); err != nil {
+	if err := repo.Enroll(ctx, "athlete16", c.ID, ""); err != nil {
 		t.Fatalf("enroll: %v", err)
 	}
 	backdateEnrollment(t, pool, "athlete16", 100)
 	if err := repo.Archive(ctx, "athlete16", c.ID); err != nil {
 		t.Fatalf("archive: %v", err)
 	}
-	if err := repo.Enroll(ctx, "athlete16", c.ID); err != nil {
+	if err := repo.Enroll(ctx, "athlete16", c.ID, ""); err != nil {
 		t.Fatalf("re-enroll: %v", err)
 	}
 
-	got, err := repo.Get(ctx, "athlete16", c.ID)
+	got, err := repo.Get(ctx, "athlete16", c.ID, "")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -786,18 +786,18 @@ func TestTheBeltCanBeClearedAndNotOnlySet(t *testing.T) {
 	ctx := context.Background()
 	cleanupUser(t, pool, "athlete17")
 
-	c, err := repo.Create(ctx, "athlete17", NewCurriculum{Name: "X", Belt: strp("blue")})
+	c, err := repo.Create(ctx, "athlete17", "", NewCurriculum{Name: "X", Belt: strp("blue")})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	got, err := repo.Update(ctx, "athlete17", c.ID, Update{Name: strp("Renamed")})
+	got, err := repo.Update(ctx, "athlete17", c.ID, "", Update{Name: strp("Renamed")})
 	if err != nil {
 		t.Fatalf("update without touching belt: %v", err)
 	}
 	if got.Belt == nil || *got.Belt != "blue" {
 		t.Fatalf("an unrelated edit changed the belt: %v", got.Belt)
 	}
-	got, err = repo.Update(ctx, "athlete17", c.ID, Update{SetBelt: true})
+	got, err = repo.Update(ctx, "athlete17", c.ID, "", Update{SetBelt: true})
 	if err != nil {
 		t.Fatalf("clear belt: %v", err)
 	}
@@ -818,7 +818,7 @@ func TestProgressCountsOnlyItemsThatCarryCriteria(t *testing.T) {
 	b := seedTechnique(t, pool, "test-mixed-b")
 	c2 := seedTechnique(t, pool, "test-mixed-c")
 
-	c, err := repo.Create(ctx, "athlete18", NewCurriculum{
+	c, err := repo.Create(ctx, "athlete18", "", NewCurriculum{
 		Name: "Mixed",
 		Items: []NewItem{
 			{TechniqueID: a, Criteria: &Criteria{TargetScored: intp(3)}},
@@ -829,7 +829,7 @@ func TestProgressCountsOnlyItemsThatCarryCriteria(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if err := repo.Enroll(ctx, "athlete18", c.ID); err != nil {
+	if err := repo.Enroll(ctx, "athlete18", c.ID, ""); err != nil {
 		t.Fatalf("enroll: %v", err)
 	}
 	backdateEnrollment(t, pool, "athlete18", 50)
@@ -837,7 +837,7 @@ func TestProgressCountsOnlyItemsThatCarryCriteria(t *testing.T) {
 		logEvidence(t, pool, "athlete18", a, i, map[string]int{"scored": 1})
 	}
 
-	got, err := repo.Get(ctx, "athlete18", c.ID)
+	got, err := repo.Get(ctx, "athlete18", c.ID, "")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -872,7 +872,7 @@ func TestTheListCanTellARoadmapFromAReadingList(t *testing.T) {
 	b := seedTechnique(t, pool, "test-list-b")
 	c3 := seedTechnique(t, pool, "test-list-c")
 
-	road, err := repo.Create(ctx, "athlete19", NewCurriculum{
+	road, err := repo.Create(ctx, "athlete19", "", NewCurriculum{
 		Name: "Roadmap",
 		Items: []NewItem{
 			{TechniqueID: a, Criteria: &Criteria{TargetScored: intp(25)}},
@@ -885,7 +885,7 @@ func TestTheListCanTellARoadmapFromAReadingList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create roadmap: %v", err)
 	}
-	reading, err := repo.Create(ctx, "athlete19", NewCurriculum{
+	reading, err := repo.Create(ctx, "athlete19", "", NewCurriculum{
 		Name:  "Reading",
 		Items: []NewItem{{TechniqueID: a}, {TechniqueID: b}},
 	})
@@ -914,7 +914,7 @@ func TestTheListCanTellARoadmapFromAReadingList(t *testing.T) {
 	// And the single read agrees with the list about the same curriculum --
 	// two code paths compute this, so they have to be checked against each
 	// other rather than each against my expectations.
-	one, err := repo.Get(ctx, "athlete19", road.ID)
+	one, err := repo.Get(ctx, "athlete19", road.ID, "")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -923,5 +923,104 @@ func TestTheListCanTellARoadmapFromAReadingList(t *testing.T) {
 		t.Fatalf("list and get disagree: get=%d/%d list=%d/%d",
 			one.ItemCount, one.CountableItems,
 			got[road.ID].ItemCount, got[road.ID].CountableItems)
+	}
+}
+
+func TestEnrollingLateAtNightStampsTheAthletesDateNotTheServers(t *testing.T) {
+	/*
+	 * The bug, seen on a device rather than reasoned about.
+	 *
+	 * Enrolling at 22:00 in New York used to stamp TOMORROW, because
+	 * `started_on` defaulted to Postgres's CURRENT_DATE and Postgres runs UTC
+	 * in every deployed environment. The screen then told the athlete their
+	 * progress was "counted from what you have logged since <tomorrow>" — a
+	 * date that had not happened — and everything they logged that evening fell
+	 * outside the window.
+	 *
+	 * Backend review had seen the same comparison and judged it harmless over a
+	 * months-long window. It is not: the boundary is only ever crossed once,
+	 * but it is crossed on the day the athlete is most likely to train.
+	 */
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	cleanupUser(t, pool, "tz1")
+
+	c, err := repo.Create(ctx, "tz1", "", NewCurriculum{Name: "X"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// Skip unless the server's date and New York's actually differ right now —
+	// otherwise this passes for the wrong reason for most of the day.
+	var serverDate, nyDate string
+	if err := pool.QueryRow(ctx, `
+		SELECT CURRENT_DATE::text, (now() AT TIME ZONE 'America/New_York')::date::text`,
+	).Scan(&serverDate, &nyDate); err != nil {
+		t.Fatalf("dates: %v", err)
+	}
+
+	if err := repo.Enroll(ctx, "tz1", c.ID, "America/New_York"); err != nil {
+		t.Fatalf("enroll: %v", err)
+	}
+	var got string
+	if err := pool.QueryRow(ctx, `
+		SELECT started_on::text FROM curriculum_enrollments WHERE user_id = 'tz1'`,
+	).Scan(&got); err != nil {
+		t.Fatalf("read started_on: %v", err)
+	}
+	if got != nyDate {
+		t.Fatalf("started_on is %s, want New York's %s (server says %s)", got, nyDate, serverDate)
+	}
+	if serverDate == nyDate {
+		t.Logf("note: server and New York agree on the date right now (%s), "+
+			"so this run did not exercise the crossing", nyDate)
+	}
+}
+
+func TestEvidenceOnTheEnrollmentDayCountsInTheAthletesZone(t *testing.T) {
+	// The other half. Comparing a bare timestamptz against a date put the
+	// boundary at UTC midnight, so a class trained on the evening of the
+	// enrollment day fell outside a window meant to start that morning.
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	cleanupUser(t, pool, "tz2")
+	tech := seedTechnique(t, pool, "test-tz")
+
+	c, err := repo.Create(ctx, "tz2", "", NewCurriculum{
+		Name:  "Roadmap",
+		Items: []NewItem{{TechniqueID: tech, Criteria: &Criteria{TargetScored: intp(1)}}},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := repo.Enroll(ctx, "tz2", c.ID, "America/New_York"); err != nil {
+		t.Fatalf("enroll: %v", err)
+	}
+
+	// A session at 23:00 New York time on the enrollment day. In UTC that is
+	// already the next day, which is exactly why the naive comparison worked
+	// and the naive STORAGE did not — and vice versa across the other boundary.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO sessions (id, user_id, sport, started_at)
+		SELECT 'tz2-s', 'tz2', 'bjj',
+		       ((now() AT TIME ZONE 'America/New_York')::date + time '23:00')
+		           AT TIME ZONE 'America/New_York'`); err != nil {
+		t.Fatalf("seed session: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO bjj_session_tags (session_id, user_id, category, event, technique_id, count)
+		VALUES ('tz2-s', 'tz2', 'sweep', 'scored', $1, 1)`, tech); err != nil {
+		t.Fatalf("seed tag: %v", err)
+	}
+
+	got, err := repo.Get(ctx, "tz2", c.ID, "America/New_York")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Items[0].Progress.Scored != 1 {
+		t.Fatalf("evening session on the enrollment day did not count: scored=%d, want 1",
+			got.Items[0].Progress.Scored)
 	}
 }

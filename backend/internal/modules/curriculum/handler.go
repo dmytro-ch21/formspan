@@ -5,6 +5,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/auth"
@@ -15,6 +17,37 @@ type Handler struct {
 }
 
 func NewHandler(repo Repository) *Handler { return &Handler{repo: repo} }
+
+// zoneOf reads the caller's timezone off the query string.
+//
+// Optional, and absent means UTC — which keeps every existing caller working
+// and is what the endpoints did before. Same `?tz=` convention and same IANA
+// names as /v1/sessions/history, because a second spelling for the same idea is
+// how two screens end up disagreeing about what day it is.
+//
+// Returns false when the name is present but unknown, so the handler can say so
+// rather than silently falling back to UTC — a silent fallback here reproduces
+// exactly the bug this parameter exists to fix.
+func zoneOf(r *http.Request) (string, bool) {
+	tz := r.URL.Query().Get("tz")
+	if tz == "" {
+		return "", true
+	}
+	if strings.EqualFold(tz, "Local") {
+		// "Local" means the SERVER's zone to time.LoadLocation, which is the
+		// one answer that is never what the caller meant.
+		return "", false
+	}
+	if _, err := time.LoadLocation(tz); err != nil {
+		return "", false
+	}
+	return tz, true
+}
+
+func badZone(w http.ResponseWriter) {
+	apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+		"tz must be an IANA timezone name, e.g. Europe/Berlin")
+}
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
@@ -28,7 +61,12 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
-	c, err := h.repo.Get(r.Context(), claims.UserID, r.PathValue("curriculumID"))
+	tz, ok := zoneOf(r)
+	if !ok {
+		badZone(w)
+		return
+	}
+	c, err := h.repo.Get(r.Context(), claims.UserID, r.PathValue("curriculumID"), tz)
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -116,7 +154,12 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	c, err := h.repo.Create(r.Context(), claims.UserID, NewCurriculum{
+	tz, ok := zoneOf(r)
+	if !ok {
+		badZone(w)
+		return
+	}
+	c, err := h.repo.Create(r.Context(), claims.UserID, tz, NewCurriculum{
 		Name:        req.Name,
 		Description: req.Description,
 		Belt:        req.Belt,
@@ -188,7 +231,12 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		in.Items = items
 	}
 
-	c, err := h.repo.Update(r.Context(), claims.UserID, r.PathValue("curriculumID"), in)
+	tz, ok := zoneOf(r)
+	if !ok {
+		badZone(w)
+		return
+	}
+	c, err := h.repo.Update(r.Context(), claims.UserID, r.PathValue("curriculumID"), tz, in)
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -207,7 +255,12 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Enroll(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
-	if err := h.repo.Enroll(r.Context(), claims.UserID, r.PathValue("curriculumID")); err != nil {
+	tz, ok := zoneOf(r)
+	if !ok {
+		badZone(w)
+		return
+	}
+	if err := h.repo.Enroll(r.Context(), claims.UserID, r.PathValue("curriculumID"), tz); err != nil {
 		writeError(w, r, err)
 		return
 	}
