@@ -151,29 +151,105 @@ func TestCreateRefusesAnIDThatAlreadyExists(t *testing.T) {
 	}
 }
 
-func TestUpdateRefusesASeededRow(t *testing.T) {
-	// An edit here would be reverted by the next deploy — silently, and only
-	// for the fields the change-detection tuple covers, which is the worst
-	// kind of half-applied. Refused outright instead.
+// Editing a seeded row is allowed now, and the write TAKES OWNERSHIP.
+//
+// This test is the inverse of the one it replaced. The old rule refused the
+// edit because the next deploy's re-seed would silently revert it; with the
+// authoring spreadsheet retired there is no other route to change the row, so
+// the write flips `source` to 'admin' instead and the seeder's own
+// `WHERE source = 'seed'` leaves it alone from then on.
+//
+// The re-seed at the end is the load-bearing half. Take `source = 'admin'` out
+// of the UPDATE's SET clause and the edit still succeeds — every assertion
+// before the re-seed still passes — and the deploy quietly undoes it. That is
+// the exact failure the old refusal existed to prevent, so it is what this has
+// to cover.
+func TestUpdatingASeededRowTakesOwnershipOfIt(t *testing.T) {
 	repo, _ := contentFixture(t)
 	ctx := context.Background()
 
-	if err := repo.UpsertAll(ctx, []Technique{aTechnique("test-content-ro", "Read Only")}); err != nil {
+	if err := repo.UpsertAll(ctx, []Technique{aTechnique("test-content-ro", "Seeded Name")}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	edit := aTechnique("test-content-ro", "Edited")
-	if _, err := repo.UpdateTechnique(ctx, edit); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("update of a seeded row = %v, want ErrNotFound", err)
+	if _, err := repo.UpdateTechnique(ctx, aTechnique("test-content-ro", "Edited In The Console")); err != nil {
+		t.Fatalf("update of a seeded row = %v, want it to succeed now", err)
 	}
 	got, _ := repo.Get(ctx, "test-content-ro")
-	if got.Name != "Read Only" {
-		t.Errorf("the seeded row was edited anyway: %q", got.Name)
+	if got.Name != "Edited In The Console" {
+		t.Fatalf("the edit did not land: %q", got.Name)
 	}
-	// ...and the handler can tell the caller WHY, rather than 404ing at an id
-	// the console is displaying.
 	source, err := repo.Source(ctx, "test-content-ro")
-	if err != nil || source != "seed" {
-		t.Errorf("Source = %q, %v; want seed", source, err)
+	if err != nil || source != "admin" {
+		t.Fatalf("Source = %q, %v; want admin — the edit must take ownership, "+
+			"or the next deploy reverts it", source, err)
+	}
+
+	// The deploy runs on every release. It must now skip this row.
+	if err := repo.UpsertAll(ctx, []Technique{aTechnique("test-content-ro", "Seeded Name")}); err != nil {
+		t.Fatalf("re-seed: %v", err)
+	}
+	after, _ := repo.Get(ctx, "test-content-ro")
+	if after.Name != "Edited In The Console" {
+		t.Errorf("the re-seed reverted the console edit to %q — the UPDATE is not "+
+			"taking ownership, so every edit made here dies at the next release", after.Name)
+	}
+}
+
+// SearchAll reaches the WHOLE catalog, aliases included, and escapes LIKE
+// metacharacters.
+//
+// Nothing covered this branch when it was written: deleting the entire `?q=`
+// path from the handler left the suite green, which is the shape this repo's
+// testing notes warn about. The alias arm matters most — it is a subquery over
+// `unnest`, so it is the part a rewrite silently drops — and the metacharacter
+// case is a real defect this caught: without database.LikeTerm a `_` matches
+// any character and a trailing backslash escapes the pattern's own closing `%`.
+func TestSearchAllReachesSeededRowsAndAliases(t *testing.T) {
+	repo, _ := contentFixture(t)
+	ctx := context.Background()
+
+	seeded := aTechnique("test-content-search-seeded", "Kesa Gatame Control")
+	seeded.Aliases = []string{"scarf hold"}
+	if err := repo.UpsertAll(ctx, []Technique{seeded}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	ids := func(q string) map[string]bool {
+		t.Helper()
+		out, err := repo.SearchAll(ctx, q)
+		if err != nil {
+			t.Fatalf("search %q: %v", q, err)
+		}
+		got := map[string]bool{}
+		for _, x := range out {
+			got[x.ID] = true
+		}
+		return got
+	}
+
+	// A SEEDED row, which the console could not previously list at all.
+	if !ids("Kesa Gatame")["test-content-search-seeded"] {
+		t.Error("search by name missed a seeded row — the whole point of the branch")
+	}
+	if !ids("test-content-search-se")["test-content-search-seeded"] {
+		t.Error("search by id missed it")
+	}
+	// The alias arm. Half this library is known by a second name.
+	if !ids("scarf hold")["test-content-search-seeded"] {
+		t.Error("search by alias missed it — the unnest subquery is not doing anything")
+	}
+
+	// Metacharacters are literal. `_` is LIKE's any-character wildcard, so
+	// unescaped this matches "Kesa Gatame" and the assertion inverts.
+	if ids("Kesa_Gatame")["test-content-search-seeded"] {
+		t.Error("`_` behaved as a wildcard — LikeTerm is not being applied")
+	}
+	if len(ids("%")) != 0 {
+		t.Error("`%` behaved as a wildcard and matched the catalog")
+	}
+	// A trailing backslash must not escape the pattern's own closing `%`.
+	if len(ids(`Kesa\`)) != 0 {
+		t.Error("a trailing backslash was not escaped")
 	}
 }
 
@@ -352,9 +428,16 @@ func TestAdoptHandsRowsToTheDeployAndOnlyAdminOnes(t *testing.T) {
 		t.Errorf("name = %q — adoption did not hand the row over", got.Name)
 	}
 
-	// And it is no longer editable in the console, which is correct: the JSON
-	// is the owner now.
-	if _, err := repo.UpdateTechnique(ctx, aTechnique("test-content-adopt", "Edited")); !errors.Is(err, ErrNotFound) {
-		t.Errorf("an adopted row is still console-editable: %v", err)
+	// The console can still edit it — that is the point of step 2 — but doing so
+	// takes it straight back off the deploy, which is what keeps the two
+	// writers from fighting over the row.
+	if _, err := repo.UpdateTechnique(ctx, aTechnique("test-content-adopt", "Edited Again")); err != nil {
+		t.Errorf("an adopted row should be editable again: %v", err)
+	}
+	var back string
+	_ = pool.QueryRow(ctx, `SELECT source FROM techniques WHERE id = 'test-content-adopt'`).Scan(&back)
+	if back != "admin" {
+		t.Errorf("editing an adopted row left source = %q — adoption is one-way "+
+			"only until the console touches it again", back)
 	}
 }

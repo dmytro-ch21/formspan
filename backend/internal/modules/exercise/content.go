@@ -73,14 +73,13 @@ type ContentRepository interface {
 	// seeded id would be skipped by the deploy's upsert, leaving the two to
 	// disagree forever.
 	CreateExercise(ctx context.Context, e Exercise) (Exercise, error)
-	// UpdateExercise edits an admin-authored exercise, and refuses a seeded one:
-	// the JSON owns those and an edit here would be reverted on the next deploy.
+	// UpdateExercise edits ANY exercise and takes ownership of it: the write
+	// sets `source` to "admin", which the seeder skips. Without that flip the
+	// next deploy would silently revert the edit. ErrNotFound now means only
+	// that the id does not exist.
 	UpdateExercise(ctx context.Context, e Exercise) (Exercise, error)
 	// GetExercise reads the current row so a partial update can overlay onto it.
 	GetExercise(ctx context.Context, id string) (Exercise, error)
-	// Source reports where an exercise came from, so a refusal can explain
-	// itself rather than 404 at an id that plainly exists.
-	Source(ctx context.Context, id string) (string, error)
 	// AdminAuthored returns every console-authored exercise.
 	//
 	// DELIBERATELY UNCAPPED, for the reason spelled out on the technique

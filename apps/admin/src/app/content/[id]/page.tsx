@@ -6,7 +6,7 @@ import { updateTechniqueAction } from "../actions";
 import { TechniqueForm } from "../TechniqueForm";
 
 /**
- * Editing one authored technique.
+ * Editing one technique — any technique.
  *
  * Ownership comes from `listAuthoredTechniques`, NOT from a `source` field on
  * the technique. That is deliberate and was got wrong first: the public
@@ -14,15 +14,21 @@ import { TechniqueForm } from "../TechniqueForm";
  * for that endpoint, by design — so reading `technique.source !== "admin"`
  * marked *everything* deploy-owned, including the row the console had just
  * written. The admin list is the one definition of what this console owns, the
- * same one `cmd/exportcontent` reads, so it cannot disagree with the list
- * screen about which techniques are editable.
+ * same one `cmd/exportcontent` reads.
+ *
+ * What ownership decides is now the WARNING, not whether there is a form. It
+ * used to be the latter: a deploy-owned row got a dead end explaining that the
+ * API would refuse the edit. Since the authoring spreadsheet was retired the
+ * API refuses nothing — a PATCH takes ownership of the row instead — so the
+ * dead end became a false refusal in front of an edit that works, on rows the
+ * list screen now deliberately surfaces through search.
  *
  * Three outcomes, all reachable by typing a URL:
  *  - in the authored list  → the form, populated from that row (which carries
  *    every field, so no second request).
- *  - not authored but real → seeded, and the fix is a completely different one:
- *    edit the JSON and release. Saying so is the difference between a dead end
- *    and a next step.
+ *  - not authored but real → the same form, plus a notice that saving takes the
+ *    row off the deploy. Silent transfer would be worse than the old dead end:
+ *    the operator would move a row between two writers without being told.
  *  - not authored, 404     → genuinely no such id.
  */
 export default async function EditTechniquePage({
@@ -38,57 +44,55 @@ export default async function EditTechniquePage({
   ]);
   const technique = authored.find((t) => t.id === id);
 
-  if (!technique) {
-    // Only now is a second request worth making, and only to tell "seeded"
-    // from "no such thing" — two states that need different copy.
-    const seeded = await getTechnique(id).catch((err) => {
-      if (err instanceof ApiError && err.status === 404) return null;
-      throw err;
-    });
-    if (!seeded) notFound();
+  // Only when it is not ours is a second request worth making — both to fill
+  // the form and to tell "deploy-owned" from "no such thing".
+  const seeded = technique
+    ? null
+    : await getTechnique(id).catch((err) => {
+        if (err instanceof ApiError && err.status === 404) return null;
+        throw err;
+      });
+  if (!technique && !seeded) notFound();
 
-    return (
-      <div className="min-h-screen w-full">
-        <AdminMasthead
-          title={seeded.name}
-          meta={<code className="font-mono text-[12px]">{seeded.id}</code>}
-          back={{ href: "/content", label: "Back to techniques" }}
-        />
-        <main className="max-w-4xl px-10 py-8">
-          <div className="flex flex-col gap-3 rounded-lg border border-danger-border bg-danger-bg px-5 py-4 text-[13px] text-danger-text">
-            <p>
-              <strong>This one comes from the seeded library, so a deploy owns it.</strong> The
-              API would refuse an edit here, and it is right to: the seeder rewrites this row
-              on every release, so a change made in the console would be silently reverted.
-            </p>
-            <p>
-              To change it, edit{" "}
-              <code className="font-mono">
-                backend/internal/modules/technique/techniques.json
-              </code>{" "}
-              and release. The form is not shown rather than shown-and-rejected, because a save
-              button that always fails is worse than no save button.
-            </p>
-          </div>
-        </main>
-      </div>
-    );
-  }
+  const initial = technique ?? seeded!;
 
   return (
     <div className="min-h-screen w-full">
       <AdminMasthead
-        title={technique.name}
-        meta={<code className="font-mono text-[12px]">{technique.id}</code>}
+        title={initial.name}
+        meta={<code className="font-mono text-[12px]">{initial.id}</code>}
         back={{ href: "/content", label: "Back to techniques" }}
       />
 
-      <main className="max-w-4xl px-10 py-8">
+      <main className="flex max-w-4xl flex-col gap-5 px-10 py-8">
+        {seeded ? (
+          // Deliberately a warning rather than a refusal, and deliberately
+          // BEFORE the form: the transfer happens on save, so the place to say
+          // so is where the decision is made. The list screen's Owner column
+          // shows the same fact afterwards, but only if you search again.
+          <div className="flex flex-col gap-3 rounded-lg border border-border bg-card px-5 py-4 text-[13px] text-text-secondary">
+            <p>
+              <strong className="text-text">
+                A deploy owns this one — saving takes it over.
+              </strong>{" "}
+              Editing it here sets its source to <code className="font-mono">admin</code>, and
+              the seeder stops managing it: releases will no longer update this row, so a later
+              change to <code className="font-mono">techniques.json</code> will not reach it.
+            </p>
+            <p>
+              That is reversible, in two steps rather than one. Run{" "}
+              <code className="font-mono">go run ./cmd/exportcontent</code> to write your edit
+              back into the JSON, merge and release it, then{" "}
+              <code className="font-mono">-adopt</code> to hand the row back to the deploy.
+            </p>
+          </div>
+        ) : null}
+
         <TechniqueForm
           mode="edit"
           positions={positions}
-          initial={technique}
-          action={updateTechniqueAction.bind(null, technique.id)}
+          initial={initial}
+          action={updateTechniqueAction.bind(null, initial.id)}
         />
       </main>
     </div>

@@ -53,6 +53,18 @@ func (f *fakeContentRepo) Source(_ context.Context, id string) (string, error) {
 	return s, nil
 }
 
+func (f *fakeContentRepo) SearchAll(_ context.Context, q string) ([]Technique, error) {
+	out := []Technique{}
+	for _, t := range f.stored {
+		if strings.Contains(strings.ToLower(t.Name), strings.ToLower(q)) ||
+			strings.Contains(strings.ToLower(t.ID), strings.ToLower(q)) {
+			out = append(out, t)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
 func (f *fakeContentRepo) AdminAuthored(context.Context) ([]Technique, error) {
 	out := []Technique{}
 	for id, t := range f.stored {
@@ -78,13 +90,17 @@ func (f *fakeContentRepo) CreateTechnique(_ context.Context, t Technique) (Techn
 }
 
 func (f *fakeContentRepo) UpdateTechnique(_ context.Context, t Technique) (Technique, error) {
-	if f.sources[t.ID] != "admin" {
+	// Absent means absent — the ONLY 404 left. It used to also refuse a row
+	// whose source was "seed"; the console edits any row now and the write
+	// takes ownership, which is what the next line models.
+	if _, ok := f.stored[t.ID]; !ok {
 		return Technique{}, ErrNotFound
 	}
 	f.lastWritten = t
 	t.Source = "admin"
 	t.UpdatedAt = time.Now()
 	f.stored[t.ID] = t
+	f.sources[t.ID] = "admin"
 	return t, nil
 }
 
@@ -211,16 +227,20 @@ func TestCreateDerivesTheIDAndIgnoresAnyTheClientSends(t *testing.T) {
 	}
 }
 
-func TestEditingASeededTechniqueExplainsItselfRatherThan404ing(t *testing.T) {
-	// A bare 404 at an id the console is displaying reads as a bug. The real
-	// answer — "that one lives in the JSON" — is a different action entirely.
+// A seeded technique is EDITABLE from the console now, and the write takes
+// ownership of it.
+//
+// This replaces a test asserting a 409 with "edit techniques.json instead".
+// That refusal was right while the authoring spreadsheet owned 450 of the 542
+// rows; with the spreadsheet retired the console is the way to change any of
+// them, so the only 404 left is an id that does not exist.
+func TestASeededTechniqueIsEditable(t *testing.T) {
 	repo := newFakeRepo()
 	// A COMPLETE row. The first version of this fixture omitted
 	// category/position/gi_no_gi, and the request 400'd on validation before
-	// the refusal could happen — which exposed a real property worth knowing:
-	// the merged row is re-validated, so a stored technique that fails current
-	// validation cannot be edited until its data is fixed. Defensible, but not
-	// obvious.
+	// reaching the behaviour under test — which exposed a real property worth
+	// knowing: the merged row is re-validated, so a stored technique that fails
+	// current validation cannot be edited until its data is fixed.
 	repo.stored["seeded-one"] = Technique{
 		ID: "seeded-one", Name: "Seeded", Category: "Pass",
 		Position: "Half Guard - Top", GiNoGi: "Both", Source: "seed",
@@ -229,15 +249,11 @@ func TestEditingASeededTechniqueExplainsItselfRatherThan404ing(t *testing.T) {
 	h := NewContentHandler(repo)
 
 	res := patch(t, h, "seeded-one", `{"name":"Edited"}`)
-	if res.StatusCode != http.StatusConflict {
-		t.Fatalf("editing a seeded row = %d, want 409", res.StatusCode)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("editing a seeded row = %d, want 200", res.StatusCode)
 	}
-	var body struct {
-		Error struct{ Message string } `json:"error"`
-	}
-	_ = json.NewDecoder(res.Body).Decode(&body)
-	if !strings.Contains(body.Error.Message, "techniques.json") {
-		t.Errorf("the refusal does not say where to edit it: %q", body.Error.Message)
+	if got := repo.stored["seeded-one"].Name; got != "Edited" {
+		t.Errorf("the edit did not land: %q", got)
 	}
 
 	// ...and a genuinely absent id is still a 404.
@@ -274,9 +290,9 @@ func TestANameThatSlugsToNothingIsRefusedAtTheHandler(t *testing.T) {
 	}
 }
 
-// The console lists what it can EDIT, which is not the catalog. Listing all 542
-// would offer 542 rows of which a handful are actionable — UpdateTechnique
-// refuses a seeded row, so the rest are decoration that 409s when clicked.
+// The default list is what the console AUTHORED, not the catalog — every row is
+// editable now, so the reason is payload rather than actionability: 542 full
+// rows is ~570 KB of prose. Search (`?q=`) is how the rest are reached.
 func TestListReturnsOnlyWhatTheConsoleCanEdit(t *testing.T) {
 	repo := newFakeRepo()
 	repo.stored["authored-one"] = Technique{ID: "authored-one", Name: "Authored One"}

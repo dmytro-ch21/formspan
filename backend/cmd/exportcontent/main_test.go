@@ -265,7 +265,7 @@ func indexOf(xs []string, want string) int {
 // and diverge from what the Python importer writes for the same content.
 func TestAmpersandsSurviveUnescaped(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "techniques.json")
-	merged, _, _, err := mergeInto(path, mapEntries([]technique.Technique{
+	merged, _, _, _, err := mergeInto(path, mapEntries([]technique.Technique{
 		{ID: "x", Name: "Over-Under & Double Under", Description: "a < b > c"},
 	}, techniqueEntryOf))
 	if err != nil {
@@ -295,7 +295,7 @@ func TestMergeKeepsHandAuthoredEntries(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "techniques.json")
 	write(t, path, `[{"id":"hand-written","name":"By Hand","category":"Escape"}]`)
 
-	merged, added, updated, err := mergeInto(path, mapEntries([]technique.Technique{
+	merged, added, updated, _, err := mergeInto(path, mapEntries([]technique.Technique{
 		{ID: "from-console", Name: "From Console", Category: "Pass"},
 	}, techniqueEntryOf))
 	if err != nil {
@@ -358,7 +358,7 @@ func TestAnUnsortedFileKeepsItsOrder(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "techniques.json")
 	write(t, path, `[{"id":"zebra","name":"Z"},{"id":"alpha","name":"A"}]`)
 
-	merged, _, _, err := mergeInto(path, mapEntries([]technique.Technique{{ID: "middle", Name: "M"}}, techniqueEntryOf))
+	merged, _, _, _, err := mergeInto(path, mapEntries([]technique.Technique{{ID: "middle", Name: "M"}}, techniqueEntryOf))
 	if err != nil {
 		t.Fatalf("merge: %v", err)
 	}
@@ -373,7 +373,7 @@ func TestExportUpdatesAnEntryItPreviouslyWrote(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "techniques.json")
 	write(t, path, `[{"id":"x","name":"Old Name","category":"Pass"}]`)
 
-	merged, added, updated, err := mergeInto(path, mapEntries([]technique.Technique{
+	merged, added, updated, _, err := mergeInto(path, mapEntries([]technique.Technique{
 		{ID: "x", Name: "New Name", Category: "Pass"},
 	}, techniqueEntryOf))
 	if err != nil {
@@ -390,7 +390,7 @@ func TestExportUpdatesAnEntryItPreviouslyWrote(t *testing.T) {
 
 func TestAMissingSeedFileIsCreatedRatherThanFatal(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "techniques.json")
-	merged, added, _, err := mergeInto(path, mapEntries([]technique.Technique{{ID: "x", Name: "X"}}, techniqueEntryOf))
+	merged, added, _, _, err := mergeInto(path, mapEntries([]technique.Technique{{ID: "x", Name: "X"}}, techniqueEntryOf))
 	if err != nil {
 		t.Fatalf("merge into a missing file: %v", err)
 	}
@@ -407,7 +407,7 @@ func TestAnUnparseableFileIsRefusedNotOverwritten(t *testing.T) {
 	// stray character.
 	path := filepath.Join(t.TempDir(), "techniques.json")
 	write(t, path, `[{"id":"broken",`)
-	if _, _, _, err := mergeInto(path, mapEntries([]technique.Technique{{ID: "x", Name: "X"}}, techniqueEntryOf)); err == nil {
+	if _, _, _, _, err := mergeInto(path, mapEntries([]technique.Technique{{ID: "x", Name: "X"}}, techniqueEntryOf)); err == nil {
 		t.Error("a malformed file was silently replaced")
 	}
 	raw, _ := os.ReadFile(path)
@@ -418,7 +418,7 @@ func TestAnUnparseableFileIsRefusedNotOverwritten(t *testing.T) {
 
 func exportOnce(t *testing.T, path string, authored []technique.Technique) string {
 	t.Helper()
-	merged, _, _, err := mergeInto(path, mapEntries(authored, techniqueEntryOf))
+	merged, _, _, _, err := mergeInto(path, mapEntries(authored, techniqueEntryOf))
 	if err != nil {
 		t.Fatalf("merge: %v", err)
 	}
@@ -470,7 +470,7 @@ func TestTheSeedFileGainsTheEntryAndKeepsTheRest(t *testing.T) {
 	authored := []technique.Technique{
 		{ID: "new-one", Name: "New One", Category: "Pass", Position: "Other", GiNoGi: "Both"},
 	}
-	if err := run(techniqueCatalog(seed, authored), slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+	if _, err := run(techniqueCatalog(seed, authored), slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	have, err := idsIn(seed)
@@ -495,7 +495,7 @@ func TestRunRefusesAnEntryThatWouldNotSeed(t *testing.T) {
 	// Valid but for the function, which has no CHECK constraint in the schema —
 	// so this validation is the only thing between a typo and a value no client
 	// can render.
-	err := run(techniqueCatalog(seed, []technique.Technique{
+	_, err := run(techniqueCatalog(seed, []technique.Technique{
 		{ID: "broken", Name: "Broken", Category: "Pass", Position: "Other",
 			GiNoGi: "Both", Function: "not-a-real-function"},
 	}), slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -520,7 +520,7 @@ func TestRunRefusesAnEntryThatWouldNotSeed(t *testing.T) {
 func TestADuplicateIDIsRefusedRatherThanSilentlyDeduped(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "techniques.json")
 	write(t, path, `[{"id":"x","name":"First"},{"id":"x","name":"Second"}]`)
-	_, _, _, err := mergeInto(path, mapEntries([]technique.Technique{{ID: "y", Name: "Y"}}, techniqueEntryOf))
+	_, _, _, _, err := mergeInto(path, mapEntries([]technique.Technique{{ID: "y", Name: "Y"}}, techniqueEntryOf))
 	if err == nil {
 		t.Fatal("a duplicate id was silently deduped — one of the two entries would be deleted")
 	}
@@ -530,8 +530,9 @@ func TestADuplicateIDIsRefusedRatherThanSilentlyDeduped(t *testing.T) {
 }
 
 func TestAdoptionSkipsWhatThisRunJustAdded(t *testing.T) {
-	// The technique exported last week, committed and deployed.
-	deployed := map[string]bool{"promoted-last-week": true}
+	// What the merge reported as already in the file WITH THIS CONTENT: the
+	// technique exported last week, committed and deployed.
+	deployed := []string{"promoted-last-week"}
 	authored := []technique.Technique{
 		{ID: "promoted-last-week"},
 		{ID: "authored-an-hour-ago"},
@@ -543,13 +544,58 @@ func TestAdoptionSkipsWhatThisRunJustAdded(t *testing.T) {
 	}
 }
 
+// The case step 2 introduced, and the one an id-based check gets wrong.
+//
+// Before the console could edit seeded rows, every admin row had an id the file
+// had never seen, so "is the id in the file?" was a fine proxy for "is it
+// deployed?". An EDITED seeded row breaks that: its id was in the file all
+// along, carrying the OLD text. Adopt it and the deploy owns a row it has a
+// stale version of, and the next release re-seeds that stale text over the
+// edit — silently, which is the whole failure class this command exists to
+// prevent.
+func TestAdoptionSkipsASeededRowThisRunEdited(t *testing.T) {
+	dir := t.TempDir()
+	seed := filepath.Join(dir, "techniques.json")
+
+	original := technique.Technique{ID: "was-seeded", Name: "Original",
+		Category: "Pass", Position: "Other", GiNoGi: "Both"}
+	promoted := technique.Technique{ID: "already-promoted", Name: "Same",
+		Category: "Pass", Position: "Other", GiNoGi: "Both"}
+	// The file is written through the SAME mapper the export uses, so its
+	// entries carry every key a real seed file has. A hand-written abbreviated
+	// fixture makes every row look changed — correctly, which is why it proves
+	// nothing about the rule under test.
+	if err := writeJSON(seed, mapEntries(
+		[]technique.Technique{original, promoted}, techniqueEntryOf)); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	edited := original
+	edited.Name = "Edited In The Console"
+	authored := []technique.Technique{
+		edited,   // same id as a file entry, different content
+		promoted, // exported before and unchanged since — genuinely deployed
+	}
+	unchanged, err := run(techniqueCatalog(seed, authored),
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	got := adoptable(unchanged, idsOfTechniques(authored))
+	if strings.Join(got, ",") != "already-promoted" {
+		t.Errorf("adoptable = %v, want only already-promoted — adopting the row "+
+			"this run edited hands the deploy content it does not carry, and the "+
+			"next release reverts the edit", got)
+	}
+}
+
 // New entries append in id order, so the output does not depend on the order
 // the database happened to return the rows in.
 func TestAppendedOrderDoesNotDependOnTheQueryOrder(t *testing.T) {
 	run := func(authored []technique.Technique) []string {
 		path := filepath.Join(t.TempDir(), "techniques.json")
 		write(t, path, `[{"id":"existing","name":"E"}]`)
-		merged, _, _, err := mergeInto(path, mapEntries(authored, techniqueEntryOf))
+		merged, _, _, _, err := mergeInto(path, mapEntries(authored, techniqueEntryOf))
 		if err != nil {
 			t.Fatalf("merge: %v", err)
 		}
@@ -727,7 +773,7 @@ func TestReExportingDoesNotWipeMediaTheFileAlreadyHas(t *testing.T) {
 	path := filepath.Join(dir, "exercises.json")
 	write(t, path, `[{"id":"zercher-squat","name":"Zercher Squat","media":[{"kind":"demo","storage_key":"exercises/zercher/demo.mp4"}]}]`)
 
-	merged, added, updated, err := mergeInto(path,
+	merged, added, updated, _, err := mergeInto(path,
 		mapEntries([]exercise.Exercise{anExercise("zercher-squat", "Zercher Squat (edited)")}, exerciseEntryOf),
 		"media")
 	if err != nil {
@@ -767,7 +813,7 @@ func TestTheExerciseSeedFileGainsTheEntry(t *testing.T) {
 	write(t, seed, `[{"id":"already-there","name":"Existing"}]`)
 
 	c := exerciseCatalog(seed, []exercise.Exercise{anExercise("zercher-squat", "Zercher Squat")})
-	if err := run(c, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+	if _, err := run(c, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	have, err := idsIn(seed)
@@ -789,7 +835,7 @@ func TestRunRefusesAnExerciseThatWouldNotSeed(t *testing.T) {
 
 	bad := anExercise("broken", "Broken")
 	bad.MovementPattern = "not-a-real-pattern"
-	err := run(exerciseCatalog(seed, []exercise.Exercise{bad}),
+	_, err := run(exerciseCatalog(seed, []exercise.Exercise{bad}),
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err == nil {
 		t.Fatal("an exercise that fails validation was written anyway")
@@ -806,7 +852,7 @@ func TestACatalogWithNoValidatorIsRefused(t *testing.T) {
 	dir := t.TempDir()
 	seed := filepath.Join(dir, "s.json")
 	write(t, seed, `[]`)
-	err := run(catalog{what: "unchecked", seedPath: seed,
+	_, err := run(catalog{what: "unchecked", seedPath: seed,
 		entries: mapEntries([]exercise.Exercise{anExercise("x", "X")}, exerciseEntryOf)},
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err == nil {
@@ -845,7 +891,7 @@ func TestTheExerciseCatalogActuallyAsksToPreserveMedia(t *testing.T) {
 			ex = c
 		}
 	}
-	if err := run(ex, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+	if _, err := run(ex, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	for _, path := range []string{p.exSeed} {

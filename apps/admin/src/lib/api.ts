@@ -268,13 +268,21 @@ export type Technique = {
 };
 
 /**
- * The techniques the console owns.
+ * The techniques the console owns, or — with a query — any technique at all.
  *
- * Not the whole catalog: PATCH refuses a seeded row, so the other 542 would be
- * rows that 409 when clicked. The screen says where those live instead.
+ * The authored set is the default because it is what you were just working on,
+ * and what `exportcontent -adopt` drains. Search reaches the rest: since the
+ * authoring spreadsheet was retired every row is editable, so a console that
+ * could only show its own handful could not fix the typo you came to fix.
+ *
+ * The two are one endpoint rather than two because they return the same shape
+ * and the screen renders them the same way; only the heading differs.
  */
-export async function listAuthoredTechniques(): Promise<Technique[]> {
-  const data = await adminFetch<{ techniques: Technique[] }>("/admin/techniques");
+export async function listAuthoredTechniques(query?: string): Promise<Technique[]> {
+  const q = query?.trim();
+  const data = await adminFetch<{ techniques: Technique[] }>(
+    q ? `/admin/techniques?q=${encodeURIComponent(q)}` : "/admin/techniques",
+  );
   return data.techniques;
 }
 

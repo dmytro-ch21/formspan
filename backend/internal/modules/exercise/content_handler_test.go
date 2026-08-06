@@ -63,13 +63,17 @@ func (f *fakeContentRepo) CreateExercise(_ context.Context, e Exercise) (Exercis
 }
 
 func (f *fakeContentRepo) UpdateExercise(_ context.Context, e Exercise) (Exercise, error) {
-	if f.sources[e.ID] != "admin" {
+	// Absent means absent — the ONLY 404 left. It used to also refuse a row
+	// whose source was "seed"; the console edits any row now and the write
+	// takes ownership, which is what the next line models.
+	if _, ok := f.stored[e.ID]; !ok {
 		return Exercise{}, ErrNotFound
 	}
 	f.lastWritten = e
 	e.Source = "admin"
 	e.UpdatedAt = time.Now()
 	f.stored[e.ID] = e
+	f.sources[e.ID] = "admin"
 	return e, nil
 }
 
@@ -255,14 +259,17 @@ func TestCreateRefusesADuplicateID(t *testing.T) {
 	}
 }
 
-// A seeded id gets an explanation, not a bare 404. The fix is completely
-// different — edit the JSON and deploy — and a 404 for a row the console is
-// displaying reads as a bug.
-func TestPatchingASeededExerciseExplainsItself(t *testing.T) {
+// A seeded exercise is EDITABLE from the console now.
+//
+// Replaces a test asserting a 409 with "edit exercises.json and deploy". That
+// was right while the authoring spreadsheet owned the catalog; it was retired
+// in 2026-08, so the console is the way to change any row and the write takes
+// ownership of it.
+func TestASeededExerciseIsEditable(t *testing.T) {
 	repo := newFakeRepo()
 	// A REALISTIC seeded row. An incomplete one is refused by validation before
-	// the ownership check ever runs, so the test would pass on a 400 and prove
-	// nothing about the seeded case.
+	// the behaviour under test runs, so the test would pass on a 400 and prove
+	// nothing.
 	repo.stored["barbell-back-squat"] = Exercise{
 		ID: "barbell-back-squat", Name: "Barbell Back Squat", Sport: "strength",
 		MovementPattern: "squat", LoadType: LoadTypeWeightReps,
@@ -270,11 +277,11 @@ func TestPatchingASeededExerciseExplainsItself(t *testing.T) {
 	repo.sources["barbell-back-squat"] = "seed"
 
 	rec := patch(t, NewContentHandler(repo), "barbell-back-squat", `{"name":"Renamed"}`)
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("status %d, want 409: %s", rec.Code, rec.Body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200: %s", rec.Code, rec.Body)
 	}
-	if !strings.Contains(rec.Body.String(), "exercises.json") {
-		t.Errorf("the refusal does not say where to make the change: %s", rec.Body)
+	if got := repo.stored["barbell-back-squat"].Name; got != "Renamed" {
+		t.Errorf("the edit did not land: %q", got)
 	}
 }
 

@@ -2666,7 +2666,11 @@ own, so none of them is redundant with "the FK exists".
   `sao-paulo-pass`, accents folded, not `s-o-paulo`.
 - It is immediately visible in `GET /v1/techniques`, on the phone's library and
   as a tag target. That immediacy is the whole point of the feature.
-- Editing an admin-authored technique applies; the id does not move.
+- Editing a technique applies; the id does not move. **Any** technique — the
+  refusal of seeded rows went with the authoring spreadsheet in 2026-08.
+- `GET /v1/admin/techniques` with no `q` returns the admin-authored set;
+  with `?q=` it searches the WHOLE catalog by name, id **or alias**, seeded rows
+  included, and each carries a `source` so the console can show who owns it.
 
 **The property everything rests on**
 
@@ -2677,13 +2681,33 @@ own, so none of them is redundant with "the FK exists".
   release.
 - **...and the seed must still update its own rows.** The inverse failure is a
   content freeze that looks exactly like "nothing changed".
+- **Editing a SEEDED technique takes ownership of it.** PATCH one, assert
+  `source` became `admin`, then run `cmd/seed` with the ORIGINAL content and
+  assert the edit survives. The re-seed is the whole test: without the
+  ownership flip every assertion about the edit landing still passes, and the
+  next release quietly undoes it. This is the single most important scenario in
+  this section — it is one SQL clause away from silent data loss.
+- **`exportcontent -adopt` must not adopt a row this run changed.** Edit a
+  seeded technique, export and adopt in one invocation, and assert the row is
+  NOT adopted: the JSON is uncommitted and undeployed, so handing it to the
+  deploy means the next release re-seeds the old content over the edit. The test
+  is whether the file already carried this exact content, not whether it carried
+  the id — an id check passes here and is wrong.
 
 **Edge cases and errors**
 
 - A duplicate id is a **409, never an upsert** — the id may already be a
   foreign key in somebody's training record.
-- Editing a **seeded** technique is refused, and the message says to edit
-  `techniques.json` rather than 404ing at an id the console is displaying.
+- A 404 from PATCH now means exactly one thing — no such id. It used to also
+  mean "that one is seeded" and answer 409; there is no second case.
+- **Search escapes LIKE metacharacters**: `?q=%` and `?q=half_guard` match
+  literally rather than as wildcards. Binding the parameter stops injection but
+  not *pattern* injection — and a trailing backslash escapes the pattern's own
+  closing `%`, turning a contains-search into something else entirely, with
+  wrong results and no error.
+- **Search is capped at 100 and says nothing about it.** A result set of exactly
+  100 may be truncated; the response carries no total. Worth a scenario because
+  the failure is an operator concluding a technique does not exist.
 - A position, function or gi_no_gi outside the catalog's vocabulary is a 400
   naming the legal set. This is the worst data the table can hold: it writes,
   it renders, and it returns nothing forever with no fault reported.
@@ -2699,7 +2723,9 @@ own, so none of them is redundant with "the FK exists".
   every athlete's library and every training record points at. A signed-in
   non-admin gets 403, not 404.
 - `source` is server-set: a client cannot mark its own row `seed` (which would
-  hand it to the deploy) or a seeded row `admin`.
+  hand it to the deploy). Note a PATCH does move a seeded row to `admin` — that
+  is the ownership flip, applied server-side, not something a client can ask
+  for.
 
 ### The focus list (`GET`/`PUT /v1/bjj/focus`)
 
@@ -3977,9 +4003,13 @@ catalog adds.
 The fake repository implements its own ownership check, so these pass in the
 handler suite no matter what the SQL says:
 
-- **`UPDATE ... WHERE source = 'admin'`** — a seeded row must be refused by the
-  statement, not by Go. Deleting that clause leaves the whole handler suite
-  green.
+- **`UPDATE ... SET source = 'admin'`** — the write TAKES OWNERSHIP, in the
+  statement rather than in Go. Any row is editable now (the refusal that used to
+  live in the WHERE went with the spreadsheet), so the property that matters is
+  the flip: edit a **seeded** row, then run `UpsertAll` with the original
+  values, and assert the edit survives. Drop `source = 'admin'` from the SET and
+  every assertion before that re-seed still passes while the next deploy quietly
+  reverts the edit.
 - **`AdoptAsSeeded` must not touch `updated_at` on already-seeded rows.** Assert
   the timestamp, not `source`: setting `seed` on a `seed` row is invisible in
   the value, and clients delta-sync on the timestamp, so an unscoped adoption

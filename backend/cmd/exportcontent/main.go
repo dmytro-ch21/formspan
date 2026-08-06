@@ -102,29 +102,29 @@ func main() {
 		exercises, exRepo.AdoptAsSeeded,
 	)
 
-	// Every id the seed files ALREADY carried, captured before any write.
-	// Adoption is scoped to these: an id this run first wrote is not committed,
-	// let alone deployed, so adopting it hands content to a release that cannot
-	// reseed it and that the console will no longer let anyone edit.
-	deployed := map[string]map[string]bool{}
-	for _, c := range catalogs {
-		have, err := idsIn(c.seedPath)
-		if err != nil {
-			logger.Error("export: read the seed file", "catalog", c.what, "err", err)
-			os.Exit(1)
-		}
-		deployed[c.what] = have
-	}
-
+	// Which ids the seed file ALREADY carried WITH EXACTLY THIS CONTENT, decided
+	// during the merge and before the write. Adoption is scoped to these, and
+	// content rather than id is what the test has to be.
+	//
+	// It was ids alone until step 2 of the content-authoring design, and that
+	// was sound while every admin row was console-CREATED: a fresh id absent
+	// from the file meant "not deployed yet". Step 2 lets the console edit
+	// SEEDED rows, whose ids were in the file all along with the old content —
+	// so an id test adopts them on the first run, handing the deploy a row it
+	// carries a stale version of, which the next release then re-seeds straight
+	// over the edit. Byte-equality covers both cases with one rule.
+	deployed := map[string][]string{}
 	for _, c := range catalogs {
 		if len(c.entries) == 0 {
 			logger.Info("export: nothing authored", "catalog", c.what)
 			continue
 		}
-		if err := run(c, logger); err != nil {
+		unchanged, err := run(c, logger)
+		if err != nil {
 			logger.Error("export: write", "catalog", c.what, "err", err)
 			os.Exit(1)
 		}
+		deployed[c.what] = unchanged
 	}
 
 	if !*adopt {
@@ -275,25 +275,25 @@ type catalog struct {
 // A write failure is bounded: main() exits before -adopt, the database still
 // holds the only authoritative copy, and re-running re-derives the file from
 // it.
-func run(c catalog, logger *slog.Logger) error {
+func run(c catalog, logger *slog.Logger) ([]string, error) {
 	// Before any write: the file is what go:embed bakes into the binary, so an
 	// entry that cannot seed takes the next deploy down, far from the operator
 	// who could still fix it.
 	if c.validate == nil {
-		return fmt.Errorf("%s: no validator — refusing to write unchecked content", c.what)
+		return nil, fmt.Errorf("%s: no validator — refusing to write unchecked content", c.what)
 	}
 	if err := c.validate(); err != nil {
-		return fmt.Errorf("%s: %w", c.what, err)
+		return nil, fmt.Errorf("%s: %w", c.what, err)
 	}
 
 	// Merge before write, still: a parse error must not leave a half-written
 	// file behind. One file makes that trivial where it used to need staging.
-	merged, added, upd, err := mergeInto(c.seedPath, c.entries, c.preserve...)
+	merged, added, upd, unchanged, err := mergeInto(c.seedPath, c.entries, c.preserve...)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := writeJSON(c.seedPath, merged); err != nil {
-		return err
+		return nil, err
 	}
 	logger.Info("export: wrote", "catalog", c.what, "path", c.seedPath,
 		"added", added, "updated", upd, "total", len(merged))
@@ -306,9 +306,23 @@ func run(c catalog, logger *slog.Logger) error {
 	// it earns its place at runtime, on a filesystem that lied, not in the test
 	// matrix. verifyContains itself is tested.
 	if err := verifyContains(c.seedPath, c.ids); err != nil {
-		return err
+		return nil, err
 	}
-	return nil
+	return unchanged, nil
+}
+
+// entriesEqual compares two entries by their serialized form, key order
+// included — the same bytes writeJSON would produce, so "equal" means the file
+// would not change.
+func entriesEqual(a, b entry) bool {
+	x, errA := a.MarshalJSON()
+	y, errB := b.MarshalJSON()
+	if errA != nil || errB != nil {
+		// Unmarshalable here means unwritable later; treat it as "changed" so
+		// the row is not adopted on the strength of a comparison that failed.
+		return false
+	}
+	return bytes.Equal(x, y)
 }
 
 // verifyContains re-reads a written file and confirms it carries every id the
@@ -326,18 +340,26 @@ func verifyContains(path string, ids []string) error {
 	return nil
 }
 
-// adoptable narrows the authored rows to those the seed file ALREADY carried
-// before this run touched it.
+// adoptable narrows the authored rows to those the seed file already carried
+// with exactly this content before this run.
 //
-// An id this export just added is not committed, let alone deployed, so
-// adopting it hands content to a release that cannot reseed it and that the
-// console will no longer let anyone edit. Without this, `-adopt` intended for
-// last week's batch also adopts the technique authored an hour ago and written
-// to the file seconds earlier.
-func adoptable(alreadyDeployed map[string]bool, ids []string) []string {
+// Content, not id. A row this export just ADDED is not committed, let alone
+// deployed, so adopting it hands content to a release that cannot reseed it.
+// A row this export just CHANGED is the same problem wearing a familiar id:
+// the file had it, but with the old text, so the deploy would re-seed that old
+// text straight over the edit. Both mean "the deploy does not carry this yet",
+// and byte-equality is the one test that catches both.
+//
+// Without it, `-adopt` intended for last week's batch also adopts the row
+// edited an hour ago and written to the file seconds earlier.
+func adoptable(alreadyDeployed, ids []string) []string {
+	deployed := make(map[string]bool, len(alreadyDeployed))
+	for _, id := range alreadyDeployed {
+		deployed[id] = true
+	}
 	out := make([]string, 0, len(ids))
 	for _, id := range ids {
-		if alreadyDeployed[id] {
+		if deployed[id] {
 			out = append(out, id)
 		}
 	}
@@ -370,11 +392,11 @@ func idsIn(path string) (map[string]bool, error) {
 // review step is the only thing standing between a typo and a permanent
 // foreign key in athletes' training records.
 func mergeInto(path string, authored []entry, preserve ...string) (
-	merged []entry, added, updated int, err error,
+	merged []entry, added, updated int, unchanged []string, err error,
 ) {
 	existing, err := readEntries(path)
 	if err != nil {
-		return nil, 0, 0, err
+		return nil, 0, 0, nil, err
 	}
 
 	byID := make(map[string]entry, len(existing)+len(authored))
@@ -382,7 +404,7 @@ func mergeInto(path string, authored []entry, preserve ...string) (
 	for _, e := range existing {
 		id := e.id()
 		if id == "" {
-			return nil, 0, 0, fmt.Errorf("%s holds an entry with no id", path)
+			return nil, 0, 0, nil, fmt.Errorf("%s holds an entry with no id", path)
 		}
 		if _, dup := byID[id]; dup {
 			// Keeping the last occurrence would DELETE the other on the next
@@ -390,7 +412,7 @@ func mergeInto(path string, authored []entry, preserve ...string) (
 			// to prevent, committed by the command. The shipped catalog cannot
 			// reach this state — validate() rejects duplicate ids long before a
 			// write — but this reads whatever is actually on disk.
-			return nil, 0, 0, fmt.Errorf("%s holds two entries with id %q", path, id)
+			return nil, 0, 0, nil, fmt.Errorf("%s holds two entries with id %q", path, id)
 		}
 		order = append(order, id)
 		byID[id] = e
@@ -414,6 +436,12 @@ func mergeInto(path string, authored []entry, preserve ...string) (
 			// to would otherwise reset it to `[]` — deleting the only record of
 			// an asset that is still sitting in the bucket.
 			e = carryOver(prev, e, preserve)
+			// The file ALREADY held exactly this content. That, and only that,
+			// means the deploy carries it — which is the question -adopt has to
+			// answer. See adoptable.
+			if entriesEqual(prev, e) {
+				unchanged = append(unchanged, id)
+			}
 		} else {
 			added++
 			fresh = append(fresh, id)
@@ -427,7 +455,8 @@ func mergeInto(path string, authored []entry, preserve ...string) (
 	for _, id := range order {
 		merged = append(merged, byID[id])
 	}
-	return merged, added, updated, nil
+	sort.Strings(unchanged)
+	return merged, added, updated, unchanged, nil
 }
 
 // carryOver copies the named keys from the existing entry onto the new one,

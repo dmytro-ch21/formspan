@@ -221,20 +221,15 @@ func (h *ContentHandler) write(
 	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"exercise": out})
 }
 
-// explainNotFound tells "no such id" apart from "that one is seeded".
+// explainNotFound is a plain 404 now.
 //
-// A bare 404 at an id the console is literally displaying reads as a bug, and
-// the fix for the second case is completely different: seeded content is
-// changed in the JSON and deployed, because an edit here would be reverted by
-// the next re-seed.
-func (h *ContentHandler) explainNotFound(w http.ResponseWriter, r *http.Request, id string) {
-	source, err := h.repo.Source(r.Context(), id)
-	if err == nil && source != "admin" {
-		apihttp.WriteError(w, http.StatusConflict, apihttp.CodeAlreadyExists,
-			"that exercise comes from the seeded catalog, so a deploy owns it — "+
-				"edit exercises.json and re-deploy, or an edit here is reverted on the next release")
-		return
-	}
+// It used to tell "no such id" apart from "that one is seeded" and return a
+// 409 for the second, because the console refused to edit a seeded row. Since
+// the spreadsheet was retired the console edits any row and the write takes
+// ownership of it, so the only way to reach here is an id that does not exist.
+// Kept as a function rather than inlined: both call sites read better naming
+// the case, and step 2's whole point is that there is now only one.
+func (h *ContentHandler) explainNotFound(w http.ResponseWriter, r *http.Request, _ string) {
 	apihttp.WriteError(w, http.StatusNotFound, apihttp.CodeNotFound, "exercise not found")
 }
 

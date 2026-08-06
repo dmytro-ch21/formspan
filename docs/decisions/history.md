@@ -12950,6 +12950,89 @@ Mutation confirmed one of the two cases was doing nothing.
   now the only guard, which is a stronger position than a build step nobody ran,
   and a weaker one than both.
 
+## 2026-08-06 — Step 2: the console can edit any row, and the edit takes ownership
+
+[content-authoring-design.md](content-authoring-design.md) step 2. All 542
+techniques and 504 exercises are now editable from `/content`, not just the
+handful the console authored.
+
+**The one-line change would have been a data-loss bug.** Dropping
+`AND source = 'admin'` from the UPDATE's WHERE makes seeded rows editable — and
+the next deploy's re-seed silently reverts every one of those edits, because the
+seeder's upsert is scoped `WHERE source = 'seed'`. So the clause did not get
+deleted; it **moved to the SET**: editing a row makes it admin-owned, and the
+seeder skips it from then on. `exportcontent` already reads exactly that set, so
+the row flows back to the JSON by the path that existed, and `-adopt` hands it
+to the deploy again once shipped.
+
+That is the whole design, and it is one clause away from broken in a way no
+test would notice: every assertion about the edit landing passes either way. The
+tests that cover it therefore **re-seed afterwards and assert the edit
+survives**, and both were mutation-checked by removing `source = 'admin'` from
+the SET.
+
+**Three tests were inverted rather than deleted**, which is the honest form for
+a rule that reversed: `TestUpdateRefusesASeededRow` (both catalogs) and the
+handler's 409-with-an-explanation became `TestUpdatingASeededRowTakesOwnershipOfIt`
+and `TestASeededTechniqueIsEditable`. The in-memory fakes had their own copy of
+the old restriction — a reminder that a fake asserting the rule independently is
+a fake that keeps passing after the rule changes.
+
+`explainNotFound` collapsed to a plain 404. It existed to tell "no such id"
+apart from "that one is seeded" and return a 409 for the second; there is no
+second case any more.
+
+**The console also gained search** (`GET /v1/admin/techniques?q=`), because a
+screen that lists only what it authored cannot fix the typo you came to fix. The
+default stays the authored set — 542 full rows is ~570 KB of prose to render a
+list — and search is capped at 100. A plain GET form, so a result is a URL.
+Search results show an Owner column (`console` / `deploy`), which is the state
+the PATCH is about to change.
+
+**Review caught that the feature was unreachable.** The search screen listed all
+542 and the edit page still dead-ended on every deploy-owned row, with copy
+saying "the API would refuse an edit here, and it is right to" — false as of
+this branch. So the console surfaced rows you then could not open. Both edit
+pages now render the form for any row, and the ownership transfer is stated
+where the decision happens rather than only in a column you would have to search
+again to see. The `OwnershipNote` needed rewriting for the second time in two
+days, which is the argument for it living in one file.
+
+**And a second silent-revert path, one layer up.** `exportcontent`'s `-adopt`
+decided "is this row deployed?" by asking whether its **id** was already in the
+seed file. That was sound while every admin row was console-CREATED — a fresh id
+absent from the file meant "not deployed yet". Editing a seeded row breaks it:
+the id was in the file all along, carrying the OLD text, so adopt hands the
+deploy a row it has a stale version of and the next release re-seeds that stale
+text over the edit. The test is now byte-equality of the entry rather than
+presence of the id, which covers created and edited rows with one rule.
+Mutation-tested, and the first version of its fixture failed for the right
+reason: hand-written abbreviated entries make every row look changed.
+
+Two smaller ones worth recording: `SearchAll` bound the raw query into a LIKE
+pattern instead of using `database.LikeTerm`, so `_` matched any character and a
+trailing backslash escaped the pattern's own closing `%` — wrong results, no
+signal. And the whole `?q=` branch had **no test at all**; deleting it left the
+suite green. It has one now, mutation-checked on both the alias arm and the
+escaping. Its first version also leaked a row into the shared test database,
+because the fixture's cleanup keys on a `test-content-%` prefix — caught by two
+unrelated global-count assertions, which is what those exist for.
+
+### Gaps
+
+- **`/content/exercises` has no search**, so the 504 seeded exercises are
+  editable through the API but not reachable in the UI. The technique catalog is
+  the one under active authoring; this is a deliberate asymmetry, not an
+  oversight, and it is cheap to close when it matters.
+- **Nothing warns before taking ownership.** Editing a seeded row silently moves
+  it off the deploy, which is correct but invisible — the operator sees the
+  Owner column change only if they search again. A confirmation, or a badge on
+  the edit form, would make the trade explicit.
+- Steps 3–6 of the design (revisions/audit, draft-published, scheduled snapshot
+  export, pointing the console at production) are untouched. Until then a
+  console edit still needs `exportcontent` plus a PR to reach another
+  environment — the no-PR flow is not built.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
