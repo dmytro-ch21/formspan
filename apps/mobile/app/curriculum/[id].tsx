@@ -4,7 +4,7 @@ import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, View as RN
 
 import { Text, View } from '@/components/Themed';
 import { SectionHeader } from '@/components/ui/Section';
-import { TechniqueRow, type Criterion } from '@/components/ui/TechniqueRow';
+import { TechniqueRow } from '@/components/ui/TechniqueRow';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { fetchFocus, setFocus, type Focus } from '@/lib/bjjFocus';
@@ -13,9 +13,8 @@ import {
   enrollInCurriculum,
   getCurriculum,
   type Curriculum,
-  type CurriculumItem,
-  type Progress,
 } from '@/lib/curriculum';
+import { criteriaChips, hasEvidence } from '@/lib/curriculumRow';
 import { proposeFocus, type FocusProposal } from '@/lib/roadmapFocus';
 import { useAuthToken } from '@/lib/useAuthToken';
 
@@ -314,75 +313,6 @@ function FocusPanel({
       </Pressable>
     </View>
   );
-}
-
-/**
- * Any evidence at all — what draws the row's "started" rule.
- *
- * Deliberately not "has a criterion been met": a met criterion is a *cleared*
- * target, and the span this state exists to mark is the one before the first
- * one clears. `attempts` is `scored + attempted`, so it already covers landing
- * it; `defended` and `sessions` are their own axes and a drilled-only session
- * moves the third without moving either of the others.
- *
- * Null progress means not enrolled — no evidence is being counted, so there is
- * nothing to have started.
- */
-function hasEvidence(p: Progress | null | undefined): boolean {
-  return p != null && (p.attempts > 0 || p.defended > 0 || p.sessions > 0);
-}
-
-/**
- * Turns one item's criteria into the chips the row draws.
- *
- * The mapping lives here rather than in TechniqueRow because it is domain, not
- * presentation: which glyph means "landed" is a fact about BJJ, and the row
- * should stay reusable by anything with thresholds.
- */
-function criteriaChips(item: CurriculumItem, enrolled: boolean): Criterion[] {
-  const c = item.criteria;
-  if (c === null) return [];
-  const p = item.progress;
-  const out: Criterion[] = [];
-
-  const volume = (
-    icon: Criterion['icon'],
-    label: string,
-    have: number | undefined,
-    need: number,
-  ) => {
-    const got = have ?? 0;
-    out.push({
-      icon,
-      // Browsing shows the bar, working shows the climb. Zero-filling for
-      // someone not enrolled would report a shortfall they were never asked
-      // to make up.
-      value: enrolled ? `${got}/${need}` : String(need),
-      met: enrolled && got >= need,
-      label: enrolled ? `${label}, ${got} of ${need}` : `${label}, ${need} needed`,
-    });
-  };
-
-  if (c.target_scored !== null) volume('goal', 'Landed', p?.scored, c.target_scored);
-  if (c.target_defended !== null) volume('recovery', 'Stopped theirs', p?.defended, c.target_defended);
-  if (c.target_sessions !== null) volume('calendar', 'Sessions', p?.sessions, c.target_sessions);
-
-  if (c.min_hit_rate !== null) {
-    const need = Math.round(c.min_hit_rate * 100);
-    // `—`, never `0%`. Zero from zero is not a rate, and the API sends null so
-    // the client cannot report a failure the athlete has not had.
-    const have = p?.hit_rate == null ? null : Math.round(p.hit_rate * 100);
-    out.push({
-      icon: 'chart',
-      value: enrolled ? `${have === null ? '—' : `${have}%`}/${need}%` : `${need}%`,
-      met: enrolled && have !== null && have >= need,
-      label:
-        enrolled && have !== null
-          ? `Hit rate, ${have} percent of ${need} needed`
-          : `Hit rate, ${need} percent needed`,
-    });
-  }
-  return out;
 }
 
 const styles = StyleSheet.create({

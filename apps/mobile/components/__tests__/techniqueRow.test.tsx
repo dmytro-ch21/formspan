@@ -156,12 +156,16 @@ describe('what a screen reader hears', () => {
     expect(screen.getByLabelText('Hit rate, 43 percent of 40 needed')).toBeTruthy();
   });
 
-  it('announces a browsing row as a target, never as a shortfall', () => {
-    // The honest-numbers rule, asserted on the LABEL — a correct visible value
-    // with a label that leaks "0 of 25" is still the bug.
+  it('announces the label it was given rather than the digits beside it', () => {
+    // Deliberately NOT asserting `queryByLabelText(/0 of 25/)` is null here.
+    // That would read as the honest-numbers guard and cover nothing: whether a
+    // browsing row says "25 needed" or "0 of 25" is decided in
+    // `criteriaChips`, which this file does not import, so the assertion could
+    // never go red from any change to this component. It is covered for real
+    // in `lib/__tests__/curriculumRow.test.ts`.
     renderRow({ criteria: [crit({ value: '25', label: 'Landed, 25 needed' })] });
     expect(screen.getByLabelText('Landed, 25 needed')).toBeTruthy();
-    expect(screen.queryByLabelText(/0 of 25/)).toBeNull();
+    expect(screen.queryByText('Landed, 25 needed')).toBeNull();
   });
 });
 
@@ -179,10 +183,12 @@ describe('the chips', () => {
     expect((StyleSheet.flatten(plain.props.style) as { color?: string }).color).toBe(vola.textMuted);
   });
 
-  it('says a reading item is to study, and shows no zeros', () => {
-    renderRow({ reading: true, criteria: [] });
+  it('says a reading item is to study, and draws no chips at all', () => {
+    // Chips passed alongside `reading` must be ignored, not merged — the same
+    // reason the old row printed a sentence instead of an empty measure block.
+    renderRow({ reading: true, criteria: [crit({ value: '0/25' })] });
     expect(screen.getByText('Something to study')).toBeTruthy();
-    expect(screen.queryByText(/0\//)).toBeNull();
+    expect(screen.queryByText('0/25')).toBeNull();
   });
 
   it('renders a note in full rather than clipping it', () => {

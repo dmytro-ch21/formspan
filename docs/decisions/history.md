@@ -12502,10 +12502,24 @@ this redesign exists to answer went unanswered precisely where the answer was
 documents as invisible, so it was not even a quiet wrong answer.
 
 It cannot be fixed inside the component: chips carry only a `met` boolean, so
-the partial counts are not there to read. `started` is now a prop, computed by
-the caller from `progress` — `attempts > 0 || defended > 0 || sessions > 0`
-(`attempts` is `scored + attempted`, so it already covers landing it; a
-drilled-only session moves `sessions` without moving either of the others).
+the partial counts are not there to read. `started` is now a prop, computed
+from `progress` — `attempts > 0 || defended > 0 || sessions > 0` (`attempts` is
+`scored + attempted`, so it already covers landing it; `defended` is its own
+axis).
+
+**A correction, because the first version of this entry got it wrong.** It said
+"a drilled-only session moves `sessions` without moving either of the others",
+and that is false: the backend filters `sessions` to `attempted`/`scored`/
+`defended` on purpose, so a technique cannot clear its spread requirement
+without being used on somebody who was resisting. Drilling moves **nothing**.
+So a drilled-only athlete reads as untouched — and since `Progress` carries no
+drilled count at all, the client has no signal to read even if we wanted the
+other answer. That makes it a limitation forced by the payload rather than a
+decision, and it is now written down as one instead of being justified by a
+mechanism that does not exist. It is defensible on its own terms (drilling
+moves none of the numbers the chips display, so a "started" rule beside three
+`0/25` chips would claim progress the criteria do not recognise) — but closing
+it needs a `drilled` count on the progress payload, not a client change.
 
 The lesson is narrower than "test your states": I derived a display state from
 the *nearest available* boolean rather than from the thing it was supposed to
@@ -12585,19 +12599,52 @@ a backoff ladder already at the value being asserted; now this). The pattern is
 the same each time — the assertion was true of something adjacent to the
 behaviour, not of the behaviour.
 
+### The second review round, and the hole it found in the first fix
+
+Re-review confirmed both fixes but caught the mapping layer being untestable
+where it sat. Its words: the component test "stays green if `hasEvidence` reads
+`scored` instead of `attempts`, because the row only ever sees a boolean" — so
+the exact class of defect that had just shipped still had no coverage, in
+either file. `hasEvidence` and `criteriaChips` moved to `lib/curriculumRow.ts`
+with 17 tests of their own, and the `attempts`→`scored` swap now goes red.
+
+It also found two assertions in the component test that could never fail:
+`queryByLabelText(/0 of 25/)` and `queryByText(/0\//)` read as the honest-
+numbers guard, but that behaviour lives in `criteriaChips`, which that file
+does not import. Both are gone — replaced by assertions about what the row
+itself does, with the real coverage in the lib test. Worth noting the shape:
+they were not wrong, they were *about nothing*, which is harder to see than a
+wrong assertion and reads as more coverage than it is.
+
+And `validate_palette.mjs` was checking belts against `surfaceRaised` only,
+while `Colors.ts` now promises 3:1 on both it and `surface` — where the strip's
+rule actually sits. Arithmetically safe (surface is the darker of the two), but
+an unchecked promise is how the strip shipped at 1.05:1 in the first place. It
+checks both now; the tightest is black at 3.30 raised / 3.61 surface.
+
 ### Gaps
 
-- **Nothing covers `CurriculaStrip` or the roadmap screen itself** — the new
-  test is the row in isolation. `hasEvidence` in `[id].tsx` is exercised only
-  through the prop it feeds, so a wrong field there (say `scored` instead of
-  `attempts`) passes.
+- **Nothing covers `CurriculaStrip` or the roadmap screen end to end** — the
+  tests are the row and the mapping in isolation.
+- **No per-note length cap on the server.** `curriculum.go` bounds the body at
+  64KB and items at 60, but a single note is unbounded — and now that notes are
+  unclamped, a user-authored one of a few thousand characters renders in full in
+  a non-virtualised `ScrollView`. Self-inflicted and no crash, but it wants a
+  cap (or an expand affordance) before athlete-authored curricula reach this
+  screen.
 - **The chip row wraps rather than scrolls**, which is right for a clipped
   number, but four criteria at the largest accessibility text size will take two
   lines and has not been seen at that size.
 - **VoiceOver was never actually heard.** The disc's label is asserted in jest
   and reasoned from RN semantics; nobody has run the screen with the screen
   reader on. Same for the contrast figures, which are computed rather than
-  observed.
+  observed. Review also noted the row is 5–6 separate accessibility elements, so
+  a forward swipe hears "Mastered" *before* the technique name — defensible and
+  consistent with the app's other cards, but one composed label per row would
+  serve someone walking fourteen of them better.
+- **The redesigned screens have not been seen since the fixes.** The Simulator
+  pass predates them, so the near-miss rule state is proven in jest and has
+  never been looked at.
 
 ## Open items / known gaps as of this entry
 

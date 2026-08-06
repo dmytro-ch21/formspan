@@ -4789,7 +4789,11 @@ be wrong in a way a screenshot review would pass.
 
 - **The rule has three states and they must not collapse into two.** Untouched
   (`lineSoft`), started (`textMuted`), mastered (the accent). **"Started" means
-  any evidence at all — not a cleared target.** The scenario that matters is
+  any evidence the criteria count — not a cleared target.** Note the boundary:
+  *drilled* evidence counts for nothing, because the backend filters `sessions`
+  to live events and `Progress` carries no drilled count, so an athlete who has
+  only drilled a technique reads as untouched. Worth its own scenario so it is
+  found deliberately. The scenario that matters most is
   the near-miss: enrolled, 24 of 25 landed, 14 of 15 sessions, 38% against a
   40% floor, so *nothing* is met. That row must draw the started rule. Keying
   it off met criteria (the shipped-then-fixed bug) drew it identically to a
