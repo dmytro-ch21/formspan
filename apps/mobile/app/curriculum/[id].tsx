@@ -4,6 +4,7 @@ import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, View as RN
 
 import { Text, View } from '@/components/Themed';
 import { SectionHeader } from '@/components/ui/Section';
+import { TechniqueRow, type Criterion } from '@/components/ui/TechniqueRow';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { fetchFocus, setFocus, type Focus } from '@/lib/bjjFocus';
@@ -11,10 +12,8 @@ import {
   archiveCurriculumEnrollment,
   enrollInCurriculum,
   getCurriculum,
-  type Criteria,
   type Curriculum,
   type CurriculumItem,
-  type Progress,
 } from '@/lib/curriculum';
 import { proposeFocus, type FocusProposal } from '@/lib/roadmapFocus';
 import { useAuthToken } from '@/lib/useAuthToken';
@@ -212,8 +211,20 @@ export default function CurriculumScreen() {
       )}
 
       <SectionHeader label={`${items.length} technique${items.length === 1 ? '' : 's'}`} />
-      {items.map((item) => (
-        <ItemRow key={item.technique_id} item={item} enrolled={curriculum.enrolled} />
+      {items.map((item, i) => (
+        <TechniqueRow
+          key={item.technique_id}
+          step={i + 1}
+          name={item.name}
+          position={item.position}
+          category={item.category}
+          notes={item.notes}
+          criteria={criteriaChips(item, curriculum.enrolled)}
+          mastered={item.progress?.mastered ?? false}
+          reading={item.criteria === null}
+          tone={accent.ink}
+          testID={`curriculum-item-${item.technique_id}`}
+        />
       ))}
     </ScrollView>
   );
@@ -303,121 +314,57 @@ function FocusPanel({
   );
 }
 
-function ItemRow({ item, enrolled }: { item: CurriculumItem; enrolled: boolean }) {
-  const accent = useAccent();
-  const mastered = item.progress?.mastered ?? false;
+/**
+ * Turns one item's criteria into the chips the row draws.
+ *
+ * The mapping lives here rather than in TechniqueRow because it is domain, not
+ * presentation: which glyph means "landed" is a fact about BJJ, and the row
+ * should stay reusable by anything with thresholds.
+ */
+function criteriaChips(item: CurriculumItem, enrolled: boolean): Criterion[] {
+  const c = item.criteria;
+  if (c === null) return [];
+  const p = item.progress;
+  const out: Criterion[] = [];
 
-  return (
-    <View
-      style={[styles.item, mastered && { borderColor: accent.accent }]}
-      testID={`curriculum-item-${item.technique_id}`}
-    >
-      <RNView style={styles.itemHead}>
-        <Text style={styles.itemName} numberOfLines={2}>
-          {item.name}
-        </Text>
-        {mastered && (
-          <Text style={[styles.mastered, { color: accent.ink }]}>MASTERED</Text>
-        )}
-      </RNView>
-      <Text style={styles.itemMeta}>
-        {item.position}
-        {item.category !== '' ? ` · ${item.category}` : ''}
-      </Text>
-      {item.notes !== '' && <Text style={styles.itemNotes}>{item.notes}</Text>}
+  const volume = (
+    icon: Criterion['icon'],
+    label: string,
+    have: number | undefined,
+    need: number,
+  ) => {
+    const got = have ?? 0;
+    out.push({
+      icon,
+      // Browsing shows the bar, working shows the climb. Zero-filling for
+      // someone not enrolled would report a shortfall they were never asked
+      // to make up.
+      value: enrolled ? `${got}/${need}` : String(need),
+      met: enrolled && got >= need,
+      label: enrolled ? `${label}, ${got} of ${need}` : `${label}, ${need} needed`,
+    });
+  };
 
-      {item.criteria === null ? (
-        /* Reading, not a roadmap step. Said out loud so the absence of numbers
-           reads as deliberate rather than as missing data. */
-        <Text style={styles.itemReading}>No completion criteria — something to study.</Text>
-      ) : (
-        <Bars criteria={item.criteria} progress={item.progress} enrolled={enrolled} />
-      )}
-    </View>
-  );
-}
+  if (c.target_scored !== null) volume('goal', 'Landed', p?.scored, c.target_scored);
+  if (c.target_defended !== null) volume('recovery', 'Stopped theirs', p?.defended, c.target_defended);
+  if (c.target_sessions !== null) volume('calendar', 'Sessions', p?.sessions, c.target_sessions);
 
-function Bars({
-  criteria,
-  progress,
-  enrolled,
-}: {
-  criteria: Criteria;
-  progress: Progress | null;
-  enrolled: boolean;
-}) {
-  const rows: { label: string; have: number | null; need: number; pct: number }[] = [];
-
-  if (criteria.target_scored !== null) {
-    const have = progress?.scored ?? 0;
-    rows.push({
-      label: 'Landed',
-      have,
-      need: criteria.target_scored,
-      pct: Math.min(1, have / criteria.target_scored),
+  if (c.min_hit_rate !== null) {
+    const need = Math.round(c.min_hit_rate * 100);
+    // `—`, never `0%`. Zero from zero is not a rate, and the API sends null so
+    // the client cannot report a failure the athlete has not had.
+    const have = p?.hit_rate == null ? null : Math.round(p.hit_rate * 100);
+    out.push({
+      icon: 'chart',
+      value: enrolled ? `${have === null ? '—' : `${have}%`}/${need}%` : `${need}%`,
+      met: enrolled && have !== null && have >= need,
+      label:
+        enrolled && have !== null
+          ? `Hit rate, ${have} percent of ${need} needed`
+          : `Hit rate, ${need} percent needed`,
     });
   }
-  if (criteria.target_defended !== null) {
-    const have = progress?.defended ?? 0;
-    rows.push({
-      label: 'Stopped theirs',
-      have,
-      need: criteria.target_defended,
-      pct: Math.min(1, have / criteria.target_defended),
-    });
-  }
-  if (criteria.target_sessions !== null) {
-    const have = progress?.sessions ?? 0;
-    rows.push({
-      label: 'Sessions',
-      have,
-      need: criteria.target_sessions,
-      pct: Math.min(1, have / criteria.target_sessions),
-    });
-  }
-
-  return (
-    <RNView style={styles.bars}>
-      {rows.map((r) => (
-        <RNView key={r.label} style={styles.barRow}>
-          <Text style={styles.barLabel}>{r.label}</Text>
-          <Text style={styles.barValue}>
-            {enrolled ? `${r.have} / ${r.need}` : String(r.need)}
-          </Text>
-          {enrolled && (
-            <RNView style={styles.barTrack}>
-              <RNView
-                style={[
-                  styles.barFill,
-                  { width: `${Math.round(r.pct * 100)}%` },
-                  r.pct >= 1 && styles.barFull,
-                ]}
-              />
-            </RNView>
-          )}
-        </RNView>
-      ))}
-      {criteria.min_hit_rate !== null && (
-        <RNView style={styles.barRow}>
-          <Text style={styles.barLabel}>Hit rate</Text>
-          <Text style={styles.barValue}>
-            {/*
-              `—`, not `0%`. Zero from zero is not a rate, and rendering it as a
-              zero reports a failure the athlete has not had — the API sends
-              null for exactly this reason.
-            */}
-            {enrolled
-              ? `${
-                  progress?.hit_rate == null
-                    ? '—'
-                    : `${Math.round(progress.hit_rate * 100)}%`
-                } / ${Math.round(criteria.min_hit_rate * 100)}%`
-              : `${Math.round(criteria.min_hit_rate * 100)}%`}
-          </Text>
-        </RNView>
-      )}
-    </RNView>
-  );
+  return out;
 }
 
 const styles = StyleSheet.create({
@@ -465,31 +412,4 @@ const styles = StyleSheet.create({
   secondaryText: { fontSize: 14, fontWeight: '700' },
   pressed: { opacity: 0.6 },
   disabled: { opacity: 0.5 },
-  item: {
-    backgroundColor: vola.surface,
-    borderColor: vola.line,
-    borderWidth: 1,
-    borderRadius: 14,
-    padding: 14,
-    gap: 4,
-  },
-  itemHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  itemName: { color: vola.text, fontSize: 15, fontWeight: '700', flex: 1 },
-  mastered: { fontSize: 10, fontWeight: '800', letterSpacing: 0.8 },
-  itemMeta: { color: vola.textMuted, fontSize: 11 },
-  itemNotes: { color: vola.textMuted, fontSize: 13, lineHeight: 18, marginTop: 2 },
-  itemReading: { color: vola.textMuted, fontSize: 12, marginTop: 6, fontStyle: 'italic' },
-  bars: { gap: 6, marginTop: 8 },
-  barRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  barLabel: { color: vola.textMuted, fontSize: 12, width: 106 },
-  barValue: { color: vola.text, fontSize: 12, fontWeight: '700', width: 74 },
-  barTrack: {
-    flex: 1,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: vola.line,
-    overflow: 'hidden',
-  },
-  barFill: { height: '100%', borderRadius: 2, backgroundColor: vola.textMuted },
-  barFull: { backgroundColor: vola.lime },
 });

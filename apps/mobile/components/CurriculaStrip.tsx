@@ -3,6 +3,7 @@ import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View as RNView } from 'react-native';
 
 import { BeltPhoto } from '@/components/BeltPhoto';
+import { Icon } from '@/components/ui/Icon';
 import { SectionHeader } from '@/components/ui/Section';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
@@ -94,38 +95,51 @@ export function CurriculaStrip() {
                 }
                 testID={`curriculum-card-${c.id}`}
               >
-                <RNView style={styles.cover}>
-                  <BeltPhoto
-                    belt={belt}
-                    // No stripes and no degree. This is the syllabus FOR a
-                    // belt, not a statement about what the athlete has been
-                    // awarded — drawing four stripes on the blue card would
-                    // read as a claim about them.
-                    stripes={0}
-                    degree={0}
-                    width={116}
-                    label=""
-                  />
-                </RNView>
-                <Text style={styles.name} numberOfLines={2}>
-                  {c.name}
-                </Text>
-                <Text style={styles.meta}>
-                  {/*
-                    `countable_items`, never `item_count`. Progress counts only
-                    items carrying criteria, and the API sends the count for
-                    exactly this reason — a web card that divided by the wrong
-                    one told every athlete their roadmap was a reading list.
+                {/* The rule, as on every other row in the app — carrying the
+                    belt rather than a discipline, since every card here is
+                    BJJ. It is the only thing that distinguishes the four at a
+                    glance once the covers are small. */}
+                <RNView style={[styles.rule, { backgroundColor: STRAP[belt] }]} />
 
-                    `mastered_items` is deliberately absent: it is zero on the
-                    LIST response, so showing "0 of 12" here would be a
-                    placeholder rendered as fact.
-                  */}
-                  {c.countable_items} to master
-                </Text>
-                {c.enrolled && (
-                  <Text style={[styles.working, { color: accent.ink }]}>WORKING</Text>
-                )}
+                <RNView style={styles.inner}>
+                  <RNView style={[styles.cover, { backgroundColor: beltTint(belt) }]}>
+                    <BeltPhoto
+                      belt={belt}
+                      // No stripes and no degree. This is the syllabus FOR a
+                      // belt, not a statement about what the athlete has been
+                      // awarded — drawing four stripes on the blue card would
+                      // read as a claim about them.
+                      stripes={0}
+                      degree={0}
+                      width={104}
+                      label=""
+                    />
+                  </RNView>
+
+                  <Text style={[styles.eyebrow, { color: accent.ink }]} numberOfLines={1}>
+                    {c.enrolled ? 'WORKING' : `${belt.toUpperCase()} BELT`}
+                  </Text>
+                  <Text style={styles.name} numberOfLines={2}>
+                    {c.name}
+                  </Text>
+
+                  <RNView style={styles.meta}>
+                    <Icon name="goal" size={12} color={vola.textDim} />
+                    <Text style={styles.metaText}>
+                      {/*
+                        `countable_items`, never `item_count`. Progress counts
+                        only items carrying criteria — a web card that divided
+                        by the wrong one told every athlete their roadmap was a
+                        reading list.
+
+                        `mastered_items` is deliberately absent: it is zero on
+                        the LIST response, so "0 of 12" here would be a
+                        placeholder rendered as fact.
+                      */}
+                      {c.countable_items} to master
+                    </Text>
+                  </RNView>
+                </RNView>
               </Pressable>
             </Link>
           );
@@ -133,6 +147,36 @@ export function CurriculaStrip() {
       </ScrollView>
     </View>
   );
+}
+
+/**
+ * Strap colours, mirrored from `Belt.tsx`.
+ *
+ * Duplicated rather than exported, because that file's are private to its
+ * drawing and this is a different use — a 3pt rule and a wash behind a
+ * photograph, neither of which is the belt itself. If they ever disagree
+ * visibly, share them; today they would only couple two unrelated things.
+ */
+const STRAP: Record<Belt, string> = {
+  white: '#EDEAE3',
+  blue: '#1B4CC4',
+  purple: '#6A2D9B',
+  brown: '#5C3A21',
+  black: '#1A1A1A',
+};
+
+/**
+ * The wash behind the cut-out.
+ *
+ * Alpha rather than a solved tint, for the reason `sportTint` gives: these sit
+ * on `surface` here and could sit on `surfaceRaised` elsewhere, and a tint
+ * solved for one is visibly wrong on the other. Low, because the belt is the
+ * subject — a strong wash makes four cards look like four buttons.
+ */
+function beltTint(belt: Belt): string {
+  // White needs less: a pale wash on a dark ground reads much stronger than a
+  // saturated one at the same alpha.
+  return STRAP[belt] + (belt === 'white' ? '14' : '22');
 }
 
 function beltOf(belt: string | null): Belt | null {
@@ -145,22 +189,31 @@ const styles = StyleSheet.create({
   wrap: { gap: 2 },
   row: { gap: 10, paddingVertical: 4, paddingRight: 4 },
   card: {
-    width: 148,
+    width: 156,
+    flexDirection: 'row',
     backgroundColor: vola.surface,
-    borderColor: vola.line,
+    borderColor: vola.lineSoft,
     borderWidth: 1,
     borderRadius: 14,
-    padding: 12,
-    gap: 2,
+    overflow: 'hidden',
   },
-  pressed: { opacity: 0.7 },
+  pressed: { backgroundColor: vola.surfaceHover },
+  rule: { width: 3, alignSelf: 'stretch' },
+  inner: { flex: 1, padding: 10, gap: 2 },
   cover: {
-    height: 78,
+    height: 66,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 4,
+    marginBottom: 6,
   },
+  eyebrow: { fontSize: 9, fontWeight: '800', letterSpacing: 0.9 },
   name: { color: vola.text, fontSize: 13, fontWeight: '700', lineHeight: 17 },
-  meta: { color: vola.textMuted, fontSize: 11 },
-  working: { fontSize: 10, fontWeight: '800', letterSpacing: 0.8, marginTop: 2 },
+  meta: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
+  metaText: {
+    color: vola.textMuted,
+    fontSize: 11,
+    fontWeight: '600',
+    fontVariant: ['tabular-nums'],
+  },
 });

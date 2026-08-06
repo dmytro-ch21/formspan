@@ -12440,6 +12440,87 @@ search answers with the wrong technique, and by then nobody connects the two.
   Python, so a green suite says nothing about the 430 lines that produced the
   CSV. Acceptable for a one-shot whose output is committed and reviewable;
   worth revisiting if it is ever re-run against a changed curriculum.
+## 2026-08-06 — The roadmap screens learn the app's own vocabulary
+
+The syllabuses shipped correct and looked like a spreadsheet. The feedback was
+specific: *"the techniques are text heavy, no inherited design we have on today
+or you… a bit more visually appealing, don't overdo it."*
+
+That is a real defect, not a polish request. The old row was a stack of labelled
+text — "Landed 0 / 25", "Sessions 0 / 15", "Hit rate — / 40%" — three lines of
+it per technique, fourteen techniques deep. Every row the same shape, so
+**finding the one you are close to finishing meant reading all of them.** A
+roadmap's whole job is to answer "what am I nearly through with", and the
+rendering made that the most expensive question on the screen.
+
+### The row: `SessionCard`'s bones, two deliberate departures
+
+`components/ui/TechniqueRow.tsx` borrows what already works on Today and You — a
+rule down the left, a disc, a name that leads, measures as icon chips. That last
+one is the same argument `SessionCard`'s own comment makes about turning a
+dot-separated string into separate slots.
+
+Two things it does differently, both because the list is different:
+
+1. **The rule carries STATE, not discipline.** SessionCard moved the other way
+   on purpose: its list is mixed, so "which of these was BJJ" is the question.
+   Every row here is BJJ, so the rule is free — and "how far through am I" is
+   the only question a roadmap raises. Three states, `lineSoft` / `textMuted` /
+   accent. Untouched is a *softer* line rather than a faded accent, because a
+   faded accent reads as "done, dimly" and the not-yet/nearly distinction is the
+   entire point of the column.
+2. **The disc holds the step number, not a sport glyph.** A BJJ icon on fourteen
+   consecutive BJJ rows is decoration. The ordinal is not — order is the content
+   of a syllabus, someone put the retention before the sweep on purpose — and it
+   is otherwise invisible. Mastery replaces the number with a check, which is
+   right: the order stops mattering for a row once it is done.
+
+The criteria→chip mapping stayed in `[id].tsx` as `criteriaChips()`, not in the
+row. Which glyph means "landed" is a fact about BJJ; the row should stay usable
+by anything with thresholds.
+
+Both honest-numbers rules from the previous entries survived the rewrite intact,
+and were the things to check hardest, because a rewrite is exactly where they go
+missing: **`—` never `0%`** before an attempt, and **targets-only when browsing**
+rather than zero-filled progress reporting a shortfall the athlete was never
+asked to make up. The accessibility labels got better rather than worse — `12/25`
+announced verbatim tells a screen reader nothing, so each chip carries a spoken
+form, and it differs by enrollment for the same reason the value does.
+
+### The strip: the belt is the subject
+
+Plan's cards were a cover and a name. They now carry the belt's strap colour as
+the rule, a low-alpha wash of the same behind the cut-out, the `WORKING` /
+`{BELT} BELT` eyebrow, and the count as an icon chip. Alpha rather than a solved
+tint, for the reason `sportTint` already gives: these sit on `surface` here and
+could sit on `surfaceRaised` elsewhere. White gets less alpha than the rest —
+a pale wash on a dark ground reads far stronger than a saturated one at the same
+value.
+
+The card chrome is deliberately the quieter pair (`lineSoft`, not `line`), so
+the strip sits below Templates in the hierarchy rather than competing with it.
+It looks almost borderless in a screenshot, and that is the intent.
+
+Net: `[id].tsx` lost 206 lines and 14 dead styles.
+
+### Verified by running it
+
+Simulator, against a local API with evidence seeded so row 1 was mastered and
+row 2 partial — the three rule states had to be *seen* side by side, since a
+single-state screenshot proves nothing about a three-way branch. Rows render the
+numbered disc, `POSITION · CATEGORY` eyebrow, name, notes and the chips
+(`32/25`, `16/15`, `43%/40%`), with met chips tinted. Plan's strip renders all
+four covers with their washes. Demo data and the backdated enrollment were
+deleted afterwards; `.env.local` restored and SHA-verified against its backup.
+
+### Gaps
+
+- **Still no component test for either surface**, and this rewrite widened what
+  one would be worth: the three-state rule and the enrolled/browsing split are
+  now branches in a component rather than in a screen.
+- **The chip row wraps rather than scrolls**, which is right for a clipped
+  number, but four criteria at the largest accessibility text size will take two
+  lines and has not been seen at that size.
 
 ## Open items / known gaps as of this entry
 
