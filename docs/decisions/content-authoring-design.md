@@ -1,7 +1,9 @@
 # Content authoring — retiring the spreadsheet, and publishing without a PR
 
-Status: **proposal, 2026-08-06. Steps 1–5 are built** (see history.md); step 6
-is blocked on a production environment existing. It complements
+Status: **proposal, 2026-08-06. All six steps are built** (see history.md).
+Step 6 landed against **staging** rather than production, which does not exist
+yet — the environment is a variable, and the console now says which one it is
+writing to. It complements
 [history.md](history.md) (what was decided and when) and describes where the
 content pipeline should end up, in two phases that can land months apart.
 
@@ -184,7 +186,8 @@ with no review, you want who, when, and what it was before — a
 `content_revisions` table written in the same transaction as the update. That
 buys rollback in the product, which is what replaces "revert the commit."
 
-**4. One environment is where content is written. — DECIDED: production.**
+**4. One environment is where content is written. — DECIDED: production;
+STAGING in the meantime.**
 The honest version of "no PR" is that content is authored in production, because
 anything else re-invents promotion. Confirmed 2026-08-06. Staging is therefore a
 place to try the console, not a place content flows from, and cross-environment
@@ -193,9 +196,12 @@ promotion is off the design board entirely.
 Two consequences follow immediately, and they reorder the plan:
 
 - **There is no production Postgres yet.** Only `staging`, currently doing
-  double duty for dev and testing. So the *last* step — pointing the console at
-  production — is blocked on infrastructure that does not exist, while
-  everything it depends on is buildable today.
+  double duty for dev and testing. Resolved by making the environment a
+  variable rather than waiting: the console points at staging today and moves
+  by changing `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_CONTENT_ENV`. What that
+  needed was not a config mechanism — one already existed — but for the console
+  to SAY which environment it is writing to, since content saves live and a
+  console is a tab you leave open.
 - **The durability gap is live NOW, not later.** The moment content is authored
   in any console, the database is its only copy: nothing in this repo documents
   a backup, and the snapshot export is what would provide one. That is a
@@ -217,7 +223,7 @@ A CMS. A workflow engine. Multi-user approvals. There is one author.
 | 3. Scheduled snapshot export — **DONE** (`.github/workflows/content-snapshot.yml`), as a bot PR rather than a bot commit: the files it writes are the bootstrap, so they get CI-equivalent validation before landing | 2 | medium |
 | 4. `status` draft/published, API filters to published — **DONE** for techniques; the exercise catalog deliberately did not get a column it has no publish path for | 2 | medium |
 | 5. Revisions + audit + rollback — **DONE** as `technique_revisions`: snapshots rather than diffs, rollback appends rather than truncates, and restore never touches `status` | 2 | medium |
-| 6. Point the console at production, and stop reseeding content on deploy | 3, 4, 5, **and a production environment existing** | small, scary |
+| 6. Point the console at an environment — **DONE**, at staging, with the target shown in the console. The "stop reseeding content on deploy" half turned out to be already done and better done: `source = 'seed'` scopes the seeder, so a deploy skips console-owned rows selectively rather than the whole seed being switched off, which a fresh environment still needs | 3, 4, 5 | small |
 
 Steps 1 and 2 are done. Every one of the 542 techniques is editable from the
 console, and a content fix is a PR that touches one JSON file instead of a

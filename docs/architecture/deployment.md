@@ -102,6 +102,29 @@ curl -sI "$MEDIA_BASE_URL/exercises/.../thumbnail.webp?bust=$(date +%s)" | grep 
 
 The per-sport placeholders in `defaultMedia` have no database row, so their version comes from the hand-maintained `defaultMediaRevision` constant. **Bump it when you replace a `_defaults/` asset**, or those are the one set of images that can never change.
 
+### Which environment the console writes to
+
+Content authored in the admin console is live immediately, so the operator has
+to be able to see which database they are editing. Two variables, set together:
+
+| Variable | What it does |
+| --- | --- |
+| `NEXT_PUBLIC_API_URL` | **The actual switch** — which backend the console talks to. |
+| `NEXT_PUBLIC_CONTENT_ENV` | **The label** — `local`, `staging` or `production`, shown as a badge in the masthead on every screen. |
+
+**Currently staging**, because there is no production Postgres yet. Moving to
+production is changing both, in whatever sets them for that deployment.
+
+They are two variables rather than one derived from the other on purpose: a
+badge that guessed the environment from the API hostname would be a rule that
+holds until someone adds a domain, and being wrong is exactly what it exists to
+prevent. The cost is that they can disagree — set them together, and note that
+nothing yet asserts they match.
+
+Unset behaves deliberately: against a `localhost` API it shows "Local" quietly,
+and against a remote one it shows **"Unlabelled environment"** in red rather
+than inventing a reassuring default.
+
 ### Content snapshots — the backup for console-authored content
 
 Content written in the admin console is live immediately and lives **only in

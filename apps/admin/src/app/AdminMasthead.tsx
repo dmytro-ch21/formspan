@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { VolaMark } from "./Brand";
+import { EnvironmentBadge } from "./EnvironmentBadge";
 
 /**
  * The console's masthead: the mark, the page's own name, and where else to go.
@@ -93,6 +94,12 @@ export function AdminMasthead({ title, meta, children, action, section, back }: 
         >
           <VolaMark style={{ height: MARK_HEIGHT, width: MARK_HEIGHT * MARK_ASPECT }} />
         </Link>
+
+        {/* Beside the mark, on EVERY screen, because the dangerous moment is
+            not the one where you go looking for it. Content written here is
+            live immediately, and which database that is cannot be inferred
+            from anything else on the page. */}
+        <EnvironmentBadge />
         {/* A rule, so the tick doesn't read as a bullet on the title. */}
         <span aria-hidden="true" className="h-6 w-px shrink-0 bg-border-strong" />
         <h1 className="font-barlow-condensed text-[17px] font-bold tracking-[0.1em] uppercase">
