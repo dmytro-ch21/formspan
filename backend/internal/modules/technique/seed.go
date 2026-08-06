@@ -5,11 +5,15 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strconv"
+	"strings"
 )
 
-// Generated from the authored spreadsheet by
-// scripts/import-exercise-catalog.py — the spreadsheet is the authoring
-// surface, this is the build artifact. Embedded so the binary is
+// The technique catalog, hand-authored in this repo. It was generated from a
+// spreadsheet until 2026-08, when that was retired and this file became the
+// source of truth rather than a build artifact — see
+// docs/decisions/content-authoring-design.md. Embedded so the binary is
 // self-contained and seeding can't fail on a container missing a data dir.
 //
 //go:embed techniques.json
@@ -106,6 +110,29 @@ func ValidateFields(t Technique) error {
 		return fmt.Errorf("technique: %q name is too long (max %d)", t.ID, maxNameLen)
 	case !validGiNoGi[t.GiNoGi]:
 		return fmt.Errorf("technique: %q has unknown gi_no_gi %q", t.ID, t.GiNoGi)
+	case entanglementDetails[t.PositionDetail] != (t.Position == positionLegEntanglement):
+		// The one rule the retired spreadsheet importer applied that is a
+		// genuine invariant rather than a derivation. It used to live in
+		// `apply_taxonomy`, which rewrote `position` on import; with the
+		// importer gone the value is authored, so this is what keeps it honest.
+		//
+		// HERE rather than in validate() because it needs no view of the rest of
+		// the library, and because the two paths that skip validate() are
+		// exactly the ones that most need it: the admin console write path,
+		// which would otherwise put a violating row live in that environment
+		// immediately, and exportcontent, whose whole promise is refusing an
+		// entry that cannot seed BEFORE writing it to the file a deploy embeds.
+		//
+		// A biconditional on purpose. Half of it — an entanglement detail filed
+		// under "Guard - Bottom" — puts a heel hook from the saddle on the same
+		// screen as a spider-guard sweep, which is what promoting the position
+		// fixed. The other half is worse and the obvious one-way check misses
+		// it: a row claiming Leg Entanglement with some other detail joins a
+		// position whose glossary entry cannot explain it.
+		return fmt.Errorf(
+			"technique: %q has position %q with position_detail %q — the "+
+				"entanglement details (%s) and the Leg Entanglement position imply "+
+				"each other", t.ID, t.Position, t.PositionDetail, entanglementDetailList())
 	case t.Function != "" && !validFunctions[t.Function]:
 		// The column has no CHECK constraint (see migration 000028), so this
 		// is the only thing standing between a typo and a value no client
@@ -118,6 +145,44 @@ func ValidateFields(t Technique) error {
 
 // maxNameLen bounds the name, and therefore the derived id.
 const maxNameLen = 200
+
+// The ashi garami family is its own position, not a kind of guard.
+//
+// Inherited from `scripts/import-exercise-catalog.py`, which set `position`
+// from these details at import time and was retired with the spreadsheet in
+// 2026-08. What did NOT come across is that script's other derivation — the
+// regex ladder that guessed `function` from a technique's NAME. As a build step
+// over a sheet that had no function column it was reasonable; as a validator it
+// would make a name pattern a hard requirement for new content, so authoring
+// "Cement Mixer" in the console would be rejected for matching no rule. That is
+// not hypothetical: it is exactly how the gap-fill broke the importer. `function`
+// is authored data now, checked against the vocabulary by ValidateFields and
+// nothing more.
+//
+// EXACT matches only. "Judo Ashi-waza" is foot sweeps — same word, unrelated
+// technique — and "Single-Leg Defense"/"Single-Leg Finish" are takedown work. A
+// substring match on "ashi" or "single-leg" sweeps all three in.
+//
+//nolint:gochecknoglobals // vocabulary, not state
+var entanglementDetails = map[string]bool{
+	"Leg Entanglement": true, "50/50": true,
+	"Backside 50/50": true, "Single-Leg X": true,
+}
+
+const positionLegEntanglement = "Leg Entanglement"
+
+// entanglementDetailList renders the vocabulary for the error message.
+// DERIVED from the map rather than written out beside it: a fifth detail added
+// to one and not the other would make the rejection lie about what is allowed,
+// which is worse than no list at all.
+func entanglementDetailList() string {
+	out := make([]string, 0, len(entanglementDetails))
+	for d := range entanglementDetails {
+		out = append(out, strconv.Quote(d))
+	}
+	sort.Strings(out)
+	return strings.Join(out, ", ")
+}
 
 func validate(techniques []Technique) error {
 	// The `techniques.position` vocabulary — the destinations a to_position

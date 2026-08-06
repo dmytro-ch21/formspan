@@ -85,6 +85,18 @@ func TestValidate_RejectsBadContent(t *testing.T) {
 			{ID: "a", Name: "A", Category: "Sweep", Position: "Guard - Bottom",
 				GiNoGi: "Both", Function: "submit"},
 		}},
+		// Both halves of the entanglement biconditional. This rule used to be a
+		// rewrite in the retired spreadsheet importer; here it can only reject,
+		// so both directions need a case or half of it is untested — and the
+		// second half is the one a one-way check would miss.
+		{"entanglement detail filed under another position", []Technique{
+			{ID: "a", Name: "A", Category: "Submission", Position: "Guard - Bottom",
+				PositionDetail: "Single-Leg X", GiNoGi: "Both"},
+		}},
+		{"leg entanglement position with an unrelated detail", []Technique{
+			{ID: "a", Name: "A", Category: "Submission", Position: "Leg Entanglement",
+				PositionDetail: "Closed Guard", GiNoGi: "Both"},
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

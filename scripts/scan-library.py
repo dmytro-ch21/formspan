@@ -90,10 +90,11 @@ IDF = {}
 
 
 def load():
+    # One file. It used to concatenate techniques.additions.json as well, which
+    # DOUBLE-COUNTED every row in it — the additions were always present in
+    # techniques.json too — skewing the word rarities below. The retirement of
+    # the spreadsheet deleted that file, and the skew with it.
     items = json.loads((SRC / "techniques.json").read_text())
-    add = SRC / "techniques.additions.json"
-    if add.exists():
-        items += json.loads(add.read_text())
     for t in items:
         # A row's position lives in two places; the structured column and the
         # name often disagree in specificity ("Armbar from Closed Guard" vs
@@ -145,15 +146,19 @@ def score(want: set, have: set) -> tuple:
 
 # A shared token must carry at least this much rarity to count as evidence.
 #
-# Measured rather than guessed, over the 482-row concatenation this script
-# then built. NOTE that concatenation double-counts: every entry in
-# techniques.additions.json is also in techniques.json (see cmd/exportcontent),
-# so the corpus is 634 rows over a 542-technique library and these figures
-# carry that skew. The category words a
-# hundred techniques share sit just below it — escape 2.25, sweep 2.33,
-# control 2.54, pass 2.57, choke 2.71 — and the words that actually name a
-# technique sit just above: armbar 3.29, kimura 3.78, break 4.57, sleeve 5.08.
-# Below this line two techniques share a noun; above it they share an identity.
+# Measured rather than guessed, originally over a 482-row corpus that
+# double-counted 16 rows (see load()). The skew is gone now that the corpus is
+# the 542-row catalog exactly, and the figures below are the ORIGINAL
+# measurements, kept because this script is retired: it produced the 2026-08
+# gap-fill, its output is committed, and re-tuning a threshold nobody will run
+# again would be motion rather than work. If it is ever revived, re-measure
+# first — the numbers below no longer describe the corpus it would build.
+#
+# The category words a hundred techniques share sat just below the line —
+# escape 2.25, sweep 2.33, control 2.54, pass 2.57, choke 2.71 — and the words
+# that actually name a technique just above: armbar 3.29, kimura 3.78, break
+# 4.57, sleeve 5.08. Below this line two techniques share a noun; above it they
+# share an identity.
 FLOOR = 2.9
 
 

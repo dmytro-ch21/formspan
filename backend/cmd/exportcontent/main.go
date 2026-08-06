@@ -7,31 +7,26 @@
 // production never learns about it, and nothing reviews an id that becomes a
 // permanent foreign key in athletes' training records.
 //
-// # WHICH FILES, AND WHY BOTH
+// # WHICH FILE
 //
-// It writes TWO files, because they mean two different things and content that
-// lands in only one of them is lost by a different route each time:
+// One file per catalog: techniques.json and exercises.json, the DEPLOY
+// ARTIFACTS. Each is what `//go:embed` bakes into the binary, what SeedData()
+// returns, and what `cmd/seed` writes to the database. Content that is not
+// there is not in the deploy — so -adopt would hand the row to a release that
+// cannot reseed it, and the next fresh environment simply would not have it.
 //
-//   - techniques.json is the DEPLOY ARTIFACT. It is what `//go:embed` bakes
-//     into the binary, what SeedData() returns, and what `cmd/seed` writes to
-//     the database. Content that is not here is not in the deploy — so
-//     -adopt would hand the row to a release that cannot reseed it, and the
-//     next fresh environment simply would not have the technique.
-//
-//   - techniques.additions.json is the record of content NOT from the
-//     spreadsheet. `scripts/import-exercise-catalog.py` rebuilds
-//     techniques.json from the sheet and merges this file in. Content that is
-//     not here is deleted by the next re-import, silently, because the sheet
-//     is a full replacement rather than a patch.
-//
-// All 92 existing additions are present in both files. That is the invariant
-// this command maintains, not an accident to be tidied up — so the two files
-// hold 634 entries between them over a library of 542 distinct techniques,
-// and adding their lengths together double-counts every addition.
+// It used to write TWO files each. The second, `*.additions.json`, recorded
+// which rows did NOT come from the authoring spreadsheet, because
+// `scripts/import-exercise-catalog.py` rebuilt the seed file from that sheet as
+// a FULL REPLACEMENT and would otherwise have deleted them. The spreadsheet was
+// retired in 2026-08 (see docs/decisions/content-authoring-design.md), the
+// importer no longer runs, and with nothing regenerating the seed file there is
+// nothing for a second file to protect content from. Every row is now equally
+// repo-owned, which is the whole point of the retirement.
 //
 // USAGE
 //
-//	go run ./cmd/exportcontent                # write both files, touch nothing else
+//	go run ./cmd/exportcontent                # write the seed files, nothing else
 //	go run ./cmd/exportcontent -adopt         # ...and hand the rows to the deploy
 //
 // The two steps are separate on purpose. Until the JSON is committed AND
@@ -63,12 +58,8 @@ func main() {
 	var (
 		techSeed = flag.String("techniques", "internal/modules/technique/techniques.json",
 			"the technique deploy artifact — embedded in the binary and seeded to the database")
-		techAdd = flag.String("technique-additions", "internal/modules/technique/techniques.additions.json",
-			"the non-spreadsheet technique record — merged back in by the importer")
 		exSeed = flag.String("exercises", "internal/modules/exercise/exercises.json",
 			"the exercise deploy artifact")
-		exAdd = flag.String("exercise-additions", "internal/modules/exercise/exercises.additions.json",
-			"the non-spreadsheet exercise record — merged back in by the importer")
 		adopt = flag.Bool("adopt", false,
 			"after writing, mark the exported rows source='seed' — only once the JSON is deployed")
 	)
@@ -106,7 +97,7 @@ func main() {
 	}
 
 	catalogs := catalogsFor(
-		filePaths{*techSeed, *techAdd, *exSeed, *exAdd},
+		filePaths{*techSeed, *exSeed},
 		techniques, techRepo.AdoptAsSeeded,
 		exercises, exRepo.AdoptAsSeeded,
 	)
@@ -123,10 +114,6 @@ func main() {
 			os.Exit(1)
 		}
 		deployed[c.what] = have
-		if err := refuseSheetOwned(c.seedPath, c.additionsPath, c.ids); err != nil {
-			logger.Error("export: refused", "catalog", c.what, "err", err)
-			os.Exit(1)
-		}
 	}
 
 	for _, c := range catalogs {
@@ -175,8 +162,8 @@ func main() {
 	}
 }
 
-// filePaths is the four files an export touches.
-type filePaths struct{ techSeed, techAdditions, exSeed, exAdditions string }
+// filePaths is the two files an export touches.
+type filePaths struct{ techSeed, exSeed string }
 
 // catalogsFor builds what the export runs over.
 //
@@ -195,7 +182,7 @@ func catalogsFor(
 ) []catalog {
 	return []catalog{
 		{
-			what: "techniques", seedPath: p.techSeed, additionsPath: p.techAdditions,
+			what: "techniques", seedPath: p.techSeed,
 			entries: mapEntries(techniques, techniqueEntryOf),
 			ids:     idsOfTechniques(techniques),
 			adopt:   adoptTechniques,
@@ -211,7 +198,7 @@ func catalogsFor(
 			},
 		},
 		{
-			what: "exercises", seedPath: p.exSeed, additionsPath: p.exAdditions,
+			what: "exercises", seedPath: p.exSeed,
 			entries:  mapEntries(exercises, exerciseEntryOf),
 			ids:      idsOfExercises(exercises),
 			adopt:    adoptExercises,
@@ -261,11 +248,10 @@ func idsOfExercises(es []exercise.Exercise) []string {
 // files is lost, by the deploy not carrying it or by the next re-import deleting
 // it. One implementation means one place for that to be right.
 type catalog struct {
-	what          string // "techniques" | "exercises", for the log line
-	seedPath      string
-	additionsPath string
-	entries       []entry
-	ids           []string
+	what     string // "techniques" | "exercises", for the log line
+	seedPath string
+	entries  []entry
+	ids      []string
 	// preserve names keys whose existing value in the FILE wins over the
 	// exported one. See mergeInto.
 	preserve []string
@@ -284,27 +270,12 @@ type catalog struct {
 	validate func() error
 }
 
-// run merges the authored rows into BOTH catalog files and writes them.
+// run merges the authored rows into the catalog's seed file and writes it.
 //
-// Both files or neither, as far as that is achievable across two files: every
-// merge is staged before any write, so a parse error in the second cannot leave
-// the first rewritten. A write failure after that is bounded — main() exits
-// before -adopt, the database still holds the only authoritative copy, and
-// re-running re-derives both files from it.
-//
-// techniques.json is written FIRST on purpose. If the second write fails, the
-// half-state is "in the deploy artifact but not the additions record", which the
-// next spreadsheet re-import cleans up by deleting the entry. The reverse
-// half-state is a phantom: content the deploy never carries, which nothing
-// removes and nobody can edit.
+// A write failure is bounded: main() exits before -adopt, the database still
+// holds the only authoritative copy, and re-running re-derives the file from
+// it.
 func run(c catalog, logger *slog.Logger) error {
-	type staged struct {
-		what   string
-		path   string
-		merged []entry
-		added  int
-		upd    int
-	}
 	// Before any write: the file is what go:embed bakes into the binary, so an
 	// entry that cannot seed takes the next deploy down, far from the operator
 	// who could still fix it.
@@ -315,35 +286,27 @@ func run(c catalog, logger *slog.Logger) error {
 		return fmt.Errorf("%s: %w", c.what, err)
 	}
 
-	var plan []staged
-	for _, f := range []struct{ what, path string }{
-		{"seed", c.seedPath},
-		{"additions", c.additionsPath},
-	} {
-		merged, added, upd, err := mergeInto(f.path, c.entries, c.preserve...)
-		if err != nil {
-			return fmt.Errorf("%s: %w", f.what, err)
-		}
-		plan = append(plan, staged{f.what, f.path, merged, added, upd})
+	// Merge before write, still: a parse error must not leave a half-written
+	// file behind. One file makes that trivial where it used to need staging.
+	merged, added, upd, err := mergeInto(c.seedPath, c.entries, c.preserve...)
+	if err != nil {
+		return err
 	}
-	for _, p := range plan {
-		if err := writeJSON(p.path, p.merged); err != nil {
-			return fmt.Errorf("%s: %w", p.what, err)
-		}
-		logger.Info("export: wrote", "catalog", c.what, "file", p.what, "path", p.path,
-			"added", p.added, "updated", p.upd, "total", len(p.merged))
+	if err := writeJSON(c.seedPath, merged); err != nil {
+		return err
 	}
-	// Read back rather than trust the writes: one guard for a half write, a
-	// silent dedupe, and a broken two-file invariant at once.
+	logger.Info("export: wrote", "catalog", c.what, "path", c.seedPath,
+		"added", added, "updated", upd, "total", len(merged))
+
+	// Read back rather than trust the write: one guard for a half write and a
+	// silent dedupe at once.
 	//
 	// Deliberately redundant. Removing the CALL leaves the suite green, because
-	// every state it catches has its own test and the writes above are correct —
+	// every state it catches has its own test and the write above is correct —
 	// it earns its place at runtime, on a filesystem that lied, not in the test
 	// matrix. verifyContains itself is tested.
-	for _, p := range plan {
-		if err := verifyContains(p.path, c.ids); err != nil {
-			return fmt.Errorf("%s: %w", p.what, err)
-		}
+	if err := verifyContains(c.seedPath, c.ids); err != nil {
+		return err
 	}
 	return nil
 }
@@ -381,43 +344,6 @@ func adoptable(alreadyDeployed map[string]bool, ids []string) []string {
 	return out
 }
 
-// refuseSheetOwned rejects any authored id the SPREADSHEET owns.
-//
-// An id in techniques.json but not in techniques.additions.json came from the
-// sheet, and `scripts/import-exercise-catalog.py` regenerates those from the
-// sheet on every run — so an admin edit to one would be silently reverted by
-// the next import, long after the export looked like it worked. The importer
-// also exits on "additions collide with sheet ids", so writing it to the
-// additions file breaks the import outright.
-//
-// A hard error rather than a skip: skipping would silently drop content that
-// has no other copy, which is the failure this whole command exists to prevent.
-func refuseSheetOwned(seedPath, additionsPath string, ids []string) error {
-	seeded, err := idsIn(seedPath)
-	if err != nil {
-		return err
-	}
-	ours, err := idsIn(additionsPath)
-	if err != nil {
-		return err
-	}
-	var clashes []string
-	for _, id := range ids {
-		if seeded[id] && !ours[id] {
-			clashes = append(clashes, id)
-		}
-	}
-	if len(clashes) > 0 {
-		sort.Strings(clashes)
-		return fmt.Errorf(
-			"these ids are owned by the spreadsheet (present in %s but not %s), so the next "+
-				"import would revert any edit to them and would refuse the additions file "+
-				"outright: %v — edit the sheet and re-import, or give the technique a new id",
-			filepath.Base(seedPath), filepath.Base(additionsPath), clashes)
-	}
-	return nil
-}
-
 func idsIn(path string) (map[string]bool, error) {
 	entries, err := readEntries(path)
 	if err != nil {
@@ -432,14 +358,13 @@ func idsIn(path string) (map[string]bool, error) {
 
 // mergeInto folds the exported techniques into an existing catalog file.
 //
-// MERGE, not replace. Both files hold content this command never wrote — the
-// additions file predates it by months, and techniques.json is 542 entries
-// generated from the spreadsheet — so overwriting either would destroy content
-// that has no other copy.
+// MERGE, not replace. The file holds content this command never wrote — 542
+// techniques and 504 exercises, hand-authored in the repo — so overwriting it
+// would destroy content that has no other copy.
 //
 // Entries are matched by id and replaced; everything else is kept BYTE FOR
 // BYTE, key order included. That is what makes the diff reviewable: without it
-// the first export reorders every key of all 634 entries (Go marshals a map
+// the first export reorders every key of all 542 entries (Go marshals a map
 // with its keys sorted, the files are written in semantic order) and buries the
 // one real change in a whole-file rewrite. Nobody reads that diff, and the
 // review step is the only thing standing between a typo and a permanent
@@ -462,19 +387,19 @@ func mergeInto(path string, authored []entry, preserve ...string) (
 		if _, dup := byID[id]; dup {
 			// Keeping the last occurrence would DELETE the other on the next
 			// write — the "content with no other copy" loss this command exists
-			// to prevent, committed by the command. techniques.json cannot reach
-			// this state (validate() rejects duplicate ids) but the additions
-			// file has no such check.
+			// to prevent, committed by the command. The shipped catalog cannot
+			// reach this state — validate() rejects duplicate ids long before a
+			// write — but this reads whatever is actually on disk.
 			return nil, 0, 0, fmt.Errorf("%s holds two entries with id %q", path, id)
 		}
 		order = append(order, id)
 		byID[id] = e
 	}
-	// Existing entries keep the file's own order. NEITHER file is in id order —
-	// techniques.json is in spreadsheet order and the additions file inverts at
-	// index 2 — so re-sorting would be the whole-file rewrite this function
-	// exists to avoid. An earlier version sorted "if the file is already
-	// sorted", which was dead code that read as a live rule.
+	// Existing entries keep the file's own order. The catalog is NOT in id order
+	// — it is in the order the spreadsheet that seeded it used, with everything
+	// authored since appended — so re-sorting would be the whole-file rewrite
+	// this function exists to avoid. An earlier version sorted "if the file is
+	// already sorted", which was dead code that read as a live rule.
 	//
 	// New ids are appended, sorted among themselves, so the output does not
 	// depend on the order the database happened to return them in.
@@ -775,7 +700,8 @@ func rawJSON(v any) (json.RawMessage, error) {
 }
 
 // readEntries parses a catalog file, keeping each entry's key order. A missing
-// file is an empty list, not an error — the additions file may not exist yet.
+// file is an empty list, not an error — a catalog can be exported before its
+// seed file exists.
 func readEntries(path string) ([]entry, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {

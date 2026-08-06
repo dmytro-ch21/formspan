@@ -489,7 +489,8 @@ The consequences fall out for free:
 - The Plan tab's **My / Shared** tab strip already exists for workouts and
   applies here without redesign.
 - Seeding follows the existing content path (`cmd/seed`, `cmd/exportcontent`,
-  the `.json` + `.additions.json` pair) — including the trap that console-authored
+  the seed JSON; the `.additions.json` half of this was retired in 2026-08) —
+  including the trap that console-authored
   content must be exported into *both* files or it is lost.
 - Admin authoring of the predefined sets reuses `/content`'s rules: only
   `source=admin` rows are editable, ownership is membership of that list rather
