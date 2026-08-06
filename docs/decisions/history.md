@@ -12440,6 +12440,211 @@ search answers with the wrong technique, and by then nobody connects the two.
   Python, so a green suite says nothing about the 430 lines that produced the
   CSV. Acceptable for a one-shot whose output is committed and reviewable;
   worth revisiting if it is ever re-run against a changed curriculum.
+## 2026-08-06 — The roadmap screens learn the app's own vocabulary
+
+The syllabuses shipped correct and looked like a spreadsheet. The feedback was
+specific: *"the techniques are text heavy, no inherited design we have on today
+or you… a bit more visually appealing, don't overdo it."*
+
+That is a real defect, not a polish request. The old row was a stack of labelled
+text — "Landed 0 / 25", "Sessions 0 / 15", "Hit rate — / 40%" — three lines of
+it per technique, fourteen techniques deep. Every row the same shape, so
+**finding the one you are close to finishing meant reading all of them.** A
+roadmap's whole job is to answer "what am I nearly through with", and the
+rendering made that the most expensive question on the screen.
+
+### The row: `SessionCard`'s bones, two deliberate departures
+
+`components/ui/TechniqueRow.tsx` borrows what already works on Today and You — a
+rule down the left, a disc, a name that leads, measures as icon chips. That last
+one is the same argument `SessionCard`'s own comment makes about turning a
+dot-separated string into separate slots.
+
+Two things it does differently, both because the list is different:
+
+1. **The rule carries STATE, not discipline.** SessionCard moved the other way
+   on purpose: its list is mixed, so "which of these was BJJ" is the question.
+   Every row here is BJJ, so the rule is free — and "how far through am I" is
+   the only question a roadmap raises. Three states, `lineSoft` / `textMuted` /
+   accent. Untouched is a *softer* line rather than a faded accent, because a
+   faded accent reads as "done, dimly" and the not-yet/nearly distinction is the
+   entire point of the column.
+2. **The disc holds the step number, not a sport glyph.** A BJJ icon on fourteen
+   consecutive BJJ rows is decoration. The ordinal is not — order is the content
+   of a syllabus, someone put the retention before the sweep on purpose — and it
+   is otherwise invisible. Mastery replaces the number with a check, which is
+   right: the order stops mattering for a row once it is done.
+
+The criteria→chip mapping stayed in `[id].tsx` as `criteriaChips()`, not in the
+row. Which glyph means "landed" is a fact about BJJ; the row should stay usable
+by anything with thresholds.
+
+Both honest-numbers rules from the previous entries survived the rewrite intact,
+and were the things to check hardest, because a rewrite is exactly where they go
+missing: **`—` never `0%`** before an attempt, and **targets-only when browsing**
+rather than zero-filled progress reporting a shortfall the athlete was never
+asked to make up. Review confirmed both case by case against the old `Bars`
+code, along with the `countable_items` division.
+
+### Review caught the redesign failing at its own stated job
+
+Two blocking findings, and the first is the one worth remembering.
+
+**The three-state rule collapsed for the most common in-progress input.** I had
+written `started = criteria.some((c) => c.met) || mastered` — but a criterion
+turns `met` only when it is fully *cleared*. An enrolled athlete at 24/25
+landed, 14/15 sessions and 38% against a 40% floor has **nothing** met, and drew
+the untouched rule: pixel-identical to a technique they had never trained. So
+for the entire span from first rep to first completed target — most of the
+journey — the column made a false claim about their record, and the question
+this redesign exists to answer went unanswered precisely where the answer was
+"this one". `lineSoft` on `surface` measures 1.14:1, which `Colors.ts` itself
+documents as invisible, so it was not even a quiet wrong answer.
+
+It cannot be fixed inside the component: chips carry only a `met` boolean, so
+the partial counts are not there to read. `started` is now a prop, computed
+from `progress` — `attempts > 0 || defended > 0 || sessions > 0` (`attempts` is
+`scored + attempted`, so it already covers landing it; `defended` is its own
+axis).
+
+**A correction, because the first version of this entry got it wrong.** It said
+"a drilled-only session moves `sessions` without moving either of the others",
+and that is false: the backend filters `sessions` to `attempted`/`scored`/
+`defended` on purpose, so a technique cannot clear its spread requirement
+without being used on somebody who was resisting. Drilling moves **nothing**.
+So a drilled-only athlete reads as untouched — and since `Progress` carries no
+drilled count at all, the client has no signal to read even if we wanted the
+other answer. That makes it a limitation forced by the payload rather than a
+decision, and it is now written down as one instead of being justified by a
+mechanism that does not exist. It is defensible on its own terms (drilling
+moves none of the numbers the chips display, so a "started" rule beside three
+`0/25` chips would claim progress the criteria do not recognise) — but closing
+it needs a `drilled` count on the progress payload, not a client change.
+
+The lesson is narrower than "test your states": I derived a display state from
+the *nearest available* boolean rather than from the thing it was supposed to
+mean, because the nearest one was already in the component. And I then wrote it
+into `functional-scenarios.md` verbatim, which would have frozen the bug as the
+specification.
+
+**Mastery stopped being announced at all.** The old row had `MASTERED` as
+visible text — an accessibility element for free. The new one carries mastery in
+a check glyph, the rule colour and a chip tint, and `Icon` sets
+`accessible={false}` on every glyph by design, so all three are invisible to
+VoiceOver. A mastered row announced its chips and never its state. The disc now
+carries `Mastered` / `Step 3`, which also fixes the bare "3" the ordinal
+announced. My claim in the first draft of this entry that "the accessibility
+labels got better rather than worse" was true of the chips and false of the row.
+
+Three suggestions taken: the strip's rule moved from the physical strap colours
+(2.50 blue, 2.14 purple, 1.81 brown, 1.05 black against this surface — the last
+literally invisible) to `beltAccent`, which exists as "the legible reading of
+each, all clearing 3:1"; `beltAccent`'s own doc note said "the rank card and
+nothing else", so it was **amended deliberately** rather than quietly broken —
+the line it draws is against belt-coloured *chrome*, not against one element
+naming one belt. Notes are no longer clamped to two lines (the longest curator
+note is 103 characters, about three lines here, with no way to reach the rest —
+and notes are where the syllabus explains why a step sits where it does). And
+the browsing eyebrow dropped the accent, which had been putting "BLUE BELT" in
+the athlete's orange directly above a blue strap.
+
+### The strip: the belt is the subject
+
+Plan's cards were a cover and a name. They now carry the belt's strap colour as
+the rule, a low-alpha wash of the same behind the cut-out, the `WORKING` /
+`{BELT} BELT` eyebrow, and the count as an icon chip. Alpha rather than a solved
+tint, for the reason `sportTint` already gives: these sit on `surface` here and
+could sit on `surfaceRaised` elsewhere. White gets less alpha than the rest —
+a pale wash on a dark ground reads far stronger than a saturated one at the same
+value.
+
+The card chrome is deliberately the quieter pair (`lineSoft`, not `line`), so
+the strip sits below Templates in the hierarchy rather than competing with it.
+It looks almost borderless in a screenshot, and that is the intent.
+
+Net: `[id].tsx` lost 206 lines and 14 dead styles.
+
+### Verified by running it
+
+Simulator, against a local API with evidence seeded so row 1 was mastered and
+row 2 partial — the three rule states had to be *seen* side by side, since a
+single-state screenshot proves nothing about a three-way branch. Rows render the
+numbered disc, `POSITION · CATEGORY` eyebrow, name, notes and the chips
+(`32/25`, `16/15`, `43%/40%`), with met chips tinted. Plan's strip renders all
+four covers with their washes. Demo data and the backdated enrollment were
+deleted afterwards; `.env.local` restored and SHA-verified against its backup.
+
+### A component test, because both defects were invisible to looking
+
+`components/__tests__/techniqueRow.test.tsx` — eleven cases, and it exists
+because a screenshot could not have caught either blocking finding. The rule bug
+needed a *near-miss* row rendered beside the other two states; a mastered row
+and a fresh row look perfect and say nothing about the middle. The announcement
+bug needed a screen reader. Both were caught by reading the code, which is not a
+repeatable check.
+
+All seven mutations die, measured rather than estimated. One is worth recording
+because it survived the first draft and the reason generalises: **removing
+`accessible` from the disc left every label assertion green.** RNTL's
+`getByLabelText` matches the `accessibilityLabel` *prop*, whether or not the
+element is an accessibility element at all — so the test proved the label
+existed while VoiceOver, where a `View` defaults to non-accessible and reads the
+children instead, would have heard nothing. Asserting a label is not asserting
+it is announced. That needed its own line, and any future a11y test in this repo
+has the same hole by default.
+
+This is the third time in this app's history that a test passed for a reason
+other than the one intended (a 300s token that never reached the offline path;
+a backoff ladder already at the value being asserted; now this). The pattern is
+the same each time — the assertion was true of something adjacent to the
+behaviour, not of the behaviour.
+
+### The second review round, and the hole it found in the first fix
+
+Re-review confirmed both fixes but caught the mapping layer being untestable
+where it sat. Its words: the component test "stays green if `hasEvidence` reads
+`scored` instead of `attempts`, because the row only ever sees a boolean" — so
+the exact class of defect that had just shipped still had no coverage, in
+either file. `hasEvidence` and `criteriaChips` moved to `lib/curriculumRow.ts`
+with 17 tests of their own, and the `attempts`→`scored` swap now goes red.
+
+It also found two assertions in the component test that could never fail:
+`queryByLabelText(/0 of 25/)` and `queryByText(/0\//)` read as the honest-
+numbers guard, but that behaviour lives in `criteriaChips`, which that file
+does not import. Both are gone — replaced by assertions about what the row
+itself does, with the real coverage in the lib test. Worth noting the shape:
+they were not wrong, they were *about nothing*, which is harder to see than a
+wrong assertion and reads as more coverage than it is.
+
+And `validate_palette.mjs` was checking belts against `surfaceRaised` only,
+while `Colors.ts` now promises 3:1 on both it and `surface` — where the strip's
+rule actually sits. Arithmetically safe (surface is the darker of the two), but
+an unchecked promise is how the strip shipped at 1.05:1 in the first place. It
+checks both now; the tightest is black at 3.30 raised / 3.61 surface.
+
+### Gaps
+
+- **Nothing covers `CurriculaStrip` or the roadmap screen end to end** — the
+  tests are the row and the mapping in isolation.
+- **No per-note length cap on the server.** `curriculum.go` bounds the body at
+  64KB and items at 60, but a single note is unbounded — and now that notes are
+  unclamped, a user-authored one of a few thousand characters renders in full in
+  a non-virtualised `ScrollView`. Self-inflicted and no crash, but it wants a
+  cap (or an expand affordance) before athlete-authored curricula reach this
+  screen.
+- **The chip row wraps rather than scrolls**, which is right for a clipped
+  number, but four criteria at the largest accessibility text size will take two
+  lines and has not been seen at that size.
+- **VoiceOver was never actually heard.** The disc's label is asserted in jest
+  and reasoned from RN semantics; nobody has run the screen with the screen
+  reader on. Same for the contrast figures, which are computed rather than
+  observed. Review also noted the row is 5–6 separate accessibility elements, so
+  a forward swipe hears "Mastered" *before* the technique name — defensible and
+  consistent with the app's other cards, but one composed label per row would
+  serve someone walking fourteen of them better.
+- **The redesigned screens have not been seen since the fixes.** The Simulator
+  pass predates them, so the near-miss rule state is proven in jest and has
+  never been looked at.
 
 ## Open items / known gaps as of this entry
 

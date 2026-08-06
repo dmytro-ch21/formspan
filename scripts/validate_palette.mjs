@@ -376,9 +376,16 @@ for (let i = 0; i < tiles.length; i++) {
   }
 }
 
-heading('Belt accents — rank card only');
+heading('Belt accents — the rank card and the belt-syllabus cards');
 for (const [belt, hex] of Object.entries(BELT)) {
   ratio(`${belt} on raised`, hex, S.raised, 3);
+  // `surface` too, since the Plan tab's syllabus cards took the second
+  // sanctioned use of this set and their rule sits on `surface`, not `raised`.
+  // Arithmetically it cannot fail while `raised` passes — surface is the darker
+  // of the two, so every ratio is strictly higher — but the doc comment in
+  // Colors.ts promises 3:1 on BOTH, and an unchecked promise is how the strip
+  // shipped with the strap colours at 1.05:1 in the first place.
+  ratio(`${belt} on surface`, hex, S.surface, 3);
   ratio(`${belt} — ink on it`, BELT_ON[belt], hex, 4.5);
 }
 // Belts are NOT checked against each other: an athlete has exactly one, so two

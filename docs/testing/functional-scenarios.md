@@ -4782,6 +4782,49 @@ the schema rather than from taste:
   nothing rather than an error. Deliberate; test that an offline Plan tab still
   shows its templates.
 
+#### What the technique row draws
+
+Presentation, but each of these is a claim about the athlete's record and can
+be wrong in a way a screenshot review would pass.
+
+- **The rule has three states and they must not collapse into two.** Untouched
+  (`lineSoft`), started (`textMuted`), mastered (the accent). **"Started" means
+  any evidence the criteria count — not a cleared target.** Note the boundary:
+  *drilled* evidence counts for nothing, because the backend filters `sessions`
+  to live events and `Progress` carries no drilled count, so an athlete who has
+  only drilled a technique reads as untouched. Worth its own scenario so it is
+  found deliberately. The scenario that matters most is
+  the near-miss: enrolled, 24 of 25 landed, 14 of 15 sessions, 38% against a
+  40% floor, so *nothing* is met. That row must draw the started rule. Keying
+  it off met criteria (the shipped-then-fixed bug) drew it identically to a
+  technique never trained, for the whole span from first rep to first completed
+  target — which is most of the journey, and exactly where "which am I close to
+  finishing?" needs answering. A mastered item must also not read as merely
+  started, and a non-enrolled viewer must see neither.
+- **A met chip tints; it does not gain a second marker.** With three criteria
+  where two are met, exactly two chips carry the accent.
+- **The disc holds the step ordinal, and mastery replaces it with a check** —
+  so the ordinal disappears exactly when the order stops mattering for that row.
+  Item 3 of 14 shows `3`; master it and the same row shows a check, not `3` plus
+  a badge.
+- **Mastery must be announced, not only drawn.** The check glyph, the rule
+  colour and the chip tint are all invisible to VoiceOver (`Icon` sets
+  `accessible={false}` on every glyph by design), so the disc carries the
+  label: `Mastered`, or `Step 3` when it does not. Assert it with a screen
+  reader, not by looking — the row this replaced said `MASTERED` in visible
+  text, and swapping that for a glyph silently removed the only statement of
+  the row's state.
+- **Every chip carries a spoken label.** `12/25` announced verbatim tells a
+  screen reader nothing; assert the row announces "Landed, 12 of 25" and
+  "Hit rate, 43 percent of 40 needed". Browsing (not enrolled) announces the
+  target only — "Landed, 25 needed" — because there is no progress to report.
+- **A criteria-free item says "Something to study" instead of chips**, and shows
+  no zeros. Rendering an empty chip row would read as targets not yet met.
+- **The strip's card eyebrow is `WORKING` when enrolled and `{BELT} BELT`
+  otherwise**, and enrolled cards sort first. `mastered_items` is deliberately
+  absent from the card: it is zero on the LIST response, so "0 of 14" there
+  would be a placeholder rendered as fact.
+
 ### The roadmap → focus bridge
 
 The loop this feature rests on: roadmap → `bjj_focus` → one-tap chips in the
