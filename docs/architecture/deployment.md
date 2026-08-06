@@ -102,6 +102,37 @@ curl -sI "$MEDIA_BASE_URL/exercises/.../thumbnail.webp?bust=$(date +%s)" | grep 
 
 The per-sport placeholders in `defaultMedia` have no database row, so their version comes from the hand-maintained `defaultMediaRevision` constant. **Bump it when you replace a `_defaults/` asset**, or those are the one set of images that can never change.
 
+### Content snapshots — the backup for console-authored content
+
+Content written in the admin console is live immediately and lives **only in
+that environment's database**. `//go:embed` seeds a fresh environment from
+`techniques.json` / `exercises.json`, so a console-authored row is in neither
+until it is exported. `.github/workflows/content-snapshot.yml` does that on a
+schedule (04:00 UTC daily, plus `workflow_dispatch`) and opens a single
+force-updated pull request.
+
+**It is a backup, not a publish.** Athletes see a console edit the moment it
+saves. The snapshot decides two other things: whether a *fresh* environment
+would have the content, and whether it survives losing the database.
+
+**Setup — one manual step, and until it is done the job skips.** Add a
+repository secret named `CONTENT_DATABASE_URL` pointing at the environment where
+content is authored (production once it exists; `staging` in the meantime).
+Without it the workflow reports "not configured" and exits green, deliberately:
+a red cron job every morning is how a backup job gets ignored.
+
+Two things worth knowing before relying on it:
+
+- **CI does not run on the PR it opens.** A pull request created with the
+  default `GITHUB_TOKEN` does not trigger other workflows — GitHub blocks that
+  to stop workflows recursing. The job therefore validates its own output
+  (`TestSeedData_IsValid` over the written files) and refuses to open the PR if
+  the export cannot seed. A PAT would restore normal CI, at the cost of a
+  credential to manage.
+- **The loss window is the schedule.** Up to a day of console authoring is
+  unbacked at any moment. Fine for one author; the cron line is the first thing
+  to change if that stops being true.
+
 ### PR / preview environments (planned, deferred)
 
 Not set up yet. When added, they must use separate database/bucket instances from staging and production — never production data.

@@ -13074,6 +13074,76 @@ week.
   ownership of content the console owned. The snapshot has to carry `source`,
   or the restore has to re-flip it.
 
+## 2026-08-06 — Step 3: the content snapshot, and the counts it collides with
+
+`.github/workflows/content-snapshot.yml`. Console-authored content is live the
+moment it saves and lives only in that environment's database; the seed files
+are what a fresh environment boots from and what a lost database is restored
+from. Until now the export that bridges the two was a human remembering to run
+`cmd/exportcontent` — a backup plan that works right up to the day it matters.
+Now it runs at 04:00 UTC and on demand, and opens one force-updated pull
+request.
+
+Reordered to the front of phase 2 when production was confirmed as the authoring
+environment: of the three remaining features, this is the only one whose failure
+is silent and total. A half-written technique going live is visible and
+self-correcting; a missing undo is inconvenient. Content that exists in one
+database and is lost is neither.
+
+**A PR rather than a direct push**, because the files it writes are what
+`//go:embed` bakes into the binary — a bad snapshot poisons the bootstrap for
+every environment created afterwards, and "never commit directly to main" does
+not get an exception because the author is a robot. The part that was manual was
+*writing* it, and that is the part now gone.
+
+**Which forced the job to check its own work.** A pull request opened with the
+default `GITHUB_TOKEN` deliberately does not trigger other workflows — GitHub
+blocks that to stop recursion — so `ci.yml` never runs on the PR this job opens.
+Nothing would have checked the snapshot before merge. The validation step is
+therefore not belt-and-braces, it is the only check, and it runs the real
+`SeedData()` over the freshly written files.
+
+**Rehearsed against a real database before shipping, which is how the actual
+defect turned up.** A scratch database, seeded, then given both shapes of
+console write — a brand-new row and an edit to a seeded one — then the job's
+steps run by hand. The export behaved (added 1, updated 1, a 20-line diff). The
+validation did not: running the whole technique package failed on
+`wantOpenGuard = 138`, because the rehearsal's new technique was an open-guard
+one and the count is pinned exactly.
+
+That is not a bug in the test. It is a **collision between two correct designs**:
+pinned counts are valuable while the catalog changes only by deliberate PR, and
+console authoring means it no longer does. The workflow's check is scoped to
+`TestSeedData_IsValid` so the job is not the thing that rediscovers this every
+morning — but scoping the job does not resolve it, and the resolution is a
+decision rather than a workaround.
+
+### Gaps
+
+- **Merging a snapshot that adds content will turn main red.** Not every time:
+  only when the authored row moves a pinned number — `wantOpenGuard`,
+  `wantClosedGuard`, `wantRestrictedTechniques`, the function-less set. A
+  Side Control row moves none of them; an open-guard one moves two. The options
+  are (a) update the constants when it happens, which is a human step returning
+  to a no-PR flow, (b) derive the counts instead of pinning them, which weakens
+  a test whose comment explains at length why exactness was chosen, or (c) pin
+  only the partition property (`closed + open == family`), which does catch the
+  regression the exact numbers were added for — verified by reading the
+  scenario in that comment. **Not decided here**, deliberately: it is someone
+  else's carefully-reasoned test and the snapshot job does not need it resolved
+  to be useful.
+- **`CONTENT_DATABASE_URL` is not set**, so the workflow currently skips. That
+  is the one manual setup step and it cannot be done from here.
+- **The loss window is a day.** Fine for one author, and the cron line is the
+  first thing to change if that stops being true.
+- **The `source` question is quieter than the design doc claimed.** It called a
+  restore re-granting deploy ownership "the sharpest edge in the whole design";
+  working through it here, a restore FROM a current snapshot is a legitimate
+  mass-adopt — the JSON carries the console's content, so seeding it back as
+  `seed` is consistent rather than lossy. What actually hurts is snapshot
+  staleness, which is the loss window above. The edge is real but it is smaller
+  than written, and mis-stating which risk is sharpest is worth correcting.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

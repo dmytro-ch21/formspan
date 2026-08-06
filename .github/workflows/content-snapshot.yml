@@ -1,0 +1,161 @@
+# Snapshot console-authored catalog content back into the repo.
+#
+# WHY THIS EXISTS. Content written in the admin console is live the moment it
+# saves and lives ONLY in that environment's database — `//go:embed` seeds a
+# fresh environment from `techniques.json` / `exercises.json`, and a row the
+# console authored is in neither until somebody exports it. Until now "somebody"
+# was a human remembering to run `cmd/exportcontent`. That is a backup plan that
+# works right up to the day it matters.
+#
+# WHAT IT IS NOT. This is not the publishing path, and it does not slow
+# publishing down. Athletes see a console edit immediately, from the database;
+# this job trails behind and decides only two things — whether a fresh
+# environment would have the content, and whether it survives losing the
+# database. Publishing latency is zero either way, which is why it is fine for
+# this to arrive as a pull request rather than a direct push to main.
+#
+# WHY A PR AND NOT A COMMIT. The files it writes are what `//go:embed` bakes
+# into the binary and what seeds every new environment, so a bad snapshot — a
+# half-migrated database, a partial read — would poison the bootstrap for every
+# environment created afterwards. The repo's "never commit directly to main"
+# rule does not get an exception because the author is a robot. No human has to
+# WRITE it; that is the part that was manual.
+#
+# ...WHICH MEANS THIS JOB HAS TO VALIDATE ITS OWN OUTPUT. A pull request opened
+# with the default GITHUB_TOKEN deliberately does NOT trigger other workflows —
+# GitHub blocks that to stop workflows recursing — so `ci.yml` will not run on
+# the PR this job opens. Nothing would check the snapshot before merge. The
+# validation step below is therefore not belt-and-braces, it IS the check: it
+# runs the same seed validation CI would, over the files just written, and
+# refuses to open the PR if the export cannot seed.
+name: Content snapshot
+
+on:
+  schedule:
+    # 04:00 UTC daily. The window of loss is therefore up to a day of console
+    # authoring — acceptable while one person authors, and the number to change
+    # first if that stops being true.
+    - cron: "0 4 * * *"
+  # Manual runs matter more than the schedule at first: it is how you snapshot
+  # deliberately after a batch of authoring rather than waiting for 04:00.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  # Two snapshots racing would both branch from main and the second would
+  # clobber the first's push. There is no value in overlapping runs anyway —
+  # the later one reads a strictly newer database.
+  group: content-snapshot
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    name: Export authored content
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      # An absent secret is a SKIP, not a failure. It has to be added by hand
+      # (see docs/architecture/deployment.md), and a red cron job every morning
+      # until then trains everyone to ignore this workflow — the one outcome
+      # that makes a backup job worthless.
+      - name: Check the database is configured
+        id: guard
+        env:
+          CONTENT_DATABASE_URL: ${{ secrets.CONTENT_DATABASE_URL }}
+        run: |
+          if [ -z "$CONTENT_DATABASE_URL" ]; then
+            echo "CONTENT_DATABASE_URL is not set — skipping." >> "$GITHUB_STEP_SUMMARY"
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Read-only against the live database. exportcontent without -adopt reads
+      # `source = 'admin'` rows and writes files; it touches the database only
+      # when -adopt is passed, which it deliberately is not here — adoption
+      # hands rows to the deploy and must FOLLOW a deploy, which this job
+      # cannot observe.
+      - name: Export
+        if: steps.guard.outputs.configured == 'true'
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ secrets.CONTENT_DATABASE_URL }}
+        run: go run ./cmd/exportcontent
+
+      - name: Detect changes
+        if: steps.guard.outputs.configured == 'true'
+        id: changed
+        run: |
+          if git diff --quiet; then
+            echo "Nothing authored since the last snapshot." >> "$GITHUB_STEP_SUMMARY"
+            echo "any=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "any=true" >> "$GITHUB_OUTPUT"
+            {
+              echo '```'
+              git diff --stat
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # THE check, not an extra one — see the header. `TestSeedData_IsValid` in
+      # each module runs the real `SeedData()` over the freshly written files:
+      # every per-row rule, duplicate ids, unknown vocabularies, a dangling
+      # to_position, the entanglement biconditional. That is what a deploy does,
+      # and the only thing standing between a bad export and an environment that
+      # cannot boot.
+      #
+      # SCOPED TO THOSE TESTS ON PURPOSE, and this is the subtle part. Running
+      # the whole package fails on LEGITIMATE content: several tests pin exact
+      # catalog counts (`wantOpenGuard = 138`, `wantRestrictedTechniques = 27`),
+      # which is deliberate and valuable while the catalog only changes by human
+      # PR — and simply wrong here, because one console-authored open-guard
+      # technique moves the number. Rehearsed against a real database before this
+      # workflow shipped: a single authored row turned the package red.
+      #
+      # Those counts going stale on main is a real consequence of authoring in
+      # the console, and it needs a decision rather than a workaround — see the
+      # gap recorded in docs/decisions/history.md. This job must not be the thing
+      # that rediscovers it every morning.
+      - name: Validate the exported catalog
+        if: steps.guard.outputs.configured == 'true' && steps.changed.outputs.any == 'true'
+        working-directory: backend
+        run: |
+          go build ./...
+          go test ./internal/modules/technique/ ./internal/modules/exercise/ -run TestSeedData_IsValid
+
+      - name: Open or update the snapshot PR
+        if: steps.guard.outputs.configured == 'true' && steps.changed.outputs.any == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          branch=content-snapshot
+          git config user.name "vola-content-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add backend/internal/modules/technique/techniques.json \
+                  backend/internal/modules/exercise/exercises.json
+          git commit \
+            -m "Content snapshot $(date -u +%Y-%m-%d)" \
+            -m "Console-authored catalog rows exported from the live database by .github/workflows/content-snapshot.yml. Generated, not hand-written." \
+            -m "This is the backup and the bootstrap: without it a fresh environment would not have this content, and losing the database would lose it entirely."
+          # Plain --force, not --force-with-lease. actions/checkout fetches only
+          # the default branch, so there is no local ref for this branch and the
+          # lease has nothing to compare against. Safe because nothing but this
+          # job ever writes here, and the concurrency group stops it racing
+          # itself.
+          git push --force origin "$branch"
+          gh pr create --base main --head "$branch" \
+            --title "Content snapshot" \
+            --body-file .github/content-snapshot-pr.md \
+            || gh pr edit "$branch" --body-file .github/content-snapshot-pr.md
