@@ -12831,6 +12831,41 @@ verified to fail at exactly one above their pinned value, so neither is slack.
   corrected here; re-tuning a calibrated constant is a behavioural change, not
   a counts refresh. Spun out as a follow-up.
 
+## 2026-08-06 — Proposal: retire the spreadsheet, then publish without a PR
+
+[content-authoring-design.md](content-authoring-design.md) — a proposal, nothing
+built. Written after the alias merge made the cost of the current arrangement
+concrete: adding one column of content took two PRs, a generator, an apply tool
+and a hunt across six candidate `.xlsx` files.
+
+The finding that shrinks phase 1: **retiring the spreadsheet needs no data
+migration at all.** The only reason a JSON edit to a seeded row fails to stick
+is that someone might re-run the importer, which is a full replacement. Remove
+the importer from the authoring path and the problem is gone by construction —
+and `techniques.additions.json`, whose entire purpose is surviving a re-import,
+folds back into `techniques.json` and disappears. That is smaller than the
+earlier framing in this log implied, which said the 450 rows would have to
+change ownership.
+
+The finding that complicates phase 2: **`source` is database state, not content
+state.** There is no `source` field in the JSON, so a fresh environment seeds
+everything as `'seed'` — meaning a restored database silently re-grants deploy
+ownership of rows the console owned. Any no-PR flow has to answer that, and it
+is the sharpest edge in the design.
+
+Also recorded there: the PR is currently providing five things nobody has
+replaced yet — review before a permanent id exists, a durable copy in git,
+rollback, cross-environment promotion, and a record of who changed what. None is
+a reason not to do it; they are the work, and the doc sequences them so each
+step is safe to stop at.
+
+### Gaps
+
+- The end state assumes content is authored **in production**, since anything
+  else re-invents promotion. Stated as the decision it is, not settled.
+- Whether the exercise catalog follows techniques is left open — same mechanism,
+  much less pressure.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
