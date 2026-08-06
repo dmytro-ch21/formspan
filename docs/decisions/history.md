@@ -12483,9 +12483,56 @@ Both honest-numbers rules from the previous entries survived the rewrite intact,
 and were the things to check hardest, because a rewrite is exactly where they go
 missing: **`—` never `0%`** before an attempt, and **targets-only when browsing**
 rather than zero-filled progress reporting a shortfall the athlete was never
-asked to make up. The accessibility labels got better rather than worse — `12/25`
-announced verbatim tells a screen reader nothing, so each chip carries a spoken
-form, and it differs by enrollment for the same reason the value does.
+asked to make up. Review confirmed both case by case against the old `Bars`
+code, along with the `countable_items` division.
+
+### Review caught the redesign failing at its own stated job
+
+Two blocking findings, and the first is the one worth remembering.
+
+**The three-state rule collapsed for the most common in-progress input.** I had
+written `started = criteria.some((c) => c.met) || mastered` — but a criterion
+turns `met` only when it is fully *cleared*. An enrolled athlete at 24/25
+landed, 14/15 sessions and 38% against a 40% floor has **nothing** met, and drew
+the untouched rule: pixel-identical to a technique they had never trained. So
+for the entire span from first rep to first completed target — most of the
+journey — the column made a false claim about their record, and the question
+this redesign exists to answer went unanswered precisely where the answer was
+"this one". `lineSoft` on `surface` measures 1.14:1, which `Colors.ts` itself
+documents as invisible, so it was not even a quiet wrong answer.
+
+It cannot be fixed inside the component: chips carry only a `met` boolean, so
+the partial counts are not there to read. `started` is now a prop, computed by
+the caller from `progress` — `attempts > 0 || defended > 0 || sessions > 0`
+(`attempts` is `scored + attempted`, so it already covers landing it; a
+drilled-only session moves `sessions` without moving either of the others).
+
+The lesson is narrower than "test your states": I derived a display state from
+the *nearest available* boolean rather than from the thing it was supposed to
+mean, because the nearest one was already in the component. And I then wrote it
+into `functional-scenarios.md` verbatim, which would have frozen the bug as the
+specification.
+
+**Mastery stopped being announced at all.** The old row had `MASTERED` as
+visible text — an accessibility element for free. The new one carries mastery in
+a check glyph, the rule colour and a chip tint, and `Icon` sets
+`accessible={false}` on every glyph by design, so all three are invisible to
+VoiceOver. A mastered row announced its chips and never its state. The disc now
+carries `Mastered` / `Step 3`, which also fixes the bare "3" the ordinal
+announced. My claim in the first draft of this entry that "the accessibility
+labels got better rather than worse" was true of the chips and false of the row.
+
+Three suggestions taken: the strip's rule moved from the physical strap colours
+(2.50 blue, 2.14 purple, 1.81 brown, 1.05 black against this surface — the last
+literally invisible) to `beltAccent`, which exists as "the legible reading of
+each, all clearing 3:1"; `beltAccent`'s own doc note said "the rank card and
+nothing else", so it was **amended deliberately** rather than quietly broken —
+the line it draws is against belt-coloured *chrome*, not against one element
+naming one belt. Notes are no longer clamped to two lines (the longest curator
+note is 103 characters, about three lines here, with no way to reach the rest —
+and notes are where the syllabus explains why a step sits where it does). And
+the browsing eyebrow dropped the accent, which had been putting "BLUE BELT" in
+the athlete's orange directly above a blue strap.
 
 ### The strip: the belt is the subject
 
@@ -12513,14 +12560,44 @@ numbered disc, `POSITION · CATEGORY` eyebrow, name, notes and the chips
 four covers with their washes. Demo data and the backdated enrollment were
 deleted afterwards; `.env.local` restored and SHA-verified against its backup.
 
+### A component test, because both defects were invisible to looking
+
+`components/__tests__/techniqueRow.test.tsx` — eleven cases, and it exists
+because a screenshot could not have caught either blocking finding. The rule bug
+needed a *near-miss* row rendered beside the other two states; a mastered row
+and a fresh row look perfect and say nothing about the middle. The announcement
+bug needed a screen reader. Both were caught by reading the code, which is not a
+repeatable check.
+
+All seven mutations die, measured rather than estimated. One is worth recording
+because it survived the first draft and the reason generalises: **removing
+`accessible` from the disc left every label assertion green.** RNTL's
+`getByLabelText` matches the `accessibilityLabel` *prop*, whether or not the
+element is an accessibility element at all — so the test proved the label
+existed while VoiceOver, where a `View` defaults to non-accessible and reads the
+children instead, would have heard nothing. Asserting a label is not asserting
+it is announced. That needed its own line, and any future a11y test in this repo
+has the same hole by default.
+
+This is the third time in this app's history that a test passed for a reason
+other than the one intended (a 300s token that never reached the offline path;
+a backoff ladder already at the value being asserted; now this). The pattern is
+the same each time — the assertion was true of something adjacent to the
+behaviour, not of the behaviour.
+
 ### Gaps
 
-- **Still no component test for either surface**, and this rewrite widened what
-  one would be worth: the three-state rule and the enrolled/browsing split are
-  now branches in a component rather than in a screen.
+- **Nothing covers `CurriculaStrip` or the roadmap screen itself** — the new
+  test is the row in isolation. `hasEvidence` in `[id].tsx` is exercised only
+  through the prop it feeds, so a wrong field there (say `scored` instead of
+  `attempts`) passes.
 - **The chip row wraps rather than scrolls**, which is right for a clipped
   number, but four criteria at the largest accessibility text size will take two
   lines and has not been seen at that size.
+- **VoiceOver was never actually heard.** The disc's label is asserted in jest
+  and reasoned from RN semantics; nobody has run the screen with the screen
+  reader on. Same for the contrast figures, which are computed rather than
+  observed.
 
 ## Open items / known gaps as of this entry
 

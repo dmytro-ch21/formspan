@@ -4788,16 +4788,28 @@ Presentation, but each of these is a claim about the athlete's record and can
 be wrong in a way a screenshot review would pass.
 
 - **The rule has three states and they must not collapse into two.** Untouched
-  (`lineSoft`), started (`textMuted`), mastered (the accent). "Started" is
-  `some(criterion met) || mastered` — an item with one target cleared and two
-  open must not read as untouched, and a mastered item must not read as merely
-  started. The column exists to find the row you are close to finishing.
+  (`lineSoft`), started (`textMuted`), mastered (the accent). **"Started" means
+  any evidence at all — not a cleared target.** The scenario that matters is
+  the near-miss: enrolled, 24 of 25 landed, 14 of 15 sessions, 38% against a
+  40% floor, so *nothing* is met. That row must draw the started rule. Keying
+  it off met criteria (the shipped-then-fixed bug) drew it identically to a
+  technique never trained, for the whole span from first rep to first completed
+  target — which is most of the journey, and exactly where "which am I close to
+  finishing?" needs answering. A mastered item must also not read as merely
+  started, and a non-enrolled viewer must see neither.
 - **A met chip tints; it does not gain a second marker.** With three criteria
   where two are met, exactly two chips carry the accent.
 - **The disc holds the step ordinal, and mastery replaces it with a check** —
   so the ordinal disappears exactly when the order stops mattering for that row.
   Item 3 of 14 shows `3`; master it and the same row shows a check, not `3` plus
   a badge.
+- **Mastery must be announced, not only drawn.** The check glyph, the rule
+  colour and the chip tint are all invisible to VoiceOver (`Icon` sets
+  `accessible={false}` on every glyph by design), so the disc carries the
+  label: `Mastered`, or `Step 3` when it does not. Assert it with a screen
+  reader, not by looking — the row this replaced said `MASTERED` in visible
+  text, and swapping that for a glyph silently removed the only statement of
+  the row's state.
 - **Every chip carries a spoken label.** `12/25` announced verbatim tells a
   screen reader nothing; assert the row announces "Landed, 12 of 25" and
   "Hit rate, 43 percent of 40 needed". Browsing (not enrolled) announces the

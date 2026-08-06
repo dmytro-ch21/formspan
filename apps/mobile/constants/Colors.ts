@@ -212,12 +212,19 @@ export type Accent = (typeof accents)[AccentName];
 export const DEFAULT_ACCENT: AccentName = 'green';
 
 /**
- * The belt, as a colour — **for the rank card and nothing else.**
+ * The belt, as a colour — **for surfaces that are about one specific belt.**
  *
  * A belt is the one thing on the You screen that is genuinely personal, so the
  * masthead takes its accent from the athlete's rank rather than from the app.
- * It stops there on purpose: a belt-coloured tab bar means five validated
- * accent sets, and three of the five do not survive contact with a dark UI.
+ * The Plan tab's belt-syllabus cards are the second such surface, and the only
+ * other one: each card is *about* a belt, so its edge is that belt.
+ *
+ * This said "the rank card and nothing else" until that second card existed.
+ * The line it was drawing is still the right one and is unchanged — what is
+ * banned is belt-coloured *chrome*, a tab bar or a background that inherits
+ * the athlete's rank, because that means five validated accent sets and three
+ * of the five do not survive contact with a dark UI. A single element naming
+ * a single belt is the sanctioned use, not the exception to it.
  *
  * **These are not the belt's own colours.** `components/Belt.tsx` draws the
  * real ones — #1B4CC4 blue, #6A2D9B purple, #5C3A21 brown — and every one of

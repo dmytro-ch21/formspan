@@ -49,6 +49,22 @@ export function TechniqueRow({
   notes,
   criteria,
   mastered,
+  /**
+   * Any evidence at all, from the caller's `progress` — NOT derived here.
+   *
+   * This started life as `criteria.some((c) => c.met)`, which is wrong in the
+   * one case the column exists for: a criterion only turns `met` when it is
+   * fully *cleared*, so an athlete at 24/25 landed and 14/15 sessions had none
+   * met and drew the untouched rule — identical to a technique they had never
+   * trained. That is a false claim about their record for the whole span from
+   * first rep to first completed target, which is most of the journey, and it
+   * left "which am I close to finishing?" unanswered exactly where the answer
+   * was "this one".
+   *
+   * It cannot be fixed inside this component: chips carry only a `met`
+   * boolean, so the partial counts are not here to read. Hence a prop.
+   */
+  started,
   /** Nothing to measure — an item that is reading rather than a roadmap step. */
   reading,
   tone,
@@ -61,27 +77,41 @@ export function TechniqueRow({
   notes: string;
   criteria: Criterion[];
   mastered: boolean;
+  started: boolean;
   reading: boolean;
   /** The accent, passed in so this stays a dumb component. */
   tone: string;
   testID?: string;
 }) {
-  // Not started, in progress, done — the rule's three states. `lineSoft` for
-  // untouched rather than the accent at low opacity, because a faded accent
-  // reads as "done, dimly" and the distinction between not-yet and nearly is
-  // the whole point of the column.
-  const started = criteria.some((c) => c.met) || mastered;
+  // Not started, in progress, done. `lineSoft` for untouched rather than the
+  // accent at low opacity, because a faded accent reads as "done, dimly" and
+  // the distinction between not-yet and nearly is the whole point of the
+  // column.
   const rule = mastered ? tone : started ? vola.textMuted : vola.lineSoft;
 
   return (
     <RNView style={styles.card} testID={testID}>
-      <RNView style={[styles.rule, { backgroundColor: rule }]} />
+      {/* testID unconditional: the rule is a pure-colour element with no text
+          and no role, so a test has no other handle on the one thing it most
+          needs to assert. */}
+      <RNView style={[styles.rule, { backgroundColor: rule }]} testID="technique-rule" />
 
+      {/*
+        Labelled, and it has to be. `Icon` sets `accessible={false}` on every
+        glyph by design, so the check is invisible to VoiceOver — and mastery
+        is otherwise carried only by the rule colour and the chip tint, both
+        equally invisible. The row this replaced had `MASTERED` as visible
+        text, which was an accessibility element for free; dropping it for a
+        glyph silently removed the only statement of the row's state. The
+        unmastered branch needs the label too: a bare "3" announces as "3".
+      */}
       <RNView
         style={[
           styles.disc,
           mastered && { backgroundColor: tone, borderColor: tone },
         ]}
+        accessible
+        accessibilityLabel={mastered ? 'Mastered' : `Step ${step}`}
       >
         {mastered ? (
           <Icon name="check" size={13} color={vola.bg} />
@@ -100,11 +130,16 @@ export function TechniqueRow({
           </Text>
         </RNView>
 
-        {notes !== '' && (
-          <Text style={styles.notes} numberOfLines={2}>
-            {notes}
-          </Text>
-        )}
+        {/*
+          Unclamped. A two-line clamp looked tidy and cut real content: the
+          longest curator note in `curricula.json` is 103 characters, roughly
+          three lines at this width, and there is no expansion affordance to
+          reach the rest. These are the one place the syllabus explains WHY a
+          step is where it is — "you learned the early escape at white and the
+          late one at blue" — so a clipped one is the sentence that made the
+          order make sense, hidden.
+        */}
+        {notes !== '' && <Text style={styles.notes}>{notes}</Text>}
 
         {reading ? (
           <RNView style={styles.chipRow}>
@@ -115,8 +150,13 @@ export function TechniqueRow({
           </RNView>
         ) : (
           <RNView style={styles.chipRow}>
-            {criteria.map((c) => (
-              <RNView key={c.icon + c.value} style={styles.chip}>
+            {/* Keyed on position, not content. Today each of the four icons
+                appears at most once, so `icon + value` cannot collide — but
+                this row advertises reuse by anything with thresholds, and the
+                first caller with two same-icon chips would get a silent
+                collision. The list never reorders within a render. */}
+            {criteria.map((c, i) => (
+              <RNView key={`${c.icon}-${i}`} style={styles.chip}>
                 <Icon
                   name={c.icon}
                   size={12}

@@ -14,6 +14,7 @@ import {
   getCurriculum,
   type Curriculum,
   type CurriculumItem,
+  type Progress,
 } from '@/lib/curriculum';
 import { proposeFocus, type FocusProposal } from '@/lib/roadmapFocus';
 import { useAuthToken } from '@/lib/useAuthToken';
@@ -221,6 +222,7 @@ export default function CurriculumScreen() {
           notes={item.notes}
           criteria={criteriaChips(item, curriculum.enrolled)}
           mastered={item.progress?.mastered ?? false}
+          started={hasEvidence(item.progress)}
           reading={item.criteria === null}
           tone={accent.ink}
           testID={`curriculum-item-${item.technique_id}`}
@@ -312,6 +314,22 @@ function FocusPanel({
       </Pressable>
     </View>
   );
+}
+
+/**
+ * Any evidence at all — what draws the row's "started" rule.
+ *
+ * Deliberately not "has a criterion been met": a met criterion is a *cleared*
+ * target, and the span this state exists to mark is the one before the first
+ * one clears. `attempts` is `scored + attempted`, so it already covers landing
+ * it; `defended` and `sessions` are their own axes and a drilled-only session
+ * moves the third without moving either of the others.
+ *
+ * Null progress means not enrolled — no evidence is being counted, so there is
+ * nothing to have started.
+ */
+function hasEvidence(p: Progress | null | undefined): boolean {
+  return p != null && (p.attempts > 0 || p.defended > 0 || p.sessions > 0);
 }
 
 /**

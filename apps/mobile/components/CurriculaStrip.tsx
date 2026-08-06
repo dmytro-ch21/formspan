@@ -6,7 +6,7 @@ import { BeltPhoto } from '@/components/BeltPhoto';
 import { Icon } from '@/components/ui/Icon';
 import { SectionHeader } from '@/components/ui/Section';
 import { Text, View } from '@/components/Themed';
-import { vola } from '@/constants/Colors';
+import { beltAccent, vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { BELTS, type Belt } from '@/lib/bjj';
 import { listCurricula, type Curriculum } from '@/lib/curriculum';
@@ -97,9 +97,20 @@ export function CurriculaStrip() {
               >
                 {/* The rule, as on every other row in the app — carrying the
                     belt rather than a discipline, since every card here is
-                    BJJ. It is the only thing that distinguishes the four at a
-                    glance once the covers are small. */}
-                <RNView style={[styles.rule, { backgroundColor: STRAP[belt] }]} />
+                    BJJ.
+
+                    `beltAccent`, NOT the strap colour. The first version used
+                    the physical colour and claimed in this comment to be what
+                    distinguishes the four at a glance, which was wrong twice:
+                    the cover is plainly what distinguishes them, and the strap
+                    colours are the ones `Colors.ts` measures at 2.50 (blue),
+                    2.14 (purple), 1.81 (brown) and 1.05 (black) against this
+                    surface — the last being invisible. `beltAccent` exists as
+                    "the legible reading of each, all clearing 3:1", which is
+                    exactly what a 3pt rule needs. The strap colour stays on
+                    the wash below, where it sits behind a photograph of that
+                    belt and is decorative. */}
+                <RNView style={[styles.rule, { backgroundColor: beltAccent[belt] }]} />
 
                 <RNView style={styles.inner}>
                   <RNView style={[styles.cover, { backgroundColor: beltTint(belt) }]}>
@@ -116,7 +127,16 @@ export function CurriculaStrip() {
                     />
                   </RNView>
 
-                  <Text style={[styles.eyebrow, { color: accent.ink }]} numberOfLines={1}>
+                  {/* Only WORKING takes the accent. Inking both variants the
+                      same made enrolled and browsing cards distinguishable
+                      only by reading the word — and put "BLUE BELT" in the
+                      athlete's accent (orange, say) directly above a blue
+                      strap. The accent means "this one is yours"; a belt name
+                      is a label. */}
+                  <Text
+                    style={[styles.eyebrow, c.enrolled ? { color: accent.ink } : styles.eyebrowIdle]}
+                    numberOfLines={1}
+                  >
                     {c.enrolled ? 'WORKING' : `${belt.toUpperCase()} BELT`}
                   </Text>
                   <Text style={styles.name} numberOfLines={2}>
@@ -153,9 +173,12 @@ export function CurriculaStrip() {
  * Strap colours, mirrored from `Belt.tsx`.
  *
  * Duplicated rather than exported, because that file's are private to its
- * drawing and this is a different use — a 3pt rule and a wash behind a
- * photograph, neither of which is the belt itself. If they ever disagree
- * visibly, share them; today they would only couple two unrelated things.
+ * drawing and this is a different use — a wash behind a photograph, which is
+ * not the belt itself. If they ever disagree visibly, share them; today they
+ * would only couple two unrelated things.
+ *
+ * Used for the wash ONLY. The rule takes `beltAccent`; see the comment there
+ * for why the physical colours cannot carry a load-bearing 3pt element.
  */
 const STRAP: Record<Belt, string> = {
   white: '#EDEAE3',
@@ -208,6 +231,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   eyebrow: { fontSize: 9, fontWeight: '800', letterSpacing: 0.9 },
+  eyebrowIdle: { color: vola.textDim },
   name: { color: vola.text, fontSize: 13, fontWeight: '700', lineHeight: 17 },
   meta: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
   metaText: {
