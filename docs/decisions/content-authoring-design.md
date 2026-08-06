@@ -184,11 +184,23 @@ with no review, you want who, when, and what it was before — a
 `content_revisions` table written in the same transaction as the update. That
 buys rollback in the product, which is what replaces "revert the commit."
 
-**4. One environment is where content is written.**
-The honest version of "no PR" is that content is authored **in production**,
-because anything else re-invents promotion. That is a real decision and worth
-making explicitly rather than discovering. Staging then becomes a place to try
-the console, not a place content flows from.
+**4. One environment is where content is written. — DECIDED: production.**
+The honest version of "no PR" is that content is authored in production, because
+anything else re-invents promotion. Confirmed 2026-08-06. Staging is therefore a
+place to try the console, not a place content flows from, and cross-environment
+promotion is off the design board entirely.
+
+Two consequences follow immediately, and they reorder the plan:
+
+- **There is no production Postgres yet.** Only `staging`, currently doing
+  double duty for dev and testing. So the *last* step — pointing the console at
+  production — is blocked on infrastructure that does not exist, while
+  everything it depends on is buildable today.
+- **The durability gap is live NOW, not later.** The moment content is authored
+  in any console, the database is its only copy: nothing in this repo documents
+  a backup, and the snapshot export is what would provide one. That is a
+  content-loss exposure, and content loss is silent — which is why the snapshot
+  moves to the front of the queue rather than sitting behind two features.
 
 ### What it does not need
 
@@ -202,24 +214,37 @@ A CMS. A workflow engine. Multi-user approvals. There is one author.
 | --- | --- | --- |
 | 1. Retire the importer; fold the additions files in; move the taxonomy into Go | nothing | small |
 | 2. Widen the console to edit any row — **DONE**, and note it is not a "drop the restriction": the clause MOVES to the SET clause, or the next deploy reverts every edit | 1 | small |
-| 3. `content_revisions` + audit + rollback in the console | 2 | medium |
+| 3. Scheduled snapshot export as a bot commit; restore path preserves `source` | 2 | medium |
 | 4. `status` draft/published, API filters to published | 2 | medium |
-| 5. Scheduled snapshot export as a bot commit; restore path preserves `source` | 3, 4 | medium |
-| 6. Point the console at production and stop reseeding content on deploy | 5 | small, scary |
+| 5. `content_revisions` + audit + rollback in the console | 2 | medium |
+| 6. Point the console at production, and stop reseeding content on deploy | 3, 4, 5, **and a production environment existing** | small, scary |
 
-Steps 1 and 2 are worth doing now and are independently useful — after them,
-every one of the 542 techniques is editable from the console, and a content fix
-is a PR that touches one JSON file instead of a spreadsheet expedition.
+Steps 1 and 2 are done. Every one of the 542 techniques is editable from the
+console, and a content fix is a PR that touches one JSON file instead of a
+spreadsheet expedition.
 
-Steps 3–6 are the no-PR flow, and each is safe to stop at.
+**Reordered once production was confirmed as the authoring environment.** The
+snapshot was step 5 and is now step 3, because the three remaining features
+answer different risks and only one of them is silent:
+
+| Risk | Answered by | Severity |
+| --- | --- | --- |
+| Content exists only in one database and is lost | snapshot export | **silent and total** |
+| A half-written technique is live to athletes | draft/published | visible, self-correcting |
+| An edit needs undoing | revisions/rollback | inconvenient; re-editing works |
+
+Durability before features. The other two can be reordered freely; each is safe
+to stop at.
 
 ---
 
 ## 6. What I would want decided before starting
 
-1. **Is production really where content gets authored?** Everything in phase 2
-   follows from that answer. If the answer is no, promotion between environments
-   is the design problem and it is a larger one.
+1. ~~**Is production really where content gets authored?**~~ **ANSWERED
+   2026-08-06: yes.** Promotion between environments is therefore not a design
+   problem — there is one place content is written. Note the follow-on it
+   exposes: production does not exist yet, so step 6 is gated on infrastructure
+   rather than on the work above it.
 2. **What is the rollback expectation?** "Undo my last edit" is a revisions
    table. "Restore the catalog to last Tuesday" is snapshots. They are different
    builds.
