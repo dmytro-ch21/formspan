@@ -245,6 +245,25 @@ type Technique struct {
 	// out of the deploy's reach or demote a seeded one into it.
 	Source string `json:"source,omitempty"`
 
+	// Whether athletes can see it: "published" or "draft".
+	//
+	// EMPTY MEANS PUBLISHED, and that is deliberate rather than sloppy. The
+	// seed file carries 542 entries that are all live, and making them each
+	// spell it out would be 542 lines of noise saying "yes, normal" — while
+	// the interesting rows, the handful still being written, would be the ones
+	// that look ordinary. Absence is the common case; presence is the signal.
+	// Normalised on read in SeedData so nothing downstream sees "".
+	//
+	// The console CREATES as draft, explicitly, and never relies on the column
+	// default — which is 'published' because it has to describe the 542 rows
+	// the migration backfills, and means exactly the wrong thing for a new one.
+	//
+	// Editing a published row leaves it published: a typo fix should reach
+	// athletes, not withdraw the technique while someone remembers to
+	// re-publish it. Draft protects content that has never been live, which is
+	// the only content nobody is relying on.
+	Status string `json:"status,omitempty"`
+
 	// Description is mechanics; WhenToUse is the decision about when the
 	// mechanics apply. Keeping them apart is the point — merging them produces
 	// a paragraph that answers neither question well.

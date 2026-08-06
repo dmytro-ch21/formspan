@@ -27,7 +27,7 @@ const contentReturning = `
 	typical_belt, description, setup_from, common_counters, when_to_use,
 	common_next_moves, video_reference, source_notes,
 	COALESCE(ibjjf_ruleset_id, ''), COALESCE(function, ''),
-	COALESCE(to_position, ''), source, created_at, updated_at`
+	COALESCE(to_position, ''), source, status, created_at, updated_at`
 
 func (r *PostgresRepository) KnownPositions(ctx context.Context) ([]string, error) {
 	rows, err := r.pool.Query(ctx, `
@@ -58,9 +58,9 @@ func (r *PostgresRepository) CreateTechnique(ctx context.Context, t Technique) (
 			id, name, aliases, category, position, position_detail, gi_no_gi,
 			typical_belt, description, setup_from, common_counters, when_to_use,
 			common_next_moves, video_reference, source_notes, ibjjf_ruleset_id,
-			function, to_position, source
+			function, to_position, source, status
 		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
-			NULLIF($16, ''), NULLIF($17, ''), NULLIF($18, ''), 'admin')
+			NULLIF($16, ''), NULLIF($17, ''), NULLIF($18, ''), 'admin', 'draft')
 		RETURNING `+contentReturning,
 		t.ID, t.Name, t.Aliases, t.Category, t.Position, t.PositionDetail, t.GiNoGi,
 		t.TypicalBelt, t.Description, t.SetupFrom, t.CommonCounters, t.WhenToUse,
@@ -135,6 +135,35 @@ func (r *PostgresRepository) UpdateTechnique(ctx context.Context, t Technique) (
 	return out, nil
 }
 
+// Publish makes a draft visible to athletes. One-way, deliberately.
+//
+// There is no unpublish. Withdrawing a LIVE technique is a different and much
+// riskier operation than finishing a new one: training records tag it by id,
+// curricula list it, and the focus screen resolves it — none of which this
+// column filters, correctly, because an athlete's own history must not develop
+// holes when a curator changes their mind. Hiding a live technique from the
+// library while all of that still points at it is a half-state nobody asked
+// for, and building it casually is how it would arrive. If a published
+// technique is genuinely wrong, editing it is the fix.
+//
+// `WHERE status = 'draft'` rather than an unconditional SET so that publishing
+// something already published is ErrNotFound rather than a silent no-op that
+// reports success — the caller learns its view is stale.
+func (r *PostgresRepository) Publish(ctx context.Context, id string) (Technique, error) {
+	row := r.pool.QueryRow(ctx, `
+		UPDATE techniques SET status = 'published', updated_at = now()
+		WHERE id = $1 AND status = 'draft'
+		RETURNING `+contentReturning, id)
+	out, err := scanContent(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Technique{}, ErrNotFound
+	}
+	if err != nil {
+		return Technique{}, fmt.Errorf("technique: publish: %w", err)
+	}
+	return out, nil
+}
+
 // GetTechnique reads one row through the same projection the writes return, so
 // a partial update overlays onto exactly the shape it will write back.
 func (r *PostgresRepository) GetTechnique(ctx context.Context, id string) (Technique, error) {
@@ -169,7 +198,7 @@ func scanContent(s scannable) (Technique, error) {
 		&t.PositionDetail, &t.GiNoGi, &t.TypicalBelt, &t.Description,
 		&t.SetupFrom, &t.CommonCounters, &t.WhenToUse, &t.CommonNextMoves,
 		&t.VideoReference, &t.SourceNotes, &t.IBJJFRulesetID, &t.Function,
-		&t.ToPosition, &t.Source, &t.CreatedAt, &t.UpdatedAt)
+		&t.ToPosition, &t.Source, &t.Status, &t.CreatedAt, &t.UpdatedAt)
 	if err != nil {
 		return Technique{}, err
 	}

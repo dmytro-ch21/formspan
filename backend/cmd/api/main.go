@@ -177,6 +177,9 @@ func main() {
 	mux.Handle("GET /v1/admin/techniques", verifier.RequireAdmin(http.HandlerFunc(techniqueContentHandler.List)))
 	mux.Handle("POST /v1/admin/techniques", verifier.RequireAdmin(http.HandlerFunc(techniqueContentHandler.Create)))
 	mux.Handle("PATCH /v1/admin/techniques/{techniqueID}", verifier.RequireAdmin(http.HandlerFunc(techniqueContentHandler.Update)))
+	// POST rather than PATCH: publishing is an action, not a field, and the
+	// edit path must not be able to change visibility by accident.
+	mux.Handle("POST /v1/admin/techniques/{techniqueID}/publish", verifier.RequireAdmin(http.HandlerFunc(techniqueContentHandler.Publish)))
 	mux.Handle("GET /v1/admin/exercises/vocabularies", verifier.RequireAdmin(http.HandlerFunc(exerciseContentHandler.Vocabularies)))
 	mux.Handle("GET /v1/admin/exercises", verifier.RequireAdmin(http.HandlerFunc(exerciseContentHandler.List)))
 	mux.Handle("POST /v1/admin/exercises", verifier.RequireAdmin(http.HandlerFunc(exerciseContentHandler.Create)))

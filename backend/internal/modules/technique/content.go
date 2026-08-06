@@ -79,6 +79,13 @@ type ContentRepository interface {
 	// SearchAll finds any technique by name, id or alias, seeded included, so
 	// the console can reach the whole catalog rather than only what it wrote.
 	SearchAll(ctx context.Context, query string) ([]Technique, error)
+	// Publish makes a draft visible to athletes. One-way — see the
+	// implementation for why there is no unpublish.
+	//
+	// ErrNotFound covers both "no such id" and "already published": the caller
+	// is acting on a stale view either way, and a success it did not cause is
+	// worse than a 404 it can refresh past.
+	Publish(ctx context.Context, id string) (Technique, error)
 	// KnownPositions returns the distinct `position` values in the catalog.
 	//
 	// The vocabulary is derived from the library rather than hardcoded — the

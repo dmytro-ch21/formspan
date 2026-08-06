@@ -3,7 +3,13 @@
 import { revalidatePath } from "next/cache";
 
 import { assertAdmin } from "@/lib/admin";
-import { ApiError, createTechnique, updateTechnique, type TechniqueWrite } from "@/lib/api";
+import {
+  ApiError,
+  createTechnique,
+  publishTechnique,
+  updateTechnique,
+  type TechniqueWrite,
+} from "@/lib/api";
 
 /**
  * What the form renders after a submit.
@@ -132,6 +138,40 @@ export async function createTechniqueAction(
       values: bodyFrom(form),
       attempt: (prev.status === "error" ? prev.attempt : 0) + 1,
     };
+  }
+}
+
+/**
+ * Publishing has its OWN result type rather than reusing SaveResult.
+ *
+ * SaveResult's error variant carries `values` so a rejected save can re-seed
+ * the form React 19 has just reset. Publish submits no fields, so there is
+ * nothing to preserve and nothing to hand back — forcing it into that shape
+ * would mean inventing an empty `values` whose only purpose is satisfying a
+ * type, which is how a comment ends up explaining a lie.
+ */
+export type PublishResult =
+  | { status: "idle" }
+  | { status: "ok" }
+  | { status: "error"; message: string };
+
+/**
+ * Publishing is its own action for the same reason it is its own endpoint: it
+ * is a decision, not a field. Nothing about the edit form can trigger it.
+ */
+export async function publishTechniqueAction(
+  id: string,
+  _prev: PublishResult,
+  _form: FormData,
+): Promise<PublishResult> {
+  try {
+    await assertAdmin();
+    await publishTechnique(id);
+    revalidatePath("/content");
+    revalidatePath(`/content/${id}`);
+    return { status: "ok" };
+  } catch (err) {
+    return { status: "error", message: explain(err) };
   }
 }
 

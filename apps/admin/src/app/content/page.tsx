@@ -129,7 +129,17 @@ export default async function ContentPage({
                     i % 2 === 0 ? "bg-card" : ""
                   }`}
                 >
-                  <span className="font-semibold">{t.name}</span>
+                  <span className="font-semibold">
+                    {t.name}
+                    {/* Drafts are the rows that need finishing, so they are
+                        marked rather than left to be inferred from a column
+                        that only appears in search results. */}
+                    {t.status === "draft" ? (
+                      <span className="ml-2 rounded-full border border-accent-dark px-2 py-0.5 align-middle font-barlow-condensed text-[9px] font-bold tracking-[0.12em] text-text uppercase">
+                        Draft
+                      </span>
+                    ) : null}
+                  </span>
                   <span className="truncate font-mono text-[12px] text-text-secondary">
                     {t.id}
                   </span>

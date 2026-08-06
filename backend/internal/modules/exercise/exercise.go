@@ -175,7 +175,8 @@ type Exercise struct {
 	// it. Do not derive ownership from its absence — see the technique module,
 	// where reading it off a public detail response marked every row
 	// deploy-owned including the one just written.
-	Source    string    `json:"source,omitempty"`
+	Source string `json:"source,omitempty"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

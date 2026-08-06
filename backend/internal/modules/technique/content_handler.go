@@ -223,6 +223,26 @@ func (h *ContentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	h.write(w, r, next, h.repo.UpdateTechnique)
 }
 
+// Publish is a separate verb, not a field on PATCH.
+//
+// A status you can PATCH is a status a partial update can change by accident:
+// the edit path is read-modify-write over eighteen fields, and "visible to
+// athletes" does not belong in the same request as fixing a typo. Its own route
+// means the console has to mean it.
+func (h *ContentHandler) Publish(w http.ResponseWriter, r *http.Request) {
+	out, err := h.repo.Publish(r.Context(), r.PathValue("techniqueID"))
+	if errors.Is(err, ErrNotFound) {
+		apihttp.WriteError(w, http.StatusNotFound, apihttp.CodeNotFound,
+			"no draft technique with that id — it may already be published")
+		return
+	}
+	if err != nil {
+		apihttp.WriteInternal(w, r, "technique", err)
+		return
+	}
+	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"technique": out})
+}
+
 func (h *ContentHandler) write(
 	w http.ResponseWriter, r *http.Request, t Technique,
 	store func(context.Context, Technique) (Technique, error),

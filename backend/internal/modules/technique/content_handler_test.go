@@ -53,6 +53,18 @@ func (f *fakeContentRepo) Source(_ context.Context, id string) (string, error) {
 	return s, nil
 }
 
+func (f *fakeContentRepo) Publish(_ context.Context, id string) (Technique, error) {
+	t, ok := f.stored[id]
+	// Mirrors the SQL's `WHERE status = 'draft'`: publishing something already
+	// published is ErrNotFound, not a quiet success.
+	if !ok || NormalizeStatus(t.Status) != StatusDraft {
+		return Technique{}, ErrNotFound
+	}
+	t.Status = StatusPublished
+	f.stored[id] = t
+	return t, nil
+}
+
 func (f *fakeContentRepo) SearchAll(_ context.Context, q string) ([]Technique, error) {
 	out := []Technique{}
 	for _, t := range f.stored {
@@ -102,6 +114,15 @@ func (f *fakeContentRepo) UpdateTechnique(_ context.Context, t Technique) (Techn
 	f.stored[t.ID] = t
 	f.sources[t.ID] = "admin"
 	return t, nil
+}
+
+func publish(t *testing.T, h *ContentHandler, id string) *http.Response {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/v1/admin/techniques/"+id+"/publish", nil)
+	req.SetPathValue("techniqueID", id)
+	rec := httptest.NewRecorder()
+	h.Publish(rec, req)
+	return rec.Result()
 }
 
 func post(t *testing.T, h *ContentHandler, body string) *http.Response {
@@ -234,6 +255,35 @@ func TestCreateDerivesTheIDAndIgnoresAnyTheClientSends(t *testing.T) {
 // That refusal was right while the authoring spreadsheet owned 450 of the 542
 // rows; with the spreadsheet retired the console is the way to change any of
 // them, so the only 404 left is an id that does not exist.
+// Publishing is a route, and a stale view gets a 404 rather than a fake success.
+func TestPublishMakesADraftLiveAndRefusesASecondTime(t *testing.T) {
+	repo := newFakeRepo()
+	repo.stored["half-written"] = Technique{
+		ID: "half-written", Name: "Half Written", Category: "Pass",
+		Position: "Half Guard - Top", GiNoGi: "Both", Source: "admin",
+		Status: StatusDraft,
+	}
+	repo.sources["half-written"] = "admin"
+	h := NewContentHandler(repo)
+
+	res := publish(t, h, "half-written")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("publish = %d, want 200", res.StatusCode)
+	}
+	if got := repo.stored["half-written"].Status; got != StatusPublished {
+		t.Errorf("status after publish = %q", got)
+	}
+
+	// Already published, and a second click must not report success it did not
+	// cause — the operator is looking at a stale page.
+	if res := publish(t, h, "half-written"); res.StatusCode != http.StatusNotFound {
+		t.Errorf("re-publish = %d, want 404", res.StatusCode)
+	}
+	if res := publish(t, h, "no-such-id"); res.StatusCode != http.StatusNotFound {
+		t.Errorf("publishing an absent id = %d, want 404", res.StatusCode)
+	}
+}
+
 func TestASeededTechniqueIsEditable(t *testing.T) {
 	repo := newFakeRepo()
 	// A COMPLETE row. The first version of this fixture omitted

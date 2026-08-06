@@ -1,0 +1,12 @@
+-- LOSSY, and it PUBLISHES rather than merely forgetting.
+--
+-- Dropping `status` erases which rows were unfinished. Every draft becomes
+-- indistinguishable from shipped content, and the public catalog serves it to
+-- athletes immediately — a half-written technique with a name and no
+-- description, live, with nothing reporting a fault. Re-running the up
+-- migration cannot recover the distinction: the default is 'published', so the
+-- drafts stay published.
+--
+-- Publish or delete the drafts before rolling this back. `SELECT id, name FROM
+-- techniques WHERE status = 'draft'` is the list to work through.
+ALTER TABLE techniques DROP COLUMN IF EXISTS status;
