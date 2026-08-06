@@ -11851,6 +11851,62 @@ types and adherence. The next one should force a `packages/` instead.
 - **No component test.** The logic is covered; the screens are not, and
   `app/__tests__/` has the pattern.
 
+## 2026-08-05 — "Counted from tomorrow": the timezone bug, fixed
+
+`started_on` stamped the SERVER's date, and Postgres runs UTC everywhere it is
+deployed. An athlete enrolling at 22:00 in New York was recorded as starting
+**tomorrow**, so the roadmap screen read *"counted from what you have logged
+since 2026-08-06"* — a date that had not happened — and everything they trained
+that evening fell outside the window.
+
+Found by rendering it, not by reading it. Backend review had seen the same
+comparison and filed it as a **suggestion**, judging it "harmless over a
+months-long window". That reasoning is sound about the *size* of the error and
+wrong about its *placement*: the boundary is crossed exactly once, on the day
+the athlete is most likely to train, and the copy announces it.
+
+### Both halves were wrong
+
+**The write.** `started_on DATE NOT NULL DEFAULT CURRENT_DATE` resolves in the
+server's zone. Now `(now() AT TIME ZONE $tz)::date`.
+
+**The read.** `s.started_at >= $3::date` compared a timestamptz against a date
+cast at the server's midnight, so a class trained on the evening of the
+enrollment day fell outside a window meant to start that morning. Now both sides
+are local dates: `(s.started_at AT TIME ZONE $tz)::date >= $3::date`.
+
+Fixing only the write would have moved the error rather than removed it.
+
+### The shape follows `/v1/sessions/history`
+
+Optional `?tz=`, IANA names, validated with `time.LoadLocation` so an unknown
+name is a 400 rather than a silent fallback — a silent fallback here reproduces
+the exact bug the parameter exists to fix. `"Local"` is rejected explicitly,
+because to `LoadLocation` it means the SERVER's zone, which is the one answer
+never intended. Absent means UTC, which is what every existing caller got.
+
+Both clients already had a `localZone()` helper for history; curricula now use
+it on `GET`, `POST`, `PATCH` and enrollment.
+
+### Two tests, both mutation-checked
+
+One asserts `started_on` matches New York's date rather than the server's, and
+**logs when the two happen to agree** so a run that did not exercise the
+crossing says so instead of passing quietly. The other seeds a session at 23:00
+New York — already tomorrow in UTC — on the enrollment day and asserts it
+counts. Reverting either half of the fix takes the corresponding test red.
+
+### Gaps
+
+- **Nothing backfills existing enrollments.** Any row created before this keeps
+  its server-zone date. There are only test rows and my own staging enrollment
+  today, so a migration would be ceremony — but it is a real inconsistency, not
+  an absent one.
+- **The window still moves if an athlete changes timezone.** Progress is
+  measured against whatever zone the client sends now, not the one they enrolled
+  in. Right for someone who moved; slightly wrong for someone on holiday, and
+  nothing records which.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

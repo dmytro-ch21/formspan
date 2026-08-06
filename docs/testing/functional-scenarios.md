@@ -4584,9 +4584,14 @@ the schema rather than from taste:
   so with five techniques already held and a roadmap wanting three, the athlete
   is asked before three of theirs go.
 - **The hit rate shows `—`, not `0%`**, before any attempt.
-- **`started_on` must not be in the future.** Enrol late in the evening from a
-  timezone behind UTC: the progress block currently reads "counted since
-  <tomorrow>", and evidence logged that night does not count. Known bug.
+- **`started_on` must not be in the future**, and evidence logged that same
+  evening must count. Enrol at 22:00 from a zone behind UTC: the progress block
+  must read today's local date, and a session logged an hour later must move the
+  numbers. Both halves broke independently — the stored date and the window
+  comparison — so fixing one and testing only that would look like a pass.
+- **An unknown `tz` is a 400, never a silent fallback to UTC.** A silent
+  fallback is precisely the bug the parameter exists to prevent. `tz=Local` is
+  also rejected: to Go it means the server's zone.
 - **The strip fails silently** when the endpoint is unreachable — it renders
   nothing rather than an error. Deliberate; test that an offline Plan tab still
   shows its templates.

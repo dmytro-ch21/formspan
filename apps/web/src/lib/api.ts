@@ -6,6 +6,7 @@ import { newTraceId, traceparent } from "@/lib/trace";
 // rule to one definition per app; the repo already carries three copies of it
 // and `positionVocabulary.test.ts` exists because they drift.
 import { inPositionFamily } from "@/lib/libraryTiles";
+import { localZone } from "@/lib/history";
 import { formatWeight, type UnitSystem } from "@/lib/units";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
@@ -1839,6 +1840,15 @@ export function listCurricula(
   ).then((b) => b.curricula ?? []);
 }
 
+/**
+ * `tz` on every call that touches a date.
+ *
+ * Progress is measured from the enrollment date, and both ends of that
+ * comparison used to resolve in the SERVER's zone — UTC in every deployed
+ * environment. Enrolling at 22:00 in New York stamped TOMORROW, so the screen
+ * reported progress "counted from" a date that had not happened and that
+ * evening's training fell outside the window.
+ */
 export function getCurriculum(
   getToken: Token,
   id: string,
@@ -1846,7 +1856,7 @@ export function getCurriculum(
 ): Promise<Curriculum> {
   return request<Curriculum>(
     getToken,
-    `/curricula/${encodeURIComponent(id)}`,
+    `/curricula/${encodeURIComponent(id)}?tz=${encodeURIComponent(localZone())}`,
     {},
     signal,
   );
@@ -1856,7 +1866,7 @@ export function createCurriculum(
   getToken: Token,
   input: CurriculumWrite,
 ): Promise<Curriculum> {
-  return request<Curriculum>(getToken, "/curricula", {
+  return request<Curriculum>(getToken, `/curricula?tz=${encodeURIComponent(localZone())}`, {
     method: "POST",
     body: JSON.stringify(input),
   });
@@ -1867,10 +1877,14 @@ export function updateCurriculum(
   id: string,
   input: CurriculumWrite,
 ): Promise<Curriculum> {
-  return request<Curriculum>(getToken, `/curricula/${encodeURIComponent(id)}`, {
+  return request<Curriculum>(
+    getToken,
+    `/curricula/${encodeURIComponent(id)}?tz=${encodeURIComponent(localZone())}`,
+    {
     method: "PATCH",
     body: JSON.stringify(input),
-  });
+    },
+  );
 }
 
 export async function deleteCurriculum(
@@ -1890,7 +1904,7 @@ export async function enrollInCurriculum(
 ): Promise<void> {
   await request<void>(
     getToken,
-    `/curricula/${encodeURIComponent(id)}/enrollment`,
+    `/curricula/${encodeURIComponent(id)}/enrollment?tz=${encodeURIComponent(localZone())}`,
     { method: "PUT" },
   );
 }
