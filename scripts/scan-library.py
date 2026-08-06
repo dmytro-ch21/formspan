@@ -145,7 +145,11 @@ def score(want: set, have: set) -> tuple:
 
 # A shared token must carry at least this much rarity to count as evidence.
 #
-# Measured over the 482-row library rather than guessed. The category words a
+# Measured rather than guessed, over the 482-row concatenation this script
+# then built. NOTE that concatenation double-counts: every entry in
+# techniques.additions.json is also in techniques.json (see cmd/exportcontent),
+# so the corpus is 634 rows over a 542-technique library and these figures
+# carry that skew. The category words a
 # hundred techniques share sit just below it — escape 2.25, sweep 2.33,
 # control 2.54, pass 2.57, choke 2.71 — and the words that actually name a
 # technique sit just above: armbar 3.29, kimura 3.78, break 4.57, sleeve 5.08.

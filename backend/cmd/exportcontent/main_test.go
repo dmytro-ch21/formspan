@@ -31,7 +31,7 @@ func write(t *testing.T, path, body string) {
 //
 // The whole promotion path rests on a reviewable diff: export, READ THE DIFF,
 // merge, deploy, adopt. If re-serialising the catalog is not a no-op, the first
-// export rewrites all 482 entries and the one review step standing between a
+// export rewrites all 634 entries and the one review step standing between a
 // typo and a permanent foreign key in athletes' training records is a
 // whole-file rewrite nobody reads.
 //
@@ -93,7 +93,7 @@ func itoa(n int) string {
 // absent key unmarshals to a nil slice, pgx encodes a nil slice as NULL, and
 // aliases/setup_from/common_counters/common_next_moves are TEXT[] NOT NULL. The
 // insert happens inside UpsertAll's transaction, so one such entry takes the
-// ENTIRE seed down — all 466 techniques, not just its own row.
+// ENTIRE seed down — all 542 techniques, not just its own row.
 //
 // This is asserted on the JSON rather than against a database so it runs
 // everywhere; the not-null violation itself was reproduced against real
@@ -133,7 +133,7 @@ func TestAnExportedEntryCanActuallyBeSeeded(t *testing.T) {
 	}
 }
 
-// The optional pair, from the same data: to_position is absent on 317 of 466
+// The optional pair, from the same data: to_position is absent on 372 of 542
 // entries and absent means "not recorded", which migration 000029 is explicit
 // is a different fact from any value. Writing "" would be a lie.
 func TestTheTwoOptionalKeysAreOmittedWhenEmpty(t *testing.T) {
@@ -356,7 +356,7 @@ func TestReExportIsByteIdentical(t *testing.T) {
 }
 
 // A file that is NOT in id order keeps its order, because techniques.json is
-// generated in spreadsheet order and sorting it would rewrite all 466 entries —
+// generated in spreadsheet order and sorting it would rewrite all 542 entries —
 // the whole-file diff this design exists to avoid.
 func TestAnUnsortedFileKeepsItsOrder(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "techniques.json")

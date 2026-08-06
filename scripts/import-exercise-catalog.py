@@ -290,7 +290,7 @@ def convert_ibjjf_rulesets(path: Path) -> tuple[list[dict], dict[tuple, str]]:
             # divisions? Adult no-gi simply has no White belt division, so a
             # no-gi technique listing "Blue, Purple, Brown, Black" is the
             # BASELINE, not a restriction on the technique. Conflating the two
-            # makes ~130 ordinary techniques look restricted — a mistake made
+            # makes 441 ordinary techniques look restricted — a mistake made
             # three times while building this before it was written down.
             # Only a list NARROWER than its division's baseline is a warning.
             "is_restricted": bool(
@@ -462,7 +462,8 @@ def convert_techniques(path: Path) -> tuple[list[dict], list[dict]]:
 
     # The sheet writes `setup_from` as technique IDS (`grappling_stance_motion`)
     # while `common_next_moves`/`common_counters` are prose names. Emitting the
-    # ids verbatim put raw snake_case identifiers on 368 of 466 detail screens
+    # ids verbatim put raw snake_case identifiers on 368 of the 466 detail
+    # screens the library then had
     # and left the graph 2% resolvable instead of 80%.
     #
     # Resolved HERE rather than in each client: the OpenAPI description already

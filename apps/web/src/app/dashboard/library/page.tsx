@@ -45,7 +45,7 @@ const LOAD_LABEL: Record<Exercise["load_type"], string> = {
 };
 
 /**
- * The Library on desktop — the exercise catalog **and** the 466 BJJ techniques,
+ * The Library on desktop — the exercise catalog **and** the 542 BJJ techniques,
  * in one grid.
  *
  * One library, matching the phone. Techniques are not a separate destination
@@ -64,7 +64,7 @@ const LOAD_LABEL: Record<Exercise["load_type"], string> = {
  * links.
  *
  * Fetch shape: exercises are filtered server-side (debounced, cancellable);
- * techniques are fetched **once** (~65 KB for all 466) and filtered in memory.
+ * techniques are fetched **once** (~197 KB for all 542) and filtered in memory.
  * Same search box, different plumbing.
  */
 
@@ -91,7 +91,7 @@ function usesBelt(sport: string, mods: Module[]): boolean {
 
 /**
  * One collator, built once. `localeCompare` re-enters ICU per call; the sources
- * are kept pre-sorted and merged linearly so a keystroke costs ~990
+ * are kept pre-sorted and merged linearly so a keystroke costs ~1046
  * comparisons rather than a full re-sort.
  */
 const collator = new Intl.Collator(undefined, { sensitivity: "base" });
@@ -114,7 +114,7 @@ export default function LibraryPage() {
   const sportChips = [{ key: "", label: "All" }, ...enabledSports(modules)];
   /**
    * The enabled discipline that carries techniques, if any. Gates the FETCH,
-   * not just the chips — the technique list is ~65 kB and was pulled on every
+   * not just the chips — the technique list is ~197 KB and was pulled on every
    * Library visit regardless of whether this athlete does BJJ.
    */
   // When modules are UNKNOWN (the fetch failed), fetch anyway — same
@@ -760,8 +760,8 @@ function Card({
         </span>
       </span>
       {/* Straight from the API's is_restricted. Never inferred from belt counts
-          — adult no-gi has no white belt division, so counting flags ~130
-          ordinary techniques instead of the real 20. */}
+          — adult no-gi has no white belt division, so counting flags 441
+          ordinary techniques instead of the real 27. */}
       {restricted && (
         <span className="shrink-0 rounded border border-warn px-1.5 py-0.5 text-[0.625rem] font-bold tracking-wide text-warn">
           IBJJF
@@ -1066,7 +1066,7 @@ function Priorities({ text }: { text: string }) {
  * A technique, in full.
  *
  * Fetched per selection rather than held: the summary the grid draws from
- * deliberately carries no prose (65 KB for all 466 against 274 KB), so the
+ * deliberately carries no prose (197 KB for all 542 against 587 KB), so the
  * panel is where the detail arrives.
  */
 function TechniquePanel({
@@ -1151,7 +1151,7 @@ function TechniquePanel({
 
           And the mechanics are a *sequence*, not a paragraph — the library just
           authors them as one comma-separated sentence. Same split as the phone,
-          same 8-of-466 prose fallback, so the two screens never disagree about
+          same 7-of-542 prose fallback, so the two screens never disagree about
           where a step ends. */}
       {steps.length > 0 ? (
         <div className="flex flex-col gap-2 border-t border-line-soft pt-4">
@@ -1210,7 +1210,7 @@ function TechniquePanel({
  * `is_restricted` comes from the API and is NOT re-derived here. Adult no-gi has
  * no white belt division, so a no-gi list of "Blue, Purple, Brown, Black" is
  * the baseline rather than a restriction — inferring from belt counts marks
- * ~130 ordinary techniques as restricted when the real number is 20.
+ * 441 ordinary techniques as restricted when the real number is 27.
  */
 function Legality({ ruleset }: { ruleset: Ruleset }) {
   return (
@@ -1276,8 +1276,8 @@ function Division({
  * The graph, as reference text.
  *
  * These were buttons that swapped the panel until the coverage was looked at
- * honestly: only ~80% of `setup_from` entries name a real library entry, and
- * for `common_next_moves` it is ~29%, for `common_counters` ~6%. Most rows were
+ * honestly: only ~84% of `setup_from` entries name a real library entry, and
+ * for `common_next_moves` it is ~30%, for `common_counters` ~7%. Most rows were
  * plain text sitting beside a few links, which reads as a feature that
  * half-works. The information stays; the navigation goes. Mirrors the phone.
  */

@@ -125,7 +125,7 @@ describe("what the athlete already had", () => {
 describe("the cap", () => {
   it("never proposes more than the maximum", () => {
     // The bound IS the feature: a focus list of twenty is the library again,
-    // and the wizard would be back to searching 466 entries.
+    // and the wizard would be back to searching 542 entries.
     const many = Array.from({ length: 9 }, (_, i) => step(`t${i}`, false));
     const p = proposeFocus(many, [], 5);
     expect(p.next).toHaveLength(5);

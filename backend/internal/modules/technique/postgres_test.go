@@ -202,11 +202,11 @@ func TestTechniqueEnrichment(t *testing.T) {
 	// is_restricted must mean "narrower than this division's baseline", not
 	// "lists fewer than five belts". Adult no-gi has no white belt division,
 	// so a no-gi ruleset of Blue/Purple/Brown/Black is the baseline. Getting
-	// this wrong marks ~130 ordinary techniques as restricted.
+	// this wrong marks 441 perfectly ordinary techniques as restricted.
 	// EXACT counts, not a range. The regression this column exists to prevent —
 	// deriving restriction by comparing belt lists, which reads adult no-gi's
-	// missing white belt division as a restriction — flags roughly 17 of 25
-	// rulesets and ~130 techniques. A "0 < n < all" assertion passes that
+	// missing white belt division as a restriction — flags 21 of 25
+	// rulesets and 468 techniques. A "0 < n < all" assertion passes that
 	// happily, which makes it worse than no test. These move only when the
 	// IBJJF rulebook or the library changes, and both are version-controlled.
 	// wantRestrictedTechniques was 20 until the 2026-08 curriculum gap-fill
@@ -225,7 +225,7 @@ func TestTechniqueEnrichment(t *testing.T) {
 		}
 	}
 	if restricted != wantRestrictedRulesets {
-		t.Errorf("restricted rulesets = %d, want %d (belt-count derivation would give ~17)",
+		t.Errorf("restricted rulesets = %d, want %d (belt-count derivation would give 21)",
 			restricted, wantRestrictedRulesets)
 	}
 
@@ -263,8 +263,8 @@ func TestTechniqueEnrichment(t *testing.T) {
 
 	// setup_from must name techniques, not carry raw ids. The sheet writes ids;
 	// the importer resolves them. Regressing that put snake_case identifiers on
-	// 368 of 466 detail screens.
-	// One query over ALL 466 rather than repo.Get in a loop over a sample. A
+	// 368 of the 466 detail screens the library then had.
+	// One query over ALL 542 rather than repo.Get in a loop over a sample. A
 	// sample proves nothing about the rows it skipped, and the property here is
 	// meant to be total: NO entry may be a raw id.
 	var rawRows int
@@ -279,7 +279,7 @@ func TestTechniqueEnrichment(t *testing.T) {
 	}
 
 	// Resolution rate stays a sample — it is a data-quality signal, not an
-	// invariant, and ~80% is the authored reality rather than a target.
+	// invariant, and ~84% is the authored reality rather than a target.
 	byName := make(map[string]bool, len(all))
 	for _, s := range all {
 		byName[strings.ToLower(s.Name)] = true
@@ -703,7 +703,7 @@ func TestLegEntanglementsAreTheirOwnPosition(t *testing.T) {
 // This is the `completed`-flag failure mode, which this project has already
 // shipped once: a column written by the upsert but absent from the
 // `IS DISTINCT FROM` tuple that decides whether the row updates at all. The
-// SET clause looks right, the seed logs "466 upserted", and the value never
+// SET clause looks right, the seed logs "542 upserted", and the value never
 // lands — with nothing failing anywhere.
 //
 // It is not hypothetical here. Removing `function` from the two tuple sides
@@ -817,7 +817,10 @@ func TestToPositionNamesRealPositionsAndOnlyGrows(t *testing.T) {
 		}
 	}
 
-	const wantAtLeast = 149
+	// Raised 149 -> 170 with the 2026-08 curriculum gap-fill. This is a
+	// ratchet: it only ever goes up, and lowering it to make a red suite green
+	// is the failure it exists to catch.
+	const wantAtLeast = 170
 	if populated < wantAtLeast {
 		t.Fatalf("only %d techniques have a destination, want at least %d — authored data was lost",
 			populated, wantAtLeast)
@@ -833,7 +836,8 @@ func TestToPositionNamesRealPositionsAndOnlyGrows(t *testing.T) {
 
 	// The transitions must actually cross positions, or the column is just a
 	// copy of `position` and answers nothing.
-	if populated-selfLoops < 100 {
+	// A ratchet too, same rule as wantAtLeast: 162 today, and it only rises.
+	if populated-selfLoops < 162 {
 		t.Errorf("only %d real position changes recorded", populated-selfLoops)
 	}
 }
@@ -843,7 +847,7 @@ func TestToPositionNamesRealPositionsAndOnlyGrows(t *testing.T) {
 // The analogue of TestReseedPopulatesFunctionOnRowsThatPredateTheColumn, and
 // added for the same reason: the `IS DISTINCT FROM` tuple decides whether the
 // row updates at all, and a column missing from it is written by the SET
-// clause that never runs. The seed logs "466 upserted" and nothing lands.
+// clause that never runs. The seed logs "542 upserted" and nothing lands.
 //
 // Review proved this is not hypothetical here — removing to_position from the
 // two tuple sides leaves the entire technique suite green while writing zero

@@ -14,7 +14,7 @@ import type { TokenGetter } from './useAuthToken';
  * rows, and that row is the only place it is recorded.
  *
  * It also puts technique-level detail where it earns its cost. Naming a
- * technique means searching a 466-entry library; across the whole catalog that
+ * technique means searching a 542-entry library; across the whole catalog that
  * data is mostly noise, across the three-to-five things being developed it is
  * the most valuable evidence there is. Set on web — choosing what to work on
  * for the next few weeks is planning, not logging.
@@ -46,7 +46,7 @@ export function fetchFocus(getToken: TokenGetter, signal?: AbortSignal): Promise
  * The cap, mirrored from the backend's own `maxFocus`.
  *
  * The bound IS the feature: a focus list of twenty is the library again, and
- * the wizard would be back to searching 466 entries. Duplicated rather than
+ * the wizard would be back to searching 542 entries. Duplicated rather than
  * fetched because it is a product decision, not data — but if the server's
  * value ever moves, this is the second place to change.
  */

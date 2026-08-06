@@ -127,7 +127,7 @@ export type TechniqueRef = Pick<Tag, 'technique_id' | 'category' | 'position'>;
  * where an earlier version put them and created a second place to record the
  * same event. The focus list is what makes that affordable: it names three to
  * five techniques up front, so recording one costs a tap instead of a search
- * through 466 library entries.
+ * through 542 library entries.
  *
  * ATTEMPTED AND SCORED ARE DISJOINT, which the labels have to carry or the
  * numbers mean nothing. `attempted` is "went for it and it did not land" (see

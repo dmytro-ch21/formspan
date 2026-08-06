@@ -397,7 +397,7 @@ the Side Control family the way closed/open guard partition Guard.
 
 ### Destination — where a technique leaves you (`to_position`)
 
-Sparse ON PURPOSE (149 of 466). Test the invariants, not the coverage.
+Sparse ON PURPOSE (170 of 542). Test the invariants, not the coverage.
 
 - **Every value names a real position.** The load-bearing one. `Side Control`
   instead of `Side Control - Top` produces an edge that resolves to nothing on
@@ -413,7 +413,9 @@ Sparse ON PURPOSE (149 of 466). Test the invariants, not the coverage.
   have broken it, not passed it); a single-leg entry records Standing (you have
   the leg, not the takedown). A test asserting zero self-loops would be
   asserting the bug.
-- **Populated count only rises.** Pinned at 149. A fall means authored data was
+- **Populated count only rises.** Pinned at 170 (was 149 before the 2026-08
+  gap-fill; raising the pin is part of landing new content). A fall means
+  authored data was
   lost rather than a decision being made — the values are hand-authored and
   exist nowhere else.
 - **A re-import preserves them.** The spreadsheet does not carry this column,
@@ -1522,7 +1524,7 @@ a technique is opened, and the library stays instant as it grows.**
 
 **Happy path**
 
-- The Library tab lists all 466 alongside the exercise catalog, scrolls smoothly, and opening one
+- The Library tab lists all 542 alongside the exercise catalog, scrolls smoothly, and opening one
   shows mechanics (`description`) *and* the decision (`when_to_use`) as separate
   sections.
 - The IBJJF panel shows rule class and both divisions' belts.
@@ -1533,7 +1535,7 @@ a technique is opened, and the library stays instant as it grows.**
 
 - **The list response must not contain prose.** Assert `description` and
   `when_to_use` are absent from `/v1/techniques`. Regressing to full rows takes
-  the payload from ~65 kB to ~274 kB and nothing visible breaks — which is why
+  the payload from ~197 kB to ~587 kB and nothing visible breaks — which is why
   it needs a test.
 - **Typing in search issues no network request.** Search is local over an
   already-fetched list.
@@ -1542,15 +1544,15 @@ a technique is opened, and the library stays instant as it grows.**
 **The traps, each of which fails silently**
 
 - **`is_restricted` must come from the API, never be re-derived.** A client
-  computing it from belt-list length marks ~130 ordinary techniques as
+  computing it from belt-list length marks 441 ordinary techniques as
   restricted (adult no-gi has no white belt division, so Blue/Purple/Brown/Black
-  is the *baseline*). Assert the restricted count is ~20, not ~130.
+  is the *baseline*). Assert the restricted count is 27, not 468.
 - **An empty belt array means "division doesn't apply", not "no belts".** A
   gi-only technique must not render as prohibited in no-gi.
 - **Unresolvable edges must not look tappable.** ~71% of `common_next_moves`
   and ~94% of `common_counters` name things absent from the library.
 - **No video section when `video_reference` is empty** — it is empty for all
-  466, so an always-present heading implies 466 missing assets.
+  542, so an always-present heading implies 542 missing assets.
 - **Alias search works**: "scarf hold" finds "Kesa-Gatame Escape".
 - **Empty states only claim emptiness after a successful read** — a failed
   fetch says the library is unavailable, not that there are no techniques.
@@ -1577,7 +1579,7 @@ a technique is opened, and the library stays instant as it grows.**
 
 ## Unified Library — exercises + techniques in one list (`apps/mobile` Library tab)
 
-Domain: one Library tab lists the exercise catalog **and** the 466 BJJ
+Domain: one Library tab lists the exercise catalog **and** the 542 BJJ
 techniques in a single alphabetically-sorted list, behind one search box and
 one set of sport chips. There is deliberately **no separate techniques screen**
 — a previous version had one and it is the specific thing these scenarios
@@ -1624,11 +1626,11 @@ guard against regressing to.
   Closed Guard".
 - `is_restricted` comes from the API and is never re-derived from belt counts.
   A no-gi list of Blue/Purple/Brown/Black is the **baseline** (adult no-gi has
-  no white belt division), not a restriction — deriving it flags ~130 ordinary
-  techniques instead of the real 20.
+  no white belt division), not a restriction — deriving it flags 441 ordinary
+  techniques instead of the real 27.
 - An empty belt list renders its note ("N/A — gi-specific"), never "allowed at
   no belt".
-- Sections with no content (e.g. `video_reference`, empty in all 466) do not
+- Sections with no content (e.g. `video_reference`, empty in all 542) do not
   render an empty heading.
 
 ### Auth / security
@@ -1640,7 +1642,7 @@ guard against regressing to.
 
 ## Unified Library on web (`apps/web`, `/dashboard/library`)
 
-Domain: the same one library as the phone — exercise catalog plus the 466 BJJ
+Domain: the same one library as the phone — exercise catalog plus the 542 BJJ
 techniques in a single alphabetical grid, one search box, one set of sport
 chips. The wide-screen difference is the detail panel beside the grid rather
 than replacing it.
@@ -1698,14 +1700,14 @@ than replacing it.
 
 ### Edge cases
 
-- A technique whose description does not split into 2+ steps (6 of 466) renders
+- A technique whose description does not split into 2+ steps (7 of 542) renders
   the original prose under the same heading — **never** a one-item list.
 - `executionSteps` must produce zero steps under 10 characters across the whole
   library; a stray "and" as its own numbered step is a failure.
 - The mobile and web parsers must stay logically identical — a step boundary
   that differs between platforms is a content difference, not a styling one.
 - Sections with no content still do not render (`video_reference` is empty in
-  all 466).
+  all 542).
 - **Retry must not flash "Technique not found."** Tapping Try again shows the
   spinner for the duration of the request, never the not-found fallback.
 - The step splitter must contain no regex lookbehind: `lib/api.ts` is imported
@@ -2614,9 +2616,10 @@ own, so none of them is redundant with "the FK exists".
   carry it, or the next re-import deletes it.
 - The diff for one new technique is **one entry**, in the file's own key order.
   A whole-file reorder is the failure: Go sorts map keys, the files are written
-  in semantic order, and 482 reordered entries bury the change.
+  in semantic order, and 634 reordered entries across the two files bury the
+  change.
 - **`function` and `to_position` sit in their interior slots** — after `category`
-  and after `position_detail` respectively, which is where 462 and 149 of the
+  and after `position_detail` respectively, which is where 538 and 170 of the
   shipped entries put them. Appending them to the end seeds and renders fine and
   is invisible until the next spreadsheet re-import relocates them on every
   entry the export wrote. Assert the order as a SUBSEQUENCE across entries: an
@@ -2655,7 +2658,7 @@ own, so none of them is redundant with "the FK exists".
   must not cost hand-authored content.
 - A missing file (or directory) is created rather than fatal.
 - Only `function` and `to_position` are omitted when empty — everything else is
-  written explicitly. `to_position` is absent on 317 of 466 entries and absent
+  written explicitly. `to_position` is absent on 372 of 542 entries and absent
   means "not recorded", which is a different fact from any value.
 - **Adoption must not touch `updated_at` on rows the deploy already owns.**
   Assert the timestamp, not `source` — setting `seed` on a `seed` row is
@@ -2784,7 +2787,8 @@ own, so none of them is redundant with "the FK exists".
   identical requests. Note removing the tiebreak does **not** currently turn a
   test red — the plan happens to be stable — so this is a property to assert,
   not one a mutation can prove.
-- The `LIMIT` cannot bind in practice (500 vs a 466-technique library). It is a
+- The `LIMIT` cannot bind in practice (800 vs a 542-technique library; the cap
+  was raised 500 -> 800 when the gap-fill pushed the library past 500). It is a
   memory backstop, not pagination; do not write a test that implies it
   truncates real data.
 - On a failed load the page shows an error banner with a retry, **not** the
@@ -2863,7 +2867,7 @@ written and then never seen again.
 
 ## BJJ position glossary (backend, mobile)
 
-The library's 466 entries are all *moves*; these ten are what those moves
+The library's 542 entries are all *moves*; these ten are what those moves
 happen inside of. Every scenario here is about reference content a signed-in
 athlete reads — nothing writes, so there is no offline outbox and no
 conflict story.
@@ -3578,7 +3582,7 @@ JS and show up on a reload.
 ### Happy path
 
 - The list shows **only admin-authored** techniques, not the catalog. Seed the
-  library, author one, and assert the list has exactly one row — 466 seeded
+  library, author one, and assert the list has exactly one row — 542 seeded
   entries must not appear, because the edit path refuses every one of them.
 - Creating a technique returns a **derived id** and the screen shows the real
   one from the API, not only the typed preview. "Cabeçada Counter" →
@@ -4314,7 +4318,7 @@ parser, not only on a page:
 
 Covers the reflection wizard's drilled-technique picker (mobile), the Library
 tab (mobile + web) and the curriculum builder's catalog pane (web). All four
-search the same 466-entry catalog through one pair of functions, duplicated per
+search the same 542-entry catalog through one pair of functions, duplicated per
 app.
 
 The defect these exist for: a beginners' closed-guard passing class could not be
@@ -4348,7 +4352,7 @@ substring of ONE field. The techniques were all present.
 
 - Empty query, whitespace-only, and a lone `-` (which folds to nothing) all
   return the whole catalog rather than nothing.
-- A query of nothing but joiners (`to the`) returns a narrowed list, not all 466
+- A query of nothing but joiners (`to the`) returns a narrowed list, not all 542
   — the athlete typed something.
 - `armbar zzzznotathing` returns **nothing**. A real term paired with nonsense
   must not fall back to the real term's hits; that is the difference between

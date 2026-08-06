@@ -12704,6 +12704,133 @@ row.
 - The spreadsheet lives outside the repo in two hand-synced copies. Nothing
   detects them drifting apart.
 
+## 2026-08-06 — The counts refresh, and the two files that were never additive
+
+PR #147 grew the library and PR #149 merged aliases; roughly a hundred
+hard-coded counts across the repo still said 466, 482, 462 or "149 of 482".
+This sweep re-measured every one of them rather than find-and-replacing,
+because most are the stated JUSTIFICATION for a design decision — the exact
+failure this log already recorded once, when the search payload figures drifted
+2.3x while being quoted as the reason for the summary/detail split.
+
+**The library is 542, and 634 is not a number.** The obvious way to count is
+`len(techniques.json) + len(techniques.additions.json)` = 634. That
+double-counts: all 92 additions are *also* in `techniques.json`, which is the
+invariant `cmd/exportcontent` exists to maintain ("content that is not here is
+not in the deploy" / "content that is not here is deleted by the next
+re-import"). `seed.go` embeds only `techniques.json`, so **542 is what is
+embedded, seeded, served and searched**. 634 is meaningful in exactly one
+place — the number of entries the export rewrites *across both files* — and
+`exportcontent`'s own comments now say so explicitly, so the next reader does
+not add the two lengths again.
+
+**A live ratchet moved.** `wantAtLeast` in
+`TestToPositionNamesRealPositionsAndOnlyGrows` was pinned at 149 and is now
+170 — the same discipline as mobile's `--max-warnings`. It was verified to bite
+at exactly its new boundary (171 fails, 170 passes), so it is tight against the
+real data rather than slack. Left at 149 it would have silently stopped
+protecting the 21 destinations the gap-fill authored.
+
+**The payload figures were wrong even after #147 re-measured them.** The
+Summary docstring's "~180 KB gzipping to ~19 KB" turns out to be the payload
+*without* `setup_from`; the real list is **197.3 KB / 22.2 KB**, full rows
+**587.3 KB** (measured by marshalling the real response envelope, not by
+approximating the JSON — and after the alias merge in #150, which moved them
+again mid-branch).
+
+**And the first attempt at re-measuring `setup_from`'s cost was itself wrong,
+which is the whole lesson of this entry.** I reported it as "+8%, not the +14%
+previously claimed" — because I measured the counterfactual as *the key present
+with an empty array* (173 KB → 177.5 KB). But the sentence argues against
+making `setup_from` **detail-only**, i.e. the field absent from Summary
+entirely. Measured that way it is **~24 KB on a ~173 KB list (+14%)** — the
+original +14% was methodologically right all along and only the magnitudes had
+drifted. Caught by `backend-reviewer`. Re-measuring is not automatically more
+truthful than the number it replaces: a re-measurement against the wrong
+counterfactual is just a new way to be confidently wrong, and this one would
+have understated the cost of a design decision in the schema description client
+authors read. The docstring now names the counterfactual explicitly.
+
+**One claim was false rather than stale.** `executionSteps` promised "no step
+under 10 or over 110 characters". On the current corpus 11 of 1960 steps run
+past 110, the longest 169. Renumbering that would have preserved a lie, so the
+comment now states the real spread and the rendering consequence.
+
+**A second unreproducible number, same shape.** The `is_restricted` column
+exists to stop anyone deriving legality by comparing belt lists, and every
+copy of that warning quoted "~130 ordinary techniques" as the cost of the
+mistake. I refreshed it to ~181 — from a formula (`either list < 4 belts`)
+that happens to produce 181 but is *not* the mistake the sentence describes.
+`backend-reviewer` could not reproduce it and was right not to. The described
+mistake — reading adult no-gi's missing white-belt division as a restriction —
+is now **stated as a derivation** rather than asserted as a bare figure:
+treating any non-empty belt list that omits White as a restriction flags **21
+of the 25 rulesets and 468 techniques, 441 of them ordinary**, against a true
+27. A number nobody can re-derive is not a measurement, it is a rumour with a
+decimal point.
+
+Also re-derived rather than re-typed, since each is a property of the data:
+step-split coverage (458/466 → 535/542, and the prose fallback 8 → 7), position
+family coverage (465/466 → 539/542, the 3 misses being the catch-all "Other"),
+exact-key coverage (274 → 219), the graph (420 → 495 techniques touched, ~541 →
+658 edges, hubs 14/9 → 18/11), edge resolution (~80/29/6% → ~84/30/7%), fold
+calls per keystroke (1592 → 2141, after #150's aliases), the Open Guard list
+(124 → 138), the glossary ("ten curated entries" → eleven, since the leg
+entanglement promotion), and the merged Library row count (~990 → 1046).
+
+**`191 of 634` arrived from main mid-branch.** PR #148's sequences module and
+its schema entry both state `to_position` is "populated for 191 of 634
+techniques" — which is this exact double-count, one release later and in a
+schema description (191 = 170 + the 21 additions counted twice). Fixed here to
+170 of 542 rather than left for a follow-up, because merging would otherwise
+have put the correction and the contradiction in the tree at the same time.
+
+**A second ratchet was raised too.** `populated - selfLoops < 100` had gone
+slack by 62 rows; it is now pinned at the measured 162. Both ratchets were
+verified to fail at exactly one above their pinned value, so neither is slack.
+
+### What was deliberately left alone
+
+- **This log's own past entries**, and the comments in **applied migrations**.
+  Both are dated records of what was true and known at a point in time; a
+  migration's rationale is part of the version it shipped in. Rewriting either
+  would destroy the record rather than refresh it.
+- **Genuine historical measurements inside live files** — the `setup_from`
+  inversion experiment, the W_META reachability regression, the raw-id
+  regression. These are now *anchored* ("the 466 rows the library then held")
+  so the number cannot be misread as the current library size.
+- **"16 actionable rows"** in the content handler. That is runtime state, not a
+  seed property: `source = 'admin'` rises as the console authors and returns to
+  zero on `exportcontent -adopt`. Re-typing it as another integer would invent
+  a fact, so it is now described rather than counted.
+
+### Gaps
+
+- **Nothing enforces any of this.** Every figure here is a comment; the only
+  count with a test behind it is `to_position`'s ratchet. The next content PR
+  will drift them again. A `verify` step that re-measures the handful of
+  load-bearing ones (library size, step coverage, payload bytes) and fails on a
+  mismatch is the real fix — this sweep is the third time these have been
+  corrected by hand.
+- **The `~175/~485 KB at 466` anchor was wrong and is now dropped**: the
+  byte-exact 466-era measurement was 164.2 KB (conditional.go's old row), which
+  `backend-reviewer` reproduced exactly. The docstring now carries that figure
+  instead of the estimate.
+- **The `42%` name-parsing figure could not be re-measured** — the parser was a
+  one-off and is not in the repo — so it is anchored as historical rather than
+  restated.
+- The **exercise catalog's** conditional-GET row (211.7 KB) was left as-is: it
+  did not match a seed-only measurement (199.8 KB), most likely because the
+  endpoint joins `exercise_media`, and confirming that needs a running
+  database rather than a guess.
+- **`scripts/scan-library.py` makes the double-count for real, not just in a
+  comment.** It builds its corpus with `items = techniques.json; items +=
+  additions.json`, so 92 techniques appear twice and every word-rarity (IDF)
+  figure is skewed downward for terms in the additions — including the values
+  its `MIN_IDF` threshold was calibrated against. Only the comment was
+  corrected here; re-tuning a calibrated constant is a behavioural change, not
+  a counts refresh. Spun out as a follow-up.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

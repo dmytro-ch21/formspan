@@ -9,9 +9,9 @@ import type { TechniqueSummary } from './techniques';
  * is the entire question, and nothing could answer it.
  *
  * So this inverts the edge once over the list a client already holds. No new
- * column, no authoring: 420 of the 466 techniques are already touched by
+ * column, no authoring: 495 of the 542 techniques are already touched by
  * `setup_from`, and its hubs are exactly the control positions — Seatbelt
- * Back Control has 14 techniques hanging off it, De La Riva Guard Control 9.
+ * Back Control has 18 techniques hanging off it, De La Riva Guard Control 11.
  * The graph was there; it just could not be walked.
  *
  * Deliberately client-side, matching how `function` and the position
@@ -27,7 +27,7 @@ export type TechniqueGraph = {
   /**
    * Edges naming something the library does not contain.
    *
-   * ~20% of `setup_from` values are concepts rather than techniques —
+   * ~16% of `setup_from` values are concepts rather than techniques —
    * "Underhook", "Crossface", "Hand fight". They are the mechanic vocabulary
    * and will become their own nodes eventually; counted here so a caller can
    * report honest coverage rather than silently presenting a partial graph as
@@ -44,7 +44,7 @@ export type TechniqueGraph = {
  * matching two techniques resolves to the first — the seed validates ids for
  * uniqueness but not names, so this cannot throw.
  *
- * O(n + e) over ~466 nodes and ~541 edges. Build it once per list, not per
+ * O(n + e) over ~542 nodes and ~658 edges. Build it once per list, not per
  * render.
  */
 export function buildTechniqueGraph(techniques: TechniqueSummary[]): TechniqueGraph {
@@ -101,7 +101,7 @@ export const FUNCTION_LABEL: Record<string, string> = {
  * Group techniques by what they DO.
  *
  * The payoff of the `function` column, and the first thing to read it. A
- * position's technique list is otherwise a flat alphabetical run of 124
+ * position's technique list is otherwise a flat alphabetical run of 138
  * entries; grouped, it answers the question a beginner actually has — from
  * here I can advance, reverse, escape, control or finish, and these are the
  * ways.

@@ -274,8 +274,8 @@ func TestANameThatSlugsToNothingIsRefusedAtTheHandler(t *testing.T) {
 	}
 }
 
-// The console lists what it can EDIT, which is not the catalog. Listing all 466
-// would offer 466 rows of which a handful are actionable — UpdateTechnique
+// The console lists what it can EDIT, which is not the catalog. Listing all 542
+// would offer 542 rows of which a handful are actionable — UpdateTechnique
 // refuses a seeded row, so the rest are decoration that 409s when clicked.
 func TestListReturnsOnlyWhatTheConsoleCanEdit(t *testing.T) {
 	repo := newFakeRepo()

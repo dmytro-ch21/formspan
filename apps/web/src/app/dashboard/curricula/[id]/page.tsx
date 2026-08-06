@@ -468,7 +468,7 @@ function FocusPanel({
       <p className="mt-1 text-xs text-neutral-600 dark:text-neutral-400">
         Putting them in your focus list makes them one-tap chips in the phone&apos;s
         reflection wizard — which is what records the evidence these criteria
-        read. Otherwise you would be naming them by hand out of 466.
+        read. Otherwise you would be naming them by hand out of 542.
       </p>
 
       {proposal.added.length > 0 && (

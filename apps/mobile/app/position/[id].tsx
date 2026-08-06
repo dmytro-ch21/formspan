@@ -14,7 +14,7 @@ import { useAuthToken } from '@/lib/useAuthToken';
 /**
  * One position, explained.
  *
- * The library had 466 techniques and nothing that said what any of them
+ * The library had 542 techniques and nothing that said what any of them
  * happened *inside* of — "Armbar from Closed Guard" is unreadable to someone
  * who has never been in a closed guard. This is the other half of that: the
  * node, rather than the edge.

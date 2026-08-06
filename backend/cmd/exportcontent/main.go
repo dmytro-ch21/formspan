@@ -24,8 +24,10 @@
 //     not here is deleted by the next re-import, silently, because the sheet
 //     is a full replacement rather than a patch.
 //
-// All 16 existing additions are present in both files. That is the invariant
-// this command maintains, not an accident to be tidied up.
+// All 92 existing additions are present in both files. That is the invariant
+// this command maintains, not an accident to be tidied up — so the two files
+// hold 634 entries between them over a library of 542 distinct techniques,
+// and adding their lengths together double-counts every addition.
 //
 // USAGE
 //
@@ -431,13 +433,13 @@ func idsIn(path string) (map[string]bool, error) {
 // mergeInto folds the exported techniques into an existing catalog file.
 //
 // MERGE, not replace. Both files hold content this command never wrote — the
-// additions file predates it by months, and techniques.json is 466 entries
+// additions file predates it by months, and techniques.json is 542 entries
 // generated from the spreadsheet — so overwriting either would destroy content
 // that has no other copy.
 //
 // Entries are matched by id and replaced; everything else is kept BYTE FOR
 // BYTE, key order included. That is what makes the diff reviewable: without it
-// the first export reorders every key of all 482 entries (Go marshals a map
+// the first export reorders every key of all 634 entries (Go marshals a map
 // with its keys sorted, the files are written in semantic order) and buries the
 // one real change in a whole-file rewrite. Nobody reads that diff, and the
 // review step is the only thing standing between a typo and a permanent
@@ -527,11 +529,11 @@ func carryOver(prev, next entry, keys []string) entry {
 
 // The key order both files are written in. Not alphabetical — it is the order
 // the Python importer emits, and matching it is what keeps an exported entry
-// visually consistent with its 481 neighbours.
+// visually consistent with its 633 neighbours.
 //
 // The two interior slots are load-bearing and were wrong in the first version,
-// which appended both to the end. Measured against the shipped file: 462 of 466
-// entries put `function` between `category` and `position`, and 149 put
+// which appended both to the end. Measured against the shipped file: 538 of 542
+// entries put `function` between `category` and `position`, and 170 put
 // `to_position` between `position_detail` and `gi_no_gi`. That is not a style
 // preference — `apply_taxonomy` inserts `function` after `category` and
 // `carry_to_position` rebuilds each record to place `to_position` after
@@ -541,7 +543,7 @@ func carryOver(prev, next entry, keys []string) entry {
 // design exists to prevent.
 //
 // `function` and `to_position` are also the only OPTIONAL keys, matching the
-// data: to_position is absent on 317 of 466 entries, and absent means "not
+// data: to_position is absent on 372 of 542 entries, and absent means "not
 // recorded", which migration 000029 is explicit is a different fact from any
 // value.
 //

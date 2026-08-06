@@ -11,7 +11,7 @@ import type { TokenGetter } from './useAuthToken';
  * curriculum can be part reading list and part roadmap.
  *
  * **What this app does and does not get.** The design doc puts roadmap
- * *building* on web — picking a dozen techniques out of 466 and setting four
+ * *building* on web — picking a dozen techniques out of 542 and setting four
  * numeric criteria each is a desk job — and everything else here: pick one,
  * see progress, put its techniques into focus. That last one is why this file
  * exists at all. The loop is roadmap → `bjj_focus` → one-tap chips in the

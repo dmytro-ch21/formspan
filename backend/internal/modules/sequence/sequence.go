@@ -135,7 +135,7 @@ type Step struct {
 
 	// EndsAtPositionID is where this step leaves you, and therefore where the
 	// next one starts. Authored, NOT derived from techniques.to_position:
-	// migration 000029 populated that for 191 of 634 techniques and documents
+	// migration 000029 populated that for 170 of the 542 techniques and documents
 	// why the rest cannot be derived without inventing data, so deriving would
 	// render most chains with holes.
 	//

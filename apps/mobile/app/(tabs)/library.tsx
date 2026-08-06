@@ -52,17 +52,17 @@ import { useAuthToken } from '@/lib/useAuthToken';
  * "BJJ Techniques" link row that pushed a separate screen with its own search
  * and its own visual language, and it was wrong twice over: it split a thing
  * the product treats as one, and tapping the existing "BJJ" chip gave you
- * twenty bear-crawl drills while the 466 actual techniques sat somewhere else
+ * twenty bear-crawl drills while the 542 actual techniques sat somewhere else
  * entirely. If the word "library" means anything it means one place to look.
  *
  * What differs between the two kinds is what a row *says*, not where it lives:
  * an exercise shows its movement pattern and load type, a technique shows its
  * position and category. Both get a tile (see components/LibraryTile), which
- * is what stops a 990-row list reading as a wall of text.
+ * is what stops a 1046-row list reading as a wall of text.
  *
  * Performance shape: exercises are filtered server-side (the catalog is
  * paginated and the query is cheap there), techniques are fetched **once** and
- * filtered in memory — 466 summaries are ~65 KB, so holding them makes typing
+ * filtered in memory — 542 summaries are ~197 KB, so holding them makes typing
  * free and works with no signal. Different mechanisms, deliberately; the same
  * search box drives both.
  */
@@ -116,10 +116,10 @@ type FacetKey = 'position' | 'belt' | 'muscle' | 'movement';
 /**
  * One collator, built once.
  *
- * `String.prototype.localeCompare` re-enters ICU per call; sorting ~990 merged
+ * `String.prototype.localeCompare` re-enters ICU per call; sorting ~1046 merged
  * rows on every keystroke is ~10k of those on the JS thread, which is felt as
  * typing lag. Both sources are kept pre-sorted instead and merged linearly, so
- * a keystroke costs ~990 comparisons through a reused collator rather than 10k
+ * a keystroke costs ~1046 comparisons through a reused collator rather than 10k
  * through a fresh one.
  */
 const collator = new Intl.Collator(undefined, { sensitivity: 'base' });
@@ -127,11 +127,11 @@ const collator = new Intl.Collator(undefined, { sensitivity: 'base' });
 /**
  * Position filters, keyed on the *family* rather than the exact position.
  *
- * Exact keys ("Mount - Top") reached 274 of 466 techniques and quietly
- * excluded every bottom and escape position — half the library, and the half a
- * white belt needs most. Worse, a chip labelled "Mount" that returns only
+ * Exact keys ("Mount - Top") reach 219 of 542 techniques and quietly
+ * exclude every bottom and escape position — most of the library, and the part
+ * a white belt needs most. Worse, a chip labelled "Mount" that returns only
  * Mount-Top is a label making a promise the filter doesn't keep. Matching the
- * family covers 465 of 466.
+ * family covers 539 of 542; the 3 left out are the catch-all "Other" position.
  *
  * "Half Guard" is listed separately and before nothing else depends on it:
  * `startsWith('Guard - ')` cannot match "Half Guard - Bottom", so the two
@@ -146,12 +146,12 @@ const POSITIONS = [
   { key: 'Side Control', label: 'Side control' },
   { key: 'Back', label: 'Back' },
   { key: 'Turtle', label: 'Turtle' },
-  // Its 7 techniques were unreachable by any chip while the glossary row
+  // Its 8 techniques were unreachable by any chip while the glossary row
   // directly above advertises the position with a card — the filter has to
   // offer at least what the glossary names.
   { key: 'North-South', label: 'North-south' },
   // Same rule, same reason. The ashi garami family became its own position,
-  // and its 26 techniques moved out from under the Guard chip in the same
+  // and its 30 techniques moved out from under the Guard chip in the same
   // change — so without this they are reachable only by typing. A saddle
   // entry is exactly what someone browses for and cannot spell.
   { key: 'Leg Entanglement', label: 'Leg entanglement' },
@@ -227,7 +227,7 @@ export default function LibraryScreen() {
    * from a hardcoded set of sport keys.
    *
    * `showTechniques` gates the FETCH, not just the chips. Hiding a module
-   * should cut the request: the technique list is ~65 kB and was pulled on
+   * should cut the request: the technique list is ~197 KB and was pulled on
    * every Library visit regardless of whether the user does BJJ.
    */
   const techniqueSport = modules.find((m) => m.enabled && m.capabilities.catalog === 'techniques');
@@ -421,7 +421,7 @@ export default function LibraryScreen() {
    * Clear the search on the way out — but not when the way out is a result.
    *
    * The blur fires for pushing `/technique/[id]` too, so "search, open a
-   * result, come back" used to return an empty box and all ~990 rows. That
+   * result, come back" used to return an empty box and all ~1046 rows. That
    * breaks the one flow this screen exists for (compare three armbars), while
    * the original reason for clearing — coming back next session to a short
    * list for no visible reason — only applies to leaving via the tab bar.
@@ -469,7 +469,7 @@ export default function LibraryScreen() {
    */
   const loadTechniques = useCallback(async () => {
     // The gate the commit message CLAIMED existed and didn't. Without this the
-    // technique list plus rulesets (~65 kB) were pulled on every Library mount
+    // technique list plus rulesets (~213 KB) were pulled on every Library mount
     // and every pull-to-refresh, for every user, regardless of whether they do
     // the discipline. Hiding a module has to cut the request, not just the
     // pixels — otherwise "hidden" costs exactly as much as shown.
@@ -882,7 +882,7 @@ export default function LibraryScreen() {
           // Without this the first tap on a result only dismisses the keyboard,
           // so search-then-open — the main use of this screen — takes two taps.
           keyboardShouldPersistTaps="handled"
-          // Virtualised: the merged catalog is ~990 rows, and mounting that
+          // Virtualised: the merged catalog is ~1046 rows, and mounting that
           // many at once is a visible stall on a phone.
           initialNumToRender={12}
           windowSize={9}
@@ -1126,7 +1126,7 @@ function TechniqueRow({
       </View>
       {/* Straight from the API's is_restricted. Never inferred from belt
           counts — adult no-gi has no white belt division, so counting flags
-          ~130 ordinary techniques instead of the real 20. */}
+          441 ordinary techniques instead of the real 27. */}
       {restricted && (
         <View style={styles.badge}>
           <Text style={styles.badgeText}>IBJJF</Text>

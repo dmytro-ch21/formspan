@@ -15,7 +15,7 @@ import (
 // changes only on deploy. Measured against the seeded database:
 //
 //	GET /v1/exercises            (504)   211.7 KB -> 12.6 KB gzip
-//	GET /v1/techniques           (466)   164.2 KB -> 17.4 KB gzip
+//	GET /v1/techniques           (542)   197.3 KB -> 22.2 KB gzip
 //	GET /v1/techniques/positions  (11)    16.6 KB ->  5.7 KB gzip
 //	GET /v1/techniques/rulesets   (25)    15.8 KB ->  1.9 KB gzip
 //
