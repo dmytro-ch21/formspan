@@ -31,8 +31,10 @@ import { RevisionHistory } from "../../RevisionHistory";
  * takes ownership of it, so a dead end here would be a false refusal in front of
  * an edit that works.
  *
- * Note the exercise list has no search yet, so a deploy-owned row is reachable
- * only by typing its URL. That is scope, not design — see the history entry.
+ * Three outcomes, same as the technique screen: in the authored list → the form
+ * from that row; not authored but real → the same form plus the transfer
+ * warning; not authored and 404 → genuinely no such id. All three are now
+ * reachable from the list's search box as well as by typing a URL.
  */
 export default async function EditExercisePage({
   params,
@@ -121,11 +123,11 @@ export default async function EditExercisePage({
             whether athletes can see the exercise. Media is not part of a revision: it lives
             outside the content the console writes.
           </p>
+          {/* Bound to the id only — see the technique page and
+              `revisionForm.ts`. */}
           <RevisionHistory
             revisions={revisions}
-            restore={(revision) =>
-              restoreExerciseRevisionAction.bind(null, initial.id, revision)
-            }
+            restore={restoreExerciseRevisionAction.bind(null, initial.id)}
           />
         </section>
       </main>

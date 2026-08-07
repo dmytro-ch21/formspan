@@ -669,7 +669,18 @@ components:
           description: >
             Whether athletes can see it. `published` is in the public catalog;
             `draft` is visible only through `/admin/*` — not in
-            `GET /techniques`, not findable, not taggable.
+            `GET /techniques` and not findable through the library.
+
+
+            **A draft technique CAN still be referenced by id** — tagged into a
+            BJJ session, a focus list, a curriculum or a sequence. Those four
+            write paths validate against the foreign key, which does not know
+            about `status`. The exercise catalog does not have this gap: its two
+            write paths (workout items, session sets) check for `published`
+            explicitly. Closing it here means adding that check in four modules
+            and is not yet done — stated rather than implied, because an earlier
+            version of this description claimed drafts were "not taggable" and
+            nothing enforced it.
 
 
             **Present only on `/admin/*` responses**, and for a stronger reason
@@ -1568,13 +1579,18 @@ components:
 
             **Present only on `/admin/*` responses.** Absent from `GET
             /exercises` and `GET /exercises/{exerciseID}`, which do not select
+            the column — so its absence means "this endpoint does not report
+            provenance", never "not admin-authored". Use membership of
+            `GET /admin/exercises` instead.
         status:
           type: string
           enum: [draft, published]
           description: >
             Whether athletes can see it. `published` is in the public catalog;
             `draft` is visible only through `/admin/*` — not in
-            `GET /exercises`, not addable to a workout.
+            `GET /exercises`, and not addable to a workout or a session: both
+            write paths validate against published rows only, so a draft id is
+            rejected as an unknown exercise.
 
 
             **Present only on `/admin/*` responses**, and for a stronger reason
@@ -1585,9 +1601,6 @@ components:
             The console CREATES as `draft`. Editing a published exercise leaves
             it published. Publishing is
             `POST /admin/exercises/{exerciseID}/publish` and is ONE-WAY.
-            the column — so its absence means "this endpoint does not report
-            provenance", never "not admin-authored". Use membership of
-            `GET /admin/exercises` instead.
         primary_muscles:
           type: array
           items: { type: string }
@@ -4777,10 +4790,13 @@ paths:
         none.
 
 
-        The payload is the CONTENT projection and excludes `media`, which lives
-        in its own table, cannot be authored in the console, and is untouched by
-        the content write path — including it would promise a restore that puts
-        pictures back, and it would not.
+        The payload is the CONTENT projection, so `media` on it is ALWAYS `[]` —
+        the same convention `GET /admin/exercises` uses, and not a claim that the
+        exercise has no pictures. Media lives in its own table, cannot be
+        authored in the console, and is never read into a revision or written by
+        a restore. Reading a payload's `media` as the media at that revision is
+        therefore wrong in both directions: it was not recorded, and restoring
+        will not put anything back.
       parameters:
         - name: exerciseID
           in: path

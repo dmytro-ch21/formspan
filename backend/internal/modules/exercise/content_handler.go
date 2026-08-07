@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/dmytro-ch21/vola/backend/internal/platform/auth"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
+	"github.com/dmytro-ch21/vola/backend/internal/platform/auth"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/discipline"
 )
 

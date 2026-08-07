@@ -570,7 +570,10 @@ func assertSportsMatch(ctx context.Context, tx pgx.Tx, sport string, sets []Set)
 	for _, s := range sets {
 		ids = append(ids, s.ExerciseID)
 	}
-	rows, err := tx.Query(ctx, `SELECT id, sport FROM exercises WHERE id = ANY($1)`, ids)
+	// PUBLISHED ONLY — same rule and same reasoning as the workout module's
+	// copy: a draft must read as an unknown id, never as a draft.
+	rows, err := tx.Query(ctx,
+		`SELECT id, sport FROM exercises WHERE id = ANY($1) AND status = 'published'`, ids)
 	if err != nil {
 		return fmt.Errorf("session: check exercise sports: %w", err)
 	}

@@ -12,6 +12,7 @@ import {
   type ExerciseWrite,
 } from "@/lib/api";
 import type { PublishResult, SaveResult } from "./actions";
+import { revisionFrom } from "./revisionForm";
 
 type ExerciseResult = SaveResult<ExerciseWrite>;
 
@@ -111,14 +112,18 @@ export async function publishExerciseAction(
   }
 }
 
+/** Same split as the technique restore — see `revisionForm.ts`. */
 export async function restoreExerciseRevisionAction(
   id: string,
-  revision: number,
   _prev: PublishResult,
-  _form: FormData,
+  form: FormData,
 ): Promise<PublishResult> {
   try {
     await assertAdmin();
+    const revision = revisionFrom(form);
+    if (revision === null) {
+      return { status: "error", message: "That restore button sent no revision." };
+    }
     await restoreExerciseRevision(id, revision);
     revalidatePath("/content/exercises");
     revalidatePath(`/content/exercises/${id}`);

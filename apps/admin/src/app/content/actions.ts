@@ -11,6 +11,7 @@ import {
   updateTechnique,
   type TechniqueWrite,
 } from "@/lib/api";
+import { revisionFrom } from "./revisionForm";
 
 /**
  * What the form renders after a submit.
@@ -157,17 +158,23 @@ export type PublishResult =
   | { status: "error"; message: string };
 
 /**
- * Publishing is its own action for the same reason it is its own endpoint: it
- * is a decision, not a field. Nothing about the edit form can trigger it.
+ * Restoring is its own action for the same reason it is its own endpoint: it is
+ * a decision, not a field. Nothing about the edit form can trigger it.
+ *
+ * `id` is bound by the page; `revision` arrives in the form — see
+ * `revisionForm.ts` for why that split is not a style choice.
  */
 export async function restoreRevisionAction(
   id: string,
-  revision: number,
   _prev: PublishResult,
-  _form: FormData,
+  form: FormData,
 ): Promise<PublishResult> {
   try {
     await assertAdmin();
+    const revision = revisionFrom(form);
+    if (revision === null) {
+      return { status: "error", message: "That restore button sent no revision." };
+    }
     await restoreRevision(id, revision);
     revalidatePath("/content");
     revalidatePath(`/content/${id}`);

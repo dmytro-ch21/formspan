@@ -2702,6 +2702,18 @@ Two exercise-only points worth their own assertions:
 
 Every console write leaves a revision. The deploy leaves none.
 
+- **The history SECTION RENDERS AT ALL.** Load a content detail page — either
+  catalog, with history and without — and assert a 200 with the form present.
+  This reads like a test of nothing, and it is first because for two increments
+  the feature was completely broken and every other check passed: the page
+  passed a closure to a client component, React refused to serialize it, and the
+  whole route 500'd into an error boundary claiming the API was unreachable. It
+  typechecked, it built, and no test rendered a page. Any scenario below that
+  runs against the API only will stay green through a repeat.
+- **Restore posts the revision as a form field, with the id bound server-side.**
+  Assert a restore button's form carries `revision=<n>` and that tampering with
+  it cannot reach another row — the id is not in the form, by construction.
+
 - **Create, update and publish each append one**, numbered from 1 per technique,
   newest first on read.
 - **The payload is the state AFTER that write**, so reading the history needs no
@@ -2752,6 +2764,29 @@ is a separate, one-way action.
 - **Deleting the status filter from the public list leaves the rest of the suite
   green** — the console paths return drafts on purpose. That is why this section
   exists rather than relying on coverage elsewhere.
+
+#### Drafts and the things that reference them
+
+Invisible is not the same as unreferenceable, and the two catalogs currently
+differ here — deliberately, and stated rather than implied.
+
+- **A draft EXERCISE cannot be added to a workout item or a session set**, and
+  the refusal is `unknown exercise` — byte-identical to a nonexistent id. Assert
+  the message, not just the error type: a distinct "that is a draft" hands any
+  authenticated caller an existence oracle over unpublished content, and a
+  sport-mismatch error does the same by naming the sport.
+- **The same exercise becomes addable once published.** Without this the test
+  above passes against a filter that rejects everything.
+- **A draft TECHNIQUE can still be tagged** into a BJJ session, a focus list, a
+  curriculum or a sequence — those four paths validate through the foreign key,
+  which does not read `status`. This is a KNOWN GAP, recorded in the contract.
+  A scenario written today should pin the current behaviour and be inverted
+  when the gap is closed, not assert the behaviour we want.
+- **Fixture discipline for all of the above:** a draft row seeded for one of
+  these tests must be registered for cleanup BEFORE the workout or session that
+  references it. `t.Cleanup` is LIFO and the FK has no `ON DELETE`, so the other
+  order leaves the draft in the shared database whenever the test fails — which
+  is exactly when it is least likely to be noticed.
 
 - **Editing a SEEDED technique takes ownership of it.** PATCH one, assert
   `source` became `admin`, then run `cmd/seed` with the ORIGINAL content and

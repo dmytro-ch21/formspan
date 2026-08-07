@@ -98,7 +98,7 @@ export default async function ExerciseContentPage({
               <span>Id</span>
               <span>Sport</span>
               <span>Pattern</span>
-              <span className="justify-self-end">Updated</span>
+              <span className="justify-self-end">{query ? "Owner" : "Updated"}</span>
             </div>
             <div className="flex flex-col">
               {exercises.map((e, i) => (
@@ -123,7 +123,17 @@ export default async function ExerciseContentPage({
                   <span className="text-text-secondary">{e.sport}</span>
                   <span className="truncate text-text-secondary">{e.movement_pattern}</span>
                   <span className="justify-self-end text-text-secondary">
-                    {formatUTC(e.updated_at ?? null)}
+                    {/* Same swap the technique list makes, for the same
+                        reason: in search results the useful column is WHO
+                        OWNS IT, because saving a `seed` row moves it to
+                        `admin` and that is worth seeing before you open it.
+                        The authored list is all `admin` by definition, so it
+                        shows the timestamp instead. */}
+                    {query
+                      ? e.source === "admin"
+                        ? "console"
+                        : "deploy"
+                      : formatUTC(e.updated_at ?? null)}
                   </span>
                 </Link>
               ))}

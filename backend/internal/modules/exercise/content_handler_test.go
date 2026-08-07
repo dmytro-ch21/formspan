@@ -158,6 +158,15 @@ func post(t *testing.T, h *ContentHandler, body string) *httptest.ResponseRecord
 	return rec
 }
 
+func publish(t *testing.T, h *ContentHandler, id string) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/admin/exercises/"+id+"/publish", nil)
+	r.SetPathValue("exerciseID", id)
+	h.Publish(rec, r)
+	return rec
+}
+
 func patch(t *testing.T, h *ContentHandler, id, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	rec := httptest.NewRecorder()
@@ -482,5 +491,68 @@ func TestAnUnboundedNameIsRefused(t *testing.T) {
 	if rec := post(t, NewContentHandler(newFakeRepo()),
 		`{"name":"`+ok+`","sport":"strength","movement_pattern":"squat","load_type":"reps"}`); rec.Code != http.StatusOK {
 		t.Errorf("a name exactly at the bound was refused: %d %s", rec.Code, rec.Body)
+	}
+}
+
+// The audit trail's whole value is that the writer cannot choose the actor.
+//
+// This has a twin in the technique package, and the twin is the reason it is
+// here: `actorOf` is duplicated per module, so nothing in the suite noticed
+// that only one of the two copies was covered. A body field named `actor` must
+// reach nothing.
+func TestTheRequestBodyCannotChooseTheActor(t *testing.T) {
+	repo := newFakeRepo()
+	repo.stored["editable"] = Exercise{
+		ID: "editable", Name: "Editable", Sport: "strength",
+		MovementPattern: "squat", LoadType: LoadTypeReps, Source: "admin",
+	}
+	repo.sources["editable"] = "admin"
+
+	rec := patch(t, NewContentHandler(repo), "editable",
+		`{"name":"Edited","actor":"impostor","source":"seed"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("patch = %d, want 200: %s", rec.Code, rec.Body)
+	}
+	if repo.lastActor == "impostor" {
+		t.Error("the request body set the actor — an audit trail the writer can " +
+			"forge records nothing")
+	}
+	// And it is the documented fallback, not an empty string: these requests
+	// carry no claims, so `actorOf` must say so rather than guess.
+	if repo.lastActor != "unknown" {
+		t.Errorf("actor = %q, want %q — it did not come from the claims path",
+			repo.lastActor, "unknown")
+	}
+	// `source` is equally not the body's to set.
+	if repo.stored["editable"].Source != "admin" {
+		t.Errorf("source = %q — the body changed ownership", repo.stored["editable"].Source)
+	}
+}
+
+func TestPublishMakesADraftLiveAndRefusesASecondTime(t *testing.T) {
+	repo := newFakeRepo()
+	repo.stored["half-written"] = Exercise{
+		ID: "half-written", Name: "Half Written", Sport: "strength",
+		MovementPattern: "squat", LoadType: LoadTypeReps, Source: "admin",
+		Status: StatusDraft,
+	}
+	repo.sources["half-written"] = "admin"
+	h := NewContentHandler(repo)
+
+	if rec := publish(t, h, "half-written"); rec.Code != http.StatusOK {
+		t.Fatalf("publish = %d, want 200: %s", rec.Code, rec.Body)
+	}
+	if got := repo.stored["half-written"].Status; got != StatusPublished {
+		t.Errorf("status after publish = %q", got)
+	}
+
+	// Already published: a second click must not report success it did not
+	// cause. The operator is looking at a stale page, and "done" would tell
+	// them the state changed when it did not.
+	if rec := publish(t, h, "half-written"); rec.Code != http.StatusNotFound {
+		t.Errorf("re-publish = %d, want 404", rec.Code)
+	}
+	if rec := publish(t, h, "no-such-id"); rec.Code != http.StatusNotFound {
+		t.Errorf("publishing an absent id = %d, want 404", rec.Code)
 	}
 }
