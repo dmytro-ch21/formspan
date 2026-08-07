@@ -13463,6 +13463,138 @@ Two things the detour is worth remembering for:
   while reading like a warning. `gh api repos/{owner}/{repo}/pulls/{n} -X
   PATCH` works. Caught only by reading the PR back afterwards.
 
+
+## 2026-08-06 — The exercise catalog reaches parity
+
+Three gaps closed at once, all recorded when the technique work deliberately
+left them: **search**, **drafts**, and **revisions**. The exercise console could
+edit any of the 504 rows through the API since step 2 but could not FIND them,
+a new exercise went live the instant it saved, and nothing recorded who changed
+what.
+
+Each was left open for the same stated reason — half a feature is worse than
+none — and this is the other half arriving rather than a correction. Migration
+000036 said so explicitly about `exercises.status`: a column without a
+create-as-draft path, a public filter and a publish button is a column nothing
+reads, and drafts with no publish control create exercises that can never go
+live. 000038 is that column, now that all three exist.
+
+Everything mirrors the technique implementation, which is the point — the two
+catalogs having different rules for the same concept is how a console teaches
+its operator two things. The same decisions carry over unchanged: the column
+defaults to `published` because it has to describe the 504 backfilled rows,
+editing a published row leaves it published, publishing is one-way, restore
+appends and never touches `status`, the actor is a parameter rather than a
+field a JSON body could set, and the deploy writes no history.
+
+**One thing differs, and it is why the revision payload is the CONTENT
+projection.** An exercise's media lives in `exercise_media` — the console cannot
+author it and the content write path does not touch it. A snapshot including
+media would promise a restore that puts pictures back, and it would not.
+
+Mutation-tested on both halves that would rot silently: dropping the public
+status filter (which leaves every other test in the package green, since the
+console paths return drafts on purpose) and making restore write `status`.
+
+### Gaps
+
+- **The two catalogs duplicate `StatusPublished`/`StatusDraft` and the four
+  action constants** across packages. A shared package for six strings felt
+  worse than a comment on each pointing at the other. *Closed by the review
+  entry below — the comment is now a test.*
+- **`RevisionHistory` is now shared** between the two catalogs and typed on
+  `Revision<Technique | Exercise>`. It reads only `payload.name`, so the union
+  costs nothing today; a component that needs a field only one of them has
+  would be the moment to split it.
+- The exercise search matches name and id but **not aliases** — exercises have
+  none. If they gain them, the query needs the same `unnest` arm the technique
+  search has.
+
+## 2026-08-06 — Review of the parity branch: a feature that had never rendered
+
+Pre-merge review of the exercise-parity branch, before it was opened as a PR.
+Four findings survived verification; all four are fixed here. Two are worth
+recording for what they say about the gaps in how this work was checked.
+
+**Revision history had never worked — in either catalog.** The detail pages
+passed `restore={(revision) => action.bind(null, id, revision)}` to a client
+component. A Server Component may hand a Client Component a *server reference*;
+a closure that returns one is not that, so React threw
+`Functions cannot be passed directly to Client Components` during
+serialization, and the entire page — form, publish button, history — was
+replaced by the root error boundary reading "the API didn't respond as
+expected", which is the one explanation that was not true. It was **not** new
+to this branch: the technique version shipped in Step 5 and is identically
+broken on `main`. Nothing caught it because it typechecked (the prop type had
+been written to describe the closure), because the pages are dynamic so no
+build-time render exercises them, and because — this is the actual lesson — the
+admin console cannot boot from a git worktree without its gitignored
+`.env.local`, so **neither Step 5 nor the parity branch ever rendered the
+screen it added.** Reproduced by copying `.env.local` in, adding a throwaway
+route that mounts the component with no API call, and reading the 500.
+
+The fix binds only the id server-side and moves the revision into a hidden form
+field (`revisionForm.ts` owns both the field name and the reader). Both restore
+buttons now share one server reference — visible in the DOM as a single
+`$ACTION_REF` id with distinct `revision=` fields, which is the confirmation
+that the prop is a real action and not a closure. The prop type is now the
+plain action signature, so **reintroducing the closure is a `typecheck:admin`
+failure** rather than a 500 in front of an operator; verified by mutation.
+
+**A draft exercise could be added to a workout.** The contract sentence this
+branch wrote — "not addable to a workout" — was false: both write paths
+validate with `SELECT id, sport FROM exercises WHERE id = ANY($1)` and no
+status filter. Beyond the broken promise, that made the endpoint an existence
+oracle over unpublished content, which the catalog's own read path explicitly
+refuses to be. Both queries now filter to `published`, so a draft reads as an
+*unknown id* rather than as a draft — indistinguishable is the point. Safe to
+tighten because publishing is one-way and drafts are new, so nothing legitimate
+could already reference one.
+
+Mutation-testing that guard found a second bug in the new tests themselves:
+cleanup was registered before the fixture, so on a failing run the exercise
+DELETE hit the `workout_items` foreign key and the draft rows survived into the
+shared test database. That is the `t.Cleanup` LIFO trap this repo already
+documents, arrived at from the other direction, and it only appeared because
+the mutation made the test fail. Registration order is now fixed and commented
+with what it cost.
+
+**The technique catalog has the analogous gap and it is NOT fixed.** A draft
+technique can still be tagged into a BJJ session, focus list, curriculum or
+sequence: those four paths validate through the foreign key, which knows
+nothing about `status`. Closing it means adding a check in four modules and is
+its own piece of work. The contract previously claimed drafts were "not
+taggable"; it now states the gap explicitly instead, because a false promise in
+a contract is worse than an admitted hole.
+
+Also fixed: a `status` schema block spliced into the middle of `source`'s
+description (structurally valid YAML, so `lint:openapi` passed — exactly the
+invisible-divergence class the review was asked to find); a contract claim that
+revision payloads "exclude `media`" when they carry `"media": []` (they exclude
+the *data*, never the key); the missing Owner column on exercise search results;
+`Revision<T = Technique>`'s default, which would have typed an exercise revision
+as a technique one and compiled; and `PublishButton`'s "visible in the athlete
+library" caption, which contradicted the exercise notice printed directly above
+it.
+
+Two test gaps closed: the exercise module had all the fake-repo plumbing for
+handler-tier tests and no tests using it, so `actorOf` — duplicated per package
+— was covered in one copy only; and the "these constants must not drift"
+comment is now `TestTheTwoCatalogsAgreeOnTheirSharedVocabulary`, which fails
+when either side moves.
+
+### Gaps
+
+- **Draft techniques are still referenceable by id** (four modules, FK-only
+  validation). Stated in the contract, not yet enforced.
+- **The admin console still cannot be rendered from a worktree** without
+  hand-copying `.env.local`. That is what let a never-rendering page ship, and
+  it will let the next one ship too. A checked-in `.env.example`-driven dev
+  fallback, or a note in the worktree flow, is the real fix.
+- Nothing renders the console in CI, so a serialization regression in a page
+  the typechecker cannot see would still reach a human first. The prop-type
+  change closes this specific instance, not the class.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

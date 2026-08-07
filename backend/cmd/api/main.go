@@ -189,6 +189,9 @@ func main() {
 	mux.Handle("GET /v1/admin/exercises", verifier.RequireAdmin(http.HandlerFunc(exerciseContentHandler.List)))
 	mux.Handle("POST /v1/admin/exercises", verifier.RequireAdmin(http.HandlerFunc(exerciseContentHandler.Create)))
 	mux.Handle("PATCH /v1/admin/exercises/{exerciseID}", verifier.RequireAdmin(http.HandlerFunc(exerciseContentHandler.Update)))
+	mux.Handle("POST /v1/admin/exercises/{exerciseID}/publish", verifier.RequireAdmin(http.HandlerFunc(exerciseContentHandler.Publish)))
+	mux.Handle("GET /v1/admin/exercises/{exerciseID}/revisions", verifier.RequireAdmin(http.HandlerFunc(exerciseContentHandler.Revisions)))
+	mux.Handle("POST /v1/admin/exercises/{exerciseID}/revisions/{revision}/restore", verifier.RequireAdmin(http.HandlerFunc(exerciseContentHandler.Restore)))
 	mux.Handle("GET /v1/sessions", verifier.RequireAuth(http.HandlerFunc(sessionHandler.List)))
 	mux.Handle("POST /v1/sessions", verifier.RequireAuth(http.HandlerFunc(sessionHandler.Create)))
 	// Registered before the {sessionID} pattern is irrelevant to net/http's

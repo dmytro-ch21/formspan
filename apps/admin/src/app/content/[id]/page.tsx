@@ -139,9 +139,12 @@ export default async function EditTechniquePage({
             back and records the restore — it never deletes what came after, and never changes
             whether athletes can see the technique.
           </p>
+          {/* Bound to the id only. The revision rides in the form — a closure
+              here is not serializable across the RSC boundary and 500s the
+              page; see `revisionForm.ts`. */}
           <RevisionHistory
             revisions={revisions}
-            restore={(revision) => restoreRevisionAction.bind(null, initial.id, revision)}
+            restore={restoreRevisionAction.bind(null, initial.id)}
           />
         </section>
       </main>

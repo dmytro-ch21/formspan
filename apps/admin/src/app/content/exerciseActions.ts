@@ -6,10 +6,13 @@ import { assertAdmin } from "@/lib/admin";
 import {
   ApiError,
   createExercise,
+  publishExercise,
+  restoreExerciseRevision,
   updateExercise,
   type ExerciseWrite,
 } from "@/lib/api";
-import type { SaveResult } from "./actions";
+import type { PublishResult, SaveResult } from "./actions";
+import { revisionFrom } from "./revisionForm";
 
 type ExerciseResult = SaveResult<ExerciseWrite>;
 
@@ -90,6 +93,43 @@ export async function createExerciseAction(
       values: bodyFrom(form),
       attempt: (prev.status === "error" ? prev.attempt : 0) + 1,
     };
+  }
+}
+
+export async function publishExerciseAction(
+  id: string,
+  _prev: PublishResult,
+  _form: FormData,
+): Promise<PublishResult> {
+  try {
+    await assertAdmin();
+    await publishExercise(id);
+    revalidatePath("/content/exercises");
+    revalidatePath(`/content/exercises/${id}`);
+    return { status: "ok" };
+  } catch (err) {
+    return { status: "error", message: explain(err) };
+  }
+}
+
+/** Same split as the technique restore — see `revisionForm.ts`. */
+export async function restoreExerciseRevisionAction(
+  id: string,
+  _prev: PublishResult,
+  form: FormData,
+): Promise<PublishResult> {
+  try {
+    await assertAdmin();
+    const revision = revisionFrom(form);
+    if (revision === null) {
+      return { status: "error", message: "That restore button sent no revision." };
+    }
+    await restoreExerciseRevision(id, revision);
+    revalidatePath("/content/exercises");
+    revalidatePath(`/content/exercises/${id}`);
+    return { status: "ok" };
+  } catch (err) {
+    return { status: "error", message: explain(err) };
   }
 }
 

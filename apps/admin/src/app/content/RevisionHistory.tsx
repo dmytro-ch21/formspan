@@ -2,34 +2,52 @@
 
 import { useActionState } from "react";
 
-import type { Revision } from "@/lib/api";
+import type { Exercise, Revision, Technique } from "@/lib/api";
 import { formatUTC } from "@/lib/format";
 import type { PublishResult } from "./actions";
+import { REVISION_FIELD } from "./revisionForm";
 
 /**
- * What happened to this technique, and the way back.
+ * What happened to this catalog row, and the way back. Serves techniques and
+ * exercises — the history renders identically for either.
  *
  * The console is the only writer of this content and there is no pull request
  * between a save and the athlete library, so this list is the entire record of
  * who changed what — the thing a PR history would otherwise be.
  *
  * Newest first, and the CURRENT state is revision 1 in the list rather than
- * something separate: each entry is the technique as it looked after that
- * write, so the top row is what is live now. That is why restoring is a copy
- * rather than a replay.
+ * something separate: each entry is the row as it looked after that write, so
+ * the top row is what is live now. That is why restoring is a copy rather than
+ * a replay.
  */
 export function RevisionHistory({
   revisions,
   restore,
 }: {
-  revisions: Revision[];
-  restore: (revision: number) => (prev: PublishResult, form: FormData) => Promise<PublishResult>;
+  // Both catalogs, because the history renders identically for either: the
+  // component only reads `payload.name`, and a second near-identical component
+  // is how the two would drift apart.
+  revisions: Revision<Technique | Exercise>[];
+  /**
+   * ONE action, already bound to the row's id — not a function that makes one.
+   *
+   * This is the plain server-action signature deliberately. The previous type,
+   * `(revision: number) => (prev, form) => …`, described a closure, and a
+   * closure is precisely what a Server Component may not hand to a Client
+   * Component: it threw at serialization, 500'd both detail pages entirely, and
+   * typechecked the whole time because the type had been written to fit the
+   * mistake. Keeping the type equal to the action's own signature is what makes
+   * a repeat a `typecheck:admin` failure instead.
+   *
+   * Which revision comes from the hidden field below.
+   */
+  restore: (prev: PublishResult, form: FormData) => Promise<PublishResult>;
 }) {
   if (revisions.length === 0) {
     return (
       <p className="text-[13px] text-text-secondary">
-        No history yet. A technique gets one the first time it is edited here — the shipped
-        catalog has none, which is not a gap: nothing has changed it.
+        No history yet. A row gets one the first time it is edited here — the shipped catalog
+        has none, which is not a gap: nothing has changed it.
       </p>
     );
   }
@@ -57,7 +75,7 @@ export function RevisionHistory({
             {formatUTC(rev.created_at)}
             {/* No restore on the newest entry: it is already the current state,
                 so the button would do nothing but add a revision saying so. */}
-            {i > 0 ? <RestoreButton action={restore(rev.revision)} /> : null}
+            {i > 0 ? <RestoreButton action={restore} revision={rev.revision} /> : null}
           </span>
         </li>
       ))}
@@ -65,10 +83,19 @@ export function RevisionHistory({
   );
 }
 
+/**
+ * One form per revision, all submitting the same action.
+ *
+ * Every button shares one server reference and distinguishes itself by the
+ * hidden field — `useActionState` still gives each its own `pending` and its
+ * own error, so a failed restore reports against the row it was clicked on.
+ */
 function RestoreButton({
   action,
+  revision,
 }: {
   action: (prev: PublishResult, form: FormData) => Promise<PublishResult>;
+  revision: number;
 }) {
   const [result, formAction, pending] = useActionState<PublishResult, FormData>(action, {
     status: "idle",
@@ -76,6 +103,7 @@ function RestoreButton({
 
   return (
     <form action={formAction}>
+      <input type="hidden" name={REVISION_FIELD} value={revision} />
       <button
         type="submit"
         disabled={pending}

@@ -25,12 +25,17 @@ type fakeContentRepo struct {
 	// thing the partial-update test has to inspect.
 	lastWritten Exercise
 	adopted     []string
+	// lastActor is who the HANDLER said made the write — from the request's
+	// claims, never its body.
+	lastActor string
+	revisions map[string][]Revision
 }
 
 func newFakeRepo() *fakeContentRepo {
 	return &fakeContentRepo{
-		stored:  map[string]Exercise{},
-		sources: map[string]string{},
+		revisions: map[string][]Revision{},
+		stored:    map[string]Exercise{},
+		sources:   map[string]string{},
 	}
 }
 
@@ -50,11 +55,12 @@ func (f *fakeContentRepo) Source(_ context.Context, id string) (string, error) {
 	return s, nil
 }
 
-func (f *fakeContentRepo) CreateExercise(_ context.Context, e Exercise) (Exercise, error) {
+func (f *fakeContentRepo) CreateExercise(_ context.Context, e Exercise, actor string) (Exercise, error) {
 	if _, taken := f.stored[e.ID]; taken {
 		return Exercise{}, ErrAlreadyExists
 	}
 	f.lastWritten = e
+	f.lastActor = actor
 	e.Source = "admin"
 	e.CreatedAt, e.UpdatedAt = time.Now(), time.Now()
 	f.stored[e.ID] = e
@@ -62,7 +68,7 @@ func (f *fakeContentRepo) CreateExercise(_ context.Context, e Exercise) (Exercis
 	return e, nil
 }
 
-func (f *fakeContentRepo) UpdateExercise(_ context.Context, e Exercise) (Exercise, error) {
+func (f *fakeContentRepo) UpdateExercise(_ context.Context, e Exercise, actor string) (Exercise, error) {
 	// Absent means absent — the ONLY 404 left. It used to also refuse a row
 	// whose source was "seed"; the console edits any row now and the write
 	// takes ownership, which is what the next line models.
@@ -70,11 +76,63 @@ func (f *fakeContentRepo) UpdateExercise(_ context.Context, e Exercise) (Exercis
 		return Exercise{}, ErrNotFound
 	}
 	f.lastWritten = e
+	f.lastActor = actor
 	e.Source = "admin"
 	e.UpdatedAt = time.Now()
 	f.stored[e.ID] = e
 	f.sources[e.ID] = "admin"
 	return e, nil
+}
+
+func (f *fakeContentRepo) Publish(_ context.Context, id, actor string) (Exercise, error) {
+	e, ok := f.stored[id]
+	// Mirrors `WHERE status = 'draft'`: publishing something already published
+	// is ErrNotFound, not a quiet success.
+	if !ok || NormalizeStatus(e.Status) != StatusDraft {
+		return Exercise{}, ErrNotFound
+	}
+	e.Status = StatusPublished
+	f.stored[id] = e
+	f.record(id, actor, ActionPublish, e)
+	return e, nil
+}
+
+func (f *fakeContentRepo) SearchAll(_ context.Context, q string) ([]Exercise, error) {
+	out := []Exercise{}
+	for _, e := range f.stored {
+		if strings.Contains(strings.ToLower(e.Name), strings.ToLower(q)) ||
+			strings.Contains(strings.ToLower(e.ID), strings.ToLower(q)) {
+			out = append(out, e)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+func (f *fakeContentRepo) Revisions(_ context.Context, id string) ([]Revision, error) {
+	return f.revisions[id], nil
+}
+
+func (f *fakeContentRepo) Restore(_ context.Context, id string, revision int, actor string) (Exercise, error) {
+	for _, rev := range f.revisions[id] {
+		if rev.Revision == revision {
+			e := rev.Payload
+			// Mirrors the SQL: content only, never status.
+			e.Status = f.stored[id].Status
+			f.stored[id] = e
+			f.record(id, actor, ActionRestore, e)
+			return e, nil
+		}
+	}
+	return Exercise{}, ErrNotFound
+}
+
+// record mirrors recordRevision so the fake's history behaves like the real
+// one — including that the actor is whatever the HANDLER passed.
+func (f *fakeContentRepo) record(id, actor, action string, e Exercise) {
+	f.revisions[id] = append([]Revision{{
+		Revision: len(f.revisions[id]) + 1, Actor: actor, Action: action, Payload: e,
+	}}, f.revisions[id]...)
 }
 
 func (f *fakeContentRepo) AdminAuthored(context.Context) ([]Exercise, error) {
@@ -97,6 +155,15 @@ func post(t *testing.T, h *ContentHandler, body string) *httptest.ResponseRecord
 	t.Helper()
 	rec := httptest.NewRecorder()
 	h.Create(rec, httptest.NewRequest(http.MethodPost, "/v1/admin/exercises", strings.NewReader(body)))
+	return rec
+}
+
+func publish(t *testing.T, h *ContentHandler, id string) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/admin/exercises/"+id+"/publish", nil)
+	r.SetPathValue("exerciseID", id)
+	h.Publish(rec, r)
 	return rec
 }
 
@@ -424,5 +491,68 @@ func TestAnUnboundedNameIsRefused(t *testing.T) {
 	if rec := post(t, NewContentHandler(newFakeRepo()),
 		`{"name":"`+ok+`","sport":"strength","movement_pattern":"squat","load_type":"reps"}`); rec.Code != http.StatusOK {
 		t.Errorf("a name exactly at the bound was refused: %d %s", rec.Code, rec.Body)
+	}
+}
+
+// The audit trail's whole value is that the writer cannot choose the actor.
+//
+// This has a twin in the technique package, and the twin is the reason it is
+// here: `actorOf` is duplicated per module, so nothing in the suite noticed
+// that only one of the two copies was covered. A body field named `actor` must
+// reach nothing.
+func TestTheRequestBodyCannotChooseTheActor(t *testing.T) {
+	repo := newFakeRepo()
+	repo.stored["editable"] = Exercise{
+		ID: "editable", Name: "Editable", Sport: "strength",
+		MovementPattern: "squat", LoadType: LoadTypeReps, Source: "admin",
+	}
+	repo.sources["editable"] = "admin"
+
+	rec := patch(t, NewContentHandler(repo), "editable",
+		`{"name":"Edited","actor":"impostor","source":"seed"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("patch = %d, want 200: %s", rec.Code, rec.Body)
+	}
+	if repo.lastActor == "impostor" {
+		t.Error("the request body set the actor — an audit trail the writer can " +
+			"forge records nothing")
+	}
+	// And it is the documented fallback, not an empty string: these requests
+	// carry no claims, so `actorOf` must say so rather than guess.
+	if repo.lastActor != "unknown" {
+		t.Errorf("actor = %q, want %q — it did not come from the claims path",
+			repo.lastActor, "unknown")
+	}
+	// `source` is equally not the body's to set.
+	if repo.stored["editable"].Source != "admin" {
+		t.Errorf("source = %q — the body changed ownership", repo.stored["editable"].Source)
+	}
+}
+
+func TestPublishMakesADraftLiveAndRefusesASecondTime(t *testing.T) {
+	repo := newFakeRepo()
+	repo.stored["half-written"] = Exercise{
+		ID: "half-written", Name: "Half Written", Sport: "strength",
+		MovementPattern: "squat", LoadType: LoadTypeReps, Source: "admin",
+		Status: StatusDraft,
+	}
+	repo.sources["half-written"] = "admin"
+	h := NewContentHandler(repo)
+
+	if rec := publish(t, h, "half-written"); rec.Code != http.StatusOK {
+		t.Fatalf("publish = %d, want 200: %s", rec.Code, rec.Body)
+	}
+	if got := repo.stored["half-written"].Status; got != StatusPublished {
+		t.Errorf("status after publish = %q", got)
+	}
+
+	// Already published: a second click must not report success it did not
+	// cause. The operator is looking at a stale page, and "done" would tell
+	// them the state changed when it did not.
+	if rec := publish(t, h, "half-written"); rec.Code != http.StatusNotFound {
+		t.Errorf("re-publish = %d, want 404", rec.Code)
+	}
+	if rec := publish(t, h, "no-such-id"); rec.Code != http.StatusNotFound {
+		t.Errorf("publishing an absent id = %d, want 404", rec.Code)
 	}
 }

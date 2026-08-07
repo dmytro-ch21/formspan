@@ -1327,3 +1327,69 @@ func TestRenameChangesOnlyTheNameAndOnlyForTheOwner(t *testing.T) {
 		t.Errorf("owner's name was changed by another user: %q", still.Name)
 	}
 }
+
+// seedDraftExercise inserts an unpublished catalog row and removes it again.
+// Same fixture discipline as the workout module's copy: the row lands in the
+// database every other package shares, so cleanup is registered first — and
+// this must be called BEFORE `cleanup`, because t.Cleanup is LIFO and the
+// exercise has to outlive the session whose sets reference it.
+func seedDraftExercise(t *testing.T, pool *pgxpool.Pool, id string) {
+	t.Helper()
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(),
+			`DELETE FROM exercises WHERE id = $1`, id); err != nil {
+			t.Logf("cleanup exercise %s: %v", id, err)
+		}
+	})
+	if _, err := pool.Exec(context.Background(),
+		`INSERT INTO exercises (id, name, sport, movement_pattern, load_type, status)
+		 VALUES ($1, 'Draft Fixture', 'strength', 'squat', 'weight_reps', 'draft')`,
+		id); err != nil {
+		t.Fatalf("seed draft exercise: %v", err)
+	}
+}
+
+// A logged set may not reference an unfinished exercise, for the same reason a
+// workout item may not — and it must fail as an unknown id rather than as a
+// draft, so the endpoint stays silent about what exists unpublished.
+func TestCreate_RejectsADraftExerciseAsUnknown(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	seedDraftExercise(t, pool, "ses-draft-fixture-exercise")
+	cleanup(t, pool, "ses-draft-1")
+
+	_, err := repo.Create(ctx, strengthSession("ses-draft-1", "user_a", []Set{
+		{ExerciseID: "ses-draft-fixture-exercise", Reps: ptrInt(5), Completed: true},
+	}))
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("a draft exercise was accepted into a session: err = %v, want ErrInvalidInput", err)
+	}
+	// Not ErrSportMismatch: the fixture IS strength, so a missing filter gives
+	// no error and a leaky one names the sport, which confirms the row exists.
+	if errors.Is(err, ErrSportMismatch) {
+		t.Errorf("draft rejected as a sport mismatch, which confirms it exists: %v", err)
+	}
+	if _, err := repo.Get(ctx, "user_a", "ses-draft-1"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("failed create left a session behind: %v", err)
+	}
+}
+
+// The published half, so the test above cannot pass by refusing everything.
+func TestCreate_AcceptsTheSameExerciseOncePublished(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	seedDraftExercise(t, pool, "ses-published-fixture-exercise")
+	cleanup(t, pool, "ses-draft-2")
+
+	if _, err := pool.Exec(ctx,
+		`UPDATE exercises SET status = 'published' WHERE id = $1`,
+		"ses-published-fixture-exercise"); err != nil {
+		t.Fatalf("publish fixture: %v", err)
+	}
+
+	if _, err := repo.Create(ctx, strengthSession("ses-draft-2", "user_a", []Set{
+		{ExerciseID: "ses-published-fixture-exercise", Reps: ptrInt(5), Completed: true},
+	})); err != nil {
+		t.Fatalf("a published exercise was refused: %v", err)
+	}
+}

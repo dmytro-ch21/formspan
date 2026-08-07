@@ -496,3 +496,87 @@ func TestRename_UnknownIDIsNotFound(t *testing.T) {
 		t.Errorf("a stranger's private workout leaked its existence: err = %v, want ErrNotFound", err)
 	}
 }
+
+// seedDraftExercise inserts an unpublished catalog row and removes it again.
+//
+// The row is a fixture, not content: it goes into the SAME database every other
+// package's tests share, so the cleanup is registered before the row exists —
+// a failed assertion below must not leave a draft behind for someone else's
+// `SELECT count(*) FROM exercises` to trip over.
+//
+// CALL THIS BEFORE cleanupWorkout, NOT AFTER. t.Cleanup is LIFO, so whichever
+// is registered last runs first, and the exercise has to outlive the workout
+// that references it — `workout_items.exercise_id` has no ON DELETE. Registered
+// the other way round the DELETE fails on the foreign key and the fixture
+// survives the run, which is how it leaks. That is not hypothetical: mutating
+// the status filter to check these tests fail did exactly this, and the draft
+// rows had to be cleared out of the shared database by hand.
+func seedDraftExercise(t *testing.T, pool *pgxpool.Pool, id string) {
+	t.Helper()
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(),
+			`DELETE FROM exercises WHERE id = $1`, id); err != nil {
+			t.Logf("cleanup exercise %s: %v", id, err)
+		}
+	})
+	if _, err := pool.Exec(context.Background(),
+		`INSERT INTO exercises (id, name, sport, movement_pattern, load_type, status)
+		 VALUES ($1, 'Draft Fixture', 'strength', 'squat', 'weight_reps', 'draft')`,
+		id); err != nil {
+		t.Fatalf("seed draft exercise: %v", err)
+	}
+}
+
+// A draft is an exercise the operator has not finished, and it must not be
+// referenceable — otherwise the workout item points at something the public
+// `GET /exercises/{id}` answers 404 for, and the client renders a hole.
+//
+// The assertion is deliberately on the error being INDISTINGUISHABLE from an
+// unknown id: a distinct "that is a draft" would hand any authenticated user an
+// existence oracle over unpublished content.
+func TestCreate_RejectsADraftExerciseAsUnknown(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	seedDraftExercise(t, pool, "wk-draft-fixture-exercise")
+	cleanupWorkout(t, pool, "wk-draft-1")
+
+	in := strengthWorkout("wk-draft-1", "user_a", VisibilityPrivate)
+	in.Items = []Item{{ExerciseID: "wk-draft-fixture-exercise"}}
+
+	_, err := repo.Create(ctx, in)
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("a draft exercise was accepted into a workout: err = %v, want ErrInvalidInput", err)
+	}
+	// The message must be the unknown-id one, not a sport mismatch: the draft
+	// above IS strength, so a filter that let it through would produce no error
+	// at all, and one that reported the sport would confirm the row exists.
+	if !strings.Contains(err.Error(), "unknown exercise") {
+		t.Errorf("draft rejected for the wrong reason: %v", err)
+	}
+	// And nothing was left behind by the rolled-back create.
+	if _, err := repo.Get(ctx, "user_a", "wk-draft-1"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("failed create left a workout behind: %v", err)
+	}
+}
+
+// Publishing makes the same reference legal. Without this the test above would
+// pass against a filter that rejected EVERY exercise.
+func TestCreate_AcceptsTheSameExerciseOncePublished(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	seedDraftExercise(t, pool, "wk-published-fixture-exercise")
+	cleanupWorkout(t, pool, "wk-draft-2")
+
+	if _, err := pool.Exec(ctx,
+		`UPDATE exercises SET status = 'published' WHERE id = $1`,
+		"wk-published-fixture-exercise"); err != nil {
+		t.Fatalf("publish fixture: %v", err)
+	}
+
+	in := strengthWorkout("wk-draft-2", "user_a", VisibilityPrivate)
+	in.Items = []Item{{ExerciseID: "wk-published-fixture-exercise"}}
+
+	if _, err := repo.Create(ctx, in); err != nil {
+		t.Fatalf("a published exercise was refused: %v", err)
+	}
+}

@@ -254,10 +254,11 @@ to stop at.
 2. **What is the rollback expectation?** "Undo my last edit" is a revisions
    table. "Restore the catalog to last Tuesday" is snapshots. They are different
    builds.
-3. **Do exercises follow techniques?** They share the mechanism (`source`,
-   `exportcontent`, an additions file) but not the pressure — the exercise
-   catalog is not being actively authored. Retiring its spreadsheet is nearly
-   free; giving it a publish flow may not be worth it yet.
+3. ~~**Do exercises follow techniques?**~~ **ANSWERED: yes, in full.** The
+   exercise catalog now has search, drafts and revisions on the same terms —
+   see the parity entry in history.md. The reasoning that deferred it (half a
+   feature is worse than none) is what made it a single coherent change rather
+   than three partial ones.
 4. **What replaces review for the failure it actually caught?** On this
    library's PRs, review caught wrong-row aliases and an id that needed renaming
    before it became a permanent foreign key. Neither is a validation rule. A

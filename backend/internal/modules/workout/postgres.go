@@ -226,7 +226,20 @@ func assertSportsMatch(ctx context.Context, tx pgx.Tx, sport Sport, items []Item
 		ids = append(ids, it.ExerciseID)
 	}
 
-	rows, err := tx.Query(ctx, `SELECT id, sport FROM exercises WHERE id = ANY($1)`, ids)
+	// PUBLISHED ONLY, so a draft reads as an unknown id rather than a usable
+	// one. A draft is an exercise the operator has not finished; putting it in
+	// a workout would make the item reference something `GET /exercises/{id}`
+	// answers 404 for, and the client renders a hole it cannot explain.
+	//
+	// Falling out of `found` — rather than a distinct "that one is a draft" —
+	// is the point: telling a caller apart from an unknown id would hand any
+	// authenticated user an existence oracle over unpublished content, which is
+	// exactly what the catalog's own read path refuses to do.
+	//
+	// Safe to tighten: publishing is one-way and drafts are new here, so no
+	// existing row can already reference one.
+	rows, err := tx.Query(ctx,
+		`SELECT id, sport FROM exercises WHERE id = ANY($1) AND status = 'published'`, ids)
 	if err != nil {
 		return fmt.Errorf("workout: check exercise sports: %w", err)
 	}

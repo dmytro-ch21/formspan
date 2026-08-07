@@ -340,29 +340,20 @@ export async function createTechnique(body: TechniqueWrite): Promise<Technique> 
 }
 
 /**
- * PATCH is a partial update on the wire, but this console always sends the
- * whole form.
+ * One recorded state of a catalog row, as it looked after a console write.
  *
- * That is deliberate and it is the safe direction: the form is populated from
- * the stored row, so every field it sends is either unchanged or edited on
- * purpose. Sending only the dirty fields would be smaller and would reintroduce
- * the failure the backend's pointer-typed request exists to survive — a form
- * that omits `description` erasing the prose.
+ * `T` is REQUIRED rather than defaulting to `Technique`. It defaulted for as
+ * long as techniques were the only catalog with a history; now that exercises
+ * have one too, a default silently types an exercise revision as a technique
+ * one and compiles for exactly as long as nobody reads a field the two do not
+ * share. One explicit `Revision<Technique>` per call site is the cheaper half
+ * of that trade.
  */
-/**
- * Publish a draft. One-way, and a separate call rather than a field on the
- * PATCH body — the backend refuses to make visibility something a partial
- * update can change by accident.
- *
- * A 404 here means "no draft with that id", which in practice means it was
- * already published and this page is stale.
- */
-/** One recorded state of a technique, as it looked after a console write. */
-export type Revision = {
+export type Revision<T> = {
   revision: number;
   actor: string;
   action: "create" | "update" | "publish" | "restore";
-  payload: Technique;
+  payload: T;
   created_at: string;
 };
 
@@ -373,8 +364,8 @@ export type Revision = {
  * history until someone edits one, so the screen has to render "nothing yet"
  * rather than treat it as a fault.
  */
-export async function listRevisions(id: string): Promise<Revision[]> {
-  const data = await adminFetch<{ revisions: Revision[] }>(
+export async function listRevisions(id: string): Promise<Revision<Technique>[]> {
+  const data = await adminFetch<{ revisions: Revision<Technique>[] }>(
     `/admin/techniques/${encodeURIComponent(id)}/revisions`,
   );
   return data.revisions;
@@ -393,6 +384,14 @@ export async function restoreRevision(id: string, revision: number): Promise<Tec
   return data.technique;
 }
 
+/**
+ * Publish a draft. One-way, and a separate call rather than a field on the
+ * PATCH body — the backend refuses to make visibility something a partial
+ * update can change by accident.
+ *
+ * A 404 here means "no draft with that id", which in practice means it was
+ * already published and this page is stale.
+ */
 export async function publishTechnique(id: string): Promise<Technique> {
   const data = await adminFetch<{ technique: Technique }>(
     `/admin/techniques/${encodeURIComponent(id)}/publish`,
@@ -401,6 +400,16 @@ export async function publishTechnique(id: string): Promise<Technique> {
   return data.technique;
 }
 
+/**
+ * PATCH is a partial update on the wire, but this console always sends the
+ * whole form.
+ *
+ * That is deliberate and it is the safe direction: the form is populated from
+ * the stored row, so every field it sends is either unchanged or edited on
+ * purpose. Sending only the dirty fields would be smaller and would reintroduce
+ * the failure the backend's pointer-typed request exists to survive — a form
+ * that omits `description` erasing the prose.
+ */
 export async function updateTechnique(
   id: string,
   body: TechniqueWrite,
@@ -445,10 +454,42 @@ export type Exercise = {
   updated_at?: string;
 };
 
-/** The exercises the console owns — not the catalog, for the same reason as techniques. */
-export async function listAuthoredExercises(): Promise<Exercise[]> {
-  const data = await adminFetch<{ exercises: Exercise[] }>("/admin/exercises");
+/**
+ * The exercises the console authored, or — with a query — any exercise at all.
+ * Same split as the technique list, for the same reason.
+ */
+export async function listAuthoredExercises(query?: string): Promise<Exercise[]> {
+  const q = query?.trim();
+  const data = await adminFetch<{ exercises: Exercise[] }>(
+    q ? `/admin/exercises?q=${encodeURIComponent(q)}` : "/admin/exercises",
+  );
   return data.exercises;
+}
+
+/** Publish a draft exercise. One-way, and a separate call from the PATCH. */
+export async function publishExercise(id: string): Promise<Exercise> {
+  const data = await adminFetch<{ exercise: Exercise }>(
+    `/admin/exercises/${encodeURIComponent(id)}/publish`,
+    { method: "POST", body: {} },
+  );
+  return data.exercise;
+}
+
+/** An exercise's history, newest first. Empty is normal, not an error. */
+export async function listExerciseRevisions(id: string): Promise<Revision<Exercise>[]> {
+  const data = await adminFetch<{ revisions: Revision<Exercise>[] }>(
+    `/admin/exercises/${encodeURIComponent(id)}/revisions`,
+  );
+  return data.revisions;
+}
+
+/** Roll an exercise back to an earlier revision. Appends; content only. */
+export async function restoreExerciseRevision(id: string, revision: number): Promise<Exercise> {
+  const data = await adminFetch<{ exercise: Exercise }>(
+    `/admin/exercises/${encodeURIComponent(id)}/revisions/${revision}/restore`,
+    { method: "POST", body: {} },
+  );
+  return data.exercise;
 }
 
 /**

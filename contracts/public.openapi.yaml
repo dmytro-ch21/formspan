@@ -669,7 +669,18 @@ components:
           description: >
             Whether athletes can see it. `published` is in the public catalog;
             `draft` is visible only through `/admin/*` — not in
-            `GET /techniques`, not findable, not taggable.
+            `GET /techniques` and not findable through the library.
+
+
+            **A draft technique CAN still be referenced by id** — tagged into a
+            BJJ session, a focus list, a curriculum or a sequence. Those four
+            write paths validate against the foreign key, which does not know
+            about `status`. The exercise catalog does not have this gap: its two
+            write paths (workout items, session sets) check for `published`
+            explicitly. Closing it here means adding that check in four modules
+            and is not yet done — stated rather than implied, because an earlier
+            version of this description claimed drafts were "not taggable" and
+            nothing enforced it.
 
 
             **Present only on `/admin/*` responses**, and for a stronger reason
@@ -1561,7 +1572,9 @@ components:
             Where this exercise came from: `seed` means the deploy owns it (the
             embedded JSON rewrites it on every release), `admin` means it was
             authored in the console and the database owns it. Read-only — the
-            server sets it.
+            server sets it. Note a PATCH through `/admin/*` moves a row from
+            `seed` to `admin` as a side effect: that is what stops the next
+            release reverting the edit.
 
 
             **Present only on `/admin/*` responses.** Absent from `GET
@@ -1569,6 +1582,25 @@ components:
             the column — so its absence means "this endpoint does not report
             provenance", never "not admin-authored". Use membership of
             `GET /admin/exercises` instead.
+        status:
+          type: string
+          enum: [draft, published]
+          description: >
+            Whether athletes can see it. `published` is in the public catalog;
+            `draft` is visible only through `/admin/*` — not in
+            `GET /exercises`, and not addable to a workout or a session: both
+            write paths validate against published rows only, so a draft id is
+            rejected as an unknown exercise.
+
+
+            **Present only on `/admin/*` responses**, and for a stronger reason
+            than `source`: an exercise read the public way is published by
+            definition, because the API filters drafts out entirely.
+
+
+            The console CREATES as `draft`. Editing a published exercise leaves
+            it published. Publishing is
+            `POST /admin/exercises/{exerciseID}/publish` and is ONE-WAY.
         primary_muscles:
           type: array
           items: { type: string }
@@ -2730,6 +2762,10 @@ paths:
     get:
       summary: List the global exercise catalog
       operationId: listExercises
+      description: >
+        **Published exercises only.** Drafts — console content not yet finished
+        — are excluded here and from `GET /exercises/{exerciseID}`, which
+        returns `404` for one. There is no parameter to include them.
       parameters:
         - $ref: "#/components/parameters/IfNoneMatch"
         - name: sport
@@ -4579,20 +4615,32 @@ paths:
       summary: List the exercises the console can edit
       operationId: listAuthoredExercises
       description: >
-        Every exercise with `source: "admin"` — what the console has authored.
-        Deliberately not the whole catalog, though `PATCH` accepts any row since
-        the authoring spreadsheet was retired in 2026-08; the exercise catalog
-        has no search equivalent to the technique one yet, so a deploy-owned
-        exercise is reachable by id but not listed.
+        Without `q`: every exercise with `source: "admin"` — what the console
+        has authored — unbounded, and exactly what `cmd/exportcontent` reads.
 
 
-        Unbounded, for the same reason as the technique equivalent: the set
-        grows one row at a time, and `cmd/exportcontent` reads the same query.
-        A `LIMIT` here would silently truncate the export rather than error.
+        With `q`: the WHOLE catalog, seeded rows included, matched on name or id
+        and ordered by name. **Capped at 100**, with no total in the response,
+        so treat a result set of exactly 100 as "first 100".
+
+
+        The authored branch is deliberately UNBOUNDED: that set grows one row at
+        a time and `cmd/exportcontent` reads the same query, so a `LIMIT` there
+        would silently truncate the export rather than error. Only the search
+        branch is capped.
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: >
+            Search the whole catalog by name or id. Omit for the admin-authored
+            set. Whitespace-only is treated as omitted.
+          schema: { type: string }
       responses:
         "200":
           description: >
-            The authored exercises, ordered by id. `[]` when nothing has been
+            Without `q`, the authored exercises ordered by id; with `q`, the
+            matching exercises ordered by name. `[]` when nothing has been
             authored yet — an empty array, never null. `media` is always empty
             on this response; it is not part of the write path.
           content:
@@ -4694,6 +4742,135 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+
+  /admin/exercises/{exerciseID}/publish:
+    post:
+      summary: Publish a draft exercise
+      operationId: publishExercise
+      description: >
+        Makes a draft visible to athletes. **One-way — there is no unpublish.**
+        Workout items and logged sets reference an exercise by id and none of
+        those reads filter on status, correctly, so withdrawing a live one would
+        leave them pointing at something the catalog no longer shows. If a
+        published exercise is wrong, edit it.
+
+
+        `404` covers both "no such id" and "already published".
+      parameters:
+        - name: exerciseID
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The published exercise.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [exercise]
+                properties:
+                  exercise:
+                    $ref: "#/components/schemas/Exercise"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /admin/exercises/{exerciseID}/revisions:
+    get:
+      summary: An exercise's revision history
+      operationId: listExerciseRevisions
+      description: >
+        Every console write to this exercise, newest first, each a snapshot of
+        the row after that write. **Empty is normal**, not an error: everything
+        the deploy seeded has no history, and `cmd/seed` deliberately writes
+        none.
+
+
+        The payload is the CONTENT projection, so `media` on it is ALWAYS `[]` —
+        the same convention `GET /admin/exercises` uses, and not a claim that the
+        exercise has no pictures. Media lives in its own table, cannot be
+        authored in the console, and is never read into a revision or written by
+        a restore. Reading a payload's `media` as the media at that revision is
+        therefore wrong in both directions: it was not recorded, and restoring
+        will not put anything back.
+      parameters:
+        - name: exerciseID
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The history, newest first. `[]` when there is none.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revisions]
+                properties:
+                  revisions:
+                    type: array
+                    items:
+                      type: object
+                      required: [revision, actor, action, payload, created_at]
+                      properties:
+                        revision: { type: integer }
+                        actor: { type: string }
+                        action:
+                          type: string
+                          enum: [create, update, publish, restore]
+                        payload:
+                          $ref: "#/components/schemas/Exercise"
+                        created_at: { type: string, format: date-time }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /admin/exercises/{exerciseID}/revisions/{revision}/restore:
+    post:
+      summary: Roll an exercise back to an earlier revision
+      operationId: restoreExerciseRevision
+      description: >
+        Copies that revision's CONTENT back and records the restore as a new
+        revision. **Appends, never truncates** — the state you rolled back from
+        stays in the history, so the rollback is itself undoable. **`status` is
+        not restored**, so a content rollback cannot withdraw a live exercise.
+      parameters:
+        - name: exerciseID
+          in: path
+          required: true
+          schema: { type: string }
+        - name: revision
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        "200":
+          description: The exercise after the restore.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [exercise]
+                properties:
+                  exercise:
+                    $ref: "#/components/schemas/Exercise"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: No such exercise, or no such revision of it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /admin/exercises/{exerciseID}:
     patch:
