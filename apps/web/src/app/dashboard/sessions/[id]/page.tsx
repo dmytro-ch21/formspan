@@ -25,7 +25,7 @@ import {
   replaceSets,
   setExerciseUnit,
   SET_TYPES,
-  similarTo,
+  swapSuggestions,
   swapExercise,
   type Exercise,
   type LoggedSet,
@@ -1133,7 +1133,10 @@ function CatalogPane({
   // Only while the search is untouched: once you're typing, the results you
   // asked for are the ones you want.
   const suggestions = useMemo(
-    () => (swapFor && query.trim() === "" ? similarTo(swapFor, results) : []),
+    () =>
+      swapFor && query.trim() === ""
+        ? swapSuggestions(swapFor, results)
+        : { muscle: [], movement: [] },
     [swapFor, results, query],
   );
 
@@ -1171,20 +1174,37 @@ function CatalogPane({
       )}
 
       <ul className="flex max-h-[34rem] flex-col gap-1 overflow-y-auto pr-1">
-        {suggestions.length > 0 && (
-          <li className="eyebrow px-2 pb-1 pt-2 text-[0.625rem]">Similar</li>
+        {/* Muscle first — see `swapSuggestions`. The full catalog stays below
+            both tiers, so neither is a restriction. */}
+        {suggestions.muscle.length > 0 && (
+          <li className="eyebrow px-2 pb-1 pt-2 text-[0.625rem]">
+            Trains the same muscles
+          </li>
         )}
-        {suggestions.map((e) => (
+        {suggestions.muscle.map((e) => (
           <CatalogRow
-            key={`suggested-${e.id}`}
+            key={`muscle-${e.id}`}
             exercise={e}
             swapFor={swapFor}
             onAdd={onAdd}
           />
         ))}
-        {suggestions.length > 0 && (
+        {suggestions.movement.length > 0 && (
           <li className="eyebrow px-2 pb-1 pt-3 text-[0.625rem]">
-            All {sport}
+            Similar movement
+          </li>
+        )}
+        {suggestions.movement.map((e) => (
+          <CatalogRow
+            key={`movement-${e.id}`}
+            exercise={e}
+            swapFor={swapFor}
+            onAdd={onAdd}
+          />
+        ))}
+        {(suggestions.muscle.length > 0 || suggestions.movement.length > 0) && (
+          <li className="eyebrow px-2 pb-1 pt-3 text-[0.625rem]">
+            Everything else — all {sport}
           </li>
         )}
         {results.map((e) => (
@@ -1236,6 +1256,13 @@ function CatalogRow({
           <span className="block truncate text-sm">{exercise.name}</span>
           <span className="block truncate text-xs capitalize text-text-dim">
             {exercise.movement_pattern.replace(/_/g, " ")}
+            {/* Equipment, matching the phone. Less urgent here — "the rack is
+                taken" is not a desk problem — but the muscle tier deliberately
+                surfaces cross-pattern options, and equipment is what tells a
+                cable fly from a dumbbell one at a glance. */}
+            {exercise.equipment.length > 0
+              ? ` · ${exercise.equipment.map((q) => q.replace(/-/g, " ")).join(", ")}`
+              : " · bodyweight"}
             {swapFor && !carries ? " · measured differently" : ""}
           </span>
         </span>

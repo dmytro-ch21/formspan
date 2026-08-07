@@ -4702,6 +4702,43 @@ on next-moves — see below.
 - Web: following a link inside the panel remounts it — focus must land on the
   panel heading, not on `<body>`.
 
+## Swapping an exercise
+
+The rule the old one broke: suggestions must be about what the exercise
+**trains**, not only what shape it is.
+
+- **Swap a bench press** → the first tier offers other chest work, including
+  exercises with a *different* movement pattern (a cable fly). The old ranking
+  scored that zero.
+- **Swap a leg press** → quad/glute work, not everything sharing the `squat`
+  pattern.
+- The second tier is **Similar movement** — same pattern, different muscle — and
+  nothing appears in both tiers.
+- **A heading names the full catalog below as "Everything else"**, and searching
+  still reaches every exercise. Neither tier is a restriction; assert you can
+  swap to something in neither.
+- **Every row shows its equipment.** The usual reason to swap is that a piece of
+  kit is occupied, and the one suggestion that cannot help is another movement
+  needing the same bar. Note the ranking deliberately does *not* prefer or
+  penalise matching equipment — only displays it.
+- Ordering within a tier: same movement *and* same measurement first, then same
+  movement, then same measurement, then alphabetical. Deterministic — the same
+  swap must produce the same order every time.
+- Each tier caps at 10 **independently**, so a well-covered muscle cannot crowd
+  the other tier off the screen.
+- Swapping still keeps the logged numbers when the measurement carries, and
+  clears them when it does not ("measured differently" on the row).
+
+### Cross-app parity (web)
+
+- The same two tiers, in the same order, with the same headings on
+  `/dashboard/sessions/[id]`.
+- **The same exercise must produce the same suggestions on both apps.** Web
+  holds its own copy of the ranking and the muscle taxonomy;
+  `swapParity.test.ts` compares them, but a spot-check of one exercise on both
+  is worth doing after any taxonomy change.
+
+
 ## Finishing a session: the celebration card (mobile)
 
 Most of these check that something does NOT appear. That is the shape of the
