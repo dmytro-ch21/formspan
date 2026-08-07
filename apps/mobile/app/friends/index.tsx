@@ -1,5 +1,5 @@
 import { Stack } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -14,7 +14,7 @@ import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
-import { isNotFound } from '@/lib/apiError';
+import { ApiError, isNotFound } from '@/lib/apiError';
 import {
   acceptRequest,
   lookupUser,
@@ -41,6 +41,8 @@ import { useAuthToken } from '@/lib/useAuthToken';
  * surface), so the empty state teaches the interaction: type the whole handle
  * a friend told you.
  */
+const isConflict = (err: unknown) => err instanceof ApiError && err.status === 409;
+
 export default function FriendsScreen() {
   const accent = useAccent();
   const getToken = useAuthToken();
@@ -59,6 +61,14 @@ export default function FriendsScreen() {
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmingRemove, setConfirmingRemove] = useState<string | null>(null);
 
+  // SINGLE-FLIGHT, and this is a correctness guard rather than tidiness: a
+  // first load stalled on a bad link would otherwise resolve AFTER a mutation
+  // and repaint its pre-mutation lists over the new ones — the request you
+  // just sent disappears and its Add button comes back. Only the load most
+  // recently STARTED is allowed to land; every earlier one is aborted, and
+  // the signal check means an in-flight response that beats the abort still
+  // cannot set state.
+  //
   // A .then chain rather than async/await, and that is the lint ratchet
   // speaking, not taste: `react-hooks/set-state-in-effect` traces the call
   // graph of anything an effect invokes, and an async body counts its whole
@@ -66,28 +76,34 @@ export default function FriendsScreen() {
   // callbacks, which run after the effect returned. Errors clear on SUCCESS,
   // covering the retry-after-error path; a failed load leaves `friends` null,
   // which must never render as "no friends".
-  const load = useCallback(
-    (signal?: AbortSignal) =>
-      Promise.all([listFriends(getToken, signal), listRequests(getToken, signal)])
-        .then(([f, r]) => {
-          setFriends(f);
-          setRequests(r);
-          setLoadError(null);
-        })
-        .catch((err) => {
-          if (signal?.aborted) return;
-          setLoadError(err instanceof Error ? err.message : String(err));
-        }),
-    [getToken],
-  );
+  const inflight = useRef<AbortController | null>(null);
+  const load = useCallback(() => {
+    inflight.current?.abort();
+    const c = new AbortController();
+    inflight.current = c;
+    return Promise.all([listFriends(getToken, c.signal), listRequests(getToken, c.signal)])
+      .then(([f, r]) => {
+        if (c.signal.aborted) return;
+        setFriends(f);
+        setRequests(r);
+        setLoadError(null);
+      })
+      .catch((err) => {
+        if (c.signal.aborted) return;
+        setLoadError(err instanceof Error ? err.message : String(err));
+      });
+  }, [getToken]);
 
   useEffect(() => {
-    const c = new AbortController();
-    void load(c.signal);
-    return () => c.abort();
+    void load();
+    return () => inflight.current?.abort();
   }, [load]);
 
   async function search() {
+    // The Find button disables itself while searching; the keyboard's search
+    // key does not, and two lookups in flight resolve in whatever order the
+    // network feels like — a slow earlier one overwriting a newer answer.
+    if (searchState === 'searching') return;
     const q = query.trim().toLowerCase();
     if (!q) return;
     setSearchState('searching');
@@ -118,6 +134,11 @@ export default function FriendsScreen() {
       await load();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
+      // These two say the other side already acted — they cancelled the
+      // request you are accepting, or unfriended before your remove. The row
+      // on screen is a ghost, so refresh rather than leaving a control that
+      // can only fail again. Keep the message; only the lists are wrong.
+      if (isNotFound(err) || isConflict(err)) await load();
     } finally {
       setBusy(null);
       setConfirmingRemove(null);
@@ -173,6 +194,7 @@ export default function FriendsScreen() {
             onPress={() => void search()}
             disabled={searchState === 'searching' || !query.trim()}
             accessibilityRole="button"
+            accessibilityLabel="Find"
             testID="friends-search-go"
           >
             <Text style={[styles.action, { color: accent.ink }, !query.trim() && styles.dim]}>
@@ -180,14 +202,21 @@ export default function FriendsScreen() {
             </Text>
           </Pressable>
         </RNView>
-        {searchMessage && <Text style={styles.muted}>{searchMessage}</Text>}
+        {searchMessage && (
+          <Text style={searchState === 'error' ? styles.error : styles.muted}>{searchMessage}</Text>
+        )}
         {result && (
           <RNView style={styles.card} testID="friends-result">
             <RNView style={styles.cardBody}>
               <Text style={styles.cardName}>@{result.username}</Text>
               {result.display_name && <Text style={styles.muted}>{result.display_name}</Text>}
             </RNView>
-            {alreadyLinked(result.username) ? (
+            {friends === null || requests === null ? (
+              // Until both lists are in, `alreadyLinked` can only answer "no",
+              // which would offer Add for someone already asked. The 409 backs
+              // this up server-side; saying nothing is better than saying wrong.
+              <Text style={styles.muted}>checking…</Text>
+            ) : alreadyLinked(result.username) ? (
               <Text style={styles.muted}>already in your lists</Text>
             ) : (
               <Pressable
@@ -252,7 +281,7 @@ export default function FriendsScreen() {
           <>
             <Text style={styles.label}>WAITING ON</Text>
             {requests.outgoing.map((c) => (
-              <RNView key={c.username} style={styles.card}>
+              <RNView key={c.username} style={styles.card} testID={`friends-outgoing-${c.username}`}>
                 <RNView style={styles.cardBody}>
                   <Text style={styles.cardName}>@{c.username}</Text>
                 </RNView>
@@ -347,6 +376,6 @@ const styles = StyleSheet.create({
   declineText: { color: vola.textMuted, fontSize: 15, minHeight: 44, paddingVertical: 12 },
   dim: { opacity: 0.4 },
   muted: { color: vola.textMuted, fontSize: 13 },
-  error: { color: '#e5484d', fontSize: 13 },
+  error: { color: vola.danger, fontSize: 13 },
   spinner: { marginTop: 16 },
 });

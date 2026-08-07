@@ -147,7 +147,12 @@ func TestOutsiderSeesAndTouchesNothing(t *testing.T) {
 		t.Fatalf("outsider remove: want ErrNotFound, got %v", err)
 	}
 	// …and sees none of it.
-	reqs, _ := repo.Pending(ctx, mallory)
+	reqs, err := repo.Pending(ctx, mallory)
+	if err != nil {
+		// Not pedantry: the zero value is an EMPTY inbox, so an ignored error
+		// makes "the outsider sees nothing" pass by failing.
+		t.Fatalf("mallory's pending: %v", err)
+	}
 	if len(reqs.Incoming)+len(reqs.Outgoing) != 0 {
 		t.Fatalf("outsider sees pending rows: %+v", reqs)
 	}
@@ -195,8 +200,12 @@ func TestUnfriendAndUnnamedAndSelf(t *testing.T) {
 	if err := repo.Remove(ctx, alice, "fr_ub_h"); err != nil {
 		t.Fatalf("unfriend: %v", err)
 	}
-	if friends, _ := repo.Friends(ctx, bob); len(friends) != 0 {
-		t.Fatalf("unfriend is symmetric, bob still has: %+v", friends)
+	fb, err := repo.Friends(ctx, bob)
+	if err != nil {
+		t.Fatalf("bob's friends after unfriend: %v", err)
+	}
+	if len(fb) != 0 {
+		t.Fatalf("unfriend is symmetric, bob still has: %+v", fb)
 	}
 
 	// A caller with no handle cannot send — the inbox would show nothing.
@@ -241,5 +250,48 @@ func TestRenamePropagatesToInbox(t *testing.T) {
 	}
 	if len(reqs.Incoming) != 1 || reqs.Incoming[0].Username != "fr_ra_new" {
 		t.Fatalf("rename did not propagate: %+v", reqs.Incoming)
+	}
+}
+
+// The `status = 'pending'` half of Accept's WHERE had no test: the reviewer
+// deleted it and all seven stayed green. It is load-bearing for a quiet
+// reason — re-accepting an ALREADY accepted friendship would return success
+// and re-stamp accepted_at, silently rewriting the "friends since" date every
+// list renders. So: accept twice, and the second must be indistinguishable
+// from a request that was never there.
+func TestReAcceptIsNotFoundAndLeavesSinceAlone(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	repo := NewPostgresRepository(pool)
+
+	alice := person(t, pool, "fr_re_alice", "fr_re_alice_h")
+	bob := person(t, pool, "fr_re_bob", "fr_re_bob_h")
+
+	if err := repo.Send(ctx, alice, "fr_re_bob_h"); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if err := repo.Accept(ctx, bob, "fr_re_alice_h"); err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	before, err := repo.Friends(ctx, bob)
+	if err != nil || len(before) != 1 {
+		t.Fatalf("friends after accept: %+v %v", before, err)
+	}
+
+	// Same recipient, same pair, already accepted.
+	if err := repo.Accept(ctx, bob, "fr_re_alice_h"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("re-accept should be ErrNotFound, got %v", err)
+	}
+	// And the sender re-accepting is the same miss, for the same reason.
+	if err := repo.Accept(ctx, alice, "fr_re_bob_h"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("sender re-accept should be ErrNotFound, got %v", err)
+	}
+
+	after, err := repo.Friends(ctx, bob)
+	if err != nil || len(after) != 1 {
+		t.Fatalf("friends after re-accept: %+v %v", after, err)
+	}
+	if !after[0].Since.Equal(before[0].Since) {
+		t.Fatalf("accepted_at moved: %v -> %v", before[0].Since, after[0].Since)
 	}
 }

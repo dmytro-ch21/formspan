@@ -114,6 +114,15 @@ func (r *PostgresRepository) Remove(ctx context.Context, callerID, username stri
 
 // otherSide picks the counterpart's profile columns for a row the caller is
 // half of. Used by both list queries; the CASE keeps it one join.
+//
+// Both callers LIMIT. The conditional-GET stack buffers a whole identity body
+// to hash it, so api-conventions.md holds peak memory bounded on the premise
+// that every list has a ceiling — and the pending list is the sharp case,
+// because it grows with OTHER people's actions: throwaway accounts sending
+// requests inflate the victim's inbox without the victim doing anything. The
+// username tiebreak is part of the same argument: a bare timestamp DESC can
+// tie, and ties reorder between queries, which wobbles the ETag of a body
+// nobody changed.
 const cardSelect = `
 	SELECT p.username, p.display_name, %s
 	FROM friendships f
@@ -124,7 +133,8 @@ func (r *PostgresRepository) Friends(ctx context.Context, callerID string) ([]Ca
 	rows, err := r.pool.Query(ctx,
 		fmt.Sprintf(cardSelect, "f.accepted_at")+`
 		AND f.status = 'accepted'
-		ORDER BY f.accepted_at DESC`, callerID)
+		ORDER BY f.accepted_at DESC, p.username
+		LIMIT 500`, callerID)
 	if err != nil {
 		return nil, translate(err, "friends")
 	}
@@ -138,7 +148,8 @@ func (r *PostgresRepository) Pending(ctx context.Context, callerID string) (Requ
 	rows, err := r.pool.Query(ctx,
 		fmt.Sprintf(cardSelect, "f.created_at, f.requested_by")+`
 		AND f.status = 'pending'
-		ORDER BY f.created_at DESC`, callerID)
+		ORDER BY f.created_at DESC, p.username
+		LIMIT 500`, callerID)
 	if err != nil {
 		return out, translate(err, "pending")
 	}

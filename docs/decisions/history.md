@@ -14748,6 +14748,16 @@ from "pending in either direction". Four mutation checks red: pair
 canonicalisation dropped, `requested_by` dropped from accept, list scoping
 dropped, unnamed-sender guard dropped.
 
+And a fifth that was **not** red, which is the part worth recording. The
+reviewer ran its own mutation on a guard I had not: deleting `AND status =
+'pending'` from Accept's WHERE left all seven tests green. The consequence is
+quiet rather than dramatic — re-accepting an already-accepted friendship would
+return 204 and re-stamp `accepted_at`, rewriting the "friends since" date every
+list renders. A test I have not watched fail is a claim, not a check; that one
+now exists and goes red on the mutation. Two other assertions in the same file
+were passing vacuously (`reqs, _ := repo.Pending(...)` — the zero value is an
+empty inbox, so "the outsider sees nothing" would have passed *by erroring*).
+
 ### Mobile is ONLINE-ONLY here, deliberately
 
 The one screen in the app that is. The offline spine exists so an athlete's
@@ -14762,7 +14772,10 @@ ratchet back at exactly 54.
 ### Gaps
 
 - **No rate limiting** — re-requests after decline are unbounded. Recorded
-  three entries running; it belongs in the platform layer.
+  three entries running; it belongs in the platform layer. Both list queries
+  now `LIMIT 500` with a stable tiebreak, which bounds the *response* but not
+  the sending: the pending inbox is the one list that grows from other
+  people's actions, so it is where a cap is a stopgap rather than a fix.
 - The Friends screen is typecheck/lint-verified, not device-verified.
 - Nothing consumes the friends list yet — that is step 5, share-by-copy,
   the thing this whole scope exists for.

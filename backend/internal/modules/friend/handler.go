@@ -17,6 +17,8 @@ func NewHandler(repo Repository) *Handler { return &Handler{repo: repo} }
 
 func (h *Handler) Send(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
+	// One short handle; a cap costs nothing and bounds the allocation.
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<10)
 	var req struct {
 		Username string `json:"username"`
 	}
