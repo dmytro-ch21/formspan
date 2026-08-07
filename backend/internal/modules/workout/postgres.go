@@ -110,9 +110,9 @@ func (r *PostgresRepository) List(ctx context.Context, userID string, f Filter) 
 	// Mine/Shared narrow *within* what's already visible — they can never
 	// widen it, because visibleTo is applied unconditionally above.
 	switch {
-	case f.Mine && !f.Shared:
+	case f.Mine && !f.Public:
 		where = append(where, `owner_user_id = $1`)
-	case f.Shared && !f.Mine:
+	case f.Public && !f.Mine:
 		where = append(where, `(owner_user_id IS DISTINCT FROM $1 AND visibility = 'public')`)
 	}
 	if f.Sport != "" {

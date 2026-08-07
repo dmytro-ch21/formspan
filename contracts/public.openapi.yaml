@@ -4103,8 +4103,12 @@ paths:
         - $ref: "#/components/parameters/IfNoneMatch"
         - name: scope
           in: query
-          schema: { type: string, enum: [mine, shared] }
-          description: Omit for both. `shared` excludes the caller's own.
+          description: >
+            `public` is the current name. `shared` is still accepted as a
+            deprecated alias so an installed mobile build — which updates on the
+            App Store's schedule, not ours — does not get a 400 and an empty
+            Workouts tab from a rename.
+          schema: { type: string, enum: [mine, public, shared] }
         - name: sport
           in: query
           schema: { type: string, enum: [strength, running, bjj] }

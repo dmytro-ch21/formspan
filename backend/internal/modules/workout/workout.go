@@ -126,7 +126,7 @@ type Filter struct {
 	Sport  Sport // empty means any
 	Goal   Goal  // empty means any
 	Mine   bool  // include the caller's own workouts
-	Shared bool  // include public workouts (official + other users')
+	Public bool  // include public plans (VOLA-authored + other users')
 }
 
 type Repository interface {

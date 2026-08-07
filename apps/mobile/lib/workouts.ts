@@ -162,7 +162,7 @@ async function request<T>(
 
 export async function listWorkouts(
   getToken: TokenGetter,
-  scope: 'mine' | 'shared',
+  scope: 'mine' | 'public',
   signal?: AbortSignal,
 ): Promise<Workout[]> {
   const body = await request<{ workouts: Workout[] }>(

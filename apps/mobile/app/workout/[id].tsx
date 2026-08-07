@@ -34,6 +34,7 @@ import {
   cacheExercises,
   cachedExercises,
   cachedWorkouts,
+  createLocalWorkout,
   deleteLocalWorkout,
   dirtyWorkoutIDs,
   renameLocalWorkout,
@@ -57,6 +58,7 @@ export default function WorkoutDetailScreen() {
   const [catalog, setCatalog] = useState<Map<string, Exercise>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [copying, setCopying] = useState(false);
   const [saving, setSaving] = useState(false);
   const [picking, setPicking] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -400,11 +402,52 @@ export default function WorkoutDetailScreen() {
         </Pressable>
 
         {!canEdit && (
-          <Text style={[styles.readonly, { color: accent.ink }]} testID="workout-readonly">
-            {workout.owner_user_id === null
-              ? 'A VOLA template — view only.'
-              : 'Shared by someone else — view only.'}
-          </Text>
+          <>
+            <Text style={[styles.readonly, { color: accent.ink }]} testID="workout-readonly">
+              {workout.owner_user_id === null
+                ? 'A VOLA plan — yours to copy, not to edit.'
+                : 'Published by someone else — yours to copy, not to edit.'}
+            </Text>
+            {/*
+              The point of a browse surface. Without this, sixteen seeded plans
+              are something you can read and never use — and "view only" is the
+              end of the road rather than a step on it.
+
+              Copied locally and pushed like anything else, so it works in a gym
+              with no signal. The copy is a NEW workout owned outright: editing
+              it later must not touch the original, and a deploy refreshing the
+              seeded plan must not reach into somebody's copy.
+            */}
+            <Pressable
+              onPress={async () => {
+                if (!userId || copying) return;
+                setCopying(true);
+                try {
+                  const mine = await createLocalWorkout(userId, {
+                    name: workout.name,
+                    sport: workout.sport,
+                    goal: workout.goal,
+                    visibility: 'private',
+                  });
+                  await saveLocalWorkoutItems(userId, mine.id, items);
+                  requestSync('workout-copied');
+                  router.replace(`/workout/${mine.id}`);
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : String(err));
+                  setCopying(false);
+                }
+              }}
+              style={[styles.copy, { borderColor: accent.accent }]}
+              accessibilityRole="button"
+              accessibilityLabel={`Copy ${workout.name} to your workouts`}
+              accessibilityState={{ busy: copying }}
+              testID="workout-copy"
+            >
+              <Text style={[styles.copyText, { color: accent.ink }]}>
+                {copying ? 'Copying…' : 'Copy to my workouts'}
+              </Text>
+            </Pressable>
+          </>
         )}
 
         {error && (
@@ -788,6 +831,14 @@ const styles = StyleSheet.create({
   },
   renameAction: { fontSize: 16, fontWeight: '700', color: vola.lime },
   meta: { color: vola.textMuted, fontSize: 13, textTransform: 'capitalize' },
+  copy: {
+    marginTop: 10,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  copyText: { fontWeight: '700', fontSize: 15 },
   readonly: {
     fontSize: 13,
     backgroundColor: vola.surfaceRaised,

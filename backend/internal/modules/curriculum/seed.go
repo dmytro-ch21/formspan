@@ -111,6 +111,24 @@ func seedOne(ctx context.Context, tx pgx.Tx, c SeedCurriculum) error {
 		return translate(err, "seed curriculum "+c.ID)
 	}
 
+	// Guarded the same way as the upsert above, and it needs its own guard.
+	//
+	// Found while writing the workout seeder, which copied this file: the
+	// upsert refuses to touch a row it does not own, and then this DELETE ran
+	// unconditionally — so an id colliding with an admin-authored curriculum
+	// left it named as the admin left it and EMPTIED of every item. The worse
+	// of the two failures, because the name surviving makes it read as
+	// somebody's own mistake rather than as a deploy.
+	var seeded bool
+	if err := tx.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM curricula WHERE id = $1 AND source = 'seed')`,
+		c.ID).Scan(&seeded); err != nil {
+		return fmt.Errorf("curriculum: check seed ownership for %s: %w", c.ID, err)
+	}
+	if !seeded {
+		return nil
+	}
+
 	if _, err := tx.Exec(ctx,
 		`DELETE FROM curriculum_items WHERE curriculum_id = $1`, c.ID); err != nil {
 		return fmt.Errorf("curriculum: clear seed items for %s: %w", c.ID, err)

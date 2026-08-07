@@ -14895,7 +14895,7 @@ output reads sensibly, but whether the two headings are legible mid-workout —
 one-handed, twenty seconds between sets — is a device question.
 ## 2026-08-07 — Sharing, built once for everything
 
-`internal/modules/share`, migration 000042, four routes under `/v1/shares`, a
+`internal/modules/share`, migration 000043, four routes under `/v1/shares`, a
 Share control on the web sequence page and a generic `/dashboard/shared`
 inbox. Step 5 of the social scope, and the reason the previous four exist.
 
@@ -15026,6 +15026,183 @@ produce a friend you could have picked or a 404.
 - Nothing has been exercised in a browser — typecheck, lint, build and the
   backend integration suite only.
 
+
+## 2026-08-07 — Shared Workouts becomes Public Workout Plans, and there is finally something in it
+
+The tab existed and was empty by construction. `visibility='public'` and a
+nullable owner have been in the schema since 000006 — the data model has always
+described VOLA-authored plans — but nothing ever wrote one, so "Shared" was a
+browse surface over other people's workouts that nobody had published. An
+athlete opening it saw "Nothing shared yet" and reasonably concluded the feature
+did not work.
+
+### Sixteen plans, and every exercise id verified
+
+Bodyweight/home (foundations, upper, lower, core, conditioning), dumbbell-only
+(full body, upper, lower), the classic gym splits (PPL ×3, upper/lower, full
+body), a 5×5 strength block, and kettlebell conditioning. 82 items, each naming
+a real exercise.
+
+That last part is not incidental: every item is a **foreign key** into the
+catalog, and `cmd/seed` runs as Railway's `preDeployCommand`. A one-character
+typo in the JSON is not a cosmetic error — it fails the seed transaction and
+therefore the deploy. `seed_test.go` resolves every id against the catalog
+without needing a database, so the typo is caught in CI instead.
+
+### The safety property, proven against a real database
+
+`source='seed'` on `workouts` (migration 000043), and **`DEFAULT 'user'`** —
+which here is not merely conventional but the safe direction. Unlike `curricula`
+in 000034, this table is **not empty**: people have workouts. Defaulting to
+'seed' would hand every workout anybody has ever built to the next deploy to
+overwrite. 000034's comment makes exactly this argument about a hypothetical
+later backfill; this is that backfill, taking its own advice.
+
+Both the upsert and the item-replace are scoped to `source = 'seed'`, and the
+item-replace needed its own guard rather than inheriting the upsert's: without
+it, a colliding id would leave the athlete's plan named as they left it and
+**emptied of everything in it**.
+
+Verified rather than reasoned about — seeded a scratch database, planted a
+user-owned workout on a seeded id, re-ran the deploy, and confirmed the name,
+owner, visibility and every item survived untouched. The seeder now also reports
+rows actually written rather than plans in the file, because it printed "16
+upserted" while writing 15, and a log that rounds in its own favour is how the
+next person stops trusting the output.
+
+### The rename keeps the old word on the wire
+
+`?scope=mine|public` now, and **`shared` is still accepted**. Not
+future-proofing for its own sake: an installed mobile build sends whatever it
+shipped with and updates on the App Store's schedule rather than ours, so
+rejecting the old word would give every not-yet-updated phone a 400 and an empty
+Workouts tab — a rename presenting as an outage. One string, deletable once the
+field has turned over.
+
+Note the rename is scoped to **workouts**. Curricula have their own My/Shared
+strip; renaming that in the same change would have been a second, unasked
+decision about a different feature.
+
+### Copy to my workouts, which did not exist
+
+The browse surface had no exit. Sixteen plans you can read and never use is
+worse than an empty tab, because it looks finished. Copying goes through the
+existing create + save-items path, so on mobile it is offline-first like
+everything else, and the copy is a **new workout owned outright** — editing it
+cannot touch the original, and a deploy refreshing the seeded plan cannot reach
+into the copy.
+
+### The artwork is generated, and costs nothing
+
+The brief asked for something that looks good and is not expensive in memory.
+The cheapest answer to that is not a small image, it is **no image**: a two-stop
+gradient plus one stroked brand icon, both from values already in the binary.
+Sixteen plans cost zero bytes of assets and zero decode time, and a seventeenth
+costs the same.
+
+The palette is chosen by hashing the plan id, so a plan looks the same on every
+launch and in a screenshot taken last week — a random pick would shimmer between
+renders, and a per-goal pick would make the whole bodyweight section one colour
+and the list harder to scan rather than easier. Both failure modes are silent,
+which is why they are tested.
+
+It also sidesteps what photography would have dragged in: licences, images that
+date, and sixteen small judgements about who a plan is "for" that nobody asked
+this app to make.
+
+### What review caught, including a test that blessed the failing case
+
+The blocking one was latent rather than live, and its shape is worth recording.
+`goal` is written straight through, and `workouts_goal_valid` is `goal IS NULL
+OR goal IN (...)` — so a plan authored with `"goal": ""`, or with the field
+simply omitted, inserts an empty string, **violates the CHECK, and fails the
+seed transaction and therefore the deploy.** Omitting `goal` is the natural
+shape for the first BJJ or running plan, since goal is a strength concept. It
+writes NULL now.
+
+Worse than the bug: **the test written to catch exactly this class of JSON
+mistake affirmatively blessed it.** `TestSeedWorkoutGoalsAreValid` skipped
+validation when the goal was empty — the one value that breaks. That is the
+third or fourth time in this run of work that a guard turned out to be shaped
+around the code rather than around the failure.
+
+Everything else was hardening, and most of it was worth doing:
+
+- **The migration was missing the two CHECKs 000034 carries**, including
+  `(owner_user_id IS NULL) = (source <> 'user')` — which is precisely what the
+  seeder's whole safety argument rests on. Without it, "an owned row can never
+  claim `source='seed'`" lived only in the application, and the application is
+  not the only thing that can write here.
+- **The partial index was dead weight and its comment claimed usage that does
+  not exist.** The upsert is arbitered by the primary key; nothing anywhere
+  filters on `source` at runtime. Dropped rather than kept with a corrected
+  comment — an index nobody queries is a write cost and a lie in the schema.
+- **No `lock_timeout`** on DDL against a table every workout request reads,
+  against house precedent from 000025 and 000034.
+- **The property proven by hand was pinned by nothing.** There is now a
+  `TEST_DATABASE_URL` test that plants a user-owned workout on a seeded id and
+  asserts name, owner, visibility AND items survive. Both halves of the guard
+  were then deleted in turn to watch it go red — the second mutation renames the
+  athlete's plan to "Bodyweight Foundations", which is the failure in one line.
+- **The `shared` alias was an unenforced promise.** The branch carries a comment
+  inviting its own deletion, so a cleanup removing it would have shipped green.
+  Testing it meant extracting `ScopeFilter`, because `List` reads claims first
+  and `auth`'s context key is unexported — the decision was simply not reachable
+  from a handler test.
+- **The seeder was a second writer that skipped `assertSportsMatch`.** Nothing
+  in the schema enforces one discipline per workout, so the seed test now checks
+  each item's sport against its plan's.
+- `target_weight_kg` was typed `*int` against a `NUMERIC(6,2)` column, which
+  would have rejected 62.5 kg at unmarshal time in a domain where 2.5 kg
+  increments are standard.
+- A skipped plan is now named in the log. The only evidence of a collision was
+  an off-by-one in a deploy log nobody alerts on.
+
+**And two programming complaints, both fair.** "Home Upper Body" was three
+presses and a plank — a push day wearing an upper-body name; it has inverted
+rows now, with a note that they need a table edge. "Heavy Five" put five sets of
+five on squat, bench, press and row *plus* deadlifts in one session — about 23
+heavy compound sets, which with its own prescribed three-minute rests is a
+ninety-minute day. Every programme it echoes alternates two, so now it does too.
+
+**A latent bug in adjacent code, found by writing this one.** `curriculum.Seed`
+— the file this seeder was copied from — guards its upsert with `source =
+'seed'` and then deletes its items unconditionally. An id colliding with an
+admin-authored curriculum would leave it named as the admin left it and emptied
+of every item: the worse of the two failures, because the name surviving makes
+it read as somebody's own mistake. Backported.
+
+### Two things the rebase onto the sharing work exposed
+
+**A migration number collision.** #175 landed `000042_create_shares` while this
+branch held `000042_workouts_source`. Renumbered to 000043. Worth noting because
+nothing catches it: `golang-migrate` orders by number, two files claiming one
+number is undefined, and both branches were green in isolation. Parallel
+branches touching `backend/migrations/` need the number checked at rebase time,
+every time.
+
+**A CHECK that was stricter than the code it guards.** Copying `curricula`'s
+biconditional `(owner_user_id IS NULL) = (source <> 'user')` looked obviously
+right and failed an existing test on contact: `Create` does not write `source`
+at all, so an ownerless workout made through the ordinary path lands as
+`('user', NULL)` — a real, harmless shape the biconditional rejects. Narrowed to
+the direction that actually carries the safety property: an OWNED row can never
+claim `source='seed'`. The looser constraint loses nothing, because the seeder
+skips `('user', NULL)` anyway, which is the conservative answer.
+
+The review that suggested those CHECKs said "no current path can produce an
+inconsistent row", and that was reasonable from reading — the path that does is
+a test fixture inserting SQL directly, which is exactly what a schema constraint
+is supposed to catch and exactly what makes copying a constraint between tables
+riskier than it looks.
+
+### Not verified
+
+The plans are sound as programming and every id resolves, but **nobody has
+trained one**. Set and rep counts are conventional rather than tested, and
+whether a plan is a good session is not something the seed test can answer. Nor
+has the browse surface been seen on a device — the gradients in particular are
+untested against a real screen.
 
 ## Open items / known gaps as of this entry
 

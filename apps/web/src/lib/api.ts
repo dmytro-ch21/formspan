@@ -639,7 +639,7 @@ async function request<T>(
 
 export async function listWorkouts(
   getToken: Token,
-  scope: "mine" | "shared",
+  scope: "mine" | "public",
   signal?: AbortSignal,
 ): Promise<Workout[]> {
   const b = await request<{ workouts: Workout[] }>(
