@@ -261,6 +261,35 @@ components:
       nullable: true
       enum: [male, female]
 
+    FriendCard:
+      type: object
+      description: >
+        One person as the social lists show them — the same two public fields
+        as PublicProfile plus the relationship timestamp. Never a user id:
+        the social API addresses everyone by handle, in both directions.
+      required: [username, display_name, since]
+      properties:
+        username: { type: string }
+        display_name: { type: string, nullable: true }
+        since:
+          type: string
+          format: date-time
+          description: Accepted-at on the friends list; requested-at on request lists.
+
+    FriendRequests:
+      type: object
+      description: >
+        Both directions of pending, split because they mean different actions —
+        incoming rows carry accept/decline, outgoing rows carry only cancel.
+      required: [incoming, outgoing]
+      properties:
+        incoming:
+          type: array
+          items: { $ref: "#/components/schemas/FriendCard" }
+        outgoing:
+          type: array
+          items: { $ref: "#/components/schemas/FriendCard" }
+
     PublicProfile:
       type: object
       description: >
@@ -2565,6 +2594,120 @@ paths:
           $ref: "#/components/responses/NotModified"
         "401":
           $ref: "#/components/responses/Unauthorized"
+
+  /friends:
+    get:
+      summary: The caller's accepted friends
+      operationId: listFriends
+      responses:
+        "200":
+          description: Accepted connections, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [friends]
+                properties:
+                  friends:
+                    type: array
+                    items: { $ref: "#/components/schemas/FriendCard" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /friends/{username}:
+    delete:
+      summary: Remove whatever links the caller and this handle
+      operationId: removeFriend
+      description: >
+        One verb for three meanings — declining an incoming request,
+        cancelling an outgoing one, or unfriending — because all three are
+        "this relationship, gone", and the caller's UI knows which it offered.
+        Decline DELETES rather than storing a declined state: a stored decline
+        either blocks re-requests forever or forces the API to lie to the
+        sender. The honest cost (a declined sender may ask again) is a
+        recorded moderation residual.
+      parameters:
+      - name: username
+        in: path
+        required: true
+        schema: { type: string }
+      responses:
+        "204": { description: Removed. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404":
+          description: >
+            No relationship between the caller and that handle — including
+            when the handle itself does not exist, indistinguishably.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /friends/requests:
+    get:
+      summary: Open requests, both directions
+      operationId: listFriendRequests
+      responses:
+        "200":
+          description: Pending rows involving the caller, newest first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FriendRequests" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      summary: Ask someone to be your friend
+      operationId: sendFriendRequest
+      description: >
+        Addressed by handle. The caller must have claimed a username first —
+        the request sits in someone's inbox AS a handle, and an unnamed
+        requester would render as nothing.
+
+
+        One 409 covers "already friends" AND "pending in either direction":
+        splitting them would tell a sender things about the other side's
+        choices that are not theirs to know. A crossing request (they asked
+        you while you asked them) is the same 409 — the pair is stored
+        canonically, so no state exists where both sit in each other's
+        inboxes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username]
+              properties:
+                username: { type: string }
+      responses:
+        "204": { description: Sent — it now sits pending in their inbox. }
+        "400":
+          description: No body username, a self-request, or the caller has no handle yet.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Already connected, or a request is pending in either direction.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /friends/requests/{username}/accept:
+    post:
+      summary: Accept a pending request from this handle
+      operationId: acceptFriendRequest
+      description: >
+        Only the RECIPIENT can accept. A sender trying to accept their own
+        request gets the same 404 as "no such request" — a distinct answer
+        would confirm the request still exists.
+      parameters:
+      - name: username
+        in: path
+        required: true
+        schema: { type: string }
+      responses:
+        "204": { description: You are now friends. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /users/{username}:
     get:

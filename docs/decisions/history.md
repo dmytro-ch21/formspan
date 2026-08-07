@@ -14706,6 +14706,80 @@ Three more, all making the card stop contradicting the screen behind it:
 Nobody has seen the flares, felt the haptic, or heard the chime land together.
 The numbers and the omissions are covered; whether the moment reads as earned
 rather than as an interruption is not something a test can answer.
+## 2026-08-07 — Friend requests: the first write between two athletes
+
+`internal/modules/friend`, migration 000041, five routes under `/v1/friends`,
+and the mobile Friends screen (search → add, inbox with accept/decline,
+outgoing with cancel, friends list with remove). Steps 3 and 4 of the social
+scope in one module, because a request and its acceptance are one resource in
+two states.
+
+### One row per pair, canonically ordered
+
+`friendships` stores user_a < user_b with `requested_by` preserving the
+direction the canonical form erases. The primary key then carries the whole
+uniqueness argument: a duplicate request AND a crossing request (B asks A
+while A→B is pending) are both a 23505 on the same row — no read-then-write
+race, no state where two people sit in each other's inboxes.
+
+### Decline is delete
+
+No third status. A stored "declined" either blocks re-requests forever or
+forces the API to lie to the sender; deleting keeps the model honest at the
+cost that a declined sender may ask again — recorded as a moderation
+residual beside display_name's, not solved with a lie.
+
+### Everything is a handle; ids never cross the wire
+
+Requests are sent to a username, the inbox shows usernames, accept and
+remove take usernames. Cards JOIN profiles live rather than denormalising,
+so a rename propagates instantly — pinned by a test that goes red if the
+join becomes a stored column. Consequence: **you must claim a handle before
+sending a request** (`ErrNoUsername`, 400 with instructive copy), because an
+unnamed requester would render in an inbox as nothing.
+
+### The oracle discipline, applied forward for once
+
+Every miss is one 404: a sender accepting their own request, an outsider
+touching a pair they are not in, a handle that does not exist — all
+indistinguishable, because each distinct answer confirms something to
+someone it should not. The 409 likewise refuses to split "already friends"
+from "pending in either direction". Four mutation checks red: pair
+canonicalisation dropped, `requested_by` dropped from accept, list scoping
+dropped, unnamed-sender guard dropped.
+
+And a fifth that was **not** red, which is the part worth recording. The
+reviewer ran its own mutation on a guard I had not: deleting `AND status =
+'pending'` from Accept's WHERE left all seven tests green. The consequence is
+quiet rather than dramatic — re-accepting an already-accepted friendship would
+return 204 and re-stamp `accepted_at`, rewriting the "friends since" date every
+list renders. A test I have not watched fail is a claim, not a check; that one
+now exists and goes red on the mutation. Two other assertions in the same file
+were passing vacuously (`reqs, _ := repo.Pending(...)` — the zero value is an
+empty inbox, so "the outsider sees nothing" would have passed *by erroring*).
+
+### Mobile is ONLINE-ONLY here, deliberately
+
+The one screen in the app that is. The offline spine exists so an athlete's
+own training survives a dead-spot; a friend request is a message to another
+person, and queueing one against a stale view means asking someone who
+already answered. Failures surface as copy. The lint ratchet earned its keep
+during the build: the screen's first load used async/await inside the
+effect's call graph, which `react-hooks/set-state-in-effect` counts as
+synchronous — converted to the .then-chain form the house already uses,
+ratchet back at exactly 54.
+
+### Gaps
+
+- **No rate limiting** — re-requests after decline are unbounded. Recorded
+  three entries running; it belongs in the platform layer. Both list queries
+  now `LIMIT 500` with a stable tiebreak, which bounds the *response* but not
+  the sending: the pending inbox is the one list that grows from other
+  people's actions, so it is where a cap is a stopgap rather than a fix.
+- The Friends screen is typecheck/lint-verified, not device-verified.
+- Nothing consumes the friends list yet — that is step 5, share-by-copy,
+  the thing this whole scope exists for.
+
 
 ## Open items / known gaps as of this entry
 

@@ -4965,6 +4965,45 @@ not inferred from the absence of an error.
   offers a seconds target for a `time` exercise, and the session screen asks for
   seconds when logging one.
 
+## Friends (`/v1/friends`, mobile Friends screen)
+
+### Happy path
+
+- A searches B's exact handle → card → Add friend → B's inbox shows @A;
+  A's "waiting on" shows @B.
+- B accepts → both friends lists show the other; both pending lists drain.
+- Renaming a handle updates every inbox and list it appears in (cards join
+  live — no stored copies).
+
+### The pair is one row
+
+- A→B pending, then B tries to add A → **409**, same message as a duplicate.
+  No state may exist where both sit in each other's inboxes.
+- Already friends → the same 409 on a new request.
+
+### One 404 for every miss (all pinned to exact errors)
+
+- Sender accepts their own request → 404, indistinguishable from "no request".
+- An outsider accepts/removes a pair they are not in → 404, and the pair is
+  untouched (assert the row, not just the status).
+- Request to a nonexistent handle → 404.
+
+### Rules
+
+- No claimed username → 400 telling you to claim one first.
+- Self-request → 400.
+- Decline deletes: re-requesting afterwards succeeds (the moderation residual
+  is recorded, not hidden).
+- DELETE covers decline / cancel / unfriend; unfriending is symmetric.
+
+### Mobile screen (online-only by design)
+
+- Airplane mode: every action surfaces the offline copy; nothing queues.
+- Failed load leaves lists as loading-state, never as "no friends".
+- Search 404 copy teaches exact-match ("handles are exact").
+- A result already in any list shows "already in your lists", not Add.
+- Remove is two-step in place, announced via live region.
+
 ## Username lookup (`GET /v1/users/{username}`)
 
 Exact-match handle resolution — the first athlete-to-athlete read. No client
