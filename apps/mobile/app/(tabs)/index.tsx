@@ -31,6 +31,7 @@ import { TrainingCalendar } from '@/components/TrainingCalendar';
 import { vola } from '@/constants/Colors';
 import { formatDuration } from '@/lib/history';
 import { addDays, dayString, startOfWeek, weekDays } from '@/lib/calendar';
+import { fetchThemes, type Theme } from '@/lib/themes';
 import { owedOn } from '@/lib/adherence';
 import { listPlannedBetween, type PlannedSession } from '@/lib/plan';
 import { formatElapsed } from '@/lib/rest';
@@ -769,6 +770,31 @@ export default function TodayScreen() {
   );
 
   const week = useMemo(() => summariseWeek(sessions, now), [sessions, now]);
+
+  /**
+   * This week's theme, if there is one.
+   *
+   * Network-only and deliberately not cached: a theme is one short string that
+   * changes weekly, so a stale one is worse than none — it would tell somebody
+   * their block is about guard retention a fortnight after they moved on. It
+   * degrades to absent offline, which is the honest answer.
+   */
+  const [theme, setTheme] = useState<Theme | null>(null);
+  const weekStartKey = dayString(startOfWeek(now));
+  useEffect(() => {
+    let live = true;
+    fetchThemes(getToken, { from: weekStartKey, to: weekStartKey })
+      .then((ts) => {
+        if (live) setTheme(ts[0] ?? null);
+      })
+      .catch(() => {
+        // Offline, or the endpoint is unreachable. No theme, no error — this
+        // is decoration on a screen that must work in a basement.
+      });
+    return () => {
+      live = false;
+    };
+  }, [getToken, weekStartKey]);
   // Everything except the card above, finished or not. Filtering to
   // `ended_at` here would make a *second* unfinished session invisible on the
   // phone entirely — not the resume card, not the list — while it kept
@@ -1279,6 +1305,25 @@ export default function TodayScreen() {
           onOpenSession={(s) => router.push(sessionHref(s, modules))}
         />
 
+        {/*
+          What this week is for, if the athlete said.
+
+          Read-only here — themes are authored on web, per the platform rule
+          that planning is a desk activity. It sits directly above the week's
+          numbers because that is the pairing: the intent, then what actually
+          happened against it.
+
+          Absent when there is no theme. A permanent "no theme set" row would be
+          the app asking for homework.
+        */}
+        {theme && (
+          <View style={styles.themeCard} testID="week-theme">
+            <Text style={styles.themeLabel}>This week</Text>
+            <Text style={styles.themeTitle}>{theme.title}</Text>
+            {theme.notes !== '' && <Text style={styles.themeNotes}>{theme.notes}</Text>}
+          </View>
+        )}
+
         {week.sessions > 0 && (
           <StatRow testID="week-summary">
             {/* The three discs are the only colour in this card, and each one
@@ -1469,6 +1514,22 @@ const styles = StyleSheet.create({
   // No horizontal padding here: the header manages its own, so it can sit
   // flush while the cards below stay inset.
   screen: { flex: 1 },
+  themeCard: {
+    borderWidth: 1,
+    borderColor: vola.lineSoft,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 2,
+  },
+  themeLabel: {
+    fontSize: 10,
+    color: vola.textDim,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  themeTitle: { fontSize: 15, fontWeight: '700' },
+  themeNotes: { fontSize: 12, color: vola.textMuted, marginTop: 2 },
   container: { gap: 12 },
 
   // The workouts tab's pill, to the point: same radius, same padding, same

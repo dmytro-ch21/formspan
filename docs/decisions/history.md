@@ -15310,6 +15310,120 @@ test, which the workout module already considered and declined.
   platform-sized one rather than a screen.
 
 
+## 2026-08-07 — A training week gets a theme, and does not get a second focus list
+
+"Add weekly training themes." The feature is one sentence per week — "deload",
+"guard retention", "chase the squat". The work was almost entirely in deciding
+what it must NOT be.
+
+### The design question, answered before any code
+
+The app already has a "what am I working on" list. `bjj_focus` is a **rolling**
+set of three-to-five **techniques**, ranked by the athlete, BJJ-only, each
+carrying the date it joined so that "you have been on this five weeks, consider
+rotating" is answerable. A second thing claiming to hold training intent is
+exactly the shape this repo keeps getting hurt by — the position vocabulary in
+four client files, the search copies that drifted, the `similarTo` that existed
+twice.
+
+Three options were on the table and two are wrong:
+
+- **A theme that DRIVES the focus list** — rejected on a specific ground rather
+  than a general one. It makes focus a derived value, and `bjj_focus.started_on`
+  exists precisely so that re-saving the list does not reset the clock on a
+  technique. Deriving focus from a week resets it every Monday and destroys the
+  one signal that column was added for.
+- **A theme that REPLACES focus** — throws away technique-level capture, which
+  the reflection wizard's whole one-capture-path design depends on.
+- **A theme as a LABEL BESIDE it** — what landed.
+
+**And the rule that holds the line is in the schema: a theme stores no technique
+ids and no exercise ids.** Prose only. The moment a theme could list techniques
+it would be a second focus list, and the two would answer the same question
+differently. That single restriction is what makes the two coexist.
+
+### One theme per week, and Monday is a constraint rather than a convention
+
+`PRIMARY KEY (user_id, week_start)`. "This is a deload week" is a claim about the
+week, not about a discipline within it — an athlete who lifts and rolls has one
+week, not two. Per-sport themes would need a nullable `sport` in the key, and
+NULL does not deduplicate in a Postgres unique constraint, so that shape invites
+exactly the duplicate rows the key is there to prevent. Additive later if the
+need turns out to be real.
+
+`CHECK (EXTRACT(ISODOW FROM week_start) = 1)`, because **a week that does not
+start on a Monday would silently overlap its neighbours — the one duplicate the
+primary key cannot catch.** Monday because both clients' `startOfWeek` already
+say Monday and have for a while. A calendar DATE rather than a timestamptz, for
+the same reason `plans.day` is one: "this week" is a claim about the athlete's
+own calendar, and an instant slides across a boundary the moment they fly
+somewhere.
+
+### PUT, not POST
+
+A week holds at most one theme and the caller names the week, so there is
+nothing to allocate and no id to return. Creating and replacing are the same
+request. `created_at` is deliberately untouched on conflict: when the week was
+first given a theme stays true after the wording changes.
+
+Deleting a week that has no theme is a 404 rather than a 204 — a client should
+be able to tell "there was nothing" from "it is gone".
+
+### Authored on web, read on the phone
+
+The platform rule, applied without argument this time: deciding what a block is
+FOR is a desk activity, like building a template. The calendar's grid already
+renders row by row with `week[0]` as the Monday, so the theme hangs off the row
+it describes with no date arithmetic and nothing to disagree with `startOfWeek`
+about. The row is invisible until hovered when a week has no theme — a permanent
+"+ Add theme" on every row would be more chrome than calendar.
+
+Today shows it above the week's numbers, which is the pairing: the intent, then
+what actually happened against it. **Network-only and deliberately not cached** —
+a theme is one short string that changes weekly, so a stale one is worse than
+none; it would tell somebody their block is about guard retention a fortnight
+after they moved on. It degrades to absent offline, which is honest.
+
+### The cross-user test earned its place
+
+Mutating the repository to drop the `user_id` scope shows another athlete
+reading **and deleting** somebody else's theme, and the owner's row destroyed.
+That is the same IDOR shape review caught twice before in this project, in two
+different modules. Worth noting the first mutation attempt was useless — it
+broke the SQL rather than the scoping, so the test failed for the wrong reason
+and proved nothing until it was redone with a query that stayed valid.
+
+### What review caught, including a third migration collision
+
+**The blocker was a migration number, again.** 000044 was clear of `000042_create_shares` and `000043_workouts_source` when this branch started, and PR #177 landed `000044_shares_sent_index` while it was in flight. That is the **third** collision in a day of parallel branches, and the pattern is now worth stating plainly: `golang-migrate` refuses duplicate versions, so the failure is a broken `migrate up` in every environment including staging — and **both branches are green in isolation right up to the merge.** Nothing in `verify` or CI can see it. Renumbered to 000045; the check belongs in the rebase, every time.
+
+The rest were real and mostly about conventions this module claimed to follow:
+
+- **`List` had no cap.** Requiring `from` and `to` bounds the *calendar*, not the response — nothing stopped `from=0001-01-01&to=9999-12-27`. `api-conventions.md` is explicit that an uncapped list unbounds the ETag buffer, and `plan`, the module this one cites for its date handling, carries `maxRangeDays` for exactly this. Added. Note themes need no second row cap where plans need one: the primary key means at most one theme per week, so bounding the span bounds the response exactly — the one-per-week decision paying off somewhere unexpected.
+- **`strings.TrimPrefix` never fired.** The repository wraps before the handler sees it — `"theme: set: theme: invalid input: …"` — so the string does not *start with* the sentinel and the client received the whole chain. Nothing leaked, since every component is a fixed string, but the caller got constraint plumbing instead of the sentence this module promises. Cut at the marker instead.
+- **`week_start::text` is not `DateStyle`-safe.** It avoids the real trap (scanning a DATE into `time.Time` and formatting server-side, which lands a day early west of Greenwich) but follows the session's `DateStyle`, which nothing here pins. `to_char` is what `plan` already uses.
+- **Year zero was a 500.** Go's `time.Parse` accepts `"0000-01-03"` and calls it a Monday; Postgres has no year zero and raises a class-22 datetime overflow that nothing mapped. Caller input, so a 400 now.
+- No `MaxBytesReader` on the write, against the practice every module except `profile` follows.
+
+### And the rune guard was a comment rather than a test
+
+The handler cited the workout rename endpoint's documented trap — swapping
+`utf8.RuneCountInString` for `len` left that whole suite green — and **the same
+swap went green here**, because nothing sent a multibyte title. A comment citing
+a trap is not a guard against it.
+
+Pinning it needed the rule extracted: a *valid* title passes validation and goes
+on to the repository, which needs claims that `auth`'s unexported context key
+makes impossible to forge — so the accepting case, the only one that catches the
+swap, was untestable in place. `CleanTitle` is now a pure function, and 80
+Japanese characters at 240 bytes go red under `len`. Same shape as `ScopeFilter`
+in the workouts rename, and for the same reason.
+
+### Not verified
+
+Neither surface has been seen. The calendar row's hover-to-reveal in particular
+is the kind of thing that reads fine in code and is undiscoverable in practice.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

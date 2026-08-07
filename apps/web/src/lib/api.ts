@@ -2510,3 +2510,62 @@ export function resolveEdge(
   if (!hit || hit.id === selfID) return null;
   return hit;
 }
+
+/**
+ * A week's theme — one sentence about what the week is for.
+ *
+ * Deliberately NOT a second focus list: `/bjj/focus` holds the rolling,
+ * technique-level "what am I working on", and a theme carries no technique ids
+ * and no exercise ids at all. See the backend module for the full reasoning.
+ */
+export type Theme = {
+  /** The Monday of the week, as a calendar date. */
+  week_start: string;
+  title: string;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export async function listThemes(
+  getToken: Token,
+  range: { from: string; to: string },
+  signal?: AbortSignal,
+): Promise<Theme[]> {
+  const qs = new URLSearchParams({ from: range.from, to: range.to });
+  const b = await request<{ themes: Theme[] }>(
+    getToken,
+    `/themes?${qs}`,
+    {},
+    signal,
+  );
+  // `?? []` at the parse boundary: an older or drifted server omitting the
+  // field would otherwise hand `undefined` to a `.map` inside a render.
+  return b.themes ?? [];
+}
+
+/**
+ * Creates or replaces a week's theme. `weekStart` must be a Monday.
+ *
+ * One verb rather than create-then-update, because a week holds at most one
+ * theme and the caller names the week.
+ */
+export async function setTheme(
+  getToken: Token,
+  weekStart: string,
+  input: { title: string; notes?: string },
+): Promise<Theme> {
+  return request<Theme>(getToken, `/themes/${encodeURIComponent(weekStart)}`, {
+    method: "PUT",
+    body: JSON.stringify({ title: input.title, notes: input.notes ?? "" }),
+  });
+}
+
+export async function deleteTheme(
+  getToken: Token,
+  weekStart: string,
+): Promise<void> {
+  await request<void>(getToken, `/themes/${encodeURIComponent(weekStart)}`, {
+    method: "DELETE",
+  });
+}

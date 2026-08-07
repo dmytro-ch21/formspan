@@ -13,6 +13,10 @@ import {
   type History,
   type Plan,
   type Workout,
+  deleteTheme,
+  listThemes,
+  setTheme,
+  type Theme,
 } from "@/lib/api";
 import {
   addMonths,
@@ -70,6 +74,10 @@ export default function CalendarPage() {
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [everLoaded, setEverLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [themes, setThemes] = useState<Theme[]>([]);
+  /** The week currently being edited, keyed by its Monday. */
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
@@ -87,15 +95,17 @@ export default function CalendarPage() {
     const controller = new AbortController();
     abortRef.current = controller;
     try {
-      const [hist, planned, mine] = await Promise.all([
+      const [hist, planned, mine, weekThemes] = await Promise.all([
         fetchHistory(getToken, { ...range, tz: localZone() }, controller.signal),
         listPlans(getToken, range, controller.signal),
         listWorkouts(getToken, "mine", controller.signal),
+        listThemes(getToken, range, controller.signal),
       ]);
       if (controller.signal.aborted) return;
       setHistory(hist);
       setPlans(planned);
       setWorkouts(mine);
+      setThemes(weekThemes);
       setError(null);
     } catch (err) {
       if (controller.signal.aborted) return;
@@ -128,6 +138,17 @@ export default function CalendarPage() {
   const workoutName = useCallback(
     (id: string | null) => (id ? (workouts.find((w) => w.id === id)?.name ?? null) : null),
     [workouts],
+  );
+
+  /**
+   * Themes by their Monday.
+   *
+   * The grid's rows already start on Monday, so `week[0]` is the key — no
+   * date arithmetic here, and nothing to disagree with `startOfWeek` about.
+   */
+  const themeByWeek = useMemo(
+    () => new Map(themes.map((t) => [t.week_start, t])),
+    [themes],
   );
 
   const weeks = useMemo(() => monthGrid(month), [month]);
@@ -226,7 +247,49 @@ export default function CalendarPage() {
 
           <div className="flex flex-col gap-1.5">
             {weeks.map((week) => (
-              <div key={week[0]} className="grid grid-cols-7 gap-1.5">
+              <div key={week[0]} className="flex flex-col gap-1">
+                {/*
+                  The week's theme, on the week's own row.
+
+                  Authored here rather than on the phone, per the platform rule:
+                  deciding what a block is FOR is a desk activity. Mobile reads
+                  it on Today.
+
+                  Prose only — no technique or exercise picker, deliberately.
+                  `/bjj/focus` is where technique-level intent lives, and a theme
+                  that could list techniques would be a second focus list.
+                */}
+                <ThemeRow
+                  weekStart={week[0]}
+                  theme={themeByWeek.get(week[0]) ?? null}
+                  editing={editing === week[0]}
+                  draft={draft}
+                  onDraft={setDraft}
+                  onOpen={() => {
+                    setEditing(week[0]);
+                    setDraft(themeByWeek.get(week[0])?.title ?? "");
+                  }}
+                  onCancel={() => setEditing(null)}
+                  onSave={async () => {
+                    const title = draft.trim();
+                    try {
+                      if (title === "") {
+                        // Clearing the box removes the theme. A week with an
+                        // empty title is not a state the model has.
+                        if (themeByWeek.has(week[0])) {
+                          await deleteTheme(getToken, week[0]);
+                        }
+                      } else {
+                        await setTheme(getToken, week[0], { title });
+                      }
+                      setEditing(null);
+                      await load();
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : String(err));
+                    }
+                  }}
+                />
+                <div className="grid grid-cols-7 gap-1.5">
                 {week.map((day) => {
                   const inMonth = day.startsWith(thisMonth);
                   const trained = trainedByDay.get(day);
@@ -315,6 +378,7 @@ export default function CalendarPage() {
                     </button>
                   );
                 })}
+                </div>
               </div>
             ))}
           </div>
@@ -578,5 +642,96 @@ function DayPanel({
         )}
       </form>
     </aside>
+  );
+}
+
+/**
+ * One week's theme, as a row above the days it covers.
+ *
+ * A single line of prose and nothing else — no technique picker, no exercise
+ * picker. That restriction is the whole reason a theme can sit beside
+ * `/bjj/focus` without becoming a second answer to "what am I working on".
+ */
+function ThemeRow({
+  weekStart,
+  theme,
+  editing,
+  draft,
+  onDraft,
+  onOpen,
+  onCancel,
+  onSave,
+}: {
+  weekStart: string;
+  theme: Theme | null;
+  editing: boolean;
+  draft: string;
+  onDraft: (v: string) => void;
+  onOpen: () => void;
+  onCancel: () => void;
+  onSave: () => void;
+}) {
+  if (editing) {
+    return (
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          onSave();
+        }}
+        className="flex items-center gap-2"
+      >
+        <input
+          autoFocus
+          value={draft}
+          onChange={(e) => onDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") onCancel();
+          }}
+          maxLength={80}
+          placeholder="What is this week for?"
+          aria-label={`Theme for the week of ${weekStart}`}
+          className="min-w-0 flex-1 rounded-control border border-line bg-surface px-2 py-1 text-xs"
+        />
+        <button
+          type="submit"
+          className="rounded-control bg-accent-fill px-2.5 py-1 text-xs font-bold text-accent-on-fill"
+        >
+          Save
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="px-1.5 py-1 text-xs text-text-muted hover:text-text"
+        >
+          Cancel
+        </button>
+      </form>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="group flex w-full items-center gap-2 rounded-control px-1 py-0.5 text-left transition hover:bg-surface-hover"
+      aria-label={
+        theme
+          ? `Theme for the week of ${weekStart}: ${theme.title}. Edit.`
+          : `Set a theme for the week of ${weekStart}`
+      }
+    >
+      {theme ? (
+        <span className="truncate text-xs font-semibold text-lime">
+          {theme.title}
+        </span>
+      ) : (
+        // Invisible until hovered: an empty week is the common case, and a
+        // permanent "+ Add theme" on every row would be more chrome than
+        // calendar.
+        <span className="text-xs text-text-dim opacity-0 transition group-hover:opacity-100">
+          + Theme
+        </span>
+      )}
+    </button>
   );
 }
