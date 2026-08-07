@@ -22,6 +22,7 @@ import (
 	"github.com/dmytro-ch21/vola/backend/internal/modules/featureflag"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/friend"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/health"
+	"github.com/dmytro-ch21/vola/backend/internal/modules/notification"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/plan"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/profile"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/sequence"
@@ -92,8 +93,19 @@ func main() {
 	shareRegistry := share.Registry{
 		"sequence": sequenceRepo,
 	}
-	shareHandler := share.NewHandler(
-		share.NewPostgresRepository(pool, shareRegistry, friendRepo), shareRegistry)
+	shareRepo := share.NewPostgresRepository(pool, shareRegistry, friendRepo)
+	shareHandler := share.NewHandler(shareRepo, shareRegistry)
+
+	// WHAT IS WAITING FOR YOU. Same registry shape as the share copiers above,
+	// and the same reason: the notification module imports neither of these,
+	// so a future source that has something waiting is one line here.
+	//
+	// The keys are WIRE FORMAT — clients switch on them to decide which badge
+	// to draw, so renaming one silently drops a badge rather than failing.
+	notificationHandler := notification.NewHandler(notification.NewCounts(notification.Registry{
+		"friend_requests": friendRepo,
+		"shares":          shareRepo,
+	}))
 	featureFlagHandler := featureflag.NewHandler(featureflag.NewPostgresRepository(pool))
 	activityHandler := activity.NewHandler(activity.NewPostgresRepository(pool))
 	exerciseRepo := exercise.NewPostgresRepository(pool)
@@ -188,6 +200,7 @@ func main() {
 	// Sharing: one surface for every shareable type, addressed by handle.
 	mux.Handle("POST /v1/shares", verifier.RequireAuth(http.HandlerFunc(shareHandler.Create)))
 	mux.Handle("GET /v1/shares/inbox", verifier.RequireAuth(http.HandlerFunc(shareHandler.Inbox)))
+	mux.Handle("GET /v1/notifications", verifier.RequireAuth(http.HandlerFunc(notificationHandler.Pending)))
 	mux.Handle("GET /v1/shares/sent", verifier.RequireAuth(http.HandlerFunc(shareHandler.Sent)))
 	mux.Handle("POST /v1/shares/{id}/accept", verifier.RequireAuth(http.HandlerFunc(shareHandler.Accept)))
 	mux.Handle("DELETE /v1/shares/{id}", verifier.RequireAuth(http.HandlerFunc(shareHandler.Delete)))

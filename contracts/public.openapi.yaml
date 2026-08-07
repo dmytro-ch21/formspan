@@ -2664,6 +2664,67 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /notifications:
+    get:
+      summary: What is waiting for you
+      operationId: getPendingCounts
+      description: >
+        Counts of things other people have sent that the caller has not
+        answered, keyed by source.
+
+
+        **DERIVED, not stored.** There is no notifications table: everything
+        that arrives already exists as a pending row — a friend request, a
+        share — and that row IS the notification. A stored copy would be a
+        second truth that can disagree with the first. For the same reason
+        there is no read/unread state: ANSWERING is what clears a count, which
+        is the only definition that cannot go out of sync. The consequence is
+        deliberate — you cannot dismiss a friend request by looking at it,
+        because it is still waiting for you.
+
+
+        **Counts, not a feed.** The items behind these numbers already have
+        screens that render them with the right verbs attached. A feed would be
+        a third rendering whose only affordance is "go to one of the other
+        two".
+
+
+        Every key the server knows is always present, at zero when nothing is
+        waiting. A MISSING key means the build has no such source, which is a
+        different thing from "nothing waiting" — clients must not treat them
+        alike. Counts are capped at 99, since a badge cannot usefully render
+        more; the cap also stops one athlete making another's most-polled
+        endpoint expensive.
+
+
+        This endpoint FAILS rather than omitting a source it could not count.
+        A zero that means "could not check" reads as "nothing is waiting for
+        you", which is the one answer a badge must never give wrongly.
+      responses:
+        "200":
+          description: Pending counts, keyed by source.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [pending]
+                properties:
+                  pending:
+                    type: object
+                    additionalProperties:
+                      type: integer
+                      minimum: 0
+                      maximum: 99
+                    description: >
+                      Keys are wire format and clients switch on them.
+                      Currently `friend_requests` (INCOMING only — an outgoing
+                      request is pending but is not waiting on you) and
+                      `shares` (the inbox, never the sent list).
+                    example:
+                      friend_requests: 2
+                      shares: 0
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
   /shares:
     post:
       summary: Send a friend a copy of something

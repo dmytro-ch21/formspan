@@ -5146,6 +5146,40 @@ not inferred from the absence of an error.
   offers a seconds target for a `time` exercise, and the session screen asks for
   seconds when logging one.
 
+## Notifications (`GET /v1/notifications`, nav badge + You-tab badge)
+
+### What counts
+
+- A friend request received → `friend_requests` is 1; the SENDER's count stays
+  0 (an outgoing request is pending and is not waiting on you).
+- A share received → `shares` is 1 for the recipient, 0 for the sender.
+- Answering — accept OR decline — clears it. There is no read flag, so this is
+  the only thing that can, which is what makes the number impossible to
+  desync.
+- An accepted friendship / accepted share stops counting.
+
+### The answers it must never give
+
+- A source that cannot be counted fails the WHOLE request (500), rather than
+  reporting that source as 0. A zero means "nothing is waiting for you"; it
+  must never mean "could not check".
+- A key present at zero and a key absent are different things: zero is
+  "nothing waiting", absent is "this build has no such source". Assert zeros
+  are serialised rather than omitted.
+- Empty registry → `{}`, never `null`.
+
+### Clients badge only what they can act on
+
+- Web badges **Sharing** (share inbox) and NOT friend requests — friend
+  requests are answered on mobile, and a badge pointing at a screen that
+  cannot answer is a dead end.
+- Mobile badges the **Friends** row and NOT shares, for the mirror reason.
+- **Known gap to test around:** a mobile-only athlete is never told a share
+  arrived. Real, recorded, unfixed until mobile gets a sharing surface.
+- A failed count leaves the previous number alone — it must not zero, since
+  zero renders no badge and thereby asserts nothing is waiting.
+- Web refetches on route change, not on a timer.
+
 ## Sharing (`/v1/shares`, web Share control + `/dashboard/shared`)
 
 ### Happy path

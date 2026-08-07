@@ -11,6 +11,7 @@ import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { isNotFound } from '@/lib/apiError';
+import { getPendingCounts } from '@/lib/friends';
 import { getProfile, type Profile } from '@/lib/profile';
 import { UNIT_SYSTEMS } from '@/lib/units';
 import { useModules } from '@/lib/ModulesProvider';
@@ -40,6 +41,15 @@ export default function YouScreen() {
   // which is the same claim this screen was fixed to stop making, merely
   // contradicted by a banner instead of withheld.
   const [answered, setAnswered] = useState(false);
+  // How many friend requests are waiting on this athlete to answer.
+  //
+  // Starts at 0 and is only ever REPLACED by a successful read — never reset
+  // on failure. The distinction matters more than it looks: 0 renders no
+  // badge, which is an assertion that nothing is waiting, and a gym dead-spot
+  // must not make that claim. Keeping the last known number is the honest
+  // degradation, and the Friends screen itself is where a real error surfaces
+  // as copy.
+  const [waiting, setWaiting] = useState(0);
 
   // On focus, so returning from Edit shows what was just saved.
   useFocusEffect(
@@ -66,6 +76,13 @@ export default function YouScreen() {
           // ever assigned null, which made the banner below dead code.
           setError("Couldn't reach your profile just now.");
         });
+
+      // A SEPARATE chain, not chained onto the profile fetch: the two are
+      // independent, and sequencing them would make a slow profile delay the
+      // badge for no reason. Failure is silent and leaves `waiting` alone.
+      getPendingCounts(getToken)
+        .then((counts) => setWaiting(counts.friend_requests ?? 0))
+        .catch(() => {});
     }, [getToken]),
   );
 
@@ -102,9 +119,18 @@ export default function YouScreen() {
               onPress={() => router.push('/friends')}
               hitSlop={10}
               accessibilityRole="button"
+              accessibilityLabel={
+                waiting > 0 ? `Friends, ${waiting} waiting` : 'Friends'
+              }
               testID="you-friends"
             >
-              <Text style={[styles.action, { color: accent.ink }]}>Friends</Text>
+              {/* Only `friend_requests`, deliberately: this app has no screen
+                  for a shared sequence, so badging shares here would be a
+                  number you cannot open. That gap is real and recorded — a
+                  mobile-only athlete never learns a share arrived. */}
+              <Text style={[styles.action, { color: accent.ink }]}>
+                Friends{waiting > 0 ? ` (${waiting > 99 ? '99+' : waiting})` : ''}
+              </Text>
             </Pressable>
             <Pressable
               onPress={() => router.push('/settings')}

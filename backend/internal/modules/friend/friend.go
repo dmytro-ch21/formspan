@@ -20,6 +20,11 @@ import (
 	"time"
 )
 
+// maxBadgeCount bounds every counting query. A badge cannot usefully render
+// more than a couple of digits, and counting a capped subquery is what stops
+// one athlete making another athlete's most-polled endpoint expensive.
+const maxBadgeCount = 99
+
 var (
 	ErrNotFound     = errors.New("friend: not found")
 	ErrInvalidInput = errors.New("friend: invalid input")
@@ -82,6 +87,10 @@ type Repository interface {
 	// module consumes; it is declared there as its own one-method interface,
 	// so that package does not import this one.
 	FriendID(ctx context.Context, callerID, username string) (id string, ok bool, err error)
+	// PendingCount is how many requests are waiting on the caller to answer —
+	// INCOMING only. Satisfies notification.Counter, which is declared over
+	// there so that package does not import this one.
+	PendingCount(ctx context.Context, callerID string) (int, error)
 }
 
 // pairOf returns the canonical ordering the schema requires.

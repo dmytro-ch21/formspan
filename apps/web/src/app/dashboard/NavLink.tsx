@@ -11,7 +11,17 @@ import { usePathname } from "next/navigation";
  * rail shout. `aria-current` carries the same fact to screen readers, which
  * a colour alone never does.
  */
-export function NavLink({ href, label }: { href: string; label: string }) {
+export function NavLink({
+  href,
+  label,
+  count = 0,
+}: {
+  href: string;
+  label: string;
+  /** How many things are waiting behind this destination. 0 renders nothing —
+   *  a badge showing "0" is noise pretending to be information. */
+  count?: number;
+}) {
   const pathname = usePathname();
   // Exact match for the index so /dashboard doesn't light up on every child.
   const active = href === "/dashboard" ? pathname === href : pathname.startsWith(href);
@@ -31,6 +41,15 @@ export function NavLink({ href, label }: { href: string; label: string }) {
         />
       )}
       {label}
+      {count > 0 && (
+        // The number is inside the link's accessible name rather than beside
+        // it as a bare numeral: a screen reader reading "Sharing 3" says
+        // nothing useful, and "Sharing, 3 waiting" is the whole point.
+        <span className="ml-2 inline-flex min-w-5 items-center justify-center rounded-full bg-accent px-1.5 py-0.5 text-xs font-semibold text-white tabular-nums">
+          <span aria-hidden="true">{count > 99 ? "99+" : count}</span>
+          <span className="sr-only">, {count} waiting</span>
+        </span>
+      )}
     </Link>
   );
 }

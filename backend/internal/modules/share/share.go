@@ -54,6 +54,9 @@ const (
 	// maxList bounds the inbox. It is the sharp case for a ceiling: unlike a
 	// list of your own things, this one grows from OTHER people's actions.
 	maxList = 200
+	// maxBadgeCount bounds the counting query — see the friend module's, which
+	// documents the same two reasons.
+	maxBadgeCount = 99
 	// maxLabel is what a card can usefully render, and bounds what a sender
 	// can store in a recipient's inbox.
 	maxLabel = 160
@@ -192,6 +195,9 @@ type Repository interface {
 	// turns this into the accept-vs-decline oracle the sent list's
 	// pending-only design exists to prevent.
 	Delete(ctx context.Context, callerID, shareID string) error
+	// PendingCount is how many shares are waiting for the caller — the INBOX,
+	// never the sent list. Satisfies notification.Counter.
+	PendingCount(ctx context.Context, callerID string) (int, error)
 }
 
 // Validate checks what the database cannot.

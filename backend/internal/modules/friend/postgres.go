@@ -225,3 +225,31 @@ func (r *PostgresRepository) FriendID(ctx context.Context, callerID, username st
 	}
 	return id, true, nil
 }
+
+// PendingCount is how many people are waiting on this caller to answer,
+// satisfying notification.Counter.
+//
+// INCOMING ONLY. An outgoing request is pending too and is emphatically not
+// waiting for you — badging it would send someone to a screen to look at
+// something they already did. `requested_by <> $1` is the whole distinction,
+// and it is the one thing to get wrong here.
+//
+// Capped: the count is for a badge, and a badge showing "312" is the same
+// information as "lots". Counting a bounded subquery also means one athlete
+// cannot make another athlete's cheapest, most-polled endpoint expensive by
+// sending them requests.
+func (r *PostgresRepository) PendingCount(ctx context.Context, callerID string) (int, error) {
+	var n int
+	err := r.pool.QueryRow(ctx, `
+		SELECT count(*) FROM (
+			SELECT 1 FROM friendships
+			WHERE (user_a = $1 OR user_b = $1)
+			  AND status = 'pending'
+			  AND requested_by <> $1
+			LIMIT $2
+		) capped`, callerID, maxBadgeCount).Scan(&n)
+	if err != nil {
+		return 0, translate(err, "pending count")
+	}
+	return n, nil
+}

@@ -867,3 +867,43 @@ func TestBothListsAreNewestFirst(t *testing.T) {
 			inbox[0].ResourceLabel, inbox[1].ResourceLabel, inbox[2].ResourceLabel)
 	}
 }
+
+// The badge count is the INBOX, never the sent list.
+//
+// What you are waiting on is not waiting on you — and a badge over the sent
+// list would tick down as other people answered, which slowly leaks the very
+// thing that list refuses to say.
+func TestPendingCountIsTheInboxNotTheSentList(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	alice := person(t, h.pool, "sh_pc_a", "sh_pc_a_h")
+	bob := person(t, h.pool, "sh_pc_b", "sh_pc_b_h")
+	befriend(t, h, alice, "sh_pc_a_h", bob, "sh_pc_b_h")
+	seq := makeSequence(t, h, alice, "For bob")
+
+	if err := h.repo.Create(ctx, alice, New{ToUsername: "sh_pc_b_h", ResourceType: "sequence", ResourceID: seq.ID}); err != nil {
+		t.Fatalf("share: %v", err)
+	}
+
+	// It is waiting for BOB, not for alice who sent it.
+	if n, err := h.repo.PendingCount(ctx, bob); err != nil || n != 1 {
+		t.Fatalf("bob should have 1 waiting, got %d (%v)", n, err)
+	}
+	if n, err := h.repo.PendingCount(ctx, alice); err != nil || n != 0 {
+		t.Fatalf("the sender has nothing waiting on them, got %d (%v)", n, err)
+	}
+
+	// Answering clears it — there is no read flag, so this is the ONLY thing
+	// that can, which is what makes the count impossible to get out of sync.
+	inbox, _ := h.repo.Inbox(ctx, bob)
+	if _, err := h.repo.Accept(ctx, bob, inbox[0].ID); err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	if n, err := h.repo.PendingCount(ctx, bob); err != nil || n != 0 {
+		t.Fatalf("accepting did not clear the count, got %d (%v)", n, err)
+	}
+	// And the accepted row does not resurface on the sender's side either.
+	if n, err := h.repo.PendingCount(ctx, alice); err != nil || n != 0 {
+		t.Fatalf("sender count after accept: %d (%v)", n, err)
+	}
+}

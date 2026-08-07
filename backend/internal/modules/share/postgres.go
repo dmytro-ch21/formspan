@@ -258,3 +258,27 @@ func translate(err error, op string) error {
 	// 500 and logs the detail server-side.
 	return fmt.Errorf("share: %s: %w", op, err)
 }
+
+// PendingCount is how many shares are waiting for this caller, satisfying
+// notification.Counter.
+//
+// The INBOX, never the sent list. What you are waiting on is not waiting on
+// you, and the sent list deliberately shows only unanswered rows anyway — a
+// badge over it would tick down as other people answered, which is both
+// useless and a slow leak of exactly what that list refuses to say.
+//
+// Capped, for the reason the friend module's is: this is the endpoint clients
+// poll most, and its cost must not be something another athlete can raise.
+func (r *PostgresRepository) PendingCount(ctx context.Context, callerID string) (int, error) {
+	var n int
+	err := r.pool.QueryRow(ctx, `
+		SELECT count(*) FROM (
+			SELECT 1 FROM shares
+			WHERE to_user_id = $1 AND status = 'pending'
+			LIMIT $2
+		) capped`, callerID, maxBadgeCount).Scan(&n)
+	if err != nil {
+		return 0, translate(err, "pending count")
+	}
+	return n, nil
+}

@@ -74,3 +74,27 @@ export function removeFriend(getToken: TokenGetter, username: string): Promise<v
     method: 'DELETE',
   });
 }
+
+/** What is waiting for you, keyed by source.
+ *
+ * Derived server-side from the pending rows themselves — there is no
+ * notifications table and no read/unread state, so ANSWERING a request is the
+ * only thing that clears it. That is why this can be fetched on focus without
+ * any local reconciliation: it cannot be stale in the way a cached unread flag
+ * can, only out of date.
+ *
+ * ONLINE-ONLY, like the rest of this screen's social calls. A failed fetch
+ * must leave the previous number alone rather than zero it: a badge is
+ * believed, and "0" asserts that nothing is waiting.
+ */
+export async function getPendingCounts(
+  getToken: TokenGetter,
+  signal?: AbortSignal,
+): Promise<Record<string, number>> {
+  const body = await apiRequest<{ pending: Record<string, number> }>(
+    getToken,
+    '/notifications',
+    { signal },
+  );
+  return body.pending ?? {};
+}

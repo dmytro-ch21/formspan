@@ -295,3 +295,53 @@ func TestReAcceptIsNotFoundAndLeavesSinceAlone(t *testing.T) {
 		t.Fatalf("accepted_at moved: %v -> %v", before[0].Since, after[0].Since)
 	}
 }
+
+// The badge count is INCOMING only.
+//
+// An outgoing request is `status='pending'` too, and counting it would send
+// somebody to the Friends screen to look at something they already did. The
+// distinction is one predicate — `requested_by <> $1` — and it is the whole
+// thing this test exists for.
+func TestPendingCountIsIncomingOnly(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	repo := NewPostgresRepository(pool)
+
+	me := person(t, pool, "fr_pc_me", "fr_pc_me_h")
+	asker := person(t, pool, "fr_pc_ask", "fr_pc_ask_h")
+	asked := person(t, pool, "fr_pc_asked", "fr_pc_asked_h")
+	friend := person(t, pool, "fr_pc_fr", "fr_pc_fr_h")
+
+	// Someone asked me: counts.
+	if err := repo.Send(ctx, asker, "fr_pc_me_h"); err != nil {
+		t.Fatalf("incoming: %v", err)
+	}
+	// I asked someone: must NOT count.
+	if err := repo.Send(ctx, me, "fr_pc_asked_h"); err != nil {
+		t.Fatalf("outgoing: %v", err)
+	}
+	// An accepted friendship: must not count either.
+	if err := repo.Send(ctx, friend, "fr_pc_me_h"); err != nil {
+		t.Fatalf("to-accept: %v", err)
+	}
+	if err := repo.Accept(ctx, me, "fr_pc_fr_h"); err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+
+	n, err := repo.PendingCount(ctx, me)
+	if err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("want 1 incoming request, got %d", n)
+	}
+	// And the person I asked sees exactly one waiting on them — the mirror,
+	// which goes red if the predicate is inverted rather than merely dropped.
+	if n, err := repo.PendingCount(ctx, asked); err != nil || n != 1 {
+		t.Fatalf("the person I asked should have 1 waiting, got %d (%v)", n, err)
+	}
+	// An outsider has nothing.
+	if n, err := repo.PendingCount(ctx, asker); err != nil || n != 0 {
+		t.Fatalf("the asker has nothing waiting on them, got %d (%v)", n, err)
+	}
+}

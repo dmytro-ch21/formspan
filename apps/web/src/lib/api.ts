@@ -2384,6 +2384,29 @@ export async function shareResource(
   });
 }
 
+/** What is waiting for the caller, keyed by source. Derived from the pending
+ *  rows themselves — there is no notifications table and no read/unread state,
+ *  so ANSWERING a request is the only thing that clears it.
+ *
+ *  Every key the server knows about is always present, at zero if nothing is
+ *  waiting; a MISSING key means this client is talking to a build that has no
+ *  such source, which is a different thing from "nothing waiting" and must not
+ *  render as a badge either way. */
+export type PendingCounts = Record<string, number>;
+
+export async function getPendingCounts(
+  getToken: Token,
+  signal?: AbortSignal,
+): Promise<PendingCounts> {
+  const body = await request<{ pending: PendingCounts }>(
+    getToken,
+    "/notifications",
+    {},
+    signal,
+  );
+  return body.pending ?? {};
+}
+
 export type SentShareCard = {
   id: string;
   resource_type: string;
