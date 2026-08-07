@@ -4587,6 +4587,69 @@ forgets is caught without anyone writing a scenario for it. It proves the import
 is present, not that the container wraps the input, so the manual passes above
 are still what proves the behaviour.
 
+## Capturing a sequence on the phone (reflection wizard, `lib/sequences.ts`)
+
+The mobile half of sequences: tag a chain you already have, or capture the one
+your class just taught. Building and refining stay on web.
+
+**Every scenario here should be run with the network OFF at least once.** The
+capture moment is a changing room after class, which is a dead-spot more often
+than not — that is the whole reason this is offline-first, and an online-only
+pass proves the least interesting half.
+
+### Happy path — tag a chain you already have
+
+- With at least one sequence, the drilled step shows a horizontal row of chain
+  chips above the search box. Tapping one adds **every** technique in it as a
+  `drilled` tag, in order.
+- Techniques already tagged are not duplicated by tapping the chain.
+- A chain with zero steps does not appear as a chip — there is nothing to add.
+- Chips show step count, and `not synced` for anything still in the outbox.
+
+### Happy path — capture what you just drilled
+
+- With **two or more** drilled techniques, "Save these N as a sequence" appears.
+  With one, it does not — one technique is not a chain, and the affordance is
+  hidden rather than disabled.
+- Naming it and saving writes to the phone immediately and the confirmation says
+  **"Saved to this phone"**, never "synced". The row may sit in the outbox for
+  hours; claiming otherwise is the reassurance that must not be false.
+- The captured chain appears as a chip straight away, marked not-synced —
+  including with the network off.
+- Steps are stored in the order they were tagged. Reorder the drilled list and
+  the captured order follows.
+
+### Offline and sync
+
+- Capture with airplane mode on, then restore signal: the chain uploads with
+  the next sync and the not-synced marker clears.
+- The pending count on the sync screen **includes** captures. A chain owed to
+  the server must not report zero pending.
+- A flaky connection that retries the same push must produce **one** sequence,
+  not one per attempt — the id is generated on the phone for this reason.
+- Capture, then edit the same chain on web, then let the phone push its original
+  copy: **the web edit must survive.** A late retry must not revert it.
+- Three captures with no network make **one** request, not three.
+- A permanently-refused capture (400) stops being owed, keeps its error, and
+  stays on the phone. Pending must reach zero — an outbox that never drains
+  nags forever about something that can never go.
+- A transient failure (5xx) stays owed and retries.
+
+### Edge cases & errors
+
+- A cold launch with no signal: the technique library is memory-only, so the
+  search box is empty and says so. Chain chips still render from the outbox.
+- A server fault (500) while listing must NOT read as "you have no sequences".
+  Offline resolves to the outbox; a 500 surfaces.
+- Signing out and in as a different athlete on the same phone shows **none** of
+  the previous account's captures, and pushes none of them under the new token.
+- Capturing with an empty name is refused (the Save control stays disabled).
+
+### Not covered yet
+
+- **No browse or detail screen on mobile.** Chains are reachable only from
+  inside the reflection wizard; reading one back is unbuilt.
+- A captured chain has no step destinations until someone opens it on web.
 
 ## Sequences (`/v1/sequences`)
 

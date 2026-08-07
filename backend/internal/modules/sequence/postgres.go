@@ -147,13 +147,49 @@ func (r *PostgresRepository) Create(ctx context.Context, userID string, in NewSe
 	// commit.
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// COALESCE, not a branch: an empty client id falls through to the column
+	// default (gen_random_uuid) inside the same statement, so the web path and
+	// the offline-capture path are one query rather than two spellings that
+	// can drift.
 	var id string
-	if err := tx.QueryRow(ctx, `
-		INSERT INTO bjj_sequences (owner_user_id, name, description, start_position_id)
-		VALUES ($1, $2, $3, $4) RETURNING id`,
-		userID, in.Name, in.Description, in.StartPositionID).Scan(&id); err != nil {
+	var clientID *string
+	if in.ID != "" {
+		clientID = &in.ID
+	}
+	err = tx.QueryRow(ctx, `
+		INSERT INTO bjj_sequences (id, owner_user_id, name, description, start_position_id)
+		VALUES (COALESCE($1, gen_random_uuid()::text), $2, $3, $4, $5)
+		ON CONFLICT (id) DO NOTHING
+		RETURNING id`,
+		clientID, userID, in.Name, in.Description, in.StartPositionID).Scan(&id)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return Sequence{}, translate(err, "create")
 	}
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The id already exists. Ids are client-supplied here, so this fallback
+		// MUST be scoped to the caller — without the owner predicate, replaying
+		// somebody else's id hands back their sequence. That is the IDOR the
+		// activity module shipped and workouts documents; it is not
+		// hypothetical, and a client id is exactly what makes it reachable.
+		var owner *string
+		if err := tx.QueryRow(ctx,
+			`SELECT owner_user_id FROM bjj_sequences WHERE id = $1`, in.ID).Scan(&owner); err != nil {
+			return Sequence{}, translate(err, "create conflict")
+		}
+		if owner == nil || *owner != userID {
+			return Sequence{}, ErrAlreadyExists
+		}
+		// Same owner, same id: an idempotent sync retry. Return what is stored
+		// WITHOUT rewriting the steps — the stored copy is the one the athlete
+		// may since have edited on web, and a retry of the original push must
+		// not silently revert it.
+		if err := tx.Commit(ctx); err != nil {
+			return Sequence{}, translate(err, "create commit")
+		}
+		return r.Get(ctx, in.ID, userID)
+	}
+
 	if err := insertSteps(ctx, tx, id, in.Steps); err != nil {
 		return Sequence{}, err
 	}

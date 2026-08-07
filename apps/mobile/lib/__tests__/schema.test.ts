@@ -13,7 +13,22 @@ import { migratedFixture, openFixture } from './support/sqlite';
 it('a fresh install ends up at the current schema version', async () => {
   const db = await migratedFixture();
   const row = db.raw.prepare('PRAGMA user_version').get() as { user_version: number };
-  expect(row.user_version).toBe(16);
+  expect(row.user_version).toBe(17);
+});
+
+it('a fresh install has the sequences outbox', async () => {
+  // The version bump on its own proves nothing — it is a number in a file.
+  // This is what the bump was FOR, and it also covers the shape the push loop
+  // depends on: without `dirty` the outbox has no way to know what it owes,
+  // and without `user_id` a shared phone pushes one athlete's captures under
+  // the next one's token.
+  const db = await migratedFixture();
+  const cols = (db.raw.prepare('PRAGMA table_info(sequences)').all() as { name: string }[]).map(
+    (c) => c.name,
+  );
+  expect(cols).toEqual(
+    expect.arrayContaining(['id', 'user_id', 'name', 'steps_json', 'dirty', 'remote', 'last_error']),
+  );
 });
 
 it('local_sessions has the tombstone column', async () => {
@@ -107,7 +122,7 @@ it('re-running migrate on the SAME database is idempotent', async () => {
   db.raw.exec('PRAGMA user_version = 0');
 
   await expect(migrate(db as never)).resolves.toBeUndefined();
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 16 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 17 });
 });
 
 it('upgrades a v6-shaped database by adding the column', async () => {
@@ -141,7 +156,7 @@ it('upgrades a v6-shaped database by adding the column', async () => {
   const cols = (db.raw.prepare('PRAGMA table_info(local_sessions)').all() as { name: string }[])
     .map((c) => c.name);
   expect(cols).toContain('deleted_at');
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 16 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 17 });
 });
 
 it('upgrades a v7-shaped database by adding the ownership columns', async () => {
@@ -162,7 +177,7 @@ it('upgrades a v7-shaped database by adding the ownership columns', async () => 
   const cols = (db.raw.prepare('PRAGMA table_info(workout_cache)').all() as { name: string }[])
     .map((c) => c.name);
   expect(cols).toEqual(expect.arrayContaining(['owner_user_id', 'visibility']));
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 16 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 17 });
 });
 
 it('an upgraded row is backfilled as owned by the athlete it is filed under', async () => {
@@ -316,5 +331,5 @@ it('upgrading a v15-shaped database does not mark every cached name as owed', as
     .prepare(`SELECT name_dirty FROM workout_cache WHERE id = 'w1'`)
     .get() as { name_dirty: number };
   expect(row.name_dirty).toBe(0);
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 16 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 17 });
 });

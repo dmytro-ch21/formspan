@@ -203,6 +203,41 @@ const CREATE_PLANNED = `
 `;
 
 /**
+ * Sequences captured on the phone, and the outbox that owes them to the server.
+ *
+ * WHY THIS TABLE EXISTS AT ALL, given the web builder already writes them:
+ * the capture moment is the changing room after class, which is a gym
+ * dead-spot more often than not. The backend shipped asserting there was "no
+ * offline creation to make idempotent" — true of the desk builder and wrong
+ * within a day. `id` is generated HERE for exactly that reason: it is what
+ * makes the sync retry idempotent, same as activities and workouts.
+ *
+ * STEPS ARE ONE JSON COLUMN, not a child table. Locally a chain is written and
+ * pushed whole and never queried step-wise, so a second table buys a join and
+ * a second migration and nothing else. The ORDER inside that array is the
+ * content — see the server's UNIQUE (sequence_id, sort_order) — so the array is
+ * stored and pushed as-is rather than being re-sorted anywhere.
+ *
+ * `dirty`/`remote`/`last_error` follow planned_sessions rather than the older
+ * `synced` flag: `remote = 0` means the server has never seen this row, which
+ * is what tells a failed push apart from a row that was never pushed.
+ */
+const CREATE_SEQUENCES = `
+  CREATE TABLE IF NOT EXISTS sequences (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    start_position_id TEXT,
+    steps_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    dirty INTEGER NOT NULL DEFAULT 1,
+    remote INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT
+  );
+`;
+
+/**
  * Current local schema version. Bump this and add a matching `if` in
  * `migrate()` whenever the local table shape changes.
  *
@@ -231,7 +266,7 @@ const CREATE_PLANNED = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 16;
+const SCHEMA_VERSION = 17;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -240,7 +275,8 @@ type LocalTable =
   | 'prefs'
   | 'workout_cache'
   | 'exercise_cache'
-  | 'planned_sessions';
+  | 'planned_sessions'
+  | 'sequences';
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
@@ -314,6 +350,7 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
   await db.execAsync(CREATE_WORKOUT_CACHE);
   await db.execAsync(CREATE_PREFS);
   await db.execAsync(CREATE_PLANNED);
+  await db.execAsync(CREATE_SEQUENCES);
   await db.execAsync(
     `CREATE INDEX IF NOT EXISTS activities_user_id_idx ON activities (user_id);`,
   );
@@ -566,6 +603,19 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     // cached template's name — including VOLA's own ownerless ones, which the
     // server would refuse with a 403 the outbox would then have to hold.
     await addColumnIfMissing(db, 'workout_cache', 'name_dirty', 'INTEGER NOT NULL DEFAULT 0');
+  }
+
+  if (current < 17) {
+    // Sequences captured on the phone. A brand-new TABLE, so nothing here is
+    // an ALTER and nothing can hit the duplicate-column trap the guard above
+    // exists for — the unconditional `CREATE ... IF NOT EXISTS` earlier has
+    // already made it, on every path. Kept as its own block anyway so the
+    // version this arrived in is readable from `migrate()` rather than only
+    // from git.
+    await db.execAsync(CREATE_SEQUENCES);
+    await db.execAsync(
+      `CREATE INDEX IF NOT EXISTS sequences_user_idx ON sequences (user_id);`,
+    );
   }
 
   await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION};`);

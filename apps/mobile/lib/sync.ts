@@ -4,6 +4,7 @@ import { AppState, type AppStateStatus } from 'react-native';
 import { isOffline } from './apiError';
 import { countPendingSessions, countPendingWorkouts, syncSessions } from './sessionStore';
 import { countPendingPlans, syncPlans } from './plan';
+import { pendingSequenceCount, syncSequences } from './sequences';
 import type { SyncErrorKind } from './sessionStore';
 import type { TokenGetter } from './useAuthToken';
 
@@ -163,12 +164,16 @@ function cancelTimer(): void {
 export async function refreshPending(): Promise<void> {
   if (!creds) return;
   try {
-    const [sessions, workouts, plans] = await Promise.all([
+    const [sessions, workouts, plans, sequences] = await Promise.all([
       countPendingSessions(creds.userID),
       countPendingWorkouts(creds.userID),
       countPendingPlans(creds.userID),
+      // Counted here too, or a chain captured in a dead-spot sits in the
+      // outbox while the sync screen reports nothing owed — which reads as
+      // "it saved" and is exactly the reassurance that must not be false.
+      pendingSequenceCount(creds.userID),
     ]);
-    emit({ pending: sessions + workouts + plans });
+    emit({ pending: sessions + workouts + plans + sequences });
   } catch {
     // A failed count must not break anything; the number is advisory.
   }
@@ -231,6 +236,14 @@ async function run(reason: string): Promise<void> {
       // it to decide what to defer.
       const planResult = await syncPlans(userID, getToken);
 
+      // Sequences LAST, and unlike the plans ordering above this one is not
+      // load-bearing — a sequence references techniques from the shared
+      // library, which the server already has, so it has no local dependency
+      // to wait for. Ordered last simply because it is the newest and least
+      // proven of the three; if it ever starts throwing, the two outboxes that
+      // carry an athlete's actual training have already drained.
+      const sequenceResult = await syncSequences(userID, getToken);
+
       // Merged so one failing half cannot be masked by the other succeeding.
       // Both surfaces — the pending count and the error banner — describe the
       // whole outbox, not one table of it.
@@ -245,10 +258,21 @@ async function run(reason: string): Promise<void> {
       // precedence for exactly this; discarding it at the merge point undoes
       // the work.
       const result = {
-        failed: sessionResult.failed + planResult.failed,
+        failed: sessionResult.failed + planResult.failed + sequenceResult.failed,
+        // Sequences have no deferred state: nothing about a captured chain can
+        // be waiting on another local row to land first, so there is nothing
+        // to add here. Written out rather than omitted, because a `+ 0` that
+        // is actually a missing term is the kind of thing that reads as a bug.
         deferred: sessionResult.deferred + planResult.deferred,
-        error: sessionResult.error ?? planResult.error,
-        errorKind: rankKind(sessionResult.errorKind, planResult.errorKind),
+        error: sessionResult.error ?? planResult.error ?? sequenceResult.error,
+        // RANKED across all three, for the reason spelled out above: `??` makes
+        // the classification order-dependent, so a permanently-refused session
+        // would mask a sequence that failed on a perfectly retryable 5xx and
+        // the orchestrator would stop retrying it.
+        errorKind: rankKind(
+          rankKind(sessionResult.errorKind, planResult.errorKind),
+          sequenceResult.errorKind,
+        ),
       };
 
       // The account may have changed while this ran.

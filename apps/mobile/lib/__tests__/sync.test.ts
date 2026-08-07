@@ -50,6 +50,19 @@ jest.mock('../plan', () => ({
   syncPlans: jest.fn(async () => ({ pushed: 0, pulled: 0, failed: 0, deferred: 0 })),
 }));
 
+// The third outbox. Mocked for the same reason as the other two — the real
+// module opens SQLite, which jest-expo stubs out, so leaving it real makes
+// every test in this file die inside `NativeDatabase` with an error that says
+// nothing about the orchestrator. Note it has NO `deferred`: a captured chain
+// cannot be waiting on another local row to land first.
+jest.mock('../sequences', () => ({
+  pendingSequenceCount: jest.fn(async () => 0),
+  syncSequences: jest.fn(async () => ({ pushed: 0, failed: 0 })),
+}));
+
+// eslint-disable-next-line import/first -- must follow the jest.mock above
+import { pendingSequenceCount, syncSequences } from '../sequences';
+
 const mockSync = syncSessions as jest.MockedFunction<typeof syncSessions>;
 const mockCount = countPendingSessions as jest.MockedFunction<typeof countPendingSessions>;
 
@@ -346,5 +359,72 @@ describe('the pending count', () => {
     await refreshPending();
 
     expect(syncState().pending).toBe(5);
+  });
+
+  it('includes captured SEQUENCES, not just sessions and workouts', async () => {
+    // Added after review pointed out that NOTHING here failed if sequences
+    // were unwired from the orchestrator — the mocks returned 0 and every
+    // assertion summed the other two, so deleting `pendingSequenceCount` from
+    // `refreshPending` kept the suite green. Same consequence as the workouts
+    // case above: a chain captured in a gym dead-spot would get no backoff
+    // retry and no foreground retry, and would sit on the device while the
+    // screen reported nothing owed.
+    (countPendingSessions as jest.Mock).mockResolvedValue(1);
+    (countPendingWorkouts as jest.Mock).mockResolvedValue(1);
+    (pendingSequenceCount as jest.Mock).mockResolvedValue(4);
+
+    setSyncIdentity('u1', async () => 'tok');
+    await refreshPending();
+
+    expect(syncState().pending).toBe(6);
+  });
+
+});
+
+describe('sequences in the three-way merge', () => {
+  it('a permanently-refused session must not stop a sequence being retried', async () => {
+    // THE CASE THAT DISTINGUISHES `rankKind` FROM `??`, and the reason the
+    // merge ranks rather than coalesces. With `??` the session's `permanent`
+    // wins by position, `retry = kind !== 'permanent'` is false, and a chain
+    // that failed on a perfectly retryable 5xx never goes again — for the life
+    // of the install. Ranked, transient outranks permanent and the ladder
+    // stays alive.
+    //
+    // My first attempt asserted `syncState().errorKind`, which is not a field
+    // — and would have been satisfied by `??` anyway, since both arms give
+    // 'transient' when only one is set. The observable difference is whether a
+    // retry is scheduled.
+    mockCount.mockResolvedValue(1);
+    setSyncIdentity('user_1', token);
+    await resetLadder();
+    mockSync.mockResolvedValue(failed('permanent'));
+    (syncSequences as jest.Mock).mockResolvedValue({
+      pushed: 0,
+      failed: 1,
+      error: 'later',
+      errorKind: 'transient',
+    });
+    await syncNow();
+
+    const before = mockSync.mock.calls.length;
+    await settle(5_300); // past BACKOFF_MS[0]
+    expect(mockSync.mock.calls.length).toBeGreaterThan(before);
+  });
+
+  it('reports a sequence failure as ONLINE — the server answered', async () => {
+    mockCount.mockResolvedValue(1);
+    setSyncIdentity('user_1', token);
+    await resetLadder();
+    mockSync.mockResolvedValue({ pushed: 0, pulled: 0, failed: 0, deferred: 0 });
+    (syncSequences as jest.Mock).mockResolvedValue({
+      pushed: 0,
+      failed: 1,
+      error: 'chain refused',
+      errorKind: 'transient',
+    });
+    await syncNow();
+
+    expect(syncState().lastError).toBe('chain refused');
+    expect(syncState().online).toBe(true);
   });
 });

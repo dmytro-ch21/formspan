@@ -2177,12 +2177,25 @@ components:
         else.
 
 
+        `id` is optional and POST-only. The phone supplies one so that an
+        offline capture's sync retry is idempotent; web omits it and the server
+        picks. Re-POSTing an id you already own returns the STORED sequence
+        unchanged — it does not overwrite it, so a late retry cannot revert an
+        edit made in between. An id owned by somebody else is a 409.
+
+
         On PATCH every field is optional. `steps` OMITTED leaves the chain
         alone; `steps` present (including `[]`) REPLACES it wholesale — order is
         the content, so per-step patching would let two clients interleave into
         a chain neither authored. `start_position_id` distinguishes omitted
         (leave it) from explicit `null` (clear it).
       properties:
+        id:
+          type: string
+          minLength: 8
+          maxLength: 64
+          description: >
+            Client-generated, POST only, optional. Ignored on PATCH.
         name: { type: string, maxLength: 120 }
         description: { type: string, maxLength: 2000 }
         start_position_id: { type: string, nullable: true }
@@ -3097,10 +3110,21 @@ paths:
       summary: Create a sequence
       operationId: createSequence
       description: >
-        Always owned by the caller. The id is server-generated: there is no
-        offline-creation case for something authored at a desk against a
-        catalog, and a client-chosen id lets a caller probe for existing ones by
-        watching which inserts conflict.
+        Always owned by the caller.
+
+
+        `id` is OPTIONAL. Omit it and the server generates one — the web
+        builder's path. Supply one and it is used, which is what lets the phone
+        capture a chain offline and retry the push idempotently: the changing
+        room after class is a dead-spot, and without a stable id every retry
+        would create another chain.
+
+
+        Re-POSTing an id you already own returns the STORED sequence unchanged
+        rather than overwriting it, so a late retry cannot revert an edit made
+        in between. An id owned by anyone else is a 409 and discloses nothing
+        about that row. That 409 does confirm the id EXISTS, which is the
+        accepted cost of client-chosen ids here and in `/v1/workouts`.
       requestBody:
         required: true
         content:
@@ -3118,6 +3142,14 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: >
+            A client-supplied `id` that belongs to another athlete. The same
+            owner re-sending their own id is an idempotent retry and succeeds.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "413":
           description: >
             Body over 256 KB. This module caps the body before parsing because

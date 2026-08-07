@@ -12830,6 +12830,151 @@ verified to fail at exactly one above their pinned value, so neither is slack.
   its `MIN_IDF` threshold was calibrated against. Only the comment was
   corrected here; re-tuning a calibrated constant is a behavioural change, not
   a counts refresh. Spun out as a follow-up.
+## 2026-08-06 — Sequences reach the phone, and a design assumption lasts one day
+
+The web builder shipped and did not close the loop it was built for. The
+complaint that started all of this was **"I went to enter these and I
+couldn't"** — after class, in a changing room, on a phone. A two-pane builder
+at a desk does not serve that moment, and the platform rule says it should not
+try to.
+
+### What the phone gets, and what stays at the desk
+
+- **Tag a chain you already have.** Pick one in the reflection wizard and every
+  technique in it lands as an ordinary `drilled` tag.
+- **Capture what you just drilled.** Two or more drilled techniques, a name,
+  done — recorded in the order they were tagged.
+
+Refining is still web: reordering, naming the position each step leaves you in,
+notes per step. The split is not arbitrary. What is lost by tomorrow is the
+ORDER; everything else can be reconstructed from a technique list at leisure.
+
+**Expanding a chain produces ordinary technique tags, not a sequence-shaped
+tag.** The funnel, mastery, curricula progress and every other read are built
+on `bjj_session_tags.technique_id`, so a new tag kind would be invisible to all
+of them. The chain is how the evidence was entered, not a different kind of
+evidence.
+
+### The assumption that lasted a day
+
+Migration 000035 shipped yesterday asserting, in as many words, that sequence
+ids are server-generated because *"a sequence is authored at a desk against a
+catalog the client had to fetch anyway, so there is no offline creation to make
+idempotent."*
+
+True of the builder. Wrong the moment capture moved to the phone: the changing
+room is a dead-spot more often than not, and an offline create needs a stable
+id or every retry of a flaky push mints another chain.
+
+`POST /v1/sequences` now takes an optional client id, exactly as workouts and
+activities do. The cost is the one workouts documents and it is not
+hypothetical — **a client-chosen id makes an IDOR reachable**, because the
+conflict path has to look up a row by an id the caller supplied. Scoped to the
+caller: same owner is an idempotent retry, anyone else gets 409 and nothing
+back. Mutating that owner check red-lines a test written for it.
+
+The replay returns the STORED sequence **without rewriting it**. That is the
+subtler half: capture on the mat, refine at a desk, and only then does the
+phone find signal and push its original copy. A replay that rewrote the row
+would silently throw the desk edit away.
+
+### A test that was passing for the wrong reason, twice in one file
+
+Writing the replay test, the obvious assertion is "the retry did not duplicate
+the steps". It is worthless — `UNIQUE (sequence_id, sort_order)` makes
+duplication impossible whatever the code does, and mutating the replay path to
+re-insert leaves it green. Measured, then replaced with the assertion that has
+teeth: edit the sequence, replay the original push, and the edit must survive.
+
+Separately, `ApiError` is `(message, code, status)`. The mobile test built one
+as `(400, 'invalid_input', …)`, which hands `isPermanentStatus` a string — so
+every failure classified as transient and the **5xx test passed for entirely
+the wrong reason**. Only the 4xx test next to it disagreed. Both are pinned
+now, with the argument order called out where the next person will hit it.
+
+### The outbox
+
+A local `sequences` table (schema v17) with `dirty`/`remote`/`last_error`,
+following `planned_sessions` rather than the older `synced` flag. Steps are one
+JSON column: locally a chain is written and pushed whole and never queried
+step-wise, so a child table buys a join and a second migration and nothing.
+
+`syncSequences` joins `syncSessions` and `syncPlans` in the orchestrator, with
+the error kind RANKED across all three — `??` makes the classification
+order-dependent, so a permanently-refused session would mask a sequence that
+failed on a retryable 5xx. The pending count includes captures, or a chain
+sitting in a dead-spot outbox reads as "saved and uploaded".
+
+Twelve tests against a real SQLite fixture, every guard mutation-checked: a
+permanent refusal left dirty (outbox never drains), the queue walked against a
+dead network (three captures becoming three doomed requests), local rows not
+merged into the list (the capture invisible offline, so the athlete records it
+twice), the client id not sent, and the outbox not scoped by user.
+
+`verify` caught the last defect itself — jest passed while `tsc` failed on an
+`OfflineError('offline')` that takes no arguments. Precisely the "failing
+typecheck scrolls past" the `&&` chain exists to prevent.
+
+### What `/pre-merge` caught, and why the tests could not
+
+Two blocking findings, and the first is the feature's headline affordance.
+
+**Tapping a chain never worked for a synced one.** `GET /v1/sequences` omits
+`steps` — the contract says so, and for a good reason: it is a list of fifty
+chains. The wizard filtered on `steps?.length > 0` and expanded `seq.steps ?? []`,
+so every server-side chain was dropped, and a chain captured on the phone
+**vanished from the bar the moment it synced** — it leaves the outbox, and the
+server copy has no steps. That reads as data loss.
+
+Twelve tests passed through this. They assert on `listSequences` output, which
+is correct; nothing asserted on what the wizard renders from it. A lib test
+cannot see an integration mistake one layer up, and nothing had been run on a
+device — which is exactly where a *synced* account would have shown it in
+seconds. Now filtered on `step_count` (present on both list and detail) and the
+steps fetched on tap, with an honest offline message: a locally-captured chain
+short-circuits from the outbox, a synced one genuinely needs signal.
+
+**A repeated technique produced duplicate tags.** The API explicitly allows a
+chain to name the same technique twice — sweep, get passed, sweep again — but
+`addChain` filtered against a Set snapshot that never grew, so two steps naming
+one technique both passed: a double-counted `drilled` stage and two React rows
+with the same key. Latent only because of the first bug; fixing that made it
+live.
+
+**And the orchestrator wiring had no failing test.** Deleting
+`pendingSequenceCount` from `refreshPending`, or `syncSequences` from `run()`,
+left the suite green — the mocks returned zero and every assertion summed the
+other two outboxes. Three mutations now go red, including the one that
+distinguishes `rankKind` from `??`: a permanently-refused session must not stop
+a chain that failed on a retryable 5xx from being retried. My first attempt at
+that test asserted `syncState().errorKind`, which is not a field, and would
+have been satisfied by `??` anyway.
+
+Also taken: the contract's POST description still asserted "the id is
+server-generated: there is no offline-creation case", two lines above the
+schema documenting the client id; client-side caps on name and step count, so
+the permanent-refusal path stays rare rather than retiring a capture the copy
+already called saved; a guard against writing under an empty user id, which
+would be selected by no query afterwards; a fallback to the outbox when the
+server errors, so an outage stops hiding captures that being offline shows; and
+44pt touch targets.
+
+### Gaps
+
+- **Still unverified on a device.** Nothing here has run on a Simulator or a
+  phone. The logic is covered against a real database; the wizard's two new
+  affordances have been typechecked, linted and never rendered. Mobile cannot
+  be verified through Expo web, and a worktree cannot build the app.
+- **No browse or detail screen on mobile.** Chains are reachable only from
+  inside the reflection wizard. Reading one back — which is what makes a
+  captured chain worth anything a week later — is unbuilt.
+- **A captured chain carries no destinations.** Every step's
+  `ends_at_position_id` is null until someone opens it on web, so a phone-only
+  athlete accumulates chains the graph cannot use.
+- **Reads are not cached.** Listing sequences hits the server and merges the
+  outbox, so offline you see what you captured and nothing else — the same
+  honest degradation the technique library already has, and the same gap.
+
 
 ## 2026-08-06 — Proposal: retire the spreadsheet, then publish without a PR
 
