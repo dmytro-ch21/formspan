@@ -159,6 +159,17 @@ export const PREF_SUGGESTIONS = 'suggestions_enabled';
  */
 export const PREF_SUGGESTIONS_OFF = 'suggestions_off';
 
+/**
+ * `'0'` silences the timer chimes. Absent means on, so the default needs no
+ * write — same shape as {@link PREF_SUGGESTIONS}.
+ *
+ * Device-local rather than on the profile, and deliberately so: whether your
+ * phone is allowed to make a noise is a property of the phone and the room it
+ * is in, not of the athlete. Muting on the gym's shared iPad should not silence
+ * your own handset.
+ */
+export const PREF_SOUNDS = 'sounds_enabled';
+
 export const PREF_AUTO_REST = 'auto_rest';
 export const PREF_TRACK_EFFORT = 'track_effort';
 /**

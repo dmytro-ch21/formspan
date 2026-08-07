@@ -7,12 +7,15 @@ import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import {
   adjusted,
+  completionSoundFor,
   formatCountdown,
   rearmsCompletionOnAdjust,
   remainingAt,
   toggledPause,
   type Countdown,
+  TICK_FROM_SECONDS,
 } from '@/lib/countdown';
+import { playSound } from '@/lib/sounds';
 
 /**
  * The session screen's one countdown — resting, or performing a timed set.
@@ -29,6 +32,8 @@ export function useCountdown(onComplete?: (c: Countdown) => void) {
   const [timer, setTimer] = useState<Countdown | null>(null);
   const [remaining, setRemaining] = useState(0);
   const firedRef = useRef(false);
+  /** Last whole second announced, so 250ms passes yield one tick per second. */
+  const tickedAtRef = useRef<number | null>(null);
 
   /**
    * The callback, held in a ref and refreshed after every render.
@@ -59,11 +64,42 @@ export function useCountdown(onComplete?: (c: Countdown) => void) {
     const id = setInterval(() => {
       const left = remainingAt(timer, Date.now());
       setRemaining(left);
+
+      /*
+        The last few seconds, one soft tick per second.
+
+        Keyed on the whole second rather than fired from the interval, because
+        the interval runs at 250ms — ticking on every pass would be four
+        clicks a second, which is a fire alarm rather than a countdown. The ref
+        holds the last second announced so the four passes inside one second
+        produce exactly one.
+
+        It matters most for a WORK countdown: a plank ending without warning is
+        a set you hold two seconds too long or drop two seconds early, and you
+        are not looking at the phone.
+      */
+      const second = Math.ceil(left);
+      // `!firedRef.current` matters for a WORK countdown that already finished
+      // and then got +15: work deliberately never re-arms completion, so the
+      // ticks would count 3-2-1 down to an ending that never arrives.
+      if (
+        left > 0 &&
+        !firedRef.current &&
+        second <= TICK_FROM_SECONDS &&
+        tickedAtRef.current !== second
+      ) {
+        tickedAtRef.current = second;
+        playSound('tick');
+      }
+
       if (left <= 0 && !firedRef.current) {
         firedRef.current = true;
         // You should not have to be looking at the phone to know a rest is
-        // over or a plank is done — that is the entire point in a gym.
+        // over or a plank is done — that is the entire point in a gym. The
+        // haptic covers the phone being in a pocket; the sound covers it being
+        // on a bench across the rack.
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+        playSound(completionSoundFor(timer.kind));
         completeRef.current?.(timer);
       }
     }, 250);
@@ -79,6 +115,7 @@ export function useCountdown(onComplete?: (c: Countdown) => void) {
 
   const start = useCallback((next: Omit<Countdown, 'endsAt' | 'pausedWith'>) => {
     firedRef.current = false;
+    tickedAtRef.current = null;
     setTimer({ ...next, endsAt: Date.now() + next.total * 1000, pausedWith: null });
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
   }, []);
@@ -114,6 +151,10 @@ export function useCountdown(onComplete?: (c: Countdown) => void) {
 
         So once a work countdown has fired, it is spent.
       */
+      // Cleared so the last seconds are re-announced from the top. Without
+      // it, +15 at "3" leaves the ref holding 3 and the athlete hears only
+      // 2, 1 on the way back down.
+      tickedAtRef.current = null;
       if (rearmsCompletionOnAdjust(t.kind)) firedRef.current = false;
       return adjusted(t, delta, Date.now());
     });

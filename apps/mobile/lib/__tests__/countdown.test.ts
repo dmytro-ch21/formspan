@@ -1,9 +1,11 @@
 import {
   adjusted,
+  completionSoundFor,
   elapsedOf,
   formatCountdown,
   rearmsCompletionOnAdjust,
   remainingAt,
+  TICK_FROM_SECONDS,
   toggledPause,
   type Countdown,
 } from '../countdown';
@@ -197,6 +199,31 @@ describe('the row a countdown is writing to', () => {
     // is per-index by design — reordering is what stops the countdown, and
     // this only has to refuse a row whose exercise no longer matches.
     expect(timedSetStillAt(sets, 2, 'back-squat')).toBe(false);
+  });
+});
+
+describe('which chime marks the end', () => {
+  it('gives a rest its own sound', () => {
+    expect(completionSoundFor('rest')).toBe('restComplete');
+  });
+
+  it('gives a finished set a DIFFERENT one', () => {
+    // The two mean opposite things — one says start moving, the other says
+    // stop — and you hear them with the phone on a bench rather than in your
+    // hand. Swapped, the app tells you to rest by chiming "set done"; nothing
+    // on screen contradicts it because you are not looking at the screen.
+    expect(completionSoundFor('work')).toBe('workComplete');
+    expect(completionSoundFor('work')).not.toBe(completionSoundFor('rest'));
+  });
+});
+
+describe('when the ticks start', () => {
+  it('counts the last three seconds', () => {
+    // Two is not enough to prepare for; five becomes nagging on a 60-second
+    // plank you hear it on every set of. Pinned to the number, not to the
+    // constant, so changing the value is a decision rather than a diff that
+    // agrees with itself.
+    expect(TICK_FROM_SECONDS).toBe(3);
   });
 });
 

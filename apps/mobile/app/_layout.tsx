@@ -1,5 +1,6 @@
 import { ClerkProvider, useAuth, useSignUp } from '@clerk/clerk-expo';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { initSounds } from '@/lib/sounds';
 import { clearSessionToken } from '@/lib/session';
 
 import { AccentProvider, useAccent } from '@/lib/AccentProvider';
@@ -160,6 +161,22 @@ function RootLayoutNav() {
       // is marked seeded, so the next launch tries again.
     });
   }, [isSignedIn, userId, getToken]);
+
+  /*
+    Load the timer chimes and claim the audio session's settings.
+
+    Here rather than in the countdown, because building a player costs a file
+    read and a decode: doing it on first play puts tens of milliseconds between
+    a rest hitting zero and the sound, which reads as the timer being wrong
+    rather than the sound being late.
+
+    Not awaited and not gating render — see `lib/sounds.ts` for why every
+    failure in there is swallowed. An app that would not start because a bell
+    failed to decode would be absurd.
+  */
+  useEffect(() => {
+    void initSounds(userId);
+  }, [userId]);
 
   useEffect(() => {
     if (!isLoaded) return;
