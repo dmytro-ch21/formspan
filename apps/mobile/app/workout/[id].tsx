@@ -5,13 +5,13 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Modal,
   Pressable,
   StyleSheet,
   TextInput,
 } from 'react-native';
 
+import { HoldToConfirm } from '@/components/HoldToConfirm';
 import {
   KeyboardAwareFlatList,
   KeyboardAwareScrollView,
@@ -196,23 +196,22 @@ export default function WorkoutDetailScreen() {
     }
   }
 
-  function confirmDelete() {
-    Alert.alert('Delete workout?', `"${workout?.name}" will be removed. This can't be undone.`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await deleteLocalWorkout(userId!, id!);
-                    requestSync('workout-deleted');
-            router.back();
-          } catch (err) {
-            setError(err instanceof Error ? err.message : String(err));
-          }
-        },
-      },
-    ]);
+  /*
+    The `Alert` this replaces named the workout — which the screen already
+    does, since the button sits on that workout's own page — and otherwise
+    said "this can't be undone", which a hold says better and without a
+    dialog. The deletes that KEPT their alert are the ones stating a fact the
+    button cannot carry: how many logged sets go with it, or that it is
+    removed everywhere rather than just here.
+  */
+  async function deleteNow() {
+    try {
+      await deleteLocalWorkout(userId!, id!);
+      requestSync('workout-deleted');
+      router.back();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
   }
 
   // A template is only worth writing if performing it is one tap away. The
@@ -451,14 +450,18 @@ export default function WorkoutDetailScreen() {
               <Text style={styles.addButtonText}>+ Add exercise</Text>
             </Pressable>
 
-            <Pressable
-              onPress={confirmDelete}
+            <HoldToConfirm
+              label="Delete workout"
+              holdingLabel="Keep holding to delete…"
+              confirmTitle="Delete workout?"
+              confirmBody={`"${workout?.name}" will be removed. This can't be undone.`}
               style={styles.deleteButton}
-              accessibilityRole="button"
+              textStyle={styles.deleteText}
+              fillColor={vola.danger}
+              destructive
               testID="workout-delete"
-            >
-              <Text style={styles.deleteText}>Delete workout</Text>
-            </Pressable>
+              onConfirm={deleteNow}
+            />
           </>
         )}
       </KeyboardAwareScrollView>

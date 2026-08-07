@@ -3,6 +3,7 @@ import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-rou
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, TextInput, View as RNView } from 'react-native';
 
+import { HoldToConfirm } from '@/components/HoldToConfirm';
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
@@ -160,9 +161,17 @@ export default function BjjSessionScreen() {
 
   async function finishNow() {
     if (!userId || !id) return;
-    await finishLocalSession(userId, id);
-    await load();
-    requestSync('bjj-session-finished');
+    // Caught here rather than left to the caller: `HoldToConfirm` calls
+    // `onConfirm` without awaiting, so a SQLite failure escaping this became
+    // an unhandled rejection and, to the athlete, a button that silently did
+    // nothing. The screen has an error state; it should use it.
+    try {
+      await finishLocalSession(userId, id);
+      await load();
+      requestSync('bjj-session-finished');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
   }
 
   async function commitRename() {
@@ -432,14 +441,16 @@ export default function BjjSessionScreen() {
           without it, Today's "in progress" card opens a screen with no way to
           close the session. */}
       {!session.ended_at && (
-        <Pressable
-          onPress={finishNow}
+        <HoldToConfirm
+          label="Finish this session"
+          holdingLabel="Keep holding to finish…"
+          confirmTitle="Finish this session?"
+          confirmBody="You won't be able to add to it afterwards."
           style={styles.cta}
-          accessibilityRole="button"
+          textStyle={[styles.ctaText, { color: accent.ink }]}
           testID="bjj-session-finish"
-        >
-          <Text style={[styles.ctaText, { color: accent.ink }]}>Finish this session</Text>
-        </Pressable>
+          onConfirm={finishNow}
+        />
       )}
 
       <Pressable

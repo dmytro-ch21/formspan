@@ -4702,6 +4702,58 @@ on next-moves — see below.
 - Web: following a link inside the panel remounts it — focus must land on the
   panel heading, not on `<body>`.
 
+## Hold to confirm (mobile)
+
+Guards the actions a stray touch must not perform. The whole point is what does
+NOT happen, so most of these are negative assertions.
+
+### It must ignore anything short of a real hold
+
+- **Tap Finish session** → nothing. This is the regression that matters: before
+  this control, that exact gesture ended the session outright.
+- **Hold and release just before the fill completes** → nothing.
+- **Two abandoned half-holds in a row** → nothing. They must not accumulate.
+- **Hold through** → finishes, once, with a success haptic. Keep holding well
+  past the end → still once.
+- **Start a hold, then navigate away mid-hold** → nothing fires.
+
+### Where it applies, and where a dialog is still correct
+
+- Held: **Finish session**, **Finish BJJ session**, **Delete session**
+  (strength), **Delete workout**.
+- Still a dialog, deliberately — each states a fact a button label cannot, and
+  must NOT also require a hold: **removing an exercise** ("3 logged sets will be
+  deleted too"), **deleting a BJJ session** ("removed everywhere, not just on
+  this phone"), **removing a planned day** ("nothing you logged changes"),
+  **sign out**.
+- Assert no action asks for both.
+
+### VoiceOver (the silent-failure case)
+
+- **Turn VoiceOver on.** The button must still work: it becomes a tap that opens
+  a confirm dialog. A hold-only control is not merely awkward there — VoiceOver's
+  double-tap synthesises a press and an immediate release, so there is no
+  sustained contact and the control is *unreachable* while still being
+  announced and focusable.
+- **The tap alone must not perform the action** — only the dialog's confirm
+  button does. Otherwise the accessible path is a single tap on a destructive
+  control, which is the thing being fixed.
+- With VoiceOver off, the button announces a hint saying it wants a hold. A
+  button that ignores taps and explains nothing is indistinguishable from a
+  broken one.
+
+### Feel (device only)
+
+- 900ms should read as deliberate but not broken. Watch for someone letting go
+  early on the first try — that means the fill is not legible enough.
+
+### Cross-app parity (web)
+
+- Web's Finish session now asks a `confirm()` — it had none. Deliberately not a
+  hold: a mouse misclick is unlikely and press-and-hold is not a desktop idiom.
+  Assert the confirmation exists, and that cancelling leaves the session open.
+
+
 ## Timed sets and the work countdown (mobile)
 
 The session screen's one countdown now serves two purposes — resting between

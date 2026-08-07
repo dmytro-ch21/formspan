@@ -14392,6 +14392,129 @@ peak, measured ~100× decay — and the wiring is covered, but whether a bell is
 *pleasant* is not something a test can answer, and neither is whether it cuts
 through a gym. Same open device-verification gap as the two entries above.
 
+## 2026-08-07 — Finishing a session stops being one tap
+
+Finishing was a single unguarded tap, on a screen operated one-handed with wet
+hands between sets, and it is not undoable from the phone. `HoldToConfirm` makes
+the deliberate case cost 900ms and the accidental case cost nothing.
+
+### The commit is a timer, not an animation callback
+
+The obvious build drives everything from `Animated.timing(...).start(cb)` and
+commits when `cb` reports `finished`. This does not, deliberately: **whether an
+irreversible action happens should not depend on the animation system
+delivering a callback.** `useNativeDriver` runs the fill on the UI thread and
+its callback crosses back over the bridge; a dropped one loses a confirmed
+action, and a mishandled `finished` flag performs a cancelled one. So a
+`setTimeout` decides and the fill only illustrates — which also makes the whole
+thing testable with fake timers instead of by trying to run an animation under
+jest.
+
+The fill animates `scaleX` from a left `transformOrigin`, not `width`:
+`useNativeDriver` cannot animate layout properties, and a JS-driven fill on the
+session screen would stutter against exactly the work that screen is doing while
+you hold the button.
+
+### Which actions got a hold, and which kept their dialog
+
+The rule, because "add a hold everywhere" would have lost real information:
+
+**A hold replaces the dialog when the dialog only said "are you sure".** Finish
+session and Finish BJJ session had no confirmation at all and now hold. Delete
+session's alert said exactly "This can't be undone", and Delete workout's named
+a workout the screen was already displaying — a hold says both better, and
+without a modal.
+
+**The dialog stays where it states a fact a button label cannot.** Removing an
+exercise says how many logged sets go with it. Deleting a BJJ session says it is
+removed everywhere and not just on this phone. Removing a planned day says
+nothing you logged changes. Those sentences are the reason someone taps Cancel,
+and a hold cannot carry them. They are not stacked with a hold either — one
+confirmation per action.
+
+Worth noting the "discard an active session" case in the task list resolved to
+nothing: Today's "Finish or discard" is a *label* on the Continue button, and
+the discard it refers to is Delete session on the session screen, which now
+holds.
+
+### The accessible path is a different mechanism, not a shorter hold
+
+**VoiceOver cannot hold this button.** Its activation gesture is a double-tap
+that synthesises a press and an immediate release, so there is no sustained
+contact to measure — a hold-only control is not awkward for those users, it is
+*unreachable*, and it fails silently: announced, focusable, does nothing. With a
+screen reader on, the control becomes a tap that opens a confirm dialog: the
+same two-step protection by a means the gesture set actually supports. A tap
+alone never performs the action, which would have made the accessible path a
+single tap on a destructive control — the exact thing being fixed.
+
+### Covered by a component test, because the property is not arithmetic
+
+There is no honest pure function here. The guard is the relationship between
+`onPressIn` arming a timer and `onPressOut` clearing it, and a helper that
+"decides" whether 400ms is less than 900ms would pass forever while the
+component forgot to call it. So this is a real render test: a tap does nothing,
+a release at 850ms does nothing, two abandoned half-holds do not accumulate into
+one, a long hold fires exactly once, an unmount cancels, and the screen-reader
+path routes to a dialog. Reverting any of three guards takes it red.
+
+**The unmount case was a bug the test found rather than confirmed.** Cancelling
+on unmount ran the snap-back animation against a tree that had already gone —
+harmless in production, and in the suite it surfaced as "unable to find node on
+an unmounted component" inside whichever test happened to run next. Unmount now
+disarms the timer and animates nothing.
+
+### What review caught: a fill that was mathematically invisible
+
+The blocking one was not subtle once stated. The strength Finish button's
+background **is** `accent.accent`; the default accent is `#B8FF2C`; `vola.lime`
+is `#B8FF2C`. So the default lime fill at 28% opacity over the default accent
+was lime over lime — **no visible progress at all, on the one button this whole
+control was built for.** The label still swapped to "Keep holding to finish…",
+which is exactly the kind of partial feedback that hides the fault. The fix is
+`accent.on`, which every palette defines precisely because it reads against
+that palette's accent, so it contrasts whichever one the athlete picked. A test
+pins the collision rather than the fix.
+
+Worth noting what made it hard to see: it is a *composition* bug across three
+files, invisible in any one of them, and only deterministic once you know the
+two hex values are equal. No amount of reading `HoldToConfirm.tsx` finds it.
+
+Three more from the same pass:
+
+- **The control was imposing chrome.** Its base `backgroundColor` turned the
+  quiet red "Delete session" text link into a raised filled block — a visual
+  change nobody asked for, in a diff about gestures, and inconsistent with the
+  BJJ delete beside it that kept its alert. The base is transparent now; the
+  callers that want a filled look pass one.
+- **Flipping VoiceOver mid-hold defeated the cancel.** Both branches return a
+  root `Pressable`, so React reconciles the same host node and swaps props — and
+  the fallback has no `onPressOut`. The finger that armed the timer lifted
+  against a handler that no longer existed and the commit fired anyway.
+- **The BJJ finish had no error handling**, which mattered more once
+  `onConfirm` became fire-and-forget: a SQLite failure was an unhandled
+  rejection and, to the athlete, a button that silently did nothing. It sets the
+  screen's error state now.
+
+And the dialog styled its confirm button `destructive` for everything, so
+finishing a session offered a red "Finish session" while the screen painted
+finishing as the accent CTA.
+
+### Web
+
+**A `confirm()`, not the hold.** Web's Finish session had no confirmation either
+— the same gap — but neither half of mobile's reasoning transfers: a mouse
+misclick is far less likely, and press-and-hold on a desktop is an interaction
+nobody expects and nothing else on the page teaches. The two deletes on that
+screen already use `confirm()`, so matching them keeps one idiom per platform
+instead of importing the phone's.
+
+### Not verified
+
+Not held on a device. The timing is covered and the fill is decoration, but
+whether 900ms *feels* right — long enough to be deliberate, short enough not to
+read as a broken button — is a judgement only a thumb can make.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
