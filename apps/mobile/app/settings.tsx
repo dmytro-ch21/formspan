@@ -11,6 +11,7 @@ import { useAccent, useAccentChoice } from '@/lib/AccentProvider';
 import { useAuth as useClerkAuth } from '@clerk/clerk-expo';
 
 import { readAutoRest, writeAutoRest } from '@/lib/rest';
+import { playSound, readSoundsEnabled, writeSoundsEnabled } from '@/lib/sounds';
 import { useTrackEffort } from '@/lib/useTrackEffort';
 
 /**
@@ -33,8 +34,11 @@ export default function SettingsScreen() {
 
   const { userId } = useClerkAuth();
   const [autoRest, setAutoRest] = useState(false);
+  // Default on: the chime is the point of a timer you are not looking at.
+  const [sounds, setSounds] = useState(true);
   useEffect(() => {
     if (userId) readAutoRest(userId).then(setAutoRest).catch(() => {});
+    if (userId) readSoundsEnabled(userId).then(setSounds).catch(() => {});
   }, [userId]);
 
   const { trackEffort, setTrackEffort, unsynced: effortUnsynced } = useTrackEffort();
@@ -103,6 +107,25 @@ export default function SettingsScreen() {
             if (userId) writeAutoRest(userId, on).catch(() => setAutoRest(!on));
           }}
           testID="settings-auto-rest"
+        />
+        <Toggle
+          label="Timer sounds"
+          hint="A chime when a rest or a timed set ends."
+          value={sounds}
+          onChange={(on) => {
+            setSounds(on);
+            // `writeSoundsEnabled` BEFORE the preview, which is the opposite of
+            // how it reads: it flips the module's flag synchronously before its
+            // first await, and `playSound` checks that flag. Previewing first
+            // meant the OFF -> ON preview was itself muted — the one case the
+            // preview exists for answered "did that work?" with silence.
+            if (userId) writeSoundsEnabled(userId, on).catch(() => {});
+            // Turning it ON previews the sound, so the toggle answers for
+            // itself rather than sending you off to start a rest. Off makes no
+            // noise, for the obvious reason.
+            if (on) playSound('restComplete');
+          }}
+          testID="settings-sounds"
         />
         <Row
           label="Suggestions"

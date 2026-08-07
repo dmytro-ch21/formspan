@@ -76,6 +76,29 @@ export function rearmsCompletionOnAdjust(kind: CountdownKind): boolean {
   return kind === 'rest';
 }
 
+/**
+ * How many seconds before the end the per-second ticks start.
+ *
+ * Three, because it is the length of a countdown people already have in their
+ * heads. Two is not enough to prepare for; five is long enough to become
+ * nagging on a 60-second plank you hear it on every set of.
+ */
+export const TICK_FROM_SECONDS = 3;
+
+/**
+ * Which chime marks the end of this countdown.
+ *
+ * The two must be audibly different, and that is the reason this exists rather
+ * than one "done" sound. Rest ending and a set ending mean opposite things —
+ * one says start moving, the other says stop — and you hear them with the
+ * phone on a bench, not in your hand. Getting them the same way round as the
+ * screen is not optional, so it is a named function with a test rather than a
+ * ternary somewhere in an interval callback.
+ */
+export function completionSoundFor(kind: CountdownKind): 'restComplete' | 'workComplete' {
+  return kind === 'work' ? 'workComplete' : 'restComplete';
+}
+
 /** Seconds left. Zero once it has run out, never negative. */
 export function remainingAt(c: Countdown | null, now: number): number {
   if (!c) return 0;

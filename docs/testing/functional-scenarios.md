@@ -4800,6 +4800,53 @@ to the wrong row, or to a read-only session, before it was fixed:
 - +15 on an expired countdown gives a genuine 15 seconds, not a deadline moved
   from a stale one (which leaves it expired and does visibly nothing).
 
+### Timer sounds
+
+Every one of these fails silently by design — `lib/sounds.ts` swallows its own
+errors so a bell can never break the countdown — so these have to be *heard*,
+not inferred from the absence of an error.
+
+- **Rest ends** → a rising two-note chime. **A timed set ends** → a lower single
+  bell. They must be **audibly different**: you hear them with the phone on a
+  bench, and they mean opposite things (one says start moving, the other says
+  stop).
+- **The last three seconds** tick, once per second, softly. Not four times a
+  second — the countdown's interval runs at 250ms, and a tick per pass is a fire
+  alarm.
+- **The second rest of a session must chime too.** A player left at the end of
+  its buffer plays silently, so the failure looks like "sounds worked, then
+  randomly stopped" rather than like a bug.
+- **Mute, then force-quit and relaunch → still muted.** This shipped broken:
+  `userId` is undefined on first render, so the module was initialised before
+  the preference could be read and a muted athlete got sounds back every
+  launch — with the Settings toggle still showing OFF, because it reads the
+  pref directly. Check the toggle AND the actual noise, not just the toggle.
+- **The replay check, in 60 seconds.** Run one countdown of at least 5s and
+  listen to the final three ticks. Three ticks means the rewind works (the tick
+  is one short player replayed three times); one tick then silence means it
+  does not. Confirm with a second rest in the same session. This is the only
+  way to settle the iOS `seekTo`/`play` ordering — `play` is synchronous JSI
+  there and `seekTo` is async-dispatched, so source order is not native order.
+- **A work countdown that has finished, then +15** → no ticks. Work never
+  re-arms its completion, so ticking would count down to an ending that never
+  comes.
+- **Ringer switch OFF → it still rings.** Deliberate. Verify on a phone with the
+  physical switch flipped.
+- **Play music, then let a rest finish** → the music ducks and comes back. It
+  must not stop, and the chime must not vanish underneath it.
+- **Settings → Timer sounds off** → silence, and it survives a relaunch.
+  Toggling it back ON previews the chime immediately.
+- **No microphone permission prompt, ever.** If iOS asks for the microphone,
+  `allowsRecording` has been set true somewhere.
+
+### Known limitation, not a bug
+
+- **Background the app mid-countdown → no chime.** iOS throttles the JS the
+  sounds are driven from. The countdown itself is still correct when you come
+  back (it is deadline-driven); only the sound is missed. A chime with the app
+  closed needs a scheduled local notification, which does not exist yet.
+
+
 ### Cross-app parity (web)
 
 - Web gets **no countdown** — deliberate, per the platform rule. Assert only

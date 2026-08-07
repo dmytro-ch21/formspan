@@ -14248,6 +14248,149 @@ over with a screen nobody asked for.
   first consumer is the search endpoint, next in the social scope.
 - The mobile field is typecheck/lint-verified, not device-verified.
 
+## 2026-08-07 — The timers get a voice, and it is synthesised rather than sourced
+
+The countdown could already tell you it had finished by vibrating. A haptic
+covers a phone in a pocket and nothing else — put the phone on a bench across
+the rack, which is where it goes during a plank, and the timer is silent.
+
+### The sounds are generated, and the generator is checked in
+
+`scripts/generate_sounds.py` synthesises all four. Three reasons, in order of
+how much they mattered:
+
+- **No licence to get wrong.** A clip from a free-sound library carries terms
+  into the app binary, and "free" there means half a dozen different things.
+  Nothing is owed on a sine wave.
+- **They are tiny.** 76KB for the set, because they have to be bundled — the
+  point is a chime in a basement gym with no signal, so streaming is out.
+- **They are a recipe, not four opaque binaries.** Re-run the script to retune
+  them. Checked-in audio nobody knows how to regenerate is audio nobody will
+  ever change.
+
+They sound like bells because a bell's partials are INHARMONIC — not 2×, 3×,
+4× — and its high partials die away faster than its low ones. Both are in
+`bell()` and neither is decoration: harmonic ratios with a uniform decay is
+precisely the sound of a cheap alarm clock. There is also a 4ms fade-in, without
+which the waveform starts at full amplitude and every single play begins with an
+audible click.
+
+### Three audio-session decisions, none of them defaults
+
+- **`playsInSilentMode: true` — it rings with the ringer switch off.** The
+  argument against is real: silencing a phone is a clear instruction. It does
+  not apply here, because this app never makes an unsolicited sound. Every
+  chime follows a countdown the athlete started themselves, seconds earlier.
+  And a phone left permanently on silent is the normal state for most people,
+  so respecting the switch would mean the feature silently does nothing for
+  most users. There is a one-tap mute for anyone who disagrees.
+- **`interruptionMode: 'duckOthers'` — ducks music, never stops it.** People
+  train to their own music. `doNotMix` kills the track on every rest and leaves
+  them restarting Spotify between sets; `mixWithOthers` lets the chime vanish
+  under a loud mix. Ducking is the only setting that both plays and gives the
+  music back.
+- **`allowsRecording: false`, always.** It triggers the OS microphone prompt.
+  Asking for the microphone as a side effect of wanting a bell would be
+  indefensible.
+
+### What it deliberately is not
+
+**Not a background alarm.** The sounds are driven by the countdown's JS
+interval, and iOS throttles JS the moment the app leaves the screen — so a phone
+in a pocket with the screen off gets no chime, whatever the audio session says.
+Firing with the app closed is a scheduled local notification: a different
+mechanism, a different feature, and worth knowing before someone reports the
+chime as broken.
+
+### expo-audio, and why that was checked rather than assumed
+
+`expo-av` is gone in SDK 57 — it is not in `bundledNativeModules.json` and
+`expo-audio` is, pinned at `~57.0.3`. Added at exactly that version, and the
+drift list is unchanged at ten packages: `expo install --fix` was NOT run,
+because it moves `react-native` too and that is a deliberate change rather than
+a reflex.
+
+The load-bearing check was whether it exists in **Expo Go at all** — this
+project has no dev client, so a native module outside Expo Go's bundle is a
+feature that cannot run. `strings` on the installed Expo Go binary finds
+`ExpoAudio` and `AudioPlayer` alongside `ExpoHaptics`. That is the difference
+between shipping this and discovering on a device that it was never possible.
+
+### Failure is silent, on purpose, which is why it is tested
+
+Nothing in `lib/sounds.ts` throws or rejects into a caller: a bell that breaks
+the timer it decorates would be the feature destroying the thing it exists to
+improve. The consequence is that every failure mode here is invisible — with
+the catch in place, the only way to notice `playSound` has stopped playing
+anything is to be standing in a gym. So the module has 16 tests, and reverting
+any of five guards takes them red: the mute check, the rewind, both audio-mode
+decisions, and which chime belongs to which countdown.
+
+**The rewind is the non-obvious one.** A player that has already run sits at the
+end of its buffer and `play()` there is silent, so without `seekTo(0)` the first
+rest of a session chimes and none of the others do — which does not read as a
+bug, it reads as the sounds working and then randomly breaking.
+
+### What review caught: three, and the first one shipped in the entry above
+
+**The mute preference was never loaded on launch.** `useAuth().userId` is
+`undefined` on the first render and only becomes real once Clerk resolves, so
+`initSounds` is called **twice, every launch** — and a single "already done"
+flag let the first call claim the job and the second return early, before the
+preference was ever read. An athlete who muted sounds got them back on every
+relaunch, while the Settings toggle correctly showed OFF, because Settings reads
+the pref directly. Two answers to "are sounds on", from two places, and only one
+of them made noise. The fix separates the two jobs: players and audio mode load
+once, the preference is tracked per athlete id (which also handles a second
+account on a shared phone). **The old suite could not have caught it** — every
+test called `initSounds('u1')` and none reproduced the undefined-then-id
+sequence that every real launch performs.
+
+**The "preview the chime when you switch it on" was itself muted.** The preview
+ran before the write, and `playSound` checks the enabled flag — which is still
+false while turning ON. The one case the preview exists for answered "did that
+work?" with silence. Writing first fixes it, because `writeSoundsEnabled` flips
+the module flag synchronously before its first `await`.
+
+**And the rewind may not have been a rewind.** `seekTo(0)` on the line above
+`play()` does not establish that order on iOS: reading `expo-audio@57`'s native
+source shows `play` is a **synchronous JSI function** running immediately on the
+JS thread, while `seekTo` is an `AsyncFunction` dispatched onto a Swift task — so
+the un-awaited version most likely reached the player as play-then-seek, the
+reverse of what the source reads as. Android is provably fine (both hop the main
+queue, order preserved). Now awaited, which removes the question rather than
+betting on it; the cost is a seek on a two-second in-memory asset against a
+completion already quantised to a 250ms interval.
+
+That last one is worth noting for a second reason: **the jest mock supplied the
+behaviour under test.** Its `seekTo` resolved instantly and its `play` worked
+regardless of position, so the test could never have failed on the real
+ordering — the exact trap `CLAUDE.md` records about mocks that provide what they
+are meant to verify. The assertion now pins `invocationCallOrder`, and the
+device listen is still the confirmation.
+
+Two smaller ones from the same pass: the final-seconds ticks now stop once a
+work countdown has fired (they were counting 3-2-1 down to an ending that, for
+work, deliberately never re-arrives), and a ±15s adjust resets the tick guard so
+the last seconds are re-announced from the top rather than resuming mid-count.
+
+### Web
+
+**No web module, which is a deviation from the task as written and is
+deliberate.** The instruction was to define the vocabulary there so it is not
+reinvented later. Doing that today means duplicating the four audio files into
+`apps/web/public/` with nothing keeping the two copies in step, in service of a
+web timer that does not exist and which the platform rule says should not exist
+— a live countdown belongs on the phone. The vocabulary is recorded here and in
+`lib/sounds.ts` instead, which serves the same purpose without shipping assets
+nothing loads.
+
+### Not verified
+
+**Nobody has heard them on a device.** They are correct as waveforms — measured
+peak, measured ~100× decay — and the wiring is covered, but whether a bell is
+*pleasant* is not something a test can answer, and neither is whether it cuts
+through a gym. Same open device-verification gap as the two entries above.
 
 ## Open items / known gaps as of this entry
 
