@@ -54,9 +54,10 @@ const (
 	// maxList bounds the inbox. It is the sharp case for a ceiling: unlike a
 	// list of your own things, this one grows from OTHER people's actions.
 	maxList = 200
-	// maxBadgeCount bounds the counting query — see the friend module's, which
-	// documents the same two reasons.
-	maxBadgeCount = 99
+	// maxBadgeCount bounds the counting query — see friend.maxBadgeCount, which
+	// documents the two reasons and names the third place (the contract's
+	// `maximum: 99`) that has to agree with both.
+	maxBadgeCount = 100
 	// maxLabel is what a card can usefully render, and bounds what a sender
 	// can store in a recipient's inbox.
 	maxLabel = 160

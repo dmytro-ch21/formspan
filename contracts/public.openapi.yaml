@@ -2692,8 +2692,8 @@ paths:
         Every key the server knows is always present, at zero when nothing is
         waiting. A MISSING key means the build has no such source, which is a
         different thing from "nothing waiting" — clients must not treat them
-        alike. Counts are capped at 99, since a badge cannot usefully render
-        more; the cap also stops one athlete making another's most-polled
+        alike. Counts are capped at 100 — the cap meaning "this many or more", every
+        lower value exact — since a badge cannot usefully render more; the cap also stops one athlete making another's most-polled
         endpoint expensive.
 
 
@@ -2714,7 +2714,12 @@ paths:
                     additionalProperties:
                       type: integer
                       minimum: 0
-                      maximum: 99
+                      # Must agree with friend.maxBadgeCount and
+                      # share.maxBadgeCount, which say the same thing in Go.
+                      # The CAP ITSELF means "this many or more"; every value
+                      # below it is exact. That is what lets a client render
+                      # "99+" without presenting a capped number as fact.
+                      maximum: 100
                     description: >
                       Keys are wire format and clients switch on them.
                       Currently `friend_requests` (INCOMING only — an outgoing

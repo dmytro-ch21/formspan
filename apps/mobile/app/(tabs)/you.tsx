@@ -27,6 +27,10 @@ import { useAuthToken } from '@/lib/useAuthToken';
  * Mixing them into one list makes "change my units" and "change my birthday"
  * look like the same kind of action, and they aren't.
  */
+/** The server caps counts here — see friend.maxBadgeCount. At the cap the value
+ *  means "this many or more", so the badge stops claiming to be exact. */
+const BADGE_CAP = 100;
+
 export default function YouScreen() {
   const accent = useAccent();
   const getToken = useAuthToken();
@@ -80,9 +84,17 @@ export default function YouScreen() {
       // A SEPARATE chain, not chained onto the profile fetch: the two are
       // independent, and sequencing them would make a slow profile delay the
       // badge for no reason. Failure is silent and leaves `waiting` alone.
-      getPendingCounts(getToken)
-        .then((counts) => setWaiting(counts.friend_requests ?? 0))
+      //
+      // Aborted on blur, so a rapid blur/focus cannot land an older count on
+      // top of a newer one — `getPendingCounts` has always taken the signal;
+      // it just was not being handed one.
+      const counting = new AbortController();
+      getPendingCounts(getToken, counting.signal)
+        .then((counts) => {
+          if (!counting.signal.aborted) setWaiting(counts.friend_requests ?? 0);
+        })
         .catch(() => {});
+      return () => counting.abort();
     }, [getToken]),
   );
 
@@ -120,7 +132,11 @@ export default function YouScreen() {
               hitSlop={10}
               accessibilityRole="button"
               accessibilityLabel={
-                waiting > 0 ? `Friends, ${waiting} waiting` : 'Friends'
+                waiting === 0
+                  ? 'Friends'
+                  : waiting >= BADGE_CAP
+                    ? 'Friends, over 99 waiting'
+                    : `Friends, ${waiting} waiting`
               }
               testID="you-friends"
             >
@@ -129,7 +145,7 @@ export default function YouScreen() {
                   number you cannot open. That gap is real and recorded — a
                   mobile-only athlete never learns a share arrived. */}
               <Text style={[styles.action, { color: accent.ink }]}>
-                Friends{waiting > 0 ? ` (${waiting > 99 ? '99+' : waiting})` : ''}
+                Friends{waiting > 0 ? ` (${waiting >= BADGE_CAP ? '99+' : waiting})` : ''}
               </Text>
             </Pressable>
             <Pressable

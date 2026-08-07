@@ -5,8 +5,13 @@ import (
 	"fmt"
 )
 
-// Counts is the whole implementation: ask everything registered, in order,
-// and hand back what they say.
+// Counts is the whole implementation: ask everything registered and hand back
+// what they say.
+//
+// NOT "in order" — this ranges a map, which has none. It matters in exactly
+// one place: if two counters fail at once, which error surfaces is
+// nondeterministic. Both are 500s carrying no client-visible detail, so the
+// only cost is which one lands in the log.
 //
 // Not a PostgresRepository, because this package owns no table and touches no
 // pool. The counting SQL lives in the module that owns the rows, which is what
