@@ -4758,16 +4758,48 @@ phone.
   already moved on from.
 
 
-## Public Workout Plans
+## VOLA Workouts
 
-Renamed from "Shared", and now actually populated — 16 VOLA-authored plans
-seeded by `cmd/seed`.
+Renamed twice — "Shared" → "Public Workout Plans" → **VOLA Workouts** — and
+populated with 17 VOLA-authored plans seeded by `cmd/seed`.
+
+**The rename is UI copy only.** `?scope=public` on the wire and the seeded ids
+(`public-ppl-push`) are deliberately unchanged: the scope describes visibility
+rather than branding, and the ids are the seeder's upsert keys — renaming them
+would orphan every copy an athlete has made. Assert both still work.
+
+### The tiles
+
+- **VOLA Workouts** shows square tiles, two to a row, each with generated
+  artwork. **Your own** workouts stay full-width rows with no artwork.
+- Switching between the two tabs must not crash: `numColumns` cannot change on
+  the fly in React Native, so the list is keyed on scope. **Toggle back and
+  forth several times** — this is the failure mode that only appears on the
+  second switch.
+- A tile's artwork is the same on every launch, and the seeded set is not all
+  one colour or all one angle.
+- **The same plan looks the same on the phone and on the web.** Web holds its own
+  copy of the palette; `planHero.test.ts` compares them, but a spot-check of one
+  plan on both is worth doing after any palette change.
+- **Scroll to the very bottom.** The seeded catalog is an odd count, so the last
+  row holds one tile — it must stay half-width rather than stretch across the
+  row, since `aspectRatio: 1` turns a stretched tile into a full-width banner.
+- A **community-published** plan — one with an owner, rather than seeded — reads
+  `Community · N exercises`; a VOLA-authored one shows the count alone. To
+  produce one: publish a workout from a second account, then browse from the
+  first.
+- Counts read "1 exercise", not "1 exercises", on both the tile and the row card.
+- With VoiceOver on, a tile announces its name, **goal**, exercise count and, if
+  community, its provenance. The artwork is silent — it is decorative, and the
+  goal it encodes as a glyph is exactly why the label has to carry the goal.
+- Switching tabs shows a spinner: never the other tab's workouts laid out in
+  this tab's shape, and never a momentary "No VOLA Workouts yet".
 
 ### The browse surface
 
-- **Workouts → Public plans** lists the seeded plans, each with generated
-  artwork. Empty state reads "No public plans yet", not "Nothing shared yet".
-- Opening one shows it read-only: *"A VOLA plan — yours to copy, not to edit."*
+- **Workouts → VOLA Workouts** lists the seeded plans as square tiles. Empty
+  state reads "No VOLA Workouts yet".
+- Opening one shows it read-only: *"A VOLA Workout — yours to copy, not to edit."*
 - **Copy to my workouts** creates an owned copy and navigates to it. Editing the
   copy must not change the original; re-running the seed must not change the
   copy.

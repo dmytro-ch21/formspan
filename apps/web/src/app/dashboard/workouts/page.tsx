@@ -17,13 +17,19 @@ import {
   labelForModule,
   moduleFor,
 } from "@/lib/api";
+import { PlanHero } from "@/components/PlanHero";
 import { useModules } from "@/lib/ModulesProvider";
 import { useUnits } from "@/lib/useUnits";
 
 const SCOPES = [
   { key: "mine", label: "Mine" },
-  { key: "public", label: "Public plans" },
+  { key: "public", label: "VOLA Workouts" },
 ] as const;
+
+/** "1 exercise", not "1 exercises" — anyone can publish a one-movement plan. */
+function countLabel(n: number): string {
+  return `${n} ${n === 1 ? "exercise" : "exercises"}`;
+}
 
 export default function WorkoutsPage() {
   // For the sport label on each card — the registry carries the acronym.
@@ -89,6 +95,12 @@ export default function WorkoutsPage() {
             onClick={() => {
               setScope(s.key);
               setLoading(true);
+              // `everLoaded` means "has THIS scope loaded". Left true, the
+              // loading line is skipped and the other scope's workouts render
+              // in the new scope's layout until the fetch lands — your own
+              // templates appearing as VOLA Workout tiles for a beat, which
+              // reads as a data bug rather than a pending request.
+              setEverLoaded(false);
             }}
             aria-pressed={scope === s.key}
             className={`rounded-pill px-4 py-1.5 text-sm font-medium transition ${
@@ -117,7 +129,7 @@ export default function WorkoutsPage() {
         error ? null : (
           <div className="rounded-card border border-dashed border-line px-6 py-16 text-center">
             <p className="font-medium">
-              {scope === "mine" ? "No workouts yet" : "No public plans yet"}
+              {scope === "mine" ? "No workouts yet" : "No VOLA Workouts yet"}
             </p>
             <p className="mt-1 text-sm text-text-muted">
               {scope === "mine"
@@ -130,9 +142,43 @@ export default function WorkoutsPage() {
         // Cards rather than a table: the count is small and each card can
         // preview its first movements, which is what actually tells them
         // apart at a glance. A table would sort well and read poorly.
-        <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <ul
+          className={
+            scope === "public"
+              ? // Denser and squarer on the browse surface, matching the phone:
+                // seventeen unfamiliar names are scanned by picture, so more
+                // tiles per row beats more preview text per card.
+                "grid gap-4 grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+              : "grid gap-4 sm:grid-cols-2 xl:grid-cols-3"
+          }
+        >
           {workouts.map((w) => (
             <li key={w.id}>
+              {scope === "public" ? (
+                <Link
+                  href={`/dashboard/workouts/${w.id}`}
+                  className="group flex h-full flex-col overflow-hidden rounded-card border border-line bg-surface transition hover:bg-surface-raised"
+                >
+                  <PlanHero id={w.id} goal={w.goal} />
+                  <div className="flex flex-col gap-0.5 px-3 pb-3 pt-2">
+                    {/* Two lines, matching the phone. Truncating at one put a
+                        different half of the same name on each device. */}
+                    <h2 className="line-clamp-2 font-display text-base font-semibold">
+                      {w.name}
+                    </h2>
+                    {/* Who wrote it, on the tile rather than one click in.
+                        This shelf is called VOLA Workouts and most of it is
+                        ours, but it also carries whatever anyone has published
+                        — so an unmarked tile would put the brand's name on a
+                        stranger's plan. Marking the exception, not the rule. */}
+                    <p className="text-xs text-text-dim">
+                      {w.owner_user_id === null
+                        ? countLabel(w.items.length)
+                        : `Community · ${countLabel(w.items.length)}`}
+                    </p>
+                  </div>
+                </Link>
+              ) : (
               <Link
                 href={`/dashboard/workouts/${w.id}`}
                 className="group flex h-full flex-col gap-3 rounded-card border border-line bg-surface p-5 transition hover:bg-surface-raised"
@@ -182,6 +228,7 @@ export default function WorkoutsPage() {
                   </p>
                 )}
               </Link>
+              )}
             </li>
           ))}
         </ul>

@@ -405,7 +405,7 @@ export default function WorkoutDetailScreen() {
           <>
             <Text style={[styles.readonly, { color: accent.ink }]} testID="workout-readonly">
               {workout.owner_user_id === null
-                ? 'A VOLA plan — yours to copy, not to edit.'
+                ? 'A VOLA Workout — yours to copy, not to edit.'
                 : 'Published by someone else — yours to copy, not to edit.'}
             </Text>
             {/*

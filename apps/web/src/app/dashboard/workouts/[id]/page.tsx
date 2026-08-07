@@ -383,7 +383,7 @@ export default function WorkoutEditorPage({
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-line bg-surface px-4 py-3">
           <p className="text-sm text-text-muted">
             {workout.owner_user_id === null
-              ? "A VOLA plan — yours to copy, not to edit."
+              ? "A VOLA Workout — yours to copy, not to edit."
               : "Published by someone else — yours to copy, not to edit."}
           </p>
           {/* The point of a browse surface: without this, the seeded plans are

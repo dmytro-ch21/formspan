@@ -15424,6 +15424,130 @@ in the workouts rename, and for the same reason.
 Neither surface has been seen. The calendar row's hover-to-reveal in particular
 is the kind of thing that reads fine in code and is undiscoverable in practice.
 
+## 2026-08-07 — Public Workout Plans becomes VOLA Workouts, and the tiles get a picture
+
+A second rename of a thing renamed hours earlier, plus the artwork brief
+reopened now that there is somewhere to put it.
+
+### What was renamed, and what deliberately was not
+
+**The UI copy only.** "Public plans" → "VOLA Workouts" in the tab strip, the
+empty state, and the read-only line on a plan's detail screen.
+
+**The wire is untouched, and that is a decision rather than an oversight.**
+`?scope=public` describes VISIBILITY, not branding — the scope is "plans anyone
+can see", which stays true whatever the shelf is called. It already carries one
+compatibility alias (`shared`, kept for installed mobile builds), and adding a
+third accepted value to a query enum for a marketing word would be churn on a
+contract two clients depend on.
+
+**The seeded ids are untouched too**, for a harder reason: `public-ppl-push` and
+its siblings are the seeder's upsert keys. Renaming them would not rename
+anything — it would orphan every plan an athlete has copied and re-seed
+seventeen duplicates beside them on the next deploy.
+
+### Square tiles, and two cards rather than one card bending
+
+A VOLA Workout is something you are BROWSING — seventeen names you do not know —
+so it gets a square tile with artwork, two to a row, scanned by picture. Your own
+workouts stay a row: a list you already know by name, where the artwork would be
+decoration over information you do not need.
+
+One RN trap worth recording: **`numColumns` cannot change on the fly.** React
+Native throws outright, and the tab strip switches between one and two columns,
+so the list is keyed on `scope` — it has to become a new list rather than the
+same one reconfigured.
+
+### The artwork budget did not move; the composition did
+
+Still **nothing bundled, downloaded or decoded** — a gradient, two flat shapes
+and one stroked glyph, all from values already in the binary. Seventeen plans
+cost zero bytes of assets and an eighteenth costs the same.
+
+What changed is that a 76pt strip could only carry a wash of colour, and a
+square has room for an actual picture: an angled band rotated well past the
+tile's bounds so its ends stay off-canvas, a corner bloom so the fill does not
+read as a swatch, and the glyph at a size legible across a two-column grid. The
+band's angle comes from a different slice of the hash than the palette, because
+with six palettes and seventeen plans collisions are certain — and identical
+tiles side by side is precisely what makes a grid unscannable.
+
+Stock photography was reconsidered and rejected again, on the grounds that have
+nothing to do with bytes: licences to track, images that date, and seventeen
+small judgements about who a plan is "for" that nobody asked this app to make.
+
+### A third duplicated vocabulary, and a third parity test
+
+Web needed its own copy of the palette and the hash. That makes three shared
+rules duplicated across the two apps, so it gets the same treatment the swap
+ranking got: `planHero.test.ts` extracts web's palette array from source and
+compares it against mobile's, **in order** — the hash indexes into that array,
+so reordering one copy silently repaints every plan on that platform. Verified
+by swapping two entries in web's copy and watching it go red.
+
+**And this is where review found the interesting one.** The *angle* half of that
+parity test matched web's formula against a literal regex and then asserted
+`bandAngleFor(x) === bandAngleFor(x)` — a tautology. It pinned web's *text* and
+constrained mobile not at all, so the obvious one-sided fix (below) would have
+left it green while seven of the seventeen seeded plans tilted differently on a
+phone than on a laptop. A test named for a property, in the suite whose founding
+rule is "every assertion should fail when the code it covers is deleted",
+certifying the one thing it could not see break. It now extracts the four
+constants **and the shift operator** from web's source and *runs* them, so a
+one-sided edit to either copy goes red. A second extractor compares the two
+`hash` bodies, because every assertion in the file leans on them being identical
+and none of them checked.
+
+The one-sided fix it would have hidden was real. `hash(id) >> 3` shifts
+**signed** while `hash` returns unsigned, so the seven seeded ids whose hash
+exceeds 2³¹ took a negative remainder and landed outside the range the
+arithmetic reads as producing — one plan at −91°, a near-vertical band nothing
+in the code accounted for. It looked deliberate on screen, which is why nobody
+would ever have reported it. Now `>>>`, over nine angles rather than five, which
+also gives the seeded seventeen a distinct palette-and-angle pair each — pinned
+as a test, because that is luck rather than a property of the formula.
+
+**One deliberate divergence, recorded rather than hidden:** mobile draws a brand
+glyph on the tile and web does not. `apps/web` has no icon component, and adding
+one for a decorative mark is a larger change than the mark is worth.
+
+### What else review caught, all of it layout rather than logic
+
+- **The last tile became a banner.** `flex: 1` with no cap means a lone tile in
+  the final row of a two-column list stretches the full width, and `aspectRatio:
+  1` then doubles its height. The seeded catalog is seventeen — odd — so *every*
+  athlete saw it on first open, and web's CSS grid does not do it, so the two
+  platforms disagreed about the same data. Capped at `maxWidth: '50%'`.
+- **Switching tabs showed the other tab's workouts in this tab's layout.**
+  `everLoaded` was screen-scoped, so the spinner was skipped on a scope switch
+  and your own templates rendered as VOLA Workout tiles until the fetch landed.
+  It now means "has *this scope* loaded". Clearing the rows instead would have
+  traded a wrong list for a false "No VOLA Workouts yet".
+- **The rename put VOLA's name on strangers' plans.** The shelf's scope is
+  `owner_user_id IS DISTINCT FROM $1 AND visibility = 'public'`, so it carries
+  whatever any athlete has published — and the square tile had dropped the
+  markers the old row card carried. Community plans are marked on the tile now,
+  marking the exception rather than the rule: seventeen "by VOLA" labels would
+  be noise. The test is scoped to each tile with `within()`, because asserting
+  both strings exist *somewhere* passes just as happily when the marker is on
+  the wrong tile — inverting the condition only swaps which plan carries it, and
+  the screen-wide version of this test did exactly that.
+- The tile said "1 exercises" where the row card beside it said "1 exercise"; the
+  screen-reader label dropped the goal, which is the one thing the glyph carries
+  and a decorative (`accessible={false}`) hero cannot announce; and a "VOLA
+  template" line survived on the `mine` card gated on `owner_user_id === null`,
+  which that scope's own filter (`owner_user_id = $1`) makes unreachable.
+- The band was 180% of the tile wide, clearing the visible edge by 1.5% at the
+  steepest angle — enough on paper, thin enough for a rounding error to show an
+  end. 210% now; the tile clips it either way, so it costs nothing.
+
+### Not verified
+
+The tiles have not been seen. Generated artwork is exactly the kind of thing
+that reads well as code and lands flat on a screen — whether the band and bloom
+actually make seventeen tiles feel distinct, or just make them all look faintly
+smudged, is a question only a device answers.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
