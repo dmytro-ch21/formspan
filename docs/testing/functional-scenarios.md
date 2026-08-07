@@ -4702,6 +4702,112 @@ on next-moves — see below.
 - Web: following a link inside the panel remounts it — focus must land on the
   panel heading, not on `<body>`.
 
+## Timed sets and the work countdown (mobile)
+
+The session screen's one countdown now serves two purposes — resting between
+sets, and performing a timed one. Rest and work share a single state, so the
+first scenario to run is the one that proves they cannot both exist.
+
+### Where the button appears (and where it must not)
+
+- A **plank** (`load_type: 'time'`) → the row shows a timer button.
+- A **barbell squat** (`weight_reps`) → no button. A countdown there would be a
+  stopwatch pointed at nothing.
+- **Reps-only** and **distance-only** exercises → no button.
+- A **row/run** (`distance_time`) with no prescribed duration → **no button**.
+  The prescription there is the distance; a default duration would invent a
+  target the athlete never set. The same exercise WITH a duration on the set →
+  button appears.
+- A finished (read-only) session → no button on any row.
+- The row whose countdown is currently running hides its own button, rather than
+  offering a restart mid-hold.
+
+### The duration comes from the plan
+
+- Start a session from a template prescribing **3 sets × 60s** → each row's
+  timer starts at 60 without anything being typed. This is the reported case.
+- Add a set by hand after one holding 45s → the new row's timer offers 45
+  (carried forward), not the 60s default.
+- A `time` exercise with nothing prescribed anywhere → 60s default.
+- A set whose `seconds` is 0 → treated as no duration, not a zero-length set. A
+  timer that is over before it starts fires its completion haptic immediately
+  and logs nothing meaningful.
+
+### Running out vs stopping early (regression-prone — they differ deliberately)
+
+- **Let it run to zero** → `seconds` is written, the set **ticks itself**, the
+  completion haptic fires, and if "Auto rest timer" is on, rest starts straight
+  away.
+- **Stop at 40 of 60** → `seconds` records **40, not 60**, and the set is
+  **left unticked**. Assert both halves: logging the prescribed 60 is the
+  failure this exists to prevent, and auto-ticking would let an accidental Stop
+  commit a two-second plank.
+- **Stop immediately** → 0 seconds recorded, nothing ticked.
+- Tapping **Done** on an already-finished countdown only dismisses the bar — it
+  must not write the set a second time.
+
+### One countdown, not two
+
+- Start a work countdown while a rest is running → the rest ends, the bar shows
+  the work countdown. Never two bars, never a bar showing the wrong one.
+- Start a rest (or tick a set with auto-rest on) while a work countdown runs →
+  same, the other way.
+- The bar's copy follows the kind: a finished rest says "Rest done / Next set",
+  a finished work set says "Set done / Logged". A bar reading "Rest done" over a
+  plank is the failure.
+
+### It must survive the phone being put down
+
+The whole reason the model is a deadline rather than a tick:
+
+- Start a 2-minute countdown, **background the app for the full duration**,
+  come back → it reads 0:00 and has fired, not "1:47 left".
+- Background it halfway → the remaining time reflects real elapsed time.
+- **Pause, wait a minute, resume** → the same seconds are left as when it was
+  paused. Time passing must not drain a paused countdown.
+- ±15s while paused adjusts the frozen seconds; ±15s while running moves the
+  deadline. Neither may let the progress bar exceed its track.
+
+### Adjustment persistence differs by kind (easy to get backwards)
+
+- ±15s on a **rest** → persists as that exercise's rest preference; the next
+  rest for that exercise uses the new figure.
+- ±15s on a **work** countdown → does **not** persist anywhere. Holding a plank
+  longer today is not a new prescription, and it must not change how long you
+  rest.
+
+### The countdown must not outlive the rows it points at (found in review)
+
+Positional `setIndex` with no stable set id — every one of these silently wrote
+to the wrong row, or to a read-only session, before it was fixed:
+
+- Start a plank countdown, then **swipe-delete a set above it** → the countdown
+  cancels. It must never complete onto the row that shifted up.
+- Same for **reordering exercises**, **removing an exercise group**, and
+  **swapping the exercise** under a running countdown.
+- Start a countdown and **Finish the session while it runs** → the countdown
+  stops. A completion landing after the finish would write into a session
+  already shown as read-only, and the sync would push it.
+- Open an **already-finished** session → no countdown can be running or started.
+
+### ±15 on a finished work countdown (found in review)
+
+- Let a 60s plank run out, then tap **+15** on the "Set done" bar → the logged
+  `seconds` must still be 60. It must not become 75, and completion must not
+  fire a second time. Tap **−15** → still 60.
+- The same taps on a finished **rest** bar are fine and should re-arm: rest
+  records nothing, so chiming again costs a haptic.
+- +15 on an expired countdown gives a genuine 15 seconds, not a deadline moved
+  from a stale one (which leaves it expired and does visibly nothing).
+
+### Cross-app parity (web)
+
+- Web gets **no countdown** — deliberate, per the platform rule. Assert only
+  that the prescribed duration is still visible and editable: the workout editor
+  offers a seconds target for a `time` exercise, and the session screen asks for
+  seconds when logging one.
+
+
 ## Sequences (`/v1/sequences`)
 
 A sequence is a chain: what a class taught, in the order it flows. Backend only
