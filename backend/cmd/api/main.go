@@ -28,6 +28,7 @@ import (
 	"github.com/dmytro-ch21/vola/backend/internal/modules/session"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/share"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/technique"
+	"github.com/dmytro-ch21/vola/backend/internal/modules/theme"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/workout"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/auth"
@@ -104,6 +105,7 @@ func main() {
 	techniqueContentHandler := technique.NewContentHandler(techniqueRepo)
 	sessionHandler := session.NewHandler(session.NewPostgresRepository(pool))
 	planHandler := plan.NewHandler(plan.NewPostgresRepository(pool))
+	themeHandler := theme.NewHandler(theme.NewPostgresRepository(pool))
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/healthz", handleHealthz)
@@ -261,6 +263,14 @@ func main() {
 	mux.Handle("POST /v1/plans", verifier.RequireAuth(http.HandlerFunc(planHandler.Create)))
 	mux.Handle("PATCH /v1/plans/{planID}", verifier.RequireAuth(http.HandlerFunc(planHandler.Update)))
 	mux.Handle("DELETE /v1/plans/{planID}", verifier.RequireAuth(http.HandlerFunc(planHandler.Delete)))
+
+	// Weekly training themes. PUT rather than POST on the week itself: a week
+	// holds at most one theme and the caller names the week, so there is
+	// nothing to allocate and no id to hand back.
+	mux.Handle("GET /v1/themes", verifier.RequireAuth(http.HandlerFunc(themeHandler.List)))
+	mux.Handle("GET /v1/themes/{weekStart}", verifier.RequireAuth(http.HandlerFunc(themeHandler.Get)))
+	mux.Handle("PUT /v1/themes/{weekStart}", verifier.RequireAuth(http.HandlerFunc(themeHandler.Set)))
+	mux.Handle("DELETE /v1/themes/{weekStart}", verifier.RequireAuth(http.HandlerFunc(themeHandler.Delete)))
 	mux.Handle("GET /v1/workouts", verifier.RequireAuth(http.HandlerFunc(workoutHandler.List)))
 	mux.Handle("POST /v1/workouts", verifier.RequireAuth(http.HandlerFunc(workoutHandler.Create)))
 	mux.Handle("GET /v1/workouts/{workoutID}", verifier.RequireAuth(http.HandlerFunc(workoutHandler.Get)))

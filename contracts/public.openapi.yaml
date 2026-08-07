@@ -37,6 +37,19 @@ components:
       description: Clerk-issued session token, verified server-side via Clerk's JWKS.
 
   schemas:
+    Theme:
+      type: object
+      required: [week_start, title, notes, created_at, updated_at]
+      properties:
+        week_start:
+          type: string
+          format: date
+          description: The Monday of the week this theme covers.
+        title: { type: string, maxLength: 80 }
+        notes: { type: string, maxLength: 500 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
     BjjRank:
       type: object
       required: [belt, stripes, degree]
@@ -4655,6 +4668,119 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+
+  /themes:
+    get:
+      operationId: listThemes
+      summary: The caller's weekly training themes, over a window
+      description: >
+        A theme is one sentence about what a training WEEK is for — "deload",
+        "guard retention", "chase the squat".
+
+
+        **It is deliberately not a second focus list.** `/bjj/focus` holds a
+        rolling, athlete-ranked set of three to five techniques and is where
+        technique-level intent lives; a theme is week-boxed, coarse, and covers
+        whatever the athlete trains. A theme carries no technique ids and no
+        exercise ids — prose only — and that restriction is what keeps the two
+        from answering the same question differently.
+
+
+        Both bounds are required. Every caller wants a window, and an unbounded
+        list grows forever; spans wider than 800 days are refused.
+
+
+        Returns weeks whose **Monday** falls in `[from, to]` — a week straddling
+        `from` is not included. Both clients align `from` to a rendered Monday,
+        so this only bites a caller that passes, say, the first of a month.
+      tags: [Themes]
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Themes for weeks in the window, oldest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [themes]
+                properties:
+                  themes:
+                    type: array
+                    items: { $ref: "#/components/schemas/Theme" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /themes/{weekStart}:
+    parameters:
+      - name: weekStart
+        in: path
+        required: true
+        description: The Monday of the week, as a calendar date.
+        schema: { type: string, format: date }
+    get:
+      operationId: getTheme
+      summary: One week's theme
+      tags: [Themes]
+      responses:
+        "200":
+          description: The theme.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Theme" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      operationId: setTheme
+      summary: Set a week's theme
+      description: >
+        PUT rather than POST because a week holds at most one theme and the
+        caller names the week — there is nothing to allocate and no id to return.
+        Creating and replacing are the same request.
+
+
+        `weekStart` **must be a Monday**. A week starting on any other day would
+        silently overlap its neighbours, which is the one duplicate the primary
+        key cannot catch.
+      tags: [Themes]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string, maxLength: 80 }
+                notes: { type: string, maxLength: 500 }
+      responses:
+        "200":
+          description: The theme as stored.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Theme" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    delete:
+      operationId: deleteTheme
+      summary: Remove a week's theme
+      description: >
+        A week with no theme is `404`, not `204` — a client should be able to
+        tell "there was nothing" from "it is gone".
+      tags: [Themes]
+      responses:
+        "204": { description: Removed. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /records:
     get:

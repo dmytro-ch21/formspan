@@ -4702,6 +4702,62 @@ on next-moves — see below.
 - Web: following a link inside the panel remounts it — focus must land on the
   panel heading, not on `<body>`.
 
+## Weekly training themes (`/v1/themes`)
+
+One sentence per week about what the week is for. Authored on web, read on the
+phone.
+
+### The property that matters most
+
+- **A theme carries no technique ids and no exercise ids.** There is no picker
+  and no list — prose only. If one ever appears, the theme has become a second
+  focus list and `/bjj/focus` now has a rival answer to "what am I working on".
+  Assert the API rejects nothing of the sort because it accepts nothing of the
+  sort: the payload is `{title, notes}`.
+
+### Weeks
+
+- `PUT /v1/themes/2026-08-03` (a Monday) → 200, and a second PUT to the same
+  week **replaces** it rather than creating a second. One theme per week.
+- `created_at` does not move when the wording changes; `updated_at` does.
+- **`PUT` on a Tuesday → 400 saying a week must start on a Monday.** Without
+  this, two "weeks" overlap and both claim the same days.
+- A malformed date → 400, not a 500.
+- `GET /v1/themes?from=…&to=…` → weeks in the window, oldest first. Both bounds
+  required.
+- `to` before `from` → 400.
+- `DELETE` a week with no theme → **404, not 204.** A client should be able to
+  tell "there was nothing" from "it is gone".
+
+### Auth / security
+
+- **Another athlete's week is 404 on GET and on DELETE**, and their theme must
+  still be there afterwards. This is the cross-user check that has caught real
+  bugs twice in this project — assert the owner's row survives, not just that
+  the request failed.
+- `List` never returns a row belonging to anybody else, even for a week both
+  athletes have a theme in. A single-user fixture cannot see this.
+
+### Web (authoring)
+
+- The calendar shows a theme row above each week. A week with no theme reveals
+  a "+ Theme" affordance on hover — **check it is discoverable**; this is the
+  most likely thing to read well in code and fail in practice.
+- Clearing the text and saving removes the theme. A week with an empty title is
+  not a state the model has.
+- Escape cancels without saving.
+
+### Mobile (read-only)
+
+- Today shows this week's theme above the week's numbers, and **nothing at all**
+  when there is none — no "no theme set" row.
+- **There is no way to author one on the phone**, deliberately. Planning is a
+  desk activity.
+- **Offline → no theme and no error.** It is deliberately not cached: a stale
+  theme is worse than none, since it would describe a block the athlete has
+  already moved on from.
+
+
 ## Public Workout Plans
 
 Renamed from "Shared", and now actually populated — 16 VOLA-authored plans
