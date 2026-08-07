@@ -14195,6 +14195,60 @@ typechecks, but nothing here proves the bar appears, that the haptic fires, or
 that a backgrounded phone comes back to a correct clock — which is the one
 behaviour the whole design is for.
 
+## 2026-08-07 — Usernames: the handle the sharing design stands on
+
+`profiles.username` — unique, claimable, nullable. The first brick of the
+agreed social scope (usernames → search → friend request → accept → share to a
+friend, by copy), and deliberately only the brick: no search endpoint, no
+friends, nothing that consumes the handle yet. Claiming is opt-in until
+sharing gives a reason to claim.
+
+### The decisions, each with its why
+
+- **Lowercase-only format** (`[a-z][a-z0-9_]{2,29}`) rather than
+  case-preserved with case-insensitive compare. `display_name` already exists
+  for how a person wants their name to LOOK, so the handle can be strictly
+  canonical — no "is @Dmytro the same as @dmytro" question anywhere. Starts
+  with a letter so a handle can never be confused with a numeric id.
+- **Uniqueness is case-insensitive at the database anyway** — a unique index
+  on `lower(username)`. Defence in depth, not redundancy: the repository does
+  not validate (the handler does), so a future caller could hand it mixed
+  case, and the index is what makes that safe. The mutation check drops
+  `lower()` and watches the collision test fail.
+- **Reserved names live in Go**, per the 000021 convention: impersonation
+  handles (admin, vola, support…) and route/pronoun collisions (me, settings,
+  friends…). The list will grow; growing it must be a code change.
+- **Renaming is allowed and frees the old handle.** Nothing references a
+  username by value — friends and shares will key on `user_id` — so a rename
+  is structurally free. **Clearing is not supported**: the module's
+  nil-means-unchanged COALESCE contract cannot express it, and un-claiming
+  has no consumer. Add the Set-flag plumbing when someone actually needs it.
+- **The taken-handle 409 is its own error** (`ErrUsernameTaken`), split from
+  ErrAlreadyExists by constraint name in `translatePgError` — the same
+  discrimination the 23514 branch already does, because "this profile exists"
+  and "someone has that handle" cannot share a sentence. And yes, the 409
+  confirms a handle exists: that enumeration surface was accepted explicitly
+  when usernames were chosen over invite codes.
+
+### Client
+
+Mobile's profile editor gains the field — `autoCapitalize="none"` threaded
+through the shared `Field` component, which had "words" hardcoded and would
+have fought the format on every keystroke; input is lowercased client-side so
+the keyboard's opinions never earn a 400. An empty box OMITS the key rather
+than sending `""`. **Web has no profile-editing surface at all**, so it gets
+nothing — that gap predates this work and is now recorded rather than papered
+over with a screen nobody asked for.
+
+### Gaps
+
+- No availability check while typing — the 409 on save is the discovery
+  mechanism. Fine at this scale; a dedicated endpoint is rate-limitable later.
+- Nothing renders a username anywhere yet. It is stored and returned, and the
+  first consumer is the search endpoint, next in the social scope.
+- The mobile field is typecheck/lint-verified, not device-verified.
+
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

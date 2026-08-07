@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/database"
@@ -253,5 +254,101 @@ func cleanupProfile(t *testing.T, pool *pgxpool.Pool, userID string) {
 	if _, err := pool.Exec(context.Background(),
 		`DELETE FROM profiles WHERE user_id = $1`, userID); err != nil {
 		t.Fatalf("cleanup: %v", err)
+	}
+}
+
+// The username claim path. Every case here is one of the ways a unique handle
+// goes wrong, and the case-collision one deliberately goes AROUND validation
+// to prove the index holds on its own.
+func TestUsernameClaimAndRename(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	a, b := "test_user_uname_a", "test_user_uname_b"
+	for _, id := range []string{a, b} {
+		id := id
+		if _, err := repo.Create(ctx, id, NewProfile{}); err != nil {
+			t.Fatalf("create %s: %v", id, err)
+		}
+		t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM profiles WHERE user_id = $1`, id) })
+	}
+
+	u := "dmytro_bjj"
+	p, err := repo.Update(ctx, a, ProfileUpdate{Username: &u})
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if p.Username == nil || *p.Username != u {
+		t.Fatalf("claim did not stick: %v", p.Username)
+	}
+
+	// Someone else wants it — exact error, not merely "an error". Accepting
+	// any error is how a mis-mapped 409 sailed through review in the sequence
+	// module; pinned here from the start.
+	if _, err := repo.Update(ctx, b, ProfileUpdate{Username: &u}); !errors.Is(err, ErrUsernameTaken) {
+		t.Fatalf("want ErrUsernameTaken, got %v", err)
+	}
+
+	// CASE-INSENSITIVE at the DATABASE, not only in validation. The repository
+	// does not validate — the handler does — so a future caller could hand it
+	// mixed case. lower() in the index is what makes that safe, and this is
+	// the test that fails if the index quietly becomes a plain unique.
+	mixed := "DMYTRO_bjj"
+	if _, err := repo.Update(ctx, b, ProfileUpdate{Username: &mixed}); !errors.Is(err, ErrUsernameTaken) {
+		t.Fatalf("case variant must collide: want ErrUsernameTaken, got %v", err)
+	}
+
+	// Re-setting your own handle is idempotent, not a conflict — the unique
+	// index sees its own row.
+	if _, err := repo.Update(ctx, a, ProfileUpdate{Username: &u}); err != nil {
+		t.Fatalf("re-setting own username must succeed: %v", err)
+	}
+
+	// A rename frees the old handle for the next claimant.
+	u2 := "dmytro_renamed"
+	if _, err := repo.Update(ctx, a, ProfileUpdate{Username: &u2}); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	if _, err := repo.Update(ctx, b, ProfileUpdate{Username: &u}); err != nil {
+		t.Fatalf("freed username must be claimable: %v", err)
+	}
+
+	// Updating unrelated fields leaves the handle alone — the nil/COALESCE
+	// contract every other profile field already lives by.
+	dn := "Display Only"
+	p, err = repo.Update(ctx, a, ProfileUpdate{DisplayName: &dn})
+	if err != nil {
+		t.Fatalf("unrelated update: %v", err)
+	}
+	if p.Username == nil || *p.Username != u2 {
+		t.Fatalf("unrelated update moved the username: %v", p.Username)
+	}
+}
+
+func TestValidUsername(t *testing.T) {
+	// Pure logic — runs without TEST_DATABASE_URL, which is most local runs.
+	ok := []string{"abc", "dmytro", "dmytro_bjj", "a12345", "x_______x"}
+	for _, u := range ok {
+		if !ValidUsername(u) {
+			t.Errorf("%q should be claimable", u)
+		}
+	}
+	bad := map[string]string{
+		"ab":                    "under 3",
+		"Dmytro":                "uppercase — handles are canonical lowercase",
+		"1dmytro":               "starts with a digit",
+		"_dmytro":               "starts with underscore",
+		"dmytro bjj":            "whitespace",
+		"dmytro-bjj":            "hyphen outside the charset",
+		"dmytró":                "unicode outside the charset",
+		"admin":                 "reserved: impersonation",
+		"vola":                  "reserved: the product",
+		"me":                    "reserved: future route/pronoun collision",
+		"settings":              "reserved: route collision",
+		strings.Repeat("a", 31): "over 30",
+	}
+	for u, why := range bad {
+		if ValidUsername(u) {
+			t.Errorf("%q should be refused (%s)", u, why)
+		}
 	}
 }
