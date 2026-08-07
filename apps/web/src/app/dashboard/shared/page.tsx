@@ -57,6 +57,12 @@ export default function SharedWithYouPage() {
   // Single-flight: a slow first load must not resolve after an accept and
   // repaint the row that was just cleared.
   const inflight = useRef<AbortController | null>(null);
+  // An action's reload runs in a `finally`, which can land after the user has
+  // navigated away — and `load()` starts TWO fresh requests. The effect
+  // cleanup can only abort the flight that exists when it runs, so this is
+  // what stops one being created afterwards. All three actions consult it;
+  // the reviewer's note was "fix all three or none".
+  const mounted = useRef(true);
   const load = useCallback(() => {
     inflight.current?.abort();
     const c = new AbortController();
@@ -80,9 +86,16 @@ export default function SharedWithYouPage() {
   }, [getToken]);
 
   useEffect(() => {
+    mounted.current = true;
     void load();
-    return () => inflight.current?.abort();
+    return () => {
+      mounted.current = false;
+      inflight.current?.abort();
+    };
   }, [load]);
+
+  // Reload only if this screen is still on screen.
+  const reload = useCallback(() => (mounted.current ? load() : undefined), [load]);
 
   const accept = useCallback(
     async (card: ShareCard) => {
@@ -100,18 +113,18 @@ export default function SharedWithYouPage() {
         // Navigate to the RECIPIENT'S copy — never the sender's id, which
         // they have no permission to open.
         if (to) router.push(to(copy.resource_id));
-        else await load();
+        else await reload();
       } catch (err) {
         setActionError(err instanceof Error ? err.message : String(err));
         // A 404 or a 410 both mean this row is a ghost: the sender took it
         // back, or deleted the thing itself. Refresh rather than leave a
         // button that can only fail again.
-        await load();
+        await reload();
       } finally {
         setBusy(null);
       }
     },
-    [getToken, router, load],
+    [getToken, router, reload],
   );
 
   // The sender's side of the same verb — DELETE /v1/shares/{id} covers
@@ -125,11 +138,11 @@ export default function SharedWithYouPage() {
       } catch (err) {
         setActionError(err instanceof Error ? err.message : String(err));
       } finally {
-        await load();
+        await reload();
         setBusy(null);
       }
     },
-    [getToken, load],
+    [getToken, reload],
   );
 
   const decline = useCallback(
@@ -141,11 +154,11 @@ export default function SharedWithYouPage() {
       } catch (err) {
         setActionError(err instanceof Error ? err.message : String(err));
       } finally {
-        await load();
+        await reload();
         setBusy(null);
       }
     },
-    [getToken, load],
+    [getToken, reload],
   );
 
   return (
@@ -176,20 +189,21 @@ export default function SharedWithYouPage() {
       )}
 
       {shares !== null && (
+        <section className="space-y-2">
         <h2 className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
           Shared with you
         </h2>
-      )}
 
-      {shares?.length === 0 && (
+      {shares.length === 0 && (
         <p className="rounded-xl border border-dashed border-neutral-300 px-4 py-10 text-center text-sm text-neutral-500 dark:border-neutral-700">
           Nothing waiting. When a training partner sends you something, it
           lands here.
         </p>
       )}
 
+      {shares.length > 0 && (
       <ul className="space-y-2">
-        {shares?.map((card) => (
+        {shares.map((card) => (
           <li
             key={card.id}
             className="flex items-center gap-4 rounded-xl border border-neutral-200 p-4 dark:border-neutral-800"
@@ -208,13 +222,16 @@ export default function SharedWithYouPage() {
                 type="button"
                 onClick={() => accept(card)}
                 disabled={busy !== null}
+                aria-busy={busy === card.id}
                 aria-label={`Accept ${card.resource_label} from ${card.from}`}
                 className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm font-medium disabled:opacity-40 dark:border-neutral-700"
               >
-                {/* Labelled per row like Decline, and announced: this is the
-                    more consequential of the two, and "Accept" repeated down a
-                    list is indistinguishable when navigating by buttons. */}
-                <span aria-live="polite">{busy === card.id ? "…" : "Accept"}</span>
+                {/* Labelled per row like Decline: "Accept" repeated down a
+                    list is indistinguishable when navigating by buttons.
+                    The busy state is aria-busy plus real words rather than a
+                    live region containing "…", which announces as nothing. */}
+                <span aria-hidden>{busy === card.id ? "…" : "Accept"}</span>
+                {busy === card.id && <span className="sr-only">Accepting…</span>}
               </button>
               <button
                 type="button"
@@ -229,6 +246,9 @@ export default function SharedWithYouPage() {
           </li>
         ))}
       </ul>
+      )}
+        </section>
+      )}
 
       {sent !== null && (
         <section className="space-y-2 border-t border-neutral-200 pt-6 dark:border-neutral-800">
@@ -236,8 +256,14 @@ export default function SharedWithYouPage() {
             Waiting on them
           </h2>
           {sent.length === 0 ? (
+            // The disclosure lives HERE too, and this is the case that needs
+            // it most: a sender who comes back to check and finds the row gone
+            // is exactly the person about to conclude they were turned down.
+            // Rendering the note only alongside surviving rows put it
+            // everywhere except the moment it exists for.
             <p className="text-sm text-neutral-500">
-              Nothing unanswered.
+              Nothing unanswered. Shares disappear once they answer — we
+              don&apos;t say which way.
             </p>
           ) : (
             <>
@@ -260,12 +286,16 @@ export default function SharedWithYouPage() {
                       type="button"
                       onClick={() => cancel(card)}
                       disabled={busy !== null}
+                      aria-busy={busy === card.id}
                       aria-label={`Cancel ${card.resource_label} sent to ${card.to}`}
                       className="shrink-0 rounded-lg px-3 py-1.5 text-sm text-neutral-500 disabled:opacity-40"
                     >
-                      <span aria-live="polite">
+                      <span aria-hidden>
                         {busy === card.id ? "…" : "Cancel"}
                       </span>
+                      {busy === card.id && (
+                        <span className="sr-only">Cancelling…</span>
+                      )}
                     </button>
                   </li>
                 ))}
