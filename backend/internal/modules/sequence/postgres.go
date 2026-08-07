@@ -329,3 +329,86 @@ func translate(err error, op string) error {
 	}
 	return fmt.Errorf("sequence: %s: %w", op, err)
 }
+
+// ─── share.Copier ───────────────────────────────────────────────────────────
+//
+// Sequences are the first shareable thing, and this is the whole of what a
+// module owes the share system: say what it is called, and know how to
+// duplicate it. Nothing here imports the share package — these two methods
+// satisfy an interface declared over there, and cmd/api/main.go is what pairs
+// them up.
+
+// Describe returns the sequence's name for a recipient's inbox card.
+//
+// VISIBILITY, not ownership: a caller who can read a VOLA-authored chain can
+// pass it on, and doing so gives the recipient nothing they could not have
+// fetched themselves. ok=false covers both "no such id" and "not visible to
+// you", collapsed so that sharing cannot be used to test whether a guessed id
+// is real.
+func (r *PostgresRepository) Describe(ctx context.Context, resourceID, sharerID string) (string, bool, error) {
+	var name string
+	err := r.pool.QueryRow(ctx, `
+		SELECT name FROM bjj_sequences
+		WHERE id = $1 AND (owner_user_id = $2 OR owner_user_id IS NULL)`,
+		resourceID, sharerID).Scan(&name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, translate(err, "describe")
+	}
+	return name, true, nil
+}
+
+// CopyTo duplicates a sequence and its steps into another athlete's ownership,
+// inside the share module's transaction.
+//
+// A NEW id, always — never the source's, even though ids here can be
+// client-supplied. Two athletes owning rows with one id would collide on the
+// primary key for the second copy and, worse, would make the recipient's chain
+// answer to the sender's offline sync retries.
+//
+// The steps are re-inserted rather than the row being pointed at, because that
+// is what snapshot semantics MEAN: after this returns, the two chains have no
+// relationship at all, and the sender can rename, reorder or delete theirs
+// without touching what the recipient now owns. `sort_order` is re-derived
+// from the read order rather than copied, so a source with gaps in its
+// ordering yields a dense one.
+func (r *PostgresRepository) CopyTo(ctx context.Context, tx pgx.Tx, resourceID, newOwnerID string) (string, bool, error) {
+	var name, description string
+	var startPositionID *string
+	err := tx.QueryRow(ctx, `
+		SELECT name, description, start_position_id FROM bjj_sequences WHERE id = $1`,
+		resourceID).Scan(&name, &description, &startPositionID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Deleted between sending and accepting; the share module clears the
+		// dead row rather than letting it fail this way forever.
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, translate(err, "copy read")
+	}
+
+	var newID string
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO bjj_sequences (owner_user_id, name, description, start_position_id)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id`,
+		newOwnerID, name, description, startPositionID).Scan(&newID); err != nil {
+		return "", false, translate(err, "copy insert")
+	}
+
+	// One statement rather than read-then-loop: the steps never leave the
+	// database, so a long chain costs one round trip and cannot half-copy.
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO bjj_sequence_steps
+			(sequence_id, technique_id, sort_order, ends_at_position_id, notes)
+		SELECT $1, technique_id,
+		       row_number() OVER (ORDER BY sort_order) - 1,
+		       ends_at_position_id, notes
+		FROM bjj_sequence_steps WHERE sequence_id = $2`,
+		newID, resourceID); err != nil {
+		return "", false, translate(err, "copy steps")
+	}
+	return newID, true, nil
+}

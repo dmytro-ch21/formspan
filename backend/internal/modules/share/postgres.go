@@ -1,0 +1,184 @@
+package share
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type PostgresRepository struct {
+	pool    *pgxpool.Pool
+	reg     Registry
+	friends Friends
+}
+
+func NewPostgresRepository(pool *pgxpool.Pool, reg Registry, friends Friends) *PostgresRepository {
+	return &PostgresRepository{pool: pool, reg: reg, friends: friends}
+}
+
+func (r *PostgresRepository) Create(ctx context.Context, callerID string, in New) error {
+	copier, known := r.reg[in.ResourceType]
+	if !known {
+		return ErrInvalidInput
+	}
+
+	// Friendship FIRST, and its failure is ErrNotFound. Not-a-friend and
+	// no-such-handle are one answer, so this endpoint cannot be used to
+	// enumerate accounts or to discover who is friends with whom.
+	toID, ok, err := r.friends.FriendID(ctx, callerID, in.ToUsername)
+	if err != nil {
+		return fmt.Errorf("share: friend lookup: %w", err)
+	}
+	if !ok {
+		return ErrNotFound
+	}
+
+	// Then the resource, whose miss is the SAME error — so a caller cannot
+	// distinguish "that id is not real" from "that id is not mine to send".
+	label, ok, err := copier.Describe(ctx, in.ResourceID, callerID)
+	if err != nil {
+		return fmt.Errorf("share: describe %s: %w", in.ResourceType, err)
+	}
+	if !ok {
+		return ErrNotFound
+	}
+	if len(label) > maxLabel {
+		label = label[:maxLabel]
+	}
+
+	// The partial unique index is the sole arbiter of "already sent" — no
+	// read-then-write window, same argument as friendships' primary key.
+	_, err = r.pool.Exec(ctx, `
+		INSERT INTO shares (resource_type, resource_id, resource_label, from_user_id, to_user_id)
+		VALUES ($1, $2, $3, $4, $5)`,
+		in.ResourceType, in.ResourceID, label, callerID, toID)
+	return translate(err, "create")
+}
+
+func (r *PostgresRepository) Inbox(ctx context.Context, callerID string) ([]Card, error) {
+	// The sender's handle is joined LIVE, so a rename propagates to every
+	// inbox it appears in — the label beside it is the deliberate exception,
+	// being a record of what was said rather than a view of a live thing.
+	rows, err := r.pool.Query(ctx, `
+		SELECT s.id, s.resource_type, s.resource_label, p.username, s.created_at
+		FROM shares s
+		JOIN profiles p ON p.user_id = s.from_user_id
+		WHERE s.to_user_id = $1 AND s.status = 'pending'
+		ORDER BY s.created_at DESC, s.id
+		LIMIT $2`, callerID, maxList)
+	if err != nil {
+		return nil, translate(err, "inbox")
+	}
+	defer rows.Close()
+	out := []Card{}
+	for rows.Next() {
+		var c Card
+		if err := rows.Scan(&c.ID, &c.ResourceType, &c.ResourceLabel, &c.From, &c.CreatedAt); err != nil {
+			return nil, translate(err, "inbox scan")
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func (r *PostgresRepository) Accept(ctx context.Context, callerID, shareID string) (Accepted, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return Accepted{}, translate(err, "accept")
+	}
+	// The copy and the status flip are ONE unit. Rollback is a no-op after a
+	// successful commit; before one, it is what stops a copy existing for a
+	// share that still reads as pending.
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// FOR UPDATE, because two taps on a slow connection are two concurrent
+	// accepts of the same row, and without the lock both would pass the
+	// status test and both would copy. The predicates are the authorization:
+	// addressed TO the caller and still pending, so a sender accepting their
+	// own share and an outsider accepting somebody else's are the same
+	// ErrNotFound as a share that never existed.
+	var resourceType, resourceID string
+	err = tx.QueryRow(ctx, `
+		SELECT resource_type, resource_id FROM shares
+		WHERE id = $1 AND to_user_id = $2 AND status = 'pending'
+		FOR UPDATE`, shareID, callerID).Scan(&resourceType, &resourceID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Accepted{}, ErrNotFound
+	}
+	if err != nil {
+		return Accepted{}, translate(err, "accept claim")
+	}
+
+	copier, ok := r.reg[resourceType]
+	if !ok {
+		// A type this build cannot copy: a module removed since the share was
+		// stored. Not the recipient's fault and not a miss to hide.
+		return Accepted{}, ErrGone
+	}
+	newID, ok, err := copier.CopyTo(ctx, tx, resourceID, callerID)
+	if err != nil {
+		return Accepted{}, fmt.Errorf("share: copy %s: %w", resourceType, err)
+	}
+	if !ok {
+		// Deleted between sending and accepting. There is no foreign key that
+		// could have prevented this — resource_id is polymorphic — so it is
+		// handled here instead, by clearing the dead share rather than
+		// leaving it to fail identically forever.
+		if _, err := tx.Exec(ctx, `DELETE FROM shares WHERE id = $1`, shareID); err != nil {
+			return Accepted{}, translate(err, "accept clear")
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return Accepted{}, translate(err, "accept clear commit")
+		}
+		return Accepted{}, ErrGone
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE shares
+		SET status = 'accepted', accepted_at = now(), copied_resource_id = $2
+		WHERE id = $1`, shareID, newID); err != nil {
+		return Accepted{}, translate(err, "accept mark")
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Accepted{}, translate(err, "accept commit")
+	}
+	return Accepted{ResourceType: resourceType, ResourceID: newID}, nil
+}
+
+func (r *PostgresRepository) Delete(ctx context.Context, callerID, shareID string) error {
+	// Either end may remove it, and the row is scoped to the caller being one
+	// of them. An accepted share can also be cleared: the copy is the
+	// recipient's own by then, so removing the record takes nothing away.
+	tag, err := r.pool.Exec(ctx, `
+		DELETE FROM shares WHERE id = $1 AND (to_user_id = $2 OR from_user_id = $2)`,
+		shareID, callerID)
+	if err != nil {
+		return translate(err, "delete")
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func translate(err error, op string) error {
+	if err == nil {
+		return nil
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		switch pgErr.Code {
+		case "23505": // unique_violation — the partial pending index
+			return ErrAlreadyExists
+		case "23514": // check_violation — self-share, or the accepted/copy invariant
+			return ErrInvalidInput
+		}
+	}
+	// Never let a raw SQL error escape: the handler turns this into a generic
+	// 500 and logs the detail server-side.
+	return fmt.Errorf("share: %s: %w", op, err)
+}

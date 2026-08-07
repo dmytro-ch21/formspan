@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@clerk/nextjs";
 
 import { deleteSequence, getSequence, type Sequence } from "@/lib/api";
+import { ShareToFriend } from "./ShareToFriend";
 
 /**
  * One sequence, drawn as the chain it is.
@@ -84,8 +85,15 @@ export default function SequenceDetailPage() {
         {/* Gated on `editable`, which the SERVER resolves. The client never
             compares user ids to decide this — that shape is how client-side
             authorization gets written by accident. */}
-        {s.editable && (
-          <div className="flex shrink-0 gap-2">
+        <div className="flex shrink-0 items-start gap-2">
+          {/* Share is OUTSIDE the `editable` gate, unlike Edit and Delete.
+              Passing on a chain you can read is not a write to it, and the
+              server tests visibility rather than ownership for exactly this
+              reason — a VOLA-authored sequence is something you can already
+              show a training partner by hand. */}
+          <ShareToFriend resourceType="sequence" resourceId={s.id} />
+          {s.editable && (
+            <>
             <Link
               href={`/dashboard/sequences/${s.id}/edit`}
               className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm font-medium dark:border-neutral-700"
@@ -106,8 +114,9 @@ export default function SequenceDetailPage() {
                 {deleting ? "Deleting…" : confirming ? "Really delete?" : "Delete"}
               </span>
             </button>
-          </div>
-        )}
+            </>
+          )}
+        </div>
       </header>
 
       <ol className="space-y-1">

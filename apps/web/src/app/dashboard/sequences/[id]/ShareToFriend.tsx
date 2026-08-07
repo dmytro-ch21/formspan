@@ -1,0 +1,175 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useAuth } from "@clerk/nextjs";
+
+import { listFriends, shareResource, type FriendCard } from "@/lib/api";
+
+/**
+ * Share this thing with a friend.
+ *
+ * **A friend PICKER, not a handle field**, and that is the product decision
+ * this component exists to hold. You can only share with people who already
+ * agreed to hear from you, so typing a handle could only ever produce one of
+ * two outcomes: a friend you could have picked from a list, or a 404. A text
+ * input would invite the second and teach nothing.
+ *
+ * It is also generic on purpose — `resourceType`/`resourceId`, no mention of
+ * sequences — because the API is one surface for everything shareable and
+ * plans and workouts will mount this same component.
+ *
+ * The API's 404 covers "not your friend", "no such handle" and "not yours to
+ * send" alike, deliberately, so the copy here cannot be more specific than the
+ * server is willing to be.
+ */
+export function ShareToFriend({
+  resourceType,
+  resourceId,
+}: {
+  resourceType: string;
+  resourceId: string;
+}) {
+  const { getToken } = useAuth();
+  const [open, setOpen] = useState(false);
+  const [friends, setFriends] = useState<FriendCard[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [sending, setSending] = useState<string | null>(null);
+  const [sentTo, setSentTo] = useState<string[]>([]);
+  const panel = useRef<HTMLDivElement>(null);
+
+  // Loaded on OPEN rather than on mount: most visits to a sequence are not
+  // visits to share it, and the friends list is somebody else's data to fetch
+  // only when it is about to be shown.
+  useEffect(() => {
+    if (!open || friends !== null) return;
+    const c = new AbortController();
+    listFriends(getToken, c.signal)
+      .then(setFriends)
+      .catch((err) => {
+        if ((err as Error)?.name !== "AbortError") {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      });
+    return () => c.abort();
+  }, [open, friends, getToken]);
+
+  // Escape closes, and focus returns to the trigger — a panel that can only be
+  // dismissed with the mouse is a keyboard trap.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open]);
+
+  const send = useCallback(
+    async (username: string) => {
+      setSending(username);
+      setError(null);
+      try {
+        await shareResource(getToken, username, resourceType, resourceId);
+        setSentTo((prev) => [...prev, username]);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setSending(null);
+      }
+    },
+    [getToken, resourceType, resourceId],
+  );
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-haspopup="true"
+        className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm font-medium dark:border-neutral-700"
+      >
+        Share
+      </button>
+
+      {open && (
+        <div
+          ref={panel}
+          role="dialog"
+          aria-label="Share with a friend"
+          className="absolute right-0 z-10 mt-2 w-72 rounded-xl border border-neutral-200 bg-white p-3 shadow-lg dark:border-neutral-800 dark:bg-neutral-900"
+        >
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">
+            Send a copy to
+          </p>
+
+          {error && (
+            <p
+              role="alert"
+              className="mb-2 text-sm text-red-700 dark:text-red-300"
+            >
+              {error}
+            </p>
+          )}
+
+          {/* null is LOADING and [] is "no friends yet" — a failed load must
+              never render as the empty state, which would read as "you have no
+              friends" when the truth is "we could not ask". */}
+          {friends === null && !error && (
+            <p className="text-sm text-neutral-500">Loading…</p>
+          )}
+
+          {friends?.length === 0 && (
+            <p className="text-sm text-neutral-500">
+              Nobody yet. Add a training partner on your phone, then share this
+              with them.
+            </p>
+          )}
+
+          <ul className="max-h-64 space-y-1 overflow-y-auto">
+            {friends?.map((f) => {
+              const sent = sentTo.includes(f.username);
+              return (
+                <li key={f.username}>
+                  <button
+                    type="button"
+                    onClick={() => send(f.username)}
+                    disabled={sending !== null || sent}
+                    className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-neutral-100 disabled:opacity-60 dark:hover:bg-neutral-800"
+                  >
+                    <span className="min-w-0">
+                      <span className="block truncate font-medium">
+                        @{f.username}
+                      </span>
+                      {f.display_name && (
+                        <span className="block truncate text-xs text-neutral-500">
+                          {f.display_name}
+                        </span>
+                      )}
+                    </span>
+                    <span
+                      aria-live="polite"
+                      className="shrink-0 text-xs text-neutral-500"
+                    >
+                      {sending === f.username
+                        ? "Sending…"
+                        : sent
+                          ? "Sent ✓"
+                          : ""}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+
+          {/* Said once, here, rather than in a tooltip nobody opens: this is
+              the property that makes sharing safe to accept. */}
+          <p className="mt-2 border-t border-neutral-200 pt-2 text-xs text-neutral-500 dark:border-neutral-800">
+            They get their own copy. Your later edits stay yours.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}

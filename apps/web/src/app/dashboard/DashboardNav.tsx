@@ -102,6 +102,16 @@ const navItems: {
     needs: (m) =>
       m.some((x) => x.enabled && x.capabilities.catalog === "techniques"),
   },
+  {
+    href: "/dashboard/shared",
+    label: "Shared with you",
+    // UNGATED, unlike everything above it, and deliberately: what lands here
+    // is decided by other people. Gating it on the recipient's own enabled
+    // disciplines would hide a real thing a real friend sent — a chain from a
+    // partner is exactly how somebody discovers a discipline they have not
+    // turned on yet. The screen is generic over resource_type for the same
+    // reason, so nothing but this one line changes when plans join it.
+  },
   { href: "/dashboard/settings", label: "Settings" },
 ];
 
