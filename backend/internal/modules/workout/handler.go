@@ -48,19 +48,47 @@ func writeErr(w http.ResponseWriter, r *http.Request, err error) {
 	}
 }
 
-// List returns workouts the caller can see. ?scope=mine|shared narrows;
+// ScopeFilter turns the ?scope= parameter into the two booleans the filter
+// carries, reporting whether it was a value we accept.
+//
+// Extracted from the handler because it is the whole of a compatibility promise
+// and none of it was reachable by a test: `List` reads claims before anything
+// else, and `auth`'s context key is unexported, so a handler-level test cannot
+// get far enough to observe the decision without widening that package.
+//
+// **`shared` is still accepted, and deliberately so.** The concept is called
+// Public Workout Plans now and `public` is the name to use, but an installed
+// mobile build sends whatever it shipped with and updates on the App Store's
+// schedule, not ours. Rejecting the old word would give every not-yet-updated
+// phone a 400 and an empty Workouts tab — a rename presenting as an outage.
+// Costs one branch; delete it once the field has turned over, and the test
+// named for that promise is what will object.
+//
+// Unknown values are rejected rather than ignored: an unrecognised ?scope= used
+// to fall through to "everything visible", so a typo looked like it worked.
+func ScopeFilter(scope string) (mine, public, ok bool) {
+	switch scope {
+	case "":
+		return true, true, true
+	case "mine":
+		return true, false, true
+	case "public", "shared":
+		return false, true, true
+	default:
+		return false, false, false
+	}
+}
+
+// List returns workouts the caller can see. ?scope=mine|public narrows;
 // omitted means both.
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
 	q := r.URL.Query()
 
-	// Reject unknown enum values rather than silently returning []. An
-	// unrecognised ?scope= used to fall through to "everything visible",
-	// so a typo looked like it worked.
-	scope := q.Get("scope")
-	if scope != "" && scope != "mine" && scope != "shared" {
+	mine, public, ok := ScopeFilter(q.Get("scope"))
+	if !ok {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
-			"scope must be mine or shared")
+			"scope must be mine or public")
 		return
 	}
 	if s := q.Get("sport"); s != "" && !ValidSport(Sport(s)) {
@@ -77,8 +105,8 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	f := Filter{
 		Sport:  Sport(q.Get("sport")),
 		Goal:   Goal(q.Get("goal")),
-		Mine:   scope == "" || scope == "mine",
-		Shared: scope == "" || scope == "shared",
+		Mine:   mine,
+		Public: public,
 	}
 
 	workouts, err := h.repo.List(r.Context(), claims.UserID, f)

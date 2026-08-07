@@ -23,6 +23,7 @@ import (
 	"github.com/dmytro-ch21/vola/backend/internal/modules/exercise"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/health"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/technique"
+	"github.com/dmytro-ch21/vola/backend/internal/modules/workout"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/database"
 )
 
@@ -49,6 +50,16 @@ func main() {
 		log.Fatalf("seed: exercises: %v", err)
 	}
 	log.Printf("seed: exercises: %d upserted", n)
+
+	// AFTER exercises, and the order is load-bearing rather than tidy: every
+	// plan item is a foreign key into the catalog, so seeding these first would
+	// fail on a fresh database with an error about an exercise that is merely
+	// not written yet.
+	wn, err := workout.Seed(ctx, pool)
+	if err != nil {
+		log.Fatalf("seed: workouts: %v", err)
+	}
+	log.Printf("seed: public workout plans: %d upserted", wn)
 
 	tn, err := technique.Seed(ctx, technique.NewPostgresRepository(pool))
 	if err != nil {

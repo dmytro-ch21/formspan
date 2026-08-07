@@ -16,6 +16,7 @@ import {
   listExercises,
   pickImage,
   renameWorkout,
+  createWorkout,
   replaceItems,
   setsFromWorkout,
   startSession,
@@ -64,6 +65,7 @@ export default function WorkoutEditorPage({
   const [loading, setLoading] = useState(true);
   const [everLoaded, setEverLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copying, setCopying] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedOnce, setSavedOnce] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -378,11 +380,40 @@ export default function WorkoutEditorPage({
       </header>
 
       {!canEdit && (
-        <p className="rounded-card border border-line bg-surface px-4 py-3 text-sm text-text-muted">
-          {workout.owner_user_id === null
-            ? "A VOLA template — view only."
-            : "Shared by someone else — view only."}
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-line bg-surface px-4 py-3">
+          <p className="text-sm text-text-muted">
+            {workout.owner_user_id === null
+              ? "A VOLA plan — yours to copy, not to edit."
+              : "Published by someone else — yours to copy, not to edit."}
+          </p>
+          {/* The point of a browse surface: without this, the seeded plans are
+              something you can read and never use. The copy is a NEW workout
+              owned outright, so editing it can't touch the original and a
+              deploy refreshing the seeded plan can't reach into the copy. */}
+          <button
+            type="button"
+            disabled={copying}
+            onClick={async () => {
+              setCopying(true);
+              try {
+                const mine = await createWorkout(getToken, {
+                  name: workout.name,
+                  sport: workout.sport,
+                  goal: workout.goal,
+                  visibility: "private",
+                });
+                await replaceItems(getToken, mine.id, items);
+                router.push(`/dashboard/workouts/${mine.id}`);
+              } catch (err) {
+                setError(err instanceof Error ? err.message : String(err));
+                setCopying(false);
+              }
+            }}
+            className="shrink-0 rounded-pill bg-accent-fill px-4 py-2 text-sm font-bold text-accent-on-fill transition hover:brightness-110 disabled:opacity-50"
+          >
+            {copying ? "Copying…" : "Copy to my workouts"}
+          </button>
+        </div>
       )}
 
       {error && (

@@ -112,3 +112,62 @@ func TestRenameHandler_RejectsMalformedJSON(t *testing.T) {
 		t.Errorf("code = %q, want invalid_input", got)
 	}
 }
+
+// The scope parameter, and the compatibility promise attached to it.
+//
+// Against `ScopeFilter` rather than the handler: `List` reads claims before
+// anything else and `auth`'s context key is unexported, so a handler-level test
+// cannot reach the decision without widening that package. Extracting it is
+// what made the promise testable at all.
+func TestScopeFilter_PublicMeansPublicOnly(t *testing.T) {
+	mine, public, ok := ScopeFilter("public")
+	if !ok || mine || !public {
+		t.Errorf("scope=public: mine=%v public=%v ok=%v", mine, public, ok)
+	}
+}
+
+func TestScopeFilter_MineMeansMineOnly(t *testing.T) {
+	mine, public, ok := ScopeFilter("mine")
+	if !ok || !mine || public {
+		t.Errorf("scope=mine: mine=%v public=%v ok=%v", mine, public, ok)
+	}
+}
+
+func TestScopeFilter_OmittedMeansBoth(t *testing.T) {
+	mine, public, ok := ScopeFilter("")
+	if !ok || !mine || !public {
+		t.Errorf("omitted scope: mine=%v public=%v ok=%v", mine, public, ok)
+	}
+}
+
+// The one that makes the deprecation promise enforceable.
+//
+// `shared` is the old name for `public`, kept because an installed mobile build
+// sends whatever it shipped with and updates on the App Store's schedule rather
+// than ours — rejecting it would hand every not-yet-updated phone a 400 and an
+// empty Workouts tab. The branch carries a comment inviting its own deletion,
+// so without this a cleanup that removes it ships green and the outage arrives
+// with it.
+func TestScopeFilter_StillAcceptsTheOldSharedScope(t *testing.T) {
+	mine, public, ok := ScopeFilter("shared")
+	if !ok {
+		t.Fatal("scope=shared was rejected — every mobile build older than the " +
+			"rename now gets an empty Workouts tab")
+	}
+	// Not merely accepted: it must mean the same thing. An alias that passed
+	// validation and then fell through to "everything" would still be wrong.
+	wantMine, wantPublic, _ := ScopeFilter("public")
+	if mine != wantMine || public != wantPublic {
+		t.Errorf("shared and public must agree: shared(%v,%v) vs public(%v,%v)",
+			mine, public, wantMine, wantPublic)
+	}
+}
+
+func TestScopeFilter_RejectsNonsense(t *testing.T) {
+	// The alias must not have widened the gate.
+	for _, bad := range []string{"everything", "Public", "SHARED", "all", " "} {
+		if _, _, ok := ScopeFilter(bad); ok {
+			t.Errorf("scope=%q should have been rejected", bad)
+		}
+	}
+}

@@ -4702,6 +4702,51 @@ on next-moves — see below.
 - Web: following a link inside the panel remounts it — focus must land on the
   panel heading, not on `<body>`.
 
+## Public Workout Plans
+
+Renamed from "Shared", and now actually populated — 16 VOLA-authored plans
+seeded by `cmd/seed`.
+
+### The browse surface
+
+- **Workouts → Public plans** lists the seeded plans, each with generated
+  artwork. Empty state reads "No public plans yet", not "Nothing shared yet".
+- Opening one shows it read-only: *"A VOLA plan — yours to copy, not to edit."*
+- **Copy to my workouts** creates an owned copy and navigates to it. Editing the
+  copy must not change the original; re-running the seed must not change the
+  copy.
+- On mobile, copying works **offline** — it writes locally and syncs like
+  anything else.
+
+### The seed, and the property that matters most
+
+- `go run ./cmd/seed` twice → 16 plans, not 32. Idempotent.
+- Every seeded plan is ownerless, `visibility='public'`, `source='seed'`.
+- **A workout somebody owns must survive a deploy.** Plant a user-owned workout
+  on a seeded id, re-run the seed, and assert the name, owner, visibility AND
+  its items are untouched. The item-replace needs its own guard — without it the
+  plan keeps its name and loses everything in it, which is the worse failure
+  because it looks like the athlete's own mistake.
+- The seed log reports rows **written**, so a skipped collision shows as 15
+  rather than 16.
+
+### The wire rename
+
+- `GET /v1/workouts?scope=public` → the plans. `?scope=mine` → your own.
+- **`?scope=shared` must still work**, returning the same as `public`. An
+  installed mobile build sends the old word until it updates; rejecting it
+  presents as an empty Workouts tab rather than as a rename.
+- `?scope=nonsense` → 400.
+
+### Artwork
+
+- A plan's gradient is the same on every launch and every device. Restart the
+  app and compare.
+- The seeded plans are not all one colour — that is what makes the list
+  scannable.
+- No image assets are downloaded or bundled for this.
+
+
 ## Swapping an exercise
 
 The rule the old one broke: suggestions must be about what the exercise

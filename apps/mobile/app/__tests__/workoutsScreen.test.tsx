@@ -147,7 +147,7 @@ it('still renders the network list for the shared scope, which has no cache', as
   // check that is to actually switch to it.
   mockCachedWorkouts.mockResolvedValue([workout({ id: 'w1', name: 'Legs' })]);
   mockListWorkouts.mockImplementation(async (...a: unknown[]) =>
-    a[1] === 'shared'
+    a[1] === 'public'
       ? [workout({ id: 's1', name: 'Someone Else Plan', owner_user_id: 'u2' })]
       : [workout({ id: 'w1', name: 'Legs' })],
   );
@@ -155,7 +155,7 @@ it('still renders the network list for the shared scope, which has no cache', as
   render(<WorkoutsScreen />);
   await screen.findByText('Legs');
 
-  fireEvent.press(screen.getByText('Shared'));
+  fireEvent.press(screen.getByText('Public plans'));
 
   expect(await screen.findByText('Someone Else Plan')).toBeTruthy();
   // And the cached `mine` row must not leak into the shared tab.

@@ -22,7 +22,7 @@ import { useUnits } from "@/lib/useUnits";
 
 const SCOPES = [
   { key: "mine", label: "Mine" },
-  { key: "shared", label: "Shared" },
+  { key: "public", label: "Public plans" },
 ] as const;
 
 export default function WorkoutsPage() {
@@ -32,7 +32,7 @@ export default function WorkoutsPage() {
   const { units } = useUnits();
   const router = useRouter();
 
-  const [scope, setScope] = useState<"mine" | "shared">("mine");
+  const [scope, setScope] = useState<"mine" | "public">("mine");
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [loading, setLoading] = useState(true);
   const [everLoaded, setEverLoaded] = useState(false);
@@ -117,12 +117,12 @@ export default function WorkoutsPage() {
         error ? null : (
           <div className="rounded-card border border-dashed border-line px-6 py-16 text-center">
             <p className="font-medium">
-              {scope === "mine" ? "No workouts yet" : "Nothing shared yet"}
+              {scope === "mine" ? "No workouts yet" : "No public plans yet"}
             </p>
             <p className="mt-1 text-sm text-text-muted">
               {scope === "mine"
                 ? "Build one once, then reuse it every session."
-                : "Workouts other people publish appear here."}
+                : "Ready-made plans you can copy and make your own."}
             </p>
           </div>
         )
@@ -143,7 +143,7 @@ export default function WorkoutsPage() {
                   </h2>
                   {w.visibility === "public" && (
                     <span className="eyebrow shrink-0 rounded-pill border border-lime/40 px-2 py-0.5 text-lime">
-                      Shared
+                      Public
                     </span>
                   )}
                 </div>

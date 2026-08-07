@@ -1,0 +1,911 @@
+[
+  {
+    "id": "public-bodyweight-foundations",
+    "name": "Bodyweight Foundations",
+    "sport": "strength",
+    "goal": "general",
+    "notes": "Your first month, with no equipment at all. Three times a week, about 25 minutes. Every movement has an easier version \u2014 drop to your knees, or shorten the range.",
+    "items": [
+      {
+        "exercise_id": "push-up",
+        "target_sets": 3,
+        "target_reps": 8,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "bodyweight-squat",
+        "target_sets": 3,
+        "target_reps": 12,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "glute-bridge",
+        "target_sets": 3,
+        "target_reps": 12,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "bird-dog",
+        "target_sets": 3,
+        "target_reps": 10,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "plank",
+        "target_sets": 3,
+        "target_reps": null,
+        "target_weight_kg": null,
+        "target_seconds": 30,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "superman",
+        "target_sets": 2,
+        "target_reps": 12,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "public-home-upper",
+    "name": "Home Upper Body",
+    "sport": "strength",
+    "goal": "general",
+    "notes": "Chest, shoulders, arms and back with no kit. The rows need a sturdy table or a low bar \u2014 go under it and pull your chest to the edge. Without one, this is a push day; skip them and say so.",
+    "items": [
+      {
+        "exercise_id": "push-up",
+        "target_sets": 4,
+        "target_reps": 10,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "inverted-row",
+        "target_sets": 4,
+        "target_reps": 8,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": "Under a table edge or a low bar."
+      },
+      {
+        "exercise_id": "pike-push-up",
+        "target_sets": 3,
+        "target_reps": 8,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "bench-dip",
+        "target_sets": 3,
+        "target_reps": 10,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "plank",
+        "target_sets": 3,
+        "target_reps": null,
+        "target_weight_kg": null,
+        "target_seconds": 40,
+        "target_distance_m": null,
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "public-home-lower",
+    "name": "Home Lower Body",
+    "sport": "strength",
+    "goal": "general",
+    "notes": "Legs and glutes on a floor. Slow the lowering down if it starts feeling easy.",
+    "items": [
+      {
+        "exercise_id": "bodyweight-squat",
+        "target_sets": 4,
+        "target_reps": 15,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "walking-lunge",
+        "target_sets": 3,
+        "target_reps": 20,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "glute-bridge",
+        "target_sets": 3,
+        "target_reps": 15,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "bodyweight-calf-raise",
+        "target_sets": 3,
+        "target_reps": 20,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "side-plank",
+        "target_sets": 2,
+        "target_reps": null,
+        "target_weight_kg": null,
+        "target_seconds": 30,
+        "target_distance_m": null,
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "public-home-core",
+    "name": "Home Core",
+    "sport": "strength",
+    "goal": "general",
+    "notes": "Fifteen minutes of trunk work. Holds, not crunches \u2014 bracing is what carries over to everything else.",
+    "items": [
+      {
+        "exercise_id": "plank",
+        "target_sets": 3,
+        "target_reps": null,
+        "target_weight_kg": null,
+        "target_seconds": 45,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "side-plank",
+        "target_sets": 3,
+        "target_reps": null,
+        "target_weight_kg": null,
+        "target_seconds": 30,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "hollow-body-hold",
+        "target_sets": 3,
+        "target_reps": null,
+        "target_weight_kg": null,
+        "target_seconds": 25,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "dead-bug",
+        "target_sets": 3,
+        "target_reps": 12,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "bird-dog",
+        "target_sets": 3,
+        "target_reps": 10,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "public-bodyweight-conditioning",
+    "name": "Bodyweight Conditioning",
+    "sport": "strength",
+    "goal": "endurance",
+    "notes": "Twenty hard minutes, no equipment. Move between exercises without resting; rest at the end of a round instead.",
+    "items": [
+      {
+        "exercise_id": "burpee",
+        "target_sets": 4,
+        "target_reps": 10,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "jump-squat",
+        "target_sets": 4,
+        "target_reps": 15,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "mountain-climber",
+        "target_sets": 4,
+        "target_reps": null,
+        "target_weight_kg": null,
+        "target_seconds": 30,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "push-up",
+        "target_sets": 4,
+        "target_reps": 12,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "plank",
+        "target_sets": 4,
+        "target_reps": null,
+        "target_weight_kg": null,
+        "target_seconds": 45,
+        "target_distance_m": null,
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "public-dumbbells-full-body",
+    "name": "Dumbbells Only: Full Body",
+    "sport": "strength",
+    "goal": "general",
+    "notes": "One pair of dumbbells, whole body, three times a week. The default answer for a home gym that is a corner of a room.",
+    "items": [
+      {
+        "exercise_id": "goblet-squat",
+        "target_sets": 3,
+        "target_reps": 10,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "dumbbell-bench-press",
+        "target_sets": 3,
+        "target_reps": 10,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "bent-over-dumbbell-row",
+        "target_sets": 3,
+        "target_reps": 10,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "dumbbell-romanian-deadlift",
+        "target_sets": 3,
+        "target_reps": 10,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "standing-dumbbell-shoulder-press",
+        "target_sets": 3,
+        "target_reps": 10,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "plank",
+        "target_sets": 3,
+        "target_reps": null,
+        "target_weight_kg": null,
+        "target_seconds": 45,
+        "target_distance_m": null,
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "public-dumbbells-upper",
+    "name": "Dumbbells Only: Upper Body",
+    "sport": "strength",
+    "goal": "hypertrophy",
+    "notes": "Push, pull and arms with one pair of dumbbells.",
+    "items": [
+      {
+        "exercise_id": "dumbbell-bench-press",
+        "target_sets": 4,
+        "target_reps": 10,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "bent-over-dumbbell-row",
+        "target_sets": 4,
+        "target_reps": 10,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "standing-dumbbell-shoulder-press",
+        "target_sets": 3,
+        "target_reps": 12,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "dumbbell-lateral-raise",
+        "target_sets": 3,
+        "target_reps": 15,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "dumbbell-biceps-curl",
+        "target_sets": 3,
+        "target_reps": 12,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "dumbbell-overhead-triceps-extension",
+        "target_sets": 3,
+        "target_reps": 12,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "public-dumbbells-lower",
+    "name": "Dumbbells Only: Lower Body",
+    "sport": "strength",
+    "goal": "hypertrophy",
+    "notes": "Legs with dumbbells. Split squats do the work a barbell would.",
+    "items": [
+      {
+        "exercise_id": "goblet-squat",
+        "target_sets": 4,
+        "target_reps": 12,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "dumbbell-bulgarian-split-squat",
+        "target_sets": 3,
+        "target_reps": 10,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "dumbbell-romanian-deadlift",
+        "target_sets": 4,
+        "target_reps": 10,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "dumbbell-lunge",
+        "target_sets": 3,
+        "target_reps": 12,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "dumbbell-calf-raise",
+        "target_sets": 3,
+        "target_reps": 15,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "public-ppl-push",
+    "name": "Push Day",
+    "sport": "strength",
+    "goal": "hypertrophy",
+    "notes": "Chest, shoulders, triceps. Part of a push / pull / legs week.",
+    "items": [
+      {
+        "exercise_id": "bench-press",
+        "target_sets": 4,
+        "target_reps": 6,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "standing-dumbbell-shoulder-press",
+        "target_sets": 3,
+        "target_reps": 10,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "incline-bench-press",
+        "target_sets": 3,
+        "target_reps": 10,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "dumbbell-lateral-raise",
+        "target_sets": 3,
+        "target_reps": 15,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "triceps-pushdown",
+        "target_sets": 3,
+        "target_reps": 12,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "public-ppl-pull",
+    "name": "Pull Day",
+    "sport": "strength",
+    "goal": "hypertrophy",
+    "notes": "Back and biceps. Part of a push / pull / legs week.",
+    "items": [
+      {
+        "exercise_id": "bent-over-row",
+        "target_sets": 4,
+        "target_reps": 8,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "machine-lat-pulldown",
+        "target_sets": 3,
+        "target_reps": 10,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "seated-cable-row",
+        "target_sets": 3,
+        "target_reps": 10,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "face-pull",
+        "target_sets": 3,
+        "target_reps": 15,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "barbell-curl",
+        "target_sets": 3,
+        "target_reps": 12,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "public-ppl-legs",
+    "name": "Leg Day",
+    "sport": "strength",
+    "goal": "hypertrophy",
+    "notes": "Quads, hamstrings, glutes, calves. Part of a push / pull / legs week.",
+    "items": [
+      {
+        "exercise_id": "back-squat",
+        "target_sets": 4,
+        "target_reps": 6,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "romanian-deadlift",
+        "target_sets": 3,
+        "target_reps": 8,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "leg-press",
+        "target_sets": 3,
+        "target_reps": 12,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "lying-leg-curl",
+        "target_sets": 3,
+        "target_reps": 12,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "barbell-calf-raise",
+        "target_sets": 4,
+        "target_reps": 15,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "public-upper",
+    "name": "Upper Body",
+    "sport": "strength",
+    "goal": "hypertrophy",
+    "notes": "The upper half of an upper / lower week \u2014 two of these and two lower days.",
+    "items": [
+      {
+        "exercise_id": "bench-press",
+        "target_sets": 4,
+        "target_reps": 8,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "bent-over-row",
+        "target_sets": 4,
+        "target_reps": 8,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "standing-dumbbell-shoulder-press",
+        "target_sets": 3,
+        "target_reps": 10,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "machine-lat-pulldown",
+        "target_sets": 3,
+        "target_reps": 10,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "barbell-curl",
+        "target_sets": 3,
+        "target_reps": 12,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "triceps-pushdown",
+        "target_sets": 3,
+        "target_reps": 12,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "public-lower",
+    "name": "Lower Body",
+    "sport": "strength",
+    "goal": "hypertrophy",
+    "notes": "The lower half of an upper / lower week.",
+    "items": [
+      {
+        "exercise_id": "back-squat",
+        "target_sets": 4,
+        "target_reps": 8,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "romanian-deadlift",
+        "target_sets": 3,
+        "target_reps": 8,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "leg-press",
+        "target_sets": 3,
+        "target_reps": 12,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "lying-leg-curl",
+        "target_sets": 3,
+        "target_reps": 12,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "barbell-calf-raise",
+        "target_sets": 4,
+        "target_reps": 15,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "public-full-body",
+    "name": "Full Body",
+    "sport": "strength",
+    "goal": "general",
+    "notes": "One session, everything. Three a week is a complete programme on its own, and the best use of a gym you only reach sometimes.",
+    "items": [
+      {
+        "exercise_id": "back-squat",
+        "target_sets": 3,
+        "target_reps": 8,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "bench-press",
+        "target_sets": 3,
+        "target_reps": 8,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "bent-over-row",
+        "target_sets": 3,
+        "target_reps": 8,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "romanian-deadlift",
+        "target_sets": 3,
+        "target_reps": 10,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "plank",
+        "target_sets": 3,
+        "target_reps": null,
+        "target_weight_kg": null,
+        "target_seconds": 45,
+        "target_distance_m": null,
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "public-heavy-five",
+    "name": "Heavy Five \u2014 Day A",
+    "sport": "strength",
+    "goal": "powerlifting",
+    "notes": "Squat, bench, row. Five sets of five; add weight only when all five are clean. Rest three minutes \u2014 the rest is part of the session. Alternate with Day B.",
+    "items": [
+      {
+        "exercise_id": "back-squat",
+        "target_sets": 5,
+        "target_reps": 5,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "bench-press",
+        "target_sets": 5,
+        "target_reps": 5,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "bent-over-row",
+        "target_sets": 5,
+        "target_reps": 5,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "public-heavy-five-b",
+    "name": "Heavy Five \u2014 Day B",
+    "sport": "strength",
+    "goal": "powerlifting",
+    "notes": "Deadlift and press. Three sets of five on the pull \u2014 five heavy sets of deadlift is more than it is worth. Alternate with Day A.",
+    "items": [
+      {
+        "exercise_id": "conventional-deadlift",
+        "target_sets": 3,
+        "target_reps": 5,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "overhead-press",
+        "target_sets": 5,
+        "target_reps": 5,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "front-squat",
+        "target_sets": 3,
+        "target_reps": 5,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "public-kettlebell-conditioning",
+    "name": "Kettlebell Conditioning",
+    "sport": "strength",
+    "goal": "endurance",
+    "notes": "One kettlebell, twenty minutes, breathing hard. Rounds rather than sets: work through the list, then rest.",
+    "items": [
+      {
+        "exercise_id": "kettlebell-swing",
+        "target_sets": 5,
+        "target_reps": 20,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "goblet-squat",
+        "target_sets": 5,
+        "target_reps": 12,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "burpee",
+        "target_sets": 5,
+        "target_reps": 8,
+        "target_weight_kg": null,
+        "target_seconds": null,
+        "target_distance_m": null,
+        "notes": ""
+      },
+      {
+        "exercise_id": "mountain-climber",
+        "target_sets": 5,
+        "target_reps": null,
+        "target_weight_kg": null,
+        "target_seconds": 30,
+        "target_distance_m": null,
+        "notes": ""
+      }
+    ]
+  }
+]

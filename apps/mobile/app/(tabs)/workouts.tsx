@@ -17,6 +17,7 @@ import {
   KeyboardAwareFlatList,
   KeyboardAwareScrollView,
 } from '@/components/KeyboardAwareScroll';
+import { PlanHero } from '@/components/PlanHero';
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
 import { Text, View } from '@/components/Themed';
 import { SectionHeader } from '@/components/ui/Section';
@@ -62,7 +63,7 @@ function fabClearance(fontScale: number): number {
 
 const SCOPES = [
   { key: 'mine', label: 'My workouts' },
-  { key: 'shared', label: 'Shared' },
+  { key: 'public', label: 'Public plans' },
 ] as const;
 
 export default function WorkoutsScreen() {
@@ -73,7 +74,7 @@ export default function WorkoutsScreen() {
   const getToken = useAuthToken();
   const { userId } = useAuth();
 
-  const [scope, setScope] = useState<'mine' | 'shared'>('mine');
+  const [scope, setScope] = useState<'mine' | 'public'>('mine');
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [loading, setLoading] = useState(true);
   const [everLoaded, setEverLoaded] = useState(false);
@@ -84,7 +85,7 @@ export default function WorkoutsScreen() {
   const abortRef = useRef<AbortController | null>(null);
 
   // Unconditional across scopes even though only `mine` renders the pill. One
-  // constant beats a conditional here; the `shared` list simply ends ~100pt
+  // constant beats a conditional here; the `public` list simply ends ~100pt
   // early, which is invisible next to the planner the header already drops.
   const { fontScale } = useWindowDimensions();
   const listPad = useMemo(
@@ -101,7 +102,7 @@ export default function WorkoutsScreen() {
     // it showed an error where the workouts should be, even though they were
     // already cached on the device for the offline session-start path.
     //
-    // Only for `mine`: the shared tab is a browse surface over other people's
+    // Only for `mine`: the public tab is a browse surface over other people's
     // templates, and there is no honest local answer for "what has everyone
     // published" — an empty list would read as "nobody has shared anything".
     if (scope === 'mine' && userId) {
@@ -271,7 +272,7 @@ export default function WorkoutsScreen() {
           // browsing them. The Library's permanently-pinned ~300pt header is
           // the counter-example this avoids.
           //
-          // `mine` only: the shared tab is a browse surface over other
+          // `mine` only: the public tab is a browse surface over other
           // people's templates, and your own week has no business on it.
           ListHeaderComponent={
             scope === 'mine' ? (
@@ -294,12 +295,12 @@ export default function WorkoutsScreen() {
             error || !everLoaded ? null : (
               <View style={styles.empty}>
                 <Text style={styles.emptyTitle}>
-                  {scope === 'mine' ? 'No workouts yet' : 'Nothing shared yet'}
+                  {scope === 'mine' ? 'No workouts yet' : 'No public plans yet'}
                 </Text>
                 <Text style={styles.muted}>
                   {scope === 'mine'
                     ? 'Build a template once, then reuse it every session.'
-                    : 'Workouts other people publish will appear here.'}
+                    : 'Ready-made plans you can copy and make your own.'}
                 </Text>
               </View>
             )
@@ -312,6 +313,11 @@ export default function WorkoutsScreen() {
                 accessibilityLabel={`${item.name}, ${item.sport}, ${item.items.length} exercises`}
                 testID={`workout-${item.id}`}
               >
+                {/* Only on the browse surface. A hero over your OWN workouts
+                    would be decoration on a list you already know by name;
+                    here it is what makes sixteen unfamiliar plans scannable.
+                    Costs no bundled asset — see `PlanHero`. */}
+                {scope === 'public' && <PlanHero id={item.id} goal={item.goal} />}
                 {/* The same two marks the Today screen's session rows use — a
                     rule down the edge and a tinted disc — so a template and the
                     session it becomes read as the same discipline. */}
@@ -344,7 +350,7 @@ export default function WorkoutsScreen() {
                         style={[styles.badge, { color: accent.ink }]}
                         testID={`workout-${item.id}-public`}
                       >
-                        Shared
+                        Public
                       </Text>
                     )}
                   </View>
