@@ -99,6 +99,14 @@ export default function YouScreen() {
               <Text style={[styles.action, { color: accent.ink }]}>Edit</Text>
             </Pressable>
             <Pressable
+              onPress={() => router.push('/friends')}
+              hitSlop={10}
+              accessibilityRole="button"
+              testID="you-friends"
+            >
+              <Text style={[styles.action, { color: accent.ink }]}>Friends</Text>
+            </Pressable>
+            <Pressable
               onPress={() => router.push('/settings')}
               hitSlop={10}
               accessibilityRole="button"

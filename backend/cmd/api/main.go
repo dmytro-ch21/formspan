@@ -20,6 +20,7 @@ import (
 	"github.com/dmytro-ch21/vola/backend/internal/modules/curriculum"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/exercise"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/featureflag"
+	"github.com/dmytro-ch21/vola/backend/internal/modules/friend"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/health"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/plan"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/profile"
@@ -73,6 +74,7 @@ func main() {
 	bjjFocusHandler := bjj.NewFocusHandler(bjjRepo)
 	curriculumHandler := curriculum.NewHandler(curriculum.NewPostgresRepository(pool))
 	sequenceHandler := sequence.NewHandler(sequence.NewPostgresRepository(pool))
+	friendHandler := friend.NewHandler(friend.NewPostgresRepository(pool))
 	featureFlagHandler := featureflag.NewHandler(featureflag.NewPostgresRepository(pool))
 	activityHandler := activity.NewHandler(activity.NewPostgresRepository(pool))
 	exerciseRepo := exercise.NewPostgresRepository(pool)
@@ -151,6 +153,17 @@ func main() {
 	// is authenticated: handle enumeration was accepted with the username
 	// design, but at signed-in speed, not anonymous-scraper speed.
 	mux.Handle("GET /v1/users/{username}", verifier.RequireAuth(http.HandlerFunc(profileHandler.Lookup)))
+
+	// The social graph. Everything is addressed by USERNAME — user ids never
+	// cross the wire in either direction — and every repository method scopes
+	// itself to the caller, so there is no unscoped read for a handler to
+	// misuse. DELETE covers decline, cancel and unfriend alike: all three are
+	// "this relationship, gone", and the caller's UI knows which it offered.
+	mux.Handle("GET /v1/friends", verifier.RequireAuth(http.HandlerFunc(friendHandler.Friends)))
+	mux.Handle("GET /v1/friends/requests", verifier.RequireAuth(http.HandlerFunc(friendHandler.Pending)))
+	mux.Handle("POST /v1/friends/requests", verifier.RequireAuth(http.HandlerFunc(friendHandler.Send)))
+	mux.Handle("POST /v1/friends/requests/{username}/accept", verifier.RequireAuth(http.HandlerFunc(friendHandler.Accept)))
+	mux.Handle("DELETE /v1/friends/{username}", verifier.RequireAuth(http.HandlerFunc(friendHandler.Remove)))
 	mux.Handle("GET /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Get)))
 	mux.Handle("POST /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Create)))
 	mux.Handle("PATCH /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Update)))
