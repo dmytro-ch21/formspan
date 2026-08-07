@@ -83,32 +83,37 @@ func befriend(t *testing.T, h *harness, a, aHandle, b, bHandle string) {
 	}
 }
 
-// techniqueIDs borrows two real library rows — bjj_sequence_steps.technique_id
-// is a foreign key, so invented ids cannot be inserted.
-func techniqueIDs(t *testing.T, pool *pgxpool.Pool, n int) []string {
+// seedTechniques inserts the library rows these tests need, rather than
+// borrowing whatever the catalog happens to hold.
+//
+// THIS IS NOT FASTIDIOUSNESS. The first version selected two rows from
+// `techniques` and skipped when it found fewer than two — and CI runs
+// `migrate up` WITHOUT `cmd/seed`, so that table is empty there and all six
+// sequence-based tests below would have skipped green in the one environment
+// they were supposed to be proving anything in. A test that silently skips is
+// indistinguishable from a test that passes, which is the exact trap CLAUDE.md
+// documents for TEST_DATABASE_URL itself. The sibling sequence tests already
+// seed their own rows; this follows them.
+func seedTechniques(t *testing.T, pool *pgxpool.Pool, ids ...string) []string {
 	t.Helper()
-	rows, err := pool.Query(context.Background(), `SELECT id FROM techniques ORDER BY id LIMIT $1`, n)
-	if err != nil {
-		t.Fatalf("techniques: %v", err)
-	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			t.Fatalf("scan technique: %v", err)
+	ctx := context.Background()
+	for _, id := range ids {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO techniques (id, name, category, position, function)
+			VALUES ($1, $1, 'Submission', 'Guard - Bottom', 'finish')
+			ON CONFLICT (id) DO NOTHING`, id); err != nil {
+			t.Fatalf("seed technique %s: %v", id, err)
 		}
-		out = append(out, id)
+		t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM techniques WHERE id = $1`, id) })
 	}
-	if len(out) < n {
-		t.Skipf("library has %d techniques, need %d", len(out), n)
-	}
-	return out
+	return ids
 }
 
 func makeSequence(t *testing.T, h *harness, owner, name string) sequence.Sequence {
 	t.Helper()
-	ids := techniqueIDs(t, h.pool, 2)
+	// Namespaced per owner so two sequences in one test do not fight over
+	// cleanup of the same rows.
+	ids := seedTechniques(t, h.pool, "sh_tech_"+owner+"_1", "sh_tech_"+owner+"_2")
 	seq, err := h.seqs.Create(context.Background(), owner, sequence.NewSequence{
 		Name:        name,
 		Description: "as taught",
@@ -451,11 +456,135 @@ func TestUnknownResourceTypeIsRefusedBeforeAnythingIsResolved(t *testing.T) {
 	// ErrInvalidInput, not ErrNotFound: an unregistered type is the client
 	// sending something this build cannot copy, and rejecting it before the
 	// handle is resolved keeps a bogus type from being used as a probe.
-	err := h.repo.Create(ctx, alice, New{ToUsername: "sh_tb_h", ResourceType: "spaceship", ResourceID: "x"})
+	// AIMED AT A HANDLE THAT DOES NOT EXIST, and that is the entire point.
+	// This test previously sent to a friend, where BOTH orderings answer
+	// ErrInvalidInput — so it asserted its own name without testing it, and
+	// review proved as much by moving the registry check after the friendship
+	// lookup and watching the suite stay green. Against an unknown handle the
+	// two orderings diverge: check-first is ErrInvalidInput, resolve-first is
+	// ErrNotFound. A bogus type must not become a probe for whether a handle
+	// is real.
+	err := h.repo.Create(ctx, alice, New{ToUsername: "nobody_at_all", ResourceType: "spaceship", ResourceID: "x"})
 	if !errors.Is(err, ErrInvalidInput) {
-		t.Fatalf("unknown type: want ErrInvalidInput, got %v", err)
+		t.Fatalf("unknown type to an unknown handle: want ErrInvalidInput, got %v", err)
+	}
+	// And the friend case still answers the same way.
+	if err := h.repo.Create(ctx, alice, New{ToUsername: "sh_tb_h", ResourceType: "spaceship", ResourceID: "x"}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("unknown type to a friend: want ErrInvalidInput, got %v", err)
 	}
 	if err := (New{ToUsername: "a", ResourceType: "sequence"}).Validate(Registry{"sequence": h.seqs}); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("missing resource id: want ErrInvalidInput, got %v", err)
+	}
+}
+
+// ── The two arms review found unpinned ──────────────────────────────────────
+
+// VOLA-authored content is shareable, and that is the whole reason Describe
+// tests VISIBILITY rather than ownership.
+//
+// Every other test here shares a user-owned row, so narrowing the predicate to
+// `owner_user_id = $2` left the suite green — the day reference chains ship,
+// someone could delete that arm and nothing would go red while legitimate
+// shares of library content silently started 404ing.
+func TestVolaAuthoredContentCanBeShared(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	alice := person(t, h.pool, "sh_wa", "sh_wa_h")
+	bob := person(t, h.pool, "sh_wb", "sh_wb_h")
+	befriend(t, h, alice, "sh_wa_h", bob, "sh_wb_h")
+	ids := seedTechniques(t, h.pool, "sh_tech_vola_1")
+
+	// An ownerless chain — nobody's, everybody's to read.
+	var refID string
+	// `source` must agree with ownership — bjj_sequences_source_matches_owner
+	// enforces `(owner_user_id IS NULL) = (source <> 'user')`, so an ownerless
+	// row has to declare itself seeded. Discovered by the constraint rejecting
+	// the first attempt, which is the schema doing its job.
+	if err := h.pool.QueryRow(ctx, `
+		INSERT INTO bjj_sequences (owner_user_id, source, name, description)
+		VALUES (NULL, 'seed', 'VOLA reference chain', 'shipped with the app')
+		RETURNING id`).Scan(&refID); err != nil {
+		t.Fatalf("seed reference sequence: %v", err)
+	}
+	t.Cleanup(func() { _, _ = h.pool.Exec(ctx, `DELETE FROM bjj_sequences WHERE id = $1`, refID) })
+	if _, err := h.pool.Exec(ctx, `
+		INSERT INTO bjj_sequence_steps (sequence_id, technique_id, sort_order, notes)
+		VALUES ($1, $2, 0, 'reference step')`, refID, ids[0]); err != nil {
+		t.Fatalf("seed reference step: %v", err)
+	}
+
+	// Alice does not own it and can still pass it on.
+	if err := h.repo.Create(ctx, alice, New{ToUsername: "sh_wb_h", ResourceType: "sequence", ResourceID: refID}); err != nil {
+		t.Fatalf("sharing VOLA content: %v", err)
+	}
+	inbox, _ := h.repo.Inbox(ctx, bob)
+	if len(inbox) != 1 || inbox[0].ResourceLabel != "VOLA reference chain" {
+		t.Fatalf("inbox: %+v", inbox)
+	}
+	got, err := h.repo.Accept(ctx, bob, inbox[0].ID)
+	if err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	// Bob's copy is HIS — the ownerless original stays ownerless.
+	copied, err := h.seqs.Get(ctx, got.ResourceID, bob)
+	if err != nil {
+		t.Fatalf("bob cannot read his copy: %v", err)
+	}
+	if !copied.Editable {
+		t.Fatalf("a copy of reference content should be the recipient's to edit: %+v", copied)
+	}
+	var stillNull bool
+	if err := h.pool.QueryRow(ctx,
+		`SELECT owner_user_id IS NULL FROM bjj_sequences WHERE id = $1`, refID).Scan(&stillNull); err != nil {
+		t.Fatalf("check original: %v", err)
+	}
+	if !stillNull {
+		t.Fatalf("copying reference content took ownership of the original")
+	}
+}
+
+// The copy re-derives sort_order densely rather than carrying the source's.
+//
+// Sources are dense in practice because insertSteps assigns from a slice index,
+// so a verbatim copy passes every other test here. Gaps are reachable through
+// bjj_sequence_steps.technique_id ON DELETE CASCADE, which migration 000035
+// flags as latent — this makes the gap by hand and pins the property.
+func TestCopyRedensifiesStepOrder(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	alice := person(t, h.pool, "sh_oa", "sh_oa_h")
+	bob := person(t, h.pool, "sh_ob", "sh_ob_h")
+	befriend(t, h, alice, "sh_oa_h", bob, "sh_ob_h")
+	seq := makeSequence(t, h, alice, "Chain with a hole in it")
+
+	// Punch out the FIRST step, leaving the survivor at sort_order 1.
+	if _, err := h.pool.Exec(ctx,
+		`DELETE FROM bjj_sequence_steps WHERE sequence_id = $1 AND sort_order = 0`, seq.ID); err != nil {
+		t.Fatalf("make a gap: %v", err)
+	}
+	var srcOrder int
+	if err := h.pool.QueryRow(ctx,
+		`SELECT sort_order FROM bjj_sequence_steps WHERE sequence_id = $1`, seq.ID).Scan(&srcOrder); err != nil {
+		t.Fatalf("read source order: %v", err)
+	}
+	if srcOrder != 1 {
+		t.Fatalf("fixture wrong: expected a lone step at 1, got %d", srcOrder)
+	}
+
+	if err := h.repo.Create(ctx, alice, New{ToUsername: "sh_ob_h", ResourceType: "sequence", ResourceID: seq.ID}); err != nil {
+		t.Fatalf("share: %v", err)
+	}
+	inbox, _ := h.repo.Inbox(ctx, bob)
+	got, err := h.repo.Accept(ctx, bob, inbox[0].ID)
+	if err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	var copyOrder int
+	if err := h.pool.QueryRow(ctx,
+		`SELECT sort_order FROM bjj_sequence_steps WHERE sequence_id = $1`, got.ResourceID).Scan(&copyOrder); err != nil {
+		t.Fatalf("read copy order: %v", err)
+	}
+	if copyOrder != 0 {
+		t.Fatalf("copy did not re-densify: source was %d, copy is %d", srcOrder, copyOrder)
 	}
 }

@@ -347,10 +347,12 @@ func translate(err error, op string) error {
 // is real.
 func (r *PostgresRepository) Describe(ctx context.Context, resourceID, sharerID string) (string, bool, error) {
 	var name string
+	// visibleTo, composed rather than retyped — the const's own comment says
+	// why, and review caught this query having retyped it. Note the argument
+	// order it fixes: visibleTo references $1 as the caller.
 	err := r.pool.QueryRow(ctx, `
-		SELECT name FROM bjj_sequences
-		WHERE id = $1 AND (owner_user_id = $2 OR owner_user_id IS NULL)`,
-		resourceID, sharerID).Scan(&name)
+		SELECT s.name FROM bjj_sequences s WHERE `+visibleTo+` AND s.id = $2`,
+		sharerID, resourceID).Scan(&name)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", false, nil
 	}
@@ -374,15 +376,21 @@ func (r *PostgresRepository) Describe(ctx context.Context, resourceID, sharerID 
 // without touching what the recipient now owns. `sort_order` is re-derived
 // from the read order rather than copied, so a source with gaps in its
 // ordering yields a dense one.
-func (r *PostgresRepository) CopyTo(ctx context.Context, tx pgx.Tx, resourceID, newOwnerID string) (string, bool, error) {
+func (r *PostgresRepository) CopyTo(ctx context.Context, tx pgx.Tx, resourceID, sharerID, newOwnerID string) (string, bool, error) {
 	var name, description string
 	var startPositionID *string
+	// The SAME visibility predicate the share was authorized under, re-applied
+	// at accept time. A bare `WHERE id = $1` would copy whatever holds that id
+	// now — and ids here can be client-supplied, so one freed by a delete and
+	// claimed by another athlete is a shape the type system does not prevent.
 	err := tx.QueryRow(ctx, `
-		SELECT name, description, start_position_id FROM bjj_sequences WHERE id = $1`,
-		resourceID).Scan(&name, &description, &startPositionID)
+		SELECT s.name, s.description, s.start_position_id
+		FROM bjj_sequences s WHERE `+visibleTo+` AND s.id = $2`,
+		sharerID, resourceID).Scan(&name, &description, &startPositionID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		// Deleted between sending and accepting; the share module clears the
-		// dead row rather than letting it fail this way forever.
+		// Deleted between sending and accepting — or no longer the sharer's to
+		// pass on. The share module clears the dead row rather than letting it
+		// fail this way forever.
 		return "", false, nil
 	}
 	if err != nil {

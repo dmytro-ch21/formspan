@@ -46,8 +46,13 @@ func (r *PostgresRepository) Create(ctx context.Context, callerID string, in New
 	if !ok {
 		return ErrNotFound
 	}
-	if len(label) > maxLabel {
-		label = label[:maxLabel]
+	// RUNES, not bytes. Slicing bytes can split a multi-byte character, and
+	// Postgres rejects invalid UTF-8 with 22021 — untranslated, so a 500.
+	// Unreachable today (sequence names cap below this) and reachable the
+	// moment a Copier with longer labels registers; Japanese BJJ terminology
+	// makes multi-byte labels ordinary rather than exotic.
+	if r := []rune(label); len(r) > maxLabel {
+		label = string(r[:maxLabel])
 	}
 
 	// The partial unique index is the sole arbiter of "already sent" — no
@@ -101,11 +106,11 @@ func (r *PostgresRepository) Accept(ctx context.Context, callerID, shareID strin
 	// addressed TO the caller and still pending, so a sender accepting their
 	// own share and an outsider accepting somebody else's are the same
 	// ErrNotFound as a share that never existed.
-	var resourceType, resourceID string
+	var resourceType, resourceID, sharerID string
 	err = tx.QueryRow(ctx, `
-		SELECT resource_type, resource_id FROM shares
+		SELECT resource_type, resource_id, from_user_id FROM shares
 		WHERE id = $1 AND to_user_id = $2 AND status = 'pending'
-		FOR UPDATE`, shareID, callerID).Scan(&resourceType, &resourceID)
+		FOR UPDATE`, shareID, callerID).Scan(&resourceType, &resourceID, &sharerID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Accepted{}, ErrNotFound
 	}
@@ -115,11 +120,15 @@ func (r *PostgresRepository) Accept(ctx context.Context, callerID, shareID strin
 
 	copier, ok := r.reg[resourceType]
 	if !ok {
-		// A type this build cannot copy: a module removed since the share was
-		// stored. Not the recipient's fault and not a miss to hide.
+		// A type this build cannot copy: a module removed, or a deploy rolled
+		// back under a share stored by a newer one. DELIBERATELY NOT CLEARED,
+		// unlike the deleted-source branch below — that resource is gone for
+		// good, whereas this one may be perfectly intact and merely
+		// unreachable from this binary. Deleting here would be irreversible
+		// damage done on account of a deploy.
 		return Accepted{}, ErrGone
 	}
-	newID, ok, err := copier.CopyTo(ctx, tx, resourceID, callerID)
+	newID, ok, err := copier.CopyTo(ctx, tx, resourceID, sharerID, callerID)
 	if err != nil {
 		return Accepted{}, fmt.Errorf("share: copy %s: %w", resourceType, err)
 	}

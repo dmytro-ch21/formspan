@@ -75,6 +75,12 @@ export default function SharedWithYouPage() {
       setActionError(null);
       try {
         const copy = await acceptShare(getToken, card.id);
+        // Drop the row BEFORE navigating. A route transition is not instant,
+        // and until it lands the accepted card is still on screen and still
+        // clickable — a second tap would 404 against a share that is already
+        // gone. Removing it locally is the honest state either way: the
+        // server has accepted it.
+        setShares((prev) => prev?.filter((s) => s.id !== card.id) ?? prev);
         const to = DESTINATION[copy.resource_type];
         // Navigate to the RECIPIENT'S copy — never the sender's id, which
         // they have no permission to open.
@@ -138,7 +144,7 @@ export default function SharedWithYouPage() {
 
       {shares?.length === 0 && (
         <p className="rounded-xl border border-dashed border-neutral-300 px-4 py-10 text-center text-sm text-neutral-500 dark:border-neutral-700">
-          Nothing waiting. When a training partner sends you a sequence, it
+          Nothing waiting. When a training partner sends you something, it
           lands here.
         </p>
       )}
@@ -163,9 +169,13 @@ export default function SharedWithYouPage() {
                 type="button"
                 onClick={() => accept(card)}
                 disabled={busy !== null}
+                aria-label={`Accept ${card.resource_label} from ${card.from}`}
                 className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm font-medium disabled:opacity-40 dark:border-neutral-700"
               >
-                {busy === card.id ? "…" : "Accept"}
+                {/* Labelled per row like Decline, and announced: this is the
+                    more consequential of the two, and "Accept" repeated down a
+                    list is indistinguishable when navigating by buttons. */}
+                <span aria-live="polite">{busy === card.id ? "…" : "Accept"}</span>
               </button>
               <button
                 type="button"

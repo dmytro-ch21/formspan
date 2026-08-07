@@ -2338,7 +2338,10 @@ export async function listFriends(
     {},
     signal,
   );
-  return body.friends;
+  // `?? []` because null has a RESERVED meaning in the screens that call
+  // this — it is the loading state — so a nil slice arriving from a future
+  // server regression would render as a spinner that never resolves.
+  return body.friends ?? [];
 }
 
 export type ShareCard = {
@@ -2360,7 +2363,7 @@ export async function listShareInbox(
     {},
     signal,
   );
-  return body.shares;
+  return body.shares ?? [];
 }
 
 /** 409 means it is already sitting unanswered in their inbox; 404 covers

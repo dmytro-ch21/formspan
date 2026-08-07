@@ -2691,7 +2691,12 @@ paths:
       operationId: listShareInbox
       responses:
         "200":
-          description: Pending shares addressed to the caller, newest first.
+          description: >
+            Pending shares addressed to the caller, newest first, capped at 200
+            and NOT paginated. Past that the oldest become invisible while still
+            holding their slot in the pending-uniqueness index, so a re-send of
+            one 409s against a card the recipient cannot see. Acceptable at
+            launch scale; pagination is the fix when it stops being.
           content:
             application/json:
               schema:
@@ -2754,10 +2759,18 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "410":
           description: >
-            The sender deleted the thing before you accepted it. 410 rather
-            than 404 because you genuinely were sent something — resource_id
-            is polymorphic and can carry no foreign key, so this is the case
-            the schema cannot prevent. The dead share is cleared by this call.
+            The sender deleted the thing before you accepted it, or it is no
+            longer theirs to pass on. 410 rather than 404 because you genuinely
+            were sent something — resource_id is polymorphic and can carry no
+            foreign key, so this is the case the schema cannot prevent. Carries
+            the `not_found` code, the enum being closed.
+
+
+            A deleted source CLEARS the dead share. The other 410 — a
+            resource_type this build cannot copy, reachable only across a
+            rollback — deliberately does not: that resource may be perfectly
+            intact and merely unreachable from this binary, and deleting on
+            account of a deploy would be irreversible.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }

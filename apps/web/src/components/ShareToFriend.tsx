@@ -3,7 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@clerk/nextjs";
 
-import { listFriends, shareResource, type FriendCard } from "@/lib/api";
+import {
+  ApiError,
+  listFriends,
+  shareResource,
+  type FriendCard,
+} from "@/lib/api";
 
 /**
  * Share this thing with a friend.
@@ -16,7 +21,11 @@ import { listFriends, shareResource, type FriendCard } from "@/lib/api";
  *
  * It is also generic on purpose — `resourceType`/`resourceId`, no mention of
  * sequences — because the API is one surface for everything shareable and
- * plans and workouts will mount this same component.
+ * plans and workouts will mount this same component. It lives in
+ * `src/components` rather than beside the sequence route for exactly that
+ * reason: a generic component with a sequence-shaped ADDRESS is one that the
+ * second caller has to move, and moving it after something imports the path
+ * is strictly more work than moving it now.
  *
  * The API's 404 covers "not your friend", "no such handle" and "not yours to
  * send" alike, deliberately, so the copy here cannot be more specific than the
@@ -36,33 +45,61 @@ export function ShareToFriend({
   const [sending, setSending] = useState<string | null>(null);
   const [sentTo, setSentTo] = useState<string[]>([]);
   const panel = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
 
   // Loaded on OPEN rather than on mount: most visits to a sequence are not
   // visits to share it, and the friends list is somebody else's data to fetch
   // only when it is about to be shown.
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     if (!open || friends !== null) return;
     const c = new AbortController();
     listFriends(getToken, c.signal)
-      .then(setFriends)
+      .then((rows) => {
+        if (c.signal.aborted) return;
+        setFriends(rows);
+        // Cleared on SUCCESS. Without this a failed load leaves its red alert
+        // sitting above a working list after the retry, and — worse — the
+        // loading indicator stays suppressed because it is gated on `!error`.
+        setError(null);
+      })
       .catch((err) => {
-        if ((err as Error)?.name !== "AbortError") {
-          setError(err instanceof Error ? err.message : String(err));
-        }
+        if (c.signal.aborted || (err as Error)?.name === "AbortError") return;
+        setError(err instanceof Error ? err.message : String(err));
       });
     return () => c.abort();
-  }, [open, friends, getToken]);
+  }, [open, friends, getToken, attempt]);
 
-  // Escape closes, and focus returns to the trigger — a panel that can only be
-  // dismissed with the mouse is a keyboard trap.
+  // Escape closes and a click outside dismisses, and BOTH put focus back on
+  // the trigger.
+  //
+  // The comment here used to claim the focus restore while the code did no
+  // such thing — closing simply unmounted the panel and dropped focus to
+  // document.body, which for anyone picking a friend by keyboard means losing
+  // their place entirely. Review caught the gap between the comment and the
+  // code; this is the code catching up.
+  const close = useCallback(() => {
+    setOpen(false);
+    trigger.current?.focus();
+  }, []);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") close();
+    };
+    const onClick = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (panel.current?.contains(t) || trigger.current?.contains(t)) return;
+      close();
     };
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [open]);
+    document.addEventListener("mousedown", onClick);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", onClick);
+    };
+  }, [open, close]);
 
   const send = useCallback(
     async (username: string) => {
@@ -72,7 +109,14 @@ export function ShareToFriend({
         await shareResource(getToken, username, resourceType, resourceId);
         setSentTo((prev) => [...prev, username]);
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        // A 409 says it is ALREADY sitting unanswered in their inbox, which is
+        // the same outcome the sender wanted — reporting it in red would make
+        // a no-op look like a failure. `code` is contract; the message is not.
+        if (err instanceof ApiError && err.code === "already_exists") {
+          setSentTo((prev) => [...prev, username]);
+        } else {
+          setError(err instanceof Error ? err.message : String(err));
+        }
       } finally {
         setSending(null);
       }
@@ -84,9 +128,10 @@ export function ShareToFriend({
     <div className="relative">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        ref={trigger}
+        onClick={() => (open ? close() : setOpen(true))}
         aria-expanded={open}
-        aria-haspopup="true"
+        aria-haspopup="dialog"
         className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm font-medium dark:border-neutral-700"
       >
         Share
@@ -104,12 +149,22 @@ export function ShareToFriend({
           </p>
 
           {error && (
-            <p
-              role="alert"
-              className="mb-2 text-sm text-red-700 dark:text-red-300"
-            >
-              {error}
-            </p>
+            <div className="mb-2">
+              <p role="alert" className="text-sm text-red-700 dark:text-red-300">
+                {error}
+              </p>
+              {friends === null && (
+                // Reachable only for a failed LOAD. Without it the sole retry
+                // is close-and-reopen, which nothing tells you about.
+                <button
+                  type="button"
+                  onClick={() => setAttempt((n) => n + 1)}
+                  className="mt-1 text-sm font-medium underline"
+                >
+                  Try again
+                </button>
+              )}
+            </div>
           )}
 
           {/* null is LOADING and [] is "no friends yet" — a failed load must

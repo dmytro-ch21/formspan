@@ -83,7 +83,14 @@ type Copier interface {
 	// flip commit together or not at all, so there is no accepted share
 	// without a copy and no way to accept twice and get two. ok is false when
 	// the source has been deleted since it was shared.
-	CopyTo(ctx context.Context, tx pgx.Tx, resourceID, newOwnerID string) (newID string, ok bool, err error)
+	//
+	// sharerID is passed so the READ can carry the same visibility predicate
+	// Describe used. Authorization happened when the share was SENT, and this
+	// runs whenever the recipient gets round to accepting — an implementation
+	// that read by bare id would copy whatever holds that id by then. Modules
+	// here accept client-supplied ids, so an id freed by a delete and taken by
+	// somebody else is not a hypothetical shape.
+	CopyTo(ctx context.Context, tx pgx.Tx, resourceID, sharerID, newOwnerID string) (newID string, ok bool, err error)
 }
 
 // Registry maps a resource_type to the module that owns it, built in

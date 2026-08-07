@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@clerk/nextjs";
 
 import { deleteSequence, getSequence, type Sequence } from "@/lib/api";
-import { ShareToFriend } from "./ShareToFriend";
+import { ShareToFriend } from "@/components/ShareToFriend";
 
 /**
  * One sequence, drawn as the chain it is.

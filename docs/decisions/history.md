@@ -14943,6 +14943,22 @@ Accepting one answers **410**, not 404 — the recipient genuinely was sent
 something, and a silent miss would read as a bug — and clears the dead row
 rather than leaving it to fail identically forever.
 
+### The test that would have skipped in CI
+
+Worth recording as its own thing. The first version of the share tests borrowed
+two rows from `techniques` and skipped when it found fewer than two. CI runs
+`migrate up` but never `cmd/seed`, so that table is empty there — and measured
+against a migrated-but-unseeded database, **eight of the nine tests skipped and
+the package still printed `ok`**. A green CI run would have proved almost
+nothing about the feature it was gating.
+
+The fix is what the sibling sequence tests already did: seed the two rows the
+test needs. The general rule this is an instance of — a test that depends on
+seeded reference data is a test that silently disappears in the one environment
+that matters — is the same trap CLAUDE.md documents for `TEST_DATABASE_URL`
+itself, relocated one level down. The whole rest of the backend suite was
+checked against the same unseeded database and skips nothing.
+
 ### One 404 for every miss, again
 
 Not-a-friend, no-such-handle, a friend request still pending, an unreal
@@ -14951,6 +14967,35 @@ split turns `POST /v1/shares` into an oracle over other people's accounts or
 libraries. Six mutation checks red: recipient scoping and the `pending`
 predicate on accept, the friendship check, the visibility scope on `Describe`,
 caller scoping on delete, and the step copy itself.
+
+Review then found three more predicates that had NO failing test, by running
+its own mutations — the most valuable thing either reviewer did. `Describe`'s
+`owner_user_id IS NULL` arm (every test shared a user-owned row, so the whole
+reason it tests visibility rather than ownership was uncovered — the day
+reference chains ship, deleting that arm would silently 404 legitimate
+shares). The registry-before-friendship ordering, whose test **asserted its own
+name without testing it**: it aimed a bogus type at a *friend's* handle, where
+both orderings answer identically. And the dense re-derivation of `sort_order`.
+All three now go red under the mutation that exposed them.
+
+It also disproved a comment of mine by direct insert rather than by reading:
+the table's `CHECK ((status='accepted') = (copy IS NOT NULL AND accepted_at IS
+NOT NULL))` does **not** say what it claimed. A pending row carrying a copy id
+with a null `accepted_at` satisfies it — both sides false — so "a copy recorded
+while still pending" stayed representable. Spelled out per state now.
+
+Two more from the same pass. `CopyTo` read its source by bare id, so
+authorization happened at SEND time while the read happened whenever the
+recipient got round to accepting; ids here can be client-supplied, so an id
+freed by a delete and taken by someone else is not a shape the type system
+prevents. It now carries the sharer and re-applies the same visibility
+predicate — which also fixed the module's own warning, since `Describe` had
+retyped `visibleTo` inline instead of composing the const that exists precisely
+because "the same rule expressed twice" produced a cross-user enumeration bug
+here twice. And the label was truncated by BYTES, which can split a multi-byte
+character into invalid UTF-8 that Postgres rejects as an untranslated 500 —
+unreachable today, and ordinary the moment a Copier with Japanese terminology
+in its labels registers.
 
 ### Web, not mobile, and the friends list is on the phone
 
