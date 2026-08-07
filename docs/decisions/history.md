@@ -14781,6 +14781,119 @@ ratchet back at exactly 54.
   the thing this whole scope exists for.
 
 
+## 2026-08-07 — Swap finally asks what the exercise trains
+
+"When we swap an exercise we should be able to swap to a similar muscle as
+priority. But we can switch to all if needed."
+
+The old `similarTo` scored `movement_pattern` and `load_type` and **never looked
+at `primary_muscles` at all.** It was right by accident often enough to look
+fine: swapping a bench press offered other horizontal presses, which usually
+does train the chest. But the question being asked on that screen is "the rack
+is taken, what else trains this?", and the rule had no way to answer it — a
+cable fly scored zero against a bench press, because a fly is `isolation` and a
+bench is `horizontal_push`.
+
+### Two tiers, and the second one is the point
+
+`Trains the same muscles` first, then `Similar movement`, then a heading that
+names the full catalog below as *Everything else*. The escape hatch was already
+there — the suggestions ride in the list header above the whole searchable
+catalog — but nothing said so, so it read as a closed set of eight.
+
+Matched on the muscle **group**, not the raw value: the catalog carries 58
+distinct `primary_muscles` across 761 exercises, and nobody swaps a lift looking
+for another that hits `teres-minor`. Comparing raw values would also call a
+barbell row and a chin-up unrelated (`upper-back` vs `lats`), which is plainly
+not how anyone thinks about them. It reuses the Library's groups, so the app has
+one vocabulary for "what does this train" instead of two.
+
+### Equipment is shown and deliberately not scored
+
+The old rule counted **shared** equipment as a point in favour, which is
+backwards for the case the screen exists for: if the barbell is occupied,
+another barbell movement is the one suggestion that cannot help. But inverting
+it would be a guess in the other direction — people also swap for a niggle, or
+because they would rather use a machine. So the ranking stays out of it entirely
+and every row now shows its equipment, which is the one thing that lets somebody
+decide in a second.
+
+The result reads well against the real catalog: a bench press now offers
+dumbbell, band, machine and decline presses; a back squat offers band, hack,
+belt-machine, cable and kettlebell variants. Varied kit, same muscles, without
+the ranking having guessed at why you are swapping.
+
+### The cap moved from 8 overall to 10 per tier
+
+Overall, with muscle-first ranking, a well-covered muscle would have pushed the
+movement tier off the screen entirely.
+
+### Two copies, and now a test that they agree
+
+Web carries its own copy of the ranking **and of the muscle taxonomy** — the
+apps share no package and mobile needs its copy offline. This is exactly the
+shape the repo has been bitten by before, where the position vocabulary lived in
+four client files and a taxonomy change updated one of them until review caught
+it.
+
+So `swapParity.test.ts` compares them directly, following `searchParity.test.ts`
+and its hard-won lesson that **every extractor must throw rather than silently
+compare nothing** — that file's first version passed while the two copies
+searched different fields. The drift here would be quiet in its own way: both
+apps would keep offering plausible swaps, just *different* ones for the same
+exercise, with nobody able to say which was right. Verified by adding a muscle
+to web's copy alone and watching it go red.
+
+### What review caught: a parity test that only checked one direction
+
+No blockers, but the top finding went at the justification for the whole
+duplication. `swapParity.test.ts` compared **web's source against literals
+written in the test file** — so a rank tweak on web was caught, while the
+identical tweak on *mobile* passed the entire suite and the two apps quietly
+diverged. One-directional parity is not parity; it is a test of one app that
+mentions two. `searchParity.test.ts` already had this right, comparing
+extracted against extracted, and this now does too (with the literal kept as a
+third pin, so both copies cannot be edited together into agreeing about the
+wrong thing).
+
+**Two more tests that proved less than they claimed**, the same class as the two
+already fixed while writing them:
+
+- The rank-order fixture was named to "defeat the sort", and only did for one
+  of three rungs — `A Machine Press` sorts before `A Push-up` anyway, so
+  collapsing rank 3 into rank 2 still passed. And **nothing pinned rank 1 against
+  rank 0 at all**: deleting `if (carries) return 1` left the whole suite green.
+  One fixture now walks all four rungs with names in reverse rank order.
+- The tie-break fixture had ids aligned with names (`a`/Alpha, `b`/Bravo), so
+  switching the tie-break to compare ids would also have passed. Crossed.
+
+That is four tests in one change that passed for the wrong reason, three of them
+found by deliberately breaking the code rather than by reading it. Worth
+recording as the recurring shape it is: a test written alongside the code tends
+to agree with it, and only mutation shows whether it is *holding* anything.
+
+Cleanups from the same pass: an orphaned docblock describing the deleted rule
+survived above the new one in web's `api.ts`, along with a `];;` left by the
+script that ported it; the swap screen's own header comment still described the
+old ranking; `SwapTier` was exported and used nowhere; and web's rows now show
+equipment too — less urgent there, since "the rack is taken" is not a desk
+problem, but the muscle tier deliberately surfaces cross-pattern options and
+equipment is what tells a cable fly from a dumbbell one at a glance.
+
+### Known limitation
+
+Ties break alphabetically, so within a rank the same ten always surface. It is
+deterministic and explainable, which is the bar, but it is not *chosen* — a
+better tiebreak would need signal the phone does not have offline (what this
+athlete actually uses, what the gym has). Worth revisiting if usage data ever
+exists; not worth guessing at now.
+
+### Not verified
+
+Not used on a device. The ranking is covered against the shipped catalog and the
+output reads sensibly, but whether the two headings are legible mid-workout —
+one-handed, twenty seconds between sets — is a device question.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

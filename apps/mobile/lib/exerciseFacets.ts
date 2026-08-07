@@ -196,6 +196,35 @@ export function muscleGroupOf(muscle: string): string | null {
   return MUSCLE_TO_GROUP.get(muscle) ?? null;
 }
 
+/**
+ * Do these two exercises train the same thing?
+ *
+ * Compared on the GROUP, not the raw muscle: the catalog carries 58 distinct
+ * `primary_muscles` values, so a raw comparison would call a barbell row and a
+ * chin-up unrelated (`upper-back` vs `lats`) while an athlete looking to swap
+ * one for the other plainly considers them the same job.
+ *
+ * **An unmapped muscle matches nothing, including another unmapped one.** The
+ * console can mint free-text muscles that no group covers (there is no
+ * server-side vocabulary for this field), and letting two unknowns match would
+ * quietly bucket every mis-typed muscle together and present them to somebody
+ * as substitutes for each other.
+ */
+export function sharesMuscleGroup(a: Exercise, b: Exercise): boolean {
+  // Unmapped muscles are dropped rather than compared, which is what makes two
+  // exercises with unrecognised muscles NOT match: neither contributes a group,
+  // so there is nothing to share. No early return is needed for that — an empty
+  // set answers `has` with false — and adding one would be unreachable code a
+  // test could never hold.
+  const groups = new Set(
+    a.primary_muscles.map(muscleGroupOf).filter((g): g is string => g !== null),
+  );
+  return b.primary_muscles.some((m) => {
+    const g = muscleGroupOf(m);
+    return g !== null && groups.has(g);
+  });
+}
+
 /** The group a raw `movement_pattern` belongs to, or null if unmapped. */
 export function movementGroupOf(pattern: string): string | null {
   return PATTERN_TO_GROUP.get(pattern) ?? null;

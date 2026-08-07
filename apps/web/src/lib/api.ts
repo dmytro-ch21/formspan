@@ -426,29 +426,137 @@ export function swapExercise(
 }
 
 /**
- * Ranks stand-ins for `base`. Deterministic and explainable by design — the
- * same movement pattern *and* load type is a true substitute (it slots into
- * the same set and the numbers still mean something); one of the two is a
- * weaker suggestion; neither isn't a recommendation at all.
+ * Suggestions for replacing `base`, in two labelled tiers.
+ *
+ * **A SECOND COPY.** `apps/mobile/lib/sessions.ts` and
+ * `apps/mobile/lib/exerciseFacets.ts` hold the same ranking and the same muscle
+ * taxonomy. The apps share no package and mobile needs its copy to work
+ * offline, so the duplication is deliberate — and it is exactly the shape this
+ * repo has already been bitten by, where one vocabulary lived in four client
+ * files and a change updated one of them. `swapParity.test.ts` on the mobile
+ * side compares the two directly; extend it if you change either.
+ *
+ * Muscle first, because the question an athlete is asking is "the rack is
+ * taken, what else trains this?" — see the mobile copy for the full reasoning,
+ * including why equipment is shown but deliberately not scored.
  */
-export function similarTo(base: Exercise, all: Exercise[]): Exercise[] {
-  const score = (e: Exercise): number => {
-    if (e.id === base.id) return -1;
+const MUSCLE_GROUPS: { key: string; label: string; muscles: readonly string[] }[] = [
+  {
+    key: 'chest',
+    label: 'Chest',
+    muscles: ['chest', 'upper-chest', 'lower-chest', 'serratus'],
+  },
+  {
+    key: 'back',
+    label: 'Back',
+    muscles: [
+      'lats', 'back', 'upper-back', 'mid-back', 'lower-back',
+      'traps', 'upper-traps', 'mid-traps', 'lower-traps',
+      'spinal-erectors', 'posterior-chain', 'spine', 'thoracic-spine',
+    ],
+  },
+  {
+    key: 'shoulders',
+    label: 'Shoulders',
+    muscles: [
+      'shoulders', 'delts', 'front-delts', 'lateral-delts', 'rear-delts',
+      'rotator-cuff', 'infraspinatus', 'subscapularis', 'teres-minor',
+      'external-rotators',
+    ],
+  },
+  {
+    key: 'arms',
+    label: 'Arms',
+    muscles: [
+      'biceps', 'triceps', 'brachialis', 'brachioradialis', 'forearms',
+      'grip', 'wrist-extensors', 'wrist-flexors', 'hands',
+    ],
+  },
+  {
+    key: 'core',
+    label: 'Core',
+    muscles: [
+      'abdominals', 'core', 'deep-core', 'lower-abdominals', 'obliques',
+      'hip-flexors',
+    ],
+  },
+  {
+    key: 'glutes',
+    label: 'Glutes',
+    muscles: ['glutes', 'glute-medius'],
+  },
+  {
+    key: 'legs',
+    label: 'Legs',
+    muscles: [
+      'quadriceps', 'hamstrings', 'adductors', 'calves', 'soleus',
+      'legs', 'hips', 'hip-rotators', 'ankles',
+    ],
+  },
+  {
+    key: 'neck',
+    label: 'Neck',
+    muscles: ['neck-extensors', 'neck-flexors', 'lateral-neck'],
+  },
+  {
+    key: 'full-body',
+    label: 'Full body',
+    muscles: ['full-body', 'cardiorespiratory'],
+  },
+];
+
+const MUSCLE_TO_GROUP = new Map<string, string>(
+  MUSCLE_GROUPS.flatMap((g) => g.muscles.map((m) => [m, g.key] as [string, string])),
+);
+
+/**
+ * Do these two exercises train the same thing?
+ *
+ * Compared on the GROUP, not the raw muscle: the catalog carries 58 distinct
+ * values, so a raw comparison calls a barbell row and a chin-up unrelated
+ * (`upper-back` vs `lats`). Unmapped muscles contribute no group, so two
+ * exercises with unrecognised muscles never match each other.
+ */
+export function sharesMuscleGroup(a: Exercise, b: Exercise): boolean {
+  const groups = new Set(
+    a.primary_muscles
+      .map((m) => MUSCLE_TO_GROUP.get(m) ?? null)
+      .filter((g): g is string => g !== null),
+  );
+  return b.primary_muscles.some((m) => {
+    const g = MUSCLE_TO_GROUP.get(m) ?? null;
+    return g !== null && groups.has(g);
+  });
+}
+
+export type SwapSuggestions = { muscle: Exercise[]; movement: Exercise[] };
+
+/** Per tier, so a well-covered muscle cannot crowd the movement tier out. */
+export const MAX_SWAP_SUGGESTIONS = 10;
+
+export function swapSuggestions(base: Exercise, all: Exercise[]): SwapSuggestions {
+  const rank = (e: Exercise): number => {
     const pattern = e.movement_pattern === base.movement_pattern;
-    const shape = e.load_type === base.load_type;
-    if (pattern && shape) return 3;
+    const carries = e.load_type === base.load_type;
+    if (pattern && carries) return 3;
     if (pattern) return 2;
-    // A shared load type alone says nothing — every barbell lift is
-    // weight_reps — so it only counts alongside shared equipment.
-    if (shape && e.equipment.some((q) => base.equipment.includes(q))) return 1;
+    if (carries) return 1;
     return 0;
   };
-  return all
-    .map((e) => ({ e, s: score(e) }))
-    .filter((x) => x.s > 0)
-    .sort((a, b) => b.s - a.s || a.e.name.localeCompare(b.e.name))
-    .slice(0, 8)
-    .map((x) => x.e);
+  const order = (a: Exercise, b: Exercise) =>
+    rank(b) - rank(a) || a.name.localeCompare(b.name);
+
+  const muscle: Exercise[] = [];
+  const movement: Exercise[] = [];
+  for (const e of all) {
+    if (e.id === base.id) continue;
+    if (sharesMuscleGroup(base, e)) muscle.push(e);
+    else if (e.movement_pattern === base.movement_pattern) movement.push(e);
+  }
+  return {
+    muscle: muscle.sort(order).slice(0, MAX_SWAP_SUGGESTIONS),
+    movement: movement.sort(order).slice(0, MAX_SWAP_SUGGESTIONS),
+  };
 }
 
 export function describeSet(s: LoggedSet): string {

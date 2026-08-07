@@ -11,7 +11,8 @@ import { useAuthToken } from '@/lib/useAuthToken';
 import { vola } from '@/constants/Colors';
 import { LibraryTile, patternBadge } from '@/components/LibraryTile';
 import { fetchExercises, pickImage, type Exercise } from '@/lib/exercises';
-import { emptySet, similarTo, swapExercise } from '@/lib/sessions';
+import { emptySet, swapExercise, swapSuggestions } from '@/lib/sessions';
+import { sharesMuscleGroup } from '@/lib/exerciseFacets';
 import {
   cachedExercises,
   cacheExercises,
@@ -28,10 +29,12 @@ import {
  * and re-adding would throw away the sets already logged, so a swap rewrites
  * them in place instead.
  *
- * When swapping, suggestions come first, ranked by a rule you can say out
- * loud — same movement pattern, same load type — rather than by anything
- * opaque. A substitute measured differently can't inherit your numbers, and
- * the ranking prefers the ones that can.
+ * When swapping, suggestions come first in two labelled tiers — what trains
+ * the same muscles, then what moves the same way — ranked by a rule you can
+ * say out loud rather than by anything opaque. The full catalog sits below
+ * both, so neither tier is a restriction. A substitute measured differently
+ * can't inherit your numbers, and within a tier the ranking prefers the ones
+ * that can.
  *
  * Either way the list is filtered to the session's discipline, so a choice
  * the API would reject is unreachable rather than merely refused.
@@ -108,7 +111,10 @@ export default function AddExerciseToSessionScreen() {
   // Only while the search is untouched: once you're typing, the results you
   // asked for are the ones you want.
   const suggestions = useMemo(
-    () => (current && query.trim() === '' ? similarTo(current, results) : []),
+    () =>
+      current && query.trim() === ''
+        ? swapSuggestions(current, results, sharesMuscleGroup)
+        : { muscle: [], movement: [] },
     [current, results, query],
   );
 
@@ -160,6 +166,14 @@ export default function AddExerciseToSessionScreen() {
           <Text style={styles.name}>{item.name}</Text>
           <Text style={styles.muted}>
             {item.movement_pattern.replace(/_/g, ' ')}
+            {/* Equipment, because the usual reason to swap is that a piece of
+                it is occupied — and the one suggestion that cannot help is
+                another movement needing the same bar. The ranking deliberately
+                does NOT guess at this (people also swap for a niggle, or a
+                preference); showing it lets the athlete decide in a second. */}
+            {item.equipment.length > 0
+              ? ` · ${item.equipment.map((q) => q.replace(/-/g, ' ')).join(', ')}`
+              : ' · bodyweight'}
             {swapping && !carries ? ' · measured differently' : ''}
           </Text>
         </View>
@@ -198,13 +212,30 @@ export default function AddExerciseToSessionScreen() {
         // Suggestions ride in the header so the whole screen stays one
         // scrolling list rather than two that fight for height.
         ListHeaderComponent={
-          suggestions.length > 0 && current ? (
+          current && (suggestions.muscle.length > 0 || suggestions.movement.length > 0) ? (
             <View style={styles.header}>
-              <Text style={styles.sectionLabel}>Similar to {current.name}</Text>
-              {suggestions.map((e) => (
-                <Row key={`suggested-${e.id}`} item={e} />
-              ))}
-              <Text style={styles.sectionLabel}>All {sport} exercises</Text>
+              {/* Muscle first: the question being asked is "the rack is taken,
+                  what else trains this?", and the answer starts with what it
+                  trains rather than what shape it is. */}
+              {suggestions.muscle.length > 0 && (
+                <>
+                  <Text style={styles.sectionLabel}>Trains the same muscles</Text>
+                  {suggestions.muscle.map((e) => (
+                    <Row key={`muscle-${e.id}`} item={e} />
+                  ))}
+                </>
+              )}
+              {suggestions.movement.length > 0 && (
+                <>
+                  <Text style={styles.sectionLabel}>Similar movement</Text>
+                  {suggestions.movement.map((e) => (
+                    <Row key={`movement-${e.id}`} item={e} />
+                  ))}
+                </>
+              )}
+              {/* Named so the escape hatch is obvious: neither tier is a
+                  restriction, and the whole catalog is one scroll below. */}
+              <Text style={styles.sectionLabel}>Everything else — all {sport} exercises</Text>
             </View>
           ) : null
         }

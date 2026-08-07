@@ -326,32 +326,85 @@ export function swapExercise(
 }
 
 /**
- * Ranks candidates by how well they stand in for `base`.
+ * Suggestions for replacing `base`, in two labelled tiers.
  *
- * Deterministic and explainable by design — the same rule the whole product
- * is built on. Same movement pattern *and* the same load type is a genuine
- * substitute (you can slot it into the same set and the numbers still mean
- * something); matching only one of the two is a weaker suggestion; anything
- * else isn't a recommendation at all and is left to the full search.
+ * **Muscle first, and that reordering is the whole point.** The previous rule
+ * scored only `movement_pattern` and `load_type` and never looked at
+ * `primary_muscles` at all — so swapping a barbell bench press offered other
+ * horizontal presses, which is usually right by accident, while swapping a
+ * leg press could suggest anything sharing the `squat` pattern regardless of
+ * what it trained. The question an athlete is actually asking is "the rack is
+ * taken, what else trains this?", and the answer starts with the muscle.
+ *
+ * Matched on the muscle GROUP rather than the raw `primary_muscles` string,
+ * because the catalog carries 58 distinct values across 761 exercises and
+ * nobody swaps a lift looking for another one that hits `teres-minor`. The
+ * groups are the same ones the Library filters on, so the app has one
+ * vocabulary for "what does this train" rather than two.
+ *
+ * Deterministic and explainable, like every other recommendation here: within
+ * a tier, candidates that also share the movement pattern come first, then
+ * those whose numbers carry over, then alphabetically.
+ *
+ * **Equipment is deliberately not scored.** The old rule treated shared
+ * equipment as a point in favour, which is backwards for the case the swap
+ * screen exists for — if the barbell is occupied, another barbell movement is
+ * the one suggestion that cannot help. But the opposite rule would be a guess
+ * too: people also swap for a niggle, or because they prefer a machine. So the
+ * ranking stays out of it and the row shows the equipment instead, which is
+ * the one thing that lets the athlete decide in a second.
  */
-export function similarTo(base: Exercise, all: Exercise[]): Exercise[] {
-  const score = (e: Exercise): number => {
-    if (e.id === base.id) return -1;
+export type SwapSuggestions = {
+  /** Trains the same muscle group. The answer to "what else hits this?". */
+  muscle: Exercise[];
+  /** Same movement shape, a different muscle group. */
+  movement: Exercise[];
+};
+
+/**
+ * Per tier, not overall.
+ *
+ * The old cap was 8 across everything, which with muscle-first ranking would
+ * have let a well-covered muscle crowd the movement tier off the screen
+ * entirely. These render in a list header rather than the virtualised list, so
+ * the number is about how much someone will read, not about performance.
+ */
+export const MAX_SWAP_SUGGESTIONS = 10;
+
+export function swapSuggestions(
+  base: Exercise,
+  all: Exercise[],
+  /**
+   * Injected rather than imported, so this module keeps knowing nothing about
+   * the facet vocabulary — and so a test can pin the tiering without also
+   * pinning the muscle taxonomy.
+   */
+  sharesMuscleGroup: (a: Exercise, b: Exercise) => boolean,
+): SwapSuggestions {
+  const rank = (e: Exercise): number => {
     const pattern = e.movement_pattern === base.movement_pattern;
-    const shape = e.load_type === base.load_type;
-    if (pattern && shape) return 3;
+    // "Carries" means the logged numbers still mean something in the same
+    // row — the same test `swapExercise` uses to decide whether to keep them.
+    const carries = e.load_type === base.load_type;
+    if (pattern && carries) return 3;
     if (pattern) return 2;
-    // A shared load type alone says nothing useful — every barbell lift is
-    // weight_reps — so it only counts alongside shared equipment.
-    if (shape && e.equipment.some((q) => base.equipment.includes(q))) return 1;
+    if (carries) return 1;
     return 0;
   };
-  return all
-    .map((e) => ({ e, s: score(e) }))
-    .filter((x) => x.s > 0)
-    .sort((a, b) => b.s - a.s || a.e.name.localeCompare(b.e.name))
-    .slice(0, 8)
-    .map((x) => x.e);
+  const order = (a: Exercise, b: Exercise) => rank(b) - rank(a) || a.name.localeCompare(b.name);
+
+  const muscle: Exercise[] = [];
+  const movement: Exercise[] = [];
+  for (const e of all) {
+    if (e.id === base.id) continue;
+    if (sharesMuscleGroup(base, e)) muscle.push(e);
+    else if (e.movement_pattern === base.movement_pattern) movement.push(e);
+  }
+
+  return {
+    muscle: muscle.sort(order).slice(0, MAX_SWAP_SUGGESTIONS),
+    movement: movement.sort(order).slice(0, MAX_SWAP_SUGGESTIONS),
+  };
 }
 
 export function describeSet(s: LoggedSet, units: UnitSystem = 'metric'): string {
