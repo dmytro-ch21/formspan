@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/discipline"
@@ -116,6 +117,11 @@ type Repository interface {
 	ListExerciseUnits(ctx context.Context, userID string) (map[string]string, error)
 	// SetExerciseUnit stores an override, or removes it when unit is empty.
 	SetExerciseUnit(ctx context.Context, userID, exerciseID, unit string) error
+	// GetByUsername resolves a handle to its public card, or ErrNotFound. The
+	// input is assumed canonical lowercase — the handler normalises — but the
+	// query matches on lower() anyway, because that is also what hits the
+	// unique expression index from migration 000040.
+	GetByUsername(ctx context.Context, username string) (*PublicProfile, error)
 	Create(ctx context.Context, userID string, in NewProfile) (*Profile, error)
 	Update(ctx context.Context, userID string, in ProfileUpdate) (*Profile, error)
 	// ListModules returns only the choices this user has actually stored.
@@ -125,6 +131,21 @@ type Repository interface {
 	// SetModules upserts the given keys. Keys the caller doesn't mention are
 	// left alone, so a client can PATCH one toggle without sending the rest.
 	SetModules(ctx context.Context, userID string, enabled map[string]bool) error
+}
+
+// PublicProfile is what one athlete may see of another — the response of
+// username lookup, and nothing else.
+//
+// A DEDICATED TYPE, not a trimmed Profile, and that is the entire point:
+// Profile carries date_of_birth, sex and track_effort, and this is the first
+// endpoint that ever shows an account to someone who does not own it. Reusing
+// Profile with some fields blanked would leave the leak one refactor away;
+// a struct that never had the fields cannot leak them.
+type PublicProfile struct {
+	Username string `json:"username"`
+	// DisplayName is the human name beside the handle — "is this the right
+	// Dmytro" is answered here. Nil when the athlete never set one.
+	DisplayName *string `json:"display_name"`
 }
 
 // usernamePattern is the whole format rule: 3–30 characters, lowercase
@@ -137,10 +158,42 @@ type Repository interface {
 // a letter keeps a handle from ever being confusable with a numeric id.
 var usernamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{2,29}$`)
 
-// ValidUsername reports whether a handle is claimable at all — format first,
-// then the reserved list.
+// ValidUsername reports whether a handle is claimable at all — format, the
+// exact reserved list, then the impersonation shape rule.
 func ValidUsername(u string) bool {
-	return usernamePattern.MatchString(u) && !reservedUsernames[u]
+	return usernamePattern.MatchString(u) && !reservedUsernames[u] && !impersonates(u)
+}
+
+// impersonates refuses handles that CONTAIN an impersonation token as an
+// underscore-segment, with trailing digits stripped — vola_official, admin2
+// and official_vola are all refused, while "modest" and "supporter" pass
+// because segment comparison is whole-word, not substring.
+//
+// Added the moment lookup made handles visible to OTHER athletes: an
+// exact-match reserved list stops @admin, and stops nothing about
+// @vola_support telling a stranger to change their password. Route-collision
+// words (me, settings…) deliberately stay exact-only — @dmytro_settings
+// impersonates nobody.
+func impersonates(u string) bool {
+	for _, seg := range strings.Split(u, "_") {
+		seg = strings.TrimRight(seg, "0123456789")
+		if impersonationTokens[seg] {
+			return true
+		}
+	}
+	return false
+}
+
+var impersonationTokens = map[string]bool{
+	// Plurals listed explicitly — the digit-stripping below does not
+	// singularise, and "message the admins" is exactly the community phrasing
+	// the rule exists to block. Added at review, BEFORE anything could claim
+	// them: this rule runs at claim time, so every day a token is missing is
+	// a day the handle can be taken.
+	"admins": true, "mods": true, "moderators": true,
+	"admin": true, "administrator": true, "moderator": true, "mod": true,
+	"staff": true, "support": true, "official": true, "security": true,
+	"system": true, "vola": true, "formspan": true, "help": true,
 }
 
 // reservedUsernames are handles nobody may claim.

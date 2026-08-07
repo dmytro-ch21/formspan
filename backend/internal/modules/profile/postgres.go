@@ -30,6 +30,24 @@ func (r *PostgresRepository) Get(ctx context.Context, userID string) (*Profile, 
 	return scanProfile(row)
 }
 
+func (r *PostgresRepository) GetByUsername(ctx context.Context, username string) (*PublicProfile, error) {
+	// lower(username) = $1 is not defensive fluff: it is the exact expression
+	// the unique index from 000040 is built on, so this lookup is an index
+	// scan rather than a table walk. Only public-card columns are selected —
+	// the row's private fields never enter this code path at all.
+	var p PublicProfile
+	err := r.pool.QueryRow(ctx, `
+		SELECT username, display_name FROM profiles
+		WHERE lower(username) = lower($1)`, username).Scan(&p.Username, &p.DisplayName)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, translatePgError(err)
+	}
+	return &p, nil
+}
+
 func (r *PostgresRepository) Create(ctx context.Context, userID string, in NewProfile) (*Profile, error) {
 	dob, err := parseDate(in.DateOfBirth)
 	if err != nil {

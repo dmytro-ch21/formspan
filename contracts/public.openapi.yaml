@@ -261,6 +261,22 @@ components:
       nullable: true
       enum: [male, female]
 
+    PublicProfile:
+      type: object
+      description: >
+        What one athlete may see of another — the username-lookup response,
+        and deliberately a separate schema from Profile: this is the first
+        endpoint that shows an account to someone who does not own it, and a
+        schema that never had date_of_birth or sex cannot leak them.
+      required: [username, display_name]
+      properties:
+        username:
+          type: string
+        display_name:
+          type: string
+          nullable: true
+          description: The human name beside the handle, or null if never set.
+
     Profile:
       type: object
       required:
@@ -2549,6 +2565,42 @@ paths:
           $ref: "#/components/responses/NotModified"
         "401":
           $ref: "#/components/responses/Unauthorized"
+
+  /users/{username}:
+    get:
+      summary: Look up an athlete by username
+      operationId: lookupUser
+      description: >
+        Exact-match resolution of a handle to its public card — the search
+        half of the social scope. The input is case-normalised, so
+        `/v1/users/Dmytro` finds `dmytro`.
+
+
+        NOT prefix search, deliberately: you type the handle a friend told
+        you. Handle existence disclosure was accepted with the username
+        design, but prefix search would widen it from "confirm one handle"
+        to "enumerate cheaply", and nothing in the friend-request flow needs
+        it. Authentication is required for the same reason — lookup runs at
+        signed-in speed, not anonymous-scraper speed.
+
+
+        Absent, malformed and reserved handles all answer the SAME 404:
+        none of the three can be a person, and distinct answers would teach
+        a prober the format and the reserved list one probe at a time.
+      parameters:
+      - name: username
+        in: path
+        required: true
+        schema: { type: string }
+      responses:
+        "200":
+          description: The public card.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicProfile"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /profile:
     get:

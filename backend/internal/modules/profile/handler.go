@@ -244,3 +244,34 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 		apihttp.WriteInternal(w, r, "profile", err)
 	}
 }
+
+// Lookup resolves a handle to its public card — the first endpoint that shows
+// one athlete to another, which is why it returns PublicProfile and could not
+// return Profile even by accident.
+//
+// Absent, invalid-format and reserved handles all answer the SAME 404: none
+// of the three can be a person, and distinguishing them teaches a prober the
+// format and the reserved list one probe at a time. The caller's identity is
+// not read — RequireAuth on the route is the gate, and gating lookup behind
+// sign-in is what keeps handle scraping at account speed rather than
+// anonymous speed.
+func (h *Handler) Lookup(w http.ResponseWriter, r *http.Request) {
+	// Lowercased before anything else: handles are canonical lowercase, and
+	// GET /v1/users/Dmytro failing to find dmytro would read as broken to
+	// every human who typed it.
+	u := strings.ToLower(strings.TrimSpace(r.PathValue("username")))
+	if !usernamePattern.MatchString(u) || reservedUsernames[u] || impersonates(u) {
+		apihttp.WriteError(w, http.StatusNotFound, apihttp.CodeNotFound, "no such user")
+		return
+	}
+	p, err := h.repo.GetByUsername(r.Context(), u)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			apihttp.WriteError(w, http.StatusNotFound, apihttp.CodeNotFound, "no such user")
+			return
+		}
+		writeError(w, r, err)
+		return
+	}
+	apihttp.WriteJSON(w, http.StatusOK, p)
+}

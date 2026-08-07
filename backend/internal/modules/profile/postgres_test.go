@@ -352,3 +352,38 @@ func TestValidUsername(t *testing.T) {
 		}
 	}
 }
+
+func TestGetByUsername(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	id := "test_user_lookup"
+	if _, err := repo.Create(ctx, id, NewProfile{}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM profiles WHERE user_id = $1`, id) })
+
+	u := "lookup_target"
+	dn := "Lookup Target"
+	if _, err := repo.Update(ctx, id, ProfileUpdate{Username: &u, DisplayName: &dn}); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+
+	got, err := repo.GetByUsername(ctx, u)
+	if err != nil {
+		t.Fatalf("lookup: %v", err)
+	}
+	if got.Username != u || got.DisplayName == nil || *got.DisplayName != dn {
+		t.Fatalf("wrong card: %+v", got)
+	}
+
+	// Case-insensitive through the lower() expression — the same index that
+	// enforces uniqueness serves the lookup, and this is the test that goes
+	// red if the WHERE clause stops matching the index expression.
+	if _, err := repo.GetByUsername(ctx, "LOOKUP_TARGET"); err != nil {
+		t.Fatalf("case-insensitive lookup: %v", err)
+	}
+
+	if _, err := repo.GetByUsername(ctx, "no_such_handle"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("want ErrNotFound, got %v", err)
+	}
+}
