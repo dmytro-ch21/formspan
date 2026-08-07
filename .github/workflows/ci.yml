@@ -136,6 +136,27 @@ jobs:
       - name: Build
         run: pnpm run build:admin
 
+  scripts:
+    name: Scripts (Python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # No actions/setup-python on purpose. The check is stdlib-only and
+      # version-agnostic, the runner image ships python3 already, and every
+      # extra action is one more thing to download before any of this repo's
+      # code runs — the failure mode that took out three jobs on 2026-08-06
+      # ("Failed to resolve action download info").
+      - name: Python version
+        run: python3 --version
+
+      # Until this job existed, NOTHING in this repo read a .py file: no CI
+      # step, no `verify` link, no pyproject/ruff config anywhere. The content
+      # pipeline is Python, and the script that imports the whole catalog is
+      # run rarely and at exactly the moment being wrong is expensive.
+      - name: Syntax
+        run: python3 scripts/check-python-syntax.py
+
   mobile:
     name: Mobile (Expo)
     runs-on: ubuntu-latest

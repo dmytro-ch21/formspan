@@ -78,6 +78,17 @@ relocated to a third app. And note `fmt:api` has to *test* gofmt's output:
 `gofmt -l` prints offenders and still exits 0, so as the chain's first link it
 could never fail.
 
+**`scripts/*.py` is parsed now** (`check:python`, plus a `Scripts (Python)` CI
+job) — it was not for a long time, and *nothing* in the repo read a `.py` file:
+no CI step, no `verify` link, no ruff/pyproject config anywhere. The content
+pipeline is Python and the importer is run rarely, at exactly the moment being
+wrong is expensive. This is only a **syntax** floor, and the distinction
+matters: `scan-library.py`'s corpus double-count survived for months and a
+parse check would not have caught it, because that was behaviour, not syntax.
+Anything about what a script *does* needs a check that runs the script.
+Stdlib-only on purpose, so `verify` needs no Python toolchain and the CI job
+needs no `setup-python`.
+
 Then: `git push -u origin <branch>`, `gh pr create`, watch CI with `gh run watch <run-id> --exit-status`.
 
 **Never merge a PR without the user's explicit go-ahead, even if CI is green.** This has been the rule for every PR in this project — don't treat a passing CI run as implicit merge permission.
