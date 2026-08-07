@@ -6,11 +6,17 @@ import { vola } from '@/constants/Colors';
 /**
  * A medal, drawn from views.
  *
- * Same rule as `ui/Icon` and `Belt`: no `react-native-svg`, because it is a
- * native dependency and therefore a prebuild and a fresh device build for
- * everyone. A medal is a disc, a rim and two ribbon tails, which views draw
- * exactly — and no gradient library is installed, so the metal is suggested by
- * a rim a shade lighter than the face rather than by a sheen.
+ * Drawn from views rather than SVG. **The original reason given here has since
+ * expired and is corrected rather than repeated:** it claimed
+ * `react-native-svg` was unavailable and that "no gradient library is
+ * installed", and both are now in `package.json` (`react-native-svg` 15.15.4,
+ * `expo-linear-gradient`). Anyone reading the old note would have designed
+ * around a constraint that had lifted.
+ *
+ * Views are still the right call, just for a smaller reason: a medal is a disc,
+ * a rim and two ribbon tails, which views draw exactly, and the metal reads
+ * fine from a rim a shade lighter than the face. Reaching for SVG here would
+ * buy nothing.
  *
  * **The tier means something.** Gold is a record set in the last 30 days —
  * what the API already calls `is_recent` — and silver is a standing record set

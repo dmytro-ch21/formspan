@@ -9,6 +9,15 @@ import { SwipeToDelete } from '@/components/SwipeToDelete';
 
 import { CountdownBar, useCountdown } from '@/components/Countdown';
 import { HoldToConfirm } from '@/components/HoldToConfirm';
+import { SessionCelebration } from '@/components/SessionCelebration';
+import {
+  recordsFromSession,
+  summariseSession,
+  worthCelebrating,
+  type SessionRecord,
+  type SessionSummary,
+} from '@/lib/celebration';
+import { fetchRecords } from '@/lib/records';
 import { elapsedOf } from '@/lib/countdown';
 import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
@@ -159,6 +168,54 @@ export default function SessionScreen() {
   // you're trying to record a number is exactly what this avoids.
   const [exerciseUnits, setExerciseUnits] = useState<Record<string, UnitSystem>>({});
   // Off unless asked for — see PREF_AUTO_REST for why that's the default.
+  /**
+   * The finished-session card, or null.
+   *
+   * Held as the summary itself rather than a boolean, so the card renders from
+   * a plain data object and nothing else — the same object a share image would
+   * be built from later.
+   */
+  const [celebrating, setCelebrating] = useState<SessionSummary | null>(null);
+  /**
+   * The records, held apart from the summary they end up on.
+   *
+   * **This separation is the fix for an infinite refetch, not tidiness.** The
+   * first version wrote the records back into `celebrating`, which is the
+   * effect's own dependency — so every fill produced a new object, re-triggered
+   * the effect, fetched again, and produced another. The guard meant to stop it
+   * was inverted: it bailed out when the session set NO records, so the loop
+   * ran precisely in the case the feature exists for, one request per
+   * round-trip for as long as the card stayed open, with nothing visibly wrong.
+   *
+   * Writing to state the effect does not depend on cannot do that.
+   */
+  const [celebrationRecords, setCelebrationRecords] = useState<SessionRecord[]>([]);
+
+  /**
+   * Personal records arrive after the card does, if at all.
+   *
+   * Records live on the server and finishing is offline-first, so the card
+   * must not wait for the network to appear — it opens immediately with the
+   * numbers the phone already has, and the PR row fills in when the answer
+   * comes back. Offline it simply never does, which is the honest outcome:
+   * silence is not a claim, a guessed medal would be.
+   */
+  useEffect(() => {
+    if (!celebrating || !id) return;
+    let live = true;
+    fetchRecords(getToken, celebrating.recordExerciseIDs)
+      .then((all) => {
+        if (live) setCelebrationRecords(recordsFromSession(all, id));
+      })
+      .catch(() => {
+        // No network, no PR row. Deliberately silent — a failed lookup is not
+        // an error the athlete needs to hear about on a celebration screen.
+      });
+    return () => {
+      live = false;
+    };
+  }, [celebrating, getToken, id]);
+
   const [autoRest, setAutoRest] = useState(false);
   useEffect(() => {
     if (userId) readAutoRest(userId).then(setAutoRest).catch(() => {});
@@ -1024,6 +1081,18 @@ export default function SessionScreen() {
                   setVolume(localVolume(s.sets));
                 }
                 requestSync('session-finished');
+                // Raised AFTER the finish has been written and the push
+                // requested — the card is a report, never a step in the flow.
+                if (s) {
+                  const summary = summariseSession(s, localVolume(s.sets), showEffort);
+                  // An empty session gets the plain read-only screen. Marking
+                  // "opened it and finished it" with a card is the hollow
+                  // praise that teaches people to stop reading the app.
+                  if (worthCelebrating(summary)) {
+                    setCelebrationRecords([]);
+                    setCelebrating(summary);
+                  }
+                }
               } catch (err) {
                 setError(err instanceof Error ? err.message : String(err));
               }
@@ -1064,6 +1133,19 @@ export default function SessionScreen() {
           }}
         />
       </KeyboardAwareScrollView>
+
+      {celebrating && (
+        <SessionCelebration
+          // Merged at render, so filling the records in cannot feed back into
+          // the effect that fetches them.
+          summary={{ ...celebrating, records: celebrationRecords }}
+          formatTonnage={(v) => formatVolume(v, units)}
+          onDismiss={() => {
+            setCelebrating(null);
+            setCelebrationRecords([]);
+          }}
+        />
+      )}
 
       {timerState.timer && (
         <CountdownBar

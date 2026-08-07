@@ -19,6 +19,32 @@ const { act } = require('@testing-library/react-native');
 // `jest.mock` above the imports, so a module-scope binding referenced in a
 // factory is not initialised yet — and jest rejects it outright rather than
 // letting it fail at runtime. Only names prefixed `mock` are exempt.
+/*
+  `expo-audio` cannot be loaded under jest at all.
+
+  Its JS reads the native module's prototype at import time, and jest-expo does
+  not stub this one — so the failure is "Cannot read properties of undefined
+  (reading 'prototype')" at line 1 of `lib/sounds.ts`, and it takes down the
+  whole SUITE rather than a test. That reaches any screen importing the
+  celebration card, which is how a change about confetti broke the BJJ screen's
+  tests.
+
+  Here rather than per-file for the reason the header gives: it is a native
+  module every screen needs to merely exist, not behaviour anything asserts.
+  `lib/__tests__/sounds.test.ts` overrides this with its own richer mock, which
+  is where the sound behaviour is actually pinned.
+*/
+jest.mock('expo-audio', () => ({
+  createAudioPlayer: () => ({
+    play: () => {},
+    pause: () => {},
+    seekTo: () => Promise.resolve(),
+    remove: () => {},
+    volume: 1,
+  }),
+  setAudioModeAsync: () => Promise.resolve(),
+}));
+
 jest.mock('expo-router', () => {
   const React = require('react');
   const { Text } = require('react-native');

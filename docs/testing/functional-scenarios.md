@@ -4702,6 +4702,65 @@ on next-moves — see below.
 - Web: following a link inside the panel remounts it — focus must land on the
   panel heading, not on `<body>`.
 
+## Finishing a session: the celebration card (mobile)
+
+Most of these check that something does NOT appear. That is the shape of the
+risk — this screen fails by congratulating someone for nothing.
+
+### When it appears, and when it must not
+
+- **Log some sets, hold Finish** → the card appears with a flare burst and a
+  success haptic.
+- **Open a session, log nothing, hold Finish** → **no card.** The plain
+  read-only screen. Marking "opened it and finished it" is hollow praise.
+- **The card must never block.** Done is tappable from the first frame, while
+  the flares are still moving. Nothing waits on the animation, and the sync was
+  already requested before the card mounted.
+
+### The badge
+
+- **An ordinary session → NO badge.** The most important assertion here: a badge
+  on every session is wallpaper.
+- **A session that set a PR** → a badge naming how many, and a medal instead of
+  the tick.
+- Long sessions, lots of exercises, big tonnage → still no badge. They describe
+  a training style, not an achievement.
+
+### Personal records
+
+- **Online, session set a PR** → the PR row appears, listing each exercise and
+  which kind of record. It may arrive a moment after the card — that is
+  expected, the card does not wait for the network.
+- **Offline** → no PR row at all, and no error. Silence, not a guess.
+- The PRs listed must be **this session's**. Log a PR in one session, finish a
+  second unrelated session → the second card shows none.
+
+### Objective vs subjective
+
+- Time / sets / reps / volume sit together as measurements.
+- **"How it felt" (RPE) is in its own captioned block**, never among them.
+- **Turn effort tracking off in Settings, finish a session** → no "How it felt"
+  block at all. Not "RPE 0". This is the case that distinguishes "not collected"
+  from "recorded as nothing".
+- A bodyweight session → **no Volume tile**, rather than "0 kg".
+
+### BJJ
+
+- Finishing a BJJ session shows the card with **Rounds and Mat time**, never
+  sets or tonnage.
+- **No badge and no PR row**, deliberately — there is no BJJ record equivalent
+  yet. Assert their absence; a "you showed up" badge here would be the bug.
+- `session_rpe` appears under "How it felt", not beside the measurements.
+
+### Cross-app parity (web)
+
+- Finishing on web shows a **static panel** of any records set — no modal, no
+  flares. Deliberate: this screen is for typing up a session that already
+  happened.
+- **No panel when no records were set** — a "no records today" note would be the
+  app rubbing it in.
+
+
 ## Hold to confirm (mobile)
 
 Guards the actions a stray touch must not perform. The whole point is what does
