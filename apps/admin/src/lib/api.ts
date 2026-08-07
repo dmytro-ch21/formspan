@@ -358,11 +358,11 @@ export async function createTechnique(body: TechniqueWrite): Promise<Technique> 
  * already published and this page is stale.
  */
 /** One recorded state of a technique, as it looked after a console write. */
-export type Revision = {
+export type Revision<T = Technique> = {
   revision: number;
   actor: string;
   action: "create" | "update" | "publish" | "restore";
-  payload: Technique;
+  payload: T;
   created_at: string;
 };
 
@@ -446,9 +446,42 @@ export type Exercise = {
 };
 
 /** The exercises the console owns — not the catalog, for the same reason as techniques. */
-export async function listAuthoredExercises(): Promise<Exercise[]> {
-  const data = await adminFetch<{ exercises: Exercise[] }>("/admin/exercises");
+/**
+ * The exercises the console authored, or — with a query — any exercise at all.
+ * Same split as the technique list, for the same reason.
+ */
+export async function listAuthoredExercises(query?: string): Promise<Exercise[]> {
+  const q = query?.trim();
+  const data = await adminFetch<{ exercises: Exercise[] }>(
+    q ? `/admin/exercises?q=${encodeURIComponent(q)}` : "/admin/exercises",
+  );
   return data.exercises;
+}
+
+/** Publish a draft exercise. One-way, and a separate call from the PATCH. */
+export async function publishExercise(id: string): Promise<Exercise> {
+  const data = await adminFetch<{ exercise: Exercise }>(
+    `/admin/exercises/${encodeURIComponent(id)}/publish`,
+    { method: "POST", body: {} },
+  );
+  return data.exercise;
+}
+
+/** An exercise's history, newest first. Empty is normal, not an error. */
+export async function listExerciseRevisions(id: string): Promise<Revision<Exercise>[]> {
+  const data = await adminFetch<{ revisions: Revision<Exercise>[] }>(
+    `/admin/exercises/${encodeURIComponent(id)}/revisions`,
+  );
+  return data.revisions;
+}
+
+/** Roll an exercise back to an earlier revision. Appends; content only. */
+export async function restoreExerciseRevision(id: string, revision: number): Promise<Exercise> {
+  const data = await adminFetch<{ exercise: Exercise }>(
+    `/admin/exercises/${encodeURIComponent(id)}/revisions/${revision}/restore`,
+    { method: "POST", body: {} },
+  );
+  return data.exercise;
 }
 
 /**

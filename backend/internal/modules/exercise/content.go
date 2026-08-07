@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/discipline"
 )
@@ -67,17 +68,49 @@ var foldASCII = map[rune]string{
 // cannot clobber it — which is what makes authoring safe without an upload
 // path. An exercise authored here simply has none, and a later deploy can add
 // some without the console having to know.
+// Revision is one recorded state of an exercise, as it looked after a console
+// write. The twin of technique.Revision — see migration 000039.
+type Revision struct {
+	Revision  int       `json:"revision"`
+	Actor     string    `json:"actor"`
+	Action    string    `json:"action"`
+	Payload   Exercise  `json:"payload"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// The four things that produce a revision. Same vocabulary as the technique
+// catalog's, and the same warning applies: one concept, one contract enum, so
+// they must not drift.
+const (
+	ActionCreate  = "create"
+	ActionUpdate  = "update"
+	ActionPublish = "publish"
+	ActionRestore = "restore"
+)
+
 type ContentRepository interface {
 	// CreateExercise writes a new admin-authored exercise. ErrAlreadyExists if
 	// the id is taken, including by a seeded row — an admin row shadowing a
 	// seeded id would be skipped by the deploy's upsert, leaving the two to
 	// disagree forever.
-	CreateExercise(ctx context.Context, e Exercise) (Exercise, error)
+	//
+	// `actor` is the caller's own id from the request's claims, never a value a
+	// client sent — a parameter rather than a field on Exercise, because a
+	// field there is a field a JSON body could set.
+	CreateExercise(ctx context.Context, e Exercise, actor string) (Exercise, error)
 	// UpdateExercise edits ANY exercise and takes ownership of it: the write
 	// sets `source` to "admin", which the seeder skips. Without that flip the
 	// next deploy would silently revert the edit. ErrNotFound now means only
 	// that the id does not exist.
-	UpdateExercise(ctx context.Context, e Exercise) (Exercise, error)
+	UpdateExercise(ctx context.Context, e Exercise, actor string) (Exercise, error)
+	// Publish makes a draft visible to athletes. One-way.
+	Publish(ctx context.Context, id, actor string) (Exercise, error)
+	// SearchAll reaches the whole catalog, seeded rows included.
+	SearchAll(ctx context.Context, query string) ([]Exercise, error)
+	// Revisions returns the history, newest first; empty for an untouched row.
+	Revisions(ctx context.Context, id string) ([]Revision, error)
+	// Restore writes an earlier revision's content back as a new revision.
+	Restore(ctx context.Context, id string, revision int, actor string) (Exercise, error)
 	// GetExercise reads the current row so a partial update can overlay onto it.
 	GetExercise(ctx context.Context, id string) (Exercise, error)
 	// AdminAuthored returns every console-authored exercise.

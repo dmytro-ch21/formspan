@@ -65,10 +65,16 @@ func (r *PostgresRepository) List(ctx context.Context, f Filter) ([]Exercise, er
 		where = append(where, database.LikeClause("name", len(args)))
 	}
 
+	// DRAFTS ARE NOT PUBLIC — here and Get, the only two places that know it.
+	// Deliberately not a filter a caller can turn off: a draft that becomes
+	// visible by passing a query parameter is not a draft.
+	//
+	// Prepended so it survives every filter combination above, including none
+	// of them — which is why the `if len(where)` guard is gone.
+	where = append([]string{"status = '" + StatusPublished + "'"}, where...)
+
 	q := `SELECT ` + selectColumns + ` FROM exercises`
-	if len(where) > 0 {
-		q += ` WHERE ` + strings.Join(where, " AND ")
-	}
+	q += ` WHERE ` + strings.Join(where, " AND ")
 	q += ` ORDER BY sport, name`
 
 	rows, err := r.pool.Query(ctx, q, args...)
@@ -162,7 +168,10 @@ func (r *PostgresRepository) attachMedia(ctx context.Context, exercises []Exerci
 }
 
 func (r *PostgresRepository) Get(ctx context.Context, id string) (*Exercise, error) {
-	row := r.pool.QueryRow(ctx, `SELECT `+selectColumns+` FROM exercises WHERE id = $1`, id)
+	// A draft is ErrNotFound, not a 403: a caller has no business knowing an id
+	// exists before it is published.
+	row := r.pool.QueryRow(ctx, `SELECT `+selectColumns+` FROM exercises
+		WHERE id = $1 AND status = '`+StatusPublished+`'`, id)
 	e, err := scanExercise(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -191,8 +200,8 @@ const upsertSQL = `
 	INSERT INTO exercises (
 		id, name, sport, movement_pattern, movement_pattern_detail,
 		primary_muscles, secondary_muscles, equipment, load_type,
-		is_unilateral, instructions
-	) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		is_unilateral, instructions, status
+	) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 	ON CONFLICT (id) DO UPDATE SET
 		name              = EXCLUDED.name,
 		sport             = EXCLUDED.sport,
@@ -204,6 +213,7 @@ const upsertSQL = `
 		load_type         = EXCLUDED.load_type,
 		is_unilateral     = EXCLUDED.is_unilateral,
 		instructions      = EXCLUDED.instructions,
+		status            = EXCLUDED.status,
 		updated_at        = now()
 	-- Scoped to seeded rows: a deploy must not revert admin-authored content.
 	-- See migration 000032 and the same guard on techniques.
@@ -211,19 +221,19 @@ const upsertSQL = `
 		exercises.name, exercises.sport, exercises.movement_pattern,
 		exercises.movement_pattern_detail, exercises.primary_muscles, exercises.secondary_muscles,
 		exercises.equipment, exercises.load_type, exercises.is_unilateral,
-		exercises.instructions
+		exercises.instructions, exercises.status
 	) IS DISTINCT FROM (
 		EXCLUDED.name, EXCLUDED.sport, EXCLUDED.movement_pattern,
 		EXCLUDED.movement_pattern_detail, EXCLUDED.primary_muscles, EXCLUDED.secondary_muscles,
 		EXCLUDED.equipment, EXCLUDED.load_type, EXCLUDED.is_unilateral,
-		EXCLUDED.instructions
+		EXCLUDED.instructions, EXCLUDED.status
 	)`
 
 func upsertArgs(e Exercise) []any {
 	return []any{
 		e.ID, e.Name, e.Sport, e.MovementPattern, e.MovementPatternDetail,
 		e.PrimaryMuscles, e.SecondaryMuscles, e.Equipment, e.LoadType,
-		e.IsUnilateral, e.Instructions,
+		e.IsUnilateral, e.Instructions, NormalizeStatus(e.Status),
 	}
 }
 

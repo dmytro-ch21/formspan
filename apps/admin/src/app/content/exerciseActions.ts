@@ -6,10 +6,12 @@ import { assertAdmin } from "@/lib/admin";
 import {
   ApiError,
   createExercise,
+  publishExercise,
+  restoreExerciseRevision,
   updateExercise,
   type ExerciseWrite,
 } from "@/lib/api";
-import type { SaveResult } from "./actions";
+import type { PublishResult, SaveResult } from "./actions";
 
 type ExerciseResult = SaveResult<ExerciseWrite>;
 
@@ -90,6 +92,39 @@ export async function createExerciseAction(
       values: bodyFrom(form),
       attempt: (prev.status === "error" ? prev.attempt : 0) + 1,
     };
+  }
+}
+
+export async function publishExerciseAction(
+  id: string,
+  _prev: PublishResult,
+  _form: FormData,
+): Promise<PublishResult> {
+  try {
+    await assertAdmin();
+    await publishExercise(id);
+    revalidatePath("/content/exercises");
+    revalidatePath(`/content/exercises/${id}`);
+    return { status: "ok" };
+  } catch (err) {
+    return { status: "error", message: explain(err) };
+  }
+}
+
+export async function restoreExerciseRevisionAction(
+  id: string,
+  revision: number,
+  _prev: PublishResult,
+  _form: FormData,
+): Promise<PublishResult> {
+  try {
+    await assertAdmin();
+    await restoreExerciseRevision(id, revision);
+    revalidatePath("/content/exercises");
+    revalidatePath(`/content/exercises/${id}`);
+    return { status: "ok" };
+  } catch (err) {
+    return { status: "error", message: explain(err) };
   }
 }
 

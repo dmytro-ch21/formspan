@@ -177,6 +177,15 @@ type Exercise struct {
 	// deploy-owned including the one just written.
 	Source string `json:"source,omitempty"`
 
+	// "published" or "draft"; EMPTY MEANS PUBLISHED.
+	//
+	// The technique catalog's `Status` carries the full reasoning — absence is
+	// the common case (504 live rows would otherwise each spell it out), the
+	// console creates as draft explicitly because the column default has to
+	// describe the backfill, and editing a published row leaves it published so
+	// a typo fix does not withdraw the exercise.
+	Status string `json:"status,omitempty"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

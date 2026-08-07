@@ -29,6 +29,11 @@ func SeedData() ([]Exercise, error) {
 	if err := json.Unmarshal(seedJSON, &exercises); err != nil {
 		return nil, fmt.Errorf("exercise: parse seed: %w", err)
 	}
+	// Normalised here so nothing downstream sees "" — the 504 seed entries
+	// carry no status, and that absence is the convention rather than a gap.
+	for i := range exercises {
+		exercises[i].Status = NormalizeStatus(exercises[i].Status)
+	}
 	if err := validate(exercises); err != nil {
 		return nil, err
 	}
@@ -62,6 +67,29 @@ var (
 	}
 )
 
+// The two publication states.
+//
+// DUPLICATED from the technique package rather than shared, and the values must
+// stay identical: they are one concept in one console and one contract enum.
+// Two string constants do not justify a package both catalogs depend on, but a
+// vocabulary that drifts is this repo's most-repeated failure — so if you
+// change one, change technique.StatusPublished/StatusDraft with it.
+const (
+	StatusPublished = "published"
+	StatusDraft     = "draft"
+)
+
+// NormalizeStatus resolves the empty-means-published convention in one place.
+func NormalizeStatus(s string) string {
+	if s == "" {
+		return StatusPublished
+	}
+	return s
+}
+
+//nolint:gochecknoglobals // vocabulary, not state
+var validStatuses = map[string]bool{StatusPublished: true, StatusDraft: true}
+
 // validate catches the content mistakes that are easy to make by hand and
 // annoying to debug later — a duplicate slug silently overwriting a
 // different exercise, or a load_type no client has a renderer for. Cheap to
@@ -82,6 +110,8 @@ func validate(exercises []Exercise) error {
 			return fmt.Errorf("exercise: seed %q has unknown movement_pattern %q", e.ID, e.MovementPattern)
 		case !validLoadTypes[e.LoadType]:
 			return fmt.Errorf("exercise: seed %q has unknown load_type %q", e.ID, e.LoadType)
+		case !validStatuses[NormalizeStatus(e.Status)]:
+			return fmt.Errorf("exercise: seed %q has unknown status %q", e.ID, e.Status)
 		}
 		for _, m := range e.Media {
 			if !validStorageKey.MatchString(m.StorageKey) {

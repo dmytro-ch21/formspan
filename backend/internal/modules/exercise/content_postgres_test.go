@@ -6,6 +6,10 @@ import (
 	"testing"
 )
 
+// The actor every console write in these tests is attributed to. A constant so
+// the audit assertions read as "this specific caller".
+const testActor = "user_test_admin"
+
 // Integration tests for the write path. These cover the properties the handler
 // tests structurally CANNOT: the fake repository implements its own ownership
 // check, so mutating `WHERE source = 'admin'` out of the real UPDATE left the
@@ -78,7 +82,7 @@ func authored(id string) Exercise {
 func TestCreateWritesAnAdminRowThatSeedingCannotTouch(t *testing.T) {
 	repo, ctx, id := contentFixture(t)
 
-	got, err := repo.CreateExercise(ctx, authored(id))
+	got, err := repo.CreateExercise(ctx, authored(id), testActor)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -106,6 +110,138 @@ func TestCreateWritesAnAdminRowThatSeedingCannotTouch(t *testing.T) {
 	}
 }
 
+// A draft is invisible to athletes, and publishing is what makes it visible.
+//
+// The two negative assertions are load-bearing: deleting the status filter from
+// the public List leaves every other test in this package green, because the
+// console paths return drafts on purpose. A draft leaking into the catalog is
+// exactly the regression nothing else here can see.
+func TestADraftExerciseIsInvisibleUntilPublished(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	const id = "test-draft-exercise"
+	// Deleting BEFORE as well as after, like contentFixture: a previous run
+	// that died mid-test leaves the row behind and every later run then fails
+	// on "already exists", which reads as a regression in the code rather than
+	// residue. Revisions go with it — the FK cascades.
+	clean := func() { _, _ = repo.pool.Exec(ctx, `DELETE FROM exercises WHERE id = $1`, id) }
+	clean()
+	t.Cleanup(clean)
+
+	created, err := repo.CreateExercise(ctx, authored(id), testActor)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// The console creates DRAFTS. The column default is 'published' because it
+	// describes the 504 backfilled rows — delete `'draft'` from the INSERT and
+	// this silently publishes instead.
+	if created.Status != StatusDraft {
+		t.Fatalf("a console-created exercise has status %q, want draft", created.Status)
+	}
+
+	inList := func() bool {
+		t.Helper()
+		all, err := repo.List(ctx, Filter{})
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		for _, e := range all {
+			if e.ID == id {
+				return true
+			}
+		}
+		return false
+	}
+	if inList() {
+		t.Error("a draft is in the public catalog — athletes can see unfinished content")
+	}
+	if _, err := repo.Get(ctx, id); !errors.Is(err, ErrNotFound) {
+		t.Errorf("public Get of a draft = %v, want ErrNotFound", err)
+	}
+	// Not hidden from the console, which would make it unfinishable.
+	if _, err := repo.GetExercise(ctx, id); err != nil {
+		t.Errorf("the console cannot see its own draft: %v", err)
+	}
+
+	if _, err := repo.Publish(ctx, id, testActor); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if !inList() {
+		t.Error("a published exercise is still missing from the public catalog")
+	}
+	// Publishing twice is ErrNotFound, not a silent success.
+	if _, err := repo.Publish(ctx, id, testActor); !errors.Is(err, ErrNotFound) {
+		t.Errorf("re-publishing = %v, want ErrNotFound", err)
+	}
+}
+
+// Every console write leaves a revision, and a restore appends rather than
+// erasing what it rolled back from.
+func TestEveryConsoleWriteToAnExerciseLeavesARevision(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	const id = "test-history-exercise"
+	clean := func() { _, _ = repo.pool.Exec(ctx, `DELETE FROM exercises WHERE id = $1`, id) }
+	clean()
+	t.Cleanup(clean)
+
+	first := authored(id)
+	first.Name = "First Draft"
+	if _, err := repo.CreateExercise(ctx, first, testActor); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	second := authored(id)
+	second.Name = "Second Name"
+	if _, err := repo.UpdateExercise(ctx, second, testActor); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if _, err := repo.Publish(ctx, id, testActor); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	revs, err := repo.Revisions(ctx, id)
+	if err != nil {
+		t.Fatalf("revisions: %v", err)
+	}
+	if len(revs) != 3 {
+		t.Fatalf("got %d revisions, want 3 (create, update, publish)", len(revs))
+	}
+	if revs[0].Action != ActionPublish || revs[2].Action != ActionCreate {
+		t.Errorf("actions newest-first = %q..%q, want publish..create",
+			revs[0].Action, revs[2].Action)
+	}
+	for _, rev := range revs {
+		if rev.Actor != testActor {
+			t.Errorf("revision %d attributed to %q", rev.Revision, rev.Actor)
+		}
+	}
+	if revs[2].Payload.Name != "First Draft" {
+		t.Errorf("revision 1 payload = %q, want the state at that time", revs[2].Payload.Name)
+	}
+
+	restored, err := repo.Restore(ctx, id, 1, testActor)
+	if err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	if restored.Name != "First Draft" {
+		t.Errorf("restored name = %q", restored.Name)
+	}
+	// ...and it did NOT unpublish. A content rollback must not withdraw a live
+	// exercise from every athlete's catalog.
+	if restored.Status != StatusPublished {
+		t.Errorf("restoring set status to %q — a content rollback must not change "+
+			"visibility", restored.Status)
+	}
+	after, _ := repo.Revisions(ctx, id)
+	if len(after) != 4 || after[0].Action != ActionRestore {
+		t.Errorf("after restore: %d revisions, newest %q — a rollback that erases "+
+			"its own evidence is not an audit trail", len(after), after[0].Action)
+	}
+	if _, err := repo.Restore(ctx, id, 99, testActor); !errors.Is(err, ErrNotFound) {
+		t.Errorf("restoring a missing revision = %v, want ErrNotFound", err)
+	}
+}
+
 // Editing a seeded row is allowed now, and the write TAKES OWNERSHIP.
 //
 // The inverse of the test it replaces. The old rule refused the edit because
@@ -124,7 +260,7 @@ func TestUpdatingASeededRowTakesOwnershipOfIt(t *testing.T) {
 
 	edited := seeded
 	edited.Name = "Edited In The Console"
-	if _, err := repo.UpdateExercise(ctx, edited); err != nil {
+	if _, err := repo.UpdateExercise(ctx, edited, testActor); err != nil {
 		t.Fatalf("update of a seeded row = %v, want it to succeed now", err)
 	}
 	after, err := repo.GetExercise(ctx, id)
@@ -155,14 +291,14 @@ func TestUpdatingASeededRowTakesOwnershipOfIt(t *testing.T) {
 
 func TestUpdateEditsAnAdminRow(t *testing.T) {
 	repo, ctx, id := contentFixture(t)
-	if _, err := repo.CreateExercise(ctx, authored(id)); err != nil {
+	if _, err := repo.CreateExercise(ctx, authored(id), testActor); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
 	edited := authored(id)
 	edited.Name = "Zercher Squat (edited)"
 	edited.Equipment = []string{}
-	got, err := repo.UpdateExercise(ctx, edited)
+	got, err := repo.UpdateExercise(ctx, edited, testActor)
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}
@@ -187,7 +323,7 @@ func TestCreateRefusesAnIDTheCatalogAlreadyHas(t *testing.T) {
 
 	// An admin row shadowing a seeded id is the collision that matters: the
 	// deploy's upsert would skip it, leaving the two to disagree forever.
-	_, err := repo.CreateExercise(ctx, authored(id))
+	_, err := repo.CreateExercise(ctx, authored(id), testActor)
 	if !errors.Is(err, ErrAlreadyExists) {
 		t.Fatalf("create over a seeded id returned %v, want ErrAlreadyExists", err)
 	}
@@ -195,7 +331,7 @@ func TestCreateRefusesAnIDTheCatalogAlreadyHas(t *testing.T) {
 
 func TestAdminAuthoredReturnsOnlyConsoleRows(t *testing.T) {
 	repo, ctx, id := contentFixture(t)
-	if _, err := repo.CreateExercise(ctx, authored(id)); err != nil {
+	if _, err := repo.CreateExercise(ctx, authored(id), testActor); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
@@ -223,7 +359,7 @@ func TestAdminAuthoredReturnsOnlyConsoleRows(t *testing.T) {
 // look changed to every device.
 func TestAdoptOnlyTouchesAdminRows(t *testing.T) {
 	repo, ctx, id := contentFixture(t)
-	if _, err := repo.CreateExercise(ctx, authored(id)); err != nil {
+	if _, err := repo.CreateExercise(ctx, authored(id), testActor); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	const seededID = "test-untouched-by-adopt"

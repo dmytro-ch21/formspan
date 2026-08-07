@@ -2,34 +2,38 @@
 
 import { useActionState } from "react";
 
-import type { Revision } from "@/lib/api";
+import type { Exercise, Revision, Technique } from "@/lib/api";
 import { formatUTC } from "@/lib/format";
 import type { PublishResult } from "./actions";
 
 /**
- * What happened to this technique, and the way back.
+ * What happened to this catalog row, and the way back. Serves techniques and
+ * exercises — the history renders identically for either.
  *
  * The console is the only writer of this content and there is no pull request
  * between a save and the athlete library, so this list is the entire record of
  * who changed what — the thing a PR history would otherwise be.
  *
  * Newest first, and the CURRENT state is revision 1 in the list rather than
- * something separate: each entry is the technique as it looked after that
- * write, so the top row is what is live now. That is why restoring is a copy
- * rather than a replay.
+ * something separate: each entry is the row as it looked after that write, so
+ * the top row is what is live now. That is why restoring is a copy rather than
+ * a replay.
  */
 export function RevisionHistory({
   revisions,
   restore,
 }: {
-  revisions: Revision[];
+  // Both catalogs, because the history renders identically for either: the
+  // component only reads `payload.name`, and a second near-identical component
+  // is how the two would drift apart.
+  revisions: Revision<Technique | Exercise>[];
   restore: (revision: number) => (prev: PublishResult, form: FormData) => Promise<PublishResult>;
 }) {
   if (revisions.length === 0) {
     return (
       <p className="text-[13px] text-text-secondary">
-        No history yet. A technique gets one the first time it is edited here — the shipped
-        catalog has none, which is not a gap: nothing has changed it.
+        No history yet. A row gets one the first time it is edited here — the shipped catalog
+        has none, which is not a gap: nothing has changed it.
       </p>
     );
   }

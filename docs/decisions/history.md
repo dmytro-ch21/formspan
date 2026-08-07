@@ -13391,6 +13391,53 @@ in CI, per the rule that a check in one belongs in both.
   authoring. That is fine while it is one person, and it is the reason "author
   in production" remains the recorded intent rather than the current state.
 
+## 2026-08-06 — The exercise catalog reaches parity
+
+Three gaps closed at once, all recorded when the technique work deliberately
+left them: **search**, **drafts**, and **revisions**. The exercise console could
+edit any of the 504 rows through the API since step 2 but could not FIND them,
+a new exercise went live the instant it saved, and nothing recorded who changed
+what.
+
+Each was left open for the same stated reason — half a feature is worse than
+none — and this is the other half arriving rather than a correction. Migration
+000036 said so explicitly about `exercises.status`: a column without a
+create-as-draft path, a public filter and a publish button is a column nothing
+reads, and drafts with no publish control create exercises that can never go
+live. 000038 is that column, now that all three exist.
+
+Everything mirrors the technique implementation, which is the point — the two
+catalogs having different rules for the same concept is how a console teaches
+its operator two things. The same decisions carry over unchanged: the column
+defaults to `published` because it has to describe the 504 backfilled rows,
+editing a published row leaves it published, publishing is one-way, restore
+appends and never touches `status`, the actor is a parameter rather than a
+field a JSON body could set, and the deploy writes no history.
+
+**One thing differs, and it is why the revision payload is the CONTENT
+projection.** An exercise's media lives in `exercise_media` — the console cannot
+author it and the content write path does not touch it. A snapshot including
+media would promise a restore that puts pictures back, and it would not.
+
+Mutation-tested on both halves that would rot silently: dropping the public
+status filter (which leaves every other test in the package green, since the
+console paths return drafts on purpose) and making restore write `status`.
+
+### Gaps
+
+- **The two catalogs now duplicate `StatusPublished`/`StatusDraft` and the four
+  action constants** across packages. The values must stay identical — one
+  concept, one console, one contract enum — and nothing enforces it. A shared
+  package for six strings felt worse than a comment on each pointing at the
+  other, but that is a judgement, not a guarantee.
+- **`RevisionHistory` is now shared** between the two catalogs and typed on
+  `Revision<Technique | Exercise>`. It reads only `payload.name`, so the union
+  costs nothing today; a component that needs a field only one of them has
+  would be the moment to split it.
+- The exercise search matches name and id but **not aliases** — exercises have
+  none. If they gain them, the query needs the same `unnest` arm the technique
+  search has.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

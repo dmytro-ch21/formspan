@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/dmytro-ch21/vola/backend/internal/platform/auth"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/discipline"
@@ -120,7 +123,19 @@ func (h *ContentHandler) Vocabularies(w http.ResponseWriter, r *http.Request) {
 // handful are actionable. See the technique module's List for the full
 // reasoning; it is identical.
 func (h *ContentHandler) List(w http.ResponseWriter, r *http.Request) {
-	authored, err := h.repo.AdminAuthored(r.Context())
+	// `?q=` searches the WHOLE catalog; without it the list is what the console
+	// authored. Same split as the technique list, for the same reason: 504 full
+	// rows is payload to render a list, and search is how the rest are reached
+	// now that every row is editable.
+	var (
+		authored []Exercise
+		err      error
+	)
+	if q := strings.TrimSpace(r.URL.Query().Get("q")); q != "" {
+		authored, err = h.repo.SearchAll(r.Context(), q)
+	} else {
+		authored, err = h.repo.AdminAuthored(r.Context())
+	}
 	if err != nil {
 		apihttp.WriteInternal(w, r, "exercise", err)
 		return
@@ -186,9 +201,74 @@ func (h *ContentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	h.write(w, r, next, h.repo.UpdateExercise)
 }
 
+// actorOf reads the caller's id from the request's own claims — never from the
+// body or a header. RequireAdmin has already run, so they are there.
+func actorOf(r *http.Request) string {
+	claims, _ := auth.ClaimsFromContext(r.Context())
+	if claims == nil {
+		// Unreachable behind RequireAdmin. Recorded rather than guessed: a
+		// revision attributed to a plausible-looking actor is worse than one
+		// that admits it does not know.
+		return "unknown"
+	}
+	return claims.UserID
+}
+
+// Publish is a separate verb, not a field on PATCH — an eighteen-field
+// read-modify-write must not be able to change visibility by accident.
+func (h *ContentHandler) Publish(w http.ResponseWriter, r *http.Request) {
+	out, err := h.repo.Publish(r.Context(), r.PathValue("exerciseID"), actorOf(r))
+	if errors.Is(err, ErrNotFound) {
+		apihttp.WriteError(w, http.StatusNotFound, apihttp.CodeNotFound,
+			"no draft exercise with that id — it may already be published")
+		return
+	}
+	if err != nil {
+		apihttp.WriteInternal(w, r, "exercise", err)
+		return
+	}
+	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"exercise": out})
+}
+
+// Revisions serves an exercise's history, newest first.
+func (h *ContentHandler) Revisions(w http.ResponseWriter, r *http.Request) {
+	out, err := h.repo.Revisions(r.Context(), r.PathValue("exerciseID"))
+	if err != nil {
+		apihttp.WriteInternal(w, r, "exercise", err)
+		return
+	}
+	// `[]`, never null. Empty is the NORMAL case — 504 seeded rows have no
+	// history until someone edits one.
+	if out == nil {
+		out = []Revision{}
+	}
+	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"revisions": out})
+}
+
+// Restore rolls an exercise back to an earlier revision, as a new revision.
+func (h *ContentHandler) Restore(w http.ResponseWriter, r *http.Request) {
+	revision, err := strconv.Atoi(r.PathValue("revision"))
+	if err != nil || revision < 1 {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"revision must be a positive whole number")
+		return
+	}
+	out, err := h.repo.Restore(r.Context(), r.PathValue("exerciseID"), revision, actorOf(r))
+	if errors.Is(err, ErrNotFound) {
+		apihttp.WriteError(w, http.StatusNotFound, apihttp.CodeNotFound,
+			"no such exercise or revision")
+		return
+	}
+	if err != nil {
+		apihttp.WriteInternal(w, r, "exercise", err)
+		return
+	}
+	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"exercise": out})
+}
+
 func (h *ContentHandler) write(
 	w http.ResponseWriter, r *http.Request, e Exercise,
-	store func(context.Context, Exercise) (Exercise, error),
+	store func(context.Context, Exercise, string) (Exercise, error),
 ) {
 	if err := ValidateForWrite(e); err != nil {
 		// The message names the offending value and the legal set. This is
@@ -198,7 +278,7 @@ func (h *ContentHandler) write(
 		return
 	}
 
-	out, err := store(r.Context(), e)
+	out, err := store(r.Context(), e, actorOf(r))
 	switch {
 	case errors.Is(err, ErrAlreadyExists):
 		apihttp.WriteError(w, http.StatusConflict, apihttp.CodeAlreadyExists,

@@ -2,9 +2,11 @@ package exercise
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
+	"github.com/dmytro-ch21/vola/backend/internal/platform/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -21,7 +23,7 @@ import (
 const contentReturning = `
 	id, name, sport, movement_pattern, movement_pattern_detail,
 	primary_muscles, secondary_muscles, equipment, load_type,
-	is_unilateral, instructions, source, created_at, updated_at`
+	is_unilateral, instructions, source, status, created_at, updated_at`
 
 type contentScannable interface {
 	Scan(dest ...any) error
@@ -32,7 +34,7 @@ func scanContent(s contentScannable) (Exercise, error) {
 	err := s.Scan(&e.ID, &e.Name, &e.Sport, &e.MovementPattern,
 		&e.MovementPatternDetail, &e.PrimaryMuscles, &e.SecondaryMuscles,
 		&e.Equipment, &e.LoadType, &e.IsUnilateral, &e.Instructions,
-		&e.Source, &e.CreatedAt, &e.UpdatedAt)
+		&e.Source, &e.Status, &e.CreatedAt, &e.UpdatedAt)
 	if err != nil {
 		return Exercise{}, err
 	}
@@ -54,17 +56,27 @@ func nonNil(in []string) []string {
 	return in
 }
 
-func (r *PostgresRepository) CreateExercise(ctx context.Context, e Exercise) (Exercise, error) {
+func (r *PostgresRepository) CreateExercise(ctx context.Context, e Exercise, actor string) (Exercise, error) {
+	return r.writeWithRevision(ctx, actor, ActionCreate, func(tx pgx.Tx) (Exercise, error) {
+		return createWithin(ctx, tx, e)
+	})
+}
+
+func createWithin(ctx context.Context, tx pgx.Tx, e Exercise) (Exercise, error) {
 	// No ON CONFLICT. A collision has to surface as an error rather than quietly
 	// become an update: the id may already be a foreign key in a workout item or
 	// a logged set, so rewriting the exercise behind it changes what somebody's
 	// training history says they did.
-	row := r.pool.QueryRow(ctx, `
+	//
+	// 'draft', explicitly: the column default is 'published' because it has to
+	// describe the 504 rows the migration backfilled, which is exactly the
+	// wrong thing for a new one.
+	row := tx.QueryRow(ctx, `
 		INSERT INTO exercises (
 			id, name, sport, movement_pattern, movement_pattern_detail,
 			primary_muscles, secondary_muscles, equipment, load_type,
-			is_unilateral, instructions, source
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'admin')
+			is_unilateral, instructions, source, status
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'admin','draft')
 		RETURNING `+contentReturning,
 		e.ID, e.Name, e.Sport, e.MovementPattern, e.MovementPatternDetail,
 		nonNil(e.PrimaryMuscles), nonNil(e.SecondaryMuscles), nonNil(e.Equipment),
@@ -81,7 +93,21 @@ func (r *PostgresRepository) CreateExercise(ctx context.Context, e Exercise) (Ex
 	return out, nil
 }
 
-func (r *PostgresRepository) UpdateExercise(ctx context.Context, e Exercise) (Exercise, error) {
+func (r *PostgresRepository) UpdateExercise(ctx context.Context, e Exercise, actor string) (Exercise, error) {
+	return r.writeWithRevision(ctx, actor, ActionUpdate, func(tx pgx.Tx) (Exercise, error) {
+		return updateWithin(ctx, tx, e)
+	})
+}
+
+// updateWithin runs the edit inside a caller's transaction, so the write and
+// its revision commit together. Shared with Restore, which must write the row
+// exactly the same way — a restore that misses a column is a rollback to a
+// state that never existed.
+//
+// `status` is absent from the SET on purpose, in both callers: editing a
+// published exercise must not withdraw it, and restoring an old revision must
+// not unpublish it. Visibility changes only through Publish.
+func updateWithin(ctx context.Context, tx pgx.Tx, e Exercise) (Exercise, error) {
 	// ANY row is editable here, and the write TAKES OWNERSHIP of it — the same
 	// change the technique catalog made when the authoring spreadsheet was
 	// retired, for the same reason and with the same load-bearing detail.
@@ -99,7 +125,7 @@ func (r *PostgresRepository) UpdateExercise(ctx context.Context, e Exercise) (Ex
 	// applies to these too: `upsertMedia`'s prune is not scoped by source, so a
 	// re-seed of a row whose JSON says `"media": []` still removes its media.
 	// That is why exportcontent preserves the key.
-	row := r.pool.QueryRow(ctx, `
+	row := tx.QueryRow(ctx, `
 		UPDATE exercises SET
 			name = $2, sport = $3, movement_pattern = $4,
 			movement_pattern_detail = $5, primary_muscles = $6,
@@ -114,10 +140,7 @@ func (r *PostgresRepository) UpdateExercise(ctx context.Context, e Exercise) (Ex
 
 	out, err := scanContent(row)
 	if errors.Is(err, pgx.ErrNoRows) {
-		// Covers both "no such exercise" and "that one is seeded". Told apart in
-		// the handler, which looks the id up to say which — the two need
-		// different advice, and a bare 404 for a row the console is displaying
-		// reads as a bug.
+		// Now means exactly one thing — no such id.
 		return Exercise{}, ErrNotFound
 	}
 	if err != nil {
@@ -191,4 +214,153 @@ func (r *PostgresRepository) AdoptAsSeeded(ctx context.Context, ids []string) er
 		return fmt.Errorf("exercise: adopt: %w", err)
 	}
 	return nil
+}
+
+// writeWithRevision ties a console write to its history entry. Every write
+// goes through it so none can forget: an edit that lands without its revision
+// is a change nobody can see or undo.
+func (r *PostgresRepository) writeWithRevision(
+	ctx context.Context, actor, action string, write func(pgx.Tx) (Exercise, error),
+) (Exercise, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return Exercise{}, fmt.Errorf("exercise: begin %s: %w", action, err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op once Commit succeeds
+
+	out, err := write(tx)
+	if err != nil {
+		return Exercise{}, err
+	}
+	if err := recordRevision(ctx, tx, out, actor, action); err != nil {
+		return Exercise{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Exercise{}, fmt.Errorf("exercise: commit %s: %w", action, err)
+	}
+	return out, nil
+}
+
+// recordRevision appends the exercise's post-write state to its history.
+//
+// The payload is the CONTENT projection, which excludes media — that lives in
+// `exercise_media`, the console cannot author it, and the write path does not
+// touch it. Including it would promise a restore that puts pictures back, and
+// it would not.
+func recordRevision(ctx context.Context, tx pgx.Tx, e Exercise, actor, action string) error {
+	payload, err := json.Marshal(e)
+	if err != nil {
+		return fmt.Errorf("exercise: marshal revision: %w", err)
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO exercise_revisions (exercise_id, revision, actor, action, payload)
+		VALUES ($1,
+			COALESCE((SELECT MAX(revision) FROM exercise_revisions WHERE exercise_id = $1), 0) + 1,
+			$2, $3, $4)`, e.ID, actor, action, payload)
+	if err != nil {
+		return fmt.Errorf("exercise: record revision: %w", err)
+	}
+	return nil
+}
+
+// Publish makes a draft visible to athletes. One-way — see the technique
+// catalog's Publish for why there is no unpublish: workout items and logged
+// sets reference an exercise by id, and none of those reads filter on status.
+func (r *PostgresRepository) Publish(ctx context.Context, id, actor string) (Exercise, error) {
+	return r.writeWithRevision(ctx, actor, ActionPublish, func(tx pgx.Tx) (Exercise, error) {
+		row := tx.QueryRow(ctx, `
+			UPDATE exercises SET status = 'published', updated_at = now()
+			WHERE id = $1 AND status = 'draft'
+			RETURNING `+contentReturning, id)
+		out, err := scanContent(row)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Exercise{}, ErrNotFound
+		}
+		if err != nil {
+			return Exercise{}, fmt.Errorf("exercise: publish: %w", err)
+		}
+		return out, nil
+	})
+}
+
+// Revisions returns the history, newest first. Empty for a row the console has
+// never touched, which is all 504 seeded ones.
+func (r *PostgresRepository) Revisions(ctx context.Context, id string) ([]Revision, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT revision, actor, action, payload, created_at
+		FROM exercise_revisions WHERE exercise_id = $1
+		ORDER BY revision DESC`, id)
+	if err != nil {
+		return nil, fmt.Errorf("exercise: revisions: %w", err)
+	}
+	defer rows.Close()
+	out := []Revision{}
+	for rows.Next() {
+		var rev Revision
+		var payload []byte
+		if err := rows.Scan(&rev.Revision, &rev.Actor, &rev.Action, &payload, &rev.CreatedAt); err != nil {
+			return nil, fmt.Errorf("exercise: scan revision: %w", err)
+		}
+		if err := json.Unmarshal(payload, &rev.Payload); err != nil {
+			return nil, fmt.Errorf("exercise: parse revision %d: %w", rev.Revision, err)
+		}
+		out = append(out, rev)
+	}
+	return out, rows.Err()
+}
+
+// Restore writes an earlier revision's content back as a NEW revision.
+//
+// Appends rather than truncates, and never touches `status` — both for the
+// reasons the technique catalog's Restore records.
+func (r *PostgresRepository) Restore(ctx context.Context, id string, revision int, actor string) (Exercise, error) {
+	return r.writeWithRevision(ctx, actor, ActionRestore, func(tx pgx.Tx) (Exercise, error) {
+		var payload []byte
+		err := tx.QueryRow(ctx, `
+			SELECT payload FROM exercise_revisions
+			WHERE exercise_id = $1 AND revision = $2`, id, revision).Scan(&payload)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Exercise{}, ErrNotFound
+		}
+		if err != nil {
+			return Exercise{}, fmt.Errorf("exercise: read revision: %w", err)
+		}
+		var want Exercise
+		if err := json.Unmarshal(payload, &want); err != nil {
+			return Exercise{}, fmt.Errorf("exercise: parse revision %d: %w", revision, err)
+		}
+		// The id comes from the PATH, not the payload: a revision whose payload
+		// carried a different id would otherwise rewrite some other exercise.
+		want.ID = id
+		return updateWithin(ctx, tx, want)
+	})
+}
+
+// SearchAll finds any exercise by name or id, seeded ones included, so the
+// console can reach the whole catalog rather than only what it wrote.
+//
+// Capped for the same reason the technique search is: this reads the WHOLE
+// catalog and 504 full rows is payload the console renders none of.
+const maxConsoleSearch = 100
+
+func (r *PostgresRepository) SearchAll(ctx context.Context, query string) ([]Exercise, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT `+contentReturning+` FROM exercises
+		WHERE `+database.LikeClause("name", 1)+`
+		   OR `+database.LikeClause("id", 1)+`
+		ORDER BY name
+		LIMIT $2`, database.LikeTerm(query), maxConsoleSearch)
+	if err != nil {
+		return nil, fmt.Errorf("exercise: console search: %w", err)
+	}
+	defer rows.Close()
+	out := []Exercise{}
+	for rows.Next() {
+		e, err := scanContent(rows)
+		if err != nil {
+			return nil, fmt.Errorf("exercise: scan search: %w", err)
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }

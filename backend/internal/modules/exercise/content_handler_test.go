@@ -25,12 +25,17 @@ type fakeContentRepo struct {
 	// thing the partial-update test has to inspect.
 	lastWritten Exercise
 	adopted     []string
+	// lastActor is who the HANDLER said made the write — from the request's
+	// claims, never its body.
+	lastActor string
+	revisions map[string][]Revision
 }
 
 func newFakeRepo() *fakeContentRepo {
 	return &fakeContentRepo{
-		stored:  map[string]Exercise{},
-		sources: map[string]string{},
+		revisions: map[string][]Revision{},
+		stored:    map[string]Exercise{},
+		sources:   map[string]string{},
 	}
 }
 
@@ -50,11 +55,12 @@ func (f *fakeContentRepo) Source(_ context.Context, id string) (string, error) {
 	return s, nil
 }
 
-func (f *fakeContentRepo) CreateExercise(_ context.Context, e Exercise) (Exercise, error) {
+func (f *fakeContentRepo) CreateExercise(_ context.Context, e Exercise, actor string) (Exercise, error) {
 	if _, taken := f.stored[e.ID]; taken {
 		return Exercise{}, ErrAlreadyExists
 	}
 	f.lastWritten = e
+	f.lastActor = actor
 	e.Source = "admin"
 	e.CreatedAt, e.UpdatedAt = time.Now(), time.Now()
 	f.stored[e.ID] = e
@@ -62,7 +68,7 @@ func (f *fakeContentRepo) CreateExercise(_ context.Context, e Exercise) (Exercis
 	return e, nil
 }
 
-func (f *fakeContentRepo) UpdateExercise(_ context.Context, e Exercise) (Exercise, error) {
+func (f *fakeContentRepo) UpdateExercise(_ context.Context, e Exercise, actor string) (Exercise, error) {
 	// Absent means absent — the ONLY 404 left. It used to also refuse a row
 	// whose source was "seed"; the console edits any row now and the write
 	// takes ownership, which is what the next line models.
@@ -70,11 +76,63 @@ func (f *fakeContentRepo) UpdateExercise(_ context.Context, e Exercise) (Exercis
 		return Exercise{}, ErrNotFound
 	}
 	f.lastWritten = e
+	f.lastActor = actor
 	e.Source = "admin"
 	e.UpdatedAt = time.Now()
 	f.stored[e.ID] = e
 	f.sources[e.ID] = "admin"
 	return e, nil
+}
+
+func (f *fakeContentRepo) Publish(_ context.Context, id, actor string) (Exercise, error) {
+	e, ok := f.stored[id]
+	// Mirrors `WHERE status = 'draft'`: publishing something already published
+	// is ErrNotFound, not a quiet success.
+	if !ok || NormalizeStatus(e.Status) != StatusDraft {
+		return Exercise{}, ErrNotFound
+	}
+	e.Status = StatusPublished
+	f.stored[id] = e
+	f.record(id, actor, ActionPublish, e)
+	return e, nil
+}
+
+func (f *fakeContentRepo) SearchAll(_ context.Context, q string) ([]Exercise, error) {
+	out := []Exercise{}
+	for _, e := range f.stored {
+		if strings.Contains(strings.ToLower(e.Name), strings.ToLower(q)) ||
+			strings.Contains(strings.ToLower(e.ID), strings.ToLower(q)) {
+			out = append(out, e)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+func (f *fakeContentRepo) Revisions(_ context.Context, id string) ([]Revision, error) {
+	return f.revisions[id], nil
+}
+
+func (f *fakeContentRepo) Restore(_ context.Context, id string, revision int, actor string) (Exercise, error) {
+	for _, rev := range f.revisions[id] {
+		if rev.Revision == revision {
+			e := rev.Payload
+			// Mirrors the SQL: content only, never status.
+			e.Status = f.stored[id].Status
+			f.stored[id] = e
+			f.record(id, actor, ActionRestore, e)
+			return e, nil
+		}
+	}
+	return Exercise{}, ErrNotFound
+}
+
+// record mirrors recordRevision so the fake's history behaves like the real
+// one — including that the actor is whatever the HANDLER passed.
+func (f *fakeContentRepo) record(id, actor, action string, e Exercise) {
+	f.revisions[id] = append([]Revision{{
+		Revision: len(f.revisions[id]) + 1, Actor: actor, Action: action, Payload: e,
+	}}, f.revisions[id]...)
 }
 
 func (f *fakeContentRepo) AdminAuthored(context.Context) ([]Exercise, error) {

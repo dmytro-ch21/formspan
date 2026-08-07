@@ -2681,6 +2681,23 @@ own, so none of them is redundant with "the FK exists".
   release.
 - **...and the seed must still update its own rows.** The inverse failure is a
   content freeze that looks exactly like "nothing changed".
+### The exercise catalog has the same three, on the same terms
+
+Search (`?q=`), drafts (`status`) and revisions all landed for exercises after
+the technique versions. **Every scenario in the two sections below applies to
+`/v1/admin/exercises` as written** — the implementations mirror each other
+deliberately, and a scenario that holds for one and not the other is a bug in
+whichever diverged.
+
+Two exercise-only points worth their own assertions:
+
+- **A revision payload excludes `media`.** It lives in `exercise_media`, the
+  console cannot author it, and the content write path does not touch it — so a
+  restore must not claim to put pictures back. Assert media is absent from the
+  payload rather than present-and-empty, which would read as "it had none".
+- **The search matches name and id, not aliases** — exercises have none. If they
+  gain them, this scenario is the reminder that the query needs the extra arm.
+
 ### Revision history and rollback
 
 Every console write leaves a revision. The deploy leaves none.
