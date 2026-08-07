@@ -9,6 +9,7 @@ import ProgressionCard from "./ProgressionCard";
 import {
   deleteSession,
   emptySet,
+  fetchRecords,
   fetchSuggestions,
   getWorkout,
   finishSession,
@@ -19,6 +20,7 @@ import {
   measuresFor,
   MEASURE_KEY,
   MEASURE_LABEL,
+  RECORD_LABEL,
   pickImage,
   replaceSets,
   setExerciseUnit,
@@ -28,6 +30,7 @@ import {
   type Exercise,
   type LoggedSet,
   type Measure,
+  type PersonalRecord,
   type Session,
   type SetType,
   type Suggestion,
@@ -113,6 +116,10 @@ export default function SessionPage({
   const [everLoaded, setEverLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  /** Records this session set, surfaced once it is finished. */
+  const [finishedRecords, setFinishedRecords] = useState<
+    { exerciseID: string; record: PersonalRecord }[]
+  >([]);
   // The exercise being replaced, if any. The catalog pane doubles as the
   // swap picker rather than growing a second modal.
   const [swapping, setSwapping] = useState<string | null>(null);
@@ -142,6 +149,10 @@ export default function SessionPage({
       setSession(s);
       setSets(s.sets);
       setVolume(v);
+      // Cleared with the rest of the session's state. The App Router keeps this
+      // component instance across session→session navigation, so without this
+      // the previous session's PR panel renders over the next one.
+      setFinishedRecords([]);
       setCatalog(new Map(list.map((e) => [e.id, e])));
       setEverLoaded(true);
       setError(null);
@@ -486,6 +497,37 @@ export default function SessionPage({
                   setSession(s);
                   setSets(s.sets);
                   setVolume(v);
+                  /*
+                    A static panel, not the phone's modal-with-confetti.
+
+                    This screen exists for "typing up a session you scribbled
+                    on paper, or fixing last Tuesday's numbers" — its own words
+                    at the top of the file. A burst of flares over retroactive
+                    data entry is theatre, and the moment of completion it
+                    would be marking already happened, hours ago, at a gym.
+
+                    What genuinely transfers is the INFORMATION: you can set a
+                    personal record while typing up Tuesday and have no idea.
+                    So the PRs surface, and nothing performs.
+                  */
+                  fetchRecords(getToken, {
+                    exerciseIDs: [
+                      ...new Set(
+                        s.sets.filter((x) => x.completed).map((x) => x.exercise_id),
+                      ),
+                    ],
+                  })
+                    .then((all) =>
+                      setFinishedRecords(
+                        all.flatMap((e) =>
+                          e.records
+                            .filter((r) => r.session_id === s.id)
+                            .map((record) => ({ exerciseID: e.exercise_id, record })),
+                        ),
+                      ),
+                    )
+                    // Advisory. A failed lookup costs the PR row, not the finish.
+                    .catch(() => {});
                 } catch (err) {
                   setError(err instanceof Error ? err.message : String(err));
                 }
@@ -528,6 +570,34 @@ export default function SessionPage({
         >
           {error}
         </p>
+      )}
+
+      {/* Only when this session actually set one. No panel otherwise — a
+          "no records today" note would be the app rubbing it in, and the house
+          rule is no shame-based messaging. */}
+      {finishedRecords.length > 0 && (
+        <section
+          className="rounded-card border border-lime/40 bg-lime/5 px-5 py-4"
+          aria-live="polite"
+          data-testid="session-records"
+        >
+          <p className="eyebrow text-lime">
+            {finishedRecords.length === 1
+              ? "Personal record"
+              : `${finishedRecords.length} personal records`}
+          </p>
+          <ul className="mt-2 flex flex-col gap-1">
+            {finishedRecords.map(({ exerciseID, record }, i) => (
+              <li
+                key={`${exerciseID}-${record.kind}-${i}`}
+                className="flex justify-between gap-4 text-sm"
+              >
+                <span className="capitalize">{exerciseID.replace(/-/g, " ")}</span>
+                <span className="text-text-muted">{RECORD_LABEL[record.kind]}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       <div

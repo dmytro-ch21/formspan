@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, TextInput, View as RNView } from 'react-native';
 
 import { HoldToConfirm } from '@/components/HoldToConfirm';
+import { SessionCelebration } from '@/components/SessionCelebration';
+import { worthCelebrating, type SessionSummary } from '@/lib/celebration';
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
@@ -63,6 +65,7 @@ export default function BjjSessionScreen() {
 
   const [session, setSession] = useState<LocalSession | null>(null);
   const [detail, setDetail] = useState<SessionDetail | null>(null);
+  const [celebrating, setCelebrating] = useState<SessionSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [techniques, setTechniques] = useState<TechniqueSummary[]>([]);
 
@@ -169,6 +172,53 @@ export default function BjjSessionScreen() {
       await finishLocalSession(userId, id);
       await load();
       requestSync('bjj-session-finished');
+      /*
+        BJJ gets the same card, with its own vocabulary — rounds and mat time
+        rather than sets and tonnage — and deliberately NO badge and no PR row.
+        There is no BJJ equivalent of a personal record yet (`lib/records.ts`
+        is strength-only), and inventing a "you showed up" badge to fill the
+        gap is precisely the wallpaper that would devalue the real ones. It
+        stays honest until the accomplishments work lands.
+      */
+      /*
+        Read back rather than taken from `session`.
+
+        `await load()` cannot refresh the `session` in this closure — those are
+        render-time captures, and `setSession` has no way to reach an already-
+        running function. The pre-finish value has `ended_at: null` by
+        definition (the button only renders when it is null), so the duration
+        was coming from a `?? Date.now()` fallback that happened to be about
+        right. Correct by accident is not correct.
+      */
+      const finished = await readLocalSession(userId, id);
+      const bjjSummary: SessionSummary = {
+        title: finished?.name ?? session?.name ?? 'Session',
+        sport: 'bjj',
+        durationSeconds: finished?.started_at
+          ? Math.max(
+              0,
+              (new Date(finished.ended_at ?? Date.now()).getTime() -
+                new Date(finished.started_at).getTime()) /
+                1000,
+            )
+          : 0,
+        exercises: 0,
+        sets: 0,
+        reps: 0,
+        tonnageKg: 0,
+        rounds: detail?.rounds ?? undefined,
+        matMinutes:
+          detail?.rounds && detail?.round_minutes
+            ? detail.rounds * detail.round_minutes
+            : undefined,
+        // `session_rpe` is the athlete's own rating of the session, so it
+        // belongs in the card's "How it felt" block rather than beside the
+        // measurements.
+        hardestRpe: detail?.session_rpe ?? null,
+        records: [],
+        recordExerciseIDs: [],
+      };
+      if (worthCelebrating(bjjSummary)) setCelebrating(bjjSummary);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -474,6 +524,16 @@ export default function BjjSessionScreen() {
         </Text>
       )}
       {!!error && <Text style={styles.footnote}>Couldn’t load everything: {error}</Text>}
+
+      {celebrating && (
+        <SessionCelebration
+          summary={celebrating}
+          // BJJ never shows a tonnage tile, so this is never called — passed
+          // because the card takes one formatter, not one per sport.
+          formatTonnage={(v) => `${Math.round(v)}`}
+          onDismiss={() => setCelebrating(null)}
+        />
+      )}
     </KeyboardAwareScrollView>
   );
 }

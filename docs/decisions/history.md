@@ -14582,6 +14582,131 @@ nobody.
   recorded decision, not an oversight.
 
 
+## 2026-08-07 — A finished session says what it was, and mostly says nothing else
+
+Finishing went straight to "Finished — this session is read-only." Now it ends
+on a card: a burst of flares, a haptic, the session's numbers, and any personal
+records it set.
+
+### Almost every decision here is about NOT claiming something
+
+A celebration screen fails by congratulating someone for nothing, or by putting
+a number it invented beside numbers it measured — and neither of those throws,
+so the tests are mostly negative assertions.
+
+- **The badge is usually absent, and that is the design.** A badge on every
+  session is wallpaper: unread within a week, and it takes the real ones down
+  with it. The only thing worth one from the data available the moment a session
+  ends is a personal record — which the server has already judged genuine. Long
+  sessions, many exercises and high tonnage are deliberately NOT badges: each
+  fires constantly for whoever trains that way and never for anyone else, which
+  makes it a description of a training style rather than an achievement.
+- **An empty session gets no card at all.** Opened, nothing logged, finished —
+  marking that is the hollow praise that teaches people to ignore the app.
+- **No praise anywhere.** The house rule is no shame-based messaging, and the
+  mirror of it matters as much: "Great work!" after four sets is not
+  encouragement, it is the app not paying attention, and everyone can tell. The
+  subtitle states what happened.
+- **Volume is omitted rather than shown as zero.** A bodyweight session has no
+  tonnage, and "0 kg" on a card marking an achievement reads as a failure to
+  record something.
+
+### PRs come from the server, and are empty offline on purpose
+
+Every record the API returns carries the `session_id` that set it, so "which
+records did this session set" is a **filter on the authority**, not a second
+implementation of the rules. Re-deriving "is this a best?" on the phone would be
+a second opinion that can disagree with the records screen, and the two
+disagreeing about whether you set a PR is worse than never mentioning it.
+
+The card therefore opens immediately on local numbers and the PR row fills in
+when the network answers. In a basement gym it never does, and that is the
+honest outcome: **silence is not a claim, a wrong medal is.**
+
+### The objective/subjective split is made in the model, not the view
+
+`stats` is what the session measurably was. `felt` is one number somebody typed
+about themselves, it lives in its own captioned block, and it is **null when
+effort tracking is off** — which is why `summariseSession` takes `effortTracked`
+as an argument rather than inferring it. A session where every RPE is empty
+looks identical to one from an athlete who opted out, and only the setting knows
+which; inferring it would give the same output for two different facts.
+
+### BJJ gets the card and honestly gets no badge
+
+Rounds and mat time instead of sets and tonnage, `session_rpe` in the "How it
+felt" block, and no PR row — because **there is no BJJ equivalent of a personal
+record yet**. Inventing a "you showed up" badge to fill that gap is exactly the
+wallpaper the badge rule exists to prevent. It stays empty until the
+accomplishments work lands.
+
+### Web gets the information, not the theatre
+
+A static panel listing the records, no modal and no flares. This screen's own
+header describes it as being for "typing up a session you scribbled on paper, or
+fixing last Tuesday's numbers" — a burst of confetti over retroactive data entry
+is theatre, and the moment it would be marking happened hours ago at a gym. What
+genuinely transfers is the information: **you can set a personal record while
+typing up Tuesday and have no idea.** So the PRs surface and nothing performs.
+
+### A latent landmine surfaced
+
+`expo-audio` cannot be loaded under jest at all — its JS reads the native
+module's prototype at import time and jest-expo does not stub it, so the failure
+is at line 1 of `lib/sounds.ts` and takes down the whole SUITE rather than a
+test. Importing the card into the BJJ screen was enough to break that screen's
+tests, and **the same trap was already armed by the sounds work**: any screen
+test that touched `lib/sounds.ts` would have failed the same way. Now mocked in
+`jest.setup.js`, where native modules every screen merely needs to exist belong.
+
+### And one stale comment corrected
+
+`ui/Medal.tsx` claimed `react-native-svg` was unavailable and that "no gradient
+library is installed". Both are in `package.json` today, so anyone reading it
+would have designed around a constraint that had lifted. Views are still the
+right call for a medal, just for a smaller reason than the one written down.
+
+### What review caught: a guard that was inverted, so the loop ran in the good case
+
+The blocking one. The records effect wrote its result back into `celebrating` —
+**the effect's own dependency** — so every fill produced a new object,
+re-triggered the effect, fetched again, and produced another. The guard meant to
+prevent that was `if (mine.length)`, which stops the cycle only when the session
+set **no** records: the loop ran precisely in the case the whole feature exists
+for, one `/v1/records` request per round-trip for as long as the card stayed
+open. Nothing visible — the records render identically, the haptic and chime
+fire once on mount — so a phone left face-up on the celebration polls the API
+until it is dismissed.
+
+Records now live in their own state, which the effect does not depend on.
+Writing to state an effect does not read cannot feed itself.
+
+Worth naming what this says about the suite: `lib/__tests__` is pure-logic by
+design, and this bug lives exactly in the "concurrency and state reconciliation"
+layer that `apps/mobile`'s own testing philosophy names as **what actually
+breaks in this app**. Every one of the 773 tests passed with the loop in place.
+
+Three more, all making the card stop contradicting the screen behind it:
+
+- **The card said 12 sets and the header said 9.** `summariseSession` counted
+  logged rows; the session header uses `volume.working_sets`, which excludes
+  warmups. Same session, one tap apart, two numbers. It takes the header's now.
+- **"Mat time" was the wrong name.** The card's tile was `rounds ×
+  round_minutes`, which the BJJ screen calls *rolling* — while what that screen
+  calls "on the mat" is wall-clock, which the card already shows as Time. One
+  name for two quantities and two names for one. Renamed "Rolling".
+- **The BJJ summary read stale pre-finish state.** `await load()` cannot refresh
+  the `session` captured in a running closure, and the pre-finish row has
+  `ended_at: null` by definition — so the duration came from a `?? Date.now()`
+  fallback that happened to be about right. Correct by accident. It reads the
+  row back now, as the strength screen already did.
+
+### Not verified
+
+Nobody has seen the flares, felt the haptic, or heard the chime land together.
+The numbers and the omissions are covered; whether the moment reads as earned
+rather than as an interruption is not something a test can answer.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
