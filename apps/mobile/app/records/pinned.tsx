@@ -1,7 +1,8 @@
 import { Stack } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, TextInput } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, TextInput } from 'react-native';
 
+import { KeyboardAwareFlatList } from '@/components/KeyboardAwareScroll';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
@@ -133,10 +134,9 @@ export default function PinnedRecordsScreen() {
       ) : pinned === null ? (
         <ActivityIndicator style={styles.loading} accessibilityLabel="Loading your choices" />
       ) : (
-        <FlatList
+        <KeyboardAwareFlatList
           data={shown}
           keyExtractor={(e) => e.id}
-          keyboardShouldPersistTaps="handled"
           contentContainerStyle={styles.list}
           ListHeaderComponent={
             <Text style={styles.hint}>

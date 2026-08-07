@@ -5,7 +5,6 @@ import { request as requestSync } from '@/lib/sync';
 import { useCallback, useMemo, useRef, useState, useEffect } from 'react';
 import {
   ActivityIndicator,
-  FlatList,
   Modal,
   Pressable,
   RefreshControl,
@@ -14,6 +13,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 
+import { KeyboardAwareFlatList } from '@/components/KeyboardAwareScroll';
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
 import { Text, View } from '@/components/Themed';
 import { SectionHeader } from '@/components/ui/Section';
@@ -250,7 +250,7 @@ export default function WorkoutsScreen() {
       {loading && !everLoaded ? (
         <ActivityIndicator style={styles.loader} accessibilityLabel="Loading workouts" />
       ) : (
-        <FlatList
+        <KeyboardAwareFlatList
           data={workouts}
           keyExtractor={(w) => w.id}
           contentContainerStyle={[styles.list, listPad]}

@@ -1,8 +1,9 @@
 import { useAuth } from '@clerk/clerk-expo';
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, TextInput, View as RNView } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, TextInput, View as RNView } from 'react-native';
 
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
@@ -252,7 +253,7 @@ export default function BjjSessionScreen() {
     detail?.gi != null;
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.body} testID="bjj-session-screen">
+    <KeyboardAwareScrollView style={styles.container} contentContainerStyle={styles.body} testID="bjj-session-screen">
       <Stack.Screen options={{ title: 'Session' }} />
 
       {/* Name, and the ability to change it. The default comes from the kind,
@@ -462,7 +463,7 @@ export default function BjjSessionScreen() {
         </Text>
       )}
       {!!error && <Text style={styles.footnote}>Couldn’t load everything: {error}</Text>}
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 }
 

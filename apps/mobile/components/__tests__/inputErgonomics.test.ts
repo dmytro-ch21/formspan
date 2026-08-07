@@ -1,6 +1,8 @@
 import {
   KEYBOARD_MARGIN,
+  dismissModeFor,
   keyboardEventNames,
+  keyboardInsetFor,
   nativeScrollsFocusedFieldClear,
   scrollTargetFor,
 } from '../KeyboardAwareScroll';
@@ -104,6 +106,47 @@ describe('lifting a field above the keyboard', () => {
     const a = scrollTargetFor({ fieldY: 600, fieldHeight: 40, keyboardTop: kbTop, containerBottom: SCREEN, offset: 0 });
     const b = scrollTargetFor({ fieldY: 600, fieldHeight: 40, keyboardTop: kbTop, containerBottom: SCREEN, offset: 900 });
     expect(b! - a!).toBe(900);
+  });
+});
+
+describe('keeping a fixed footer clear of the keyboard', () => {
+  const SCREEN = 812;
+
+  it('lifts by the overlap when the keyboard covers the footer — the iOS case', () => {
+    // The footer runs to the bottom of the screen and the keyboard sits over
+    // it. This is the reflection wizard's Next button: without this it is
+    // buried on the step where you type the session note, so the only control
+    // that advances the wizard is unreachable.
+    expect(keyboardInsetFor({ keyboardTop: 520, containerBottom: SCREEN })).toBe(SCREEN - 520);
+  });
+
+  it('lifts NOTHING when the window already shrank — the Android case', () => {
+    // Android's default `resize` moves the footer up on its own. Reading the
+    // keyboard's HEIGHT here instead of this overlap would push it a second
+    // keyboard-height up the screen, leaving a gap the size of the keyboard.
+    expect(keyboardInsetFor({ keyboardTop: 520, containerBottom: 520 })).toBe(0);
+  });
+
+  it('never returns a negative lift', () => {
+    // A footer entirely above the keyboard must not be pulled DOWN into it.
+    expect(keyboardInsetFor({ keyboardTop: 520, containerBottom: 300 })).toBe(0);
+  });
+
+  it('does nothing when the keyboard is down', () => {
+    expect(keyboardInsetFor({ keyboardTop: null, containerBottom: SCREEN })).toBe(0);
+  });
+});
+
+describe('which dismiss mode the platform honours', () => {
+  it("refuses 'interactive' on Android, where it silently does nothing", () => {
+    // Not a preference. Android does not implement `interactive`: it neither
+    // errors nor warns, the keyboard just never dismisses on drag. Asserting
+    // the Android value is what stops the iOS one being used for both.
+    expect(dismissModeFor('android')).toBe('on-drag');
+  });
+
+  it("uses 'interactive' on iOS, where the keyboard follows the finger", () => {
+    expect(dismissModeFor('ios')).toBe('interactive');
   });
 });
 

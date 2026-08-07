@@ -10,7 +10,8 @@ import {
 } from 'react-native';
 
 import { GoogleAuthButton } from '@/components/GoogleAuthButton';
-import { Text, View } from '@/components/Themed';
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
+import { Text } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { firstClerkMessage, hasClerkCode } from '@/lib/clerkErrors';
 import {
@@ -169,7 +170,11 @@ export default function SignInScreen() {
   const codeLabel = secondFactor ? secondFactorPrompt(secondFactor) : '';
 
   return (
-    <View style={styles.container}>
+    /* A scroll view rather than a plain View: this screen had NO scrollable
+       container at all, so with the keyboard up on a small phone the password
+       field and the sign-in button were simply unreachable — nothing to
+       scroll, nothing to lift. It is the only auth screen that was missed. */
+    <KeyboardAwareScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>Sign in to VOLA</Text>
 
       {secondFactor === null ? (
@@ -285,7 +290,7 @@ export default function SignInScreen() {
           </Pressable>
         </>
       )}
-    </View>
+    </KeyboardAwareScrollView>
   );
 }
 
@@ -299,7 +304,14 @@ export default function SignInScreen() {
  */
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
+    // `flexGrow`, not `flex`, because this is a scroll view's CONTENT
+    // container now. `flex: 1` would pin the content to the viewport height
+    // and defeat the scrolling this screen was converted to get: with the
+    // keyboard up on a small phone there is no longer room for the form, and
+    // the fields below the fold have to be reachable.
+    flexGrow: 1,
+    // Still centred while the content does fit, which is what this screen
+    // looked like before and should keep looking like with the keyboard down.
     justifyContent: 'center',
     paddingHorizontal: 24,
     gap: 12,

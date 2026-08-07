@@ -10,6 +10,10 @@ import {
   View as RNView,
 } from 'react-native';
 
+import {
+  KeyboardAwareFooter,
+  KeyboardAwareScrollView,
+} from '@/components/KeyboardAwareScroll';
 import { LibraryTile, categoryBadge } from '@/components/LibraryTile';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
@@ -228,11 +232,7 @@ export default function ReflectScreen() {
         ))}
       </RNView>
 
-      <ScrollView
-        contentContainerStyle={styles.scroll}
-        keyboardShouldPersistTaps="handled"
-        automaticallyAdjustKeyboardInsets
-      >
+      <KeyboardAwareScrollView contentContainerStyle={styles.scroll}>
         {error && (
           <Text style={styles.error} accessibilityLiveRegion="polite">
             {error}
@@ -247,9 +247,14 @@ export default function ReflectScreen() {
         )}
         {current.key === 'live' && <LiveStep detail={detail} onChange={persist} getToken={getToken} />}
         {current.key === 'note' && <NoteStep detail={detail} onChange={persistSoon} />}
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
-      <RNView style={styles.footer}>
+      {/* A footer, not an RNView: it is a SIBLING of the scroll view, so the
+          keyboard inset that rescues the list above cannot reach it. On the
+          note step — the one step whose whole content is a text field — the
+          keyboard sat straight over the only control that finishes the
+          wizard. */}
+      <KeyboardAwareFooter style={styles.footer}>
         <Pressable
           onPress={() => (last ? finish() : setStep((s) => s + 1))}
           style={styles.skip}
@@ -266,7 +271,7 @@ export default function ReflectScreen() {
         >
           <Text style={[styles.nextText, { color: accent.on }]}>{last ? 'Save it' : 'Next'}</Text>
         </Pressable>
-      </RNView>
+      </KeyboardAwareFooter>
     </View>
   );
 }

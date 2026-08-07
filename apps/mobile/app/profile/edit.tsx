@@ -1,7 +1,8 @@
 import { Stack, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, TextInput } from 'react-native';
 
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
@@ -176,7 +177,7 @@ export default function EditProfileScreen() {
         }}
       />
 
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+      <KeyboardAwareScrollView contentContainerStyle={styles.scroll}>
         {error && (
           <Text style={styles.error} accessibilityLiveRegion="polite">
             {error}
@@ -258,7 +259,7 @@ export default function EditProfileScreen() {
             );
           })}
         </View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </View>
   );
 }

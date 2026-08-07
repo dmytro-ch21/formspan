@@ -13594,6 +13594,107 @@ when either side moves.
 - Nothing renders the console in CI, so a serialization regression in a page
   the typechecker cannot see would still reach a human first. The prop-type
   change closes this specific instance, not the class.
+## 2026-08-07 — The keyboard fix that existed and was used once
+
+`components/KeyboardAwareScroll.tsx` was written months ago, is correct, carries
+a long comment explaining exactly which case iOS misses and why, and was used by
+**one screen out of thirteen**. The report that reopened it — "the keyboard
+overlaps the techniques and you don't see them all" — was about two screens that
+never imported it.
+
+So the finding worth recording is not about the keyboard. **Centralising the
+knowledge did not centralise the behaviour, because using it stayed opt-in and
+nothing noticed when a new screen didn't.** The other twelve screens had each
+solved some fraction independently: four set `automaticallyAdjustKeyboardInsets`,
+three set only `keyboardShouldPersistTaps`, five `FlatList`s had nothing, and
+`sign-in.tsx` had no scrolling container at all — with the keyboard up on a small
+phone its password field and submit button were simply unreachable, with nothing
+to scroll and nothing to lift.
+
+### Three problems, not one
+
+Conflating them is why this kept getting half-solved:
+
+1. **The focused field is hidden.** What the original file addressed. iOS
+   genuinely scrolls the field clear, but only when the keyboard's *frame
+   changes* — so moving between two same-height number pads posts no event and
+   the field stays covered. That gap is `useEnsureVisible`.
+2. **Content below the fold is unreachable.** The list cannot scroll far enough,
+   so the last rows sit behind the keyboard permanently. **This is the one that
+   was reported**, and neither field-lifting nor a bigger `paddingBottom` fixes
+   it — `automaticallyAdjustKeyboardInsets` does, and the Library's `FlatList`
+   did not set it. Its `contentContainerStyle` padded for the tab bar and
+   nothing else.
+3. **A fixed footer is buried.** A footer is a *sibling* of the scroll view, so
+   no content inset can reach it. The reflection wizard's Next button sat under
+   the keyboard on the note step — the one step whose entire content is a text
+   field, and the button is the only way to finish the wizard.
+
+### What landed
+
+`KeyboardAwareScrollView` (extended), `KeyboardAwareFlatList` (new — the five
+searching screens are virtualised over ~1000-row catalogs and cannot nest in a
+ScrollView) and `KeyboardAwareFooter` (new). All thirteen screens migrated onto
+them. The keyboard props are now **defaults inside the components**, so a screen
+gets the behaviour by existing rather than by remembering.
+
+Two platform facts are encoded as tested functions rather than comments, because
+both fail *silently*:
+
+- **`keyboardDismissMode="interactive"` is iOS-only.** Android does not
+  implement it, does not warn, and simply never dismisses on drag. `sign-up` and
+  `forgot-password` both set it. Same class as the `keyboardWillShow` naming
+  already recorded here: reads as present in the source, does nothing on the
+  device.
+- **`keyboardInsetFor` takes a measured `containerBottom`, never a keyboard
+  height.** On iOS the container runs under the keyboard and the overlap is
+  real; on Android `resize` the window has already shrunk and the honest answer
+  is zero. One formula, no `Platform` branch. Reading `endCoordinates.height`
+  instead would push the footer a second keyboard-height up the screen on the
+  platform nobody tests on.
+
+### The enforcement is the point
+
+`keyboardCoverage.test.ts` scans the source: any file rendering a `<TextInput`
+must import the module and must have no bare vertical `ScrollView`/`FlatList`
+left in it (horizontal rows are exempt — a keyboard never traps content on the
+x-axis). Verified by adding a throwaway screen with a bare `ScrollView` and a
+`TextInput` and watching it go red, then deleting it.
+
+It asserts it found at least thirteen files and names two of them, because the
+failure mode of a source-scanning test is finding nothing and passing every
+`forEach` by running zero times — the exact way two tests in this app once
+passed for the wrong reason. What it proves is that the module is *imported*,
+not that the container wraps the input; that limit is stated in the file rather
+than implied, and it is still the only check that can catch the screen nobody
+thought about, which is the failure that actually happened.
+
+It also caught a bare scroller in the Library's facet sheet that had no input in
+it. Migrated rather than exempted: a facet list is exactly where a filter field
+appears later, and an exemption on day one is how a rule stops applying.
+
+### Web
+
+One real parity issue. The New Workout dialog is `fixed inset-0` centred with no
+scroll — and `fixed` sizes to the *layout* viewport, which iOS Safari does not
+shrink for the keyboard, so the dialog sits partly behind it with nothing to
+scroll and the Goal field unreachable. Now a scrolling outer element with an
+inner `min-h-full` flex box; the centring has to move off the scroll container,
+because `items-center` on a scrolling element makes everything above the centre
+line unreachable once content exceeds the viewport.
+
+Otherwise web is structurally fine: `min-h-screen` is a floor, the page flows,
+and the one `100vh` clamp is `lg:`-gated where there is no soft keyboard.
+
+### Not verified
+
+**The interaction itself is unverified on a device.** Types, lint and 623 tests
+pass, and the existing component tests for the migrated screens still pass — but
+none of that can show a field clearing a keyboard. A second Simulator was booted
+on an isolated Metro port to avoid disturbing a parallel session, and it stopped
+at Expo Go's "Open in Expo Go?" confirmation, which needs a tap this session had
+no device grant for. It is the highest-value remaining check on this branch:
+every defect this change addresses is runtime-only.
 
 ## Open items / known gaps as of this entry
 

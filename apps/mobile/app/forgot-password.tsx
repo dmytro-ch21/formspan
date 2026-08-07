@@ -5,11 +5,11 @@ import {
   AccessibilityInfo,
   ActivityIndicator,
   Pressable,
-  ScrollView,
   StyleSheet,
   TextInput,
 } from 'react-native';
 
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { AuthFieldErrors, AuthFieldKey, hasClerkCode, toFieldErrors } from '@/lib/clerkErrors';
@@ -397,12 +397,7 @@ export default function ForgotPasswordScreen() {
         : 'One more step';
 
   return (
-    <ScrollView
-      contentContainerStyle={styles.scroll}
-      keyboardShouldPersistTaps="handled"
-      keyboardDismissMode="interactive"
-      automaticallyAdjustKeyboardInsets
-    >
+    <KeyboardAwareScrollView contentContainerStyle={styles.scroll}>
       <View style={styles.hero}>
         <Text style={styles.eyebrow}>VOLA</Text>
         <Text style={styles.title}>{title}</Text>
@@ -685,7 +680,7 @@ export default function ForgotPasswordScreen() {
           <Text style={styles.footerLink}>Back to sign in</Text>
         </Text>
       </Pressable>
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 }
 

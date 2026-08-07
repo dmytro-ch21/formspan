@@ -1,8 +1,9 @@
 import { Stack, useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
+import { Alert, Pressable, StyleSheet, TextInput } from 'react-native';
 
 import { Belt as BeltView, describeBelt } from '@/components/Belt';
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
@@ -151,17 +152,13 @@ export function PromotionForm({
         }}
       />
 
-      <ScrollView
-        contentContainerStyle={styles.scroll}
-        keyboardShouldPersistTaps="handled"
-        // iOS genuinely scrolls the focused field clear of the keyboard with
-        // this on — see the extensive note in KeyboardAwareScrollView.tsx for
-        // why that component exists for the session screen's same-height
-        // number-pad fields and why it explicitly isn't the right tool here:
-        // this form's fields are an ordinary top-to-bottom list, which is
-        // exactly the case the platform already handles on its own once asked.
-        automaticallyAdjustKeyboardInsets
-      >
+      {/* This used to be a bare ScrollView, on the reasoning that an ordinary
+          top-to-bottom form is the case iOS already handles once
+          `automaticallyAdjustKeyboardInsets` is asked for — true, and it left
+          Android with nothing lifting the focused field, since that prop is
+          iOS-only. The wrapper is now a superset of what was here: same inset,
+          plus the Android path and a dismiss mode Android actually honours. */}
+      <KeyboardAwareScrollView contentContainerStyle={styles.scroll}>
         {error && (
           <Text style={styles.error} accessibilityLiveRegion="polite">
             {error}
@@ -269,7 +266,7 @@ export function PromotionForm({
             <Text style={styles.deleteText}>Delete this promotion</Text>
           </Pressable>
         )}
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </View>
   );
 }

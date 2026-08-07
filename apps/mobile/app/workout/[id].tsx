@@ -6,14 +6,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
   Modal,
   Pressable,
-  ScrollView,
   StyleSheet,
   TextInput,
 } from 'react-native';
 
+import {
+  KeyboardAwareFlatList,
+  KeyboardAwareScrollView,
+} from '@/components/KeyboardAwareScroll';
 import { Text, View } from '@/components/Themed';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { fetchExercises, pickImage, type Exercise } from '@/lib/exercises';
@@ -294,7 +296,7 @@ export default function WorkoutDetailScreen() {
         }}
       />
 
-      <ScrollView
+      <KeyboardAwareScrollView
         contentContainerStyle={styles.scroll}
         // Without this, RN's default ("never") spends the first tap outside a
         // focused TextInput on dismissing the keyboard and the child never
@@ -459,7 +461,7 @@ export default function WorkoutDetailScreen() {
             </Pressable>
           </>
         )}
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       <ExercisePicker
         visible={picking}
@@ -725,7 +727,7 @@ function ExercisePicker({
           </Text>
         )}
 
-        <FlatList
+        <KeyboardAwareFlatList
           data={results}
           keyExtractor={(e) => e.id}
           contentContainerStyle={styles.pickerList}
