@@ -5087,6 +5087,17 @@ not inferred from the absence of an error.
   Toggling it back ON previews the chime immediately.
 - **No microphone permission prompt, ever.** If iOS asks for the microphone,
   `allowsRecording` has been set true somewhere.
+- **The tick has to beat gym noise; the chime must not be piercing.** These pull
+  opposite ways, and the levels sit 11 dB apart on purpose (tick −15 dBFS,
+  rest-over −4). Verify with music playing, through the **phone speaker**, not
+  on a desk in a quiet room — the first synthesis pass failed exactly here, at
+  −23 dBFS and an octave too dark, and sounded lovely on headphones.
+- **All four are regenerable, and none should be hand-edited.**
+  `python3 scripts/generate_sounds.py --check` reports whether the checked-in
+  `.m4a` files match what this machine's ffmpeg produces. A mismatch usually
+  means a different ffmpeg build rather than a changed sound, so it is reported
+  and never fatal — do not wire it into `verify` on the strength of one green
+  run.
 
 ### Known limitation, not a bug
 

@@ -15423,6 +15423,107 @@ in the workouts rename, and for the same reason.
 
 Neither surface has been seen. The calendar row's hover-to-reveal in particular
 is the kind of thing that reads fine in code and is undiscoverable in practice.
+## 2026-08-07 — The timer sounds, resynthesised
+
+Replaces all four bundled sounds and the script that makes them.
+`scripts/generate_sounds.py` is now an additive synthesiser with per-partial
+voicing, a convolution room and frequency-dependent damping. It renders a
+**17-sound family**, of which the app still bundles exactly **four** —
+`rest-done`, `work-done`, `session-done`, `tick`, under the filenames
+`lib/sounds.ts` already requires. No call site changed; `SoundName` is untouched.
+
+### Why the old ones read as a beep, measurably
+
+The previous generator summed five partials per note in a Python loop, with no
+room, no filtering and no per-partial voicing. Two numbers name the result
+rather than leaving it to taste:
+
+- the old `tick` had a spectral centroid of **1880 Hz** against the new one's
+  **1127**
+- the old sounds put **66-80%** of their energy into their 40 strongest bins;
+  the new ones sit near **37%**
+
+The second number is the important one. A near-pure pitched tone is what the ear
+reads as *synthetic*; a struck object in a room spreads its energy across many
+weak partials and a decaying tail. Closing that gap is what "softer and more
+natural" actually consists of, and it is why the script now needs numpy —
+hand-rolling FFT convolution in the stdlib takes the render from three seconds
+to minutes. Nothing in CI or `verify` imports it, so it is not a pipeline
+dependency, and `--check` deliberately still works without it.
+
+### One instrument, not sixteen unrelated sounds
+
+Everything is struck from **F# major pentatonic** and four voices (`glass`,
+`bell`, `marimba`, `pad`). Pentatonic is not decoration: it contains no minor
+2nd and no tritone, so *any* two notes in the set are consonant. UI sounds
+overlap unpredictably — a set logged while a rest timer fires — and this is the
+cheapest possible insurance against the one-in-twenty collision that sounds
+like a mistake.
+
+Levels are deliberately **not** uniform, which is where the old
+`normalise(..., 0.82)` on three of the four was wrong. The family runs −19 dBFS
+(a tap) to −4 (rest over, the only sound that has to beat gym noise). A tap as
+loud as a workout-complete fanfare is a design bug.
+
+### Two bugs worth recording, both of which sounded fine until measured
+
+**`decay` meant the time constant, not the decay time.** The first render
+produced a 2.57-second "tap": τ and T60 differ by a factor of 6.91, so every
+voice rang seven times longer than the number in the table implied. The fix is
+one division; the lesson is the naming. Every duration in `VOICES` is now T60 in
+seconds — a number you can hear — and the docstring says so, because stating
+them as time constants is what caused it.
+
+**The convolution room decorrelated its own low end.** `make_ir` drew
+independent noise per channel, which is the obvious implementation and wrong: a
+real room is nearly mono below ~400 Hz because the wavelengths dwarf the ear
+spacing, and only genuinely diffuse up high. Fully independent noise sounds
+phasey in headphones and **drops several dB of body the instant a phone speaker
+folds it to mono** — which is the primary playback device here. Lows now share
+one noise source, mids mix 0.75/0.66 shared-to-independent, highs stay
+independent. Measured low-frequency mono loss went from −0.54 dB worst case to
+−0.06 dB typical.
+
+Neither was audible as "a bug". Both were found by measuring rather than
+listening, which is the transferable part: for audio, the objective pass finds
+what the ear excuses.
+
+### Where "soft and pleasant" was the wrong instruction
+
+The countdown `tick` shipped in the first pass at −23 dBFS and 753 Hz,
+faithfully executing the brief. It was also 10 dB below the sound it replaces
+*and* an octave darker — and ~750 Hz is exactly where gym music sits. Quiet plus
+dark is the worst possible combination for cutting through. It fires in the last
+three seconds of a rest specifically to make you look up, so a tick nobody hears
+is the same as no tick. Relevelled to −15 dBFS at 1127 Hz: **99.5% of its energy
+sits in the 1-4 kHz band** the old one used (99.1%), so it survives a phone
+speaker, while staying 11 dB under the chime it precedes.
+
+The scenario doc already required rest-over and work-over to be *audibly
+different*. They are, by construction: rest is two rising notes (C#6 → F#6),
+work is one lower bell (F#5) behind a darker filter.
+
+### What this deliberately does not do
+
+- **Thirteen of the seventeen are not bundled.** `tap`, `select`,
+  `toggle-on/off`, `set-logged`, `message`, `success`, `start`, `error`,
+  `rest-warning`, `notification`, `streak` and `pr` render to a gitignored
+  `assets/audio/` for auditioning. They have no call sites, and shipping unused
+  assets bloats the binary for nothing. Wiring one up is three lines: add it to
+  `BUNDLE`, add the name to `SoundName`, and add the matching `require` to
+  `SOURCES` — which is keyed on the union, so doing two of the three will not
+  compile.
+- **No sound was added to any screen that did not already make one.** Whether a
+  tap should make noise is a product decision, not a side effect of a
+  sound-design pass.
+- **Not verified on a device.** Rendered, measured and auditioned on a desktop.
+  The gym-noise argument for the tick's level is reasoned from its spectrum, not
+  from a phone in an actual gym — the one claim here that wants a real check.
+
+The bundle went from 68,475 B to 65,824 B despite moving from mono to stereo. The
+width is real (panned partials, decorrelated room), a phone speaker folds it
+down to what mono would have been anyway, and headphones get the room back.
+
 
 ## Open items / known gaps as of this entry
 
@@ -15431,6 +15532,7 @@ is the kind of thing that reads fine in code and is undiscoverable in practice.
 
 
 - **The opening animation's native half is unverified.** The JS animation is Simulator-confirmed, but the bare `#080B12` native launch screen it hands over from cannot be seen in Expo Go at all (the plugin writes native assets at prebuild and leaves the manifest empty). Nothing proves the two grounds match until someone runs a dev or EAS build; if they don't, the join flashes on every cold start.
+- **The resynthesised timer sounds have never been heard on a phone.** Levels, the tick's cut-through and the rest/work distinction were all set from measurements (spectral centroid, 1-4 kHz energy share, mono fold-down) on desktop monitoring. The argument that the tick survives gym noise is the weakest link and is the one to check first on a real device.
 - **`assets/brand/logos/` still holds four placeholder lockups** built from Arial text and a hand-drawn checkmark, dating from before the real artwork existed. The genuine Corel exports now sit one level down in `logos/source/`, so the top-level directory is the stale one — anything that reads from it (the web app has not been re-pointed) silently gets the stand-in logo.
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.
 - Functional test suite not yet passing — blocked on applying the `--hostname` fix to `tests/functional/support/start-stack.mjs` (the user's own in-progress file — not something to edit unilaterally).
