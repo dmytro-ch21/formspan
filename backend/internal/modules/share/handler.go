@@ -59,6 +59,16 @@ func (h *Handler) Inbox(w http.ResponseWriter, r *http.Request) {
 	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"shares": cards})
 }
 
+func (h *Handler) Sent(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.ClaimsFromContext(r.Context())
+	cards, err := h.repo.Sent(r.Context(), claims.UserID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"shares": cards})
+}
+
 func (h *Handler) Accept(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
 	out, err := h.repo.Accept(r.Context(), claims.UserID, r.PathValue("id"))

@@ -186,6 +186,7 @@ func main() {
 	// Sharing: one surface for every shareable type, addressed by handle.
 	mux.Handle("POST /v1/shares", verifier.RequireAuth(http.HandlerFunc(shareHandler.Create)))
 	mux.Handle("GET /v1/shares/inbox", verifier.RequireAuth(http.HandlerFunc(shareHandler.Inbox)))
+	mux.Handle("GET /v1/shares/sent", verifier.RequireAuth(http.HandlerFunc(shareHandler.Sent)))
 	mux.Handle("POST /v1/shares/{id}/accept", verifier.RequireAuth(http.HandlerFunc(shareHandler.Accept)))
 	mux.Handle("DELETE /v1/shares/{id}", verifier.RequireAuth(http.HandlerFunc(shareHandler.Delete)))
 	mux.Handle("GET /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Get)))

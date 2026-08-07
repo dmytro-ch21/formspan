@@ -15203,6 +15203,62 @@ trained one**. Set and rep counts are conventional rather than tested, and
 whether a plan is a good session is not something the seed test can answer. Nor
 has the browse surface been seen on a device — the gradients in particular are
 untested against a real screen.
+## 2026-08-07 — The sent list, and what it deliberately will not tell you
+
+`GET /v1/shares/sent`, migration 000043, and a "Waiting on them" section on
+`/dashboard/shared` (now titled Sharing, since it has two directions). Closes
+the gap the sharing PR shipped with: a sender saw "Sent ✓" and then nothing —
+the API supported cancelling and no screen offered it.
+
+### Pending only, which is a privacy decision rather than a scope cut
+
+The list shows what nobody has answered yet, and never what they said.
+
+That is forced by decline-is-delete. If an ACCEPTED share stayed visible here,
+then a row that vanished would mean declined — the exact inference the delete
+exists to prevent. Both answers therefore have to look identical from the
+sender's side, and they do: the row is simply gone. Same rule and same reason
+as the outgoing half of the friends list. The screen says so in as many words,
+because the alternative is a sender quietly concluding from a disappearance
+that they were turned down.
+
+Pinned by a test that shares to two friends, has one accept and one decline,
+and asserts the sender's list is empty either way — plus a copy count, so it
+cannot pass because nothing worked.
+
+### The index arrives with the feature that reads it
+
+000042 shipped without an index on `from_user_id` on the argument that no query
+used it and there was no sent list, so it would be write amplification for a
+feature that did not exist — this repo dropped exactly such an index once
+before, in 000018. The stated rule was "it arrives with the sent list." It has.
+
+Both directional indexes are now PARTIAL on `status = 'pending'`, since that is
+the only status either list reads. The inbox index was rebuilt to match rather
+than left inconsistent: `shares` is hours old and empty in every environment,
+so it costs nothing today and a lock on a real table later. The down migration
+restores 000042's exact shape, verified by round-tripping it and diffing
+`pg_indexes` rather than by assuming.
+
+### One query, two directions
+
+`Inbox` and `Sent` differ only in which end of the row is the caller — so the
+SQL is composed once and the two wire shapes stay distinct (`from` on an inbox
+card, `to` on a sent one). A single neutrally-named field was the alternative
+and would have had every client rendering "shared with @alice" for something
+alice sent them. Three mutations red: joining the wrong end, scoping to the
+wrong end, and dropping the pending filter.
+
+### Gaps
+
+- **Still no rate limiting.** Fifth entry.
+- The web page has never been exercised in a browser — an authenticated
+  walkthrough needs credentials, so this is typecheck, lint, build and backend
+  integration tests only. Same caveat as the sharing PR it extends.
+- No notification of any kind: a share sitting in an inbox is discovered by
+  visiting the page. That is the next real gap in this area, and it is a
+  platform-sized one rather than a screen.
+
 
 ## Open items / known gaps as of this entry
 

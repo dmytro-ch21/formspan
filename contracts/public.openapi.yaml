@@ -290,6 +290,23 @@ components:
           description: The sender's handle, resolved live so a rename propagates.
         created_at: { type: string, format: date-time }
 
+    SentShareCard:
+      type: object
+      description: >
+        One share the caller is WAITING ON. The same shape as ShareCard with
+        the counterpart named for what it is — `to`, not `from`.
+      required: [id, resource_type, resource_label, to, created_at]
+      properties:
+        id:
+          type: string
+          description: The same id DELETE /v1/shares/{id} takes, to cancel it.
+        resource_type: { type: string }
+        resource_label: { type: string }
+        to:
+          type: string
+          description: The recipient's handle, resolved live so a rename propagates.
+        created_at: { type: string, format: date-time }
+
     AcceptedShare:
       type: object
       description: >
@@ -2706,6 +2723,40 @@ paths:
                   shares:
                     type: array
                     items: { $ref: "#/components/schemas/ShareCard" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /shares/sent:
+    get:
+      summary: What you are waiting on
+      operationId: listSentShares
+      description: >
+        The caller's own PENDING shares, newest first — what they have sent
+        that nobody has answered yet, and the list they cancel from.
+
+
+        **Pending only, and that is a privacy decision rather than a scope
+        cut.** Declining a share deletes it, so if accepting left a visible row
+        here then a row that VANISHED would mean "they declined" — which is
+        exactly the inference decline-is-delete exists to prevent. Accepted and
+        declined therefore look identical from the sender's side: the row is
+        simply gone. This endpoint answers "what have they not answered yet",
+        and deliberately never answers "what did they say". Same rule, and the
+        same reason, as the outgoing half of GET /v1/friends/requests.
+
+
+        Capped at 200 and not paginated, matching the inbox.
+      responses:
+        "200":
+          description: The caller's unanswered outgoing shares, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [shares]
+                properties:
+                  shares:
+                    type: array
+                    items: { $ref: "#/components/schemas/SentShareCard" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /shares/{id}:

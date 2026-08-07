@@ -588,3 +588,138 @@ func TestCopyRedensifiesStepOrder(t *testing.T) {
 		t.Fatalf("copy did not re-densify: source was %d, copy is %d", srcOrder, copyOrder)
 	}
 }
+
+// ── The sent list ───────────────────────────────────────────────────────────
+
+func TestSentListShowsWhatIsUnansweredAndOnlyToTheSender(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	alice := person(t, h.pool, "sh_sa", "sh_sa_h")
+	bob := person(t, h.pool, "sh_sb", "sh_sb_h")
+	mallory := person(t, h.pool, "sh_sm", "sh_sm_h")
+	befriend(t, h, alice, "sh_sa_h", bob, "sh_sb_h")
+	seq := makeSequence(t, h, alice, "Waiting on bob")
+
+	if err := h.repo.Create(ctx, alice, New{ToUsername: "sh_sb_h", ResourceType: "sequence", ResourceID: seq.ID}); err != nil {
+		t.Fatalf("share: %v", err)
+	}
+
+	sent, err := h.repo.Sent(ctx, alice)
+	if err != nil {
+		t.Fatalf("sent: %v", err)
+	}
+	if len(sent) != 1 {
+		t.Fatalf("alice's sent list: %+v", sent)
+	}
+	// The counterpart is the RECIPIENT here, not the sender — the mirror of
+	// the inbox, and the thing a shared query gets wrong by copying.
+	if sent[0].To != "sh_sb_h" || sent[0].ResourceLabel != "Waiting on bob" {
+		t.Fatalf("sent card wrong: %+v", sent[0])
+	}
+
+	// The RECIPIENT does not see it in their sent list, and an outsider sees
+	// nothing at all. Errors checked, because the zero value is an empty list
+	// and an ignored error would make both assertions pass BY FAILING.
+	bobSent, err := h.repo.Sent(ctx, bob)
+	if err != nil {
+		t.Fatalf("bob's sent: %v", err)
+	}
+	if len(bobSent) != 0 {
+		t.Fatalf("recipient sees the share in their SENT list: %+v", bobSent)
+	}
+	malSent, err := h.repo.Sent(ctx, mallory)
+	if err != nil {
+		t.Fatalf("mallory's sent: %v", err)
+	}
+	if len(malSent) != 0 {
+		t.Fatalf("outsider sees a sent list: %+v", malSent)
+	}
+	// And the sender's own inbox stays empty — the two directions do not leak
+	// into each other.
+	if own, err := h.repo.Inbox(ctx, alice); err != nil || len(own) != 0 {
+		t.Fatalf("sender's inbox: %+v %v", own, err)
+	}
+}
+
+// The list answers "what have they not answered", never "what did they say".
+//
+// Accepted rows must NOT appear: declining deletes, so if accepting left a
+// visible row then a VANISHED row would mean declined — the exact inference
+// decline-is-delete exists to prevent. Both outcomes have to look identical
+// from the sender's side, and this pins that they do.
+func TestAcceptedAndDeclinedLookTheSameToTheSender(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	alice := person(t, h.pool, "sh_qa", "sh_qa_h")
+	bob := person(t, h.pool, "sh_qb", "sh_qb_h")
+	carol := person(t, h.pool, "sh_qc", "sh_qc_h")
+	befriend(t, h, alice, "sh_qa_h", bob, "sh_qb_h")
+	befriend(t, h, alice, "sh_qa_h", carol, "sh_qc_h")
+	accepted := makeSequence(t, h, alice, "Bob will take it")
+	declined := makeSequence(t, h, alice, "Carol will not")
+
+	if err := h.repo.Create(ctx, alice, New{ToUsername: "sh_qb_h", ResourceType: "sequence", ResourceID: accepted.ID}); err != nil {
+		t.Fatalf("share to bob: %v", err)
+	}
+	if err := h.repo.Create(ctx, alice, New{ToUsername: "sh_qc_h", ResourceType: "sequence", ResourceID: declined.ID}); err != nil {
+		t.Fatalf("share to carol: %v", err)
+	}
+	if sent, _ := h.repo.Sent(ctx, alice); len(sent) != 2 {
+		t.Fatalf("both should be waiting: %+v", sent)
+	}
+
+	bobInbox, _ := h.repo.Inbox(ctx, bob)
+	if _, err := h.repo.Accept(ctx, bob, bobInbox[0].ID); err != nil {
+		t.Fatalf("bob accepts: %v", err)
+	}
+	carolInbox, _ := h.repo.Inbox(ctx, carol)
+	if err := h.repo.Delete(ctx, carol, carolInbox[0].ID); err != nil {
+		t.Fatalf("carol declines: %v", err)
+	}
+
+	sent, err := h.repo.Sent(ctx, alice)
+	if err != nil {
+		t.Fatalf("sent: %v", err)
+	}
+	if len(sent) != 0 {
+		t.Fatalf("an answered share is still visible to the sender: %+v", sent)
+	}
+	// The accept really did happen — this is not passing because nothing worked.
+	var copies int
+	if err := h.pool.QueryRow(ctx,
+		`SELECT count(*) FROM bjj_sequences WHERE owner_user_id = $1`, bob).Scan(&copies); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if copies != 1 {
+		t.Fatalf("bob's accept did not copy: %d", copies)
+	}
+}
+
+func TestSenderCancelsFromTheSentList(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	alice := person(t, h.pool, "sh_ca", "sh_ca_h")
+	bob := person(t, h.pool, "sh_cb", "sh_cb_h")
+	befriend(t, h, alice, "sh_ca_h", bob, "sh_cb_h")
+	seq := makeSequence(t, h, alice, "Sent by mistake")
+
+	if err := h.repo.Create(ctx, alice, New{ToUsername: "sh_cb_h", ResourceType: "sequence", ResourceID: seq.ID}); err != nil {
+		t.Fatalf("share: %v", err)
+	}
+	sent, _ := h.repo.Sent(ctx, alice)
+	// The id on the sent card is the one DELETE takes — a card carrying an id
+	// its own cancel button cannot use would be worse than no card.
+	if err := h.repo.Delete(ctx, alice, sent[0].ID); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	if after, _ := h.repo.Sent(ctx, alice); len(after) != 0 {
+		t.Fatalf("cancel left it waiting: %+v", after)
+	}
+	if inbox, _ := h.repo.Inbox(ctx, bob); len(inbox) != 0 {
+		t.Fatalf("cancel did not take it out of the recipient's inbox: %+v", inbox)
+	}
+	// Cancelled, so it can be sent again.
+	if err := h.repo.Create(ctx, alice, New{ToUsername: "sh_cb_h", ResourceType: "sequence", ResourceID: seq.ID}); err != nil {
+		t.Fatalf("re-share after cancel: %v", err)
+	}
+}

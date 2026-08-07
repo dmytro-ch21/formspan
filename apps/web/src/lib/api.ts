@@ -2384,6 +2384,32 @@ export async function shareResource(
   });
 }
 
+export type SentShareCard = {
+  id: string;
+  resource_type: string;
+  resource_label: string;
+  /** The recipient's handle, resolved live. */
+  to: string;
+  created_at: string;
+};
+
+/** What you are waiting on: PENDING shares only. Accepted and declined both
+ *  simply vanish — the API will not tell a sender which way it went, because
+ *  declining deletes and so a visible "accepted" would make absence mean
+ *  "declined". */
+export async function listSentShares(
+  getToken: Token,
+  signal?: AbortSignal,
+): Promise<SentShareCard[]> {
+  const body = await request<{ shares: SentShareCard[] }>(
+    getToken,
+    "/shares/sent",
+    {},
+    signal,
+  );
+  return body.shares ?? [];
+}
+
 /** Returns the id of the RECIPIENT'S OWN new copy — never the sender's, which
  *  they cannot open. 410 means the sender deleted it before you accepted. */
 export async function acceptShare(
