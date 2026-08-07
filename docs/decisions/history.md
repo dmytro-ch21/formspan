@@ -15226,6 +15226,39 @@ Pinned by a test that shares to two friends, has one accept and one decline,
 and asserts the sender's list is empty either way — plus a copy count, so it
 cannot pass because nothing worked.
 
+### The oracle this feature would have armed
+
+Review found a **blocking** one, and it is worth recording in full because the
+shape generalises: a privacy property held at every endpoint anyone thought to
+look at, and leaked through the one that existed to serve them.
+
+Accepting leaves the row (`status='accepted'`); declining deletes it. `Delete`
+was status-blind — `WHERE id = $1 AND (to_user_id = $2 OR from_user_id = $2)` —
+so a sender's cancel answered 204 for an accepted share and 404 for a declined
+one. Record the ids from your sent list, wait for them to disappear from it,
+then delete each: one request per share, deterministic, no timing analysis.
+
+The asymmetry pre-dated this branch and was **unreachable**: a sender had no
+way to learn a share id at all. `POST /v1/shares` returns 204 with no body, the
+inbox is recipient-scoped, `Accept` is recipient-only, and the ids are random
+UUIDs. Handing senders their own ids is exactly what would have armed it — so
+this is not a pre-existing bug the sent list exposed, it is a bug the sent list
+creates, and the fix ships with it.
+
+`Delete` is now asymmetric: the recipient may remove a row in any status, the
+sender only a pending one. Notably **all 14 existing tests stayed green with
+the fix applied**, which means nothing pinned "a sender may delete an accepted
+share" — the change costs no intended behaviour. It is pinned now by a test
+that walks every sender-reachable channel (delete, accept, both lists,
+re-share) and asserts accepted and declined are indistinguishable across all
+of them.
+
+The two channels flagged for scrutiny in advance — re-sharing after an answer,
+and the sent list itself — were both genuinely clean, for the reasons the code
+claimed. The lesson is not "check the obvious channels harder"; it is that the
+endpoint a new feature FEEDS is part of that feature's attack surface even
+when its code does not change.
+
 ### The index arrives with the feature that reads it
 
 000042 shipped without an index on `from_user_id` on the argument that no query
@@ -15248,6 +15281,23 @@ card, `to` on a sent one). A single neutrally-named field was the alternative
 and would have had every client rendering "shared with @alice" for something
 alice sent them. Three mutations red: joining the wrong end, scoping to the
 wrong end, and dropping the pending filter.
+
+### Three more predicates with no failing test
+
+Review's now-standard sweep. The `ORDER BY` survived deletion in both
+directions while "newest first" is promised in three places. `SentCard`'s
+`json:"to"` survived being changed to `json:"from"` — the transposition is
+pinned on the SQL side, but the SQL side is not where it is observable: the
+field would still hold the recipient's handle, just under the key that makes a
+client render a share you sent as one you received. And the empty list could
+become `null` against a contract declaring `type: array`.
+
+The last two needed the module's first `handler_test.go`, and getting there
+found a real constraint: `auth`'s context key is unexported, so a handler test
+cannot inject claims and panics on the first line of either list method. The
+response shaping is therefore a plain function the handlers call, which is what
+makes the promise testable at all — the alternative was widening `auth` for a
+test, which the workout module already considered and declined.
 
 ### Gaps
 

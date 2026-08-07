@@ -723,3 +723,147 @@ func TestSenderCancelsFromTheSentList(t *testing.T) {
 		t.Fatalf("re-share after cancel: %v", err)
 	}
 }
+
+// THE ORACLE, closed and pinned.
+//
+// Review found this and it is this feature's own doing: accepting leaves the
+// row and declining deletes it, so a status-blind DELETE answers 204 for one
+// and 404 for the other. Before the sent list a sender could not learn a share
+// id at all — POST returns 204 with no body, the inbox is recipient-scoped,
+// and the ids are random UUIDs — so the asymmetry existed and was unreachable.
+// Handing senders their own ids is what would have armed it.
+//
+// Everything the sender can observe about an answered share must be identical
+// whichever way it was answered. This walks the full set.
+func TestSenderCannotTellAcceptFromDeclineThroughAnyChannel(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	alice := person(t, h.pool, "sh_oa2", "sh_oa2_h")
+	bob := person(t, h.pool, "sh_ob2", "sh_ob2_h")
+	carol := person(t, h.pool, "sh_oc2", "sh_oc2_h")
+	befriend(t, h, alice, "sh_oa2_h", bob, "sh_ob2_h")
+	befriend(t, h, alice, "sh_oa2_h", carol, "sh_oc2_h")
+	toAccept := makeSequence(t, h, alice, "Bob accepts this")
+	toDecline := makeSequence(t, h, alice, "Carol declines this")
+
+	share := func(handle, resourceID string) string {
+		t.Helper()
+		if err := h.repo.Create(ctx, alice, New{ToUsername: handle, ResourceType: "sequence", ResourceID: resourceID}); err != nil {
+			t.Fatalf("share to %s: %v", handle, err)
+		}
+		sent, err := h.repo.Sent(ctx, alice)
+		if err != nil {
+			t.Fatalf("sent: %v", err)
+		}
+		for _, c := range sent {
+			if c.ResourceLabel == "Bob accepts this" && handle == "sh_ob2_h" {
+				return c.ID
+			}
+			if c.ResourceLabel == "Carol declines this" && handle == "sh_oc2_h" {
+				return c.ID
+			}
+		}
+		t.Fatalf("share not in the sent list: %+v", sent)
+		return ""
+	}
+	acceptedID := share("sh_ob2_h", toAccept.ID)
+	declinedID := share("sh_oc2_h", toDecline.ID)
+
+	bobInbox, _ := h.repo.Inbox(ctx, bob)
+	if _, err := h.repo.Accept(ctx, bob, bobInbox[0].ID); err != nil {
+		t.Fatalf("bob accepts: %v", err)
+	}
+	carolInbox, _ := h.repo.Inbox(ctx, carol)
+	if err := h.repo.Delete(ctx, carol, carolInbox[0].ID); err != nil {
+		t.Fatalf("carol declines: %v", err)
+	}
+
+	// 1. DELETE — the channel review found. Both must be the same miss.
+	errAccepted := h.repo.Delete(ctx, alice, acceptedID)
+	errDeclined := h.repo.Delete(ctx, alice, declinedID)
+	if !errors.Is(errAccepted, ErrNotFound) || !errors.Is(errDeclined, ErrNotFound) {
+		t.Fatalf("DELETE is an oracle: accepted=%v declined=%v", errAccepted, errDeclined)
+	}
+	// And the accepted row is still THERE — the sender was refused, not
+	// silently allowed to erase the recipient's record of where it came from.
+	var alive int
+	if err := h.pool.QueryRow(ctx, `SELECT count(*) FROM shares WHERE id = $1`, acceptedID).Scan(&alive); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if alive != 1 {
+		t.Fatalf("the sender's refused delete removed the row anyway")
+	}
+
+	// 2. Accept, as the sender.
+	_, aErr := h.repo.Accept(ctx, alice, acceptedID)
+	_, dErr := h.repo.Accept(ctx, alice, declinedID)
+	if !errors.Is(aErr, ErrNotFound) || !errors.Is(dErr, ErrNotFound) {
+		t.Fatalf("accept is an oracle: accepted=%v declined=%v", aErr, dErr)
+	}
+
+	// 3. Both lists, both directions.
+	sent, err := h.repo.Sent(ctx, alice)
+	if err != nil || len(sent) != 0 {
+		t.Fatalf("sent list after answers: %+v %v", sent, err)
+	}
+	if inbox, err := h.repo.Inbox(ctx, alice); err != nil || len(inbox) != 0 {
+		t.Fatalf("sender's inbox: %+v %v", inbox, err)
+	}
+
+	// 4. Re-sharing succeeds after BOTH — the channel that was already clean,
+	//    pinned so it stays that way.
+	if err := h.repo.Create(ctx, alice, New{ToUsername: "sh_ob2_h", ResourceType: "sequence", ResourceID: toAccept.ID}); err != nil {
+		t.Fatalf("re-share after accept: %v", err)
+	}
+	if err := h.repo.Create(ctx, alice, New{ToUsername: "sh_oc2_h", ResourceType: "sequence", ResourceID: toDecline.ID}); err != nil {
+		t.Fatalf("re-share after decline: %v", err)
+	}
+
+	// The RECIPIENT keeps full control of their own row, which is the half the
+	// asymmetry must not break.
+	if err := h.repo.Delete(ctx, bob, acceptedID); err != nil {
+		t.Fatalf("recipient clearing their accepted row: %v", err)
+	}
+}
+
+// Newest first, in both directions — promised by both Repository docs and the
+// contract, and surviving deletion of the ORDER BY until now.
+func TestBothListsAreNewestFirst(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	alice := person(t, h.pool, "sh_na", "sh_na_h")
+	bob := person(t, h.pool, "sh_nb", "sh_nb_h")
+	befriend(t, h, alice, "sh_na_h", bob, "sh_nb_h")
+
+	labels := []string{"first sent", "second sent", "third sent"}
+	for _, name := range labels {
+		seq := makeSequence(t, h, alice, name)
+		if err := h.repo.Create(ctx, alice, New{ToUsername: "sh_nb_h", ResourceType: "sequence", ResourceID: seq.ID}); err != nil {
+			t.Fatalf("share %s: %v", name, err)
+		}
+		// created_at defaults to now() at microsecond resolution; three inserts
+		// in one statement-burst can land on the same timestamp, and then the
+		// id tiebreak decides rather than the clock. Force distinct instants.
+		if _, err := h.pool.Exec(ctx,
+			`UPDATE shares SET created_at = now() WHERE resource_label = $1`, name); err != nil {
+			t.Fatalf("stamp: %v", err)
+		}
+	}
+
+	sent, err := h.repo.Sent(ctx, alice)
+	if err != nil || len(sent) != 3 {
+		t.Fatalf("sent: %+v %v", sent, err)
+	}
+	if sent[0].ResourceLabel != "third sent" || sent[2].ResourceLabel != "first sent" {
+		t.Fatalf("sent list is not newest-first: %v, %v, %v",
+			sent[0].ResourceLabel, sent[1].ResourceLabel, sent[2].ResourceLabel)
+	}
+	inbox, err := h.repo.Inbox(ctx, bob)
+	if err != nil || len(inbox) != 3 {
+		t.Fatalf("inbox: %+v %v", inbox, err)
+	}
+	if inbox[0].ResourceLabel != "third sent" || inbox[2].ResourceLabel != "first sent" {
+		t.Fatalf("inbox is not newest-first: %v, %v, %v",
+			inbox[0].ResourceLabel, inbox[1].ResourceLabel, inbox[2].ResourceLabel)
+	}
+}

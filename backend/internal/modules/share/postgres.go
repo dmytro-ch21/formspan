@@ -207,11 +207,30 @@ func (r *PostgresRepository) Accept(ctx context.Context, callerID, shareID strin
 }
 
 func (r *PostgresRepository) Delete(ctx context.Context, callerID, shareID string) error {
-	// Either end may remove it, and the row is scoped to the caller being one
-	// of them. An accepted share can also be cleared: the copy is the
-	// recipient's own by then, so removing the record takes nothing away.
+	// ASYMMETRIC ON PURPOSE, and the asymmetry is a privacy control rather
+	// than a permission model.
+	//
+	// The RECIPIENT may remove a row in any status: declining a pending one,
+	// or clearing an accepted one, which takes nothing away because the copy
+	// is already theirs.
+	//
+	// The SENDER may only remove a PENDING one. Without that predicate this
+	// endpoint is a perfect accept-vs-decline oracle, which is precisely what
+	// the sent list's pending-only design exists to prevent — accepting
+	// leaves the row, declining deletes it, so a status-blind DELETE answers
+	// 204 for accepted and 404 for declined. Record the ids from your sent
+	// list, wait for them to disappear from it, then delete each one: one
+	// request per share, deterministic, no timing analysis.
+	//
+	// The asymmetry pre-dated the sent list and was unreachable — a sender had
+	// no way to learn a share id, since POST returns 204 with no body, the
+	// inbox is recipient-scoped, and the ids are random UUIDs. Handing the
+	// sender their own ids is what armed it, so the fix ships with the feature
+	// that would have armed it.
 	tag, err := r.pool.Exec(ctx, `
-		DELETE FROM shares WHERE id = $1 AND (to_user_id = $2 OR from_user_id = $2)`,
+		DELETE FROM shares
+		WHERE id = $1
+		  AND (to_user_id = $2 OR (from_user_id = $2 AND status = 'pending'))`,
 		shareID, callerID)
 	if err != nil {
 		return translate(err, "delete")

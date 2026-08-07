@@ -56,7 +56,7 @@ func (h *Handler) Inbox(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"shares": cards})
+	apihttp.WriteJSON(w, http.StatusOK, sharesPayload(cards))
 }
 
 func (h *Handler) Sent(w http.ResponseWriter, r *http.Request) {
@@ -66,7 +66,7 @@ func (h *Handler) Sent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"shares": cards})
+	apihttp.WriteJSON(w, http.StatusOK, sharesPayload(cards))
 }
 
 func (h *Handler) Accept(w http.ResponseWriter, r *http.Request) {
@@ -112,4 +112,25 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 	default:
 		apihttp.WriteInternal(w, r, "share", err)
 	}
+}
+
+// sharesPayload wraps either list in the response envelope, guaranteeing `[]`
+// rather than `null` for an empty one.
+//
+// HERE rather than in the repository, because the contract declares
+// `type: array` and that is a promise of the ENDPOINT — it should not depend on
+// which Repository implementation is wired in. The technique module documents
+// review making exactly this mutation (nil slice instead of empty) and its
+// suite staying green.
+//
+// A plain function rather than inline code because it is the only part of
+// these handlers a test can reach: `auth`'s context key is unexported, so a
+// handler test cannot inject claims and cannot get past the first line of
+// either method. Extracting the shaping is what makes the promise testable at
+// all, and the handlers below are its only callers.
+func sharesPayload[T any](cards []T) map[string]any {
+	if cards == nil {
+		cards = []T{}
+	}
+	return map[string]any{"shares": cards}
 }

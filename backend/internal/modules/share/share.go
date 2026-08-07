@@ -182,9 +182,15 @@ type Repository interface {
 	// share ADDRESSED TO the caller — including when the caller is the one
 	// who sent it. ErrGone when the resource has since been deleted.
 	Accept(ctx context.Context, callerID, shareID string) (Accepted, error)
-	// Delete removes a share the caller is either end of: a decline, or the
-	// sender taking it back. One verb, as with friend requests, because both
-	// are "this, gone" and the client knows which it offered.
+	// Delete removes a share: a decline, or the sender taking it back. One
+	// verb, as with friend requests, because both are "this, gone" and the
+	// client knows which it offered.
+	//
+	// ASYMMETRIC, and deliberately. The recipient may remove a row in ANY
+	// status; the sender may only remove a PENDING one. A sender allowed to
+	// delete an accepted row learns it was accepted — 204 versus 404 — which
+	// turns this into the accept-vs-decline oracle the sent list's
+	// pending-only design exists to prevent.
 	Delete(ctx context.Context, callerID, shareID string) error
 }
 

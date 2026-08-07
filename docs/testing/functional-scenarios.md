@@ -5095,6 +5095,14 @@ All of these must be indistinguishable 404s:
   nothing worked.
 - Cancel from the sent card: the id on the card is the one DELETE takes, it
   leaves the recipient's inbox too, and the same thing can then be re-sent.
+- **The sender must not be able to tell an accept from a decline through ANY
+  channel.** Walk them all with two shares, one accepted and one declined:
+  `DELETE` (404 for both — the sender may only delete a PENDING share, or this
+  endpoint is a perfect oracle), `accept` as the sender, both lists, and
+  re-sharing. Assert the accepted row still EXISTS after the sender's refused
+  delete, so the test cannot pass by the row being erased.
+- The RECIPIENT keeps full control: they may clear an accepted row, which is
+  the half the asymmetry must not break.
 - Web: both lists load in ONE round trip; the copy says rows disappear once
   answered and that the app does not say which way.
 
