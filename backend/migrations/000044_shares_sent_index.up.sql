@@ -2,6 +2,12 @@ SET lock_timeout = '3s';
 
 -- The sender's side gets its index now that something reads it.
 --
+-- Numbered 000044, not 000043: a parallel branch took 43 for workouts_source
+-- while this was in review. Two migrations sharing a version is not something
+-- golang-migrate resolves — it is the branch that merges second's job to
+-- notice, which is why the number is checked against origin/main at rebase
+-- time rather than at authoring time.
+--
 -- 000042 deliberately shipped WITHOUT this: no query used from_user_id
 -- (cancelling is a primary-key lookup) and there was no sent list, so it would
 -- have been write amplification for a feature that did not exist — this repo
