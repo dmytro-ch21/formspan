@@ -290,6 +290,23 @@ components:
           description: The sender's handle, resolved live so a rename propagates.
         created_at: { type: string, format: date-time }
 
+    SentShareCard:
+      type: object
+      description: >
+        One share the caller is WAITING ON. The same shape as ShareCard with
+        the counterpart named for what it is — `to`, not `from`.
+      required: [id, resource_type, resource_label, to, created_at]
+      properties:
+        id:
+          type: string
+          description: The same id DELETE /v1/shares/{id} takes, to cancel it.
+        resource_type: { type: string }
+        resource_label: { type: string }
+        to:
+          type: string
+          description: The recipient's handle, resolved live so a rename propagates.
+        created_at: { type: string, format: date-time }
+
     AcceptedShare:
       type: object
       description: >
@@ -2708,6 +2725,40 @@ paths:
                     items: { $ref: "#/components/schemas/ShareCard" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /shares/sent:
+    get:
+      summary: What you are waiting on
+      operationId: listSentShares
+      description: >
+        The caller's own PENDING shares, newest first — what they have sent
+        that nobody has answered yet, and the list they cancel from.
+
+
+        **Pending only, and that is a privacy decision rather than a scope
+        cut.** Declining a share deletes it, so if accepting left a visible row
+        here then a row that VANISHED would mean "they declined" — which is
+        exactly the inference decline-is-delete exists to prevent. Accepted and
+        declined therefore look identical from the sender's side: the row is
+        simply gone. This endpoint answers "what have they not answered yet",
+        and deliberately never answers "what did they say". Same rule, and the
+        same reason, as the outgoing half of GET /v1/friends/requests.
+
+
+        Capped at 200 and not paginated, matching the inbox.
+      responses:
+        "200":
+          description: The caller's unanswered outgoing shares, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [shares]
+                properties:
+                  shares:
+                    type: array
+                    items: { $ref: "#/components/schemas/SentShareCard" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
   /shares/{id}:
     delete:
       summary: Decline a share, or take one back
@@ -2718,6 +2769,21 @@ paths:
         rather than storing a rejection: a stored decline would either tell the
         sender their thing was refused — friction the app has no business
         manufacturing — or force the API to lie about why nothing happened.
+
+
+        **ASYMMETRIC, and the asymmetry is a privacy control rather than a
+        permission model.** The RECIPIENT may remove a share in any status —
+        declining a pending one, or clearing an accepted one, which costs them
+        nothing since the copy is already theirs. The SENDER may only remove a
+        PENDING one, and gets the ordinary 404 for anything else.
+
+
+        Without that restriction this endpoint is a perfect accept-vs-decline
+        oracle: accepting leaves the row and declining deletes it, so a
+        status-blind delete answers 204 for one and 404 for the other. Record
+        the ids from GET /v1/shares/sent, wait for them to leave it, then
+        delete each — one request per share, deterministic. That defeats the
+        exact property the sent list's pending-only design exists to protect.
       parameters:
       - name: id
         in: path
@@ -2727,7 +2793,9 @@ paths:
         "204": { description: Removed. }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404":
-          description: No such share, or the caller is neither end of it.
+          description: >
+            No such share; the caller is neither end of it; or the caller is
+            the SENDER and the share is no longer pending. All one answer.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }

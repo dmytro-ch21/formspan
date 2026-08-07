@@ -104,7 +104,7 @@ const navItems: {
   },
   {
     href: "/dashboard/shared",
-    label: "Shared with you",
+    label: "Sharing",
     // UNGATED, unlike everything above it, and deliberately: what lands here
     // is decided by other people. Gating it on the recipient's own enabled
     // disciplines would hide a real thing a real friend sent — a chain from a

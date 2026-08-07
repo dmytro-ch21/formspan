@@ -15203,6 +15203,112 @@ trained one**. Set and rep counts are conventional rather than tested, and
 whether a plan is a good session is not something the seed test can answer. Nor
 has the browse surface been seen on a device — the gradients in particular are
 untested against a real screen.
+## 2026-08-07 — The sent list, and what it deliberately will not tell you
+
+`GET /v1/shares/sent`, migration 000043, and a "Waiting on them" section on
+`/dashboard/shared` (now titled Sharing, since it has two directions). Closes
+the gap the sharing PR shipped with: a sender saw "Sent ✓" and then nothing —
+the API supported cancelling and no screen offered it.
+
+### Pending only, which is a privacy decision rather than a scope cut
+
+The list shows what nobody has answered yet, and never what they said.
+
+That is forced by decline-is-delete. If an ACCEPTED share stayed visible here,
+then a row that vanished would mean declined — the exact inference the delete
+exists to prevent. Both answers therefore have to look identical from the
+sender's side, and they do: the row is simply gone. Same rule and same reason
+as the outgoing half of the friends list. The screen says so in as many words,
+because the alternative is a sender quietly concluding from a disappearance
+that they were turned down.
+
+Pinned by a test that shares to two friends, has one accept and one decline,
+and asserts the sender's list is empty either way — plus a copy count, so it
+cannot pass because nothing worked.
+
+### The oracle this feature would have armed
+
+Review found a **blocking** one, and it is worth recording in full because the
+shape generalises: a privacy property held at every endpoint anyone thought to
+look at, and leaked through the one that existed to serve them.
+
+Accepting leaves the row (`status='accepted'`); declining deletes it. `Delete`
+was status-blind — `WHERE id = $1 AND (to_user_id = $2 OR from_user_id = $2)` —
+so a sender's cancel answered 204 for an accepted share and 404 for a declined
+one. Record the ids from your sent list, wait for them to disappear from it,
+then delete each: one request per share, deterministic, no timing analysis.
+
+The asymmetry pre-dated this branch and was **unreachable**: a sender had no
+way to learn a share id at all. `POST /v1/shares` returns 204 with no body, the
+inbox is recipient-scoped, `Accept` is recipient-only, and the ids are random
+UUIDs. Handing senders their own ids is exactly what would have armed it — so
+this is not a pre-existing bug the sent list exposed, it is a bug the sent list
+creates, and the fix ships with it.
+
+`Delete` is now asymmetric: the recipient may remove a row in any status, the
+sender only a pending one. Notably **all 14 existing tests stayed green with
+the fix applied**, which means nothing pinned "a sender may delete an accepted
+share" — the change costs no intended behaviour. It is pinned now by a test
+that walks every sender-reachable channel (delete, accept, both lists,
+re-share) and asserts accepted and declined are indistinguishable across all
+of them.
+
+The two channels flagged for scrutiny in advance — re-sharing after an answer,
+and the sent list itself — were both genuinely clean, for the reasons the code
+claimed. The lesson is not "check the obvious channels harder"; it is that the
+endpoint a new feature FEEDS is part of that feature's attack surface even
+when its code does not change.
+
+### The index arrives with the feature that reads it
+
+000042 shipped without an index on `from_user_id` on the argument that no query
+used it and there was no sent list, so it would be write amplification for a
+feature that did not exist — this repo dropped exactly such an index once
+before, in 000018. The stated rule was "it arrives with the sent list." It has.
+
+Both directional indexes are now PARTIAL on `status = 'pending'`, since that is
+the only status either list reads. The inbox index was rebuilt to match rather
+than left inconsistent: `shares` is hours old and empty in every environment,
+so it costs nothing today and a lock on a real table later. The down migration
+restores 000042's exact shape, verified by round-tripping it and diffing
+`pg_indexes` rather than by assuming.
+
+### One query, two directions
+
+`Inbox` and `Sent` differ only in which end of the row is the caller — so the
+SQL is composed once and the two wire shapes stay distinct (`from` on an inbox
+card, `to` on a sent one). A single neutrally-named field was the alternative
+and would have had every client rendering "shared with @alice" for something
+alice sent them. Three mutations red: joining the wrong end, scoping to the
+wrong end, and dropping the pending filter.
+
+### Three more predicates with no failing test
+
+Review's now-standard sweep. The `ORDER BY` survived deletion in both
+directions while "newest first" is promised in three places. `SentCard`'s
+`json:"to"` survived being changed to `json:"from"` — the transposition is
+pinned on the SQL side, but the SQL side is not where it is observable: the
+field would still hold the recipient's handle, just under the key that makes a
+client render a share you sent as one you received. And the empty list could
+become `null` against a contract declaring `type: array`.
+
+The last two needed the module's first `handler_test.go`, and getting there
+found a real constraint: `auth`'s context key is unexported, so a handler test
+cannot inject claims and panics on the first line of either list method. The
+response shaping is therefore a plain function the handlers call, which is what
+makes the promise testable at all — the alternative was widening `auth` for a
+test, which the workout module already considered and declined.
+
+### Gaps
+
+- **Still no rate limiting.** Fifth entry.
+- The web page has never been exercised in a browser — an authenticated
+  walkthrough needs credentials, so this is typecheck, lint, build and backend
+  integration tests only. Same caveat as the sharing PR it extends.
+- No notification of any kind: a share sitting in an inbox is discovered by
+  visiting the page. That is the next real gap in this area, and it is a
+  platform-sized one rather than a screen.
+
 
 ## Open items / known gaps as of this entry
 

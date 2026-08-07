@@ -128,6 +128,19 @@ type Card struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// SentCard is one share the caller is WAITING ON. Same shape as Card with the
+// counterpart named for what it actually is: `to`, not `from`. One struct with
+// a neutrally-named field was the alternative and would have made every client
+// render "shared with @alice" for an inbox row.
+type SentCard struct {
+	ID            string `json:"id"`
+	ResourceType  string `json:"resource_type"`
+	ResourceLabel string `json:"resource_label"`
+	// To is the recipient's handle, joined live like Card.From.
+	To        string    `json:"to"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 // Accepted is what accepting hands back: enough for the client to navigate
 // straight to the recipient's OWN new copy.
 type Accepted struct {
@@ -154,14 +167,30 @@ type Repository interface {
 	Create(ctx context.Context, callerID string, in New) error
 	// Inbox lists what is waiting for the caller, newest first.
 	Inbox(ctx context.Context, callerID string) ([]Card, error)
+	// Sent lists what the caller is waiting on — their own PENDING shares,
+	// newest first.
+	//
+	// PENDING ONLY, and that is a privacy decision rather than a scope cut.
+	// Include accepted rows and a VANISHED row starts to mean "declined",
+	// since declining deletes — which is precisely the inference
+	// decline-is-delete exists to prevent. So this answers "what have they
+	// not answered yet" and never "what did they say". Same rule as the
+	// friend module's outgoing list, for the same reason.
+	Sent(ctx context.Context, callerID string) ([]SentCard, error)
 	// Accept copies the resource into the caller's ownership and marks the
 	// share accepted, atomically. ErrNotFound when there is no such pending
 	// share ADDRESSED TO the caller — including when the caller is the one
 	// who sent it. ErrGone when the resource has since been deleted.
 	Accept(ctx context.Context, callerID, shareID string) (Accepted, error)
-	// Delete removes a share the caller is either end of: a decline, or the
-	// sender taking it back. One verb, as with friend requests, because both
-	// are "this, gone" and the client knows which it offered.
+	// Delete removes a share: a decline, or the sender taking it back. One
+	// verb, as with friend requests, because both are "this, gone" and the
+	// client knows which it offered.
+	//
+	// ASYMMETRIC, and deliberately. The recipient may remove a row in ANY
+	// status; the sender may only remove a PENDING one. A sender allowed to
+	// delete an accepted row learns it was accepted — 204 versus 404 — which
+	// turns this into the accept-vs-decline oracle the sent list's
+	// pending-only design exists to prevent.
 	Delete(ctx context.Context, callerID, shareID string) error
 }
 

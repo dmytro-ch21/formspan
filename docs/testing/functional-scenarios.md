@@ -5081,6 +5081,31 @@ All of these must be indistinguishable 404s:
   cleared from the inbox, and no copy is created.
 - Unknown `resource_type` → 400, rejected before the handle is resolved.
 
+### The sent list (`GET /v1/shares/sent`)
+
+- After sharing, the sender's "Waiting on them" shows the row, labelled with
+  the RECIPIENT's handle (not their own — the mirror of the inbox is the thing
+  a copied query gets wrong).
+- The recipient does NOT see it in their own sent list; an outsider sees
+  nothing. Assert the errors, not just the lengths — the zero value is an
+  empty list, so an ignored error passes by failing.
+- **Accepted and declined must look identical to the sender**: share to two
+  friends, one accepts and one declines, and the sender's list goes empty
+  either way. Assert the accept really copied, so the test cannot pass because
+  nothing worked.
+- Cancel from the sent card: the id on the card is the one DELETE takes, it
+  leaves the recipient's inbox too, and the same thing can then be re-sent.
+- **The sender must not be able to tell an accept from a decline through ANY
+  channel.** Walk them all with two shares, one accepted and one declined:
+  `DELETE` (404 for both — the sender may only delete a PENDING share, or this
+  endpoint is a perfect oracle), `accept` as the sender, both lists, and
+  re-sharing. Assert the accepted row still EXISTS after the sender's refused
+  delete, so the test cannot pass by the row being erased.
+- The RECIPIENT keeps full control: they may clear an accepted row, which is
+  the half the asymmetry must not break.
+- Web: both lists load in ONE round trip; the copy says rows disappear once
+  answered and that the app does not say which way.
+
 ### Web surfaces
 
 - Share panel: friends load on OPEN, not on mount; `null` vs `[]` distinguished

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -64,30 +65,77 @@ func (r *PostgresRepository) Create(ctx context.Context, callerID string, in New
 	return translate(err, "create")
 }
 
-func (r *PostgresRepository) Inbox(ctx context.Context, callerID string) ([]Card, error) {
-	// The sender's handle is joined LIVE, so a rename propagates to every
-	// inbox it appears in — the label beside it is the deliberate exception,
-	// being a record of what was said rather than a view of a live thing.
-	rows, err := r.pool.Query(ctx, `
-		SELECT s.id, s.resource_type, s.resource_label, p.username, s.created_at
-		FROM shares s
-		JOIN profiles p ON p.user_id = s.from_user_id
-		WHERE s.to_user_id = $1 AND s.status = 'pending'
-		ORDER BY s.created_at DESC, s.id
-		LIMIT $2`, callerID, maxList)
+// pendingCards is the one query both directions run. Composed rather than
+// written twice: the two differ only in which end of the row is the caller and
+// which is the counterpart, and this repo's own sequence module carries a
+// comment about what happens when the same rule is expressed twice and only
+// one copy gets updated.
+//
+// The counterpart's handle is joined LIVE, so a rename propagates to every
+// list it appears in. The label beside it is the deliberate exception — it is
+// a record of what was said, not a view of a live thing.
+const pendingCards = `
+	SELECT s.id, s.resource_type, s.resource_label, p.username, s.created_at
+	FROM shares s
+	JOIN profiles p ON p.user_id = s.%s
+	WHERE s.%s = $1 AND s.status = 'pending'
+	ORDER BY s.created_at DESC, s.id
+	LIMIT $2`
+
+// cardRow is what both directions scan into before being named. It exists so
+// the scan is written once; the wire shapes stay distinct.
+type cardRow struct {
+	id, resourceType, resourceLabel, handle string
+	createdAt                               time.Time
+}
+
+func (r *PostgresRepository) pending(ctx context.Context, callerID, counterpart, caller, op string) ([]cardRow, error) {
+	rows, err := r.pool.Query(ctx, fmt.Sprintf(pendingCards, counterpart, caller), callerID, maxList)
 	if err != nil {
-		return nil, translate(err, "inbox")
+		return nil, translate(err, op)
 	}
 	defer rows.Close()
-	out := []Card{}
+	out := []cardRow{}
 	for rows.Next() {
-		var c Card
-		if err := rows.Scan(&c.ID, &c.ResourceType, &c.ResourceLabel, &c.From, &c.CreatedAt); err != nil {
-			return nil, translate(err, "inbox scan")
+		var c cardRow
+		if err := rows.Scan(&c.id, &c.resourceType, &c.resourceLabel, &c.handle, &c.createdAt); err != nil {
+			return nil, translate(err, op+" scan")
 		}
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+func (r *PostgresRepository) Inbox(ctx context.Context, callerID string) ([]Card, error) {
+	rows, err := r.pending(ctx, callerID, "from_user_id", "to_user_id", "inbox")
+	if err != nil {
+		return nil, err
+	}
+	out := []Card{}
+	for _, c := range rows {
+		out = append(out, Card{
+			ID: c.id, ResourceType: c.resourceType, ResourceLabel: c.resourceLabel,
+			From: c.handle, CreatedAt: c.createdAt,
+		})
+	}
+	return out, nil
+}
+
+// Sent is the mirror: the caller is the sender, so the counterpart joined is
+// the recipient. Pending only — see the Repository interface for why.
+func (r *PostgresRepository) Sent(ctx context.Context, callerID string) ([]SentCard, error) {
+	rows, err := r.pending(ctx, callerID, "to_user_id", "from_user_id", "sent")
+	if err != nil {
+		return nil, err
+	}
+	out := []SentCard{}
+	for _, c := range rows {
+		out = append(out, SentCard{
+			ID: c.id, ResourceType: c.resourceType, ResourceLabel: c.resourceLabel,
+			To: c.handle, CreatedAt: c.createdAt,
+		})
+	}
+	return out, nil
 }
 
 func (r *PostgresRepository) Accept(ctx context.Context, callerID, shareID string) (Accepted, error) {
@@ -159,11 +207,30 @@ func (r *PostgresRepository) Accept(ctx context.Context, callerID, shareID strin
 }
 
 func (r *PostgresRepository) Delete(ctx context.Context, callerID, shareID string) error {
-	// Either end may remove it, and the row is scoped to the caller being one
-	// of them. An accepted share can also be cleared: the copy is the
-	// recipient's own by then, so removing the record takes nothing away.
+	// ASYMMETRIC ON PURPOSE, and the asymmetry is a privacy control rather
+	// than a permission model.
+	//
+	// The RECIPIENT may remove a row in any status: declining a pending one,
+	// or clearing an accepted one, which takes nothing away because the copy
+	// is already theirs.
+	//
+	// The SENDER may only remove a PENDING one. Without that predicate this
+	// endpoint is a perfect accept-vs-decline oracle, which is precisely what
+	// the sent list's pending-only design exists to prevent — accepting
+	// leaves the row, declining deletes it, so a status-blind DELETE answers
+	// 204 for accepted and 404 for declined. Record the ids from your sent
+	// list, wait for them to disappear from it, then delete each one: one
+	// request per share, deterministic, no timing analysis.
+	//
+	// The asymmetry pre-dated the sent list and was unreachable — a sender had
+	// no way to learn a share id, since POST returns 204 with no body, the
+	// inbox is recipient-scoped, and the ids are random UUIDs. Handing the
+	// sender their own ids is what armed it, so the fix ships with the feature
+	// that would have armed it.
 	tag, err := r.pool.Exec(ctx, `
-		DELETE FROM shares WHERE id = $1 AND (to_user_id = $2 OR from_user_id = $2)`,
+		DELETE FROM shares
+		WHERE id = $1
+		  AND (to_user_id = $2 OR (from_user_id = $2 AND status = 'pending'))`,
 		shareID, callerID)
 	if err != nil {
 		return translate(err, "delete")
