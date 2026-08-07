@@ -8,6 +8,7 @@ import { KeyboardAwareScrollView, useEnsureVisible } from '@/components/Keyboard
 import { SwipeToDelete } from '@/components/SwipeToDelete';
 
 import { CountdownBar, useCountdown } from '@/components/Countdown';
+import { HoldToConfirm } from '@/components/HoldToConfirm';
 import { elapsedOf } from '@/lib/countdown';
 import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
@@ -991,9 +992,28 @@ export default function SessionScreen() {
         )}
 
         {!finished ? (
-          <Pressable
+          /* Held, not tapped. This screen is operated one-handed with wet
+             hands between sets, and finishing is not undoable from the phone —
+             it was a single tap with no confirmation of any kind. */
+          <HoldToConfirm
+            label="Finish session"
+            holdingLabel="Keep holding to finish…"
+            confirmTitle="Finish session?"
+            confirmBody="You won't be able to add to it afterwards."
             style={[styles.finish, { backgroundColor: accent.accent }]}
-            onPress={async () => {
+            textStyle={styles.finishText}
+            /*
+              `accent.on`, not the default lime. This button's background IS
+              `accent.accent`, and on the default (green) palette that is
+              `#B8FF2C` — the exact value of `vola.lime`. A lime fill over a
+              lime button at 28% opacity is lime: the fill was mathematically
+              invisible on the one button this control was built for. Every
+              accent ships an `on` colour precisely because it reads against
+              that accent, so this contrasts whichever one is chosen.
+            */
+            fillColor={accent.on}
+            testID="session-finish"
+            onConfirm={async () => {
               try {
                 await flush(); // the last set typed must land before the session closes
                 await finishLocalSession(userId!, id!);
@@ -1008,45 +1028,41 @@ export default function SessionScreen() {
                 setError(err instanceof Error ? err.message : String(err));
               }
             }}
-            accessibilityRole="button"
-            testID="session-finish"
-          >
-            <Text style={styles.finishText}>Finish session</Text>
-          </Pressable>
+          />
         ) : (
           <Text style={styles.muted}>Finished — this session is read-only.</Text>
         )}
 
-        <Pressable
-          onPress={() =>
-            Alert.alert('Delete session?', "This can't be undone.", [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Delete',
-                style: 'destructive',
-                onPress: async () => {
-                  try {
-                    // Writes a tombstone (or hard-deletes a session the
-                    // server never saw). The delete travels out through the
-                    // ordinary push path, so there is no fire-and-forget
-                    // DELETE here any more — that one both raced the push and
-                    // was silently lost whenever it failed, which offline was
-                    // always.
-                    await deleteLocalSession(userId!, id!);
-                    requestSync('session-deleted');
-                    router.back();
-                  } catch (err) {
-                    setError(err instanceof Error ? err.message : String(err));
-                  }
-                },
-              },
-            ])
-          }
+        {/* The `Alert` this replaces said only "This can't be undone." — which
+            a hold says better, and without a dialog. Contrast the two deletes
+            that kept theirs: those state a fact the button cannot carry (how
+            many logged sets go with it, that it is removed everywhere and not
+            just here). */}
+        <HoldToConfirm
+          label="Delete session"
+          holdingLabel="Keep holding to delete…"
+          confirmTitle="Delete session?"
+          confirmBody="This can't be undone."
           style={styles.deleteButton}
-          accessibilityRole="button"
-        >
-          <Text style={styles.deleteText}>Delete session</Text>
-        </Pressable>
+          textStyle={styles.deleteText}
+          fillColor={vola.danger}
+          destructive
+          testID="session-delete"
+          onConfirm={async () => {
+            try {
+              // Writes a tombstone (or hard-deletes a session the server never
+              // saw). The delete travels out through the ordinary push path,
+              // so there is no fire-and-forget DELETE here any more — that one
+              // both raced the push and was silently lost whenever it failed,
+              // which offline was always.
+              await deleteLocalSession(userId!, id!);
+              requestSync('session-deleted');
+              router.back();
+            } catch (err) {
+              setError(err instanceof Error ? err.message : String(err));
+            }
+          }}
+        />
       </KeyboardAwareScrollView>
 
       {timerState.timer && (

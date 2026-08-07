@@ -459,6 +459,23 @@ export default function SessionPage({
             <button
               type="button"
               onClick={async () => {
+                /*
+                  A `confirm`, not the phone's hold-to-confirm.
+
+                  Mobile holds this button because it is pressed one-handed
+                  with wet hands between sets, and a stray touch there ended a
+                  session outright. Neither half applies to a mouse: a misclick
+                  is far less likely, and a press-and-hold on a desktop is an
+                  interaction nobody expects and nothing else on the page
+                  teaches. Deleting a session — just below on this screen —
+                  already guards itself with a `confirm`, as does deleting a
+                  workout, so matching them keeps one idiom per platform rather
+                  than importing the phone's.
+
+                  Web had NO confirmation here at all — the same gap mobile had.
+                */
+                if (!confirm("Finish this session? You won't be able to add to it afterwards."))
+                  return;
                 try {
                   // The last set typed must land before the session closes.
                   await flush();
