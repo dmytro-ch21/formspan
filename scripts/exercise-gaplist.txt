@@ -1,0 +1,337 @@
+Ab Wheel Rollout|strength
+Air Bike|cardio
+Archer Pull Ups|strength
+Archer Push Ups|strength
+Machine Assisted Dips|strength
+Assisted Pull Ups|strength
+Back Extension|strength
+Back Lever|strength
+Stability Ball Leg Curl|strength
+Ball Pike|strength
+Band Assisted Pull Ups|strength
+Banded Adductor Stretch|stretching
+Banded Ankle Stretch|stretching
+Banded Calf Stretch|stretching
+Banded Chest Stretch|stretching
+Banded Figure-4 Stretch|stretching
+Banded Fire Hydrant|strength
+Banded Hamstring Stretch|stretching
+Banded IT-Band Stretch|stretching
+Banded Kneeling Hip Thrust|strength
+Banded Lat Stretch|stretching
+Banded Rear Delt Stretch|stretching
+Banded Seated Hip Abduction|strength
+Banded Shoulder Stretch|stretching
+Banded Standing Leg Curl|strength
+Banded Standing Hip Abduction|strength
+Banded Standing Hip Adduction|strength
+Banded Sumo Walk|strength
+Banded Terminal Knee Extension|strength
+Banded Triceps Stretch|stretching
+Barbell Front Raise|strength
+Barbell Overhead Extension|strength
+Barbell Pullover|strength
+Barbell Rear Delt Row|strength
+Battle Rope Double Slam|cardio
+Battle Ropes|cardio
+Behind the Back Barbell Shrug|strength
+Bench Adductor Stretch|stretching
+Bench Ankle Stretch|stretching
+Bench Bulgarian Split Stretch|stretching
+Bench Calf Stretch|stretching
+Bench Chest Stretch|stretching
+Bench Child's Pose|stretching
+Bench Couch Stretch|stretching
+Bench Dips|strength
+Bench Figure-4 Glute Stretch|stretching
+Bench Hamstring Stretch|stretching
+Bench Lat Stretch|stretching
+Bench Leg Pull-In|strength
+Bench Pull|strength
+Bent Arm Barbell Pullover|strength
+Bent-Arm EZ-Bar Pullover|strength
+Bent-Over Dumbbell Row|strength
+Bent-Over EZ-Bar Row|strength
+Bird Dog Hold|strength
+Bodyweight Calf Raise|strength
+Bodyweight Good Morning|strength
+Bodyweight Lateral Raise|strength
+Bodyweight Overhead Press|strength
+Burpees|cardio
+Butterfly Stretch|stretching
+Cable Bent-Over Row|strength
+Cable Chest Press|strength
+Cable Hammer Curl|strength
+Cable Wrist Curl|strength
+Captain's Chair Leg Raise|strength
+Cat Stretch|stretching
+Cheat Curl|strength
+Chest Supported Dumbbell Shrug|strength
+Chest-Supported Kettlebell Row|strength
+Chest-Supported Smith Machine Row|strength
+Chin Tuck Hold|strength
+Chin-Ups|strength
+Clamshells|strength
+Clap Push-Ups|strength
+Close-Grip Barbell Curl|strength
+Close-Grip Dumbbell Bench Press|strength
+Close-Grip EZ-Bar Bench Press|strength
+Close-Grip EZ-Bar Curl|strength
+Close-Grip Incline Bench Press|strength
+Close-Grip Pull-Ups|strength
+Close Grip Push Ups|strength
+Cocoons|strength
+Cross-Body Crunch|strength
+Cross-Body Shoulder Stretch|stretching
+Crunches|strength
+Dumbbell Kickstand Deadlift|strength
+Dumbbell Lunge|strength
+Dumbbell Reverse Curl|strength
+Dumbbell Somersault Squat|strength
+Dumbbell Squat|strength
+Dumbbell Sumo Squat|strength
+Dumbbell Svend Press|strength
+Dead Hang|strength
+Barbell Deadlift|strength
+Decline EZ-Bar Bench Press|strength
+Decline Crunch|strength
+Decline Dumbbell Fly|strength
+Deficit Push Ups|strength
+Diamond Push Ups|strength
+Chest Dips|strength
+Donkey Calf Raise|strength
+Doorway Chest Stretch|stretching
+Double Dumbbell Kickstand Deadlift|strength
+Double Dumbbell Overhead Carry|strength
+Double Kettlebell Bicep Curl|strength
+Double Kettlebell Clean and Press|strength
+Double Kettlebell Dead Clean|olympic
+Double Kettlebell Dead Split Snatch|olympic
+Double Kettlebell Jerk|strength
+Double Kettlebell Overhead Carry|strength
+Double Kettlebell Overhead Press|strength
+Double Kettlebell Push Press|strength
+Double Kettlebell Rear Delt Row|strength
+Double Kettlebell Row|strength
+Double Kettlebell Split Jerk|olympic
+Double Kettlebell Swing Snatch|olympic
+Downward-Facing Dog|stretching
+Dragon Flag|strength
+Dumbbell Bench Pull|strength
+Dumbbell Face Pull|strength
+Dumbbell Pistol Squat|strength
+Dumbbell Reverse Fly|strength
+Dumbbell Shoulder Press|strength
+Dumbbell Side Bend|strength
+Dumbbell Snatch|olympic
+Dumbbell Tricep Extension|strength
+Dumbbell Windmill|strength
+Elliptical Trainer|cardio
+EZ-Bar Bench Press|strength
+EZ-Bar Curl|strength
+EZ-Bar Front Raise|strength
+EZ-Bar Lying Triceps Extension|strength
+EZ-Bar Overhead Tricep Extension|strength
+EZ Bar Pullover|strength
+EZ-Bar Reverse Curl|strength
+EZ Bar Reverse Grip Row|strength
+EZ-Bar Romanian Deadlift|strength
+EZ-Bar Shrug|strength
+EZ Bar Spider Curl|strength
+EZ-Bar Upright Row|strength
+EZ-Bar Wrist Curl|strength
+Floor EZ-Bar Press|strength
+Floor Kettlebell Pullover|strength
+Flutter Kicks|strength
+Front Lever|strength
+Glute Kickback|strength
+Hack Squat|strength
+Hack Squat Calf Raise|strength
+Handstand Push Ups|strength
+Hanging Pike|strength
+Heel-Elevated Squat|strength
+Heel-to-Toe Walk|strength
+Hex Bar Deadlift|strength
+High Knees|cardio
+High Plank|strength
+Machine Hip Abduction|strength
+Hip Adduction|strength
+Human Flag|strength
+Incline EZ-Bar Bench Press|strength
+Incline Hammer Curl|strength
+Isometric Neck Lateral Flexion|strength
+Jackknife Sit-Up|strength
+Jefferson Curl|strength
+Jump Rope|cardio
+Jumping Jacks|cardio
+Kettlebell Bulgarian Split Squat|strength
+Kettlebell Close-Grip Floor Press|strength
+Kettlebell Concentration Curl|strength
+Kettlebell Goblet Lunge|strength
+Kettlebell Hammer Curl|strength
+Kettlebell Hip Thrust|strength
+Kettlebell Kickstand Deadlift|strength
+Kettlebell Lunge Press|strength
+Kettlebell Offset Reverse Lunge and Press|strength
+Kettlebell Overhead Tricep Extension|strength
+Kettlebell Pistol Squat|strength
+Kettlebell Pullover|strength
+Kettlebell Reverse Wrist Curl|strength
+Kettlebell Rotational Lunge|strength
+Kettlebell Russian Twist|strength
+Kettlebell Shrug|strength
+Kettlebell Single Leg Deadlift|strength
+Kettlebell Skull Crusher|strength
+Kettlebell Squat|strength
+Kettlebell Sumo High Pull|strength
+Kettlebell Svend Press|strength
+Kettlebell Swing Clean|olympic
+Kettlebell Wrist Curl|strength
+Knee Push Ups|strength
+Knee-to-Chest Stretch|stretching
+Kneeling Cable Row|strength
+Kneeling Hip Flexor Stretch|stretching
+Kneeling Wrist Stretch|stretching
+Lat Pulldown|strength
+Lizard Stretch|stretching
+Lunge|strength
+Lying Leg Raise|strength
+Lying Tricep Extension|strength
+Machine Back Extension|strength
+Machine Bicep Curl|strength
+Machine Calf Raise|strength
+Machine Chest Fly|strength
+Machine Seated Crunch|strength
+Mountain Climbers|cardio
+Muscle Ups|strength
+Neck Side Stretch|stretching
+Negative Pull Ups|strength
+Neutral Grip Pull Ups|strength
+One-Arm Dumbbell Push Press|strength
+One-Arm Dumbbell Swing|strength
+One Arm Kettlebell Bicep Curl|strength
+One-Arm Kettlebell Bottoms-Up Press|strength
+One Arm Kettlebell Floor Glute Bridge Press|strength
+One Arm Kettlebell Floor Press|strength
+One Arm Kettlebell Front Squat|strength
+One Arm Kettlebell Push Press|strength
+One Arm Kettlebell Row|strength
+One Arm Kettlebell Shoulder Press|strength
+One Arm Kettlebell Swing|strength
+One-Arm Kettlebell Tricep Kickback|strength
+One-Arm Landmine Press|strength
+One-Arm Lat Pulldown|strength
+One-Arm Single-Leg Dumbbell Romanian Deadlift|strength
+One-Arm Single-Leg Kettlebell Romanian Deadlift|strength
+Overhead Tricep Extension|strength
+Overhead Triceps Stretch|stretching
+Pause Pull-Up|strength
+Pause Squat|strength
+Paused Bench Press|strength
+Paused Incline Bench Press|strength
+Paused Overhead Press|strength
+Pec Deck|strength
+Pike Push Ups|strength
+Planche|strength
+Plate-Loaded Donkey Calf Raise|strength
+Plate Pinch|strength
+Plyo Lunge|plyometrics
+Plyo Push-Up|plyometrics
+Preacher Curl|strength
+Preacher Hammer Curl|strength
+Pseudo Planche Push Ups|strength
+Rear Delt Fly|strength
+Reverse Crunches|strength
+Reverse Curl|strength
+Reverse Grip Bent Over Row|strength
+Reverse Grip Lat Pulldown|strength
+Reverse Nordic Curl|strength
+Ring Dead Hang|strength
+Ring Dips|strength
+Ring Face Pull|strength
+Ring Muscle-Up|strength
+Ring Push-Up|strength
+Ring Row|strength
+Rings Inverted Row|strength
+Rope Climb|strength
+Rowing Machine|cardio
+Running|cardio
+Russian Twist|strength
+Scapular Pull Ups|strength
+Scissor Kicks|strength
+Seated Barbell Overhead Press|strength
+Seated Calf Raise|strength
+Seated Dumbbell Curl|strength
+Seated Dumbbell Tricep Extension|strength
+Seated Forward Fold|stretching
+Seated Smith Machine Shoulder Press|strength
+Seated Spinal Twist|stretching
+Seated Straddle Stretch|stretching
+Side Lunge|strength
+Side-Lying Hip Abduction|strength
+Side Lying Hip Adduction|strength
+Side-Lying Lateral Raise|strength
+Side Plank with Leg Lift|strength
+Single-Arm Chest-Supported Dumbbell Row|strength
+Single-Arm Dumbbell Row|strength
+Single-Arm Dumbbell Overhead Tricep Extension|strength
+Single-Arm Plate-Loaded Lateral Raise|strength
+Single Arm Tricep Pushdown|strength
+Single Dumbbell Svend Press|strength
+Single Leg Lying Leg Curl|strength
+Single Leg Romanian Deadlift|strength
+Sit-Ups|strength
+Skull Crusher|strength
+Sled Row|strength
+Smith Machine Decline Bench Press|strength
+Smith Machine Good Morning|strength
+Smith Machine Reverse Grip Bent Over Row|strength
+Smith Machine Reverse Lunge|strength
+Smith Machine Shrug|strength
+Smith Machine Squat|strength
+Smith Machine Upright Row|strength
+Stability Ball Hip Bridge|strength
+Stability Ball Knee Tuck|strength
+Stability Ball Push-Up|strength
+Stability Ball Push-Up (Hands on Ball)|strength
+Stability Ball Wall Squat|strength
+Standing Calf Raise|strength
+Standing Calf Stretch|stretching
+Standing Forward Fold|stretching
+Standing Quad Stretch|stretching
+Standing Side Bend|stretching
+Step Ups|strength
+Straight Bar Dips|strength
+Strict Curl|strength
+Suitcase Carry|strength
+Sumo Squat|strength
+Superman|strength
+Supine Spinal Twist|stretching
+Svend Press|strength
+T-Bar Row|strength
+Thoracic Bridge|strength
+Thruster|strength
+Treadmill Running|cardio
+TRX Bicep Curl|strength
+TRX Chest Press|strength
+TRX Face Pull|strength
+TRX Hamstring Curl|strength
+TRX Lunge|strength
+TRX Pistol Squat|strength
+TRX Plank|strength
+TRX Row|strength
+TRX Side Plank|strength
+TRX Squat|strength
+TRX Triceps Extension|strength
+TRX Y-Fly|strength
+V-Bar Lat Pulldown|strength
+V-Sit|strength
+V Ups|strength
+Walking|cardio
+Wall Push Ups|strength
+Weighted Dips|strength
+Weighted Pull-Up|strength
+Weighted Wall Crunch|strength
+Wide Grip Pull Ups|strength
+Wide Grip Push Ups|strength
+Bilateral Dumbbell Wrist Curl|strength

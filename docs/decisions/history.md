@@ -13969,6 +13969,101 @@ at Expo Go's "Open in Expo Go?" confirmation, which needs a tap this session had
 no device grant for. It is the highest-value remaining check on this branch:
 every defect this change addresses is runtime-only.
 
+## 2026-08-07 — The exercise catalog grows by 257, and the audit mattered more than the generator
+
+A RepDB coverage manifest (slug + name + category for 518 exercises; the
+licensed half — muscles, equipment, instructions, translations — was not used)
+was matched against the 504-row catalog. 257 rows were authored by an ordered
+rule table in `scripts/expand_exercise_catalog.py`: 504 → 761. Every attribute
+is derived from the movement, not copied.
+
+The clusters, which are the point: calisthenics and gymnastic strength (levers,
+planche, flags, ~90 bodyweight rows), 38 stretches (the catalog had 12),
+kettlebell doubles, and the machine/implement variations of lifts already
+shipped.
+
+### The generator was wrong five ways, and each was found by reading output
+
+The rule table produced plausible rows, which is exactly the danger:
+
+- **Semantic theft by generic rules.** "Reverse Nordic Curl" → biceps; "TRX
+  Hamstring Curl" → biceps; a tricep kickback → glutes; "Rope Climb" → cardio;
+  upright rows → horizontal_pull. First-match-wins is only as good as the
+  ordering, and the ordering is only as good as the reading.
+- **Substring matching, twice.** "hamstRING" put a stretch on ring equipment;
+  generic "machine" claimed "rowing machine" before its own entry. The same
+  bug class the technique matcher had with hyphens.
+- **A fake muscle.** Stretches got `"mobility"` as a primary muscle — not a
+  muscle, and invisible to the Library's muscle filter. **Caught by the
+  existing mobile suite** (`every primary muscle belongs to a group`), which is
+  a test doing exactly its job against a placeholder that should never have
+  been written.
+- **An equipment default that inverted meaning.** Implementless loaded lifts
+  (Preacher Curl, Svend Press, Paused Bench Press) defaulted to bodyweight and
+  were then downgraded to bare reps — a Pec Deck was briefly a bodyweight
+  exercise. The policy now: olympic-implied → barbell + platform,
+  barbell-implied → barbell, loaded movement → free-weights, else bodyweight,
+  with load following the implement.
+- **28 duplicates the matcher blessed.** Nine were the same row under another
+  spelling or word order (Burpees/Burpee, Machine Hip Abduction/Hip Abduction
+  Machine); the rest the same movement in different words (Kettlebell Single
+  Leg Deadlift = Single-Leg Kettlebell Romanian Deadlift). Root cause: the
+  matcher derived equipment from the structured field on one side and the name
+  on the other, so identical rows mismatched themselves. Every drop is named
+  in the script with the row it duplicates.
+
+Also dropped: Running, Walking, Treadmill Running. The gap analysis had
+explicitly warned that importing these creates two ways to record a run — the
+`sport: running` family already owns them — and the first pass **imported them
+anyway** when told to produce the import. Flagging a problem and then building
+it is worse than missing it; recorded here so the next flag is re-raised at
+delivery instead of buried. Machine cardio (elliptical, rower, air bike) stays:
+the catalog already models `stationary-bike` as a strength-sport locomotion
+row, so those follow house precedent.
+
+### The sixth defect class, found by review after all of the above
+
+`/pre-merge`'s backend reviewer was told the five classes and asked to hunt for
+the sixth. It found one: **~40 more duplicates across synonym boundaries** —
+19 plural twins (`Chin-Ups` against the shipped `chin-up`), the whole TRX
+family duplicating the catalog's own "Suspension" rows, one-arm against
+single-arm, `Barbell Deadlift` against `conventional-deadlift` — plus ~20
+misclassified rows (dips split across two movement patterns, close-grip bench
+variants contradicting the triceps-primary rows they vary, a reverse wrist
+curl flexing the wrong way).
+
+The embarrassing mechanism: the in-line duplicate check had been **rebuilt
+from memory as a weaker normaliser** than the one already fixed that morning —
+"ups" is three letters, and the stemmer only touched words over three. The
+same session that wrote "re-measure, don't recall" into memory rebuilt a
+tool from recall. Every reviewer claim was verified against the base catalog
+before acting; all held. The surviving strap exercises were renamed to the
+house "Suspension" naming so the Library does not show two brands for one
+piece of equipment.
+
+### Method note
+
+Every row of the final set was read, grouped by rule bucket — not sampled —
+and the final duplicate scan runs the full normaliser (plural, sibilant,
+brand-synonym) against the true base, reporting zero at ≥0.85 similarity.
+Sampling had twice declared this set good while defects sat in the displayed
+sample itself (Rope Climb was printed in a spot-check and called fine).
+`instructions` is deliberately empty, matching 443 of the original 504 rows:
+writing 307 instruction paragraphs from a coverage list would be inventing
+content.
+
+### Gaps
+
+- **Secondary muscles got one reading pass, not a per-exercise argument.**
+  They are rule-assigned and plausible; a coach would quibble with some.
+- **The Library UI now merges ~1,350 rows** across both catalogs. The mobile
+  Library's pinned-header problem (an existing open item) gets worse with
+  every growth; nobody has evaluated browse UX at this size.
+- **Movement-pattern details are free text** and a few compounds are filed
+  under one half of what they do (a Thruster is a squat and a press; it says
+  "Squat + Press" but lives under vertical_push).
+
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
