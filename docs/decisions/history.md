@@ -14893,6 +14893,139 @@ exists; not worth guessing at now.
 Not used on a device. The ranking is covered against the shipped catalog and the
 output reads sensibly, but whether the two headings are legible mid-workout —
 one-handed, twenty seconds between sets — is a device question.
+## 2026-08-07 — Sharing, built once for everything
+
+`internal/modules/share`, migration 000042, four routes under `/v1/shares`, a
+Share control on the web sequence page and a generic `/dashboard/shared`
+inbox. Step 5 of the social scope, and the reason the previous four exist.
+
+### The share module imports nothing it shares
+
+`shares` stores `(resource_type, resource_id, from, to, status)` and knows
+nothing about what any of those things contain. A module becomes shareable by
+implementing two methods — `Describe` for the inbox card, `CopyTo` for the
+copy — and being registered by type in `cmd/api/main.go`. That file is the only
+place that knows both that "sequence" is shareable and who owns it.
+
+The direction is the whole point. Had `share` imported `sequence`, every
+future shareable domain would join one knot at the centre of the app, and the
+fourth to arrive would be the one that could not. Each module already knows
+how to duplicate its own thing; this asks for that knowledge and nothing else.
+The same applies to the friendship test: `share.Friends` is a one-method
+interface the friend module happens to satisfy, so neither package imports the
+other.
+
+Both cross-package interfaces return an explicit `ok bool` rather than a
+sentinel error, and that is not style. A sentinel cannot be matched with
+`errors.Is` across a package boundary without one side importing the other —
+the first cut had `share` comparing against `friend.ErrNotFound` and the test
+caught it immediately — and the lazy repair, treating *any* error as a miss,
+would quietly turn a database outage into a 404.
+
+### Accepting is what copies, and it copies in one transaction
+
+`CopyTo` is handed the share module's own `pgx.Tx`. The duplicate and the
+status flip commit together or not at all, so an accepted share with no copy
+and a copy from a share still marked pending are both unreachable — and the
+table asserts it: `CHECK ((status = 'accepted') = (copied_resource_id IS NOT
+NULL AND accepted_at IS NOT NULL))`. The claim is `SELECT … FOR UPDATE`, so two
+taps on a slow connection cannot both pass the status test and both copy.
+
+Snapshot semantics fall out of this rather than being enforced: the recipient
+gets rows they own outright, so there is no `visibility` column, no ACL, no
+shared ownership and no "who may edit this" question anywhere in the app.
+
+### The case the schema cannot prevent
+
+`resource_id` is polymorphic and can carry no foreign key, so a resource
+deleted between sending and accepting leaves a share pointing at nothing.
+Accepting one answers **410**, not 404 — the recipient genuinely was sent
+something, and a silent miss would read as a bug — and clears the dead row
+rather than leaving it to fail identically forever.
+
+### The test that would have skipped in CI
+
+Worth recording as its own thing. The first version of the share tests borrowed
+two rows from `techniques` and skipped when it found fewer than two. CI runs
+`migrate up` but never `cmd/seed`, so that table is empty there — and measured
+against a migrated-but-unseeded database, **eight of the nine tests skipped and
+the package still printed `ok`**. A green CI run would have proved almost
+nothing about the feature it was gating.
+
+The fix is what the sibling sequence tests already did: seed the two rows the
+test needs. The general rule this is an instance of — a test that depends on
+seeded reference data is a test that silently disappears in the one environment
+that matters — is the same trap CLAUDE.md documents for `TEST_DATABASE_URL`
+itself, relocated one level down. The whole rest of the backend suite was
+checked against the same unseeded database and skips nothing.
+
+### One 404 for every miss, again
+
+Not-a-friend, no-such-handle, a friend request still pending, an unreal
+resource id, and another athlete's resource id are all the same answer. Any
+split turns `POST /v1/shares` into an oracle over other people's accounts or
+libraries. Six mutation checks red: recipient scoping and the `pending`
+predicate on accept, the friendship check, the visibility scope on `Describe`,
+caller scoping on delete, and the step copy itself.
+
+Review then found three more predicates that had NO failing test, by running
+its own mutations — the most valuable thing either reviewer did. `Describe`'s
+`owner_user_id IS NULL` arm (every test shared a user-owned row, so the whole
+reason it tests visibility rather than ownership was uncovered — the day
+reference chains ship, deleting that arm would silently 404 legitimate
+shares). The registry-before-friendship ordering, whose test **asserted its own
+name without testing it**: it aimed a bogus type at a *friend's* handle, where
+both orderings answer identically. And the dense re-derivation of `sort_order`.
+All three now go red under the mutation that exposed them.
+
+It also disproved a comment of mine by direct insert rather than by reading:
+the table's `CHECK ((status='accepted') = (copy IS NOT NULL AND accepted_at IS
+NOT NULL))` does **not** say what it claimed. A pending row carrying a copy id
+with a null `accepted_at` satisfies it — both sides false — so "a copy recorded
+while still pending" stayed representable. Spelled out per state now.
+
+Two more from the same pass. `CopyTo` read its source by bare id, so
+authorization happened at SEND time while the read happened whenever the
+recipient got round to accepting; ids here can be client-supplied, so an id
+freed by a delete and taken by someone else is not a shape the type system
+prevents. It now carries the sharer and re-applies the same visibility
+predicate — which also fixed the module's own warning, since `Describe` had
+retyped `visibleTo` inline instead of composing the const that exists precisely
+because "the same rule expressed twice" produced a cross-user enumeration bug
+here twice. And the label was truncated by BYTES, which can split a multi-byte
+character into invalid UTF-8 that Postgres rejects as an untranslated 500 —
+unreachable today, and ordinary the moment a Copier with Japanese terminology
+in its labels registers.
+
+### Web, not mobile, and the friends list is on the phone
+
+The platform rule decided it: sequences are authored and reviewed on web, and
+there is no sequence library on mobile to share from or copy into. Accepting a
+share on the phone would produce something the phone cannot open. So the
+loop is web-side, and the split is real — you add friends on your phone and
+share from your desk. The mobile Friends screen gains the inbox when mobile
+gets a sequence surface, not before.
+
+Sharing is a friend PICKER, never a handle field: you can only share with
+people who already agreed to hear from you, so typing a handle could only
+produce a friend you could have picked or a 404.
+
+### Gaps
+
+- **No sent list.** The sender sees "Sent ✓" and then nothing — they cannot
+  see what is still unanswered or take it back from a list. `DELETE` supports
+  the cancel; no screen offers it.
+- **Still no rate limiting**, now fourth entry running. Sharing is the first
+  feature where its absence lets someone put repeated content in another
+  person's inbox, which is a sharper edge than a repeated friend request.
+- The label on a card is a snapshot and the copy is live, so a sender who
+  renames between sending and accepting produces two names for one thing. The
+  copy is right; the card is a record of what was said. Documented rather than
+  reconciled, because making the card live would mean an N+1 across modules on
+  every inbox open.
+- Nothing has been exercised in a browser — typecheck, lint, build and the
+  backend integration suite only.
+
 
 ## Open items / known gaps as of this entry
 

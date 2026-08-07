@@ -26,6 +26,7 @@ import (
 	"github.com/dmytro-ch21/vola/backend/internal/modules/profile"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/sequence"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/session"
+	"github.com/dmytro-ch21/vola/backend/internal/modules/share"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/technique"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/workout"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
@@ -73,8 +74,25 @@ func main() {
 	bjjProficiencyHandler := bjj.NewProficiencyHandler(bjjRepo)
 	bjjFocusHandler := bjj.NewFocusHandler(bjjRepo)
 	curriculumHandler := curriculum.NewHandler(curriculum.NewPostgresRepository(pool))
-	sequenceHandler := sequence.NewHandler(sequence.NewPostgresRepository(pool))
-	friendHandler := friend.NewHandler(friend.NewPostgresRepository(pool))
+	sequenceRepo := sequence.NewPostgresRepository(pool)
+	friendRepo := friend.NewPostgresRepository(pool)
+	sequenceHandler := sequence.NewHandler(sequenceRepo)
+	friendHandler := friend.NewHandler(friendRepo)
+
+	// THE SHARE REGISTRY. This is the only place that knows both that
+	// "sequence" is a shareable kind of thing and which module owns it — the
+	// share package never imports sequence, and sequence never imports share.
+	// Adding a shareable domain is one line here plus Describe/CopyTo on its
+	// repository; nothing in the share module changes, which is the entire
+	// reason it was built generically instead of four times.
+	//
+	// The KEY IS WIRE FORMAT: it is stored in shares.resource_type and sent by
+	// clients, so renaming one orphans every stored row of that type.
+	shareRegistry := share.Registry{
+		"sequence": sequenceRepo,
+	}
+	shareHandler := share.NewHandler(
+		share.NewPostgresRepository(pool, shareRegistry, friendRepo), shareRegistry)
 	featureFlagHandler := featureflag.NewHandler(featureflag.NewPostgresRepository(pool))
 	activityHandler := activity.NewHandler(activity.NewPostgresRepository(pool))
 	exerciseRepo := exercise.NewPostgresRepository(pool)
@@ -164,6 +182,12 @@ func main() {
 	mux.Handle("POST /v1/friends/requests", verifier.RequireAuth(http.HandlerFunc(friendHandler.Send)))
 	mux.Handle("POST /v1/friends/requests/{username}/accept", verifier.RequireAuth(http.HandlerFunc(friendHandler.Accept)))
 	mux.Handle("DELETE /v1/friends/{username}", verifier.RequireAuth(http.HandlerFunc(friendHandler.Remove)))
+
+	// Sharing: one surface for every shareable type, addressed by handle.
+	mux.Handle("POST /v1/shares", verifier.RequireAuth(http.HandlerFunc(shareHandler.Create)))
+	mux.Handle("GET /v1/shares/inbox", verifier.RequireAuth(http.HandlerFunc(shareHandler.Inbox)))
+	mux.Handle("POST /v1/shares/{id}/accept", verifier.RequireAuth(http.HandlerFunc(shareHandler.Accept)))
+	mux.Handle("DELETE /v1/shares/{id}", verifier.RequireAuth(http.HandlerFunc(shareHandler.Delete)))
 	mux.Handle("GET /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Get)))
 	mux.Handle("POST /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Create)))
 	mux.Handle("PATCH /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Update)))

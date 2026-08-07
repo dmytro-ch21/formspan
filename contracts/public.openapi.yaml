@@ -261,6 +261,45 @@ components:
       nullable: true
       enum: [male, female]
 
+    ShareCard:
+      type: object
+      description: >
+        One waiting share. Carries a handle and a label, never a user id and
+        never the resource's contents — the recipient has not accepted it yet,
+        so they are owed a description, not the thing itself.
+      required: [id, resource_type, resource_label, from, created_at]
+      properties:
+        id: { type: string }
+        resource_type:
+          type: string
+          description: >
+            What kind of thing this is — "sequence" today, more later. It is
+            WIRE FORMAT, stored in the row and sent by clients, so a value that
+            ships can never be renamed without orphaning stored shares.
+          example: sequence
+        resource_label:
+          type: string
+          description: >
+            What the thing was called WHEN IT WAS SENT. A snapshot, not a live
+            read: this is a message, and what a message said does not change.
+            The copy taken on accept IS live, so a sender who renames in
+            between produces a card and a copy that disagree — the copy is
+            right, and the card is the record of what was said.
+        from:
+          type: string
+          description: The sender's handle, resolved live so a rename propagates.
+        created_at: { type: string, format: date-time }
+
+    AcceptedShare:
+      type: object
+      description: >
+        The RECIPIENT'S OWN new copy — never the sender's id, which the
+        recipient has no permission to open.
+      required: [resource_type, resource_id]
+      properties:
+        resource_type: { type: string }
+        resource_id: { type: string }
+
     FriendCard:
       type: object
       description: >
@@ -2594,6 +2633,147 @@ paths:
           $ref: "#/components/responses/NotModified"
         "401":
           $ref: "#/components/responses/Unauthorized"
+
+  /shares:
+    post:
+      summary: Send a friend a copy of something
+      operationId: createShare
+      description: >
+        ONE endpoint for every shareable type, rather than a share verb per
+        resource. A per-resource `/sequences/{id}/share` would be the fourth
+        private implementation of one idea by the time plans and workouts
+        arrived, and each would have re-derived the friendship check.
+
+
+        Shares reach FRIENDS ONLY. Not-a-friend, no-such-handle, a request
+        still pending, an unreal resource id, and a resource that is not yours
+        to send are ALL the same 404 — each distinct answer would turn this
+        into an oracle over other people's accounts or libraries.
+
+
+        Sending does not copy anything. The recipient's accept is what copies,
+        and what it copies is the resource as it stands AT THAT MOMENT.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to_username, resource_type, resource_id]
+              properties:
+                to_username: { type: string }
+                resource_type:
+                  type: string
+                  description: Must be a type this build can copy.
+                  example: sequence
+                resource_id: { type: string }
+      responses:
+        "204": { description: Sent — it now sits pending in their inbox. }
+        "400":
+          description: A missing field, or a resource_type nothing can copy.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: >
+            You already sent them this exact thing and they have not answered.
+            Uniqueness is on PENDING rows only, so re-sending after they accept
+            is allowed — that is how an author sends an updated version.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /shares/inbox:
+    get:
+      summary: What is waiting for you
+      operationId: listShareInbox
+      responses:
+        "200":
+          description: >
+            Pending shares addressed to the caller, newest first, capped at 200
+            and NOT paginated. Past that the oldest become invisible while still
+            holding their slot in the pending-uniqueness index, so a re-send of
+            one 409s against a card the recipient cannot see. Acceptable at
+            launch scale; pagination is the fix when it stops being.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [shares]
+                properties:
+                  shares:
+                    type: array
+                    items: { $ref: "#/components/schemas/ShareCard" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /shares/{id}:
+    delete:
+      summary: Decline a share, or take one back
+      operationId: dismissShare
+      description: >
+        One verb for both, as with friend requests, because both are "this,
+        gone" and the caller's UI knows which it offered. Declining DELETES
+        rather than storing a rejection: a stored decline would either tell the
+        sender their thing was refused — friction the app has no business
+        manufacturing — or force the API to lie about why nothing happened.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+      responses:
+        "204": { description: Removed. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404":
+          description: No such share, or the caller is neither end of it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /shares/{id}/accept:
+    post:
+      summary: Accept a share, which is what makes the copy
+      operationId: acceptShare
+      description: >
+        The copy and the share's status change commit in ONE transaction, so
+        there is no accepted share without a copy and no way to accept twice
+        and get two.
+
+
+        Only the RECIPIENT may accept; a sender accepting their own share gets
+        the same 404 as a share that never existed.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+      responses:
+        "200":
+          description: Copied. The id returned is the caller's own new copy.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AcceptedShare" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "410":
+          description: >
+            The sender deleted the thing before you accepted it, or it is no
+            longer theirs to pass on. 410 rather than 404 because you genuinely
+            were sent something — resource_id is polymorphic and can carry no
+            foreign key, so this is the case the schema cannot prevent. Carries
+            the `not_found` code, the enum being closed.
+
+
+            A deleted source CLEARS the dead share. The other 410 — a
+            resource_type this build cannot copy, reachable only across a
+            rollback — deliberately does not: that resource may be perfectly
+            intact and merely unreachable from this binary, and deleting on
+            account of a deploy would be irreversible.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /friends:
     get:

@@ -2314,6 +2314,97 @@ export async function deleteSequence(
   });
 }
 
+/* ── Friends and sharing ─────────────────────────────────────────────────────
+ *
+ * Everyone is addressed by HANDLE, never by user id — the API does not accept
+ * one and does not return one, so there is no id here to leak into a URL or a
+ * log. Sharing is one surface for every shareable type: a `resource_type` and
+ * a `resource_id`, so plans and workouts join it without a second client.
+ */
+
+export type FriendCard = {
+  username: string;
+  display_name: string | null;
+  since: string;
+};
+
+export async function listFriends(
+  getToken: Token,
+  signal?: AbortSignal,
+): Promise<FriendCard[]> {
+  const body = await request<{ friends: FriendCard[] }>(
+    getToken,
+    "/friends",
+    {},
+    signal,
+  );
+  // `?? []` because null has a RESERVED meaning in the screens that call
+  // this — it is the loading state — so a nil slice arriving from a future
+  // server regression would render as a spinner that never resolves.
+  return body.friends ?? [];
+}
+
+export type ShareCard = {
+  id: string;
+  resource_type: string;
+  resource_label: string;
+  /** The sender's handle, resolved live — a rename propagates. */
+  from: string;
+  created_at: string;
+};
+
+export async function listShareInbox(
+  getToken: Token,
+  signal?: AbortSignal,
+): Promise<ShareCard[]> {
+  const body = await request<{ shares: ShareCard[] }>(
+    getToken,
+    "/shares/inbox",
+    {},
+    signal,
+  );
+  return body.shares ?? [];
+}
+
+/** 409 means it is already sitting unanswered in their inbox; 404 covers
+ *  "not your friend", "no such handle" and "not yours to send" alike. */
+export async function shareResource(
+  getToken: Token,
+  toUsername: string,
+  resourceType: string,
+  resourceID: string,
+): Promise<void> {
+  await request<void>(getToken, "/shares", {
+    method: "POST",
+    body: JSON.stringify({
+      to_username: toUsername,
+      resource_type: resourceType,
+      resource_id: resourceID,
+    }),
+  });
+}
+
+/** Returns the id of the RECIPIENT'S OWN new copy — never the sender's, which
+ *  they cannot open. 410 means the sender deleted it before you accepted. */
+export async function acceptShare(
+  getToken: Token,
+  shareID: string,
+): Promise<{ resource_type: string; resource_id: string }> {
+  return request(getToken, `/shares/${encodeURIComponent(shareID)}/accept`, {
+    method: "POST",
+  });
+}
+
+/** One verb for declining and for the sender taking it back. */
+export async function dismissShare(
+  getToken: Token,
+  shareID: string,
+): Promise<void> {
+  await request<void>(getToken, `/shares/${encodeURIComponent(shareID)}`, {
+    method: "DELETE",
+  });
+}
+
 /** Idempotent, and it un-archives. `started_on` is NOT reset — it is when you
  *  first took it on, and every criterion is measured from it. */
 export async function enrollInCurriculum(

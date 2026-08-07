@@ -77,6 +77,11 @@ type Repository interface {
 	Friends(ctx context.Context, callerID string) ([]Card, error)
 	// Pending lists both directions of open requests, newest first.
 	Pending(ctx context.Context, callerID string) (Requests, error)
+	// FriendID resolves a handle to an ACCEPTED friend's user id. ok is false
+	// for every kind of miss alike. This is the friendship test the share
+	// module consumes; it is declared there as its own one-method interface,
+	// so that package does not import this one.
+	FriendID(ctx context.Context, callerID, username string) (id string, ok bool, err error)
 }
 
 // pairOf returns the canonical ordering the schema requires.

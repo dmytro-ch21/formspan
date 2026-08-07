@@ -197,3 +197,31 @@ func translate(err error, op string) error {
 	}
 	return fmt.Errorf("friend: %s: %w", op, err)
 }
+
+// FriendID resolves a handle to the user id of an ACCEPTED friend of the
+// caller, satisfying share.Friends.
+//
+// ONE not-found answer for three different misses — no such handle, a handle
+// that is not your friend, and a pending-but-unaccepted request. That collapse is
+// the whole reason this lives here rather than being assembled by the caller
+// out of a lookup plus a friendship read: two calls can be told apart, and
+// being able to tell them apart turns any endpoint that shares to a handle
+// into an oracle for "does this account exist" and "who is friends with whom".
+func (r *PostgresRepository) FriendID(ctx context.Context, callerID, username string) (string, bool, error) {
+	var id string
+	err := r.pool.QueryRow(ctx, `
+		SELECT p.user_id
+		FROM profiles p
+		JOIN friendships f
+		  ON (f.user_a = LEAST(p.user_id, $1) AND f.user_b = GREATEST(p.user_id, $1))
+		WHERE lower(p.username) = lower($2)
+		  AND p.user_id <> $1
+		  AND f.status = 'accepted'`, callerID, username).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, translate(err, "friend id")
+	}
+	return id, true, nil
+}

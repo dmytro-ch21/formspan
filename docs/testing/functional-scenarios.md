@@ -5002,6 +5002,51 @@ not inferred from the absence of an error.
   offers a seconds target for a `time` exercise, and the session screen asks for
   seconds when logging one.
 
+## Sharing (`/v1/shares`, web Share control + `/dashboard/shared`)
+
+### Happy path
+
+- A opens a sequence → Share → picks friend B → B's `/dashboard/shared` shows
+  it, labelled with A's handle and the sequence name.
+- B accepts → lands on **B's own copy**, with every step and note, in order.
+- The copy is INDEPENDENT: A renames, reorders, then deletes the original; B's
+  copy is unchanged and still there.
+
+### Friends only, and one 404 for every miss
+
+All of these must be indistinguishable 404s:
+- share to a stranger; to someone with a request still pending; to a handle
+  that does not exist;
+- share a resource id that is not real; share another athlete's sequence id.
+
+### One copy, ever
+
+- Accept twice → second is 404, and exactly one copy exists (assert the count,
+  not the status).
+- Sender accepts their own share → 404. An outsider accepts → 404, and the row
+  is untouched.
+- Two concurrent accepts of the same share → one copy.
+
+### Lifecycle
+
+- Duplicate pending share → 409. After the recipient accepts, re-sharing the
+  same thing **succeeds** (that is how an updated version is sent).
+- Decline deletes; re-sharing afterwards works. The sender can also cancel.
+- Sender deletes the resource, then recipient accepts → **410**, the share is
+  cleared from the inbox, and no copy is created.
+- Unknown `resource_type` → 400, rejected before the handle is resolved.
+
+### Web surfaces
+
+- Share panel: friends load on OPEN, not on mount; `null` vs `[]` distinguished
+  so a failed load never reads as "you have no friends"; Escape closes it.
+- Share is offered on a sequence the athlete can READ but not edit (VOLA
+  content) — visibility, not ownership.
+- Inbox: accepting navigates to the copy's own URL; a failed accept refreshes
+  rather than leaving a button that can only fail again.
+- "Shared with you" is ungated in the nav even for an athlete with no BJJ
+  module enabled — what arrives is decided by other people.
+
 ## Friends (`/v1/friends`, mobile Friends screen)
 
 ### Happy path
