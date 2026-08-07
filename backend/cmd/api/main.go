@@ -147,6 +147,10 @@ func main() {
 	mux.Handle("PATCH /v1/sequences/{sequenceID}", verifier.RequireAuth(http.HandlerFunc(sequenceHandler.Update)))
 	mux.Handle("DELETE /v1/sequences/{sequenceID}", verifier.RequireAuth(http.HandlerFunc(sequenceHandler.Delete)))
 
+	// Username lookup — the first athlete-to-athlete read, and the reason it
+	// is authenticated: handle enumeration was accepted with the username
+	// design, but at signed-in speed, not anonymous-scraper speed.
+	mux.Handle("GET /v1/users/{username}", verifier.RequireAuth(http.HandlerFunc(profileHandler.Lookup)))
 	mux.Handle("GET /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Get)))
 	mux.Handle("POST /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Create)))
 	mux.Handle("PATCH /v1/profile", verifier.RequireAuth(http.HandlerFunc(profileHandler.Update)))

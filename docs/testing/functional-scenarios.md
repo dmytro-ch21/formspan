@@ -4906,6 +4906,40 @@ not inferred from the absence of an error.
   offers a seconds target for a `time` exercise, and the session screen asks for
   seconds when logging one.
 
+## Username lookup (`GET /v1/users/{username}`)
+
+Exact-match handle resolution — the first athlete-to-athlete read. No client
+surface yet; API-level scenarios.
+
+### Happy path
+
+- Look up a claimed handle → 200 with exactly `{username, display_name}`.
+- `display_name` is null when the athlete never set one — not absent, not "".
+- Case-normalised: `/v1/users/DMYTRO` finds `dmytro`.
+
+### The serialization boundary (the test that matters)
+
+- The response body contains EXACTLY two keys. `user_id`, `date_of_birth`,
+  `sex`, `unit_system`, `track_effort` must never appear — assert on raw JSON
+  keys, not on a decoded struct, or a type swap passes unseen.
+
+### One 404 for every kind of nothing
+
+- Absent handle → 404. Malformed (`1abc`, `Dmytro!`) → the same 404. Reserved
+  (`admin`) → the same 404. Impersonation-shaped (`vola_official`) → the same
+  404. All four must be indistinguishable in status, code and message.
+
+### Auth
+
+- Unauthenticated → 401. Lookup is deliberately signed-in-only.
+
+### The shape rule (claim-time, `PATCH /v1/profile`)
+
+- `vola_official`, `official_vola`, `admin2`, `vola_1`, `dmytro_support` →
+  400 at claim time.
+- `modest`, `supporter`, `systemic`, `adminton_fan` → claimable; the rule is
+  whole-segment, never substring.
+
 ## Usernames (`PATCH /v1/profile`, mobile profile editor)
 
 The unique claimable handle. Backend + mobile field only — nothing consumes it

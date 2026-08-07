@@ -14514,6 +14514,73 @@ instead of importing the phone's.
 Not held on a device. The timing is covered and the fill is decoration, but
 whether 900ms *feels* right — long enough to be deliberate, short enough not to
 read as a broken button — is a judgement only a thumb can make.
+## 2026-08-07 — Username lookup, and the shape rule that was owed
+
+`GET /v1/users/{username}` — exact-match resolution of a handle to a public
+card. The search half of the social scope, and the first endpoint in the
+system that shows one athlete's account to another.
+
+### Exact match, not prefix search
+
+You type the handle a friend told you. Handle-existence disclosure was
+accepted when usernames beat invite codes, but prefix search would widen it
+from "confirm one handle per probe" to "enumerate cheaply" — and nothing in
+the friend-request flow needs it. Authenticated for the same reason: lookup
+runs at signed-in speed. Widening to prefix search later breaks nothing.
+
+### The response is a type that cannot leak
+
+`PublicProfile` is `{username, display_name}` — a dedicated struct, not a
+trimmed `Profile`. Profile carries date_of_birth, sex and track_effort;
+reusing it with fields blanked leaves the leak one refactor away, while a
+struct that never had the fields cannot leak them. The handler test asserts
+on the RAW JSON KEYS — exactly two, with the five private field names
+explicitly forbidden — because a struct-level assertion cannot see what an
+accidental type swap serialises.
+
+The mutation harness initially "proved" that test by mutating the WRONG
+function — `replace(…, 1)` hit Update's WriteJSON, not Lookup's, and the
+green run meant nothing. Re-aimed at the right occurrence it goes red
+properly. A mutation check is itself code, and itself capable of passing for
+the wrong reason.
+
+### One 404 for every kind of nothing
+
+Absent, malformed and reserved handles are indistinguishable: none can be a
+person, and distinct answers teach a prober the format and the reserved list
+one probe at a time. Case is normalised first — `/v1/users/Dmytro` finds
+`dmytro`, because humans are not canonical-lowercase.
+
+### The impersonation shape rule lands, as promised
+
+The usernames entry recorded the residual: an exact-match reserved list stops
+@admin and nothing about @vola_official. The moment handles became visible to
+other athletes is the moment that mattered, so: impersonation tokens (admin,
+vola, support, official, staff…) are now refused as underscore-segments with
+trailing digits stripped — `vola_official`, `official_vola`, `admin2`,
+`mod_team1` all unclaimable — while whole-word comparison keeps `modest`,
+`supporter` and `systemic` claimable, and route-collision words (me,
+settings) deliberately stay exact-only because @dmytro_settings impersonates
+nobody.
+
+### Gaps
+
+- **No client surface.** A search box with no "add friend" action is a dead
+  end, so the screen arrives with friend requests (step 3), where a result
+  has something to do.
+- **No rate limiting**, here or platform-wide. Signed-in-only is the current
+  brake; a per-account limit belongs in the platform layer eventually.
+- Existing handles claimed before the shape rule are grandfathered — at time
+  of writing that set is at most one athlete's, and empty of violations. A
+  stored violating handle would be silently unfindable via lookup, which is
+  the right failure.
+- **`display_name` is unguarded free prose on the public card** — review's
+  sharpest observation: the shape rule stops @vola_support while an athlete
+  named "VOLA Support" sails through, because refusing impersonation in a
+  display name means refusing real names. Deliberately NOT validated;
+  belongs with report/moderation tooling when friend requests land. A
+  recorded decision, not an oversight.
+
 
 ## Open items / known gaps as of this entry
 
