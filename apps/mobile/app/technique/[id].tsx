@@ -16,7 +16,7 @@ import {
   type Technique,
   type TechniqueSummary,
 } from '@/lib/techniques';
-import { buildTechniqueGraph, follows } from '@/lib/techniqueGraph';
+import { buildEdgeIndex, buildTechniqueGraph, follows, resolveEdge } from '@/lib/techniqueGraph';
 import { useAuthToken } from '@/lib/useAuthToken';
 
 /**
@@ -65,6 +65,10 @@ export default function TechniqueScreen() {
    * request and works offline.
    */
   const [leadsTo, setLeadsTo] = useState<TechniqueSummary[]>([]);
+  // Built from the same fetch as `leadsTo`, so linking the edge rows costs no
+  // extra request and — like the rest of this screen — works offline once the
+  // Library has been opened.
+  const [edgeIndex, setEdgeIndex] = useState<Map<string, TechniqueSummary> | null>(null);
   const [ruleset, setRuleset] = useState<Ruleset | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -77,6 +81,12 @@ export default function TechniqueScreen() {
       // because error is cleared while technique is still null.
       setLoading(true);
       setError(null);
+      // Cleared too. Expo Router reuses this route rather than pushing a new
+      // one, so without this a technique with no ruleset would inherit the
+      // previous one's legality table. Safe only by a data invariant today
+      // (every seeded row has one) — and a code path held up by a data
+      // invariant is a bug waiting for the content to change.
+      setRuleset(null);
       try {
         const t = await fetchTechnique(id, getToken, signal);
         setTechnique(t);
@@ -110,7 +120,9 @@ export default function TechniqueScreen() {
     let cancelled = false;
     fetchTechniques(getToken)
       .then((list) => {
-        if (!cancelled) setLeadsTo(follows(buildTechniqueGraph(list), id));
+        if (cancelled) return;
+        setLeadsTo(follows(buildTechniqueGraph(list), id));
+        setEdgeIndex(buildEdgeIndex(list));
       })
       .catch(() => {});
     return () => {
@@ -118,10 +130,17 @@ export default function TechniqueScreen() {
     };
   }, [id, getToken]);
 
-  const shown = new Set(leadsTo.map((n) => n.name.toLowerCase()));
-  const remainingNextMoves = (technique?.common_next_moves ?? []).filter(
-    (m) => !shown.has(m.toLowerCase()),
-  );
+  // By RESOLVED ID, not a lowercase name compare. The old string match and
+  // `resolveEdge` normalise differently — the latter folds dashes and follows
+  // aliases — so a next-move written as an alias of something already in
+  // "Leads to" would render twice under the same visible name. Zero
+  // occurrences in the shipped catalog today; this closes the trap rather
+  // than a live bug.
+  const shownIDs = new Set(leadsTo.map((n) => n.id));
+  const remainingNextMoves = (technique?.common_next_moves ?? []).filter((m) => {
+    const hit = edgeIndex ? resolveEdge(edgeIndex, m, technique?.id) : null;
+    return hit ? !shownIDs.has(hit.id) : true;
+  });
 
   if (loading) {
     return (
@@ -228,14 +247,29 @@ export default function TechniqueScreen() {
           </RNView>
         )}
 
-        <Edges label="Set up from" items={t.setup_from} />
+        <Edges label="Set up from" items={t.setup_from} index={edgeIndex} selfID={t.id} />
         {/* Minus whatever "Leads to" already showed. 72% of these strings
             are verbatim repeats of a row rendered just above — same name,
             tappable there and inert here, with nothing explaining the
             difference. That overlap is good news about the edge data and bad
             news on screen. What remains is the genuinely prose-only advice
             ("Stabilize top position"), which is worth its own heading. */}
+        {/* NO `index`, and this differs from web ON PURPOSE — measured, not
+            assumed. This list is what REMAINS after "Leads to" above has
+            already shown every next-move that resolves to a real technique, so
+            the rows most likely to link have been promoted out of it. As
+            rendered on this screen that leaves 252 of 1507 linked (17%), and
+            295 of the 505 screens with this section show ZERO links in it.
+            A section that occasionally has a link and usually does not is the
+            half-works feel the counters are excluded for. Web renders the same
+            field unfiltered at 31% and has no "Leads to", so there it earns
+            the links; here it does not. */}
         <Edges label="Common next moves" items={remainingNextMoves} />
+        {/* NO `index` here, deliberately. Only 8% of counters name a library
+            entry — the rest are reactions and grips ("Sprawl", "Crossface",
+            "Hand fight") that are not techniques and should not become them.
+            One tappable row in ten is the half-works feel this screen removed
+            links for in the first place. */}
         <Edges label="Common counters" items={t.common_counters} />
 
         {/* Deliberately last and deliberately quiet. An observation about where
@@ -395,37 +429,102 @@ function Division({ label, belts, note }: { label: string; belts: string[]; note
 }
 
 /**
- * The graph, as reference text.
+ * The graph, navigable where it resolves and prose where it does not.
  *
- * These were tappable links until the coverage was looked at honestly: only
- * ~84% of `setup_from` entries name a real library entry, and for
- * `common_next_moves` it is ~30%, for `common_counters` ~7%. The rest is prose
- * — "establish grips or inside ties". So most rows were plain text sitting
- * beside a few links, which reads as a feature that half-works rather than a
- * graph.
+ * THESE WERE LINKS, THEN TEXT, AND ARE NOW BOTH. The history matters because
+ * the middle step was right for its reason and that reason has not gone away:
+ * coverage is uneven — measured over the 542-entry catalog, `setup_from`
+ * resolves 84%, `common_next_moves` 31%, `common_counters` 10% — so linking
+ * everything produced "most rows plain text sitting beside a few links, which
+ * reads as a feature that half-works".
  *
- * The information is worth keeping: knowing an armbar chains to a triangle is
- * useful whether or not the app can navigate there. The navigation is not. If
- * coverage ever reaches the point where nearly every entry resolves, this is
- * the place to reconsider.
+ * The old comment said to reconsider "if coverage ever reaches the point where
+ * nearly every entry resolves". **It has not**, and this is not that. The
+ * change is to the AFFORDANCE rather than the data: a resolved row is visibly
+ * a link — chevron, accent text, a real button role — and an unresolved one
+ * carries no affordance at all. The original failure was that the two looked
+ * identical, so a reader had to guess and learned not to try. Made distinct,
+ * the mixture is honest: some of this names a technique and some of it is
+ * advice, which is what the field actually holds.
+ *
+ * `index` is optional and its absence is meaningful, not a default: passing
+ * none renders the whole block as plain text. `common_counters` is called that
+ * way on purpose.
  */
-function Edges({ label, items }: { label: string; items: string[] }) {
+function Edges({
+  label,
+  items,
+  index,
+  selfID,
+}: {
+  label: string;
+  items: string[];
+  index?: Map<string, TechniqueSummary> | null;
+  selfID?: string;
+}) {
   if (items.length === 0) return null;
   return (
     <RNView style={styles.edgeBlock}>
       <Text style={styles.edgeLabel}>{label.toUpperCase()}</Text>
       <RNView style={styles.edgeWrap}>
-        {items.map((raw) => (
-          <RNView key={raw} style={styles.edgeFlat}>
-            <Text style={styles.edgeFlatText}>{raw}</Text>
-          </RNView>
-        ))}
+        {items.map((raw) => {
+          const hit = index ? resolveEdge(index, raw, selfID) : null;
+          if (!hit) {
+            return (
+              <RNView key={raw} style={styles.edgeFlat}>
+                <Text style={styles.edgeFlatText}>{raw}</Text>
+              </RNView>
+            );
+          }
+          return (
+            // `accessibilityLabel` uses `hit.name`, matching the visible text.
+            // With `raw` VoiceOver announced a different destination than the
+            // screen showed on the 22 rows where a reference is an alias — the
+            // accessible name has to contain the visible label.
+            <Link key={raw} href={`/technique/${hit.id}`} asChild>
+              <Pressable
+                style={styles.edgeLink}
+                accessibilityRole="link"
+                accessibilityLabel={`${hit.name}, open technique`}
+                testID={`technique-edge-${hit.id}`}
+              >
+                {/* The library's OWN name, not the raw reference string. They
+                    differ whenever the reference used an alias or the other
+                    dash, and showing where you are actually going beats
+                    echoing what was typed. */}
+                <Text style={styles.edgeLinkText}>{hit.name}</Text>
+                <Text style={styles.edgeChevron}>›</Text>
+              </Pressable>
+            </Link>
+          );
+        })}
       </RNView>
     </RNView>
   );
 }
 
 const styles = StyleSheet.create({
+  edgeLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    // minHeight 44 because `leadRow` in this same file enforces it and a
+    // tappable row that misses the target is worse than an untappable one.
+    // The padding and type size are >= edgeFlat's deliberately: the first
+    // version made links SMALLER than the inert rows beside them, which
+    // inverts the whole affordance argument — the tappable thing has to look
+    // heavier than the prose, not lighter.
+    minHeight: 44,
+    paddingHorizontal: 13,
+    paddingVertical: 11,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: vola.line,
+    backgroundColor: vola.surfaceHover,
+  },
+  edgeLinkText: { color: vola.text, fontSize: 14, fontWeight: '600' },
+  edgeChevron: { color: vola.textMuted, fontSize: 15 },
+
   scroll: { paddingBottom: 48 },
   body: { padding: 20, gap: 16 },
   centre: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 },

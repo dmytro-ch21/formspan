@@ -3,8 +3,10 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  buildEdgeIndex,
   foldForSearch,
   rankTechniques,
+  resolveEdge,
   searchTechniques,
   type TechniqueSummary,
 } from "../api";
@@ -191,5 +193,77 @@ describe("rankTechniques", () => {
     expect(rankTechniques(byName, "guard").map((t) => t.name)).not.toEqual(
       filtered,
     );
+  });
+});
+
+/**
+ * Resolving a cross-reference to a link.
+ *
+ * The web copy of the resolver, tested here for the same reason the search is:
+ * the two apps carry independent copies, and until this file existed a
+ * web-only divergence was invisible. Mirrors
+ * apps/mobile/lib/__tests__/techniqueGraph.test.ts — a case added there and
+ * not here reopens exactly that hole.
+ */
+describe("buildEdgeIndex / resolveEdge", () => {
+  const index = buildEdgeIndex(catalog);
+
+  it("resolves a plain name and an alias", () => {
+    expect(resolveEdge(index, "Knee-Cut Pass")?.id).toBe("knee-cut-pass");
+    const withAlias = catalog.find((t) => (t.aliases ?? []).length > 0)!;
+    expect(resolveEdge(index, withAlias.aliases[0])?.id).toBe(withAlias.id);
+  });
+
+  it("resolves across the dash the keyboard produces", () => {
+    const dashed = catalog.find((t) => t.name.includes("–"))!;
+    expect(resolveEdge(index, dashed.name.replace(/–/g, "-"))?.id).toBe(
+      dashed.id,
+    );
+  });
+
+  it("returns null for prose, which is most of what counters hold", () => {
+    // Not a data gap: "Sprawl" and "Hand fight" are reactions, not techniques.
+    expect(resolveEdge(index, "Stabilize top position")).toBeNull();
+    expect(resolveEdge(index, "Hand fight")).toBeNull();
+  });
+
+  it("refuses a self-reference", () => {
+    const t = catalog.find((x) => x.id === "knee-cut-pass")!;
+    expect(resolveEdge(index, t.name, t.id)).toBeNull();
+    expect(resolveEdge(index, t.name, "other")?.id).toBe("knee-cut-pass");
+  });
+
+  it("resolves each linked field often enough to justify linking it", () => {
+    // The measurement the decision rests on, asserted against the real catalog
+    // so a content change that guts it fails rather than quietly making the
+    // links pointless. Only `setup_from` had a floor before review; the field
+    // doing the most argumentative work — next_moves — had none.
+    const rate = (field: "setup_from" | "common_next_moves") => {
+      let tot = 0;
+      let hit = 0;
+      for (const t of catalog) {
+        for (const raw of (t as unknown as Record<string, string[]>)[field] ?? []) {
+          tot++;
+          if (resolveEdge(index, raw, t.id)) hit++;
+        }
+      }
+      return hit / tot;
+    };
+    // Measured 84% and 31%. Floored below that so ordinary content churn does
+    // not fail the build, but high enough that a collapse is visible — and if
+    // next_moves ever falls toward the counters' 10%, linking it here stops
+    // being defensible, exactly as it already is on the phone.
+    expect(rate("setup_from")).toBeGreaterThan(0.7);
+    expect(rate("common_next_moves")).toBeGreaterThan(0.22);
+  });
+
+  it("prefers a real name over another entry's alias", () => {
+    // Fixture, not the catalog — the shipped library has no such collision, so
+    // searching it for one asserts nothing. (That version passed with the
+    // precedence inverted.)
+    const a = { ...catalog[0], id: "real", name: "Contested Name", aliases: [] };
+    const b = { ...catalog[1], id: "impostor", name: "Other", aliases: ["Contested Name"] };
+    expect(resolveEdge(buildEdgeIndex([a, b]), "Contested Name")?.id).toBe("real");
+    expect(resolveEdge(buildEdgeIndex([b, a]), "Contested Name")?.id).toBe("real");
   });
 });

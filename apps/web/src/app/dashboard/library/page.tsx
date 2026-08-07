@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@clerk/nextjs";
 
 import {
+  buildEdgeIndex,
+  resolveEdge,
   executionSteps,
   getBjjStanding,
   getPosition,
@@ -679,6 +681,8 @@ export default function LibraryPage() {
             // title while the new fetch is still in flight.
             key={selected.id}
             id={selected.id}
+            catalog={techniques}
+            onSelectTechnique={(id) => setSelected({ kind: "technique", id })}
             name={nameById.get(selected.id) ?? "Loading…"}
             onClose={() => setSelected(null)}
           />
@@ -785,6 +789,17 @@ function PanelShell({
   onClose: () => void;
   children: React.ReactNode;
 }) {
+  // The panels are keyed on the selected id, so following an edge link
+  // REMOUNTS the shell — which destroys the button that had focus and drops
+  // keyboard and screen-reader users to <body> with no announcement of where
+  // they landed. Focusing the heading on mount fixes the swap case and, as a
+  // bonus, makes opening a panel at all move focus into it, which is what a
+  // disclosure should do. Invisible to mouse users.
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, []);
+
   return (
     <aside
       id="library-detail"
@@ -796,7 +811,12 @@ function PanelShell({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           {eyebrow}
-          <h2 className="font-display text-2xl font-semibold leading-tight">
+          {/* tabIndex -1: focusable by script, never in the tab order. */}
+          <h2
+            ref={headingRef}
+            tabIndex={-1}
+            className="font-display text-2xl font-semibold leading-tight outline-none"
+          >
             {title}
           </h2>
         </div>
@@ -1072,16 +1092,23 @@ function Priorities({ text }: { text: string }) {
 function TechniquePanel({
   id,
   name,
+  catalog,
+  onSelectTechnique,
   onClose,
 }: {
   /** Known from the card that opened this, so the shell never says "Loading…". */
   name: string;
   id: string;
+  /** The summaries the page already holds — resolving an edge costs no fetch. */
+  catalog: TechniqueSummary[];
+  onSelectTechnique: (id: string) => void;
   onClose: () => void;
 }) {
   const { getToken } = useAuth();
   const [t, setT] = useState<Technique | null>(null);
   const [failed, setFailed] = useState(false);
+  const edgeIndex = useMemo(() => buildEdgeIndex(catalog), [catalog]);
+
 
   useEffect(() => {
     const ac = new AbortController();
@@ -1181,12 +1208,13 @@ function TechniquePanel({
 
       {rs && <Legality ruleset={rs} />}
 
-      {/* Reference text, not navigation — see the Edges docstring for why the
-          links were removed. The wide screen still earns its keep here: the
-          full prose and legality table fit beside the grid rather than
-          replacing it. */}
-      <Edges label="Set up from" items={t.setup_from} />
-      <Edges label="Common next moves" items={t.common_next_moves} />
+      <Edges label="Set up from" items={t.setup_from} index={edgeIndex} selfID={t.id} onSelect={onSelectTechnique} />
+      <Edges label="Common next moves" items={t.common_next_moves} index={edgeIndex} selfID={t.id} onSelect={onSelectTechnique} />
+      {/* NO `index` here, deliberately. Only 8% of counters name a library
+          entry — the rest are reactions and grips ("Sprawl", "Crossface",
+          "Hand fight") that are not techniques and should not become them.
+          One navigable row in ten is the half-works feel that had the
+          buttons removed in the first place. */}
       <Edges label="Common counters" items={t.common_counters} />
 
       {/* Deliberately last and deliberately quiet. An observation about where
@@ -1273,28 +1301,78 @@ function Division({
 }
 
 /**
- * The graph, as reference text.
+ * The graph, navigable where it resolves and prose where it does not.
  *
- * These were buttons that swapped the panel until the coverage was looked at
- * honestly: only ~84% of `setup_from` entries name a real library entry, and
- * for `common_next_moves` it is ~30%, for `common_counters` ~7%. Most rows were
- * plain text sitting beside a few links, which reads as a feature that
- * half-works. The information stays; the navigation goes. Mirrors the phone.
+ * THESE WERE BUTTONS, THEN TEXT, AND ARE NOW BOTH. The middle step was right
+ * for its reason and the reason has not gone away: coverage is uneven —
+ * measured over the 542-entry catalog, `setup_from` resolves 84%,
+ * `common_next_moves` 31%, `common_counters` 10% — so making every row a button
+ * produced "plain text sitting beside a few links, which reads as a feature
+ * that half-works".
+ *
+ * What changed is the AFFORDANCE, not the coverage. A resolved row is visibly
+ * a control — button role, hover, a chevron — and an unresolved one has none.
+ * The original failure was that both looked identical, so a reader had to
+ * guess and learned not to try. Made distinct, the mixture is honest: part of
+ * this field names techniques and part of it is advice, which is what it holds.
+ *
+ * `index` is optional and its absence is meaningful rather than a default:
+ * with none, the whole block renders as text. Counters are called that way.
+ *
+ * Mirrors the phone — apps/mobile/app/technique/[id].tsx.
  */
-function Edges({ label, items }: { label: string; items: string[] }) {
+function Edges({
+  label,
+  items,
+  index,
+  selfID,
+  onSelect,
+}: {
+  label: string;
+  items: string[];
+  index?: Map<string, TechniqueSummary>;
+  selfID?: string;
+  onSelect?: (id: string) => void;
+}) {
   if (items.length === 0) return null;
   return (
     <div className="flex flex-col gap-2">
       <p className="eyebrow">{label}</p>
       <ul className="flex flex-col gap-1.5">
-        {items.map((raw) => (
-          <li
-            key={raw}
-            className="rounded-lg border border-line-soft bg-surface-hover px-3 py-2 text-xs leading-relaxed text-text-muted"
-          >
-            {raw}
-          </li>
-        ))}
+        {items.map((raw) => {
+          const hit = index && onSelect ? resolveEdge(index, raw, selfID) : null;
+          // `!onSelect` is redundant at runtime — `hit` is only non-null when
+          // it exists — but the compiler cannot see that correlation, and a
+          // non-null assertion below would hide a real mistake later.
+          if (!hit || !onSelect) {
+            return (
+              <li
+                key={raw}
+                className="rounded-lg border border-line-soft bg-surface-hover px-3 py-2 text-xs leading-relaxed text-text-muted"
+              >
+                {raw}
+              </li>
+            );
+          }
+          return (
+            <li key={raw}>
+              <button
+                type="button"
+                onClick={() => onSelect(hit.id)}
+                className="flex w-full items-center justify-between gap-2 rounded-lg border border-line-soft bg-surface-hover px-3 py-2 text-left text-xs leading-relaxed text-text hover:border-line"
+              >
+                {/* The library's OWN name, not the raw reference string. They
+                    differ whenever the reference used an alias or the other
+                    dash, and showing where you are going beats echoing what
+                    was written. */}
+                <span>{hit.name}</span>
+                <span aria-hidden className="text-text-muted">
+                  ›
+                </span>
+              </button>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

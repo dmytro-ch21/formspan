@@ -2,7 +2,13 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 
 import type { TechniqueSummary } from '../techniques';
-import { buildTechniqueGraph, follows, groupByFunction } from '../techniqueGraph';
+import {
+  buildEdgeIndex,
+  buildTechniqueGraph,
+  follows,
+  groupByFunction,
+  resolveEdge,
+} from '../techniqueGraph';
 
 /**
  * The library stored graph edges for months in the one direction nobody asks
@@ -146,5 +152,108 @@ describe('the shipped library is actually connected', () => {
     const shown = grouped.reduce((n, g) => n + g.techniques.length, 0);
     const withFunction = library.filter((x) => x.function).length;
     expect(shown).toBe(withFunction);
+  });
+});
+
+/**
+ * Resolving a cross-reference to a link.
+ *
+ * `setup_from` / `common_next_moves` / `common_counters` hold NAMES, so a
+ * tappable row means resolving one first. These cases are the reasons the
+ * links were removed once and are being reintroduced selectively — not "does
+ * a Map work", but the specific ways a naive resolver misleads.
+ */
+describe('buildEdgeIndex / resolveEdge', () => {
+  // The real shipped catalog, matching the suite above — the claim worth
+  // testing is about the DATA, and fixtures would agree with the code by
+  // construction. Aliases included: they are half the reason the index exists.
+  const catalog = (
+    JSON.parse(
+      readFileSync(
+        join(__dirname, '..', '..', '..', '..', 'backend/internal/modules/technique/techniques.json'),
+        'utf8',
+      ),
+    ) as TechniqueSummary[]
+  ).map((x) => ({ ...x, aliases: x.aliases ?? [], setup_from: x.setup_from ?? [] }));
+  const index = buildEdgeIndex(catalog);
+
+  it('resolves a plain name', () => {
+    const hit = resolveEdge(index, 'Knee-Cut Pass');
+    expect(hit?.id).toBe('knee-cut-pass');
+  });
+
+  it('resolves across the dash the keyboard produces', () => {
+    // The whole reason this index folds while buildTechniqueGraph does not.
+    // The catalog stores an en dash; references are written with a hyphen.
+    const dashed = catalog.find((t) => t.name.includes('–'));
+    expect(dashed).toBeDefined();
+    const typed = dashed!.name.replace(/–/g, '-');
+    expect(typed).not.toBe(dashed!.name);
+    expect(resolveEdge(index, typed)?.id).toBe(dashed!.id);
+  });
+
+  it('resolves an alias to the technique that owns it', () => {
+    const withAlias = catalog.find((t) => (t.aliases ?? []).length > 0);
+    expect(withAlias).toBeDefined();
+    expect(resolveEdge(index, withAlias!.aliases[0])?.id).toBe(withAlias!.id);
+  });
+
+  it('returns null for prose, which is most of what counters hold', () => {
+    // NOT a data gap. "Sprawl" and "Crossface" are reactions, not techniques,
+    // and a resolver that invented entries for them would be worse than one
+    // that leaves them as the text they are.
+    expect(resolveEdge(index, 'Stabilize top position')).toBeNull();
+    expect(resolveEdge(index, 'Hand fight')).toBeNull();
+    expect(resolveEdge(index, 'zzz not a technique')).toBeNull();
+  });
+
+  it('refuses a self-reference', () => {
+    // A row that navigates to the screen it is already on is a dead control
+    // that looks live.
+    const t = catalog.find((x) => x.id === 'knee-cut-pass');
+    expect(t).toBeDefined();
+    expect(resolveEdge(index, t!.name, t!.id)).toBeNull();
+    // ...but the same name from a DIFFERENT technique's list still resolves.
+    expect(resolveEdge(index, t!.name, 'some-other-id')?.id).toBe('knee-cut-pass');
+  });
+
+  it('prefers a real name over another entry’s alias', () => {
+    // ON A FIXTURE, NOT THE CATALOG, and that is the point. The first version
+    // of this searched the shipped library for a name/alias collision, found
+    // none, and asserted nothing — it passed with the precedence deliberately
+    // inverted. A guard the data happens not to exercise still has to be
+    // tested; it just has to be tested somewhere the case exists.
+    const list = [
+      t({ id: 'armbar-mount', name: 'Armbar from Mount' }),
+      // A different entry claiming the first one's name as its alias.
+      t({ id: 'impostor', name: 'Something Else', aliases: ['Armbar from Mount'] }),
+    ];
+    const idx = buildEdgeIndex(list);
+    expect(resolveEdge(idx, 'Armbar from Mount')?.id).toBe('armbar-mount');
+
+    // ...and the order the list arrives in must not decide it either.
+    expect(resolveEdge(buildEdgeIndex([...list].reverse()), 'Armbar from Mount')?.id).toBe(
+      'armbar-mount',
+    );
+  });
+
+  it('resolves the field we are linking often enough to be worth it', () => {
+    // The measurement the whole decision rests on, asserted against the real
+    // catalog so a content change that guts it is visible rather than silent.
+    const rate = (field: 'setup_from') => {
+      let tot = 0;
+      let hit = 0;
+      for (const t of catalog) {
+        for (const raw of t[field] ?? []) {
+          tot++;
+          if (resolveEdge(index, raw, t.id)) hit++;
+        }
+      }
+      return hit / tot;
+    };
+    // 86% measured. Floored well below that so ordinary content churn does not
+    // fail the build — but if `setup_from` ever drops toward the counters'
+    // coverage, linking it stops being defensible and this should say so.
+    expect(rate('setup_from')).toBeGreaterThan(0.7);
   });
 });
