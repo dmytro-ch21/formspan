@@ -5,12 +5,12 @@ import {
   AccessibilityInfo,
   ActivityIndicator,
   Pressable,
-  ScrollView,
   StyleSheet,
   TextInput,
 } from 'react-native';
 
 import { GoogleAuthButton } from '@/components/GoogleAuthButton';
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { AuthFieldErrors, AuthFieldKey, hasClerkCode, toFieldErrors } from '@/lib/clerkErrors';
@@ -331,12 +331,7 @@ export default function SignUpScreen() {
        the same job natively, header included; it's a no-op on Android, where
        Expo's default `resize` mode already shrinks the window. Either way the
        content still scrolls by hand, so nothing is ever unreachable. */
-    <ScrollView
-      contentContainerStyle={styles.scroll}
-      keyboardShouldPersistTaps="handled"
-      keyboardDismissMode="interactive"
-      automaticallyAdjustKeyboardInsets
-    >
+    <KeyboardAwareScrollView contentContainerStyle={styles.scroll}>
       <View style={styles.hero}>
         <Text style={styles.eyebrow}>VOLA</Text>
         <Text style={styles.title}>
@@ -591,7 +586,7 @@ export default function SignUpScreen() {
           </Text>
         </Pressable>
       )}
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 }
 

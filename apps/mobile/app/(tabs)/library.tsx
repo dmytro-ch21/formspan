@@ -2,7 +2,6 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  FlatList,
   Modal,
   Pressable,
   RefreshControl,
@@ -13,6 +12,10 @@ import {
 
 import { useAuth } from '@clerk/clerk-expo';
 
+import {
+  KeyboardAwareFlatList,
+  KeyboardAwareScrollView,
+} from '@/components/KeyboardAwareScroll';
 import { LibraryTile, categoryBadge, patternBadge, positionBadge } from '@/components/LibraryTile';
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
 import { Text, View } from '@/components/Themed';
@@ -875,13 +878,10 @@ export default function LibraryScreen() {
       {loading && !everLoaded && rows.length === 0 ? (
         <ActivityIndicator style={styles.loader} testID="library-loading" />
       ) : (
-        <FlatList
+        <KeyboardAwareFlatList
           data={rows}
           keyExtractor={(r) => r.key}
           contentContainerStyle={styles.list}
-          // Without this the first tap on a result only dismisses the keyboard,
-          // so search-then-open — the main use of this screen — takes two taps.
-          keyboardShouldPersistTaps="handled"
           // Virtualised: the merged catalog is ~1046 rows, and mounting that
           // many at once is a visible stall on a phone.
           initialNumToRender={12}
@@ -1020,7 +1020,7 @@ export default function LibraryScreen() {
               <Text style={styles.sheetClose}>Done</Text>
             </Pressable>
           </View>
-          <ScrollView contentContainerStyle={styles.sheetBody}>
+          <KeyboardAwareScrollView contentContainerStyle={styles.sheetBody}>
             {(FACETS.find((f) => f.key === shownFacet)?.options ?? []).map((o) => {
               const on = shownFacet !== null && facetValue(shownFacet) === o.key;
               return (
@@ -1049,7 +1049,7 @@ export default function LibraryScreen() {
                 </Pressable>
               );
             })}
-          </ScrollView>
+          </KeyboardAwareScrollView>
         </View>
         </View>
       </Modal>

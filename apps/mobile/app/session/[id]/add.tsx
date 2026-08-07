@@ -1,10 +1,11 @@
 import { request as requestSync } from '@/lib/sync';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, TextInput } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, TextInput } from 'react-native';
 
 import { useAuth } from '@clerk/clerk-expo';
 
+import { KeyboardAwareFlatList } from '@/components/KeyboardAwareScroll';
 import { Text, View } from '@/components/Themed';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { vola } from '@/constants/Colors';
@@ -190,11 +191,10 @@ export default function AddExerciseToSessionScreen() {
         </Text>
       )}
 
-      <FlatList
+      <KeyboardAwareFlatList
         data={results}
         keyExtractor={(e) => e.id}
         contentContainerStyle={styles.list}
-        keyboardShouldPersistTaps="handled"
         // Suggestions ride in the header so the whole screen stays one
         // scrolling list rather than two that fight for height.
         ListHeaderComponent={

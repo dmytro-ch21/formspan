@@ -252,111 +252,156 @@ function NewWorkoutDialog({
   }
 
   return (
+    /*
+      Two nested elements rather than one centred flex box, and both parts are
+      load-bearing on a phone.
+
+      `overflow-y-auto` on the OUTER element is what lets the dialog be reached
+      when the soft keyboard is up: `fixed inset-0` sizes to the layout
+      viewport, which iOS Safari does not shrink for the keyboard, so a dialog
+      centred in it sits partly behind the keyboard with nothing to scroll —
+      the Goal field below the autofocused Name field was simply unreachable.
+
+      The centring then moves to an INNER `min-h-full` flex box instead of onto
+      the scroll container, because `items-center` on a scrolling element clips
+      its own overflow at the top: once the content is taller than the
+      viewport, the part above the centre line becomes unscrollable. That is
+      the classic centred-modal bug, and it only appears on the small screens
+      this is being fixed for.
+    */
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
-      onClick={onClose}
+      className="fixed inset-0 z-50 overflow-y-auto bg-black/70"
+      /*
+        `pointerdown` on the element itself, not `click` anywhere inside it.
+
+        Two ways `onClick` closed this dialog when the user had not asked it
+        to, and the scroll container above makes the first one reachable: a
+        click on the overlay's SCROLLBAR dispatches a click on the overlay in
+        Chrome, so dragging the scrollbar of a dialog too tall for the window
+        threw the form away. And a text selection that starts inside the Name
+        field and releases over the backdrop fires `click` on the common
+        ancestor — losing everything typed, which is the worst possible
+        outcome for a stray drag.
+
+        Both go away by closing on the press that STARTS on the backdrop
+        itself. `currentTarget` is what makes it the backdrop rather than
+        anything within it, so the inner centring wrapper does not swallow it.
+      */
+      onPointerDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
       role="presentation"
     >
-      <form
-        onSubmit={submit}
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="new-workout-title"
-        className="flex w-full max-w-md flex-col gap-5 rounded-card border border-line bg-surface p-6"
+      <div
+        className="flex min-h-full items-center justify-center p-4"
+        onPointerDown={(e) => {
+          // The centring wrapper fills the overlay, so backdrop presses land
+          // HERE rather than on the scrolling parent — it needs the same rule
+          // or click-outside-to-close stops working entirely.
+          if (e.target === e.currentTarget) onClose();
+        }}
       >
-        <h2 id="new-workout-title" className="font-display text-2xl font-bold">
-          New workout
-        </h2>
+        <form
+          onSubmit={submit}
+          onClick={(e) => e.stopPropagation()}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="new-workout-title"
+          className="flex w-full max-w-md flex-col gap-5 rounded-card border border-line bg-surface p-6"
+        >
+          <h2 id="new-workout-title" className="font-display text-2xl font-bold">
+            New workout
+          </h2>
 
-        <label className="flex flex-col gap-1.5">
-          <span className="eyebrow">Name</span>
-          {/* Autofocused deliberately: the dialog exists only to fill this
-              field, so landing anywhere else would cost a click. */}
-          <input
-            autoFocus
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            maxLength={80}
-            placeholder="Push Day A"
-            className="rounded-card border border-line bg-bg px-3 py-2.5 outline-none placeholder:text-text-dim focus:border-lime"
-          />
-        </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="eyebrow">Name</span>
+            {/* Autofocused deliberately: the dialog exists only to fill this
+                field, so landing anywhere else would cost a click. */}
+            <input
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              maxLength={80}
+              placeholder="Push Day A"
+              className="rounded-card border border-line bg-bg px-3 py-2.5 outline-none placeholder:text-text-dim focus:border-lime"
+            />
+          </label>
 
-        <fieldset className="flex flex-col gap-1.5">
-          <legend className="eyebrow mb-1.5">Discipline</legend>
-          <div className="flex flex-wrap gap-2">
-            {startable.map((s) => (
-              <Chip
-                key={s.key}
-                active={sport === s.key}
-                onClick={() => setSport(s.key)}
-              >
-                {s.label}
-              </Chip>
-            ))}
-          </div>
-          <p className="mt-1 text-xs text-text-dim">
-            One discipline per workout — that&apos;s what lets the catalog show
-            only what fits.
-          </p>
-        </fieldset>
-
-        {moduleFor(modules, sport)?.capabilities.has_goals && (
           <fieldset className="flex flex-col gap-1.5">
-            <legend className="eyebrow mb-1.5">Goal</legend>
+            <legend className="eyebrow mb-1.5">Discipline</legend>
             <div className="flex flex-wrap gap-2">
-              {GOALS.map((g) => (
+              {startable.map((s) => (
                 <Chip
-                  key={g.key}
-                  active={goal === g.key}
-                  onClick={() => setGoal(g.key)}
+                  key={s.key}
+                  active={sport === s.key}
+                  onClick={() => setSport(s.key)}
                 >
-                  {g.label}
+                  {s.label}
                 </Chip>
               ))}
             </div>
+            <p className="mt-1 text-xs text-text-dim">
+              One discipline per workout — that&apos;s what lets the catalog show
+              only what fits.
+            </p>
           </fieldset>
-        )}
 
-        <label className="flex cursor-pointer items-center justify-between gap-4">
-          <span>
-            <span className="block text-sm font-medium">Share publicly</span>
-            <span className="block text-xs text-text-dim">
-              Anyone can view it. You stay the only editor.
+          {moduleFor(modules, sport)?.capabilities.has_goals && (
+            <fieldset className="flex flex-col gap-1.5">
+              <legend className="eyebrow mb-1.5">Goal</legend>
+              <div className="flex flex-wrap gap-2">
+                {GOALS.map((g) => (
+                  <Chip
+                    key={g.key}
+                    active={goal === g.key}
+                    onClick={() => setGoal(g.key)}
+                  >
+                    {g.label}
+                  </Chip>
+                ))}
+              </div>
+            </fieldset>
+          )}
+
+          <label className="flex cursor-pointer items-center justify-between gap-4">
+            <span>
+              <span className="block text-sm font-medium">Share publicly</span>
+              <span className="block text-xs text-text-dim">
+                Anyone can view it. You stay the only editor.
+              </span>
             </span>
-          </span>
-          <input
-            type="checkbox"
-            checked={isPublic}
-            onChange={(e) => setIsPublic(e.target.checked)}
-            className="h-5 w-5 accent-lime"
-          />
-        </label>
+            <input
+              type="checkbox"
+              checked={isPublic}
+              onChange={(e) => setIsPublic(e.target.checked)}
+              className="h-5 w-5 accent-lime"
+            />
+          </label>
 
-        {error && (
-          <p role="alert" className="text-sm text-danger">
-            {error}
-          </p>
-        )}
+          {error && (
+            <p role="alert" className="text-sm text-danger">
+              {error}
+            </p>
+          )}
 
-        <div className="flex justify-end gap-3">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 text-sm text-text-muted hover:text-text"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={busy || !name.trim() || !sport}
-            className="rounded-pill bg-accent-fill px-5 py-2 text-sm font-bold text-accent-on-fill transition disabled:cursor-not-allowed disabled:opacity-30"
-          >
-            {busy ? "Creating…" : "Create"}
-          </button>
-        </div>
-      </form>
+          <div className="flex justify-end gap-3">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-sm text-text-muted hover:text-text"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={busy || !name.trim() || !sport}
+              className="rounded-pill bg-accent-fill px-5 py-2 text-sm font-bold text-accent-on-fill transition disabled:cursor-not-allowed disabled:opacity-30"
+            >
+              {busy ? "Creating…" : "Create"}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

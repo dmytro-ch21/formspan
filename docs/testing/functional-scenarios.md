@@ -4516,6 +4516,78 @@ substring of ONE field. The techniques were all present.
   carries no description, and no alias names a grip. Add scenarios when the
   library-content pass adds grip aliases.
 
+## Keyboard handling (mobile, cross-cutting)
+
+Not a feature with a route — a property every screen that takes typing has to
+hold. It is listed here because it broke on twelve screens at once while each
+screen's own scenarios passed, so it cannot be covered from inside any one of
+them.
+
+Three distinct failures, and a scenario that only exercises one will miss the
+other two. Run each on the SMALLEST supported device (iPhone SE) — every one of
+these is invisible on a large screen, and all three are invisible on the
+Simulator with a hardware keyboard attached, because then the soft keyboard
+never appears at all. Toggle it off first (`⌘K`).
+
+### The focused field stays visible
+
+- Tap any field → it sits clear of the keyboard, not flush against it.
+- **Move focus between two same-height fields** (Weight → Reps → RIR on the
+  session screen — all number pads). No keyboard event fires here, so the
+  platform does nothing: this is the case the app's own handling exists for, and
+  the only one that catches its removal.
+- Expand a row *below* the fold while the keyboard is already up, then tap into
+  it.
+- On `sign-in`, `sign-up`, `forgot-password`: reach the submit button with the
+  keyboard up. `sign-in` had no scrolling container at all, so this was
+  impossible rather than awkward.
+
+### Content below the fold stays reachable (the reported bug)
+
+- Library: focus the search field, type a query with many matches, then **scroll
+  to the last result**. It must be reachable. This is what "the keyboard covers
+  the techniques and you don't see them all" meant — the field was fine, the
+  results were trapped.
+- Same on the reflection wizard's technique search, the session exercise picker,
+  pinned records, saved workouts, and the workout editor's picker.
+- Regression shape to watch: a list that pads for a tab bar but not for the
+  keyboard looks correct with the keyboard down and loses its last rows with it
+  up.
+
+### Fixed footers and action bars stay above the keyboard
+
+- Reflection wizard, **note step** (its whole content is a text field): the
+  Next/Save button must stay visible and tappable while typing. It is the only
+  control that finishes the wizard, and a content inset cannot reach it — it is
+  a sibling of the scroll view, not inside it.
+
+### Android-specific (fails silently on iOS-only assumptions)
+
+- **Dismiss-on-drag must work.** `keyboardDismissMode="interactive"` is iOS-only
+  and Android neither errors nor warns — it just never dismisses. Two auth
+  screens shipped with exactly that.
+- The focused field must lift. `automaticallyAdjustKeyboardInsets` is iOS-only,
+  so nothing does this for free on Android.
+- Content must NOT gain a keyboard-sized gap under it. Android `resize` already
+  shrinks the window; anything that also pads by the keyboard height
+  double-counts.
+
+### Cross-app parity (web)
+
+- New Workout dialog on a phone browser: focus Name, then reach **Goal** and the
+  Create button. A `fixed inset-0` centred dialog sizes to the layout viewport,
+  which iOS Safari does not shrink for the keyboard.
+- Long forms on small viewports: nothing clipped, page still scrolls.
+
+### Covered by the suite already
+
+`components/__tests__/keyboardCoverage.test.ts` fails if a screen renders a
+`<TextInput` without going through the shared containers — so a NEW screen that
+forgets is caught without anyone writing a scenario for it. It proves the import
+is present, not that the container wraps the input, so the manual passes above
+are still what proves the behaviour.
+
+
 ## Sequences (`/v1/sequences`)
 
 A sequence is a chain: what a class taught, in the order it flows. Backend only
