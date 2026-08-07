@@ -56,3 +56,21 @@ cd backend && DATABASE_URL='postgres://vola:vola_dev_only@localhost:5432/vola_te
 ```
 
 Then set `TEST_DATABASE_URL` in `backend/.env` (see `backend/.env.example`) and run `pnpm run test:api`. Expect `PASS`, not `SKIP`.
+
+### Run the checks
+
+One command, before every push:
+
+```bash
+pnpm run verify
+```
+
+It chains every check with `&&` deliberately — run as separate lines, a failing typecheck scrolls past and the commit happens anyway. It covers the palette and icon guards, Python syntax, gofmt/vet/build, the OpenAPI spec, and lint/typecheck/test for mobile, web and admin. Everything is stdlib or already-installed tooling, so there is nothing extra to set up.
+
+Deliberately **not** in it — each is slow or needs setup, and CI runs them:
+
+```bash
+pnpm run test:api                            # needs TEST_DATABASE_URL (see above)
+pnpm run build:web && pnpm run build:admin   # slow
+docker build -f backend/Dockerfile backend   # needs Docker/Colima
+```

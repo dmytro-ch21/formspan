@@ -13391,6 +13391,78 @@ in CI, per the rule that a check in one belongs in both.
   authoring. That is fine while it is one person, and it is the reason "author
   in production" remains the recorded intent rather than the current state.
 
+## 2026-08-06 — The repo starts reading its own Python, and a branch gets overtaken
+
+A one-file change with a longer story than it deserves, kept because the story
+is the useful part.
+
+**The gap: nothing in this repo read a `.py` file.** No CI step, no `verify`
+link, no `pyproject.toml`, no ruff config. Six scripts, and the content
+pipeline is all of them — including the importer that rewrites the whole
+catalog, which is run rarely and at exactly the moment being wrong is
+expensive. A `Scripts (Python)` job and a `check:python` link now parse every
+one of them with `ast.parse` (not `py_compile`/`compileall`, which write
+`__pycache__` beside the source; a check that dirties the tree it checks turns
+up in somebody's `git status` eventually). No `actions/setup-python`: the
+check is stdlib-only, the runner ships `python3`, and every extra action is
+one more thing to resolve before any repo code runs — which is exactly what
+failed all day today, when GitHub's action-download service returned `Service
+Unavailable` and took out three jobs on `main` and all four on the PR.
+
+**It is a syntax floor and nothing more, which is the honest framing.** The
+concrete precedent is `scan-library.py`'s corpus double-count — it
+concatenated `techniques.json` with `techniques.additions.json`, counting all
+92 additions twice and skewing the word rarities its `FLOOR` threshold was
+calibrated against. **A parse check would not have caught it.** That was
+behaviour, not syntax, and it was found by reading the code. Anything about
+what a script *does* needs a check that runs the script.
+
+**The branch was overtaken mid-flight, and that is worth recording.** This
+started as a fix for that double-count: dedupe the corpus by id, then
+re-derive the nine IDF figures the calibration comment quotes, since they had
+gone stale twice over (they were exact measurements of the 466 + 16 = 482-row
+corpus of the day the scanner was committed, then carried through the
+concatenation bug). That work was done and measured — deduping widened the
+empty band `FLOOR` sits in from 0.20 to 0.34 and moved no token across the
+line, so 2.9 stood; the re-derived figures were sweep 2.36, escape 2.40,
+control 2.47, choke 2.56, back 2.58, pass 2.66 below and leg 3.00, triangle
+3.12, armbar 3.35, kimura 3.66, break 4.69, sleeve 5.20 above. It also turned
+up a second consequence nobody had named: duplicated rows were taking two of
+the three hit-list slots, so 13 of 44 probes hid a genuine third match.
+
+**All of it was superseded before it could merge.** The GitHub Actions outage
+blocked CI for six hours, and in that window `main` shipped #159–#163 — and
+fixed the same bug by a better route: the spreadsheet retirement **deleted**
+`techniques.additions.json` outright, so `load()` reads one file and the skew
+is gone with it. `main` also declared the scanner retired and deliberately
+kept the original 482-era figures, with the note that a reviver should
+re-measure first.
+
+**A calibration ratchet was built and then dropped, on purpose.** The branch
+also carried a `check:scanner` guard that re-derived every figure the comment
+quotes and failed if any had drifted, if the band narrowed, or if `FLOOR`
+slipped toward an edge — nine mutations, all verified to go red, pins verified
+to fail one notch tighter. Run against `main`'s tree it fails on all nine
+figures, because `main` chose to keep them stale and said why. A ratchet on a
+retired script, enforcing a re-derivation its own author decided was "motion
+rather than work", is a CI failure waiting to annoy somebody into deleting the
+guard. So only the syntax floor landed.
+
+Two things the detour is worth remembering for:
+
+- **The mutation test caught a bug in the guard itself.** Moving `FLOOR` from
+  2.9 to 2.5 came back GREEN. `importlib` goes through the bytecode cache, and
+  that cache keys on the source's mtime **and size** — `2.9` → `2.5` changes
+  neither the size nor, within a second of a prior run, the recorded mtime, so
+  Python served the stale `.pyc` and the guard checked the old constant. Any
+  Python tool that reads a file it also imports can be fooled this way; `exec`
+  the compiled source instead. A guard that passes for the wrong reason is
+  worse than no guard.
+- **`gh pr edit` fails silently against this repo.** It returns a GraphQL
+  deprecation error about Projects (classic) and makes *no change at all*,
+  while reading like a warning. `gh api repos/{owner}/{repo}/pulls/{n} -X
+  PATCH` works. Caught only by reading the PR back afterwards.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
