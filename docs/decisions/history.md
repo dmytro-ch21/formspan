@@ -13686,6 +13686,44 @@ line unreachable once content exceeds the viewport.
 Otherwise web is structurally fine: `min-h-screen` is a floor, the page flows,
 and the one `100vh` clamp is `lg:`-gated where there is no soft keyboard.
 
+### What review caught, and why it matters more than the fixes
+
+The `frontend-reviewer` pass found no blocking defect but two things worth
+recording, because they are the same mistake in two places.
+
+**The coverage guard passed for the wrong reason, and there was a live
+instance.** `source.includes('KeyboardAwareScroll')` is satisfied by a
+*comment* mentioning the module — and `PromotionForm.tsx` on `main` carried
+exactly such a comment while using a bare `ScrollView`. So the guard written to
+stop this class of bug could itself be satisfied by prose. Now matched as an
+import path.
+
+**And the screen it was letting through was real.** The New Workout sheet in
+`app/(tabs)/workouts.tsx` has an autofocused `TextInput` with the discipline
+chips, goal chips and share toggle rendered *below* it, in a plain `View` with
+no scroller — so on a small phone they sat behind the keyboard with nothing to
+scroll, and `returnKeyType="done"` submits rather than dismisses, so there was
+no way past it. **This branch had already fixed the identical dialog on web,
+for the identical reason, and missed the mobile one** — because the migration
+converted scrollers that existed, and this sheet never had one. That is the
+whole lesson of this entry recurring inside the change meant to address it: a
+sweep finds what it is shaped to look for.
+
+Two narrower holes in the same guard, both now closed: `horizontal={false}` is
+an explicitly *vertical* list that a substring test exempted, and only the two
+literal tag names were matched, so a `SectionList` or `Animated.ScrollView` was
+invisible. All three are verified by throwaway files that go red and are then
+deleted.
+
+Also from review: `KeyboardAwareFooter` now carries the same `onTop` guard the
+scrollers have, and adds `KEYBOARD_MARGIN` to its lift — its padding *replaces*
+the footer's own `paddingBottom` rather than adding to it, so the bare overlap
+parked the buttons flush against the keyboard with no air. On web, the dialog
+now closes on a `pointerdown` whose target is the backdrop itself rather than
+on any click inside it: the new scroll container made clicking the overlay's
+scrollbar close the form, and a text selection released over the backdrop did
+the same, discarding everything typed.
+
 ### Not verified
 
 **The interaction itself is unverified on a device.** Types, lint and 623 tests

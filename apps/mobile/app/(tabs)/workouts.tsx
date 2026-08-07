@@ -13,7 +13,10 @@ import {
   useWindowDimensions,
 } from 'react-native';
 
-import { KeyboardAwareFlatList } from '@/components/KeyboardAwareScroll';
+import {
+  KeyboardAwareFlatList,
+  KeyboardAwareScrollView,
+} from '@/components/KeyboardAwareScroll';
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
 import { Text, View } from '@/components/Themed';
 import { SectionHeader } from '@/components/ui/Section';
@@ -495,86 +498,96 @@ function NewWorkoutSheet({
           </Pressable>
         </View>
 
-        <TextInput
-          style={styles.input}
-          placeholder="Name — e.g. Push Day A"
-          placeholderTextColor="#767676"
-          accessibilityLabel="Workout name"
-          value={name}
-          onChangeText={setName}
-          autoFocus
-          returnKeyType="done"
-          onSubmitEditing={submit}
-          maxLength={80}
-          testID="new-workout-name"
-        />
+        {/* The input is autofocused and the Discipline/Goal chips and the
+            share toggle all render BELOW it, so with the keyboard up on a
+            small phone they sat behind it with nothing to scroll — and
+            `returnKeyType="done"` submits rather than dismisses, so there was
+            no way past it. Same defect this branch fixed on the web version of
+            this very dialog. It was missed by the migration because the
+            migration converted scrollers that already existed, and this sheet
+            never had one. */}
+        <KeyboardAwareScrollView contentContainerStyle={styles.sheetBody}>
+          <TextInput
+            style={styles.input}
+            placeholder="Name — e.g. Push Day A"
+            placeholderTextColor="#767676"
+            accessibilityLabel="Workout name"
+            value={name}
+            onChangeText={setName}
+            autoFocus
+            returnKeyType="done"
+            onSubmitEditing={submit}
+            maxLength={80}
+            testID="new-workout-name"
+          />
 
-        <Text style={styles.label}>Discipline</Text>
-        <View style={styles.chips}>
-          {startable.length === 0 && (
-            <Text style={styles.muted}>
-              You haven&apos;t turned on any disciplines yet — choose what you train in your profile
-              first.
+          <Text style={styles.label}>Discipline</Text>
+          <View style={styles.chips}>
+            {startable.length === 0 && (
+              <Text style={styles.muted}>
+                You haven&apos;t turned on any disciplines yet — choose what you train in your profile
+                first.
+              </Text>
+            )}
+            {startable.map((s) => (
+              <Chip
+                key={s.key}
+                label={s.label}
+                active={sport === s.key}
+                onPress={() => {
+                  setSport(s.key as Sport);
+                }}
+                testID={`new-workout-sport-${s.key}`}
+              />
+            ))}
+          </View>
+          <Text style={styles.hint}>
+            A workout is one discipline — that&apos;s what lets the exercise picker show only what
+            fits.
+          </Text>
+
+          {moduleFor(modules, sport)?.capabilities.has_goals && (
+            <>
+              <Text style={styles.label}>Goal</Text>
+              <View style={styles.chips}>
+                {GOALS.map((g) => (
+                  <Chip
+                    key={g.key}
+                    label={g.label}
+                    active={goal === g.key}
+                    onPress={() => setGoal(g.key)}
+                    testID={`new-workout-goal-${g.key}`}
+                  />
+                ))}
+              </View>
+            </>
+          )}
+
+          <Pressable
+            style={styles.toggleRow}
+            onPress={() => setIsPublic((v) => !v)}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: isPublic }}
+            accessibilityLabel="Share this workout publicly"
+            testID="new-workout-public"
+          >
+            <View style={styles.toggleBody}>
+              <Text style={styles.label}>Share publicly</Text>
+              <Text style={styles.muted}>Anyone can view it. You stay the only editor.</Text>
+            </View>
+            <View
+              style={[styles.switch, isPublic && [styles.switchOn, { backgroundColor: accent.accent }]]}
+            >
+              <View style={[styles.knob, isPublic && styles.knobOn]} />
+            </View>
+          </Pressable>
+
+          {error && (
+            <Text style={styles.error} accessibilityLiveRegion="polite">
+              {error}
             </Text>
           )}
-          {startable.map((s) => (
-            <Chip
-              key={s.key}
-              label={s.label}
-              active={sport === s.key}
-              onPress={() => {
-                setSport(s.key as Sport);
-              }}
-              testID={`new-workout-sport-${s.key}`}
-            />
-          ))}
-        </View>
-        <Text style={styles.hint}>
-          A workout is one discipline — that&apos;s what lets the exercise picker show only what
-          fits.
-        </Text>
-
-        {moduleFor(modules, sport)?.capabilities.has_goals && (
-          <>
-            <Text style={styles.label}>Goal</Text>
-            <View style={styles.chips}>
-              {GOALS.map((g) => (
-                <Chip
-                  key={g.key}
-                  label={g.label}
-                  active={goal === g.key}
-                  onPress={() => setGoal(g.key)}
-                  testID={`new-workout-goal-${g.key}`}
-                />
-              ))}
-            </View>
-          </>
-        )}
-
-        <Pressable
-          style={styles.toggleRow}
-          onPress={() => setIsPublic((v) => !v)}
-          accessibilityRole="switch"
-          accessibilityState={{ checked: isPublic }}
-          accessibilityLabel="Share this workout publicly"
-          testID="new-workout-public"
-        >
-          <View style={styles.toggleBody}>
-            <Text style={styles.label}>Share publicly</Text>
-            <Text style={styles.muted}>Anyone can view it. You stay the only editor.</Text>
-          </View>
-          <View
-            style={[styles.switch, isPublic && [styles.switchOn, { backgroundColor: accent.accent }]]}
-          >
-            <View style={[styles.knob, isPublic && styles.knobOn]} />
-          </View>
-        </Pressable>
-
-        {error && (
-          <Text style={styles.error} accessibilityLiveRegion="polite">
-            {error}
-          </Text>
-        )}
+        </KeyboardAwareScrollView>
       </View>
     </Modal>
   );
@@ -725,7 +738,10 @@ const styles = StyleSheet.create({
   // this is the one place a screen-level container has to set its own
   // background. Without it the sheet falls through to iOS's default
   // white and the near-white body text disappears into it.
-  sheet: { flex: 1, padding: 20, gap: 12, backgroundColor: vola.bg },
+  sheet: { flex: 1, paddingHorizontal: 20, paddingTop: 20, backgroundColor: vola.bg },
+  // The gap moved here from `sheet` with the content: it belongs to the
+  // scrolling body now, not to the fixed shell holding the header.
+  sheetBody: { gap: 12, paddingTop: 12, paddingBottom: 24 },
   sheetHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   sheetTitle: { fontSize: 17, fontWeight: '700' },
   link: { fontSize: 16, fontWeight: '600' },

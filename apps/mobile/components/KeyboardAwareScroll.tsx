@@ -487,16 +487,40 @@ export function KeyboardAwareFlatList<ItemT>({ onScroll, ...props }: FlatListPro
  *
  * On Android this measures to zero and renders unchanged; see
  * `keyboardInsetFor`.
+ *
+ * **The bottom-edge invariance this relies on is a property of the LAYOUT, not
+ * of this component.** It holds when the footer is a content-sized last child
+ * of a `flex: 1` column whose other child can shrink — which is the reflection
+ * wizard, whose sibling is a ScrollView (`flexGrow: 1, flexShrink: 1` by
+ * default). Drop this into a content-hugging parent with no slack to give and
+ * the bottom edge moves when the padding does, at which point the measurement
+ * feeds itself. Worth checking before the second call site.
  */
 export function KeyboardAwareFooter({ style, children, ...props }: ViewProps) {
   const [inset, setInset] = useState(0);
   const ref = useRef<View>(null);
 
+  /**
+   * Same reason the scrollers have one: `Keyboard` listeners are global, so a
+   * screen that is merely covered rather than unmounted still hears every
+   * event. Without this, pushing a screen with an input over the wizard makes
+   * the buried footer measure and pad itself.
+   */
+  const onTop = useRef(true);
+  useFocusEffect(
+    useCallback(() => {
+      onTop.current = true;
+      return () => {
+        onTop.current = false;
+      };
+    }, []),
+  );
+
   useEffect(() => {
     const names = keyboardEventNames(Platform.OS);
     const measure = (keyboardTop: number | null) => {
       const node = ref.current;
-      if (!node) return;
+      if (!node || !onTop.current) return;
       node.measureInWindow((_x, y, _w, h) => {
         // `y + h` — the footer's BOTTOM edge — is invariant under this
         // padding, which is what makes measuring here safe to repeat. The
@@ -506,7 +530,13 @@ export function KeyboardAwareFooter({ style, children, ...props }: ViewProps) {
         // edge stays put. Feeding the previous inset back in would therefore
         // compound it on every keyboard frame change, walking the footer up
         // the screen a keyboard-height at a time.
-        setInset(keyboardInsetFor({ keyboardTop, containerBottom: y + h }));
+        const lift = keyboardInsetFor({ keyboardTop, containerBottom: y + h });
+        // `+ MARGIN` when lifting at all, because this padding REPLACES the
+        // footer's own `paddingBottom` rather than adding to it — so the bare
+        // overlap parks the buttons flush against the keyboard's top edge with
+        // no air at all, which reads as clipped. Same 24pt the field-lifting
+        // path leaves, so the two paths space alike.
+        setInset(lift > 0 ? lift + MARGIN : 0);
       });
     };
     const subs = [

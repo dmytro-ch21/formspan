@@ -29,8 +29,18 @@ import { join, relative, resolve } from 'node:path';
 const MOBILE_ROOT = resolve(__dirname, '../..');
 const SEARCH_DIRS = ['app', 'components'];
 
-/** The module every scrolling screen with an input has to go through. */
-const MODULE = 'KeyboardAwareScroll';
+/**
+ * The module every scrolling screen with an input has to go through.
+ *
+ * Matched as an IMPORT, not as a substring of the file. A plain
+ * `includes('KeyboardAwareScroll')` is satisfied by a passing mention in a
+ * comment — and that is not hypothetical: before this branch,
+ * `PromotionForm.tsx` carried the words "see the extensive note in
+ * KeyboardAwareScrollView.tsx" while using a bare `ScrollView`, so it would
+ * have satisfied the loose check while being exactly what the check exists to
+ * catch.
+ */
+const IMPORTS_MODULE = /from ['"]@\/components\/KeyboardAwareScroll['"]/;
 
 /**
  * Escape hatch for a component that renders an input but is ALWAYS mounted
@@ -87,7 +97,10 @@ describe('keyboard handling reaches every screen that takes typing', () => {
     '%s goes through the shared keyboard container',
     (file, source) => {
       if (source.includes(OPT_OUT)) return;
-      expect({ file, usesModule: source.includes(MODULE) }).toEqual({ file, usesModule: true });
+      expect({ file, importsModule: IMPORTS_MODULE.test(source) }).toEqual({
+        file,
+        importsModule: true,
+      });
     },
   );
 
@@ -98,13 +111,24 @@ describe('keyboard handling reaches every screen that takes typing', () => {
    * Horizontal rows are exempt because a keyboard never traps content on the
    * x-axis — the library's filter chips and the reflection wizard's category
    * strip are both legitimately plain `ScrollView`s.
+   *
+   * The two narrow spellings are deliberate, because both were holes:
+   * `horizontal={false}` is an explicitly VERTICAL list and a plain
+   * `includes('horizontal')` would have exempted it, and the tag list covers
+   * the wrapped and aliased forms rather than only the two literal names — a
+   * `SectionList` or an `Animated.ScrollView` is just as capable of trapping
+   * content under a keyboard.
    */
   it.each(screensWithInputs.map((s) => [s.file, s.source] as const))(
     '%s has no bare vertical scroller left behind',
     (file, source) => {
       if (source.includes(OPT_OUT)) return;
-      const bare = [...source.matchAll(/<(ScrollView|FlatList)\b([^>]*)>/g)].filter(
-        ([, , attrs]) => !attrs.includes('horizontal'),
+      const SCROLLERS =
+        /<(?:Animated\.)?(ScrollView|FlatList|SectionList|VirtualizedList|FlashList)\b([^>]*)>/g;
+      // `horizontal`, but not `horizontal={false}`.
+      const isHorizontal = /\bhorizontal\b(?!\s*=\s*\{\s*false\s*\})/;
+      const bare = [...source.matchAll(SCROLLERS)].filter(
+        ([, , attrs]) => !isHorizontal.test(attrs),
       );
       expect({ file, bare: bare.map(([, tag]) => tag) }).toEqual({ file, bare: [] });
     },

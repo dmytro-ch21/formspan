@@ -271,10 +271,36 @@ function NewWorkoutDialog({
     */
     <div
       className="fixed inset-0 z-50 overflow-y-auto bg-black/70"
-      onClick={onClose}
+      /*
+        `pointerdown` on the element itself, not `click` anywhere inside it.
+
+        Two ways `onClick` closed this dialog when the user had not asked it
+        to, and the scroll container above makes the first one reachable: a
+        click on the overlay's SCROLLBAR dispatches a click on the overlay in
+        Chrome, so dragging the scrollbar of a dialog too tall for the window
+        threw the form away. And a text selection that starts inside the Name
+        field and releases over the backdrop fires `click` on the common
+        ancestor — losing everything typed, which is the worst possible
+        outcome for a stray drag.
+
+        Both go away by closing on the press that STARTS on the backdrop
+        itself. `currentTarget` is what makes it the backdrop rather than
+        anything within it, so the inner centring wrapper does not swallow it.
+      */
+      onPointerDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
       role="presentation"
     >
-      <div className="flex min-h-full items-center justify-center p-4">
+      <div
+        className="flex min-h-full items-center justify-center p-4"
+        onPointerDown={(e) => {
+          // The centring wrapper fills the overlay, so backdrop presses land
+          // HERE rather than on the scrolling parent — it needs the same rule
+          // or click-outside-to-close stops working entirely.
+          if (e.target === e.currentTarget) onClose();
+        }}
+      >
         <form
           onSubmit={submit}
           onClick={(e) => e.stopPropagation()}
