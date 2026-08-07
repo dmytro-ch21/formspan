@@ -14063,6 +14063,137 @@ content.
   under one half of what they do (a Thruster is a squat and a press; it says
   "Squat + Press" but lives under vertical_push).
 
+## 2026-08-07 — Timed sets get a countdown, and the rest timer stops being the only one
+
+"Exercises that are timed like planks should trigger a timer for the amount set
+for the place — I set 3 sets and 1 min each; when I log it I should have the
+timer start option."
+
+**The duration was already there, which changed the shape of the whole
+feature.** `setsFromWorkout` has always copied a template's `target_seconds`
+onto every set it creates, and `emptySet` carries the previous set's numbers
+forward — so "3 × 1 min" arrives as three rows already holding 60, and a set
+added by hand inherits the last one. So this is not a new prescription to model
+and store; it is a field to read. `workSecondsFor` is that read, and it is three
+lines because the data was in the right place already.
+
+### One countdown, not two
+
+Rest and work share a single state discriminated by `kind`, and that is
+load-bearing rather than tidy. You cannot rest and hold a plank at once, there
+is exactly one bar at the bottom of the session screen, and two independent
+timers would both be entitled to it. One state means starting either ends the
+other — which is what actually happens in a gym.
+
+`components/RestTimer.tsx` is now `components/Countdown.tsx`, and its arithmetic
+moved to `lib/countdown.ts` as pure functions taking `now` as a parameter. That
+is what made the load-bearing property testable **for the first time**: the
+timer must be right after the phone has been in a pocket, which is a claim about
+a clock that jumped, and a function calling `Date.now()` internally cannot be
+asked about it. The deadline model was always correct; nothing had ever checked
+it. There are now 27 tests where there were zero, and every one was confirmed to
+go red by mutating the guard it covers.
+
+### Running out and stopping early are different events
+
+The judgement call worth recording. A countdown that reaches zero is a set you
+performed: it writes `seconds`, ticks itself, and hands over to rest exactly as
+the manual tick does. **Stopping early writes the elapsed time and does NOT
+tick.**
+
+Two reasons, and they point the same way. A plank let go at 40 of a planned 60
+is a 40-second plank — logging 60 because that is what the timer started from
+would put a number in the history that never happened, which is precisely the
+objective-vs-prescribed confusion the separate metrics/ratings work exists to
+prevent. And an accidental Stop should not silently commit a two-second set;
+`toggleDone`'s standing contract is that ticking is the moment the numbers are
+final, and this keeps it.
+
+### Where the affordance is, and where it deliberately is not
+
+Beside the tick in the set row, not inside the expanded editor — starting a
+timed set is the thing you do BEFORE the set, one-handed, and a disclosure would
+cost the tap the countdown exists to save. It uses the kit's `timer` glyph
+rather than a play triangle, because a ▶ next to a ✓ reads as "play the set
+back".
+
+It appears only where it means something. Two nulls in `workSecondsFor`:
+
+- **An exercise not measured in seconds cannot be timed** — a countdown over a
+  set of squats is a stopwatch pointed at nothing, so no button appears at all.
+- **`distance_time` with no duration gets nothing either.** There the
+  prescription is the DISTANCE — row 500m, run 400m — and the time is the
+  result, not the target. Defaulting those to 60s would invent a goal the
+  athlete never set and quietly turn a measurement into a target. A pure `time`
+  exercise with nothing prescribed does get a default, because a plank with no
+  number is still a plank you want to time.
+
+Adjusting a work countdown by ±15s is deliberately not persisted, unlike rest.
+Rest adjustments write to the per-exercise preference because "this movement
+needs a different wait" is a standing fact; extending a plank today is not a new
+prescription, and writing it to the rest preference would change how long you
+rest because you held something longer.
+
+### Web
+
+**No change, and that is the decision rather than an omission.** The platform
+rule puts live in-workout affordances on the phone: a countdown on a desktop you
+are not standing next to is decoration. Web already shows and edits the
+prescribed duration — `targetFieldsFor('time')` returns `['sets','seconds']`, so
+the workout editor offers it and the session screen asks for it — which is
+exactly the half of this feature web should have. Checked rather than assumed.
+
+### What review caught: two ways to write a number that never happened
+
+Both blocking, both in the seam this change created rather than in the
+arithmetic — and both are the same shape as the `completed`-flag near-miss this
+review step exists for: silent, wrong, and in the logging path.
+
+**±15 on a finished work countdown rewrote the logged set.** `adjust` re-armed
+the completion flag unconditionally, and `adjusted` added its delta to a
+deadline already in the past. So a countdown sitting at "Set done" with its
+buttons still live could fire completion a *second* time, against a `total` the
+adjustment had grown — one +15 tap turned a logged 60-second plank into 75, with
+no countdown visibly running and nothing on screen to say a number had changed.
+Harmless in the old rest-only timer, where completion was just a haptic; this
+change made completion a data write and the existing behaviour became a bug.
+
+**A running countdown wrote to whatever row had moved into its index.**
+`setIndex` is a position, `LoggedSet` has no stable id, and nothing cancelled a
+countdown when the rows moved. Delete a set above it, reorder the exercises,
+swap one out — and completion wrote `seconds` onto, and ticked, somebody else's
+squat. Worst case: **Finish session did not stop the timer**, so a countdown
+could write into a session the screen had already declared read-only, and the
+sync would push it — logging a full 60-second plank for a hold the athlete cut
+short precisely by finishing.
+
+The fixes are a cancel on every structural change plus a `finished` effect, and
+an identity check as the backstop that does not depend on a future mutator
+remembering. Note the effect is keyed on `session.ended_at` rather than the
+derived `finished` flag, because that flag is computed below the screen's early
+returns, where a hook cannot go.
+
+### The mutation test found the real gap, which was in the tests
+
+Worth recording separately, because the first round of fixes was wrong in a way
+that looked complete. Reverting each fix and re-running showed the deadline
+clamp went red — and **both blocking-bug guards were completely silent.** They
+typechecked, all 29 tests passed, and the only symptom of deleting either was a
+number quietly changing in somebody's history.
+
+So both were extracted into named pure functions — `rearmsCompletionOnAdjust`
+and `timedSetStillAt` — for the same reason `keyboardEventNames` is a function
+rather than a condition: a one-line decision whose failure mode is invisible
+should be a thing a test can hold. Re-running the mutation now takes four
+assertions red. The guards are one line each; that was never the point.
+
+### Not verified
+
+Same gap as the keyboard work, and for the same reason: **the countdown has not
+been watched running on a device.** The arithmetic is covered and the wiring
+typechecks, but nothing here proves the bar appears, that the haptic fires, or
+that a backgrounded phone comes back to a correct clock — which is the one
+behaviour the whole design is for.
 
 ## Open items / known gaps as of this entry
 

@@ -172,6 +172,70 @@ export function measuresFor(loadType: Exercise['load_type']): Measure[] {
   }
 }
 
+/**
+ * How long to run a work timer for this set, or null if it cannot be timed.
+ *
+ * **The duration is already on the set, which is why this is a lookup and not a
+ * prescription.** `setsFromWorkout` copies a template's `target_seconds` onto
+ * every set it creates, and `emptySet` carries the previous set's numbers
+ * forward — so "3 sets of 1 minute" arrives here as three rows already holding
+ * 60, and a set added by hand inherits whatever the last one was. Reading the
+ * field covers the template, the repeat and the correction with one rule.
+ *
+ * The two nulls are the interesting part:
+ *
+ *  - **An exercise that does not measure seconds cannot be timed.** A countdown
+ *    over a set of squats is a stopwatch pointed at nothing; the affordance
+ *    should not appear at all rather than appear and do something meaningless.
+ *  - **`distance_time` with no duration gets nothing either.** There the
+ *    prescription is the DISTANCE — row 500m, run 400m — and how long it takes
+ *    is the result, not the target. Defaulting those to 60 seconds would invent
+ *    a goal the athlete never set and quietly turn a measurement into a target.
+ *
+ * A pure `time` exercise with nothing prescribed does get a default, because a
+ * plank with no number is still a plank you want to time.
+ */
+export const DEFAULT_WORK_SECONDS = 60;
+
+export function workSecondsFor(
+  set: Pick<LoggedSet, 'seconds'>,
+  loadType: Exercise['load_type'] | undefined,
+): number | null {
+  if (loadType === undefined) return null;
+  if (!measuresFor(loadType).includes('seconds')) return null;
+  // A stored 0 is not a duration to count down from, and neither is a
+  // negative one: a timer over before it starts fires its completion the
+  // instant it begins and logs a zero-second set. Both fall through to the
+  // same answer the field-absent case gets — the default for `time`, nothing
+  // for `distance_time`.
+  if (set.seconds != null && set.seconds > 0) return set.seconds;
+  return loadType === 'time' ? DEFAULT_WORK_SECONDS : null;
+}
+
+/**
+ * Is the row a countdown was started against still the row at that index?
+ *
+ * **A work countdown identifies its set by POSITION, and positions move.**
+ * `LoggedSet` carries no stable id, so the only handle is where the row sat
+ * when the timer started. Delete a set above it, reorder the exercises, or
+ * swap one out, and that index now names a different set — at which point a
+ * finishing countdown writes `seconds` onto, and ticks, somebody else's squat.
+ *
+ * The session screen also cancels the countdown on every structural change,
+ * which is the fix; this is the backstop that does not depend on a future
+ * mutator remembering to. A mutator that forgets loses the elapsed seconds,
+ * which is a shame. Writing them to the wrong exercise is a lie, and it is
+ * SILENT — which is why this is a named, tested function rather than an inline
+ * `?.` comparison nobody would notice going missing.
+ */
+export function timedSetStillAt(
+  sets: Pick<LoggedSet, 'exercise_id'>[],
+  index: number,
+  exerciseID: string,
+): boolean {
+  return sets[index]?.exercise_id === exerciseID;
+}
+
 export function emptySet(exerciseID: string, position: number, from?: LoggedSet): LoggedSet {
   // Carrying the previous set's numbers forward is the single biggest
   // reduction in taps: sets in a session are usually the same weight and

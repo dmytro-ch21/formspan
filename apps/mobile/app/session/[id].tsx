@@ -7,8 +7,10 @@ import { ActivityIndicator, Alert, Pressable, StyleSheet, TextInput } from 'reac
 import { KeyboardAwareScrollView, useEnsureVisible } from '@/components/KeyboardAwareScroll';
 import { SwipeToDelete } from '@/components/SwipeToDelete';
 
-import { RestTimerBar, useRestTimer } from '@/components/RestTimer';
+import { CountdownBar, useCountdown } from '@/components/Countdown';
+import { elapsedOf } from '@/lib/countdown';
 import { Text, View } from '@/components/Themed';
+import { Icon } from '@/components/ui/Icon';
 import { Stat, StatRow } from '@/components/ui/Stat';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { vola } from '@/constants/Colors';
@@ -50,6 +52,8 @@ import {
   fillForward,
   measuresFor,
   reorderGroups,
+  timedSetStillAt,
+  workSecondsFor,
   SET_TYPES,
   type LoggedSet,
   type Measure,
@@ -94,7 +98,18 @@ export default function SessionScreen() {
     workoutID: null,
     goal: null,
   });
-  const timerState = useRestTimer();
+  /**
+   * A work countdown reaching zero is a set that happened, so it logs itself.
+   *
+   * Only `work` does anything here — a rest running out has produced no number
+   * for the session to keep, which is the whole difference between the two.
+   * The hook holds this in a ref, so this closure is the current render's and
+   * sees the current `sets`.
+   */
+  const timerState = useCountdown((finished) => {
+    if (finished.kind !== 'work' || finished.setIndex == null || !finished.exerciseID) return;
+    recordTimedSet(finished.setIndex, finished.exerciseID, Math.round(finished.total), true);
+  });
   // The switch in Settings writes this; reading the same hook is what makes
   // the two agree. An earlier version imported the hook and never called it,
   // leaving a useState(true) nothing ever updated — so the setting silently
@@ -119,6 +134,24 @@ export default function SessionScreen() {
     const timer = setInterval(tick, 1000);
     return () => clearInterval(timer);
   }, [session]);
+
+  /**
+   * A finished session is a record, so no countdown may outlive it.
+   *
+   * Hiding the bar would not be enough: the interval keeps running behind it,
+   * and a work countdown reaching zero WRITES — `seconds` onto a set, plus the
+   * tick. That would land in a session the screen has already declared
+   * read-only, and the sync would push it, logging a full 60-second plank for
+   * a hold the athlete cut short precisely BY finishing.
+   *
+   * Keyed on the timestamp rather than the derived `finished` flag, because
+   * that flag is computed below the early returns where a hook cannot go.
+   */
+  const stopTimer = timerState.stop;
+  useEffect(() => {
+    if (session?.ended_at) stopTimer();
+  }, [session?.ended_at, stopTimer]);
+
   const { units, unitsReady } = useUnits();
   // Per-exercise overrides: a lifter who thinks in kilograms still faces a
   // leg press marked in pounds, and converting in your head at the moment
@@ -445,10 +478,79 @@ export default function SessionScreen() {
   async function startRest(exerciseID: string) {
     const ex = catalog.get(exerciseID);
     const seconds = userId ? await readRestSeconds(userId, ex, exerciseID) : 90;
-    timerState.start(seconds, ex?.name ?? 'Rest', exerciseID);
+    timerState.startRest(seconds, ex?.name ?? 'Rest', exerciseID);
+  }
+
+  /**
+   * Starts the countdown for a timed set — a plank, a hold, a carry.
+   *
+   * The duration comes off the set itself, because that is where the
+   * prescription already is: a template's `target_seconds` is copied onto every
+   * set it creates, so "3 × 1 min" needs no second source. See
+   * `workSecondsFor`.
+   */
+  function startWork(index: number, exerciseID: string) {
+    const ex = catalog.get(exerciseID);
+    const seconds = workSecondsFor(sets[index], ex?.load_type);
+    if (seconds == null) return;
+    timerState.startWork(seconds, ex?.name ?? 'Work', exerciseID, index);
+  }
+
+  /**
+   * Writes what a timed set actually took, and optionally ticks it.
+   *
+   * **`seconds` is what the clock counted, never what was asked for.** A plank
+   * held for 40 of a planned 60 is a 40-second plank; logging the target
+   * because the target is what the timer started from would put a number in
+   * the history that never happened.
+   *
+   * Which is why running out and stopping early are not the same event. A
+   * countdown that reaches zero is a set you completed, so it ticks itself and
+   * hands over to rest exactly as the manual tick does. Stopping early records
+   * the honest elapsed time but leaves the tick alone — an accidental Stop
+   * should not silently commit a two-second plank, and `toggleDone`'s contract
+   * is that ticking is the moment the numbers are final.
+   *
+   * One commit either way, for the reason `toggleDone` documents: a second
+   * setState here would compute from the pre-write `sets` and drop the value.
+   */
+  function recordTimedSet(index: number, exerciseID: string, seconds: number, tick: boolean) {
+    /*
+      `setIndex` is a POSITION, and positions move.
+
+      `LoggedSet` carries no stable id, so a countdown identifies its row by
+      where that row sat when it started. Delete a set above it, reorder the
+      groups, or swap the exercise, and the index now names a different set —
+      at which point a finishing countdown writes seconds onto, and ticks,
+      somebody else's squat. Silent wrong-row corruption, in the one screen
+      that must not lose data.
+
+      `stopTimerForStructureChange` below cancels the countdown whenever the
+      shape changes, and this check is the backstop that does not depend on
+      anyone remembering to call it. A mutator that forgets loses the elapsed
+      seconds, which is a shame; writing them to the wrong exercise is a lie.
+    */
+    if (!timedSetStillAt(sets, index, exerciseID)) return;
+    const written = sets.map((s, i) => (i === index ? { ...s, seconds, completed: tick || s.completed } : s));
+    const next = tick
+      ? fillForward(written, index, measuresFor(catalog.get(exerciseID)?.load_type ?? 'reps'))
+      : written;
+    commit(next);
+    if (tick && autoRest) void startRest(exerciseID);
+  }
+
+  /**
+   * Cancels a running work countdown when the rows move under it.
+   *
+   * Only `work` — a rest belongs to an exercise, not to a position, so
+   * reordering does not invalidate it.
+   */
+  function stopTimerForStructureChange() {
+    if (timerState.timer?.kind === 'work') timerState.stop();
   }
 
   function removeSet(index: number) {
+    stopTimerForStructureChange();
     commit(sets.filter((_, i) => i !== index).map((s, i) => ({ ...s, position: i })));
   }
 
@@ -491,7 +593,9 @@ export default function SessionScreen() {
    */
   function moveGroup(groupIndex: number, delta: -1 | 1) {
     const next = reorderGroups(sets, groups.map((g) => g.indices), groupIndex, delta);
-    if (next) commit(next);
+    if (!next) return;
+    stopTimerForStructureChange();
+    commit(next);
   }
 
   function removeGroup(groupIndex: number) {
@@ -509,6 +613,7 @@ export default function SessionScreen() {
           text: 'Remove',
           style: 'destructive',
           onPress: () => {
+            stopTimerForStructureChange();
             const drop = new Set(g.indices);
             commit(
               sets.filter((_, i) => !drop.has(i)).map((x, position) => ({ ...x, position })),
@@ -727,6 +832,16 @@ export default function SessionScreen() {
                     onChange={(next) => update(i, next)}
                     onRemove={() => removeSet(i)}
                     onToggleDone={() => toggleDone(i, g.exerciseID)}
+                    // Null on anything that isn't measured in seconds, which
+                    // is what keeps a play button off a set of squats. The
+                    // running row hides its own button rather than offering a
+                    // restart mid-hold.
+                    onStartTimer={
+                      workSecondsFor(sets[i], exercise?.load_type) != null &&
+                      timerState.timer?.setIndex !== i
+                        ? () => startWork(i, g.exerciseID)
+                        : undefined
+                    }
                     showEffort={showEffort}
                     units={unitFor(g.exerciseID)}
                   />
@@ -934,22 +1049,37 @@ export default function SessionScreen() {
         </Pressable>
       </KeyboardAwareScrollView>
 
-      {timerState.rest && (
-        <RestTimerBar
-          rest={timerState.rest}
+      {timerState.timer && (
+        <CountdownBar
+          timer={timerState.timer}
           remaining={timerState.remaining}
           onAdjust={(delta) => {
             timerState.adjust(delta);
-            // Adjusting is how you tell the app this exercise needs a
-            // different wait — so it sticks, rather than being redone
-            // every set.
-            const ex = timerState.rest?.exerciseID;
-            if (userId && ex) {
-              writeRestSeconds(userId, ex, (timerState.rest?.total ?? 90) + delta).catch(() => {});
+            // Adjusting a REST is how you tell the app this exercise needs a
+            // different wait — so it sticks, rather than being redone every
+            // set. A work countdown is deliberately not saved anywhere: its
+            // length is the set's own `seconds`, and ±15s there is "hold it a
+            // bit longer today", not a new prescription. Writing it to the
+            // rest preference would silently change how long you rest because
+            // you extended a plank.
+            const t = timerState.timer;
+            if (userId && t?.kind === 'rest' && t.exerciseID) {
+              writeRestSeconds(userId, t.exerciseID, t.total + delta).catch(() => {});
             }
           }}
           onTogglePause={timerState.togglePause}
-          onStop={timerState.stop}
+          onStop={() => {
+            // Stopping a running work countdown logs what it actually
+            // counted; see `recordTimedSet` for why that is the elapsed time
+            // and why it does not tick the set. Once it has finished, the
+            // completion callback has already written the set and this button
+            // is only dismissing the bar.
+            const t = timerState.timer;
+            if (t?.kind === 'work' && t.setIndex != null && t.exerciseID && timerState.remaining > 0) {
+              recordTimedSet(t.setIndex, t.exerciseID, elapsedOf(t, timerState.remaining), false);
+            }
+            timerState.stop();
+          }}
         />
       )}
     </View>
@@ -1096,6 +1226,7 @@ function SetRow({
   onChange,
   onRemove,
   onToggleDone,
+  onStartTimer,
   units,
   showEffort,
 }: {
@@ -1107,6 +1238,8 @@ function SetRow({
   onChange: (next: LoggedSet) => void;
   onRemove: () => void;
   onToggleDone: () => void;
+  /** Undefined when this set isn't timed — see `workSecondsFor`. */
+  onStartTimer?: () => void;
   units: UnitSystem;
   showEffort: boolean;
 }) {
@@ -1145,6 +1278,31 @@ function SetRow({
           {typeShort ? <Text style={styles.setBadge}> {typeShort}</Text> : null}
         </Text>
         <Text style={styles.setSummary}>{describeSet(set, units)}</Text>
+        {editable && onStartTimer && (
+          /*
+            Only on sets measured in seconds — a plank, a hold, a carry.
+
+            It sits beside the tick rather than inside the expanded editor
+            because starting a timed set is the thing you do BEFORE the set,
+            one-handed, and burying it behind a disclosure would cost the tap
+            the countdown exists to save. `hitSlop` matches the tick for the
+            same reason both are 10: sweaty thumbs, 20 seconds, one hand.
+          */
+          <Pressable
+            onPress={onStartTimer}
+            hitSlop={10}
+            style={styles.play}
+            accessibilityRole="button"
+            accessibilityLabel={`Start the timer for set ${ordinal}${
+              set.seconds ? `, ${set.seconds} seconds` : ''
+            }`}
+            testID={`start-timer-${index}`}
+          >
+            {/* The kit's timer glyph rather than a play triangle: this starts
+                a countdown, and a ▶ next to a ✓ reads as "play the set back". */}
+            <Icon name="timer" size={16} color={accent.ink} />
+          </Pressable>
+        )}
         {editable && (
           // Records the set; starts rest only if "Auto rest timer" is on.
           <Pressable
@@ -1478,6 +1636,17 @@ const styles = StyleSheet.create({
   setOrdinal: { width: 34, fontWeight: '700', color: vola.textDim },
   setBadge: { color: vola.lime, fontSize: 11, fontWeight: '700' },
   setSummary: { flex: 1, fontSize: 15 },
+  // Same disc as the tick beside it — two controls of equal weight on one
+  // row, sized for a thumb rather than a cursor.
+  play: {
+    width: 34,
+    height: 34,
+    borderRadius: 999,
+    borderWidth: 1.5,
+    borderColor: vola.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   tick: {
     width: 34,
     height: 34,

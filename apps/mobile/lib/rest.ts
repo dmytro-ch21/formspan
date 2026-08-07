@@ -81,9 +81,3 @@ export function formatElapsed(seconds: number): string {
   return `${m}:${sec.toString().padStart(2, '0')}`;
 }
 
-export function formatRest(seconds: number): string {
-  const s = Math.max(0, Math.round(seconds));
-  const mins = Math.floor(s / 60);
-  const secs = s % 60;
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
-}
