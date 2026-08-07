@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/discipline"
 
@@ -164,6 +165,7 @@ func (h *Handler) SetExerciseUnit(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateRequest struct {
+	Username    *string `json:"username"`
 	DisplayName *string `json:"display_name"`
 	DateOfBirth *string `json:"date_of_birth"`
 	Sex         *string `json:"sex"`
@@ -180,6 +182,23 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.Username != nil {
+		// Trimmed BEFORE validation: mobile keyboards append spaces
+		// routinely, and "dmytro " earning a format 400 would be the most
+		// common claim failure in practice. Only whitespace is normalised
+		// here — case is the client's job, because silently lowercasing
+		// would store something other than what the caller sent.
+		trimmed := strings.TrimSpace(*req.Username)
+		req.Username = &trimmed
+	}
+	if req.Username != nil && !ValidUsername(*req.Username) {
+		// One message for format and reserved alike, stating the rule rather
+		// than which clause failed: "admin is reserved" invites walking the
+		// reserved list, and the format is the useful half to teach anyway.
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"username must be 3-30 characters of a-z, 0-9 or _, start with a letter, and not be a reserved word")
+		return
+	}
 	if req.UnitSystem != nil && !ValidUnitSystem(*req.UnitSystem) {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
 			"unit_system must be metric or imperial")
@@ -187,6 +206,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	p, err := h.repo.Update(r.Context(), claims.UserID, ProfileUpdate{
+		Username:    req.Username,
 		DisplayName: req.DisplayName,
 		DateOfBirth: req.DateOfBirth,
 		Sex:         req.Sex,
@@ -206,6 +226,14 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 // raw database errors) over the wire.
 func writeError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
+	case errors.Is(err, ErrUsernameTaken):
+		// 409 with the already_exists code — the code vocabulary is part of
+		// the contract and this is what it means; the message carries the
+		// specific fact. Confirming a handle is taken is inherent to unique
+		// handles and was accepted when usernames were chosen over invite
+		// codes.
+		apihttp.WriteError(w, http.StatusConflict, apihttp.CodeAlreadyExists,
+			"that username is taken")
 	case errors.Is(err, ErrNotFound):
 		apihttp.WriteError(w, http.StatusNotFound, apihttp.CodeNotFound, err.Error())
 	case errors.Is(err, ErrAlreadyExists):

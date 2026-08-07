@@ -4807,6 +4807,41 @@ to the wrong row, or to a read-only session, before it was fixed:
   offers a seconds target for a `time` exercise, and the session screen asks for
   seconds when logging one.
 
+## Usernames (`PATCH /v1/profile`, mobile profile editor)
+
+The unique claimable handle. Backend + mobile field only — nothing consumes it
+yet.
+
+### Happy path
+
+- Claim a free handle → 200, `username` returned on every subsequent
+  `GET /v1/profile`.
+- Rename → old handle immediately claimable by another account.
+- Re-submitting your own current handle → 200, idempotent, not a 409.
+- PATCHing unrelated fields leaves the username untouched (nil = unchanged).
+
+### Uniqueness
+
+- A handle held by another account → **409 `already_exists`**, message names
+  the fact ("that username is taken") — distinct from the create-time 409.
+- **Case variants collide**: if `dmytro` is taken, `DMYTRO` must 409 — and via
+  the repository directly (bypassing handler validation), which is what proves
+  the `lower()` index rather than the Go format rule.
+
+### Format & reserved (all 400)
+
+- Under 3 / over 30 chars, uppercase, leading digit or underscore, whitespace,
+  hyphens, unicode.
+- Reserved words: `admin`, `vola`, `me`, `settings`, … — the 400 message states
+  the format rule, not which reserved word matched.
+
+### Mobile editor
+
+- The field never fights the keyboard: no auto-capitalisation, input lowercased
+  on save.
+- An empty username box omits the key — saving must NOT clear a claimed handle.
+- A 409 lands in the form's error banner with the server's message.
+- The first-run (no profile yet) path still works with the field present.
 
 ## Sequences (`/v1/sequences`)
 

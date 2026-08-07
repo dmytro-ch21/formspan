@@ -265,6 +265,7 @@ components:
       type: object
       required:
         - user_id
+        - username
         - display_name
         - date_of_birth
         - sex
@@ -275,9 +276,34 @@ components:
       properties:
         user_id:
           type: string
+        username:
+          type: string
+          nullable: true
+          pattern: "^[a-z][a-z0-9_]{2,29}$"
+          description: >
+            The unique, claimable handle — the lookup key the sharing design
+            is built on. Null until claimed; claiming is opt-in until sharing
+            ships.
+
+
+            Lowercase only, 3-30 characters of a-z 0-9 _, starting with a
+            letter. Uniqueness is case-insensitive at the database (an index
+            on lower(username)), so the lowercase rule is canonical form, not
+            the collision boundary. Reserved words (admin, vola, me, settings,
+            …) are refused server-side; the list is Go code, not schema, so it
+            can grow without a migration.
+
+
+            Renaming is allowed and frees the old handle — nothing references
+            a username by value; friends and shares key on user_id. CLEARING
+            is not supported: nil in a PATCH means "leave unchanged", the
+            same contract as every other profile field.
         display_name:
           type: string
           nullable: true
+          description: >
+            Free prose for SHOWING a person, never for finding one — that is
+            the username's job, and neither field can do the other's.
         date_of_birth:
           type: string
           format: date
@@ -323,6 +349,17 @@ components:
       type: object
       description: Partial update — omitted fields are left unchanged.
       properties:
+        username:
+          type: string
+          nullable: true
+          pattern: "^[a-z][a-z0-9_]{2,29}$"
+          description: >
+            Claim or rename the caller's handle. An explicit `null` is
+            accepted and means "leave unchanged", exactly like omitting the
+            key — clearing a claimed handle is not supported. 409 `already_exists` when it
+            belongs to someone else — which does confirm the handle exists,
+            an enumeration surface accepted when usernames were chosen over
+            invite codes. Re-sending your own current handle is idempotent.
         display_name:
           type: string
           nullable: true
@@ -2577,6 +2614,16 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          description: >
+            The requested username belongs to another account. The code is
+            `already_exists`; the message says which fact ("that username is
+            taken") — distinct from the create-time 409, which means the
+            profile itself already exists.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /profile/exercise-units:
     get:

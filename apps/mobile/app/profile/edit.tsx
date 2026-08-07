@@ -47,16 +47,25 @@ export default function EditProfileScreen() {
   // Distinct from `error`, which also covers a failed *save*. This one means
   // we never learned what the profile says, so there is nothing safe to edit.
   const [unavailable, setUnavailable] = useState(false);
+  // What the server currently holds, so save can send the handle ONLY when it
+  // changed. Re-sending an unchanged handle couples every unrelated edit to
+  // username validation: the reserved list is documented as growing, and the
+  // day a claimed handle lands on it, an athlete who re-sends it can no
+  // longer save a date-of-birth fix — the whole screen bricked by a field
+  // they didn't touch.
+  const [loadedUsername, setLoadedUsername] = useState<string | null>(null);
 
   useEffect(() => {
     getProfile(getToken)
-      .then((p) =>
+      .then((p) => {
+        setLoadedUsername(p.username);
         setPatch({
+          username: p.username ?? undefined,
           display_name: p.display_name,
           date_of_birth: p.date_of_birth,
           sex: p.sex,
-        }),
-      )
+        });
+      })
       .catch((err) => {
         // A 404 is the ordinary first-run case: there genuinely is no profile
         // yet, so an empty form is the truth and saving creates one.
@@ -95,6 +104,13 @@ export default function EditProfileScreen() {
         ...patch,
         // An empty box means "no name", not the empty string.
         display_name: patch.display_name?.trim() || null,
+        // Only when it CHANGED — see loadedUsername. Empty box omits the
+        // key (the server cannot clear a handle); the lowercase here is
+        // belt-and-braces behind the on-change lowercasing below.
+        username: (() => {
+          const next = patch.username?.trim().toLowerCase() || undefined;
+          return next !== (loadedUsername ?? undefined) ? next : undefined;
+        })(),
       });
       // Only what actually differs from the server's state. Toggling something
       // on and back off again would otherwise send a redundant key — which for
@@ -193,6 +209,27 @@ export default function EditProfileScreen() {
         />
 
         <Field
+          label="Username"
+          value={patch.username ?? ''}
+          // Lowercased AS TYPED, not only at save: the transform is
+          // length-preserving so the cursor cannot jump, and what is on the
+          // screen is exactly what gets claimed — lowercasing only at save
+          // means claiming a handle you were never shown.
+          onChangeText={(v) => setPatch((p) => ({ ...p, username: v.toLowerCase() }))}
+          placeholder="e.g. dmytro_bjj"
+          autoCapitalize="none"
+          accessibilityHint="3 to 30 characters: lowercase letters, digits or underscore, starting with a letter"
+          testID="profile-username"
+        />
+        {/* The rule stated up front, because the server's 400 states it
+            anyway and reading it here first is one less failed save. */}
+        <Text style={styles.hint}>
+          3–30 characters: a–z, 0–9 or _, starting with a letter. This is how friends will find
+          you once sharing arrives. A claimed handle can be renamed — which frees the old one —
+          but not removed.
+        </Text>
+
+        <Field
           label="Date of birth"
           value={patch.date_of_birth ?? ''}
           onChangeText={(v) => setPatch((p) => ({ ...p, date_of_birth: v || null }))}
@@ -269,12 +306,18 @@ function Field({
   value,
   onChangeText,
   placeholder,
+  autoCapitalize = 'words',
+  accessibilityHint,
   testID,
 }: {
   label: string;
   value: string;
   onChangeText: (v: string) => void;
   placeholder?: string;
+  /** "words" suits names; a username field must pass "none" or the keyboard
+   *  fights the lowercase-only format on every character. */
+  autoCapitalize?: 'none' | 'words';
+  accessibilityHint?: string;
   testID?: string;
 }) {
   return (
@@ -286,9 +329,10 @@ function Field({
         onChangeText={onChangeText}
         placeholder={placeholder}
         placeholderTextColor={vola.textDim}
-        autoCapitalize="words"
+        autoCapitalize={autoCapitalize}
         autoCorrect={false}
         accessibilityLabel={label}
+        accessibilityHint={accessibilityHint}
         testID={testID}
       />
     </View>

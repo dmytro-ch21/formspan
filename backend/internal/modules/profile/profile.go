@@ -7,6 +7,7 @@ package profile
 import (
 	"context"
 	"errors"
+	"regexp"
 	"time"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/discipline"
@@ -16,6 +17,11 @@ var (
 	ErrNotFound      = errors.New("profile: not found")
 	ErrAlreadyExists = errors.New("profile: already exists")
 	ErrInvalidInput  = errors.New("profile: invalid input")
+	// ErrUsernameTaken is distinct from ErrAlreadyExists on purpose: both are
+	// 409s, but "this profile already exists" and "somebody else has that
+	// handle" are different facts and the client copy for them cannot be one
+	// sentence. The repository tells them apart by constraint name.
+	ErrUsernameTaken = errors.New("profile: username taken")
 )
 
 // Profile no longer carries module toggles. They moved to profile_modules
@@ -23,7 +29,16 @@ var (
 // internal/platform/discipline registry. Four boolean columns meant a
 // migration and ~13 unchecked edit sites per new discipline; rows mean none.
 type Profile struct {
-	UserID      string  `json:"user_id"`
+	UserID string `json:"user_id"`
+	// Username is the unique, claimable handle — the lookup key the sharing
+	// design is built on. Nil until claimed; claiming is opt-in until sharing
+	// ships. Lowercase by validation ([a-z][a-z0-9_]{2,29}), case-insensitive
+	// by index — see migration 000040 for the split of those two duties.
+	//
+	// DisplayName stays what it always was: free prose for showing, never for
+	// finding. The two fields answer different questions and neither can do
+	// the other's job.
+	Username    *string `json:"username"`
 	DisplayName *string `json:"display_name"`
 	DateOfBirth *string `json:"date_of_birth"` // "YYYY-MM-DD"
 	Sex         *string `json:"sex"`           // "male" | "female" | null
@@ -50,7 +65,15 @@ type NewProfile struct {
 }
 
 // ProfileUpdate is a partial update — nil fields are left unchanged.
+//
+// Username follows that rule, which means a claimed handle cannot be CLEARED
+// through this path, only renamed. Deliberate: nothing references usernames by
+// value (friends and shares will key on user_id), so a rename is free — but
+// un-claiming has no consumer yet, and the module's nil-means-unchanged
+// convention would need a Set flag to express it. Add that when someone
+// actually needs to release a handle.
 type ProfileUpdate struct {
+	Username    *string
 	DisplayName *string
 	DateOfBirth *string
 	Sex         *string
@@ -102,4 +125,39 @@ type Repository interface {
 	// SetModules upserts the given keys. Keys the caller doesn't mention are
 	// left alone, so a client can PATCH one toggle without sending the rest.
 	SetModules(ctx context.Context, userID string, enabled map[string]bool) error
+}
+
+// usernamePattern is the whole format rule: 3–30 characters, lowercase
+// letters, digits and underscore, starting with a letter.
+//
+// Lowercase-only rather than case-preserving-with-case-insensitive-compare:
+// the catalog already has DisplayName for how a person wants their name to
+// LOOK, so the handle can be strictly canonical — one spelling, no "is
+// @Dmytro the same as @dmytro" question anywhere in the system. Starting with
+// a letter keeps a handle from ever being confusable with a numeric id.
+var usernamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{2,29}$`)
+
+// ValidUsername reports whether a handle is claimable at all — format first,
+// then the reserved list.
+func ValidUsername(u string) bool {
+	return usernamePattern.MatchString(u) && !reservedUsernames[u]
+}
+
+// reservedUsernames are handles nobody may claim.
+//
+// Two kinds live here, and both matter: names that would let an account
+// impersonate the product or its staff (admin, vola, support…), and names
+// that collide with words the UI or future routes use as path segments or
+// pronouns (me, you, settings…). Validated in Go per the 000021 convention —
+// this list will grow, and growing it must be a code change, not a migration.
+var reservedUsernames = map[string]bool{
+	"admin": true, "administrator": true, "moderator": true, "mod": true,
+	"staff": true, "support": true, "help": true, "official": true,
+	"security": true, "system": true, "root": true, "api": true,
+	"vola": true, "formspan": true, "team": true,
+	"me": true, "you": true, "self": true, "user": true, "users": true,
+	"profile": true, "settings": true, "account": true, "friends": true,
+	"share": true, "shares": true, "about": true, "everyone": true,
+	"anonymous": true, "unknown": true, "deleted": true,
+	"null": true, "undefined": true, "none": true, "test": true,
 }

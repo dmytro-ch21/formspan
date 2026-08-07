@@ -14,6 +14,8 @@ const API_BASE = `${API_URL}/v1`;
  */
 export type Profile = {
   user_id: string;
+  /** The unique handle, or null until claimed. Lowercase by server rule. */
+  username: string | null;
   display_name: string | null;
   date_of_birth: string | null;
   sex: string | null;
@@ -24,6 +26,10 @@ export type Profile = {
 /** The fields the edit screen can change. Omitted keys are left alone. */
 export type ProfilePatch = Partial<{
   track_effort: boolean;
+  /** Claim or rename only — never null. The server treats null as "leave
+   *  unchanged" (the profile-wide COALESCE contract), so a clear cannot be
+   *  expressed and the save path must OMIT the key rather than null it. */
+  username: string;
   display_name: string | null;
   date_of_birth: string | null;
   sex: string | null;
