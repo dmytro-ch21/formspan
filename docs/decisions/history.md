@@ -17419,6 +17419,65 @@ Connect's exercise-type enum has a martial-arts constant. HealthKit's
 `martialArts` (28) is confirmed; the Android equivalent was not reachable from the
 docs during this pass.
 
+## 2026-08-08 — Renaming appended instead of replacing, and the evidence was sitting in the workout list
+
+The third defect from task #13's device pass, and the only one whose evidence
+predates the pass: the user's own template list contains a workout called
+**`Maestro Push DayPush A`**. That is "Maestro Push Day" with "Push A" typed
+onto the end by someone who believed they were replacing it.
+
+Both rename fields — `app/workout/[id].tsx` and `app/bjj/session/[id].tsx` —
+carried `autoFocus` and `selectTextOnFocus` together. **That pair does not work
+on iOS, and it fails silently.** Reproduced on an iPhone 15 Pro: tap the title,
+and the field opens with an unselected caret parked at the END of the name. No
+highlight, no error, nothing in the logs. Every rename appends.
+
+The mechanism is an ordering race, which is why it reads as flaky rather than
+broken. `selectTextOnFocus` is honoured in the native `textFieldDidBeginEditing`
+callback; `autoFocus` begins editing during the first mount; RN then applies the
+`text`/`selection` props on the commit that follows and collapses the selection
+it just made.
+
+**So the selection is stated as a prop rather than asked for as a behaviour.** A
+controlled `selection` is not racing anything — it is part of the same commit as
+the text. `SelectAllTextInput` wraps `TextInput`, opens with `{0, length}`, and
+both screens now use it.
+
+**The half that matters as much as the fix is when to stop.** A permanently
+controlled `selection` fights every subsequent tap and keystroke: the field
+would snap back to select-all forever, which is worse than the bug. Control is
+released on the first `onChangeText`, and on any selection change that is not
+the one we asked for — a tap to place the caret, a drag on a handle. The one we
+asked for is ignored, because **RN echoes a controlled `selection` back through
+`onSelectionChange`**, and treating that echo as user intent would release
+before the selection ever took effect. That is the subtle failure, it is
+invisible (the prop is still set for one render), and it has its own test.
+
+Not a hook, deliberately: the state must be created when the field OPENS, and
+both callers render the field only while renaming — so mounting is that moment.
+A hook called from the always-mounted screen would need its own "was it open"
+bookkeeping to notice.
+
+**Device-verified in both directions**, because this fix's premise — that iOS
+honours a controlled `selection` where it ignored `selectTextOnFocus` — cannot
+be checked in jest at all: RNTL records the prop and never applies it. On the
+Simulator the field now opens with the whole name highlighted and selection
+handles showing, and dragging a handle inward releases control with no
+snap-back. The jest tests guard the regression (a future edit that stops asking,
+or starts releasing too eagerly); the device is the only proof of the premise.
+
+`keyboardCoverage.test.ts` caught the new file immediately — any file with a
+`TextInput` must import the shared keyboard container. Taken as the opt-out it
+provides, with the justification next to the code: this is a leaf input with no
+scroll container of its own and no business acquiring one, and both call sites
+already sit inside a `KeyboardAwareScrollView`.
+
+### Left alone
+
+The mangled `Maestro Push DayPush A` is still in the list. It is the user's
+data, "Push A" is an inference about what they meant, and the fix does not need
+it renamed to be verified.
+
 
 ## Open items / known gaps as of this entry
 
