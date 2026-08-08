@@ -17260,6 +17260,40 @@ already argued in code, so the next person to notice them can stop sooner:
   Safari with `simctl` and tapping the address bar — no keyboard there means it
   is device-wide, not the app.
 
+## 2026-08-08 — A planned row that drew a chevron and did nothing
+
+Also from task #13's device pass. Tapping a planned session on the Plan tab did
+nothing — three taps, three different points on the row, no navigation. The row
+was not subtly wrong; it had no `onPress` at all.
+
+What made it read as broken rather than as "a row you long-press" is that it
+drew a **chevron** and carried `accessibilityRole="button"`, which is the
+standard promise of a screen behind a tap. `onLongPress` was the only handler,
+and the accessibility label did say "Long press to remove" — but nobody reads a
+label off a screen, they read the affordance.
+
+**The fix is to make the affordance and the behaviour come from one decision.**
+`plannedEntryTarget(p, names)` answers "what does this row open, if anything",
+and both the `onPress` and the chevron hang off it. A fix that added navigation
+but left the chevron unconditional would still lie, and it would lie on the
+*common* rows.
+
+**Nowhere to go is the common case, not an edge case.** A plan can name no
+template at all — "BJJ on Thursday" is a legitimate plan — and it can name one
+the cache no longer holds, because `lib/plan.ts` deliberately keeps no foreign
+key, so a template deleted on another device leaves the plan pointing at
+nothing. The title already falls back to "<Sport> session" for exactly that. The
+device made this concrete: the only planned row on the test account was that
+second case, so the fix's visible effect there is the chevron disappearing.
+Both states were then checked — a row with a resolvable template shows its
+chevron and opens the workout, one without shows none and stays inert — and
+long-press still removes, which was the non-regression worth confirming since
+adding `onPress` to a `Pressable` is exactly how a long-press gets swallowed.
+
+Keyed on the cached NAME rather than on `workoutId` alone, because a row whose
+id resolves to nothing would otherwise push a detail screen that can only render
+an error.
+
 
 ## 2026-08-08 — What a wearable can actually tell us, and the two things system-design got wrong about it
 

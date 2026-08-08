@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import {
   Alert,
   AppState,
@@ -36,6 +36,34 @@ import {
   type PlannedSession,
 } from '@/lib/plan';
 import { cachedWorkouts } from '@/lib/sessionStore';
+
+/**
+ * The workout a planned row opens, or null when it opens nothing.
+ *
+ * A planned row used to draw a chevron and carry `accessibilityRole="button"`
+ * while having no `onPress` at all — so it was inert to a tap, and the chevron
+ * promised a screen that did not exist. On a device that reads as a broken row,
+ * not as a row that was only ever meant to be long-pressed: three taps at three
+ * points did nothing, with the affordance for "tap to open" plainly drawn.
+ *
+ * **Nowhere to go is a real state, not an edge case.** A plan may name no
+ * template at all (a bare "BJJ on Thursday"), and it may name one the cache no
+ * longer holds — `lib/plan.ts` deliberately keeps no foreign key, so a template
+ * deleted on another device leaves the plan row pointing at nothing. That is
+ * already why the title falls back to "<Sport> session". Both cases must not
+ * navigate, and must not advertise that they would.
+ *
+ * Keyed on `names` rather than on `workoutId` alone for exactly that second
+ * case: a row whose id resolves to no cached name would otherwise push a detail
+ * screen that can only render an error.
+ */
+export function plannedEntryTarget(
+  p: { workoutId: string | null },
+  names: Record<string, string>,
+): string | null {
+  if (!p.workoutId) return null;
+  return names[p.workoutId] ? p.workoutId : null;
+}
 
 /**
  * The training week, as something you fill in.
@@ -77,6 +105,7 @@ export function WeekPlanner({
   modules: Module[];
 }) {
   const accent = useAccent();
+  const router = useRouter();
   const [now, setNow] = useState(() => new Date());
   const [plans, setPlans] = useState<PlannedSession[]>([]);
   const [names, setNames] = useState<Record<string, string>>({});
@@ -443,15 +472,25 @@ export function WeekPlanner({
                   {isPast ? '—' : 'Rest'}
                 </Text>
               ) : (
-                mine.map((p) => (
+                mine.map((p) => {
+                  const target = plannedEntryTarget(p, names);
+                  // One lookup feeding the title, the label and the chevron.
+                  // They were two copies agreeing by luck: both fall back when
+                  // the name is empty, so they match today — but the predicate
+                  // deciding to open a blank-named workout would leave the row
+                  // navigating while still announcing the sport fallback. That
+                  // is the same drift this fix exists to remove.
+                  const name = target ? names[target] : null;
+                  return (
                   <Pressable
                     key={p.id}
                     style={({ pressed }) => [styles.entry, pressed && styles.entryPressed]}
+                    onPress={target ? () => router.push(`/workout/${target}`) : undefined}
                     onLongPress={() => confirmRemove(p)}
                     accessibilityRole="button"
                     accessibilityLabel={`${
-                      (p.workoutId && names[p.workoutId]) || labelFor(modules, p.sport)
-                    }, planned. Long press to remove.`}
+                      name || labelFor(modules, p.sport)
+                    }, planned.${target ? ' Opens the workout.' : ''} Long press to remove.`}
                     testID={`plan-entry-${p.id}`}
                   >
                     <RNView
@@ -490,14 +529,18 @@ export function WeekPlanner({
                       <Text style={styles.entryTitle} numberOfLines={1}>
                         {/* Falls back to the discipline when the plan names a
                             template the cache no longer holds — see lib/plan.ts
-                            on why there is no foreign key. */}
-                        {(p.workoutId && names[p.workoutId]) ||
-                          `${labelFor(modules, p.sport)} session`}
+                            on why there is no foreign key. Same `name` the
+                            chevron and the label read, so a row can never
+                            announce one thing and open another. */}
+                        {name || `${labelFor(modules, p.sport)} session`}
                       </Text>
                     </RNView>
-                    <Icon name="chevron" size={13} color={vola.textDim} />
+                    {/* Only when there is somewhere to go. A chevron on an
+                        inert row is the whole bug this fixes. */}
+                    {target && <Icon name="chevron" size={13} color={vola.textDim} />}
                   </Pressable>
-                ))
+                  );
+                })
               )}
             </RNView>
           );
