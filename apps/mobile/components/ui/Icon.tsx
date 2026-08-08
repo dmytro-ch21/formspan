@@ -49,6 +49,20 @@ const EXTRA = {
   layers: [{ t: 'p', d: 'M4 7h16M4 12h16M4 17h10' }],
   /** Dismiss. Chrome, like the chevrons — the kit has no close glyph. */
   close: [{ t: 'p', d: 'M6 6l12 12M18 6L6 18' }],
+  /**
+   * Transport controls for the timer.
+   *
+   * Chrome rather than iconography, same as the chevrons: the kit draws things
+   * the product is *about* (a barbell, a belt, a route), and these are the
+   * universal player glyphs. Stroked and closed (`z`) like everything else here
+   * — this renderer sets `fill="none"` for the whole set, so a triangle that
+   * expected a fill would come out as two disconnected lines.
+   */
+  play: [{ t: 'p', d: 'M8.5 5.8l10 6.2-10 6.2z' }],
+  pause: [{ t: 'p', d: 'M9 5v14M15 5v14' }],
+  /** Collapse the timer to the top bar; the chevron the other way expands it. */
+  minimise: [{ t: 'p', d: 'M5 14h14M12 4v6M9 7l3 3 3-3' }],
+  expand: [{ t: 'p', d: 'M5 10h14M12 20v-6M9 17l3-3 3 3' }],
 } as const satisfies Record<string, readonly Primitive[]>;
 
 /**

@@ -6166,3 +6166,123 @@ agree about the same rows.
 - **Two enrolled roadmaps conflict, and nothing warns.** Known gap; worth a
   scenario so it is found deliberately rather than by an athlete.
 
+
+## The session timer, timed sets and guided runs (mobile)
+
+Mobile-only by the platform rule — a rest countdown on a desk you are not
+standing next to is decoration. Everything here is `app/session/[id]`, plus the
+pure modules behind it (`lib/countdown.ts`, `lib/setMode.ts`, `lib/duration.ts`,
+`lib/intervalRun.ts`, `lib/voice.ts`).
+
+### The timer surface
+
+- **Work opens expanded, rest opens minimised.** The default is the whole
+  argument: a timed set is time you spend watching a clock, a rest is not.
+- **Minimise and expand round-trip**, and the same controls (±, pause, stop) work
+  in both forms — an athlete who minimised a rest must not have to expand it to
+  add fifteen seconds.
+- **The collapsed bar pushes the list down; the expanded card overlays it.**
+  Padding the log by 380pt every time a countdown starts and stops would make the
+  screen jump under the thumb between every set.
+- **Every colour is the accent's.** Switch to yellow, run a rest to completion,
+  and nothing green appears — the old bar's completion state did exactly that.
+- **A finished session kills any running countdown.** A work countdown reaching
+  zero WRITES; landing that in a read-only session would push a full plank for a
+  hold the athlete cut short by finishing.
+
+### The count-in
+
+- **Three seconds before every timed set**, not just the first one in a run.
+- **± and pause are absent on a count-in**, not present-and-inert.
+- **It ends on its own note**, audibly different from both rest-done and set-done.
+
+### Ticks land on the second
+
+The regression this replaced: ticks fired from a 250ms poll and landed up to
+250ms late. Hard to assert in a UI test, so it is pinned on `tickSchedule` — but
+worth one manual pass on a device, because "does the beep feel late" is the
+whole user-visible property.
+
+- The last three seconds are announced at `endsAt − n × 1000`.
+- **A count-in is counted in from its first instant** — "3, 2, 1", never "2, 1".
+- Adjusting mid-countdown re-derives only the ticks not yet played.
+- A paused countdown announces nothing.
+
+### Ending a timed set early
+
+- **Stop mid-plank logs the elapsed seconds, not the prescribed ones**, and does
+  NOT tick the set. Verified once by hand: 60 prescribed, stopped at ~40, logged
+  `40s`, untouched tick.
+- **"Done early" inside a run logs elapsed AND ticks**, then advances — skipping
+  is not the same as pretending the set did not happen.
+- **A countdown that simply runs out logs its full total.** Same code path, and
+  the number happens to be the same.
+
+### Reps or time, per exercise
+
+- **The chip appears only on `load_type: 'reps'` exercises.** Not on a barbell
+  squat, not on a plank.
+- **Switching clears the other measure.** A row holding both 15 reps and 40
+  seconds is a row two readers describe two different ways — and one of them is
+  the volume rollup.
+- **Completed sets are left alone.** They are records of something that happened.
+- **A timed burpee gets the play button; a rep-counted one does not.** The toggle
+  and the timer button must never disagree, because both read `seconds`.
+- **Flipping to reps and back restores the prescribed duration**, not the generic
+  default.
+- **A progression suggestion does not put a rep target on a timed set** — it
+  would flip the row's mode back with a duration still attached.
+
+### Seconds or minutes
+
+- **The chip appears on timed exercises only**, and the kg/lb chip only on
+  weighted ones.
+- **The stored value never changes.** Type 1.5 in minutes, switch to seconds,
+  read 90.
+- **±  follows the unit**: 15s in seconds, 30s in minutes, and the button says so.
+- **The default follows the prescription** — a 4-minute round opens in minutes, a
+  45-second plank in seconds, before anybody chooses anything.
+- **The choice is per exercise and survives a relaunch.**
+
+### Run all sets / guided workout
+
+- **"Run all" appears only when every pending set of that exercise is timed.**
+- **"Guided workout" appears only when every pending set in the SESSION is.** One
+  untimed exercise anywhere hides it — a run that skipped them would stop guiding
+  halfway through without saying so.
+- **The sequence is ready → work → rest → …, with no trailing rest** after the
+  final set.
+- **Sets already logged are skipped**, and the run's estimate reflects that.
+- **The rest between exercises is the one you just finished**, not the one coming.
+- **Any structural change ends the whole run** — add, remove, reorder or swap.
+  Every remaining step carries a `setIndex` the change has invalidated.
+- **Nothing else starts a countdown while a run is live**: auto-rest is
+  suppressed, and the per-set play button is hidden.
+- **Adjusting a rest inside a run does not persist to the preference** — the
+  plan's later steps were built from the stored value.
+- **Ending a run mid-way leaves the sets already logged intact.**
+
+### Spoken cues
+
+- **Only during a guided run.** "Run all" on one exercise is silent.
+- **The chime is replaced, not joined.** Exactly one of voice or chime per
+  transition.
+- **Voice off, sounds on, still chimes.** The two preferences must not interact
+  to produce silence — that reads as the timer having stopped.
+- **Stopping a run cuts the voice off mid-sentence.** Being told to get ready
+  after you stopped is the app arguing with a decision already made.
+- **"Set completed" is never said unless a work interval ended.**
+- **The next exercise is named on the way into a rest**, and only when it changes.
+
+### Monochrome
+
+- **Choosing Mono recolours the accent immediately** and shows the relaunch note.
+- **After a relaunch there is no hue anywhere** — error text, the consistency
+  grid, sport rules, tile codes and exercise photography included.
+- **Switching back to a colour restores everything**, also on relaunch.
+- **The relaunch note appears only when the mode is actually mid-switch** — never
+  on the five accents that need no relaunch.
+- **The accent swatches keep their real colours in Mono.** They are the control
+  for choosing a colour; greying them out would make the picker unusable.
+- **A fresh install with no stored flag comes up in colour**, and an unreadable
+  keychain does the same rather than taking the palette down with it.

@@ -15,7 +15,7 @@ import { useModules } from '@/lib/ModulesProvider';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
 import { applySuggestions, fetchSuggestions, setsFromWorkout } from '@/lib/sessions';
-import { cachedWorkouts, cacheWorkouts, startLocalSession } from '@/lib/sessionStore';
+import { cachedExercises, cachedWorkouts, cacheWorkouts, startLocalSession } from '@/lib/sessionStore';
 import { listWorkouts, summariseTargets, type Sport, type Workout } from '@/lib/workouts';
 
 /**
@@ -118,7 +118,17 @@ export default function StartSessionScreen() {
             sets.map((x) => x.exercise_id),
             workout?.goal ?? null,
           );
-          sets = applySuggestions(sets, suggestions);
+          // The catalog goes with it, so a dual-mode set already prescribed in
+          // seconds does not also acquire a rep target — a row holding both is
+          // a row two readers describe differently. See lib/setMode.ts.
+          //
+          // From the local cache rather than the network: this whole path has
+          // to work with no signal, and a lookup that failed would silently
+          // reintroduce the thing the argument exists to prevent.
+          const loadTypes = new Map(
+            (await cachedExercises(sport).catch(() => [])).map((e) => [e.id, e.load_type]),
+          );
+          sets = applySuggestions(sets, suggestions, (id) => loadTypes.get(id));
         } catch {
           // A failed lookup must not stop the session starting — an empty
           // weight is an inconvenience, a blocked workout is a lost one.

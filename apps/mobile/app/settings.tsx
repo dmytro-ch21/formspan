@@ -12,6 +12,8 @@ import { useAuth as useClerkAuth } from '@clerk/clerk-expo';
 
 import { readAutoRest, writeAutoRest } from '@/lib/rest';
 import { playSound, readSoundsEnabled, writeSoundsEnabled } from '@/lib/sounds';
+import { MONO_ACCENT, monoNeedsRelaunch } from '@/lib/palette';
+import { readVoiceEnabled, speak, writeVoiceEnabled } from '@/lib/voice';
 import { useTrackEffort } from '@/lib/useTrackEffort';
 import { isNotFound } from '@/lib/apiError';
 import { getProfile, updateProfile } from '@/lib/profile';
@@ -39,9 +41,13 @@ export default function SettingsScreen() {
   const [autoRest, setAutoRest] = useState(false);
   // Default on: the chime is the point of a timer you are not looking at.
   const [sounds, setSounds] = useState(true);
+  // Also default on, and for the same reason: a guided workout that says nothing
+  // is a guided workout you have to watch.
+  const [voice, setVoice] = useState(true);
   useEffect(() => {
     if (userId) readAutoRest(userId).then(setAutoRest).catch(() => {});
     if (userId) readSoundsEnabled(userId).then(setSounds).catch(() => {});
+    if (userId) readVoiceEnabled(userId).then(setVoice).catch(() => {});
   }, [userId]);
 
   const { trackEffort, setTrackEffort, unsynced: effortUnsynced } = useTrackEffort();
@@ -173,6 +179,22 @@ export default function SettingsScreen() {
           }}
           testID="settings-sounds"
         />
+        <Toggle
+          label="Spoken cues"
+          hint="A guided workout says what's next — get ready, start, rest. Only during a guided run; the timer's chimes are the Sounds switch above."
+          value={voice}
+          onChange={(on) => {
+            setVoice(on);
+            // Flag before preview, same ordering trap the Sounds toggle
+            // documents: `writeVoiceEnabled` flips the module's flag before its
+            // first await, and `speak` checks that flag — so previewing first
+            // would answer "did that work?" with silence in the one direction
+            // the preview exists for.
+            if (userId) writeVoiceEnabled(userId, on).catch(() => {});
+            if (on) speak('getReady');
+          }}
+          testID="settings-voice"
+        />
         <Row
           label="Suggestions"
           hint="What VOLA suggests, and what you've told it to stop suggesting."
@@ -271,7 +293,27 @@ function AccentRow() {
     <View style={styles.accentRow}>
       <View style={styles.rowBody}>
         <Text style={styles.rowLabel}>Accent</Text>
-        <Text style={styles.muted}>Buttons, links and the active tab.</Text>
+        <Text style={styles.muted}>
+          {name === MONO_ACCENT
+            ? 'Mono turns the whole app black and white.'
+            : 'Buttons, links and the active tab.'}
+        </Text>
+        {/*
+          Only while it is actually true.
+
+          Monochrome repaints the accent immediately and the rest of the palette
+          on the next launch — the palette is resolved once, at module load, for
+          the reason `constants/Colors.ts` sets out. Saying so is the honest
+          alternative to an athlete deciding the setting is broken because the
+          error text beside it is still red. A permanent "restart to apply" line
+          would be noise on the five accents that need no restart at all.
+        */}
+        {monoNeedsRelaunch(name) && (
+          <Text style={styles.unsynced} testID="accent-relaunch">
+            Reopen VOLA to finish switching — the accent has changed already, the
+            rest of the palette follows on next launch.
+          </Text>
+        )}
       </View>
       <RNView
         style={styles.swatches}

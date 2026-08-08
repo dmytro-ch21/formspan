@@ -170,6 +170,21 @@ export const PREF_SUGGESTIONS_OFF = 'suggestions_off';
  */
 export const PREF_SOUNDS = 'sounds_enabled';
 
+/**
+ * `'0'` silences the guided workout's spoken cues. Absent means on.
+ *
+ * A key of its own rather than riding {@link PREF_SOUNDS}, because they are
+ * genuinely different questions. A chime is anonymous and survives a shared
+ * room; a voice saying "set completed" out loud in a busy gym is a thing plenty
+ * of people want off while still wanting to hear their rest timer. Muting sounds
+ * does silence the voice too — see `Countdown`'s run handler — but not the
+ * reverse.
+ *
+ * Device-local, same reasoning as {@link PREF_SOUNDS}: whether your phone is
+ * allowed to talk is a property of the phone and the room it is in.
+ */
+export const PREF_VOICE = 'voice_cues';
+
 export const PREF_AUTO_REST = 'auto_rest';
 export const PREF_TRACK_EFFORT = 'track_effort';
 /**

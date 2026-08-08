@@ -27,6 +27,7 @@ import {
   getWorkout,
   summariseTargets,
   targetFieldsFor,
+  withTarget,
   type TargetField,
   type Workout,
   type WorkoutItem,
@@ -291,6 +292,9 @@ export default function WorkoutDetailScreen() {
         sets = applySuggestions(
           sets,
           await fetchSuggestions(getToken, sets.map((x) => x.exercise_id), workout.goal),
+          // The catalog, so a dual-mode set already prescribed in seconds does
+          // not also acquire a rep target — see lib/setMode.ts.
+          (id) => catalog.get(id)?.load_type,
         );
       } catch {
         /* start anyway */
@@ -676,14 +680,25 @@ function ItemRow({
                     value={shown}
                     onChangeText={(text) => {
                       const n = text.trim() === '' ? null : Number(text.replace(',', '.'));
-                      if (n === null || !Number.isFinite(n)) {
-                        onChange({ ...item, [FIELD_KEY[f]]: null });
-                        return;
-                      }
-                      onChange({
-                        ...item,
-                        [FIELD_KEY[f]]: f === 'weight' ? fromDisplayWeight(n, units) : Math.round(n),
-                      });
+                      // Through `withTarget`, not a raw spread. On a dual-mode
+                      // exercise reps and seconds are mutually exclusive, and
+                      // this editor now renders both fields — so a raw write
+                      // lets a template store "3 × 15 AND 40s", which
+                      // `setsFromWorkout` then copies onto every set it
+                      // creates. See lib/setMode.ts for why a row holding both
+                      // is a row two readers describe differently.
+                      onChange(
+                        withTarget(
+                          item,
+                          f,
+                          n === null || !Number.isFinite(n)
+                            ? null
+                            : f === 'weight'
+                              ? fromDisplayWeight(n, units)
+                              : Math.round(n),
+                          exercise?.load_type,
+                        ),
+                      );
                     }}
                     placeholder="—"
                     placeholderTextColor="#9aa0a6"
@@ -742,13 +757,10 @@ const FIELD_LABEL: Record<TargetField, string> = {
   seconds: 'Seconds',
   distance: 'Distance (m)',
 };
-const FIELD_KEY: Record<TargetField, keyof WorkoutItem> = {
-  sets: 'target_sets',
-  reps: 'target_reps',
-  weight: 'target_weight_kg',
-  seconds: 'target_seconds',
-  distance: 'target_distance_m',
-};
+// The field→column map moved to `withTarget` in lib/workouts.ts, which is the
+// only thing allowed to write one now: on a dual-mode exercise reps and seconds
+// are mutually exclusive, and a local copy of the map here is exactly how a
+// future edit writes one without the other being cleared.
 const FIELD_VALUE: Record<TargetField, (i: WorkoutItem) => number | null> = {
   sets: (i) => i.target_sets,
   reps: (i) => i.target_reps,

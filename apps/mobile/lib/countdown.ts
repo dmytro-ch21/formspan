@@ -15,19 +15,19 @@
  * the drift-free property is exactly what a test has to pin, and it cannot be
  * pinned by a function that reads the clock itself.
  *
- * ## Rest and work are ONE countdown, not two
+ * ## Rest, work and get-ready are ONE countdown, not three
  *
  * `kind` discriminates them. That is deliberate and load-bearing: you cannot
- * be resting and holding a plank at the same time, there is one bar at the
- * bottom of the session screen to show a countdown in, and two independent
- * timers would both be entitled to it. One state means starting either one
- * ends the other, which is what actually happens in a gym.
+ * be resting and holding a plank at the same time, there is one timer surface
+ * on the session screen to show a countdown in, and independent timers would
+ * all be entitled to it. One state means starting any of them ends the others,
+ * which is what actually happens in a gym.
  */
 
-export type CountdownKind = 'rest' | 'work';
+export type CountdownKind = 'rest' | 'work' | 'ready';
 
 export type Countdown = {
-  /** Resting between sets, or performing a timed set. */
+  /** Resting between sets, performing a timed set, or about to start one. */
   kind: CountdownKind;
   /**
    * Epoch ms this ends at.
@@ -53,7 +53,30 @@ export type Countdown = {
    * on that row and no other.
    */
   setIndex?: number;
+  /**
+   * The unit this countdown's ± buttons work in — see `lib/duration.ts`.
+   *
+   * On the countdown rather than looked up by the bar, because the bar is handed
+   * a `Countdown` and nothing else: a ±15 on a five-minute round is a rounding
+   * error, and the button has to say the number it will actually move.
+   */
+  step?: number;
 };
+
+/**
+ * The lead-in before a timed set actually starts.
+ *
+ * Three seconds, and it is not decoration: the countdown a phone starts is
+ * useless if the athlete is still putting the phone down when it begins. Every
+ * gym clock, every interval app and every referee counts you in, and without it
+ * the first seconds of every timed set are spent getting into position — which
+ * then get logged as work that happened.
+ *
+ * Same three as {@link TICK_FROM_SECONDS} on purpose: the lead-in is *entirely*
+ * ticks, so "3, 2, 1, go" is one continuous sound rather than a silent pause
+ * followed by a chime.
+ */
+export const READY_SECONDS = 3;
 
 /**
  * Does adjusting this countdown let it complete a second time?
@@ -77,6 +100,24 @@ export function rearmsCompletionOnAdjust(kind: CountdownKind): boolean {
 }
 
 /**
+ * Is this countdown one the athlete may lengthen, shorten or pause?
+ *
+ * `ready` is not. It is a three-second count-in whose entire job is to be over —
+ * a pause button on it would be a control that exists for less time than it
+ * takes to find, and ±15 seconds on a 3-second lead-in is nonsense. Rendering
+ * the buttons and having them do nothing would be worse than not rendering
+ * them, so the timer surface asks this rather than each control guessing.
+ */
+export function isAdjustable(kind: CountdownKind): boolean {
+  return kind !== 'ready';
+}
+
+/** How much ± moves this countdown; 15s unless it was started in minutes. */
+export function stepOf(c: Pick<Countdown, 'step'>): number {
+  return c.step && c.step > 0 ? c.step : 15;
+}
+
+/**
  * How many seconds before the end the per-second ticks start.
  *
  * Three, because it is the length of a countdown people already have in their
@@ -95,8 +136,52 @@ export const TICK_FROM_SECONDS = 3;
  * screen is not optional, so it is a named function with a test rather than a
  * ternary somewhere in an interval callback.
  */
-export function completionSoundFor(kind: CountdownKind): 'restComplete' | 'workComplete' {
-  return kind === 'work' ? 'workComplete' : 'restComplete';
+export function completionSoundFor(kind: CountdownKind): 'restComplete' | 'workComplete' | 'go' {
+  if (kind === 'work') return 'workComplete';
+  // The count-in ends by handing over to the work interval, so it gets the
+  // rising "start" note rather than either of the two chimes that mean an
+  // interval ENDED. Sharing `restComplete` would have been free and wrong: rest
+  // ending and a count-in ending are both "go", but one of them is followed by
+  // silence and the other by a set you are already three seconds into.
+  if (kind === 'ready') return 'go';
+  return 'restComplete';
+}
+
+/**
+ * When each of the last seconds should be announced, as absolute epoch ms.
+ *
+ * **This exists because the ticks used to be polled, and polling is what made
+ * them late.** The countdown reads its remaining time on a 250ms interval, and
+ * the tick fired on whichever pass first saw a new whole second — so a beep
+ * landed anywhere from 0 to 250ms after the second actually turned over, which
+ * is exactly the "three seconds pass and *then* it beeps" the athlete hears.
+ * Averaged 125ms late, and a late beep on a count-in is worse than no beep,
+ * because you start moving on it.
+ *
+ * The deadline model already knows the answer exactly: the moment three seconds
+ * remain is `endsAt - 3000`, and it has been known since the countdown started.
+ * So the caller schedules one timer per tick against these times instead of
+ * asking every 250ms whether it is time yet. The interval stays, for the digits
+ * on screen, where being a quarter of a second stale is invisible.
+ *
+ * Returned in fire order and filtered to what is still ahead of `now`, so a
+ * countdown adjusted at "2" re-derives its remaining ticks and never replays one
+ * that has already sounded. A paused countdown has no schedule at all: there is
+ * no deadline to hang the times off, which is the same reason `remainingAt`
+ * short-circuits on `pausedWith`.
+ */
+export type ScheduledTick = { at: number; second: number };
+
+export function tickSchedule(c: Countdown, now: number): ScheduledTick[] {
+  if (c.pausedWith != null || c.endsAt == null) return [];
+  const out: ScheduledTick[] = [];
+  for (let second = Math.min(TICK_FROM_SECONDS, Math.ceil(c.total)); second >= 1; second--) {
+    const at = c.endsAt - second * 1000;
+    // `>= now` and not `> now`: a three-second count-in's first tick is due the
+    // instant it starts, and dropping it would count the athlete in "2, 1, go".
+    if (at >= now) out.push({ at, second });
+  }
+  return out;
 }
 
 /** Seconds left. Zero once it has run out, never negative. */

@@ -3,9 +3,13 @@ import {
   completionSoundFor,
   elapsedOf,
   formatCountdown,
+  isAdjustable,
+  READY_SECONDS,
   rearmsCompletionOnAdjust,
   remainingAt,
+  stepOf,
   TICK_FROM_SECONDS,
+  tickSchedule,
   toggledPause,
   type Countdown,
 } from '../countdown';
@@ -168,6 +172,14 @@ describe('who is allowed to complete twice', () => {
     // running and nothing on screen to suggest the number had changed.
     expect(rearmsCompletionOnAdjust('work')).toBe(false);
   });
+
+  it('never re-arms a count-in, which cannot be adjusted anyway', () => {
+    // Belt and braces with `isAdjustable`: the surface hides the buttons, and
+    // this makes the model refuse even if a future caller finds another route
+    // to `adjust`. A count-in that completed twice would start two work
+    // intervals against one row.
+    expect(rearmsCompletionOnAdjust('ready')).toBe(false);
+  });
 });
 
 describe('the row a countdown is writing to', () => {
@@ -215,6 +227,15 @@ describe('which chime marks the end', () => {
     expect(completionSoundFor('work')).toBe('workComplete');
     expect(completionSoundFor('work')).not.toBe(completionSoundFor('rest'));
   });
+
+  it('gives the count-in its own rising note', () => {
+    // A count-in ending and a rest ending are both "go", but one is followed by
+    // silence and the other by a set you are already three seconds into.
+    // Sharing `restComplete` would have been free and wrong.
+    expect(completionSoundFor('ready')).toBe('go');
+    expect(completionSoundFor('ready')).not.toBe(completionSoundFor('rest'));
+    expect(completionSoundFor('ready')).not.toBe(completionSoundFor('work'));
+  });
 });
 
 describe('when the ticks start', () => {
@@ -242,6 +263,84 @@ describe('formatting', () => {
   });
 });
 
+/**
+ * The fix for the late beeps.
+ *
+ * The ticks used to fire from the 250ms display interval, on whichever pass
+ * first noticed a new whole second — so every one landed between 0 and 250ms
+ * AFTER the second turned over. Averaged 125ms late, audibly so, and on a
+ * count-in it matters because you move on the beep.
+ *
+ * These pin the property that replaced it: the times are DERIVED FROM THE
+ * DEADLINE and known the moment the countdown starts, so the caller can aim a
+ * timer at each one instead of polling for it.
+ */
+describe('when the last seconds get announced', () => {
+  it('puts each tick exactly on the second boundary', () => {
+    const c = rest({ endsAt: T0 + 90_000, total: 90 });
+    expect(tickSchedule(c, T0)).toEqual([
+      { at: T0 + 87_000, second: 3 },
+      { at: T0 + 88_000, second: 2 },
+      { at: T0 + 89_000, second: 1 },
+    ]);
+  });
+
+  it('counts a three-second lead-in in from its very first instant', () => {
+    // `>= now`, not `>`. Dropping the tick due at t=0 would count the athlete
+    // in "2, 1, go" — one short, on the cue they are about to move on.
+    const ready = rest({ kind: 'ready', endsAt: T0 + 3_000, total: READY_SECONDS });
+    expect(tickSchedule(ready, T0).map((t) => t.second)).toEqual([3, 2, 1]);
+    expect(tickSchedule(ready, T0)[0].at).toBe(T0);
+  });
+
+  it('never replays a tick that has already sounded', () => {
+    // An adjustment mid-countdown rebuilds the schedule; without the filter a
+    // +15 at "2" would re-announce 3, 2 and 1 against the OLD deadline.
+    const c = rest({ endsAt: T0 + 90_000, total: 90 });
+    expect(tickSchedule(c, T0 + 88_500).map((t) => t.second)).toEqual([1]);
+    expect(tickSchedule(c, T0 + 90_000)).toEqual([]);
+  });
+
+  it('never announces more seconds than the countdown has', () => {
+    // A two-second countdown gets two ticks, not three — the third would be
+    // due before it started.
+    const short = rest({ endsAt: T0 + 2_000, total: 2 });
+    expect(tickSchedule(short, T0).map((t) => t.second)).toEqual([2, 1]);
+  });
+
+  it('has nothing to schedule while paused', () => {
+    // There is no deadline to hang the times off — the same reason
+    // `remainingAt` short-circuits on `pausedWith`.
+    expect(tickSchedule(rest({ pausedWith: 30 }), T0)).toEqual([]);
+    expect(tickSchedule(rest({ endsAt: null }), T0)).toEqual([]);
+  });
+
+  it('announces exactly the last TICK_FROM_SECONDS seconds', () => {
+    // Derived rather than hard-coded, so changing the constant moves the test
+    // with it instead of failing it.
+    expect(tickSchedule(rest(), T0)).toHaveLength(TICK_FROM_SECONDS);
+  });
+});
+
+describe('what the timer lets you touch', () => {
+  it('refuses to pause or stretch a count-in', () => {
+    // A three-second lead-in exists to be over. ±15 on it is nonsense, and a
+    // pause button is a control that exists for less time than it takes to
+    // find. Rendering them and having them do nothing would be worse.
+    expect(isAdjustable('ready')).toBe(false);
+    expect(isAdjustable('rest')).toBe(true);
+    expect(isAdjustable('work')).toBe(true);
+  });
+
+  it('moves by fifteen seconds unless the exercise thinks in minutes', () => {
+    expect(stepOf({ step: undefined })).toBe(15);
+    expect(stepOf({ step: 30 })).toBe(30);
+    // A zero or negative step would make ± a no-op button.
+    expect(stepOf({ step: 0 })).toBe(15);
+    expect(stepOf({ step: -30 })).toBe(15);
+  });
+});
+
 describe('which sets can be timed, and for how long', () => {
   it('uses the duration already on the set — the template put it there', () => {
     // `setsFromWorkout` copies target_seconds onto every set it creates, so a
@@ -253,8 +352,21 @@ describe('which sets can be timed, and for how long', () => {
     // A countdown over a set of squats is a stopwatch pointed at nothing. The
     // null is what keeps the play button off those rows entirely.
     expect(workSecondsFor({ seconds: null }, 'weight_reps')).toBeNull();
-    expect(workSecondsFor({ seconds: 30 }, 'reps')).toBeNull();
     expect(workSecondsFor({ seconds: 30 }, 'distance')).toBeNull();
+    // Even a weighted set that somehow carries a duration: `weight_reps` is
+    // never dual-mode, so the number is stray data rather than a prescription.
+    expect(workSecondsFor({ seconds: 30 }, 'weight_reps')).toBeNull();
+  });
+
+  it('times a dual-mode exercise only while it is in time mode', () => {
+    // Burpees are `reps` in the catalog and can be counted either way — see
+    // lib/setMode.ts. The duration IS the mode, so these two answers have to
+    // track each other: reps mode carries no seconds and gets no timer, time
+    // mode carries one and does.
+    expect(workSecondsFor({ seconds: null }, 'reps')).toBeNull();
+    expect(workSecondsFor({ seconds: 40 }, 'reps')).toBe(40);
+    // And a stored zero is still not a duration.
+    expect(workSecondsFor({ seconds: 0 }, 'reps')).toBeNull();
   });
 
   it('defaults a plank with nothing prescribed', () => {

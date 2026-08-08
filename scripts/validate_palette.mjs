@@ -303,6 +303,19 @@ function loadPalette() {
   };
   const ramp = src.match(/gridLevels:\s*\[([^\]]+)\]/);
   if (!ramp) throw new Error('validate_palette: no gridLevels in Colors.ts');
+  const monoBlock = src.match(/export const mono = \{([\s\S]*?)\n\};/);
+  if (!monoBlock) throw new Error('validate_palette: no `mono` block in Colors.ts');
+  const monoOne = (key) => {
+    const m = monoBlock[1].match(new RegExp(`\\b${key}:\\s*'(#[0-9A-Fa-f]{6})'`));
+    if (!m) throw new Error(`validate_palette: no mono '${key}' — renamed or removed?`);
+    return m[1];
+  };
+  const monoRampMatch = monoBlock[1].match(/gridLevels:\s*\[([^\]]+)\]/);
+  if (!monoRampMatch) throw new Error('validate_palette: no mono gridLevels in Colors.ts');
+  const monoRamp = [...monoRampMatch[1].matchAll(/'(#[0-9A-Fa-f]{6})'/g)].map((m) => m[1]);
+  if (monoRamp.length !== 3) throw new Error('validate_palette: mono gridLevels needs three steps');
+  const monoSportMatch = src.match(/export const monoSport = '(#[0-9A-Fa-f]{6})'/);
+  if (!monoSportMatch) throw new Error('validate_palette: no `monoSport` in Colors.ts');
   return {
     S: { bg: one('bg'), surface: one('surface'), raised: one('surfaceRaised') },
     P: {
@@ -317,10 +330,21 @@ function loadPalette() {
     BELT_ON: block('beltAccentOn'),
     ACCENTS: accentBlock(src),
     SPORTS: block('sportColors'),
+    MONO: {
+      rest: monoOne('gridRest'),
+      ramp: monoRamp,
+      lime: monoOne('lime'),
+      info: monoOne('info'),
+      danger: monoOne('danger'),
+      warn: monoOne('warn'),
+      tileHold: monoOne('tileHold'),
+      accent: monoOne('accent'),
+      sport: monoSportMatch[1],
+    },
   };
 }
 
-const { S, P, BELT, BELT_ON, ACCENTS, SPORTS } = loadPalette();
+const { S, P, BELT, BELT_ON, ACCENTS, SPORTS, MONO } = loadPalette();
 
 heading('Text');
 ratio('text on surface', P.text, S.surface, 4.5);
@@ -350,6 +374,55 @@ ratio('ramp[0] on surface', P.ramp[0], S.surface, 3, 'The faintest trained day m
 separation('rest → ramp[0]', P.gridRest, P.ramp[0]);
 separation('ramp 0→1', P.ramp[0], P.ramp[1]);
 separation('ramp 1→2', P.ramp[1], P.ramp[2]);
+
+// The monochrome mode replaces every hue in the palette with a grey, resolved
+// at module-evaluation time so all 794 colour reads in the app pick it up (see
+// the `mono` block in Colors.ts for why that mechanism and not a filter or a
+// hook). Lightness is the only axis left, so these are exactly the checks the
+// coloured palette gets — and they are the checks most likely to be *newly*
+// failed, because two hues that separate on chroma may not separate at all once
+// the chroma is gone.
+heading('Monochrome mode — the same guarantees, on one axis');
+ratio('mono accent on surface', MONO.accent, S.surface, 3, 'A fill that carries meaning: WCAG 1.4.11.');
+ratio('mono danger on surface', MONO.danger, S.surface, 4.5, 'Error text and destructive actions.');
+ratio('mono warn on surface', MONO.warn, S.surface, 4.5);
+ratio('mono sport on surface', MONO.sport, S.surface, 4.5);
+// The accent must not read as body text: the whole job of an accent is being
+// the brighter thing, and `text` is #F3F6FA.
+separation('mono accent vs body text', MONO.accent, P.text, 8);
+// Grid: a QUANTITY, so its steps have to be countable.
+ratio('mono ramp[0] on surface', MONO.ramp[0], S.surface, 3, 'The faintest trained day must still be a day.');
+separation('mono rest → ramp[0]', MONO.rest, MONO.ramp[0]);
+separation('mono ramp 0→1', MONO.ramp[0], MONO.ramp[1]);
+separation('mono ramp 1→2', MONO.ramp[1], MONO.ramp[2]);
+/*
+  Library tile intents, and the one place this file admits a guarantee is
+  WEAKER in monochrome rather than merely different.
+
+  In colour these four are checked pairwise at ΔE 15. Four achromatic values
+  cannot meet that and 4.5:1 on the card at the same time — it is arithmetic, not
+  a failure of imagination: 4.5:1 puts the floor at L* 53.4, white is the
+  ceiling, and CIEDE2000's lightness compression means three gaps of 15 do not
+  fit in what is left. Measured, the best available spacing puts the top pair at
+  ΔE 9.9.
+
+  So the pairwise claim is dropped rather than fudged with a lowered threshold —
+  and it can be, because the tile is not colour-only: it renders the category's
+  own three-letter code (SUB, SWP, PIN) inside it, and the row beside it spells
+  the category out. What is still asserted is contrast, and that the set has at
+  least two genuinely distinguishable steps, so mono cannot silently collapse to
+  one flat grey through a later edit.
+*/
+const MONO_TILES = {
+  attack: MONO.danger,
+  advance: MONO.lime,
+  defend: MONO.info,
+  hold: MONO.tileHold,
+};
+for (const [name, hex] of Object.entries(MONO_TILES)) {
+  ratio(`mono ${name} on surface`, hex, S.surface, 4.5);
+}
+separation('mono tiles keep two steps', MONO_TILES.advance, MONO_TILES.defend);
 
 // Sports DO co-occur — a Recent list mixes them in one column — so unlike the
 // belts these must be distinguishable from each other, pairwise, under CVD.

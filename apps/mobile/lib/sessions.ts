@@ -3,7 +3,9 @@ import { netFetch } from './authedFetch';
 import type { TokenGetter } from './useAuthToken';
 
 import { ApiError } from './apiError';
+import { formatDuration, type DurationUnit } from './duration';
 import type { Exercise } from './exercises';
+import { isDualMode, setModeOf } from './setMode';
 import { newTraceId, traceparent } from './trace';
 import { formatDistance, formatWeight, type UnitSystem } from './units';
 import type { WorkoutItem } from './workouts';
@@ -194,6 +196,12 @@ export function measuresFor(loadType: Exercise['load_type']): Measure[] {
  *
  * A pure `time` exercise with nothing prescribed does get a default, because a
  * plank with no number is still a plank you want to time.
+ *
+ * **A dual-mode exercise is timed only while it is in time mode**, which is the
+ * same question read the same way — see `lib/setMode.ts`. Burpees in reps mode
+ * carry no duration and get no timer button; the same burpees switched to time
+ * carry one and do. Deriving both answers from `seconds` is what stops the
+ * toggle and the play button from ever disagreeing.
  */
 export const DEFAULT_WORK_SECONDS = 60;
 
@@ -202,7 +210,7 @@ export function workSecondsFor(
   loadType: Exercise['load_type'] | undefined,
 ): number | null {
   if (loadType === undefined) return null;
-  if (!measuresFor(loadType).includes('seconds')) return null;
+  if (!measuresFor(loadType).includes('seconds') && !isDualMode(loadType)) return null;
   // A stored 0 is not a duration to count down from, and neither is a
   // negative one: a timer over before it starts fires its completion the
   // instant it begins and logs a zero-second set. Both fall through to the
@@ -407,13 +415,24 @@ export function swapSuggestions(
   };
 }
 
-export function describeSet(s: LoggedSet, units: UnitSystem = 'metric'): string {
+/**
+ * `duration` is how this exercise's seconds are written — see `lib/duration.ts`.
+ * Defaulted rather than required so the several read-only surfaces that
+ * summarise a set (history, the celebration card, VoiceOver) keep working
+ * unchanged; only the logging screen, which knows the per-exercise choice, needs
+ * to pass it.
+ */
+export function describeSet(
+  s: LoggedSet,
+  units: UnitSystem = 'metric',
+  duration: DurationUnit = 'seconds',
+): string {
   const parts: string[] = [];
   const w = formatWeight(s.weight_kg, units);
   if (s.reps != null && s.weight_kg != null) parts.push(`${s.reps} × ${w}`);
   else if (s.reps != null) parts.push(`${s.reps} reps`);
   else if (s.weight_kg != null) parts.push(w);
-  if (s.seconds != null) parts.push(`${s.seconds}s`);
+  if (s.seconds != null) parts.push(formatDuration(s.seconds, duration));
   if (s.distance_m != null) parts.push(formatDistance(s.distance_m, units));
   if (s.rpe != null) parts.push(`RPE ${s.rpe}`);
   else if (s.rir != null) parts.push(`${s.rir} RIR`);
@@ -489,6 +508,16 @@ export async function fetchSuggestions(
 export function applySuggestions(
   sets: LoggedSet[],
   suggestions: Map<string, Suggestion>,
+  /**
+   * The catalog, so a dual-mode set in time mode is left alone.
+   *
+   * Optional, because most callers have no catalog to hand and the rule only
+   * bites on `reps` exercises. Without it a burpee set switched to 40 seconds
+   * would silently acquire a rep target too — and a row holding both numbers is
+   * the one thing `lib/setMode.ts` derives its mode from, so the set would flip
+   * itself back to reps with a duration still attached.
+   */
+  loadTypeOf?: (exerciseID: string) => Exercise['load_type'] | undefined,
 ): LoggedSet[] {
   return sets.map((s) => {
     const hit = suggestions.get(s.exercise_id);
@@ -497,7 +526,8 @@ export function applySuggestions(
     if (next.weight_kg == null && hit.target_weight_kg != null) {
       next = { ...next, weight_kg: hit.target_weight_kg };
     }
-    if (next.reps == null && hit.target_reps != null) {
+    const timed = setModeOf(next, loadTypeOf?.(next.exercise_id)) === 'time';
+    if (!timed && next.reps == null && hit.target_reps != null) {
       next = { ...next, reps: hit.target_reps };
     }
     return next;

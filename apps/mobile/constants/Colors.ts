@@ -1,3 +1,5 @@
+import * as SecureStore from 'expo-secure-store';
+
 /**
  * The VOLA mobile palette.
  *
@@ -165,7 +167,103 @@ export const accents = {
   blue: { label: 'Blue', accent: '#4C7DF0', ink: '#4C7DF0', on: '#080B12' },
   purple: { label: 'Purple', accent: '#7A50EC', ink: '#A78BFA', on: '#FFFFFF' },
   orange: { label: 'Orange', accent: '#FF8A3D', ink: '#FF8A3D', on: '#080B12' },
+  /**
+   * **Mono is not a sixth hue — it is a MODE**, and it is the one entry here
+   * that changes more than the chrome.
+   *
+   * Choosing it also turns the whole app greyscale, because a white accent over
+   * an otherwise coloured app is not what anybody means by monochrome. That
+   * happens through a real greyscale filter on the root view rather than through
+   * a second palette (see `lib/palette.ts` for why), so photos, the belt
+   * renders, `danger` red and every colour already baked into a `StyleSheet` go
+   * with it.
+   *
+   * The value is a light grey rather than pure white on purpose. White measures
+   * marginally better on paper but sits ΔL* 3 from `text` (#F3F6FA), so an
+   * accent-coloured action and ordinary body copy become the same brightness and
+   * the accent stops signalling anything. This clears `text` by ΔL* 12 while
+   * still reading as "the bright one" against everything else on a near-black
+   * ground.
+   */
+  mono: { label: 'Mono', accent: '#C9D2E0', ink: '#C9D2E0', on: '#080B12' },
 } as const;
+
+/**
+ * Every colour in this file that carries a HUE, restated in grey.
+ *
+ * ## Why the whole palette and not a filter on the root view
+ *
+ * React Native 0.76 added a `filter` style with a `grayscale` function, and one
+ * of those on the root view is the obvious implementation — it would reach the
+ * exercise photography and every hex already frozen into a `StyleSheet`. **It
+ * was built that way first, and it does not work on the runtime this app has.**
+ * Measured on an iPhone 15 Pro Simulator, Expo Go SDK 57: the filter is a
+ * complete no-op, applied to the root or to a single leaf view. RN implements
+ * iOS `grayscale` by re-hosting the view in a SwiftUI container
+ * (`RCTSwiftUIContainerViewWrapper`), and Expo Go's binary does not carry it, so
+ * the property is parsed and silently dropped. Do not reach for it again without
+ * a custom dev client to test against.
+ *
+ * ## Why not a `usePalette()` hook either
+ *
+ * This app has **794 colour reads across 65 files, and almost all of them sit
+ * inside `StyleSheet.create` at module scope** — evaluated once when the module
+ * is imported, before any hook has run and before anyone has signed in. A hook
+ * would mean moving every stylesheet inside its component: sixty-five files of
+ * mechanical churn in the screens where a mistake is a mis-rendered workout, to
+ * serve one setting.
+ *
+ * ## So: the palette itself changes, at module-evaluation time
+ *
+ * `vola` below resolves to these values instead when mono is on, and it does so
+ * *before* any screen's stylesheet is built — ES modules are evaluated
+ * depth-first, so every one of those 794 reads gets a grey. Zero call sites
+ * change, and nothing can be missed, because there is nothing to remember.
+ *
+ * The cost, and it is a real one: **the choice is read synchronously, so it
+ * takes full effect on the next launch.** The accent itself moves immediately
+ * (it is a context value), and everything else follows on relaunch — the picker
+ * says so. See `MONO_KEY` for why the flag lives in the keychain rather than in
+ * the preferences table with its sibling settings.
+ *
+ * ## What is in here, and what deliberately is not
+ *
+ * Only the hues. The greys this palette is otherwise built from — `bg`,
+ * `surface`, `line`, `text`, `textMuted` — are already a desaturated blue-grey
+ * ramp and read as monochrome; restating them would be churn for a difference
+ * nobody can see.
+ *
+ * Every replacement is chosen for LIGHTNESS separation, because that is the only
+ * axis left. The grid ramp and the Library tile intents are the two sets where
+ * that matters most — one encodes a quantity, the other four categories — and
+ * both are validated by `scripts/validate_palette.mjs` against the same
+ * thresholds their coloured originals meet. **Changing a value here without
+ * running it is how a ramp gets two steps nobody can tell apart.**
+ *
+ * The sports are the deliberate exception: they all collapse to one grey. Every
+ * site that draws a sport colour draws a per-sport glyph or the sport's name
+ * beside it (`components/ui/sport.ts` keeps the two together for exactly this
+ * reason), so the hue was redundant encoding — and four greys that clear ΔE 15
+ * pairwise *and* 4.5:1 on the card do not exist, so inventing four would be
+ * claiming a distinction the eye cannot make.
+ */
+export const mono = {
+  lime: '#E7EBF1',
+  green: '#C9D2E0',
+  info: '#98A3B5',
+  warn: '#B9C2D0',
+  danger: '#EAEEF4',
+  setDone: '#2B313A',
+  gridRest: '#333B48',
+  gridLevels: ['#6E7787', '#A7B0BE', '#FFFFFF'] as const,
+  tileHold: '#7E8899',
+  accent: '#C9D2E0',
+  accentInk: '#C9D2E0',
+  accentOn: '#080B12',
+};
+
+/** One grey for every discipline — see the note above on why. */
+export const monoSport = '#98A3B5';
 
 /**
  * A discipline's colour — categorical, and **fixed regardless of the accent**.
@@ -272,15 +370,74 @@ export const beltAccentOn = {
   black: '#FFFFFF',
 } as const;
 
+/**
+ * Where the monochrome flag lives, and why it is not in `prefs`.
+ *
+ * Every other device preference is a row in the SQLite `prefs` table, which is
+ * the right home for them and the wrong one for this: opening that database is
+ * asynchronous, and this answer is needed during module evaluation, before the
+ * first stylesheet is built. `expo-secure-store` is the one store in this app
+ * with a **synchronous** read, which is the entire reason it is used here — not
+ * because a colour preference is a secret.
+ *
+ * Written alongside the ordinary `PREF_ACCENT` row rather than instead of it, so
+ * the accent picker keeps one source of truth for *which* accent is chosen and
+ * this is only a cache of the one bit that has to be readable early.
+ */
+export const MONO_KEY = 'vola.mono';
+
+/**
+ * Is this launch monochrome?
+ *
+ * Wrapped in a try/catch that swallows everything, because it runs at module
+ * scope: an unavailable keychain here would take the colour palette down with
+ * it, and every screen in the app with it. Colour is the safe default.
+ */
+function monoAtLaunch(): boolean {
+  try {
+    return SecureStore.getItem(MONO_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The palette this launch is actually using.
+ *
+ * Resolved once, here, before anything imports it — see the note on {@link mono}
+ * for why that is the mechanism. Consumers see one object either way and need to
+ * know nothing about the mode.
+ */
+export const isMono = monoAtLaunch();
+
+export const vola = isMono ? { ...palette, ...mono } : palette;
+
+/**
+ * The legacy `Colors.light`/`Colors.dark` shape, kept for the Themed components.
+ *
+ * `tint` reads `vola` rather than `palette`, and is declared after it for that
+ * reason: the literal was the one place in this file that could hand out a lime
+ * after mono had swapped everything else. Nothing consumes it today, which is
+ * exactly why it was worth fixing rather than leaving as a trap.
+ */
 const scheme = {
   text: palette.text,
   background: palette.bg,
-  tint: palette.lime,
+  tint: vola.lime,
   tabIconDefault: palette.textDim,
-  tabIconSelected: palette.lime,
+  tabIconSelected: vola.lime,
 };
 
-export const vola = palette;
+/**
+ * A discipline's colour, mode-aware.
+ *
+ * `sportColors` above stays the literal map — the palette validator parses it,
+ * and a mode-dependent export would make it unparseable — so the swap happens
+ * here, where `components/ui/sport.ts` already reads it.
+ */
+export const activeSportColors: Record<SportKey, string> = isMono
+  ? { strength: monoSport, bjj: monoSport, running: monoSport, nutrition: monoSport }
+  : sportColors;
 
 export default {
   light: scheme,
