@@ -2,7 +2,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { StyleSheet, View as RNView } from 'react-native';
 
 import { Icon, type IconName } from '@/components/ui/Icon';
-import { vola } from '@/constants/Colors';
+import { isMono, vola } from '@/constants/Colors';
 
 /**
  * The artwork on a VOLA Workout tile.
@@ -44,6 +44,24 @@ const PALETTES: readonly (readonly [string, string])[] = [
 ];
 
 /**
+ * The same six, drained of hue.
+ *
+ * These are artwork rather than signal, so the mono versions only have to keep
+ * the two properties the note above claims: dark enough to read as a picture,
+ * and light enough at the top that the white band and bloom stay visible over
+ * them. Six of them rather than one, because the whole point of the set is that
+ * two plans side by side do not look like the same card.
+ */
+const MONO_PALETTES: readonly (readonly [string, string])[] = [
+  ['#2e3542', '#171c25'],
+  ['#272d39', '#13171f'],
+  ['#333a48', '#191e27'],
+  ['#2a303c', '#151920'],
+  ['#3a4150', '#1d222c'],
+  ['#232935', '#11151c'],
+];
+
+/**
  * Which brand glyph sits on the plan.
  *
  * Read off the goal rather than the name, so it never has to be authored per
@@ -70,7 +88,10 @@ function hash(id: string): number {
 }
 
 export function paletteFor(id: string): readonly [string, string] {
-  return PALETTES[hash(id) % PALETTES.length];
+  // The set swaps, the INDEX does not — so a plan keeps the same artwork slot
+  // through a mode change rather than shuffling into a different one.
+  const set = isMono ? MONO_PALETTES : PALETTES;
+  return set[hash(id) % set.length];
 }
 
 /**

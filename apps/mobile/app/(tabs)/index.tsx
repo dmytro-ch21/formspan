@@ -61,6 +61,7 @@ import { formatVolume, type UnitSystem } from '@/lib/units';
 import { enabledSports, labelFor, usesBelt, type Module } from '@/lib/modules';
 import { useModules } from '@/lib/ModulesProvider';
 import { useAccent } from '@/lib/AccentProvider';
+import { accentGlow } from '@/lib/palette';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
 
@@ -1488,7 +1489,7 @@ export default function TodayScreen() {
       <Pressable
         style={({ pressed }) => [
           styles.fab,
-          { backgroundColor: accent.accent, shadowColor: accent.accent },
+          { backgroundColor: accent.accent }, accentGlow(accent.accent),
           pressed && styles.fabPressed,
         ]}
         onPress={() => setPicking(true)}

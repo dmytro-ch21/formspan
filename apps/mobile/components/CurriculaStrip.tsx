@@ -6,7 +6,7 @@ import { BeltPhoto } from '@/components/BeltPhoto';
 import { Icon } from '@/components/ui/Icon';
 import { SectionHeader } from '@/components/ui/Section';
 import { Text, View } from '@/components/Themed';
-import { beltAccent, vola } from '@/constants/Colors';
+import { activeBeltAccent, activeStrap, vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { BELTS, type Belt } from '@/lib/bjj';
 import { listCurricula, type Curriculum } from '@/lib/curriculum';
@@ -110,7 +110,7 @@ export function CurriculaStrip() {
                     exactly what a 3pt rule needs. The strap colour stays on
                     the wash below, where it sits behind a photograph of that
                     belt and is decorative. */}
-                <RNView style={[styles.rule, { backgroundColor: beltAccent[belt] }]} />
+                <RNView style={[styles.rule, { backgroundColor: activeBeltAccent[belt] }]} />
 
                 <RNView style={styles.inner}>
                   <RNView style={[styles.cover, { backgroundColor: beltTint(belt) }]}>
@@ -170,23 +170,18 @@ export function CurriculaStrip() {
 }
 
 /**
- * Strap colours, mirrored from `Belt.tsx`.
+ * The strap colours, for the wash behind the belt photograph.
  *
- * Duplicated rather than exported, because that file's are private to its
- * drawing and this is a different use — a wash behind a photograph, which is
- * not the belt itself. If they ever disagree visibly, share them; today they
- * would only couple two unrelated things.
+ * **Shared with `Belt.tsx` now**, both reading `activeStrap` out of
+ * `constants/Colors.ts` — this comment used to say they were deliberately
+ * duplicated and should be shared only "if they ever disagree visibly". They
+ * disagreed invisibly instead: two copies of the same literals meant two places
+ * the monochrome swap had to reach, and it reached neither.
  *
- * Used for the wash ONLY. The rule takes `beltAccent`; see the comment there
- * for why the physical colours cannot carry a load-bearing 3pt element.
+ * Used for the wash ONLY. The rule takes `activeBeltAccent`; see the comment
+ * there for why the physical colours cannot carry a load-bearing 3pt element.
  */
-const STRAP: Record<Belt, string> = {
-  white: '#EDEAE3',
-  blue: '#1B4CC4',
-  purple: '#6A2D9B',
-  brown: '#5C3A21',
-  black: '#1A1A1A',
-};
+const STRAP = activeStrap;
 
 /**
  * The wash behind the cut-out.

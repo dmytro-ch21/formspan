@@ -6,6 +6,7 @@ import { Icon } from '@/components/ui/Icon';
 import { Stat, StatRow } from '@/components/ui/Stat';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
+import { accentGlow } from '@/lib/palette';
 import { sportColor } from '@/components/ui/sport';
 import { formatDuration } from '@/lib/history';
 import { labelFor, type Module } from '@/lib/modules';
@@ -331,7 +332,7 @@ export function TrainingCalendar({
                   styles.date,
                   isToday && [
                     styles.dateToday,
-                    { backgroundColor: accent.accent, shadowColor: accent.accent },
+                    { backgroundColor: accent.accent }, accentGlow(accent.accent),
                   ],
                 ]}
               >

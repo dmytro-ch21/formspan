@@ -17083,6 +17083,86 @@ each go red when broken.
   relaunch. Worth re-testing then, not before.
 
 
+## 2026-08-08 — Monochrome, finished: no glow, and the colours that were hiding outside the palette
+
+Two reports off the first build on a real phone, and both are the same bug seen
+from different angles: **`vola` is one object, and not everything was in it.**
+
+### The buttons glowed
+
+Three surfaces set `shadowColor` to the accent rather than to black, so a primary
+control reads as *lit* rather than as lifted — the Today action, the Workouts
+action, and the calendar's selected day. In green that is a soft halo and it is
+the intended look. In mono the accent is a near-white, and a near-white bloom on
+a near-black ground is not subtle: it is a glow, on the one theme whose entire
+argument is being plain.
+
+`accentGlow()` in `lib/palette.ts` now stands between the accent and the shadow,
+and returns nothing at all in mono. `shadowOpacity` and `elevation` are zeroed
+rather than just the colour — a transparent iOS shadow still costs an offscreen
+pass, and Android draws `elevation` on its own regardless of what colour it was
+told.
+
+### The PR medal was still gold
+
+And the belt edges were still blue, and the plan artwork was still six coloured
+gradients. All for one reason: the mono swap is a spread over `palette`, and
+these were **literals inside components** — `Medal.tsx` held its own gold,
+`Belt.tsx` its own straps, `PlanHero.tsx` its own six palettes — plus
+`beltAccent`, which is in `constants/Colors.ts` but is a separate export rather
+than part of `palette`, so the spread never reached it either.
+
+Every one of them moved into `constants/Colors.ts` beside a mono twin, with an
+`active*` accessor doing the swap — the shape `activeSportColors` already
+established. The components now read the accessor and hold no colour of their
+own, which is the property that matters: a colour outside that file is a colour
+nobody re-validates, and this is the second time that has cost something visible.
+
+Three judgement calls in the greys:
+
+- **The medal's two tiers still separate** (ΔE 25.7), because they mean different
+  things — gold is a record set in the last 30 days, silver a standing one. The
+  gold tier's star was already redundant encoding on top of the metal, which is
+  why `Medal` could survive greyscale even before this.
+- **The belt accents run lightest-to-darkest in rank order** rather than encoding
+  rank as brightness. The alternative inverts it and puts a bright edge on a card
+  showing a dark belt, which fights the belt drawn beside it.
+- **The strap colours are a picture, not a signal.** A belt is dyed cotton, so
+  the mono set is the greyscale reading of the real thing — which happens to
+  already run in rank order, so the drawing still reads as a progression.
+
+`scripts/validate_palette.mjs` checks all of it now: contrast for every mono
+medal and belt value, ink on each belt, and the medal's two-tier separation. The
+point is not the numbers, it is that the next colour added outside `palette`
+fails a gate instead of being found on a phone.
+
+### The one thing mono still cannot reach: photographs
+
+`BeltPhoto` renders five belt **rasters**, and the Plan tab's hero uses another.
+A palette swap cannot touch a webp, so a monochrome CurriculaStrip draws a grey
+wash and a grey rule behind a fully-coloured belt photograph — the one place the
+mode visibly fails to be monochrome. Surfaced in review rather than on a phone.
+
+This is the exact gap the root-level `filter: grayscale` would have closed for
+free, and it is a measured no-op in Expo Go (see the previous entry). The honest
+options are a second set of greyscale assets, or revisiting the filter if this app
+ever gets a custom dev client. Neither is worth doing on a guess about which one
+lands first.
+
+### Verified
+
+On a Simulator, in mono: the day pill and the primary action are flat, with no
+halo on either. The medal is **not** screen-verified — this account has no
+personal records, so nothing renders one — so that one rests on a one-line
+accessor swap and the validator.
+
+**The mono branch of every `active*` ternary is structurally untested.** The jest
+mock supplies no synchronous `getItem`, so `isMono` is deterministically false
+under test and all 985 of them exercise the colour path. Covering the other side
+needs a file that mocks a sync `getItem: () => '1'` before `Colors.ts` is
+imported; worth doing, not done here.
+
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

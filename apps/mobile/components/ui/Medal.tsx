@@ -1,7 +1,7 @@
 import { StyleSheet, View } from 'react-native';
 
 import { Text } from '@/components/Themed';
-import { vola } from '@/constants/Colors';
+import { activeMedalFace, activeMedalRim, vola, type MedalTier } from '@/constants/Colors';
 
 /**
  * A medal, drawn from views.
@@ -30,11 +30,17 @@ import { vola } from '@/constants/Colors';
  * calendar's ✓/○ markers follow, and for the same reason.
  */
 
-export type MedalTier = 'gold' | 'silver';
+export type { MedalTier };
 
-/** Warm and cool metals. Both clear 3:1 against `surface` on this dark ground. */
-const FACE: Record<MedalTier, string> = { gold: '#C9A227', silver: '#8A94A6' };
-const RIM: Record<MedalTier, string> = { gold: '#F2D98A', silver: '#C3CAD6' };
+/**
+ * Warm and cool metals — or two greys, in monochrome.
+ *
+ * The values moved to `constants/Colors.ts` so the mono swap can reach them.
+ * They were literals here, which is exactly why a black-and-white app still had
+ * one gold disc on it: `vola` is one object and these were not in it.
+ */
+const FACE = activeMedalFace;
+const RIM = activeMedalRim;
 
 export function Medal({ tier, size = 26 }: { tier: MedalTier; size?: number }) {
   const disc = Math.round(size * 0.72);

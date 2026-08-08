@@ -1,6 +1,6 @@
 import { StyleSheet, View } from 'react-native';
 
-import { vola } from '@/constants/Colors';
+import { activeRankBar, activeStrap, vola } from '@/constants/Colors';
 
 /**
  * A jiu-jitsu belt, drawn rather than illustrated.
@@ -25,32 +25,13 @@ import { vola } from '@/constants/Colors';
 
 export type Belt = 'white' | 'blue' | 'purple' | 'brown' | 'black';
 
-/** Belt strap colours. */
-const STRAP: Record<Belt, string> = {
-  // Not pure white: #FFF on a dark ground glares, and a real belt is closer
-  // to unbleached cotton anyway.
-  white: '#EDEAE3',
-  blue: '#1B4CC4',
-  purple: '#6A2D9B',
-  brown: '#5C3A21',
-  // Not pure black either — it would disappear into `vola.bg`. This reads as
-  // black beside the other straps while staying visible on its own.
-  black: '#1A1A1A',
-};
+// Strap and rank-bar colours live in `constants/Colors.ts` now, so the
+// monochrome mode can reach them — they were literals here, which is why a
+// black-and-white app still drew a blue belt. `active*` resolves per launch.
+const STRAP = activeStrap;
+const RANK_BAR = activeRankBar;
 
-/**
- * The rank bar. Red on a black belt, black on everything else — the actual
- * construction, not a stylistic choice.
- */
-const RANK_BAR: Record<Belt, string> = {
-  white: '#1A1A1A',
-  blue: '#1A1A1A',
-  purple: '#1A1A1A',
-  brown: '#1A1A1A',
-  black: '#B01B2E',
-};
-
-/** Stripes are white tape on every belt. */
+/** Stripes are white tape on every belt — already achromatic, mono or not. */
 const STRIPE = '#EDEAE3';
 
 export function Belt({

@@ -9,7 +9,7 @@ import { describeBelt } from '@/components/Belt';
 import { BeltPhoto } from '@/components/BeltPhoto';
 import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
-import { beltAccent, vola } from '@/constants/Colors';
+import { activeBeltAccent, vola } from '@/constants/Colors';
 import {
   awardingPromotion,
   describeTimeAtBelt,
@@ -97,7 +97,7 @@ export function BjjRankHeader({ getToken }: { getToken: TokenGetter }) {
 
   // The card's accent is the athlete's own belt — see `beltAccent`, and note
   // these are legible readings of each belt rather than its literal colour.
-  const tone = beltAccent[rank.belt];
+  const tone = activeBeltAccent[rank.belt];
 
   // Split into a headline and its qualifier, which `describeBelt` deliberately
   // does not do: it returns one utterance ("Purple belt, 2 stripes") because

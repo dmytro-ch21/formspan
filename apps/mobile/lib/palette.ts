@@ -1,3 +1,4 @@
+import type { ViewStyle } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 
 import { MONO_KEY, isMono, type AccentName } from '@/constants/Colors';
@@ -51,3 +52,24 @@ export async function writeMonoFlag(name: AccentName): Promise<void> {
 export function monoNeedsRelaunch(name: AccentName): boolean {
   return (name === MONO_ACCENT) !== isMono;
 }
+
+/**
+ * The accent-coloured bloom under a primary control — and nothing at all in
+ * monochrome.
+ *
+ * Three surfaces (the Today action, the Workouts action, the calendar's selected
+ * day) set `shadowColor` to the accent rather than to black, so the button reads
+ * as lit rather than as lifted. In colour that is a soft green or amber halo. In
+ * mono the accent is a near-white, and a near-white bloom on a near-black ground
+ * is not subtle — it is a glow, on the one theme whose whole point is being
+ * plain.
+ *
+ * `shadowOpacity` and `elevation` are zeroed rather than just the colour:
+ * a transparent iOS shadow still costs an offscreen pass, and Android draws
+ * `elevation` on its own regardless of what colour it was told.
+ */
+export function accentGlow(accent: string): ViewStyle {
+  return isMono ? NO_GLOW : { shadowColor: accent };
+}
+
+const NO_GLOW: ViewStyle = { shadowColor: 'transparent', shadowOpacity: 0, elevation: 0 };
