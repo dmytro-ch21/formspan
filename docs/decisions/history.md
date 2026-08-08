@@ -17261,6 +17261,131 @@ already argued in code, so the next person to notice them can stop sooner:
   is device-wide, not the app.
 
 
+## 2026-08-08 — What a wearable can actually tell us, and the two things system-design got wrong about it
+
+Research only — nothing is built. The output is
+[health-integration-design.md](health-integration-design.md), the detail pass on
+[system-design.md](system-design.md) §8's decision to integrate with HealthKit and
+Health Connect rather than with wearable vendors. §8 settled *that*; this settles
+**what to read, how a logged session picks up heart rate, and what has to exist
+first**.
+
+### The join is not the one the documentation recommends
+
+The interesting question was how a VOLA session acquires HR. The tidy answer is
+`HKQuery.predicateForObjects(from: workout)` — join to the platform's own workout
+object and take the samples it owns, no window arithmetic, no bleed from the walk
+to the gym.
+
+That is the wrong default, and the reason is a defect in other people's apps:
+**Whoop and Garmin both write workouts to HealthKit without correctly attaching
+the underlying heart rate.** The samples are in the store; they are simply not
+reachable from the workout. So anchor-first returns nothing for precisely the
+users who bought a strap to be measured accurately. The window read is the
+default; the anchor is an optimization for Apple Watch, which does associate
+correctly.
+
+### Density, not accuracy, is the limiting factor
+
+Apple Watch publishes a background heart rate about **every five minutes** at
+rest and measures **continuously** only during a Workout-app workout. A 60-minute
+BJJ session logged with no Watch workout running therefore yields a dozen sparse
+samples, several taken sitting down. Averaging those and calling it session HR is
+the fake precision system-design §7 exists to forbid.
+
+This is a product requirement wearing technical clothes: either onboarding says
+plainly "start a workout on your watch", or we eventually ship a watchOS app.
+There is no third option — without an active workout session the sensor is not
+sampling at that rate for anybody. `hr_source` and `sample_count` are recorded on
+every enrichment so the app can say which case it is in, and so the watchOS
+question can eventually be answered from data rather than from taste.
+
+### Two corrections to system-design §8
+
+**HRV is worse than §8 assumed.** §8 has the SDNN-vs-rMSSD mismatch right and the
+rule stands. But the practical situation is not a units problem: **Whoop and Oura
+do not write HRV to Apple Health at all**, and Garmin has the same gap. Whoop says
+why openly — their rMSSD is not Apple's SDNN, so they write nothing rather than
+something misleading. On iOS, "HRV-based readiness" therefore means Apple Watch
+users only. Resting HR carries recovery instead: nearly universal, needs no
+interpretation, and a multi-day elevation is a real signal. Health Connect has a
+first-class rMSSD record, so Android is genuinely the better platform on this one
+axis. Amazfit/Zepp is the notable exception that does write HRV to Apple Health —
+and since HealthKit has exactly one HRV field and it is SDNN, that number needs
+verifying against a known reading before anyone trusts it.
+
+**Per-vendor APIs are not a "later gap-filler".** Whoop's developer platform is
+free — no fee, no revenue share, nothing commercial in the terms — self-serve for
+up to 10 members without approval, and it returns the recovery score and genuine
+rMSSD the device refuses to publish to HealthKit. It is also *backend* work, so it
+is not blocked on the dev client and web gets the data too. It now sits ahead of
+Health Connect in the ordering. Garmin's own FAQ states no licensing fees but
+business-use-only; several aggregator blogs claim a $5,000 fee and paused
+onboarding, which their own pages contradict — recorded as marketing until
+verified, because the people making that claim sell the alternative.
+
+### The BJJ-specific finding, which cuts both ways
+
+Optical wrist HR degrades under grip, wrist flexion and contact — the three things
+grappling consists of. The fix is placement, and it is real: an upper-arm strap
+sits off the wrist, away from the grips, and the Amazfit Helio Strap samples every
+second from there. **An armband beats a watch for grappling** is advice no
+competitor is giving, because none of them are BJJ-first.
+
+It does not lift the constraint, because most athletes arrive with a wrist device.
+So the line held is: **session RPE stays the primary internal-load metric for BJJ
+and heart rate corroborates it** — sRPE correlates with HR-derived TRIMP around
+0.65–0.78 and needs no hardware. The genuinely differentiated use falls out of
+holding both: when someone's RPE-6 sessions consistently show twenty minutes in
+Z4/Z5, their scale runs low, and we can correct for it on every session they log
+*without* a strap. Measurement calibrates the subjective scale rather than
+replacing it, which also makes the no-wearable path better rather than merely
+tolerable.
+
+### Scope, and the gate
+
+First increment is deliberately narrow: **window read, zones, one load number,
+fed into the suggestions.** Edwards' TRIMP rather than Banister's, because
+Banister needs resting HR and drags a whole daily-recovery pipeline into a phase
+that otherwise doesn't need one. HRmax is seeded from `220 − age`, labelled
+estimated, and replaced by the athlete's observed maximum — never switched
+silently. VO₂max is read as a device-written profile trend, never computed and
+never attached to a session.
+
+Deferred and researched: write-back as workouts, daily recovery, Health Connect,
+Oura, Garmin, watchOS. **Every source in the plan is free.**
+
+The backend module is named `biometric`, not `health` — `internal/modules/health`
+is already operational telemetry, and that collision would be genuinely confusing
+in a codebase where the module name is the first thing anyone reads.
+
+**The gate is leaving Expo Go**, and it is smaller than it looked: `eas.json`
+already has a `development` profile with `developmentClient: true`, `ios/` is
+already generated with pods installed, and there are a dozen `VOLA-*` DerivedData
+folders. Device builds already left Expo Go; only the simulator loop
+(`expo start --ios`) still uses it. The switch is installing `expo-dev-client` and
+repointing one script. What it costs is rebuilds instead of reloads — and it
+*removes* two documented Expo Go traps, the `ExpoAsset` native-module mismatch and
+the worklets segfault from Expo Go upgrading itself, because we would own the
+binary.
+
+### Left open
+
+Store review is the long pole and needs starting before code: Google requires a
+**video demonstration** per health permission and blocks all store updates —
+listing changes included — while a permissions alert is open. Apple needs purpose
+strings, the HealthKit capability and a privacy policy URL that resolves; Whoop
+needs the same URL, so it is one piece of work clearing two gates. Retention
+policy for biometric samples is unanswered and needs deciding before the first row
+is written, not after: resting HR, sleep and HRV against a user identity is GDPR
+special-category data.
+
+Also unverified, and flagged in the doc rather than asserted: whether Health
+Connect's exercise-type enum has a martial-arts constant. HealthKit's
+`martialArts` (28) is confirmed; the Android equivalent was not reachable from the
+docs during this pass.
+
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
