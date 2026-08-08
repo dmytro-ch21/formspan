@@ -253,3 +253,44 @@ func (r *PostgresRepository) PendingCount(ctx context.Context, callerID string) 
 	}
 	return n, nil
 }
+
+// FriendIDs returns the user ids of everyone who has ACCEPTED a friendship
+// with the caller, satisfying feed.Friends.
+//
+// **The one place this module yields a user id in bulk, and it is deliberate
+// that it stays inside the process.** This package's contract is that handles
+// cross the wire in both directions and ids never do — that is why `Friends`
+// returns cards and why `FriendID` resolves exactly one handle. Nothing here
+// changes that: no handler calls this, it is wired into the feed module in
+// `cmd/api/main.go`, and the feed's own rows carry handles.
+//
+// Same 500 ceiling as `Friends`, and for the same reason: it is what the
+// social graph is allowed to be, and a caller fanning out over the result must
+// not be able to exceed it.
+func (r *PostgresRepository) FriendIDs(ctx context.Context, callerID string) ([]string, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT CASE WHEN user_a = $1 THEN user_b ELSE user_a END
+		FROM friendships
+		WHERE (user_a = $1 OR user_b = $1)
+		  AND status = 'accepted'
+		ORDER BY accepted_at DESC
+		LIMIT 500`, callerID)
+	if err != nil {
+		return nil, translate(err, "friend ids")
+	}
+	defer rows.Close()
+	// Non-nil, so a caller building a query from it gets an empty ANY() rather
+	// than a nil that reads as "no filter".
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, translate(err, "friend ids scan")
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, translate(err, "friend ids rows")
+	}
+	return ids, nil
+}

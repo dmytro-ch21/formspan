@@ -51,9 +51,18 @@ type Profile struct {
 	// On by default: the progression rule is built on them, and silently
 	// withholding its only input would make the app look broken rather
 	// than simple.
-	TrackEffort bool      `json:"track_effort"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	TrackEffort bool `json:"track_effort"`
+	// ShareTrainingWithFriends is the ONLY thing that makes an athlete's
+	// training readable by another athlete. Off by default and read live, so
+	// switching it off retracts every past session at once — see the feed
+	// module, and migration 000046 for why it is a column rather than a rule.
+	//
+	// Turning it ON is retroactive: friends see finished sessions from before
+	// the switch too. That is a real consequence and the settings copy says so
+	// rather than leaving it to be discovered.
+	ShareTrainingWithFriends bool      `json:"share_training_with_friends"`
+	CreatedAt                time.Time `json:"created_at"`
+	UpdatedAt                time.Time `json:"updated_at"`
 }
 
 // NewProfile is the input for onboarding. Module enablement isn't set here —
@@ -74,12 +83,13 @@ type NewProfile struct {
 // convention would need a Set flag to express it. Add that when someone
 // actually needs to release a handle.
 type ProfileUpdate struct {
-	Username    *string
-	DisplayName *string
-	DateOfBirth *string
-	Sex         *string
-	UnitSystem  *string
-	TrackEffort *bool
+	Username                 *string
+	DisplayName              *string
+	DateOfBirth              *string
+	Sex                      *string
+	UnitSystem               *string
+	TrackEffort              *bool
+	ShareTrainingWithFriends *bool
 }
 
 // Module is one discipline as a client sees it: the registry's definition

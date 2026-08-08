@@ -21,11 +21,22 @@ export type Profile = {
   sex: string | null;
   unit_system: UnitSystem;
   track_effort: boolean;
+  /**
+   * The ONLY thing that makes this athlete's training readable by another
+   * athlete. Off by default and read live server-side, so switching it off
+   * retracts every past session at once.
+   *
+   * Turning it ON is retroactive — friends see finished sessions from before
+   * the switch too. The Settings copy says so rather than leaving it to be
+   * found out.
+   */
+  share_training_with_friends: boolean;
 };
 
 /** The fields the edit screen can change. Omitted keys are left alone. */
 export type ProfilePatch = Partial<{
   track_effort: boolean;
+  share_training_with_friends: boolean;
   /** Claim or rename only — never null. The server treats null as "leave
    *  unchanged" (the profile-wide COALESCE contract), so a clear cannot be
    *  expressed and the save path must OMIT the key rather than null it. */

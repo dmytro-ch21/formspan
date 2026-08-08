@@ -16485,6 +16485,125 @@ wonders which one is real.
 
 ## Open items / known gaps as of this entry
 
+## 2026-08-07 — A friends' feed, and the first time one athlete can read another's training
+
+Every read of `sessions` in this system has been `WHERE user_id = $1`, without
+exception, since the module was written. Sharing moves **copies** on an
+explicit send-and-accept precisely so that it never has to answer "who may see
+this". This is the first thing that answers it, and the entry is mostly about
+that rather than about the screen.
+
+### Two decisions taken before any code
+
+**Sessions, not posts.** The brief said "activities from your friends, like a
+workout completed, a session done", and later mentioned posts and pictures. In
+build terms those share almost nothing: a feed over rows that already exist is
+a read path, while posts need a table, an upload endpoint, request signing,
+image processing, a per-user quota, moderation and a picker — **none of which
+exists.** There is a Cloudflare R2 bucket and a `storage_key`-not-URL
+convention, but its only writer is the seeder. Posts are a separate task.
+
+**Opt-in, off by default.** The alternative — automatic for accepted friends —
+is simpler and defensible, and it was rejected because it changes the privacy
+posture of every existing athlete silently, and retroactively. Nobody's
+training may become visible because they installed an update.
+
+### The switch is a column, read live
+
+`profiles.share_training_with_friends`, `DEFAULT false`, joined at query time
+rather than stamped onto each session as it finishes.
+
+That choice is the whole design. Stamping would be cheaper and would pass a
+first-load test, and it would mean **turning the switch off could not retract
+anything** — every already-published session would stay published. Reading it
+live means off is off, immediately, for everything. The cost is the mirror
+image: turning it ON is retroactive, so friends see finished sessions from
+before the switch. That is a real consequence and the Settings copy says so
+rather than leaving it to be discovered.
+
+### Three conditions, and one test each
+
+A session reaches your feed only if its owner is an **accepted** friend, has
+**opted in**, and the session is **finished**. (An in-progress session is a
+live location; "training right now" is a different disclosure from "trained on
+Tuesday".) Each clause has its own test, because a rule tested only in
+aggregate can lose a clause and still pass — and each was mutated away
+individually to confirm it goes red.
+
+The count query uses the same `visibleFrom` const as the list, which is not
+tidiness: a total larger than what the list returns promises pages that do not
+exist, and reports how much training a friend has done that the reader may not
+see.
+
+### What a row does not carry
+
+No sets, no notes, no RPE, no exercise ids. It says *that* somebody trained and
+roughly how much. Enlarging it is a privacy decision rather than a feature, and
+the type is its own rather than a `Session` with fields removed — that shape
+invites the missing ones back.
+
+**No badge, and that is structural.** The notification module counts what is
+*waiting* on you, cleared by answering the pending row, which is why it needs
+no read/unread state anywhere. A feed item is not answerable, so registering it
+there would require inventing exactly the second source of truth that module
+was built to avoid.
+
+### What review found
+
+The backend reviewer attacked the privacy boundary directly and could not get
+through it — no path by which a stranger's, a pending requester's, an
+opted-out friend's, an unfinished, or the caller's own session reaches a
+client, including through the total, the error text or timing. What it did find
+was tests that would stop noticing:
+
+- **Three purely-negative privacy tests discarded the error** (`page, _ :=`).
+  An errored `List` returns an empty page, so "a pending request granted
+  access" and its siblings pass vacuously the moment the query breaks — in the
+  suite that *is* the long-term enforcement of this boundary.
+- **The friendship pair's `ELSE` arm was never executed.** `friendships` stores
+  one row per pair with `user_a < user_b`, and in every fixture the caller
+  happened to sort first. A directional bug there empties the feed for roughly
+  half of all athletes with nothing going red. There is a test for the other
+  side now, and breaking the arm turns it red.
+- **The test borrowed `back-squat` from the seeded catalog.** It passed only
+  because `exercise`'s suite seeds the full catalog and sorts before `feed`
+  under `-p 1`; on a freshly migrated database it failed outright. The repo has
+  documented this trap twice already, and its rule — own the library rows you
+  depend on — now applies here too.
+- A third form of the **list-versus-count divergence** this branch had already
+  fixed twice: a row whose owner has no handle was skipped in Go but counted in
+  SQL. `AND p.username IS NOT NULL` moved into the shared predicate so the two
+  agree by construction.
+
+The frontend reviewer found two that were live rather than latent:
+
+- **A first-run account has no profile row**, so `getProfile` 404s — and inside
+  a `Promise.all` that rejected the entire load. A brand-new athlete saw "not
+  found" where the feed should be, with the feed, friends and counts calls all
+  having succeeded. In Settings the same 404 left the privacy switch
+  permanently disabled, reading as "off" whether it was or not.
+- **Volume was hardcoded `kg`.** `units.ts` states the rule — storage is
+  kilograms, conversion happens at the last possible moment on the way out —
+  and `formatVolume`/`formatDuration` already exist. Both were reimplemented
+  here and both diverged immediately: an imperial athlete would have read their
+  friends' training in a unit they never use, on the one surface where the
+  numbers are somebody else's and hardest to sanity-check.
+
+### Not verified
+
+- **No device run.** The screen has not been seen, and a feed is a layout that
+  either reads at a glance or does not.
+- **The single-flight guard has no test HERE.** One was written and removed
+  rather than left in: with this file's `useFocusEffect` mock the re-focus
+  fired but the screen's `load` did not run for it, so the test failed against
+  correct code and I could not establish why. A test I cannot explain is worse
+  than an acknowledged gap. The pattern itself is the one `app/friends/`
+  documents and `sharedScreen.test.tsx` exercises.
+- **`agoLabel` had a mutant that survived the first version of its test** —
+  `floor` → `round` on the weeks and months lines, because 7 days and 61 days
+  land where the two agree. Worth remembering that a table of cases is not
+  coverage unless the cases separate the implementations.
+
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
 - **Two position taxonomies now sit on one Library screen.** The filter chips are nine coarse families; the glossary is eleven curated entries. Since the guard split they disagree in a visible way: a beginner can read the Closed Guard card, learn the distinction, and then find no chip that filters to those 37 techniques. Adding North-South, and later Leg Entanglement, closed the cheap half each time (a position the glossary advertised that no chip could reach) — but doing it twice by hand is the evidence that hand-maintenance is the actual bug: the vocabulary is copied across four client files and one backend map, and the taxonomy PR updated one of the four until review caught it. Keying the chips on the glossary's ids, or a shared constant with a test asserting it matches positions.json, is the real answer and is design work, not a patch.
 

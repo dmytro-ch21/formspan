@@ -238,16 +238,16 @@ export default function YouScreen() {
                 on. Shares could not be badged when the counts shipped, because
                 the phone had no sharing surface; `app/shared/` closed that. */}
             <Text style={styles.sectionLabel}>People</Text>
-            {/* The entry point a Social screen would take over: friends'
-                activity with a friend-management pane above it, absorbing
-                `app/friends/`. When that lands this row changes its label, its
-                detail line and its href, and nothing else moves. */}
+            {/* Social took the entry point over, exactly as planned — this
+                row changed its label, its detail line and its href, and
+                nothing else moved. Friend management still exists at
+                `/friends`; the Social screen carries a pane through to it. */}
             <NavRow
-              label="Friends"
-              detail="Training partners, and requests waiting on you"
+              label="Social"
+              detail="What your training partners have been doing"
               badge={waiting.friend_requests}
-              onPress={() => router.push('/friends')}
-              testID="you-friends"
+              onPress={() => router.push('/social')}
+              testID="you-social"
             />
             {/* The RECEIVE half of sharing, and the reason the Share button on
                 a plan is a whole feature rather than half of one: the social

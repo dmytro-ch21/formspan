@@ -13,6 +13,9 @@ import { useAuth as useClerkAuth } from '@clerk/clerk-expo';
 import { readAutoRest, writeAutoRest } from '@/lib/rest';
 import { playSound, readSoundsEnabled, writeSoundsEnabled } from '@/lib/sounds';
 import { useTrackEffort } from '@/lib/useTrackEffort';
+import { isNotFound } from '@/lib/apiError';
+import { getProfile, updateProfile } from '@/lib/profile';
+import { useAuthToken } from '@/lib/useAuthToken';
 
 /**
  * Settings as grouped rows that drill down, rather than one flat screen of
@@ -42,6 +45,49 @@ export default function SettingsScreen() {
   }, [userId]);
 
   const { trackEffort, setTrackEffort, unsynced: effortUnsynced } = useTrackEffort();
+
+  /**
+   * The privacy switch, read straight from the profile rather than through a
+   * local-first hook.
+   *
+   * DELIBERATELY NOT OFFLINE-TOLERANT, unlike `trackEffort` beside it. That
+   * one is a display preference and a phone that disagrees with the server for
+   * an hour costs nothing. This one decides whether other people can read your
+   * training: a switch that flips locally and silently fails to reach the
+   * server would show "off" to an athlete whose sessions are still visible.
+   * So it is server state, it says so while it saves, and a failure puts it
+   * back where it was.
+   */
+  const getToken = useAuthToken();
+  const [sharing, setSharing] = useState<boolean | null>(null);
+  const [sharingBusy, setSharingBusy] = useState(false);
+  const [sharingError, setSharingError] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    getProfile(getToken)
+      .then((p) => {
+        if (live) setSharing(p.share_training_with_friends);
+      })
+      .catch((err: unknown) => {
+        if (!live) return;
+        // A 404 is the ordinary first-run case: no profile row yet, which
+        // means never opted in. Swallowing every error instead left `sharing`
+        // null forever, and a null switch is DISABLED — so a new athlete got a
+        // permanently dimmed control with no message, reading as "off" whether
+        // it was or not. `updateProfile` creates the row on write, so flipping
+        // it would have worked all along.
+        if (isNotFound(err)) {
+          setSharing(false);
+          return;
+        }
+        // Anything else is a real failure, and an indefinitely dimmed switch
+        // is the one thing a privacy control must not be: it looks like "off".
+        setSharingError("Couldn't check your sharing setting just now.");
+      });
+    return () => {
+      live = false;
+    };
+  }, [getToken]);
 
   return (
     <ScrollView contentContainerStyle={styles.scroll} testID="settings-screen">
@@ -143,6 +189,45 @@ export default function SettingsScreen() {
         />
       </Section>
 
+      {/* Its own section, because it is not a display preference like the ones
+          above — it is the only setting in the app that changes what somebody
+          else can see. Grouping it with units and sounds would file a
+          disclosure decision under cosmetics. */}
+      <Section title="Privacy">
+        <Toggle
+          label="Share training with friends"
+          // The retroactive half is stated up front. Turning this on shows
+          // finished sessions from BEFORE the switch, which is the kind of
+          // thing that must not be discovered afterwards.
+          hint="Accepted friends see your finished sessions — name, sport, time and volume, including ones from before you turned this on. Never your notes. Off, and nobody sees anything."
+          value={sharing ?? false}
+          disabled={sharing === null || sharingBusy}
+          last
+          onChange={(on) => {
+            // Optimistic, then reverted on failure — the honest shape for a
+            // control whose truth lives on the server.
+            const previous = sharing;
+            setSharing(on);
+            setSharingBusy(true);
+            setSharingError(null);
+            updateProfile(getToken, { share_training_with_friends: on })
+              .catch((err: unknown) => {
+                setSharing(previous);
+                setSharingError(
+                  err instanceof Error ? err.message : 'Could not save that just now.',
+                );
+              })
+              .finally(() => setSharingBusy(false));
+          }}
+          testID="settings-share-training"
+        />
+      </Section>
+      {sharingError && (
+        <Text style={styles.unsynced} accessibilityLiveRegion="polite" testID="sharing-error">
+          {sharingError} Your sharing setting is unchanged.
+        </Text>
+      )}
+
       {/* Same admission the units screen makes, for the same reason: this
           preference is on the account, so "changed here only" is a different
           outcome from "changed". It used to be neither surfaced nor even
@@ -236,6 +321,7 @@ function Toggle({
   value,
   onChange,
   last,
+  disabled,
   testID,
 }: {
   label: string;
@@ -243,15 +329,20 @@ function Toggle({
   value: boolean;
   onChange: (on: boolean) => void;
   last?: boolean;
+  /** For a switch whose true value is not known yet, or is being saved. A
+   *  privacy control especially must not be flippable before it can be
+   *  trusted to report where it stands. */
+  disabled?: boolean;
   testID?: string;
 }) {
   const accent = useAccent();
   return (
     <Pressable
-      style={[styles.row, !last && styles.rowDivided]}
+      style={[styles.row, !last && styles.rowDivided, disabled && styles.rowBusy]}
       onPress={() => onChange(!value)}
+      disabled={disabled}
       accessibilityRole="switch"
-      accessibilityState={{ checked: value }}
+      accessibilityState={{ checked: value, disabled: !!disabled }}
       accessibilityLabel={hint ? `${label}. ${hint}` : label}
       testID={testID}
     >
@@ -325,6 +416,7 @@ const styles = StyleSheet.create({
     minHeight: 58,
   },
   rowDivided: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: vola.lineSoft },
+  rowBusy: { opacity: 0.5 },
   rowBody: { flex: 1, gap: 2 },
 
   // Its own row shape rather than `Row`'s: the swatches need the full width
