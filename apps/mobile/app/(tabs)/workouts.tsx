@@ -39,6 +39,17 @@ import { sportColor, sportIcon, sportTint } from '@/components/ui/sport';
 import { useAccent } from '@/lib/AccentProvider';
 
 /**
+ * "1 exercise", not "1 exercises".
+ *
+ * Reachable on the browse shelf as well as your own list — anyone can publish a
+ * one-movement plan — and the tile had it wrong while the row beside it had it
+ * right, which is the version of this bug that survives review.
+ */
+function countLabel(n: number): string {
+  return `${n} ${n === 1 ? 'exercise' : 'exercises'}`;
+}
+
+/**
  * Room under the list for the floating New workout pill.
  *
  * 12pt of padding twice, the label's line box, and the 16pt the pill sits above
@@ -63,7 +74,7 @@ function fabClearance(fontScale: number): number {
 
 const SCOPES = [
   { key: 'mine', label: 'My workouts' },
-  { key: 'public', label: 'Public plans' },
+  { key: 'public', label: 'VOLA Workouts' },
 ] as const;
 
 export default function WorkoutsScreen() {
@@ -205,6 +216,15 @@ export default function WorkoutsScreen() {
               onPress={() => {
                 setScope(s.key);
                 setLoading(true);
+                // `everLoaded` means "has THIS scope loaded", not "has the
+                // screen ever loaded" — so a switch resets it and you get the
+                // spinner. Left true, the spinner is skipped and the OTHER
+                // scope's workouts render in the new scope's layout until the
+                // fetch lands: your own templates appear for a beat as VOLA
+                // Workout tiles, which reads as a data bug rather than a
+                // pending request. Clearing `workouts` instead would swap that
+                // for a false "No VOLA Workouts yet".
+                setEverLoaded(false);
               }}
               style={[
                 styles.scopeTab,
@@ -255,6 +275,15 @@ export default function WorkoutsScreen() {
         <ActivityIndicator style={styles.loader} accessibilityLabel="Loading workouts" />
       ) : (
         <KeyboardAwareFlatList
+          /*
+            Keyed on scope, and that is not cosmetic: React Native throws
+            "Changing numColumns on the fly is not supported" — the tab strip
+            switches between one and two columns, so the list has to be a new
+            list rather than the same one reconfigured.
+          */
+          key={scope}
+          numColumns={scope === 'public' ? 2 : 1}
+          columnWrapperStyle={scope === 'public' ? styles.tileRow : undefined}
           data={workouts}
           keyExtractor={(w) => w.id}
           contentContainerStyle={[styles.list, listPad]}
@@ -295,7 +324,7 @@ export default function WorkoutsScreen() {
             error || !everLoaded ? null : (
               <View style={styles.empty}>
                 <Text style={styles.emptyTitle}>
-                  {scope === 'mine' ? 'No workouts yet' : 'No public plans yet'}
+                  {scope === 'mine' ? 'No workouts yet' : 'No VOLA Workouts yet'}
                 </Text>
                 <Text style={styles.muted}>
                   {scope === 'mine'
@@ -305,19 +334,64 @@ export default function WorkoutsScreen() {
               </View>
             )
           }
-          renderItem={({ item }) => (
+          renderItem={({ item }) =>
+            /*
+              Two different cards, not one card bending.
+
+              A VOLA Workout is something you are BROWSING — seventeen names
+              you do not know — so it gets a square tile with artwork, laid out
+              two to a row and scanned by picture. Your own workouts are a list
+              you already know by name, so they stay a row: denser, and the
+              artwork would be decoration over information you do not need.
+            */
+            scope === 'public' ? (
+              <Link href={`/workout/${item.id}`} asChild>
+                <Pressable
+                  style={styles.tile}
+                  accessibilityRole="button"
+                  // The sport is dropped — the tile does not show it, and the
+                  // label should describe what is there. The GOAL is added
+                  // back, because the tile does show it: as the glyph, which
+                  // the hero is `accessible={false}` for. Without this line a
+                  // screen reader is the one reader who cannot tell a
+                  // powerlifting plan from a conditioning one.
+                  accessibilityLabel={[
+                    item.name,
+                    GOALS.find((g) => g.key === item.goal)?.label,
+                    countLabel(item.items.length),
+                    item.owner_user_id === null ? undefined : 'community plan',
+                  ]
+                    .filter(Boolean)
+                    .join(', ')}
+                  testID={`workout-${item.id}`}
+                >
+                  <PlanHero id={item.id} goal={item.goal} />
+                  <View style={styles.tileBody}>
+                    <Text style={styles.tileName} numberOfLines={2}>
+                      {item.name}
+                    </Text>
+                    {/* Who wrote it, on the tile rather than one tap in.
+                        This shelf is called VOLA Workouts and most of it is
+                        ours, but it also carries whatever anyone has published
+                        — so an unmarked tile would put the brand's name on a
+                        stranger's plan. Marking the exception rather than the
+                        rule: seventeen "by VOLA" labels would be noise. */}
+                    <Text style={styles.tileMeta} numberOfLines={1}>
+                      {item.owner_user_id === null
+                        ? countLabel(item.items.length)
+                        : `Community · ${countLabel(item.items.length)}`}
+                    </Text>
+                  </View>
+                </Pressable>
+              </Link>
+            ) : (
             <Link href={`/workout/${item.id}`} asChild>
               <Pressable
                 style={styles.card}
                 accessibilityRole="button"
-                accessibilityLabel={`${item.name}, ${item.sport}, ${item.items.length} exercises`}
+                accessibilityLabel={`${item.name}, ${item.sport}, ${countLabel(item.items.length)}`}
                 testID={`workout-${item.id}`}
               >
-                {/* Only on the browse surface. A hero over your OWN workouts
-                    would be decoration on a list you already know by name;
-                    here it is what makes sixteen unfamiliar plans scannable.
-                    Costs no bundled asset — see `PlanHero`. */}
-                {scope === 'public' && <PlanHero id={item.id} goal={item.goal} />}
                 {/* The same two marks the Today screen's session rows use — a
                     rule down the edge and a tinted disc — so a template and the
                     session it becomes read as the same discipline. */}
@@ -357,13 +431,17 @@ export default function WorkoutsScreen() {
                   <Text style={styles.cardMeta}>
                     {labelFor(modules, item.sport)}
                     {item.goal ? ` · ${GOALS.find((g) => g.key === item.goal)?.label}` : ''}
-                    {` · ${item.items.length} ${item.items.length === 1 ? 'exercise' : 'exercises'}`}
+                    {` · ${countLabel(item.items.length)}`}
                   </Text>
-                  {item.owner_user_id === null && <Text style={styles.muted}>VOLA template</Text>}
+                  {/* No "VOLA template" line here any more. This card only
+                      renders under `mine`, whose filter is `owner_user_id =
+                      $1` — so the null-owner branch it was gated on could
+                      never be true, and it named the shelf by its old name. */}
                 </View>
               </Pressable>
             </Link>
-          )}
+            )
+          }
         />
       )}
 
@@ -664,6 +742,26 @@ const styles = StyleSheet.create({
   // The list's own `gap` doesn't apply between a header and the first row, so
   // the spacing below the planner is the header's to own.
   planHeader: { gap: 18, marginBottom: 4 },
+  tileRow: { gap: 12 },
+  tile: {
+    // `flex: 1` inside a two-column wrapper, so the pair share the row evenly
+    // whatever the names do. A fixed width would break at large text sizes.
+    flex: 1,
+    // …but capped, or the LAST row stretches when it holds one tile — and
+    // `aspectRatio: 1` then doubles that tile's height, turning whichever plan
+    // sorts last into a banner. The seeded catalog is seventeen, so every
+    // athlete sees it on first open. (A lone tile lands 6pt wider than a
+    // paired one, half the row gap it no longer shares. Imperceptible.)
+    maxWidth: '50%',
+    borderWidth: 1,
+    borderColor: vola.line,
+    borderRadius: 14,
+    backgroundColor: vola.surface,
+    overflow: 'hidden',
+  },
+  tileBody: { paddingHorizontal: 10, paddingTop: 8, paddingBottom: 10, gap: 2 },
+  tileName: { fontSize: 14, fontWeight: '700', lineHeight: 18 },
+  tileMeta: { fontSize: 11, color: vola.textDim },
   card: {
     flexDirection: 'row',
     alignItems: 'center',

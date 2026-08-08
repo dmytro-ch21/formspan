@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
 
 import WorkoutsScreen from '../(tabs)/workouts';
 import type { Workout } from '@/lib/workouts';
@@ -155,9 +155,58 @@ it('still renders the network list for the shared scope, which has no cache', as
   render(<WorkoutsScreen />);
   await screen.findByText('Legs');
 
-  fireEvent.press(screen.getByText('Public plans'));
+  fireEvent.press(screen.getByText('VOLA Workouts'));
 
   expect(await screen.findByText('Someone Else Plan')).toBeTruthy();
   // And the cached `mine` row must not leak into the shared tab.
   expect(screen.queryByText('Legs')).toBeNull();
+});
+
+it('marks a community plan on the shelf that carries VOLA’s name', async () => {
+  // The shelf is called VOLA Workouts and most of it is ours, but the scope is
+  // `owner_user_id IS DISTINCT FROM $1 AND visibility = 'public'` — so it also
+  // carries whatever any athlete has published. Unmarked, the rename would put
+  // the brand's name on a stranger's plan, and nothing on the tile would say
+  // otherwise until you opened it.
+  mockCachedWorkouts.mockResolvedValue([]);
+  mockListWorkouts.mockImplementation(async (...a: unknown[]) =>
+    a[1] === 'public'
+      ? [
+          workout({ id: 'p1', name: 'Ours', owner_user_id: null, items: [{}, {}] as never }),
+          workout({ id: 'p2', name: 'Theirs', owner_user_id: 'u2', items: [{}, {}] as never }),
+        ]
+      : [],
+  );
+
+  render(<WorkoutsScreen />);
+  fireEvent.press(screen.getByText('VOLA Workouts'));
+  await screen.findByText('Ours');
+
+  // Scoped to each tile, not to the screen. Asserting both strings exist
+  // somewhere passes just as happily when the marker is on the WRONG tile —
+  // inverting the condition only swaps which plan carries it — so a
+  // screen-wide query would certify the one thing that actually goes wrong.
+  //
+  // Marking the exception rather than the rule: seventeen "by VOLA" labels
+  // would be noise, so the VOLA-authored tile carries the count alone.
+  expect(within(screen.getByTestId('workout-p1')).getByText('2 exercises')).toBeTruthy();
+  expect(
+    within(screen.getByTestId('workout-p2')).getByText('Community · 2 exercises'),
+  ).toBeTruthy();
+});
+
+it('says "1 exercise" on a one-movement plan', async () => {
+  // Reachable: anyone can publish a single-movement plan. The tile had this
+  // wrong while the row card beside it had it right.
+  mockCachedWorkouts.mockResolvedValue([]);
+  mockListWorkouts.mockImplementation(async (...a: unknown[]) =>
+    a[1] === 'public'
+      ? [workout({ id: 'p1', name: 'Just Squats', owner_user_id: null, items: [{}] as never })]
+      : [],
+  );
+
+  render(<WorkoutsScreen />);
+  fireEvent.press(screen.getByText('VOLA Workouts'));
+
+  expect(await screen.findByText('1 exercise')).toBeTruthy();
 });
