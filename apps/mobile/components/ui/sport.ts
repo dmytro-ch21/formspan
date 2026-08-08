@@ -1,4 +1,4 @@
-import { sportColors, type SportKey } from '@/constants/Colors';
+import { activeSportColors, type SportKey } from '@/constants/Colors';
 import type { IconName } from '@/components/ui/Icon';
 
 /**
@@ -21,9 +21,17 @@ const ICONS: Record<SportKey, IconName> = {
   nutrition: 'nutrition',
 };
 
-/** Undefined for a sport this build doesn't know — callers use a neutral. */
+/**
+ * Undefined for a sport this build doesn't know — callers use a neutral.
+ *
+ * Reads `activeSportColors` rather than `sportColors`, so monochrome mode
+ * collapses all four to one grey. That is safe here and only here because this
+ * module hands out the GLYPH beside the colour, and every caller renders both —
+ * which is exactly why the two live in one lookup. See the `mono` block in
+ * `constants/Colors.ts` for why four distinguishable greys do not exist.
+ */
 export function sportColor(key: string): string | undefined {
-  return sportColors[key as SportKey];
+  return activeSportColors[key as SportKey];
 }
 
 export function sportIcon(key: string): IconName | undefined {

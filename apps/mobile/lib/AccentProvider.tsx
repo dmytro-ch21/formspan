@@ -2,6 +2,7 @@ import { useAuth } from '@clerk/clerk-expo';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
 import { accents, DEFAULT_ACCENT, type Accent, type AccentName } from '@/constants/Colors';
+import { writeMonoFlag } from './palette';
 import { PREF_ACCENT, readPref, writePref } from './prefs';
 
 /**
@@ -92,6 +93,11 @@ export function AccentProvider({ children }: { children: React.ReactNode }) {
       // whole point is being seen immediately, and a round trip to SQLite
       // before the colour moves reads as a laggy control.
       setStored({ for: userId, name: next });
+      // Mirrored into the keychain so `constants/Colors.ts` can read it
+      // synchronously at module-evaluation time next launch — see `lib/palette.ts`.
+      // Not awaited before the pref write: the two are independent, and the one
+      // the app reads on every render is this one.
+      void writeMonoFlag(next);
       await writePref(userId, PREF_ACCENT, next);
     },
     [userId],

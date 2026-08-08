@@ -140,6 +140,13 @@ BUNDLE = {
     "notification": "notification",
     "streak": "streak",
     "success": "success",
+    # The count-in's payoff. `start` was in the family unbundled from the
+    # beginning and is exactly the right shape for it — rising and
+    # forward-leaning, where both of the timer's other chimes fall. It has to be
+    # its own sound rather than a reused `rest-complete`: a count-in ending and a
+    # rest ending are both "go", but one is followed by silence and the other by
+    # a set you are already three seconds into.
+    "start": "go",
 }
 
 # ---------------------------------------------------------------------------

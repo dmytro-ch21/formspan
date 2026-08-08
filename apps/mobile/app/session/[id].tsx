@@ -7,7 +7,8 @@ import { ActivityIndicator, Alert, Pressable, StyleSheet, TextInput } from 'reac
 import { KeyboardAwareScrollView, useEnsureVisible } from '@/components/KeyboardAwareScroll';
 import { SwipeToDelete } from '@/components/SwipeToDelete';
 
-import { CountdownBar, useCountdown } from '@/components/Countdown';
+import { useCountdown } from '@/components/Countdown';
+import { TIMER_BAR_SPACE, TimerSurface } from '@/components/Timer';
 import { HoldToConfirm } from '@/components/HoldToConfirm';
 import { SessionCelebration } from '@/components/SessionCelebration';
 import {
@@ -20,6 +21,32 @@ import {
 import { fetchRecords } from '@/lib/records';
 import { carriedTheStreak, fetchHistory, localZone, streakRange, weekStreak } from '@/lib/history';
 import { elapsedOf } from '@/lib/countdown';
+import {
+  adjustStepFor,
+  defaultDurationUnit,
+  durationInputUnit,
+  durationUnitKey,
+  fromDisplayDuration,
+  parseDurationUnit,
+  toDisplayDuration,
+  type DurationUnit,
+} from '@/lib/duration';
+import {
+  groupModeOf,
+  isDualMode,
+  measuresForSet,
+  setModeOf,
+  withGroupMode,
+  type SetMode,
+} from '@/lib/setMode';
+import {
+  buildExerciseRun,
+  buildSessionRun,
+  canRun,
+  runSeconds,
+  type RunContext,
+} from '@/lib/intervalRun';
+import { readPref, writePref } from '@/lib/prefs';
 import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { Stat, StatRow } from '@/components/ui/Stat';
@@ -118,10 +145,23 @@ export default function SessionScreen() {
    * The hook holds this in a ref, so this closure is the current render's and
    * sees the current `sets`.
    */
-  const timerState = useCountdown((finished) => {
-    if (finished.kind !== 'work' || finished.setIndex == null || !finished.exerciseID) return;
-    recordTimedSet(finished.setIndex, finished.exerciseID, Math.round(finished.total), true);
-  });
+  const timerState = useCountdown(
+    (finished, elapsed) => {
+      if (finished.kind !== 'work' || finished.setIndex == null || !finished.exerciseID) return;
+      // `elapsed`, not `total`. A countdown that ran out reports its full length,
+      // so the ordinary case is unchanged; one ended deliberately early — "Done
+      // early" mid-plank — reports the seconds that actually happened. Logging
+      // the prescription there would put a number in the history nobody
+      // performed, which is the whole reason the hook hands this over.
+      recordTimedSet(finished.setIndex, finished.exerciseID, elapsed, true);
+    },
+    () => {
+      // A run that reached its own end. The session is not over — there may be
+      // untimed work left — so this only says the run is, and the celebration
+      // still belongs to Finish.
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    },
+  );
   // The switch in Settings writes this; reading the same hook is what makes
   // the two agree. An earlier version imported the hook and never called it,
   // leaving a useState(true) nothing ever updated — so the setting silently
@@ -291,6 +331,65 @@ export default function SessionScreen() {
     },
     [getToken, unitFor, units],
   );
+
+  /**
+   * Seconds or minutes, per exercise — the duration counterpart of kg/lb above.
+   *
+   * Holds **only genuine overrides**, which is why the read parses to null
+   * rather than to a default: an exercise with no entry falls through to the
+   * scale its own prescription implies, so a 4-minute round opens in minutes and
+   * a 45-second plank opens in seconds without anybody having chosen anything.
+   * Storing a default would freeze the first guess and make the map lie about
+   * what the athlete actually asked for.
+   *
+   * Local (`prefs`) rather than on the profile, unlike the weight unit — see
+   * `lib/duration.ts` for why the two differ.
+   */
+  const [durationUnits, setDurationUnits] = useState<Record<string, DurationUnit>>({});
+  const durationFor = useCallback(
+    (exerciseID: string, seconds?: number | null): DurationUnit =>
+      durationUnits[exerciseID] ?? defaultDurationUnit(seconds),
+    [durationUnits],
+  );
+  const toggleDurationFor = useCallback(
+    (exerciseID: string, current: DurationUnit) => {
+      const next: DurationUnit = current === 'minutes' ? 'seconds' : 'minutes';
+      setDurationUnits((m) => ({ ...m, [exerciseID]: next }));
+      if (userId) writePref(userId, durationUnitKey(exerciseID), next).catch(() => {});
+    },
+    [userId],
+  );
+  /*
+    Keyed on the SET OF EXERCISE IDS rather than on `sets`.
+
+    `sets` changes on every keystroke, so depending on it would re-read every
+    preference from SQLite while somebody types a weight. The ids only change
+    when an exercise is added, removed or swapped, which is exactly when a new
+    preference might need reading — and the sorted join makes reordering a
+    no-op, because moving an exercise does not change which ones are here.
+  */
+  const exerciseKey = [...new Set(sets.map((s) => s.exercise_id))].sort().join(',');
+  useEffect(() => {
+    if (!userId || !exerciseKey) return;
+    let live = true;
+    Promise.all(
+      exerciseKey.split(',').map(async (eid) => {
+        return [eid, parseDurationUnit(await readPref(userId, durationUnitKey(eid)))] as const;
+      }),
+    )
+      .then((pairs) => {
+        if (!live) return;
+        const next: Record<string, DurationUnit> = {};
+        for (const [eid, unit] of pairs) if (unit) next[eid] = unit;
+        setDurationUnits(next);
+      })
+      .catch(() => {
+        // Unreadable preferences leave the prescription-derived defaults.
+      });
+    return () => {
+      live = false;
+    };
+  }, [userId, exerciseKey]);
   const [loading, setLoading] = useState(true);
   const [everLoaded, setEverLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -536,6 +635,14 @@ export default function SessionScreen() {
   }
 
   function addSet(exerciseID: string, afterIndex: number) {
+    // This INSERTS mid-array, so every later index shifts — which makes it a
+    // structural change exactly like removal and reordering, and it was the one
+    // mutator not saying so. Found in review. A countdown running on a later
+    // group would then write one row above its target, and when that row is the
+    // same exercise (set 2 of a plank with set 1 above it) `timedSetStillAt`
+    // passes and the wrong-row write is silent. "+ Set" during a run's rest step
+    // is an ordinary thing to do: the bar is minimised and the list is live.
+    stopTimerForStructureChange();
     commit(
       [
         ...sets.slice(0, afterIndex + 1),
@@ -568,7 +675,7 @@ export default function SessionScreen() {
     // One commit, not two: a second setState here would compute from the
     // pre-toggle `sets` and drop the tick.
     const next = now
-      ? fillForward(marked, index, measuresFor(catalog.get(exerciseID)?.load_type ?? 'reps'))
+      ? fillForward(marked, index, measuresForSet(sets[index], loadTypeOf(exerciseID), measuresFor))
       : marked;
     commit(next);
     // A haptic, not a sound. This fires 20+ times a session — more than
@@ -600,10 +707,30 @@ export default function SessionScreen() {
    * and a set of lateral raises are not the same wait, and the movement
    * pattern's default is a starting point rather than an answer.
    */
+  /**
+   * Bank a running work countdown before something replaces it.
+   *
+   * Stop logs honest elapsed time; starting a *different* timer used to discard
+   * it — so a minimised plank plus one tap on another row's timer glyph erased
+   * the plank from history with nothing on screen to say so. Found in review,
+   * and it is the same rule Stop follows: the seconds happened, so they are
+   * kept, and the set is not ticked because the athlete did not say it was done.
+   *
+   * Only a countdown still running. A finished one has already written itself
+   * through the completion callback, and writing again would double up.
+   */
+  function bankRunningWork() {
+    const t = timerState.timer;
+    if (t?.kind !== 'work' || t.setIndex == null || !t.exerciseID) return;
+    if (timerState.remaining <= 0) return;
+    recordTimedSet(t.setIndex, t.exerciseID, elapsedOf(t, timerState.remaining), false);
+  }
+
   async function startRest(exerciseID: string) {
+    bankRunningWork();
     const ex = catalog.get(exerciseID);
     const seconds = userId ? await readRestSeconds(userId, ex, exerciseID) : 90;
-    timerState.startRest(seconds, ex?.name ?? 'Rest', exerciseID);
+    timerState.startRest(seconds, ex?.name ?? 'Rest', exerciseID, stepFor(exerciseID, seconds));
   }
 
   /**
@@ -613,12 +740,104 @@ export default function SessionScreen() {
    * prescription already is: a template's `target_seconds` is copied onto every
    * set it creates, so "3 × 1 min" needs no second source. See
    * `workSecondsFor`.
+   *
+   * **Counted in, always.** The three seconds before it starts are not
+   * decoration: without them the first seconds of every timed set are spent
+   * putting the phone down and getting into position, and they get logged as
+   * work that happened. See `READY_SECONDS`.
    */
   function startWork(index: number, exerciseID: string) {
+    bankRunningWork();
     const ex = catalog.get(exerciseID);
     const seconds = workSecondsFor(sets[index], ex?.load_type);
     if (seconds == null) return;
-    timerState.startWork(seconds, ex?.name ?? 'Work', exerciseID, index);
+    timerState.startWorkWithLeadIn(
+      seconds,
+      ex?.name ?? 'Work',
+      exerciseID,
+      index,
+      stepFor(exerciseID, seconds),
+    );
+  }
+
+  /** The catalog's load type for an exercise, or undefined while it is loading. */
+  function loadTypeOf(exerciseID: string): Exercise['load_type'] | undefined {
+    return catalog.get(exerciseID)?.load_type;
+  }
+
+  /** How much ± moves this exercise's clock — 15s, or 30s if it thinks in minutes. */
+  function stepFor(exerciseID: string, seconds?: number | null): number {
+    return adjustStepFor(durationFor(exerciseID, seconds));
+  }
+
+  /**
+   * Everything a run needs to know about the exercises in it.
+   *
+   * Built here rather than inside `lib/intervalRun.ts` because this is the only
+   * place that holds the catalog, the resolved rest durations and the duration
+   * units at once — the module itself stays free of all three, which is what
+   * lets it be tested without a database.
+   */
+  function runContext(rests: Record<string, number>): RunContext {
+    return {
+      workSeconds: (set, exerciseID) => workSecondsFor(set, loadTypeOf(exerciseID)),
+      restSeconds: (exerciseID) => rests[exerciseID] ?? 60,
+      name: (exerciseID) => catalog.get(exerciseID)?.name ?? 'Exercise',
+      // Seeded from the exercise's own first duration, not from nothing: a
+      // four-minute round with no stored override would otherwise fall to the
+      // seconds default and put ±15 on the timer for it.
+      step: (exerciseID) =>
+        stepFor(exerciseID, sets.find((s) => s.exercise_id === exerciseID)?.seconds ?? null),
+    };
+  }
+
+  /**
+   * The rest durations for a list of exercises, resolved together.
+   *
+   * Up front rather than at each transition, and that is the point of building
+   * the plan in advance: looking a preference up from SQLite inside a countdown
+   * callback would put an await between one interval ending and the next
+   * beginning, which is a gap the athlete stands in.
+   */
+  async function restsFor(exerciseIDs: string[]): Promise<Record<string, number>> {
+    const unique = [...new Set(exerciseIDs)];
+    const pairs = await Promise.all(
+      unique.map(async (eid) => {
+        const seconds = userId
+          ? await readRestSeconds(userId, catalog.get(eid), eid)
+          : 60;
+        return [eid, seconds] as const;
+      }),
+    );
+    return Object.fromEntries(pairs);
+  }
+
+  /**
+   * Run every remaining set of one exercise, hands free.
+   *
+   * "Run all sets" on the group header. Only offered when every pending set of
+   * that exercise is timed — see `canRun` for why that is all-or-nothing.
+   */
+  async function runExercise(group: { exerciseID: string; indices: number[] }) {
+    bankRunningWork();
+    const rests = await restsFor([group.exerciseID]);
+    const steps = buildExerciseRun(sets, group.indices, runContext(rests));
+    timerState.startRun(steps, 'exercise');
+  }
+
+  /**
+   * Run the whole session, hands free, with spoken cues.
+   *
+   * The "Guided" button, and it appears only when every pending set in the
+   * session is timed — which in practice means a conditioning or circuit
+   * workout, the kind VOLA Workouts ships. A mixed session cannot be guided
+   * honestly: the app has no way to know when you racked a bar.
+   */
+  async function runSession() {
+    bankRunningWork();
+    const rests = await restsFor(sets.map((s) => s.exercise_id));
+    const steps = buildSessionRun(sets, groups, runContext(rests));
+    timerState.startRun(steps, 'session');
   }
 
   /**
@@ -658,10 +877,13 @@ export default function SessionScreen() {
     if (!timedSetStillAt(sets, index, exerciseID)) return;
     const written = sets.map((s, i) => (i === index ? { ...s, seconds, completed: tick || s.completed } : s));
     const next = tick
-      ? fillForward(written, index, measuresFor(catalog.get(exerciseID)?.load_type ?? 'reps'))
+      ? fillForward(written, index, measuresForSet(written[index], loadTypeOf(exerciseID), measuresFor))
       : written;
     commit(next);
-    if (tick && autoRest) void startRest(exerciseID);
+    // Never inside a run: the plan already has its own rest steps, and starting a
+    // second countdown here would race the one the run is about to start —
+    // whichever landed last would win, and it would not reliably be the plan's.
+    if (tick && autoRest && !timerState.run) void startRest(exerciseID);
   }
 
   /**
@@ -669,9 +891,16 @@ export default function SessionScreen() {
    *
    * Only `work` — a rest belongs to an exercise, not to a position, so
    * reordering does not invalidate it.
+   *
+   * **A run always dies, whatever step it is on**, and that asymmetry is the
+   * point: every remaining step in the plan carries a `setIndex` that the
+   * reorder has just invalidated, so a run allowed to continue through a rest
+   * would come out the other side writing to somebody else's squat. One
+   * cancelled circuit is a nuisance; a set logged against the wrong exercise is
+   * a lie in the training history.
    */
   function stopTimerForStructureChange() {
-    if (timerState.timer?.kind === 'work') timerState.stop();
+    if (timerState.run || timerState.timer?.kind === 'work') timerState.stop();
   }
 
   function removeSet(index: number) {
@@ -703,6 +932,23 @@ export default function SessionScreen() {
     if (last && last.exerciseID === s.exercise_id) last.indices.push(i);
     else groups.push({ exerciseID: s.exercise_id, indices: [i] });
   });
+
+  /**
+   * Switch a whole exercise between reps and time.
+   *
+   * Per exercise rather than per set — see `lib/setMode.ts`. Cancels any running
+   * countdown first: a work countdown started against a duration that is about
+   * to be cleared is a countdown writing seconds onto a row that no longer
+   * measures them.
+   */
+  function setGroupMode(group: { exerciseID: string; indices: number[] }, mode: SetMode) {
+    const next = withGroupMode(sets, group.indices, loadTypeOf(group.exerciseID), mode);
+    if (next === sets) return;
+    stopTimerForStructureChange();
+    commit(next);
+    Haptics.selectionAsync().catch(() => {});
+  }
+
 
 
   /**
@@ -751,6 +997,34 @@ export default function SessionScreen() {
 
   const finished = session.ended_at !== null;
 
+  /**
+   * Whether the session as a whole can be run hands-free.
+   *
+   * Computed over every set rather than per group, because "Guided" claims to
+   * take the athlete through the entire workout. One untimed exercise anywhere
+   * means it cannot, and offering it anyway would be a guided run that stops
+   * guiding in the middle without saying so. `runContext({})` is safe here
+   * because `canRun` only ever consults `workSeconds` — the rest durations are
+   * resolved later, when a run is actually built.
+   */
+  const guidable =
+    !finished &&
+    !timerState.run &&
+    groups.length > 0 &&
+    canRun(sets, sets.map((_, i) => i), runContext({}));
+
+  /**
+   * How long a guided run would take, for the label on the button.
+   *
+   * Built with the DEFAULT rest rather than the athlete's stored per-exercise
+   * ones, because the real durations need SQLite and this renders on every
+   * keystroke. It is an estimate on a button, not a prescription — the run
+   * itself resolves the real values before it starts.
+   */
+  const guidedSeconds = guidable
+    ? runSeconds(buildSessionRun(sets, groups, runContext({})))
+    : 0;
+
   return (
     <View style={styles.container} testID="session-screen">
       <Stack.Screen
@@ -762,7 +1036,12 @@ export default function SessionScreen() {
       />
 
       <KeyboardAwareScrollView
-        contentContainerStyle={styles.scroll}
+        contentContainerStyle={[
+          styles.scroll,
+          // Only for the collapsed bar. The expanded card is modal by intent
+          // and overlays instead — see TIMER_BAR_SPACE.
+          timerState.timer && timerState.minimized ? { paddingTop: TIMER_BAR_SPACE } : null,
+        ]}
         keyboardShouldPersistTaps="handled"
         // Kept alongside the focus-scrolling above it: this is what slides the
         // content back down when the keyboard goes, and what lets the last
@@ -833,8 +1112,53 @@ export default function SessionScreen() {
           </Text>
         )}
 
+        {/*
+          The whole workout, hands free.
+
+          Only on a session where EVERY pending set is timed — in practice a
+          conditioning or circuit plan, the shape VOLA Workouts ships. That is
+          the "only the ones that make sense" rule, made mechanical: the app
+          cannot know when you racked a bar, so a run through a mixed session
+          would have to stop and wait without being able to say what for.
+
+          It says how long it will take, because that is the one thing an
+          athlete wants to know before handing the next eleven minutes to a
+          timer.
+        */}
+        {guidable && (
+          <Pressable
+            onPress={() => void runSession()}
+            style={[styles.guided, { borderColor: accent.accent }]}
+            accessibilityRole="button"
+            accessibilityLabel="Run this whole workout hands free, with spoken cues"
+            testID="run-session"
+          >
+            <Icon name="play" size={15} color={accent.ink} strokeWidth={2.2} />
+            <View style={styles.guidedBody}>
+              <Text style={[styles.guidedTitle, { color: accent.ink }]}>Guided workout</Text>
+              <Text style={styles.guidedSub}>
+                {formatElapsed(guidedSeconds)} · counts you in and calls each set
+              </Text>
+            </View>
+          </Pressable>
+        )}
+
         {groups.map((g, gi) => {
           const exercise = catalog.get(g.exerciseID);
+          const dual = isDualMode(exercise?.load_type);
+          const mode = groupModeOf(sets, g.indices, exercise?.load_type);
+          // The first pending duration, so the chip and the fields agree about
+          // which scale this exercise is being written at.
+          const groupSeconds = g.indices.map((i) => sets[i]?.seconds).find((s) => s != null) ?? null;
+          const durationUnit = durationFor(g.exerciseID, groupSeconds);
+          const measures = measuresFor(exercise?.load_type ?? 'reps');
+          const timed = mode === 'time' || measures.includes('seconds');
+          // The kg/lb chip now appears only where there IS a weight. It used to
+          // sit on every header, including planks and jump rope, offering to
+          // switch the units of a field those rows do not have — harmless until
+          // the duration chip arrived beside it and the two read as a pair.
+          const weighted = measures.includes('weight');
+          const runnable = !finished && !timerState.run && canRun(sets, g.indices, runContext({}));
           return (
             <View key={g.exerciseID + g.indices[0]} style={styles.group}>
               <View style={styles.groupHead}>
@@ -886,7 +1210,70 @@ export default function SessionScreen() {
                     <Text style={styles.restChipText}>Rest</Text>
                   </Pressable>
                 )}
-                {!finished && (
+                {/* Reps or time, for the movements that are honestly both.
+                    On the header rather than on each row because nobody does
+                    set 1 of burpees in reps and set 2 in seconds — see
+                    lib/setMode.ts. */}
+                {!finished && dual && (
+                  <Pressable
+                    onPress={() => setGroupMode(g, mode === 'time' ? 'reps' : 'time')}
+                    hitSlop={10}
+                    style={[
+                      styles.modeChip,
+                      mode === 'time' && { borderColor: accent.accent },
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: mode === 'time' }}
+                    accessibilityLabel={`${exercise?.name ?? 'This exercise'} is counted in ${
+                      mode === 'time' ? 'time' : 'reps'
+                    }. Switch to ${mode === 'time' ? 'reps' : 'time'}.`}
+                    testID={`mode-${g.exerciseID}`}
+                  >
+                    <Text
+                      style={[styles.modeChipText, mode === 'time' && { color: accent.ink }]}
+                    >
+                      {mode === 'time' ? 'Time' : 'Reps'}
+                    </Text>
+                  </Pressable>
+                )}
+                {/* Seconds or minutes — the duration counterpart of the kg/lb
+                    chip beside it. Only on an exercise actually measured in
+                    time; on a set of squats it would be a control for a field
+                    that is not there. */}
+                {!finished && timed && (
+                  <Pressable
+                    onPress={() => toggleDurationFor(g.exerciseID, durationUnit)}
+                    hitSlop={10}
+                    style={styles.unitChip}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${exercise?.name ?? 'This exercise'} is in ${
+                      durationUnit === 'minutes' ? 'minutes' : 'seconds'
+                    }. Switch.`}
+                    testID={`duration-${g.exerciseID}`}
+                  >
+                    <Text style={styles.unitChipText}>{durationInputUnit(durationUnit)}</Text>
+                  </Pressable>
+                )}
+                {/* Every remaining set, back to back, counted in and rested
+                    between. Only when all of them are timed — a run that
+                    skipped the untimed ones would stop guiding halfway
+                    through without saying so. */}
+                {runnable && (
+                  <Pressable
+                    onPress={() => void runExercise(g)}
+                    hitSlop={10}
+                    style={[styles.runChip, { borderColor: accent.accent }]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Run all remaining sets of ${
+                      exercise?.name ?? 'this exercise'
+                    } back to back`}
+                    testID={`run-${g.exerciseID}`}
+                  >
+                    <Icon name="play" size={11} color={accent.ink} strokeWidth={2.2} />
+                    <Text style={[styles.runChipText, { color: accent.ink }]}>Run all</Text>
+                  </Pressable>
+                )}
+                {!finished && weighted && (
                   <Pressable
                     onPress={() => toggleUnitFor(g.exerciseID)}
                     hitSlop={10}
@@ -963,12 +1350,17 @@ export default function SessionScreen() {
                     // restart mid-hold.
                     onStartTimer={
                       workSecondsFor(sets[i], exercise?.load_type) != null &&
-                      timerState.timer?.setIndex !== i
+                      timerState.timer?.setIndex !== i &&
+                      // Never inside a run: the plan is already driving this
+                      // exercise, and a second countdown started by hand would
+                      // race it for the same row.
+                      !timerState.run
                         ? () => startWork(i, g.exerciseID)
                         : undefined
                     }
                     showEffort={showEffort}
                     units={unitFor(g.exerciseID)}
+                    duration={durationUnit}
                   />
                 </SwipeToDelete>
               ))}
@@ -1052,7 +1444,19 @@ export default function SessionScreen() {
                                 ? {
                                     ...st,
                                     ...(w != null ? { weight_kg: w } : {}),
-                                    ...(reps != null ? { reps } : {}),
+                                    // Never onto a set being counted in time.
+                                    // This button bypasses `applySuggestions`,
+                                    // so it needs the guard of its own that
+                                    // review caught it missing: a rep target on
+                                    // a 40-second burpee row leaves it holding
+                                    // both measures, which flips the derived
+                                    // mode back with a duration still attached
+                                    // and feeds phantom reps to the volume
+                                    // rollup. See lib/setMode.ts.
+                                    ...(reps != null &&
+                                    setModeOf(st, loadTypeOf(st.exercise_id)) !== 'time'
+                                      ? { reps }
+                                      : {}),
                                   }
                                 : st,
                             ),
@@ -1219,9 +1623,13 @@ export default function SessionScreen() {
       )}
 
       {timerState.timer && (
-        <CountdownBar
+        <TimerSurface
           timer={timerState.timer}
           remaining={timerState.remaining}
+          run={timerState.run}
+          minimized={timerState.minimized}
+          onMinimize={() => timerState.setMinimized(true)}
+          onExpand={() => timerState.setMinimized(false)}
           onAdjust={(delta) => {
             timerState.adjust(delta);
             // Adjusting a REST is how you tell the app this exercise needs a
@@ -1231,18 +1639,24 @@ export default function SessionScreen() {
             // bit longer today", not a new prescription. Writing it to the
             // rest preference would silently change how long you rest because
             // you extended a plank.
+            //
+            // Not inside a RUN either, and for a third reason: the plan's later
+            // rest steps were built from the stored duration, so persisting an
+            // adjustment mid-run would leave the preference and the remaining
+            // steps disagreeing about the same number.
             const t = timerState.timer;
-            if (userId && t?.kind === 'rest' && t.exerciseID) {
+            if (userId && t?.kind === 'rest' && t.exerciseID && !timerState.run) {
               writeRestSeconds(userId, t.exerciseID, t.total + delta).catch(() => {});
             }
           }}
           onTogglePause={timerState.togglePause}
+          onSkip={timerState.skipStep}
           onStop={() => {
             // Stopping a running work countdown logs what it actually
             // counted; see `recordTimedSet` for why that is the elapsed time
             // and why it does not tick the set. Once it has finished, the
             // completion callback has already written the set and this button
-            // is only dismissing the bar.
+            // is only dismissing the surface.
             const t = timerState.timer;
             if (t?.kind === 'work' && t.setIndex != null && t.exerciseID && timerState.remaining > 0) {
               recordTimedSet(t.setIndex, t.exerciseID, elapsedOf(t, timerState.remaining), false);
@@ -1397,6 +1811,7 @@ function SetRow({
   onToggleDone,
   onStartTimer,
   units,
+  duration,
   showEffort,
 }: {
   index: number;
@@ -1410,11 +1825,16 @@ function SetRow({
   /** Undefined when this set isn't timed — see `workSecondsFor`. */
   onStartTimer?: () => void;
   units: UnitSystem;
+  /** Seconds or minutes, for this exercise — see `lib/duration.ts`. */
+  duration: DurationUnit;
   showEffort: boolean;
 }) {
   const accent = useAccent();
   const [open, setOpen] = useState(false);
-  const measures: Measure[] = exercise ? measuresFor(exercise.load_type) : ['reps'];
+  // Mode-aware: burpees switched to time show a duration field and no reps one,
+  // which is the whole point of the switch. Going through `measuresFor` directly
+  // would offer the one number the row is not keeping.
+  const measures: Measure[] = measuresForSet(set, exercise?.load_type, measuresFor);
   const typeShort = SET_TYPES.find((t) => t.key === set.set_type)?.short ?? '';
   // Named in every field's label, so VoiceOver reads "Reps for set 2 of Back
   // Squat" rather than a column of identical "Reps".
@@ -1438,7 +1858,7 @@ function SetRow({
         style={styles.setHead}
         onPress={() => editable && setOpen((v) => !v)}
         accessibilityRole={editable ? 'button' : undefined}
-        accessibilityLabel={`Set ${ordinal}. ${describeSet(set, units)}`}
+        accessibilityLabel={`Set ${ordinal}. ${describeSet(set, units, duration)}`}
         accessibilityState={{ expanded: open }}
         testID={`set-${index}`}
       >
@@ -1446,7 +1866,7 @@ function SetRow({
           {ordinal}
           {typeShort ? <Text style={styles.setBadge}> {typeShort}</Text> : null}
         </Text>
-        <Text style={styles.setSummary}>{describeSet(set, units)}</Text>
+        <Text style={styles.setSummary}>{describeSet(set, units, duration)}</Text>
         {editable && onStartTimer && (
           /*
             Only on sets measured in seconds — a plank, a hold, a carry.
@@ -1503,9 +1923,13 @@ function SetRow({
                   ? `Weight ${weightUnit(units)}`
                   : m === 'distance'
                     ? distanceInputUnit(units)
-                    : MEASURE_LABEL[m];
+                    : m === 'seconds'
+                      ? `Time (${durationInputUnit(duration)})`
+                      : MEASURE_LABEL[m];
               // Converted for display, converted back on input — the stored
-              // value is always kilograms or metres, whatever is on screen.
+              // value is always kilograms, metres or seconds, whatever is on
+              // screen. Duration is the third of those and works exactly like
+              // the other two: see lib/duration.ts.
               const shown =
                 stored == null
                   ? null
@@ -1513,7 +1937,9 @@ function SetRow({
                     ? toDisplayWeight(stored, units)
                     : m === 'distance'
                       ? toDisplayDistance(stored, units)
-                      : stored;
+                      : m === 'seconds'
+                        ? toDisplayDuration(stored, duration)
+                        : stored;
               return (
                 <Field
                   key={m}
@@ -1530,10 +1956,16 @@ function SetRow({
                         ? fromDisplayWeight(raw, units)
                         : m === 'distance'
                           ? Math.round(fromDisplayDistance(raw, units))
-                          : Math.round(raw);
+                          : m === 'seconds'
+                            ? fromDisplayDuration(raw, duration)
+                            : Math.round(raw);
                     onChange({ ...set, [MEASURE_KEY[m]]: canonical });
                   }}
-                  integer={m !== 'weight'}
+                  // A duration in minutes is the second field that takes a
+                  // decimal — 1.5 min is 90 seconds, and forcing a whole number
+                  // there would make the unit useless for exactly the durations
+                  // it exists for.
+                  integer={m !== 'weight' && !(m === 'seconds' && duration === 'minutes')}
                   accessibilityLabel={`${label} for set ${ordinal} of ${exerciseName}`}
                   testID={`set-${index}-${m}`}
                 />
@@ -1767,6 +2199,40 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   unitChipText: { fontSize: 12, fontWeight: '700', color: vola.textMuted },
+  modeChip: {
+    borderWidth: 1,
+    borderColor: vola.line,
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    minHeight: 32,
+    justifyContent: 'center',
+  },
+  modeChipText: { fontSize: 12, fontWeight: '700', color: vola.textMuted },
+  runChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    minHeight: 32,
+  },
+  runChipText: { fontSize: 12, fontWeight: '700' },
+  guided: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginHorizontal: 16,
+    marginBottom: 14,
+    backgroundColor: vola.surface,
+  },
+  guidedBody: { flex: 1, backgroundColor: 'transparent' },
+  guidedTitle: { fontSize: 15, fontWeight: '700' },
+  guidedSub: { fontSize: 12, color: vola.textMuted, marginTop: 2 },
   moveChip: {
     minWidth: 30,
     height: 30,

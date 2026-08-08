@@ -88,6 +88,7 @@ export const SOUND_NAMES = [
   'notification',
   'streak',
   'success',
+  'go',
 ] as const;
 
 export type SoundName = (typeof SOUND_NAMES)[number];
@@ -106,6 +107,7 @@ const SOURCES: Record<SoundName, number> = {
   notification: require('@/assets/sounds/notification.m4a'),
   streak: require('@/assets/sounds/streak.m4a'),
   success: require('@/assets/sounds/success.m4a'),
+  go: require('@/assets/sounds/go.m4a'),
 };
 
 let players: Partial<Record<SoundName, AudioPlayer>> = {};

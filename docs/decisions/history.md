@@ -16853,6 +16853,236 @@ sits, correctly, before it. That should be the last repair: every branch open
 now postdates the rule.
 
 
+## 2026-08-08 — The timer becomes a training tool, and the app learns to run a workout for you
+
+The rest timer was a bar pinned to the bottom of the session screen: one
+countdown, ±15s, pause, skip. Everything below is the consequence of asking it
+to do the job an interval timer actually does.
+
+### The timer moved to the TOP, and grew two forms
+
+The bottom of a session screen is where the thumb lives — "+ Set", the done
+ticks, swipe-to-delete. A permanent 90pt bar there is a permanent reduction in
+the working area, directly under the hand, and it put the one thing you want to
+read from three metres away furthest from your eyeline when the phone is propped
+against a water bottle.
+
+`components/Timer.tsx` replaces it with a top-anchored surface in two sizes. The
+expanded card is a ring (SVG, drains from twelve o'clock) with the clock in the
+middle; the collapsed bar is the old control set, moved. `minimized` is the only
+difference between them, and **rest opens minimised while work opens expanded** —
+resting is time you spend looking at anything except the phone.
+
+**Every colour comes from the accent.** The old bar reached for `vola.green` on
+completion, so a yellow-themed app grew a green progress bar the moment a rest
+finished. Kind is carried by the word ("Work", "Rest", "Get ready") and by ring
+opacity, never by hue: there is one hue available and inventing a second would
+break the promise the accent setting makes.
+
+### The last-three-seconds ticks were late, and it was the polling
+
+The ticks fired from the 250ms display interval, on whichever pass first noticed
+a new whole second — so every beep landed 0–250ms *after* the second turned over,
+averaging 125ms late. Audible, and on a count-in it matters because you move on
+the beep.
+
+The deadline model already knew the answer exactly and had since the countdown
+started: three seconds remain at `endsAt - 3000`. `tickSchedule` returns those
+instants and the hook aims one `setTimeout` at each. The interval stays, doing
+the only job it is good at — repainting digits, where a quarter second of
+staleness is invisible — plus one backstop: completing a countdown whose timeout
+was suspended while the app was backgrounded.
+
+### A three-second count-in before every timed set
+
+`READY_SECONDS`, a third `CountdownKind`. Without it the first seconds of every
+timed set are spent putting the phone down and getting into position, and they
+get logged as work that happened. It is deliberately not adjustable and not
+pausable — `isAdjustable` says so, because a pause button on a three-second
+countdown is a control that exists for less time than it takes to find.
+
+It ends on its own note (`go`, the `start` recipe promoted out of the unbundled
+half of `scripts/generate_sounds.py`). Sharing `restComplete` would have been
+free and wrong: a count-in ending and a rest ending are both "go", but one is
+followed by silence and the other by a set you are already three seconds into.
+
+### Ending early logs what happened, on one path
+
+`useCountdown`'s completion callback now hands over `elapsed` alongside the
+countdown. A countdown that ran out reports its full total, so the ordinary case
+is unchanged; one ended deliberately early — "Done early" mid-plank — reports the
+seconds that actually happened. Verified on a Simulator: a 60-second plank
+stopped at ~40 logs `40s`, and does not tick itself, because an accidental Stop
+must not silently commit a two-second plank.
+
+### Burpees can be counted in seconds — `lib/setMode.ts`
+
+The catalog marks burpees, mountain climbers and 130 others `load_type: 'reps'`,
+because that is the commonest way they are written down. "40 seconds of burpees"
+is not a different exercise, it is the same exercise counted a different way, and
+until now the app had an opinion and the athlete had none.
+
+The rule is exactly `load_type: 'reps'` — if the only thing you are counting is
+repetitions, you can count seconds instead. `weight_reps` is never dual (a timed
+bench press is not a thing, and the toggle would sit on 483 exercises to serve
+none of them) and `time` does not go the other way (a plank logged in reps is a
+number nobody wants in their history).
+
+**The mode is derived, not stored.** A set is in time mode when it carries a
+positive `seconds`. No new column, no migration, and no second source of truth
+that could disagree with the two numbers it describes — `LoggedSet` already
+round-trips both fields. The invariant that keeps it honest is that a dual-mode
+set holds one measure or the other, never both, which is why `withGroupMode`
+clears the one it leaves, `applySuggestions` learned to skip a rep target on a
+timed set, and `withTarget` makes the two mutually exclusive in the template
+editor.
+
+The choice is per EXERCISE, on the group header beside the kg/lb chip. Nobody
+does set 1 of burpees in reps and set 2 in seconds.
+
+### Seconds or minutes, per exercise — `lib/duration.ts`
+
+The same relationship to a duration that kg/lb has to a weight, and the same
+rule: **everything is stored in seconds, always.** A 45-second plank and a
+4-minute round are both "a timed set" and one field cannot serve both; typing
+`240` for four minutes is the same small daily insult as converting kilograms in
+your head at the moment you are trying to record a number.
+
+The unit reaches the timer, not just the input: ± moves by 15s in seconds and 30s
+in minutes, because a ±15 on a five-minute round is a rounding error and the
+button has to say a number that means something at the scale you are working at.
+Held in `prefs` rather than on the profile, unlike the weight unit — a weight
+unit is a fact about how an athlete thinks and wants to travel, whether a plank
+is written in seconds is a fact about the plank.
+
+One drive-by: the kg/lb chip now appears only on exercises that have a weight. It
+used to sit on every header including planks, offering to switch the units of a
+field those rows do not have — harmless until the duration chip arrived beside it
+and the two read as a pair.
+
+### Running a whole exercise, or a whole workout, hands free — `lib/intervalRun.ts`
+
+A timed circuit is the one case where the app already knows everything that is
+going to happen. Making the athlete press Start eight times for a sequence that
+was fully determined before the first one is the app asking to be held,
+mid-burpee, with wet hands.
+
+Two entry points: **"Run all"** on the exercise header, and **"Guided workout"**
+at the top of the session. Both build the whole `ready → work → rest → …`
+sequence up front as plain data. A plan rather than a state machine, because a
+machine that decides the next step inside a timer callback has to hold the
+session's shape several minutes after the athlete last looked — and because the
+plan is inspectable before it starts, which is how the button can say "1:03".
+
+**`canRun` is all-or-nothing, and that is the load-bearing half.** There is no
+honest way to auto-advance past a set of squats: the app cannot know when you
+racked the bar, and guessing would either cut the set short or log a rest that
+never happened. So "Guided workout" appears only when *every* pending set in the
+session is timed — in practice a conditioning or circuit plan, which is the
+"only the ones that make sense" rule made mechanical. A run that quietly skipped
+the untimed exercises would be a guided workout that stops guiding halfway
+through without saying so.
+
+The plan carries `setIndex`, and positions move, so any structural change kills
+the whole run rather than just the current step — every *remaining* step's index
+has been invalidated too, and a run allowed to continue through a rest would come
+out the other side writing to somebody else's squat.
+
+### The guided workout talks — `lib/voice.ts`, `expo-speech`
+
+Hands-free is only hands-free if it is also eyes-free. Chimes say *that*
+something changed; on a five-exercise circuit you also need to know *what*, and
+that is a sentence rather than a bell.
+
+Device TTS rather than shipped clips. The voice is whatever the phone has and it
+varies; what that buys is a cue set that can be reworded without a binary landing
+in the repo, and the ability to speak an exercise NAME — "Next: mountain
+climbers" — which a fixed clip library of 761 exercises never could. It is also
+the only option consistent with `assets/brand/` and `generate_sounds.py`, both of
+which hold a recipe rather than artefacts.
+
+Neither platform exposes voice gender, so the "soft female voice" is matched by
+name (`Samantha`, `Ava`, …) and by Android's identifier convention
+(`en-us-x-tpf-local`) — exactly as fragile as it sounds, which is why `pickVoice`
+falls back to the system default rather than to a second guess.
+
+**Every cue fires at a step boundary and nowhere else**, and during a guided run
+the completion chime is *replaced* by the voice rather than joined by it. The
+ticks own the inside of a step; a voice starting on top of the "1" tick is two
+people talking, and in a gym you hear neither. `cuesForTransition` is where the
+whole ordering lives, because a run that says "rest now" on the way *into* a work
+interval is still a run that makes noises at the right times.
+
+### Monochrome — and two mechanisms that did not work
+
+A sixth accent, `mono`, that turns the **whole app** black and white rather than
+just the chrome. Getting there took three attempts and the two failures are worth
+more than the success.
+
+**`filter: [{ grayscale: 1 }]` on the root view.** React Native 0.76 added it, it
+is typed in 0.86, and it would have reached the exercise photography and every
+hex already frozen into a `StyleSheet`. Built first, and it is a **complete no-op
+in Expo Go** — measured on an iPhone 15 Pro Simulator, applied to the root and
+then to a single leaf view. RN implements iOS `grayscale` by re-hosting the view
+in a SwiftUI container (`RCTSwiftUIContainerViewWrapper`) and Expo Go's binary
+does not carry it, so the property is parsed and silently dropped. **Do not reach
+for it again without a custom dev client to test against.**
+
+**A `usePalette()` hook.** This app has 794 colour reads across 65 files, and
+almost all of them sit inside `StyleSheet.create` at module scope — evaluated
+once when the module is imported, before any hook has run and before anyone has
+signed in. A hook means moving every stylesheet inside its component: sixty-five
+files of mechanical churn in the screens where a mistake is a mis-rendered
+workout, to serve one setting.
+
+What ships instead: **the palette resolves itself at module-evaluation time.**
+`expo-secure-store` has a synchronous `getItem`, so `constants/Colors.ts` reads
+the flag before any screen's stylesheet is built and exports greys instead of
+hues. ES modules evaluate depth-first, so all 794 reads get the mono value, zero
+call sites change, and nothing can be missed because there is nothing to
+remember. The cost is real and stated in the picker: the accent moves
+immediately, the rest of the palette follows on the next launch.
+
+The greys are chosen for lightness separation and validated by
+`scripts/validate_palette.mjs` against the same thresholds their coloured
+originals meet. Two findings from that:
+
+- **The sports collapse to one grey, deliberately.** Four values cannot clear
+  ΔE 15 pairwise *and* 4.5:1 on the card — it is arithmetic, not a failure of
+  imagination. They can afford to collapse because `components/ui/sport.ts` hands
+  out the glyph beside the colour and every caller renders both.
+- **The Library tile intents lose their pairwise guarantee**, and the validator
+  now says so rather than fudging a lowered threshold. Same arithmetic; the tile
+  renders the category's own three-letter code inside it, so the colour was never
+  carrying it alone. What is still asserted is contrast, and that the set keeps at
+  least two distinguishable steps so a later edit cannot flatten it to one grey.
+
+### Verified
+
+On a Simulator, monochrome end to end (Today, Library and Settings with no hue
+anywhere), the count-in handing over to work, the expanded ring, the collapsed
+top bar, and a 60-second plank stopped early logging `40s`. 972 tests pass, and
+the new guards were mutation-checked — `tickSchedule`'s `>= now` boundary, the
+mode clear, the completed-set skip, the cue ordering and the trailing-rest rule
+each go red when broken.
+
+### Not verified
+
+- **The voice has never been heard.** `expo-speech` resolves a different voice on
+  every device, the Simulator's TTS is not the phone's, and the *timing* claim —
+  that a cue never lands on top of a tick — is a claim about a real run in a real
+  gym. The known overlap is at the very start of a guided workout, where "Get
+  ready" and the count-in's first tick are due at the same instant; it is one
+  short bell under a spoken phrase, once per workout, and it is deliberate
+  because dropping that tick would count the athlete in "2, 1, go".
+- **No multi-exercise guided run has been driven to completion**, only its plan
+  and its estimate. The transitions are covered by tests against
+  `lib/intervalRun.ts`, which is the part that can be wrong quietly.
+- **`filter: grayscale` may work in a dev client**, and if the app ever gets one,
+  the module-load palette swap could be retired for something that needs no
+  relaunch. Worth re-testing then, not before.
+
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

@@ -1,6 +1,7 @@
 import { ClerkProvider, useAuth, useSignUp } from '@clerk/clerk-expo';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { initSounds } from '@/lib/sounds';
+import { initVoice } from '@/lib/voice';
 import { clearSessionToken } from '@/lib/session';
 
 import { AccentProvider, useAccent } from '@/lib/AccentProvider';
@@ -176,6 +177,11 @@ function RootLayoutNav() {
   */
   useEffect(() => {
     void initSounds(userId);
+    // The same two jobs, for the guided workout's spoken cues: resolve which
+    // voice this device has, and read whether the athlete wants to hear it.
+    // Enumerating the voices is a native call worth making once, at launch,
+    // rather than at the moment a countdown needs to say something.
+    void initVoice(userId);
   }, [userId]);
 
   useEffect(() => {

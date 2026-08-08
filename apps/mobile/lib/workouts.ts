@@ -66,8 +66,12 @@ export function targetFieldsFor(loadType: Exercise['load_type']): TargetField[] 
   switch (loadType) {
     case 'weight_reps':
       return ['sets', 'reps', 'weight'];
+    // Both, because these are the movements that are honestly both — "3 × 15
+    // burpees" and "3 × 40s burpees" are the same plan written two ways, and
+    // until the second one could be written the timer had nothing to run on a
+    // conditioning circuit. Mutually exclusive in practice: see `withTarget`.
     case 'reps':
-      return ['sets', 'reps'];
+      return ['sets', 'reps', 'seconds'];
     case 'time':
       return ['sets', 'seconds'];
     case 'distance':
@@ -75,6 +79,42 @@ export function targetFieldsFor(loadType: Exercise['load_type']): TargetField[] 
     case 'distance_time':
       return ['distance', 'seconds'];
   }
+}
+
+/** Which `WorkoutItem` field each target writes. */
+const TARGET_FIELD: Record<TargetField, keyof WorkoutItem> = {
+  sets: 'target_sets',
+  reps: 'target_reps',
+  weight: 'target_weight_kg',
+  seconds: 'target_seconds',
+  distance: 'target_distance_m',
+};
+
+/**
+ * Write one target, keeping a dual-mode item to a single measure.
+ *
+ * **Reps and duration are mutually exclusive on a `reps` exercise**, and this is
+ * where that is enforced rather than in the editor, because it is the same
+ * invariant `lib/setMode.ts` derives a set's mode from: a row carrying both 15
+ * reps and 40 seconds is a row two readers describe two different ways. A
+ * template holding both would hand that ambiguity straight to every session
+ * started from it, where the duration wins and the rep target sits in the data
+ * meaning nothing.
+ *
+ * Only `reps` exercises. `distance_time` legitimately carries both — there the
+ * pair is a distance and how long it took, not two ways of counting one thing.
+ */
+export function withTarget(
+  item: WorkoutItem,
+  field: TargetField,
+  value: number | null,
+  loadType: Exercise['load_type'] | undefined,
+): WorkoutItem {
+  const next = { ...item, [TARGET_FIELD[field]]: value };
+  if (loadType !== 'reps' || value == null) return next;
+  if (field === 'seconds') return { ...next, target_reps: null };
+  if (field === 'reps') return { ...next, target_seconds: null };
+  return next;
 }
 
 /** A one-line human summary of an item's targets, e.g. "3 × 5 · 100kg". */
