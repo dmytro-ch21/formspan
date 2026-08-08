@@ -17,6 +17,7 @@ import (
 
 	"github.com/dmytro-ch21/vola/backend/internal/modules/activity"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/bjj"
+	"github.com/dmytro-ch21/vola/backend/internal/modules/body"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/curriculum"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/exercise"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/featureflag"
@@ -36,6 +37,7 @@ import (
 	"github.com/dmytro-ch21/vola/backend/internal/platform/auth"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/database"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/httplog"
+	"github.com/dmytro-ch21/vola/backend/internal/platform/objectstore"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/ratelimit"
 )
 
@@ -202,6 +204,23 @@ func main() {
 	planHandler := plan.NewHandler(plan.NewPostgresRepository(pool))
 	themeHandler := theme.NewHandler(theme.NewPostgresRepository(pool))
 
+	// Private object storage for check-in photos. Nil when unconfigured, which
+	// is a supported state — local dev and CI have no bucket, and the photo
+	// endpoints then say so rather than failing. A PARTIAL config is fatal
+	// here, on purpose: three of four values set is somebody halfway through
+	// setting it up, and starting anyway hides it until a photo vanishes.
+	photoStore, err := objectstore.New(objectstore.Config{
+		Endpoint:  os.Getenv("R2_ENDPOINT"),
+		Bucket:    os.Getenv("R2_BUCKET"),
+		AccessKey: os.Getenv("R2_ACCESS_KEY_ID"),
+		SecretKey: os.Getenv("R2_SECRET_ACCESS_KEY"),
+	})
+	if err != nil {
+		logger.Error("object storage misconfigured", "error", err)
+		os.Exit(1)
+	}
+	bodyHandler := body.NewHandler(body.NewPostgresRepository(pool), photoStore)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/healthz", handleHealthz)
 	mux.Handle("GET /v1/me", verifier.RequireAuth(http.HandlerFunc(handleMe)))
@@ -209,6 +228,19 @@ func main() {
 	// discipline-scoped — see the note at the top of profile.go. The screens
 	// still show it inside the profile; that is a UI decision, not a
 	// reason to put a belt on the account record every sport shares.
+	// Body check-ins: what the athlete weighs and measures, and the phase they
+	// are measuring against. Under /v1/body rather than /v1/profile because a
+	// measurement is an event on a day, not a field on the account.
+	mux.Handle("GET /v1/body/checkins", verifier.RequireAuth(http.HandlerFunc(bodyHandler.ListCheckins)))
+	// PUT, keyed on the day: the client names the resource and sending it twice
+	// is the same as sending it once, which is what makes an offline check-in
+	// safe to retry.
+	mux.Handle("PUT /v1/body/checkins/{date}", verifier.RequireAuth(http.HandlerFunc(bodyHandler.SaveCheckin)))
+	mux.Handle("DELETE /v1/body/checkins/{date}", verifier.RequireAuth(http.HandlerFunc(bodyHandler.DeleteCheckin)))
+	mux.Handle("POST /v1/body/checkins/{date}/photo", verifier.RequireAuth(http.HandlerFunc(bodyHandler.PhotoUploadURL)))
+	mux.Handle("GET /v1/body/phases", verifier.RequireAuth(http.HandlerFunc(bodyHandler.ListPhases)))
+	mux.Handle("POST /v1/body/phases", verifier.RequireAuth(http.HandlerFunc(bodyHandler.CreatePhase)))
+	mux.Handle("POST /v1/body/phases/{id}/end", verifier.RequireAuth(http.HandlerFunc(bodyHandler.EndPhase)))
 	mux.Handle("GET /v1/bjj/standing", verifier.RequireAuth(http.HandlerFunc(bjjHandler.GetStanding)))
 	mux.Handle("POST /v1/bjj/promotions", verifier.RequireAuth(http.HandlerFunc(bjjHandler.CreatePromotion)))
 	mux.Handle("PATCH /v1/bjj/promotions/{promotionID}", verifier.RequireAuth(http.HandlerFunc(bjjHandler.UpdatePromotion)))

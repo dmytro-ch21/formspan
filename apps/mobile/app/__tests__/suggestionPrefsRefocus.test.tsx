@@ -265,6 +265,18 @@ jest.mock('@/lib/proficiency', () => ({ fetchProficiency: jest.fn(async () => mo
 // outlives the test and reports as an open handle.
 jest.mock('@/lib/techniques', () => ({ fetchTechniques: jest.fn(async () => []) }));
 
+// The Today screen's check-in card fetches on mount. Unmocked it reaches the
+// real request helper, and the setState that lands afterwards is an update
+// outside `act` — which is a warning here and a genuinely unmocked network call
+// in a unit test either way.
+jest.mock('@/lib/body', () => ({
+  // `requireActual` for the constants: a hand-copied PHASE_LABELS is a second
+  // copy that can drift from the real one and would never fail anything.
+  ...jest.requireActual('@/lib/body'),
+  listCheckins: jest.fn(async () => []),
+  listPhases: jest.fn(async () => []),
+}));
+
 /**
  * Pinned rather than left real.
  *

@@ -43,6 +43,12 @@ type Profile struct {
 	DisplayName *string `json:"display_name"`
 	DateOfBirth *string `json:"date_of_birth"` // "YYYY-MM-DD"
 	Sex         *string `json:"sex"`           // "male" | "female" | null
+	// HeightCM is what the ratio measurements need — waist-to-height and the
+	// Navy body-fat estimate cannot be derived without it. On the profile rather
+	// than on each check-in because it is a fact about the athlete that does not
+	// move week to week; per check-in it would be asked for every time and every
+	// row would get a chance to disagree.
+	HeightCM *float64 `json:"height_cm"`
 	// UnitSystem is display only — "metric" | "imperial". Training data is
 	// stored in kilograms and metres regardless, so changing it can never
 	// alter a recorded number, only how it's shown and entered.
@@ -72,6 +78,7 @@ type NewProfile struct {
 	DisplayName *string
 	DateOfBirth *string
 	Sex         *string
+	HeightCM    *float64
 }
 
 // ProfileUpdate is a partial update — nil fields are left unchanged.
@@ -87,6 +94,7 @@ type ProfileUpdate struct {
 	DisplayName              *string
 	DateOfBirth              *string
 	Sex                      *string
+	HeightCM                 *float64
 	UnitSystem               *string
 	TrackEffort              *bool
 	ShareTrainingWithFriends *bool
@@ -223,4 +231,14 @@ var reservedUsernames = map[string]bool{
 	"share": true, "shares": true, "about": true, "everyone": true,
 	"anonymous": true, "unknown": true, "deleted": true,
 	"null": true, "undefined": true, "none": true, "test": true,
+}
+
+// ValidHeightCM bounds height in the domain rather than leaving it to the
+// column.
+//
+// The CHECK constraint (50–260) already refuses nonsense, but a value at or
+// above 10000 overflows NUMERIC(5,1) FIRST — SQLSTATE 22003, which nothing maps
+// — so plain bad input produced a 500. Raised in review.
+func ValidHeightCM(v *float64) bool {
+	return v == nil || (*v > 50 && *v < 260)
 }

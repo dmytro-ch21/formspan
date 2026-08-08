@@ -64,6 +64,7 @@ export default function EditProfileScreen() {
           display_name: p.display_name,
           date_of_birth: p.date_of_birth,
           sex: p.sex,
+          height_cm: p.height_cm,
         });
       })
       .catch((err) => {
@@ -235,6 +236,24 @@ export default function EditProfileScreen() {
           onChangeText={(v) => setPatch((p) => ({ ...p, date_of_birth: v || null }))}
           placeholder="YYYY-MM-DD"
           testID="profile-dob"
+        />
+
+        {/* Height earns its place here rather than on a check-in: it is a fact
+            about the athlete that does not move week to week, and asking for it
+            per check-in would both nag and let rows disagree. Waist-to-height
+            and the body-fat estimate are both unavailable without it. */}
+        <Field
+          label="Height (cm)"
+          value={patch.height_cm != null ? String(patch.height_cm) : ''}
+          onChangeText={(v) => {
+            const n = Number(v.replace(',', '.'));
+            setPatch((p) => ({
+              ...p,
+              height_cm: v.trim() === '' || !Number.isFinite(n) ? null : n,
+            }));
+          }}
+          placeholder="180"
+          testID="profile-height"
         />
 
         <Text style={styles.sectionLabel}>Sex</Text>
