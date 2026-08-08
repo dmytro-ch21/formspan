@@ -7,6 +7,7 @@ import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { request as requestSync } from '@/lib/sync';
+import { playSound } from '@/lib/sounds';
 import { useAuthToken } from '@/lib/useAuthToken';
 import {
   acceptShare,
@@ -136,6 +137,11 @@ export default function SharedScreen() {
       setLanded(null);
       try {
         const copy = await acceptShare(getToken, card.id);
+        // Accepting navigates away, so the chime is the only feedback that
+        // survives the transition — the row vanishing is otherwise the entire
+        // signal, and a disappearing row reads as much like a failure as a
+        // success.
+        playSound('success');
         // Drop the row BEFORE navigating: a route transition is not instant,
         // and until it lands the accepted card is still on screen and still
         // tappable — a second tap would 404 against a share that is gone.

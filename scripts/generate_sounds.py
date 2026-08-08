@@ -139,6 +139,7 @@ BUNDLE = {
     "pr": "pr",
     "notification": "notification",
     "streak": "streak",
+    "success": "success",
 }
 
 # ---------------------------------------------------------------------------
@@ -481,7 +482,7 @@ S = [
        notes=[(0.000, "C#6", "glass", 0.85, 0.55, 0.95, 0.10, -0.14),
               (0.078, "D#6", "glass", 0.90, 0.65, 0.95, 0.10, 0.14)]),
 
-  dict(name="success", desc="Generic confirmation — saved, sent, applied.",
+  dict(name="success", desc="Confirmation for a deliberate, once-per-action send or accept. NOT saves — those autosave constantly.",
        level=-12, rt60=0.85, wet=0.24, lp=8600,
        notes=[(0.000, "A#5", "glass", 0.90, 0.75, 1.00, 0.12, -0.12),
               (0.090, "D#6", "glass", 0.95, 0.90, 1.00, 0.12, 0.12),

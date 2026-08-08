@@ -5230,6 +5230,30 @@ saw. Close the app and nothing happens, by construction.
 - **Muting Sounds silences it** — it goes through `playSound` like every
   other sound.
 
+### The confirmation chime
+
+Fires on four deliberate, once-per-action moments, all of which had **no
+feedback at all** before — no haptic, no toast, only a row quietly changing.
+
+- **Share a workout to a friend → chime.** Tap a second time and the server
+  409s ("already in their inbox"); that chimes too, because the outcome is
+  identical and the UI already renders it identically. A silent second tap
+  reads as the press having missed.
+- **A send that really fails → silence,** with the error on screen. A
+  confirmation that also plays on failure is not a confirmation.
+- **Accept a shared workout → chime.** Accepting navigates away, so the chime
+  is the only feedback that survives the transition; a row vanishing reads as
+  much like a failure as a success.
+- **Send a friend request, accept a friend request → chime.**
+- **Decline a request, cancel your own, unfriend someone → SILENCE.** All three
+  run through the same helper as accepting and all three call `removeFriend`,
+  so anything that confirms "the action succeeded" rather than an explicit
+  opt-in will chime on them. **If unfriending someone makes a happy noise, that
+  is the bug this scenario exists for.**
+- **Saving is never confirmed.** Sets, BJJ detail and workout items all
+  autosave continuously while you edit; a chime there would fire dozens of
+  times a session. Finishing and deleting already buzz via `HoldToConfirm`.
+
 ### Known limitation, not a bug
 
 - **Background the app mid-countdown → no chime.** iOS throttles the JS the

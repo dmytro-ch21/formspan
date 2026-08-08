@@ -47,6 +47,9 @@ jest.mock('@/lib/shares', () => ({
 // first: the accepted row was cleared correctly and then re-fetched back onto
 // the screen, and the failure read exactly like a bug in the accept path.
 const mockRequestSync = jest.fn();
+const mockPlay = jest.fn();
+jest.mock('@/lib/sounds', () => ({ playSound: (...a: unknown[]) => mockPlay(...a) }));
+
 jest.mock('@/lib/sync', () => ({
   request: (...a: unknown[]) => mockRequestSync(...a),
   syncNow: jest.fn(async () => {}),
@@ -89,6 +92,7 @@ beforeEach(() => {
   mockDismiss.mockReset().mockResolvedValue(undefined);
   mockPush.mockReset();
   mockRequestSync.mockReset();
+  mockPlay.mockReset();
 });
 
 it('opens the RECIPIENT’S copy after accepting, never the sender’s', async () => {
@@ -187,4 +191,29 @@ it('says shares vanish either way, even with nothing sent', async () => {
   render(<SharedScreen />);
   await screen.findByTestId('shared-sent-empty');
   expect(await screen.findByText(/don't say which way/)).toBeTruthy();
+});
+
+it('confirms an accept out loud, because the row vanishing is otherwise the whole signal', async () => {
+  // Accepting navigates away, so the only other feedback is a row
+  // disappearing — which reads as much like a failure as a success.
+  mockInbox.mockResolvedValue([card({ id: 's1' })]);
+
+  render(<SharedScreen />);
+  fireEvent.press(await screen.findByTestId('share-accept-s1'));
+
+  await waitFor(() => expect(mockPlay).toHaveBeenCalledWith('success'));
+});
+
+it('stays silent when the accept fails', async () => {
+  // Without this, moving the chime ABOVE `await acceptShare` reddens nothing —
+  // the accept-chime test passes either way. A confirmation that also plays on
+  // failure is not a confirmation.
+  mockInbox.mockResolvedValue([card({ id: 's1' })]);
+  mockAccept.mockRejectedValue(new Error('offline'));
+
+  render(<SharedScreen />);
+  fireEvent.press(await screen.findByTestId('share-accept-s1'));
+
+  await waitFor(() => expect(mockAccept).toHaveBeenCalled());
+  expect(mockPlay).not.toHaveBeenCalled();
 });
