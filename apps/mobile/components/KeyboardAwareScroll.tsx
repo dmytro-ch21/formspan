@@ -172,9 +172,12 @@ export function dismissModeFor(os: string): 'interactive' | 'on-drag' {
 /**
  * Where to scroll so a field clears the keyboard, or null to leave it alone.
  *
- * Pure, because it is the only arithmetic here and `apps/mobile` has no
- * component test runner — extracting it is the difference between this being
- * covered and being hoped about.
+ * Pure, because it is the only arithmetic worth pinning here — extracting it
+ * is the difference between this being covered and being hoped about. (This
+ * used to add "and `apps/mobile` has no component test runner", which stopped
+ * being true: `screenHeader.test.tsx` and `keyboardFooterCoordination.test.tsx`
+ * both render. Rendering still cannot produce a keyboard or a Yoga pass, so
+ * the arithmetic is still better off out here.)
  */
 export function scrollTargetFor(a: {
   /** Field's absolute Y on screen. */
@@ -452,6 +455,17 @@ const FooterCtx = createContext<{ register: () => () => void; hasFooter: boolean
  * and unmount (the wizard's is always rendered, but a screen that shows one
  * only on the last step is an obvious next call site) without stranding the
  * scroll view in the wrong mode.
+ *
+ * **A footer that mounts while the keyboard is already up needs checking on a
+ * device first.** In `RCTScrollViewComponentView.mm`, `updateProps` only stores
+ * `automaticallyAdjustKeyboardInsets` and `_keyboardWillChangeFrame:` returns
+ * early when it is off — so flipping it true→false mid-keyboard leaves the
+ * inset that is already applied in place, and the later hide notification is
+ * ignored, stranding it past dismissal. The wizard is safe because its footer
+ * mounts with the screen, keyboard down; a "footer on the last step" screen
+ * reached by typing on the step before is exactly the case that is not, and
+ * wants either a keyboard dismiss on step change or a device check. Nothing in
+ * jest can see this — the prop is inert without native code.
  */
 export function KeyboardAwareScreen({ children }: { children: React.ReactNode }) {
   const [footers, setFooters] = useState(0);
