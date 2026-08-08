@@ -23,6 +23,10 @@ const (
 	CodeNotFound      = "not_found"
 	CodeAlreadyExists = "already_exists"
 	CodeInternal      = "internal"
+	// CodeRateLimited accompanies 429. New with the rate limiter — the enum
+	// is closed and part of the contract, so adding one is a deliberate
+	// contract change rather than an implementation detail.
+	CodeRateLimited = "rate_limited"
 )
 
 type errorBody struct {

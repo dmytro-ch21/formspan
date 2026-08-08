@@ -35,6 +35,7 @@ import (
 	"github.com/dmytro-ch21/vola/backend/internal/platform/auth"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/database"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/httplog"
+	"github.com/dmytro-ch21/vola/backend/internal/platform/ratelimit"
 )
 
 func main() {
@@ -76,6 +77,70 @@ func main() {
 	bjjProficiencyHandler := bjj.NewProficiencyHandler(bjjRepo)
 	bjjFocusHandler := bjj.NewFocusHandler(bjjRepo)
 	curriculumHandler := curriculum.NewHandler(curriculum.NewPostgresRepository(pool))
+	// RATE LIMITS. Six features shipped recording "no rate limiting" as a
+	// residual; this is that, once, in the platform layer.
+	//
+	// The DEFAULT budget hangs off the verifier, so every authenticated route
+	// carries it without any route saying so — see UseLimiter for why that
+	// placement rather than sixty explicit call sites.
+	//
+	// The numbers are an opening position, not a measurement. They are picked
+	// against two known shapes: the mobile outbox pushes one request per
+	// pending row with no batching, so a week offline is a long burst of
+	// legitimate writes; and /v1/notifications is polled on every client
+	// navigation. Burst 120 covers both outright, then 2/second sustained.
+	// Every rejection is logged with its policy name, which is the only way
+	// these get tuned from evidence rather than from another guess.
+	defaultLimiter := ratelimit.New(ratelimit.Policy{
+		Name: "default", Burst: 120, Every: 500 * time.Millisecond,
+	}, nil)
+	verifier.UseLimiter(defaultLimiter, ratelimit.Reject)
+
+	// One entry per athlete who has ever called the API, held for the life of
+	// the process, is a slow leak — bounded by real accounts rather than by
+	// anything an attacker picks, but a ceiling of "everyone we ever had" is
+	// still a ceiling worth not having. Sweeping drops only FULL buckets, so
+	// it can never hand somebody a fresh burst by forgetting them.
+
+	// Tighter budgets for the two writes that put something in ANOTHER
+	// person's inbox — the abuse the residuals kept naming. A friend request
+	// survives a decline being a delete, so re-sending is unbounded by
+	// design; a share is unbounded once the resource differs.
+	//
+	// Sized against real use rather than against the attack: an athlete sends
+	// a handful of friend requests ever, and sharing one sequence to a squad
+	// of fifteen is ordinary, so shares get the deeper bucket.
+	byUser := func(r *http.Request) (string, bool) {
+		claims, ok := auth.ClaimsFromContext(r.Context())
+		if !ok {
+			return "", false
+		}
+		return claims.UserID, true
+	}
+	friendRequestLimiter := ratelimit.New(ratelimit.Policy{
+		Name: "friend_request", Burst: 10, Every: 6 * time.Minute,
+	}, nil)
+	shareLimiter := ratelimit.New(ratelimit.Policy{
+		Name: "share", Burst: 30, Every: 2 * time.Minute,
+	}, nil)
+	limitFriendRequests := ratelimit.Middleware(friendRequestLimiter, byUser)
+	limitShares := ratelimit.Middleware(shareLimiter, byUser)
+
+	// ALL THREE, not just the default. The two tight maps are smaller — only
+	// athletes who ever sent a request or a share — but "smaller leak" is
+	// still the leak this sweeper exists to not have, and review pointed out
+	// that sweeping one of three quietly reads as sweeping all of them.
+	sweepable := []*ratelimit.Limiter{defaultLimiter, friendRequestLimiter, shareLimiter}
+	go func() {
+		for range time.Tick(10 * time.Minute) {
+			for _, l := range sweepable {
+				if n := l.Sweep(30 * time.Minute); n > 0 {
+					logger.Info("ratelimit: swept idle buckets", "policy", l.PolicyName(), "dropped", n, "remaining", l.Len())
+				}
+			}
+		}
+	}()
+
 	sequenceRepo := sequence.NewPostgresRepository(pool)
 	friendRepo := friend.NewPostgresRepository(pool)
 	workoutRepo := workout.NewPostgresRepository(pool)
@@ -199,12 +264,12 @@ func main() {
 	// "this relationship, gone", and the caller's UI knows which it offered.
 	mux.Handle("GET /v1/friends", verifier.RequireAuth(http.HandlerFunc(friendHandler.Friends)))
 	mux.Handle("GET /v1/friends/requests", verifier.RequireAuth(http.HandlerFunc(friendHandler.Pending)))
-	mux.Handle("POST /v1/friends/requests", verifier.RequireAuth(http.HandlerFunc(friendHandler.Send)))
+	mux.Handle("POST /v1/friends/requests", verifier.RequireAuth(limitFriendRequests(http.HandlerFunc(friendHandler.Send))))
 	mux.Handle("POST /v1/friends/requests/{username}/accept", verifier.RequireAuth(http.HandlerFunc(friendHandler.Accept)))
 	mux.Handle("DELETE /v1/friends/{username}", verifier.RequireAuth(http.HandlerFunc(friendHandler.Remove)))
 
 	// Sharing: one surface for every shareable type, addressed by handle.
-	mux.Handle("POST /v1/shares", verifier.RequireAuth(http.HandlerFunc(shareHandler.Create)))
+	mux.Handle("POST /v1/shares", verifier.RequireAuth(limitShares(http.HandlerFunc(shareHandler.Create))))
 	mux.Handle("GET /v1/shares/inbox", verifier.RequireAuth(http.HandlerFunc(shareHandler.Inbox)))
 	mux.Handle("GET /v1/notifications", verifier.RequireAuth(http.HandlerFunc(notificationHandler.Pending)))
 	mux.Handle("GET /v1/shares/sent", verifier.RequireAuth(http.HandlerFunc(shareHandler.Sent)))

@@ -31,6 +31,7 @@ Every route is prefixed with a version: `/v1/...`. Added now, while it's cheap (
 | 401 | Missing, malformed, or expired auth |
 | 404 | The resource doesn't exist for this caller |
 | 409 | Conflict — e.g. attempting to create a resource that already exists |
+| 429 | Rate limited. Carries `Retry-After` in whole seconds, rounded **up** so that obeying it exactly succeeds. Applies to every authenticated endpoint — the default budget hangs off authentication itself, not off routes, so a route cannot be added without one. The body never names which limit was hit. |
 | 410 | The resource was really here and is really gone — currently only `POST /v1/shares/{id}/accept`, when the sender deleted the thing between sending and accepting. Distinct from 404 because the caller was genuinely sent something, and a silent miss would read to them as a bug. Note it carries the `not_found` **code**: the code enum is part of the contract and closed, and a 410 is a not-found with provenance. |
 | 499 | The caller disconnected before the response was written (nginx's convention). **The one response with no body** — nothing is listening, and a JSON error shape would be misleading if it somehow were. Not a failure: it is not logged at ERROR and should not count toward an error-rate alert. |
 | 500 | Unexpected server error |
@@ -50,7 +51,7 @@ Every error response, from every endpoint, shares one shape:
 
 `code` is a stable, machine-readable token — it's part of the API contract (mirrored in `contracts/public.openapi.yaml`'s `Error` schema `enum`), and renaming one is a breaking change requiring a version bump. `message` is for humans and may reword between releases; clients must not pattern-match on it.
 
-Current codes: `invalid_input`, `unauthorized`, `not_found`, `already_exists`, `internal`.
+Current codes: see the `Error` schema's `enum` in [contracts/public.openapi.yaml](../../contracts/public.openapi.yaml) — that enum is the single source. This line used to restate them and rotted twice: it was missing `forbidden` long before it was missing `rate_limited`, because nothing made restating them stay true.
 
 **Never leak internal error details in a 500.** An unmapped/unexpected error is logged server-side with its real detail and returns only a generic `{"error": {"code": "internal", "message": "internal error"}}` to the client — raw database errors, stack traces, or other implementation details must never reach the response body. See `internal/platform/apihttp.WriteError` and how `profile.writeError` uses it.
 
