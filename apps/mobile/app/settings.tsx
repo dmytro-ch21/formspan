@@ -109,8 +109,8 @@ export default function SettingsScreen() {
           testID="settings-auto-rest"
         />
         <Toggle
-          label="Timer sounds"
-          hint="A chime when a rest or a timed set ends."
+          label="Sounds"
+          hint="Rests, timed sets, finishing a session, and when someone's waiting on you."
           value={sounds}
           onChange={(on) => {
             setSounds(on);

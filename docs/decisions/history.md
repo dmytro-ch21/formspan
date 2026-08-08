@@ -16080,8 +16080,6 @@ that the hint rounds up AND that waiting the rounded-down value still fails.
   pace itself.
 
 
-## Open items / known gaps as of this entry
-
 ## 2026-08-07 — The set sound becomes a set haptic
 
 `setLogged` is out of the bundle one PR after going into it, replaced by
@@ -16140,6 +16138,125 @@ The `## Open items / known gaps as of this entry` heading had been lost in a
 merge, leaving that whole list orphaned under the sharing entry's "Not
 verified" prose and reading as though those gaps belonged to sharing. Heading
 restored; the list is unchanged.
+
+
+## 2026-08-07 — A chime for what is waiting, which is not a notification
+
+`notification` joins the bundle (six of seventeen) and fires on the YOU tab
+when a focus refetch finds more pending than the last count it saw.
+
+### The request was for push, and push does not exist
+
+Worth recording plainly, because the gap between the name and the mechanism is
+where somebody later files a bug. There is no push: `expo-notifications` is not
+a dependency, nothing registers a token, no server sends anything. What
+`GET /v1/notifications` returns is COUNTS, derived from pending rows and
+rendered as a badge — and `getPendingCounts` runs on screen focus.
+
+Two things block real push independently of scope. **APNs needs a paid Apple
+Developer Program membership**, and this account is a free Apple ID — the same
+constraint that expires device builds after seven days. And **the bell could
+not be the sound even then**: iOS notification sounds must be CAF, WAV or AIFF
+(Linear PCM, µLaw, aLaw, IMA4) and AAC is rejected, so a push implementation
+needs a second export path out of the generator, not just a `BUNDLE` entry.
+Cheap, but invisible until the sound silently fails on a real device.
+
+So this is the foreground half, chosen knowingly: a "something is waiting" cue,
+not an arrival alert.
+
+### null and 0 are different, and that is the whole feature
+
+`announcesArrival(prev, next)` is a one-line function with its own test file,
+because the two states that look identical are the ones that matter. `null`
+means nothing has been counted yet; `0` means it was counted and there was
+nothing. Collapse them — `if (!prev)`, the natural way to write it — and every
+cold launch with a request waiting announces it as an arrival.
+
+So: a first count never chimes whatever it holds, and a rise from a *seen* zero
+does. Both mutations were run rather than reasoned about — dropping the null
+guard reddens the first-look test, swapping `prev === null` for a falsy check
+reddens the seen-zero test.
+
+The caller must also leave the last-seen count alone when the fetch fails. The
+endpoint is online-only, and a blip resolving to 0 would go quiet on the fall
+and then chime on the next success, announcing an arrival that never happened.
+That discipline already existed for the badge (a failed fetch must not zero a
+number people believe); the chime inherits it.
+
+### Two things it broke that were true before it
+
+**The silent-switch argument.** `sounds.ts` justified `playsInSilentMode: true`
+on the grounds that "this app never makes an unsolicited sound — every one
+fires as the direct result of a countdown the athlete started seconds earlier."
+This cue fires because somebody ELSE sent a friend request, so that sentence is
+now false, and it was load-bearing rather than decorative.
+
+The session is process-wide; `setAudioModeAsync` cannot be made per-sound, so
+the real options were "no arrival cue" or "no timer sounds on a silenced
+phone", and neither is better. Keeping it is therefore a decision, recorded as
+one: the cue only fires with the app focused and in hand, alongside a badge
+changing in front of you, and it is one tap to mute. **If a sound is ever added
+that can fire while the app is backgrounded, this has to be reopened** — at
+that point the switch is being overridden for something the user has no part in
+and cannot see.
+
+**The toggle's name.** It said "Timer sounds / A chime when a rest or a timed
+set ends", which was already slightly untrue once `pr` landed and is plainly
+untrue now that a social cue rides it. It is "Sounds" now, with a hint that
+lists what it actually covers. A mute control that does not describe what it
+mutes is a control people cannot find.
+
+### The cue was put where it could break the badge
+
+The rebase onto the widened badge landed this branch on `youScreen.test.tsx`,
+which #187 had just added — and five of its tests timed out. The cause is worth
+recording because it is a shape, not a typo.
+
+The chime was written ABOVE `setWaiting`, inside the fetch's `.then`. That test
+mocks `@/lib/friends` by listing exports, so `anyArrived` arrived as
+`undefined`; calling it threw; the fetch's own `.catch(() => {})` swallowed the
+throw; `setWaiting` was never reached; the badge never rendered. Five timeouts
+and no error anywhere — a count you can see, killed by a noise you can't.
+
+`lib/sounds.ts` already forbids this in as many words ("audio is a nicety; a
+timer that stopped working because a sound file failed to decode would be the
+feature breaking the thing it decorates"), and the same rule applies one level
+out: **commit the badge first, then chime, and wrap it.** Pinned by a test that
+makes `playSound` throw and asserts the badge renders anyway — moving the chime
+back above `setWaiting` reproduces the original ten-second timeout exactly.
+
+The mock was fixed too, and in the shape that prevents a recurrence: it spreads
+`jest.requireActual` and overrides only the network call, so a helper added to
+`lib/friends` later cannot silently arrive as `undefined`. Listing exports is
+what made a hole; listing them more carefully would only postpone the next one.
+
+### It follows the badge, which widened underneath it
+
+This was written to read `friend_requests` only, on the reasoning that the
+chime must never announce something the screen cannot then show you — so
+widening it meant widening the badge first. That happened during the branch:
+the You header work badged **shares** as well, and the merge conflict was the
+notice. The rule was never "friend requests"; it was "whatever this screen can
+show you", and it now covers both because the badge does.
+
+**Per source, not on the total.** A total hides a swap: answer a friend request
+in the same window a share arrives and the sum is unchanged while something
+genuinely new is sitting there. `anyArrived` composes the tested
+`announcesArrival` across each key, and the swap is its own test case —
+replacing the loop with a sum reddens exactly that one and nothing else.
+
+Adding a third source is the case to think about before doing it. First sight
+of a key that was not previously reported compares against zero and chimes,
+which is right for "something new is waiting" and wrong for "the server just
+started reporting a source it always had".
+
+### The Open items heading, again
+
+The previous entry restored that heading after a merge dropped it. A merge then
+brought the original back too, leaving **two** — one empty, stranded above the
+haptic entry, and one with the actual list. The empty one is deleted here. The
+lesson is that appending before a trailing section is not merge-safe when two
+branches both do it; the list itself has never changed.
 
 
 ## Open items / known gaps as of this entry
