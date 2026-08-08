@@ -96,7 +96,15 @@ Then: `git push -u origin <branch>`, `gh pr create`, watch CI with `gh run watch
 
 ## Keep the history log current (hard rule)
 
-[docs/decisions/history.md](docs/decisions/history.md) is a living document, not a one-time snapshot. Whenever a PR lands (or right before merging one) that represents a material decision or a notable chunk of work — a new module, a new convention, an infrastructure change, a bug found and fixed, a provider/tooling choice — **append a dated entry** to it in the same style as the existing entries: what was decided/built, why, and any open questions or gaps it leaves behind. Do this as part of finishing the work, not as an afterthought someone has to remember to ask for. Skip it only for truly trivial changes (typo fixes, formatting) that don't represent a decision anyone would need to know about later.
+[docs/decisions/history.md](docs/decisions/history.md) is a living document, not a one-time snapshot. Whenever a PR lands (or right before merging one) that represents a material decision or a notable chunk of work — a new module, a new convention, an infrastructure change, a bug found and fixed, a provider/tooling choice — **append a dated entry** to it in the same style as the existing entries: what was decided/built, why, and any open questions or gaps it leaves behind. Do this as part of finishing the work, not as an afterthought someone has to remember to ask for.
+
+**Append immediately BEFORE the trailing `## Open items / known gaps as of this
+entry` heading — never after it.** The file ends with that heading and its
+bullet list, and branches have anchored on both sides of it: insert before and
+the heading keeps its list, insert after and the heading is stranded on the
+newest entry while its list drifts below, reading as though those gaps belong
+to whatever landed under it. Two branches doing different things merge into
+exactly that, and it has been repaired three times. One side, always: before. Skip it only for truly trivial changes (typo fixes, formatting) that don't represent a decision anyone would need to know about later.
 
 ## Keep functional test scenarios current (hard rule)
 
@@ -165,6 +173,42 @@ The backend integration tests need `TEST_DATABASE_URL` and **skip silently witho
 docker compose exec postgres createdb -U vola vola_test
 cd backend && DATABASE_URL='postgres://vola:vola_dev_only@localhost:5432/vola_test?sslmode=disable' go run ./cmd/migrate up
 ```
+
+**`vola_test` is shared by every worktree, so an unmerged migration in one
+blocks all the others.** A branch that adds `000046_*.sql` and runs `migrate
+up` leaves the shared database at version 46 while `main` tops out at 45 —
+after which *every other branch* fails with `no migration found for version
+46`, including branches that have never touched the backend. It reads like a
+broken checkout and is nothing of the sort. This has happened; it cost a
+confusing debugging session and it will happen again, because nothing prevents
+it.
+
+Diagnose with `SELECT version FROM schema_migrations;` against `vola_test` and
+compare to the highest file in `backend/migrations/`. If the database is ahead,
+find the branch: `find . -name "0000NN*" -not -path "*/node_modules/*"` — the
+migration will be sitting uncommitted in somebody's worktree, which is why
+`git log --all` does not know about it.
+
+**If you are the branch with the unmerged migration, use your own database.**
+`createdb -U vola vola_test_<branch>` and point `TEST_DATABASE_URL` at it. That
+is the whole fix, it costs one command, and it is the only thing that keeps a
+shared database usable while several branches carry schema changes at once.
+
+**To undo one migration, do NOT run `go run ./cmd/migrate down`.** That command
+takes no step argument: it calls golang-migrate's `m.Down()`, which unwinds
+**every** migration and leaves you with an empty schema. There is no per-step
+form in the CLI, and "down" is exactly what somebody wanting to step back one
+will type. Roll a single migration back by hand instead, in one transaction,
+using that migration's own `.down.sql` rather than a guess:
+
+```bash
+{ echo 'BEGIN;'; cat backend/migrations/0000NN_name.down.sql; echo 'UPDATE schema_migrations SET version = MM, dirty = false;'; echo 'COMMIT;'; } | docker compose exec -T postgres psql -U vola -d vola_test -v ON_ERROR_STOP=1
+```
+
+Run from the repo root, with `MM` = `NN - 1`. Piping rather than a heredoc on
+purpose: an unquoted heredoc would expand `$$` in any migration that defines a
+function body, and `psql`'s own `\i` reads a path on the *container's*
+filesystem, not yours.
 
 Env vars come from real files, never baked into images: `backend/.env` / `backend/.env.example`, `apps/web/.env.local` / `apps/web/.env.example`, `apps/mobile/.env.local` / `apps/mobile/.env.example`, `apps/admin/.env.local` / `apps/admin/.env.example` — all gitignored except the `.example` templates. `backend/.env.staging.local` holds real Railway `staging` Postgres credentials (gitignored, never commit).
 
