@@ -1,5 +1,5 @@
 import * as Haptics from 'expo-haptics';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Modal, Pressable, StyleSheet, View as RNView } from 'react-native';
 
 import { Medal } from '@/components/ui/Medal';
@@ -114,6 +114,42 @@ export function SessionCelebration({
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     playSound('sessionComplete');
   }, []);
+
+  /*
+    The PR chime, if this session set one.
+
+    Separate from the mount effect because the records are not there yet when
+    the card opens — they need the network and arrive a moment later, which is
+    why the record rows animate in rather than being part of the first paint.
+    That lag is usually enough to keep the two sounds apart on its own, but a
+    cached or very fast response would fire both in the same frame, so the
+    delay makes the ordering a property rather than a race: `sessionComplete`
+    runs ~1.9s, and this lands on its tail instead of its attack.
+
+    Offline, `summary.records` is correctly empty and no PR chime plays —
+    see `recordsFromSession`. Silence is the honest answer there: the phone
+    cannot know it beat anything, and a chime that fired on a guess would be
+    celebrating something the records screen might then disagree with.
+
+    Keyed on the boolean, not the array, so a later refetch that returns the
+    same records cannot chime twice; the ref covers the case where the count
+    itself changes.
+
+    The ref latches BEFORE the timer, which fails quiet rather than loud: if
+    `hasRecords` could go true -> false inside the delay, the cleanup cancels
+    the chime and the latch keeps it cancelled. That cannot happen today (the
+    records are fetched exactly once per celebration), and losing a chime beats
+    firing one for a record that turned out not to exist — but anyone adding a
+    refetch path here should re-read this rather than assume it still holds.
+  */
+  const hasRecords = summary.records.length > 0;
+  const chimed = useRef(false);
+  useEffect(() => {
+    if (!hasRecords || chimed.current) return;
+    chimed.current = true;
+    const t = setTimeout(() => playSound('pr'), 1100);
+    return () => clearTimeout(t);
+  }, [hasRecords]);
 
   return (
     <Modal transparent animationType="fade" onRequestClose={onDismiss} visible>

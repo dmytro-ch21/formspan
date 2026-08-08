@@ -15,16 +15,23 @@
   factories' bodies do not touch the `mock*` bindings — only the closures they
   return do, and those run inside tests.
 */
-import { initSounds, playSound, resetSounds, soundsEnabled, writeSoundsEnabled } from '../sounds';
+import {
+  initSounds,
+  playSound,
+  resetSounds,
+  SOUND_NAMES,
+  soundsEnabled,
+  writeSoundsEnabled,
+} from '../sounds';
 
 type FakePlayer = { play: jest.Mock; seekTo: jest.Mock; remove: jest.Mock };
 
 /**
  * Players in creation order, NOT keyed by source.
  *
- * jest-expo stubs every asset `require` to the same placeholder, so all four
+ * jest-expo stubs every asset `require` to the same placeholder, so every
  * `.m4a` imports arrive here as an identical value — keying on the source
- * collapses four players into one and the suite quietly stops testing what it
+ * collapses them all into one player and the suite quietly stops testing what it
  * claims to. Creation order is the only thing that actually distinguishes
  * them under the stub.
  */
@@ -100,13 +107,13 @@ describe('claiming the audio session', () => {
     // Built up front because a decode on first play puts tens of milliseconds
     // between zero and the chime, which reads as the timer being wrong.
     await initSounds('u1');
-    expect(mockPlayers).toHaveLength(4);
+    expect(mockPlayers).toHaveLength(SOUND_NAMES.length);
   });
 
   it('does not rebuild the players if called again', async () => {
     await initSounds('u1');
     await initSounds('u1');
-    expect(mockPlayers).toHaveLength(4);
+    expect(mockPlayers).toHaveLength(SOUND_NAMES.length);
   });
 
   it('reads the preference on the SECOND call — the real launch sequence', async () => {
@@ -133,7 +140,7 @@ describe('claiming the audio session', () => {
 
   it('still builds the players when no one is signed in yet', async () => {
     await initSounds(undefined);
-    expect(mockPlayers).toHaveLength(4);
+    expect(mockPlayers).toHaveLength(SOUND_NAMES.length);
   });
 });
 

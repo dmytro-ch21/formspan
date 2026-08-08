@@ -5131,6 +5131,43 @@ not inferred from the absence of an error.
   and never fatal — do not wire it into `verify` on the strength of one green
   run.
 
+### Logging and record sounds
+
+Same discipline as above — these have to be *heard*. Both ride the one global
+Timer sounds toggle; there is no separate preference, so muting silences these
+too.
+
+- **Ticking a set chimes; un-ticking is silent.** Tick, un-tick, tick again →
+  two sounds, not three. Un-ticking is a correction, and the screen already
+  treats it as one: it fills nothing and never starts rest.
+- **A timed set that runs out makes ONE sound, not two.** The countdown reaching
+  zero ticks its own set, and it has already played the work chime by then —
+  so you must hear the work chime alone, with no set chime under it. This is
+  the collision the wiring deliberately avoids by not putting the sound in
+  `recordTimedSet`. Stopping a work timer early makes no sound at all, because
+  stopping early does not tick.
+- **Twenty sets is twenty chimes.** Log a full session and judge whether it
+  wears; it sits ~10 dB under the rest chime for exactly this reason. This is a
+  taste call that can only be made by doing it, not by reading the level.
+- **A session that sets a PR plays two sounds, in sequence, never together.**
+  The card opens with the session chime, then the PR chime lands about a second
+  later as the record rows animate in. If they fire simultaneously the delay has
+  regressed.
+- **A session that sets no record plays one sound.** No PR chime.
+- **Finish a session offline that WOULD have been a PR → session chime only.**
+  Records need the network, `summary.records` is correctly empty, and silence is
+  the honest answer: the phone cannot know it beat anything, and a chime fired
+  on a guess would celebrate something the records screen may then contradict.
+- **The PR chime fires once.** Leave the card open long enough for any refetch;
+  it must not chime twice.
+- **A PR can legitimately produce neither row nor chime, and it is not this
+  wiring's bug.** Finishing online kicks off the sync and then fetches records
+  more or less immediately; if the server has not ingested the finish yet, the
+  card shows no record and so plays no chime. The chime reads the same state as
+  the rows, so the two can never disagree — if you see a record row and hear
+  nothing, that IS a regression, but seeing neither is the pre-existing fetch
+  race and reproduces without any sound involved.
+
 ### Known limitation, not a bug
 
 - **Background the app mid-countdown → no chime.** iOS throttles the JS the
