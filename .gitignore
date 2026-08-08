@@ -47,3 +47,8 @@ __pycache__/
 # catalog that nothing reads and nothing keeps in step, in the very PR that
 # deleted the last such file.
 *.generated.json
+
+# Rendered by scripts/generate_sounds.py. Only the four sounds the app actually
+# plays are checked in (apps/mobile/assets/sounds/*.m4a); the rest of the family
+# is regenerable and would just be unused binaries in the history.
+assets/audio/
