@@ -122,6 +122,10 @@ describe('what a count renders as', () => {
   it('says the number in words for a screen reader', () => {
     // "3" beside a label is obvious to look at and meaningless to hear, and
     // "99+" is not a phrase.
+    //
+    // The label is whatever the CALLER passes, so these are the function's own
+    // cases rather than the screen's rows — they do not move when a row is
+    // renamed, which is the point of testing the function and not the copy.
     expect(rowLabelFor('Friends', 0)).toBe('Friends');
     expect(rowLabelFor('Friends', 3)).toBe('Friends, 3 waiting');
     expect(rowLabelFor('Sharing', 100)).toBe('Sharing, over 99 waiting');
@@ -147,8 +151,8 @@ describe('the People rows', () => {
     render(<YouScreen />);
 
     return waitFor(() => {
-      expect(screen.getByTestId('you-friends-badge', { includeHiddenElements: true })).toBeTruthy();
-      expect(screen.getByLabelText('Friends, 2 waiting')).toBeTruthy();
+      expect(screen.getByTestId('you-social-badge', { includeHiddenElements: true })).toBeTruthy();
+      expect(screen.getByLabelText('Social, 2 waiting')).toBeTruthy();
       expect(screen.getByLabelText('Sharing, 5 waiting')).toBeTruthy();
     });
   });
@@ -163,7 +167,7 @@ describe('the People rows', () => {
 
     return waitFor(() => {
       expect(screen.getByTestId('you-shared-badge', { includeHiddenElements: true })).toBeTruthy();
-      expect(screen.queryByTestId('you-friends-badge', { includeHiddenElements: true })).toBeNull();
+      expect(screen.queryByTestId('you-social-badge', { includeHiddenElements: true })).toBeNull();
     });
   });
 
@@ -194,7 +198,7 @@ describe('the People rows', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByTestId('you-friends-badge', { includeHiddenElements: true })).toBeTruthy();
+      expect(screen.getByTestId('you-social-badge', { includeHiddenElements: true })).toBeTruthy();
     });
     expect(mockPlay).toHaveBeenCalledWith('notification');
   });
@@ -205,15 +209,15 @@ describe('the People rows', () => {
     // athlete their inbox is clear.
     mockCounts.mockResolvedValue({ friend_requests: 3, shares: 0 });
     render(<YouScreen />);
-    await screen.findByTestId('you-friends-badge', { includeHiddenElements: true });
+    await screen.findByTestId('you-social-badge', { includeHiddenElements: true });
 
     mockCounts.mockRejectedValue(new Error('Network request failed'));
     await act(async () => {
       refocus();
     });
 
-    expect(screen.getByTestId('you-friends-badge', { includeHiddenElements: true })).toBeTruthy();
-    expect(screen.getByLabelText('Friends, 3 waiting')).toBeTruthy();
+    expect(screen.getByTestId('you-social-badge', { includeHiddenElements: true })).toBeTruthy();
+    expect(screen.getByLabelText('Social, 3 waiting')).toBeTruthy();
   });
 
   it('takes the badge away once the count really is zero', async () => {
@@ -221,14 +225,14 @@ describe('the People rows', () => {
     // of 0 must clear it, or the badge would be permanent once lit.
     mockCounts.mockResolvedValue({ friend_requests: 3, shares: 0 });
     render(<YouScreen />);
-    await screen.findByTestId('you-friends-badge', { includeHiddenElements: true });
+    await screen.findByTestId('you-social-badge', { includeHiddenElements: true });
 
     mockCounts.mockResolvedValue({ friend_requests: 0, shares: 0 });
     await act(async () => {
       refocus();
     });
 
-    await waitFor(() => expect(screen.queryByTestId('you-friends-badge', { includeHiddenElements: true })).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId('you-social-badge', { includeHiddenElements: true })).toBeNull());
   });
 });
 
@@ -262,7 +266,7 @@ describe('the header', () => {
       // And every destination the header used to carry is reachable as a row.
       expect(screen.getByTestId('you-edit')).toBeTruthy();
       expect(screen.getByTestId('you-settings')).toBeTruthy();
-      expect(screen.getByTestId('you-friends')).toBeTruthy();
+      expect(screen.getByTestId('you-social')).toBeTruthy();
       expect(screen.getByTestId('you-shared')).toBeTruthy();
     });
   });
@@ -292,13 +296,13 @@ it('does not let a blurred count land on top of a newer one', async () => {
   await act(async () => {
     refocus();
   });
-  expect(await screen.findByLabelText('Friends, 1 waiting')).toBeTruthy();
+  expect(await screen.findByLabelText('Social, 1 waiting')).toBeTruthy();
 
   // Now the abandoned first request comes back, claiming something else.
   await act(async () => {
     resolveFirst({ friend_requests: 9, shares: 9 });
   });
 
-  expect(screen.getByLabelText('Friends, 1 waiting')).toBeTruthy();
-  expect(screen.queryByLabelText('Friends, 9 waiting')).toBeNull();
+  expect(screen.getByLabelText('Social, 1 waiting')).toBeTruthy();
+  expect(screen.queryByLabelText('Social, 9 waiting')).toBeNull();
 });

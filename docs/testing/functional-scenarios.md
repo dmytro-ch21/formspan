@@ -5328,6 +5328,65 @@ controls**. Edit, Friends, Settings and Sharing are rows in the body.
 - The four destinations all open: Friends, Sharing, Edit profile, Settings.
 - With a pending friend request AND a pending share, both rows badge at once.
 
+## Social — the friends' feed (`GET /v1/feed`, mobile `app/social/`)
+
+**MOBILE ONLY.** There is no web feed and there should not be one. Web sees
+shared content and manages friends; posts and feeds are a phone thing.
+
+**This is the first athlete-to-athlete read of training data in the system**, so
+most of what is worth testing is what must NOT appear.
+
+### The three conditions, tested one at a time
+
+A finished session reaches your feed only if its owner is an accepted friend,
+has opted in, and the session is finished. Break each separately:
+
+- A **stranger's** session never appears — and test this while you have at
+  least one friend, or the client short-circuits before the query runs and the
+  filter is never exercised.
+- A **pending** friend request grants nothing. Send one, do not accept it.
+- A friend who has **never opted in** is invisible. This is the default, and it
+  is what "opt-in" means: accepting a friend request must not publish anything.
+- An **in-progress** session does not appear; the same session does once
+  finished.
+- **Your own** sessions are not in your own feed — that is the Today tab.
+
+### The privacy switch (Settings → Privacy)
+
+- Off by default on every account, including existing ones.
+- **Turning it OFF retracts everything, immediately** — including sessions a
+  friend could see a moment ago. Have a friend watching their feed, switch off,
+  refresh: gone. This is the property the whole design is built around.
+- **Turning it ON is retroactive** — friends see finished sessions from before
+  the switch. The hint text says so; check it still does.
+- The switch is server state, not a local preference: with no signal, flipping
+  it must revert and say so rather than appearing to have worked.
+- On a **brand-new account with no profile saved yet** the switch is usable and
+  reads off — not permanently greyed. (It was greyed, silently, and a dimmed
+  privacy control reads as "off" whether it is or not.)
+
+### The feed itself
+
+- A failed load says so. It must NEVER render as "Nothing here yet" — that is a
+  claim about other people's training invented from a failed request.
+- An empty feed with no friends reads differently from an empty feed with
+  friends who have not shared.
+- Rows carry who, what, how long ago, and the measures. **Volume respects the
+  athlete's unit system** — an imperial reader sees pounds, not kilograms.
+- A measure is omitted rather than zeroed: a BJJ session shows no set count and
+  no volume, because sets are not how that discipline is measured.
+- "Show older" pages without duplicating or skipping rows.
+- With VoiceOver, each row is ONE stop reading who, what, the measures and when
+   — not four separate stops per card.
+- Nothing is cached: the feed is other people's data, and a stale one is a
+  claim that gets less true every hour.
+
+### You → Social
+
+- The row is labelled **Social** and opens the feed; friend management is a tap
+  further, through the pane at the top.
+- The friend-request badge still rides on that row.
+
 ## Sharing (`/v1/shares`, both clients' Share control + Sharing screens)
 
 Two kinds are shareable: **sequences** and **workouts**. Everything in this

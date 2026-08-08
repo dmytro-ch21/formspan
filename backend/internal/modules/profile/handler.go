@@ -171,6 +171,10 @@ type updateRequest struct {
 	Sex         *string `json:"sex"`
 	UnitSystem  *string `json:"unit_system"`
 	TrackEffort *bool   `json:"track_effort"`
+	// Off by default and the only switch that makes training readable by
+	// another athlete. Absent means "leave it alone", like every other field
+	// here — a PATCH that omits it can never silently publish anything.
+	ShareTrainingWithFriends *bool `json:"share_training_with_friends"`
 }
 
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
@@ -206,12 +210,13 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	p, err := h.repo.Update(r.Context(), claims.UserID, ProfileUpdate{
-		Username:    req.Username,
-		DisplayName: req.DisplayName,
-		DateOfBirth: req.DateOfBirth,
-		Sex:         req.Sex,
-		UnitSystem:  req.UnitSystem,
-		TrackEffort: req.TrackEffort,
+		Username:                 req.Username,
+		DisplayName:              req.DisplayName,
+		DateOfBirth:              req.DateOfBirth,
+		Sex:                      req.Sex,
+		UnitSystem:               req.UnitSystem,
+		TrackEffort:              req.TrackEffort,
+		ShareTrainingWithFriends: req.ShareTrainingWithFriends,
 	})
 	if err != nil {
 		writeError(w, r, err)

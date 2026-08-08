@@ -336,6 +336,57 @@ components:
         resource_type: { type: string }
         resource_id: { type: string }
 
+    FeedItem:
+      type: object
+      description: >
+        One finished session, as somebody else's feed shows it. Deliberately
+        NOT a Session with fields removed — that shape would invite the missing
+        ones back.
+      required:
+        - id
+        - from
+        - display_name
+        - sport
+        - name
+        - started_at
+        - ended_at
+        - working_sets
+        - tonnage_kg
+      properties:
+        id:
+          type: string
+          description: >
+            The session's id, and a KEY rather than a handle to fetch with — no
+            endpoint accepts it from anybody but its owner. It is here because
+            a client needs a stable list key.
+        from:
+          type: string
+          description: >
+            The owner's HANDLE, never their user id — the rule the whole social
+            API follows in both directions. Resolved live, so a rename
+            propagates.
+        display_name:
+          type: string
+          nullable: true
+        sport:
+          type: string
+        name:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+          description: Never null — unfinished sessions are excluded entirely.
+        working_sets:
+          type: integer
+          description: >
+            Warm-ups and uncompleted sets contribute nothing, matching the
+            volume rule the session endpoints report.
+        tonnage_kg:
+          type: number
+
     FriendCard:
       type: object
       description: >
@@ -391,6 +442,7 @@ components:
         - sex
         - unit_system
         - track_effort
+        - share_training_with_friends
         - created_at
         - updated_at
       properties:
@@ -445,6 +497,23 @@ components:
             Whether the clients collect RIR and RPE. On by default — the
             progression rule is built on them, and silently withholding its
             only input would make the app look broken rather than simple.
+        share_training_with_friends:
+          type: boolean
+          description: >
+            THE ONLY THING THAT MAKES AN ATHLETE'S TRAINING READABLE BY ANOTHER
+            ATHLETE. Every other read of a session is scoped to its owner
+            without exception; sharing moves copies on an explicit
+            send-and-accept precisely so it never has to answer this.
+
+
+            Off by default, and no update may turn it on implicitly — a PATCH
+            that omits the key leaves it alone, like every other field here.
+
+
+            Read LIVE at query time rather than stamped onto each session, so
+            turning it off retracts everything at once. The consequence is that
+            turning it ON is retroactive: accepted friends see finished
+            sessions from before the switch. Clients must say so.
         created_at:
           type: string
           format: date-time
@@ -504,6 +573,13 @@ components:
             Whether the clients collect RIR and RPE. On by default — the
             progression rule is built on them, and silently withholding its
             only input would make the app look broken rather than simple.
+        share_training_with_friends:
+          type: boolean
+          description: >
+            Opt in or out of the friends' feed. Absent means "leave alone" — a
+            client that does not know about this field can never change it,
+            which is what keeps an older build from publishing somebody's
+            training by omission.
 
     Flag:
       type: object
@@ -2953,6 +3029,73 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+
+  /feed:
+    get:
+      summary: What your training partners have been doing
+      description: >
+        Finished sessions belonging to the caller's accepted friends, newest
+        FINISHED first.
+
+
+        THE FIRST ATHLETE-TO-ATHLETE READ OF TRAINING DATA IN THIS API. Every
+        other session read is scoped to its owner; sharing moves copies on an
+        explicit send-and-accept so that it never has to decide who may see
+        what. This decides, and does so under three conditions that all have
+        to hold: the owner is an ACCEPTED friend, the owner has turned
+        `share_training_with_friends` on (off by default), and the session is
+        FINISHED.
+
+
+        MOBILE ONLY by product decision — the web app sees shared content and
+        manages friends; a feed is a phone thing. Nothing prevents a web client
+        calling this, but nothing should.
+
+
+        A row is the smallest thing that makes a card. No sets, no notes, no
+        RPE, no exercise ids: it says THAT somebody trained and roughly how
+        much, not what their programme is. Enlarging it is a privacy decision
+        rather than a feature.
+
+
+        There is deliberately no `GET /feed/{id}`. The row is the whole of what
+        a friend may see, so a per-item endpoint would be a second and wider
+        path to the same data.
+      operationId: listFeed
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 30 }
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        "200":
+          description: A page of feed items, newest finished first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total, limit, offset]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/FeedItem" }
+                  total:
+                    type: integer
+                    description: >
+                      Counted under the SAME access rule as the list. A total
+                      larger than what the list would return promises pages
+                      that do not exist, and reports how much training a friend
+                      has done that the reader may not see.
+                  limit: { type: integer }
+                  offset: { type: integer }
+        "400":
+          description: limit or offset is not a non-negative integer.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
 
   /friends:
     get:

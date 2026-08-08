@@ -20,6 +20,7 @@ import (
 	"github.com/dmytro-ch21/vola/backend/internal/modules/curriculum"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/exercise"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/featureflag"
+	"github.com/dmytro-ch21/vola/backend/internal/modules/feed"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/friend"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/health"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/notification"
@@ -173,6 +174,17 @@ func main() {
 	//
 	// The keys are WIRE FORMAT — clients switch on them to decide which badge
 	// to draw, so renaming one silently drops a badge rather than failing.
+	// The friends' feed. It imports neither `friend` nor `session` — the friend
+	// repo satisfies a consumer-side `feed.Friends` interface declared over
+	// there, the same inversion the share registry uses.
+	//
+	// NOT registered with the notification counts below, and that is structural
+	// rather than an omission: those count what is WAITING on you, cleared by
+	// answering the pending row. A feed item is not answerable, so it would
+	// need a read/unread flag — the second source of truth that module was
+	// built to avoid.
+	feedHandler := feed.NewHandler(feed.NewPostgresRepository(pool, friendRepo))
+
 	notificationHandler := notification.NewHandler(notification.NewCounts(notification.Registry{
 		"friend_requests": friendRepo,
 		"shares":          shareRepo,
@@ -262,6 +274,11 @@ func main() {
 	// itself to the caller, so there is no unscoped read for a handler to
 	// misuse. DELETE covers decline, cancel and unfriend alike: all three are
 	// "this relationship, gone", and the caller's UI knows which it offered.
+	// What your training partners have been doing. ONE route and one verb:
+	// the feed row is the whole of what a friend may see, so a
+	// `GET /v1/feed/{id}` would be a second, wider path to the data this
+	// module exists to keep narrow.
+	mux.Handle("GET /v1/feed", verifier.RequireAuth(http.HandlerFunc(feedHandler.List)))
 	mux.Handle("GET /v1/friends", verifier.RequireAuth(http.HandlerFunc(friendHandler.Friends)))
 	mux.Handle("GET /v1/friends/requests", verifier.RequireAuth(http.HandlerFunc(friendHandler.Pending)))
 	mux.Handle("POST /v1/friends/requests", verifier.RequireAuth(limitFriendRequests(http.HandlerFunc(friendHandler.Send))))
