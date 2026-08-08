@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 
 import { HoldToConfirm } from '@/components/HoldToConfirm';
+import { SelectAllTextInput } from '@/components/SelectAllTextInput';
 import {
   KeyboardAwareFlatList,
   KeyboardAwareScrollView,
@@ -381,11 +382,10 @@ export default function WorkoutDetailScreen() {
         */}
         {renaming ? (
           <View style={styles.renameRow}>
-            <TextInput
+            <SelectAllTextInput
               value={draftName}
               onChangeText={setDraftName}
               autoFocus
-              selectTextOnFocus
               style={styles.renameInput}
               placeholder="Workout name"
               placeholderTextColor={vola.textMuted}

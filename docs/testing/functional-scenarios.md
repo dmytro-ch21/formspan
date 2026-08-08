@@ -4209,6 +4209,17 @@ carries a rename made without signal.
 
 - Open a workout you own, tap/click the title, type a new name, confirm — the
   title updates, and it is still the new name after a reload.
+- **Mobile: the field opens with the whole existing name SELECTED, so the first
+  keystroke replaces it.** This is the one that shipped broken —
+  `selectTextOnFocus` does nothing alongside `autoFocus` on iOS and says
+  nothing about it, so the field opened with a caret at the end and every
+  rename appended. Check on a device, not in a test: the evidence is the
+  highlight, and no jest runner applies a `selection`. The same applies to the
+  BJJ session rename, which had the identical pair.
+- **…and it stops selecting the moment you want the caret.** Tap into the text,
+  or drag a selection handle, and the selection must stay where you put it. A
+  field that snaps back to select-all on every tap is worse than the bug above,
+  and it is the natural way to get this wrong.
 - The item list is unchanged by a rename: the same exercises in the same order,
   with the same targets.
 - Plans pointing at that template show the new name (they resolve it from the

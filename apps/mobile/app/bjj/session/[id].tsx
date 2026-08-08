@@ -1,9 +1,10 @@
 import { useAuth } from '@clerk/clerk-expo';
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, TextInput, View as RNView } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, View as RNView } from 'react-native';
 
 import { HoldToConfirm } from '@/components/HoldToConfirm';
+import { SelectAllTextInput } from '@/components/SelectAllTextInput';
 import { SessionCelebration } from '@/components/SessionCelebration';
 import { worthCelebrating, type SessionSummary } from '@/lib/celebration';
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
@@ -352,11 +353,10 @@ export default function BjjSessionScreen() {
           which is right until the session was a seminar or a comp class. */}
       {renaming ? (
         <RNView style={styles.renameRow}>
-          <TextInput
+          <SelectAllTextInput
             value={draftName}
             onChangeText={setDraftName}
             autoFocus
-            selectTextOnFocus
             style={styles.renameInput}
             placeholder="Session name"
             placeholderTextColor={vola.textMuted}
