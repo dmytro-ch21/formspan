@@ -34,6 +34,7 @@ import {
   type UnitSystem,
 } from "@/lib/units";
 import { useUnits } from "@/lib/useUnits";
+import { ShareToFriend } from "@/components/ShareToFriend";
 
 /**
  * The workout editor, built for a mouse and a keyboard rather than as a
@@ -365,6 +366,21 @@ export default function WorkoutEditorPage({
               </button>
             </>
           )}
+          {/* OUTSIDE the `canEdit` gate, exactly as on the sequence page:
+              passing on a template you can read is not a write to it, and the
+              server tests VISIBILITY rather than ownership for that reason —
+              a VOLA Workout is already one tap from "Copy to my workouts".
+
+              What it shares is what the SERVER holds. With unsaved edits on
+              screen that is not what you are looking at, which is the same
+              trap "Start session" is disabled for, so this says so rather
+              than sending a version of the plan nobody chose. */}
+          <ShareToFriend
+            resourceType="workout"
+            resourceId={workout.id}
+            disabled={dirty}
+            disabledReason="Save your changes first — sharing sends the saved version."
+          />
           <button
             type="button"
             onClick={start}

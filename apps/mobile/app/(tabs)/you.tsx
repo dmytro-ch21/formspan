@@ -200,6 +200,29 @@ export default function YouScreen() {
                 strength-only account never sees an empty BJJ block. */}
             <RoadmapSummary />
 
+            {/* The RECEIVE half of sharing, and the reason the Share button on
+                a plan is a whole feature rather than half of one: the social
+                graph lives on this phone, so being sent a plan you could only
+                answer on a laptop was the gap.
+
+                A row here rather than a fourth header action — the header
+                already carries three, and this is a destination you visit
+                because somebody sent you something, not a control you reach
+                for. Under You because that is where Friends is. */}
+            <Pressable
+              onPress={() => router.push('/shared')}
+              style={styles.navRow}
+              accessibilityRole="button"
+              accessibilityLabel="Sharing. What training partners sent you, and what you sent them"
+              testID="you-shared"
+            >
+              <View style={styles.navBody}>
+                <Text style={styles.navLabel}>Sharing</Text>
+                <Text style={styles.muted}>What partners sent you, and what you sent them</Text>
+              </View>
+              <Text style={[styles.navChevron, { color: accent.ink }]}>›</Text>
+            </Pressable>
+
             <Text style={styles.sectionLabel}>Profile</Text>
             <View style={styles.card}>
               <Row
@@ -242,6 +265,21 @@ const styles = StyleSheet.create({
   body: { paddingHorizontal: 20, gap: 10 },
   actions: { flexDirection: 'row', gap: 16 },
   action: { fontWeight: '700', fontSize: 14 },
+  navRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderWidth: 1,
+    borderColor: vola.line,
+    borderRadius: 14,
+    backgroundColor: vola.surface,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    marginTop: 4,
+  },
+  navBody: { flex: 1, gap: 2 },
+  navLabel: { fontSize: 15, fontWeight: '700' },
+  navChevron: { fontSize: 22, fontWeight: '700' },
   name: { fontSize: 26, fontWeight: '800', marginTop: 4 },
   sectionLabel: {
     fontSize: 12,

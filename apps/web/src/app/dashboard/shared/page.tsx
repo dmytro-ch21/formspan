@@ -16,11 +16,11 @@ import {
 /**
  * Sharing — both directions of it.
  *
- * **Generic by design, and it stays that way even though sequences are the
- * only shareable type today.** The card renders whatever `resource_type` says,
- * so plans, workouts and curricula appear here the day their modules register
- * a copier — no new screen, no second inbox. Filing this under Sequences
- * instead would have meant moving it the first time anything else was shared.
+ * **Generic by design, and the design has now been paid off once.** The card
+ * renders whatever `resource_type` says, so workouts arrived here as two map
+ * entries below rather than as a second inbox — and plans and curricula will
+ * arrive the same way. Filing this under Sequences instead would have meant
+ * moving it the first time anything else was shared.
  *
  * ACCEPTING IS WHAT COPIES. Until then nothing exists in your library, which
  * is why the empty state is a real destination rather than an error: an inbox
@@ -38,10 +38,12 @@ import {
  *  failure for a client that is older than the server it is talking to. */
 const DESTINATION: Record<string, (id: string) => string> = {
   sequence: (id) => `/dashboard/sequences/${id}`,
+  workout: (id) => `/dashboard/workouts/${id}`,
 };
 
 const KIND_LABEL: Record<string, string> = {
   sequence: "Sequence",
+  workout: "Workout",
 };
 
 export default function SharedWithYouPage() {

@@ -25,7 +25,9 @@ import {
  * `src/components` rather than beside the sequence route for exactly that
  * reason: a generic component with a sequence-shaped ADDRESS is one that the
  * second caller has to move, and moving it after something imports the path
- * is strictly more work than moving it now.
+ * is strictly more work than moving it now. **Workouts are the second caller,
+ * and they cost one line at the call site** — which is the claim this file's
+ * placement was making.
  *
  * The API's 404 covers "not your friend", "no such handle" and "not yours to
  * send" alike, deliberately, so the copy here cannot be more specific than the
@@ -34,9 +36,22 @@ import {
 export function ShareToFriend({
   resourceType,
   resourceId,
+  disabled = false,
+  disabledReason,
 }: {
   resourceType: string;
   resourceId: string;
+  /**
+   * For when the thing on screen is not the thing the server would send.
+   *
+   * A workout with unsaved edits is the case: sharing copies what is STORED,
+   * so a sender who has just reordered their template would hand over the old
+   * order and have no way to know. The same reason "Start session" is disabled
+   * while dirty. Sequences pass neither prop — they save on submit, so the
+   * question cannot arise there.
+   */
+  disabled?: boolean;
+  disabledReason?: string;
 }) {
   const { getToken } = useAuth();
   const [open, setOpen] = useState(false);
@@ -82,6 +97,19 @@ export function ShareToFriend({
     setOpen(false);
     trigger.current?.focus();
   }, []);
+
+  // Going disabled while the panel is open closes it — DURING RENDER, not in
+  // an effect. React's documented "adjust state when a prop changes" shape;
+  // an effect here is `react-hooks/set-state-in-effect`, and it is right to
+  // complain, since this is derivation rather than synchronisation with
+  // anything outside React. Left as a stale `open`, re-enabling the button
+  // would pop the panel open again on its own.
+  //
+  // Reachable, if narrowly: the panel does not trap focus, so a keyboard user
+  // can tab out to the plan and type. `setOpen` rather than `close()` — the
+  // focus restore would aim at a button that is disabled at this instant, and
+  // focusing a disabled button puts focus nowhere.
+  if (open && disabled) setOpen(false);
 
   useEffect(() => {
     if (!open) return;
@@ -132,25 +160,31 @@ export function ShareToFriend({
         onClick={() => (open ? close() : setOpen(true))}
         aria-expanded={open}
         aria-haspopup="dialog"
-        className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm font-medium dark:border-neutral-700"
+        disabled={disabled}
+        // The reason travels with the control, in BOTH channels. A disabled
+        // button with no explanation is indistinguishable from a broken one —
+        // and `title` alone would not do it, because a disabled button
+        // suppresses the mouse events some browsers raise the tooltip from.
+        // So the reason goes into the accessible name too.
+        title={disabled ? disabledReason : undefined}
+        aria-label={disabled && disabledReason ? `Share. ${disabledReason}` : undefined}
+        className="rounded-pill border border-line px-5 py-2 text-sm font-bold transition hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-30"
       >
         Share
       </button>
 
-      {open && (
+      {open && !disabled && (
         <div
           ref={panel}
           role="dialog"
           aria-label="Share with a friend"
-          className="absolute right-0 z-10 mt-2 w-72 rounded-xl border border-neutral-200 bg-white p-3 shadow-lg dark:border-neutral-800 dark:bg-neutral-900"
+          className="absolute right-0 z-10 mt-2 w-72 rounded-card border border-line bg-surface p-3 shadow-lg"
         >
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">
-            Send a copy to
-          </p>
+          <p className="eyebrow mb-2">Send a copy to</p>
 
           {error && (
             <div className="mb-2">
-              <p role="alert" className="text-sm text-red-700 dark:text-red-300">
+              <p role="alert" className="text-sm text-danger">
                 {error}
               </p>
               {friends === null && (
@@ -171,11 +205,11 @@ export function ShareToFriend({
               never render as the empty state, which would read as "you have no
               friends" when the truth is "we could not ask". */}
           {friends === null && !error && (
-            <p className="text-sm text-neutral-500">Loading…</p>
+            <p className="text-sm text-text-muted">Loading…</p>
           )}
 
           {friends?.length === 0 && (
-            <p className="text-sm text-neutral-500">
+            <p className="text-sm text-text-muted">
               Nobody yet. Add a training partner on your phone, then share this
               with them.
             </p>
@@ -190,21 +224,21 @@ export function ShareToFriend({
                     type="button"
                     onClick={() => send(f.username)}
                     disabled={sending !== null || sent}
-                    className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-neutral-100 disabled:opacity-60 dark:hover:bg-neutral-800"
+                    className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-2 text-left text-sm transition hover:bg-surface-raised disabled:opacity-60"
                   >
                     <span className="min-w-0">
                       <span className="block truncate font-medium">
                         @{f.username}
                       </span>
                       {f.display_name && (
-                        <span className="block truncate text-xs text-neutral-500">
+                        <span className="block truncate text-xs text-text-muted">
                           {f.display_name}
                         </span>
                       )}
                     </span>
                     <span
                       aria-live="polite"
-                      className="shrink-0 text-xs text-neutral-500"
+                      className="shrink-0 text-xs text-text-muted"
                     >
                       {sending === f.username
                         ? "Sending…"
@@ -220,7 +254,7 @@ export function ShareToFriend({
 
           {/* Said once, here, rather than in a tooltip nobody opens: this is
               the property that makes sharing safe to accept. */}
-          <p className="mt-2 border-t border-neutral-200 pt-2 text-xs text-neutral-500 dark:border-neutral-800">
+          <p className="mt-2 border-t border-line pt-2 text-xs text-text-muted">
             They get their own copy. Your later edits stay yours.
           </p>
         </div>

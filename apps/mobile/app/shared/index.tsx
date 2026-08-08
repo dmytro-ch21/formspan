@@ -1,0 +1,378 @@
+import { Stack, useRouter } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Pressable, RefreshControl, StyleSheet } from 'react-native';
+
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
+import { Text, View } from '@/components/Themed';
+import { vola } from '@/constants/Colors';
+import { useAccent } from '@/lib/AccentProvider';
+import { request as requestSync } from '@/lib/sync';
+import { useAuthToken } from '@/lib/useAuthToken';
+import {
+  acceptShare,
+  dismissShare,
+  listShareInbox,
+  listSentShares,
+  type SentShareCard,
+  type ShareCard,
+} from '@/lib/shares';
+
+/**
+ * Sharing, both directions of it — the phone's half of `/dashboard/shared`.
+ *
+ * **This screen is why the mobile share button is not a half-feature.** The
+ * social graph lives on the phone: you add a training partner here, and until
+ * now you could be sent a plan with no way on this device to answer. A send
+ * path without a receive path is a message into a room nobody can open.
+ *
+ * GENERIC, like web's. The card renders whatever `resource_type` says, so
+ * sequences and future kinds land here with no new screen — a type this build
+ * has never heard of still accepts, it just does not navigate afterwards,
+ * which is the right failure for a client older than its server.
+ *
+ * ACCEPTING IS WHAT COPIES. Until then nothing exists in your library, which
+ * is why a cleared inbox is a destination rather than an error state.
+ *
+ * ONLINE-ONLY, deliberately, against this app's offline-first spine — see the
+ * head of `lib/shares.ts`. The copy is made server-side inside a transaction
+ * this device cannot hold, so there is no honest local answer to "accept".
+ */
+
+/**
+ * Where an accepted thing lives once it is yours.
+ *
+ * A type absent from here still ACCEPTS — the copy is made server-side either
+ * way, so refusing would strand a real share behind an app update. It just has
+ * nowhere to send you, and `landedMessage` is what stops that reading as
+ * nothing having happened.
+ *
+ * `sequence` is deliberately absent rather than forgotten: this app has no
+ * sequence route yet. Sequences live in the Library, which is where the
+ * fallback message points.
+ */
+const DESTINATION: Record<string, (id: string) => string> = {
+  workout: (id) => `/workout/${id}`,
+};
+
+/** Said when an accept succeeded but there is nowhere to navigate. Without it
+ *  the row simply vanishes and nothing tells you where the copy went. */
+function landedMessage(resourceType: string): string {
+  if (resourceType === 'sequence') return 'Accepted — your copy is in the Library.';
+  return 'Accepted — the copy is yours now.';
+}
+
+const KIND_LABEL: Record<string, string> = {
+  sequence: 'Sequence',
+  workout: 'Workout',
+};
+
+export default function SharedScreen() {
+  const getToken = useAuthToken();
+  const accent = useAccent();
+  const router = useRouter();
+
+  const [inbox, setInbox] = useState<ShareCard[] | null>(null);
+  const [sent, setSent] = useState<SentShareCard[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [landed, setLanded] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Single-flight: a slow first load must not resolve after an accept and
+  // repaint the row that was just cleared.
+  const inflight = useRef<AbortController | null>(null);
+  // An action's reload runs in a `finally`, which can land after the screen is
+  // gone — and `load()` starts TWO fresh requests, so the effect's cleanup can
+  // only abort the flight that existed when it ran. This is what stops another
+  // being created afterwards. Web's copy records a reviewer's note on this:
+  // "fix all three or none".
+  const mounted = useRef(true);
+
+  const load = useCallback(() => {
+    inflight.current?.abort();
+    const c = new AbortController();
+    inflight.current = c;
+    // Both directions in one round trip. A waterfall would put the second list
+    // visibly behind the first on gym wifi.
+    return Promise.all([listShareInbox(getToken, c.signal), listSentShares(getToken, c.signal)])
+      .then(([incoming, outgoing]) => {
+        if (c.signal.aborted) return;
+        setInbox(incoming);
+        setSent(outgoing);
+        setLoadError(null);
+      })
+      .catch((err: unknown) => {
+        if (c.signal.aborted || (err as Error)?.name === 'AbortError') return;
+        setLoadError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (!c.signal.aborted) setRefreshing(false);
+      });
+  }, [getToken]);
+
+  useEffect(() => {
+    mounted.current = true;
+    void load();
+    return () => {
+      mounted.current = false;
+      inflight.current?.abort();
+    };
+  }, [load]);
+
+  const reload = useCallback(() => (mounted.current ? load() : undefined), [load]);
+
+  const accept = useCallback(
+    async (card: ShareCard) => {
+      setBusy(card.id);
+      setActionError(null);
+      setLanded(null);
+      try {
+        const copy = await acceptShare(getToken, card.id);
+        // Drop the row BEFORE navigating: a route transition is not instant,
+        // and until it lands the accepted card is still on screen and still
+        // tappable — a second tap would 404 against a share that is gone.
+        setInbox((prev) => prev?.filter((s) => s.id !== card.id) ?? prev);
+        // The copy was made SERVER-SIDE, so this device has never heard of it.
+        // Without a pull the new plan is missing from the Workouts tab until
+        // something else happens to refresh, which reads as the accept having
+        // silently failed.
+        requestSync('share-accepted');
+        const to = DESTINATION[copy.resource_type];
+        // Navigate to the RECIPIENT'S copy — never the sender's id, which they
+        // have no permission to open.
+        if (to) router.push(to(copy.resource_id));
+        else {
+          // No route for this kind. The accept WORKED, so say so — otherwise
+          // the row just disappears and the only signal is its absence, which
+          // reads as the tap having failed.
+          setLanded(landedMessage(copy.resource_type));
+          await reload();
+        }
+      } catch (err) {
+        setActionError(err instanceof Error ? err.message : String(err));
+        // A 404 or a 410 both mean the row is a ghost: taken back, or the
+        // thing itself deleted. Refresh rather than leave a button that can
+        // only fail again.
+        await reload();
+      } finally {
+        setBusy(null);
+      }
+    },
+    [getToken, router, reload],
+  );
+
+  // One verb for declining and for the sender taking it back — DELETE
+  // /v1/shares/{id} covers both, because both are "this, gone".
+  const dismiss = useCallback(
+    async (id: string) => {
+      setBusy(id);
+      setActionError(null);
+      try {
+        await dismissShare(getToken, id);
+      } catch (err) {
+        setActionError(err instanceof Error ? err.message : String(err));
+      } finally {
+        await reload();
+        setBusy(null);
+      }
+    },
+    [getToken, reload],
+  );
+
+  return (
+    <>
+      <Stack.Screen options={{ title: 'Sharing' }} />
+      <KeyboardAwareScrollView
+        contentContainerStyle={styles.scroll}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              setRefreshing(true);
+              load();
+            }}
+          />
+        }
+        testID="shared-screen"
+      >
+        <Text style={styles.lede}>
+          Accepting makes your own copy. What they change afterwards is theirs, not yours.
+        </Text>
+
+        {actionError && (
+          <Text style={styles.error} accessibilityLiveRegion="polite" testID="shared-action-error">
+            {actionError}
+          </Text>
+        )}
+        {loadError && (
+          <Text style={styles.error} accessibilityLiveRegion="polite" testID="shared-load-error">
+            {loadError}
+          </Text>
+        )}
+        {landed && (
+          <Text
+            style={[styles.landed, { color: accent.ink }]}
+            accessibilityLiveRegion="polite"
+            testID="shared-landed"
+          >
+            {landed}
+          </Text>
+        )}
+
+        {/* null is loading, [] is a cleared inbox. A failed load renders as
+            NEITHER — it renders as the error above, because "nothing waiting"
+            is a lie when the truth is "we could not ask". */}
+        {inbox === null && !loadError && (
+          <ActivityIndicator style={styles.loader} accessibilityLabel="Loading shares" />
+        )}
+
+        {inbox !== null && (
+          <>
+            <Text style={styles.sectionLabel}>Shared with you</Text>
+            {inbox.length === 0 ? (
+              <Text style={styles.muted} testID="shared-inbox-empty">
+                Nothing waiting. When a training partner sends you something, it lands here.
+              </Text>
+            ) : (
+              inbox.map((card) => (
+                <View key={card.id} style={styles.card} testID={`share-card-${card.id}`}>
+                  <View style={styles.cardBody}>
+                    <Text style={styles.kind}>
+                      {KIND_LABEL[card.resource_type] ?? card.resource_type} from @{card.from}
+                    </Text>
+                    <Text style={styles.label} numberOfLines={2}>
+                      {card.resource_label}
+                    </Text>
+                  </View>
+                  <View style={styles.cardActions}>
+                    <Pressable
+                      onPress={() => accept(card)}
+                      disabled={busy !== null}
+                      style={[
+                        styles.accept,
+                        { borderColor: accent.accent },
+                        busy !== null && styles.disabled,
+                      ]}
+                      accessibilityRole="button"
+                      // Labelled per row: "Accept" repeated down a list is
+                      // indistinguishable when navigating by buttons.
+                      accessibilityLabel={`Accept ${card.resource_label} from ${card.from}`}
+                      accessibilityState={{ busy: busy === card.id, disabled: busy !== null }}
+                      testID={`share-accept-${card.id}`}
+                    >
+                      <Text style={[styles.acceptText, { color: accent.ink }]}>
+                        {busy === card.id ? 'Accepting…' : 'Accept'}
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => dismiss(card.id)}
+                      disabled={busy !== null}
+                      style={[styles.decline, busy !== null && styles.disabled]}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Decline ${card.resource_label} from ${card.from}`}
+                      accessibilityState={{ disabled: busy !== null }}
+                      testID={`share-decline-${card.id}`}
+                    >
+                      <Text style={styles.declineText}>Decline</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ))
+            )}
+          </>
+        )}
+
+        {sent !== null && (
+          <>
+            <Text style={styles.sectionLabel}>Waiting on them</Text>
+            {sent.length === 0 ? (
+              // The disclosure lives HERE too, and this is the case that needs
+              // it most: a sender who comes back to check and finds the row
+              // gone is exactly the person about to conclude they were turned
+              // down. Rendering the note only beside surviving rows put it
+              // everywhere except the moment it exists for.
+              <Text style={styles.muted} testID="shared-sent-empty">
+                Nothing unanswered. Shares disappear once they answer — we don&apos;t say which way.
+              </Text>
+            ) : (
+              <>
+                {sent.map((card) => (
+                  <View key={card.id} style={styles.card} testID={`sent-card-${card.id}`}>
+                    <View style={styles.cardBody}>
+                      <Text style={styles.kind}>
+                        {KIND_LABEL[card.resource_type] ?? card.resource_type} to @{card.to}
+                      </Text>
+                      <Text style={styles.label} numberOfLines={2}>
+                        {card.resource_label}
+                      </Text>
+                    </View>
+                    <Pressable
+                      onPress={() => dismiss(card.id)}
+                      disabled={busy !== null}
+                      style={[styles.decline, busy !== null && styles.disabled]}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Cancel ${card.resource_label} sent to ${card.to}`}
+                      accessibilityState={{ busy: busy === card.id, disabled: busy !== null }}
+                      testID={`sent-cancel-${card.id}`}
+                    >
+                      <Text style={styles.declineText}>
+                        {busy === card.id ? 'Cancelling…' : 'Cancel'}
+                      </Text>
+                    </Pressable>
+                  </View>
+                ))}
+                <Text style={styles.muted}>
+                  These disappear once they answer. We don&apos;t say which way.
+                </Text>
+              </>
+            )}
+          </>
+        )}
+      </KeyboardAwareScrollView>
+    </>
+  );
+}
+
+const styles = StyleSheet.create({
+  scroll: { padding: 20, gap: 10, paddingBottom: 40 },
+  lede: { fontSize: 13, color: vola.textMuted },
+  error: { fontSize: 13, color: vola.danger },
+  landed: { fontSize: 13, fontWeight: '700' },
+  loader: { marginTop: 12 },
+  sectionLabel: {
+    fontSize: 12,
+    color: vola.textDim,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginTop: 14,
+  },
+  muted: { fontSize: 13, color: vola.textMuted },
+  card: {
+    borderWidth: 1,
+    borderColor: vola.line,
+    borderRadius: 14,
+    backgroundColor: vola.surface,
+    padding: 14,
+    gap: 12,
+  },
+  cardBody: { gap: 2 },
+  kind: {
+    fontSize: 11,
+    color: vola.textDim,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  label: { fontSize: 16, fontWeight: '700' },
+  cardActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  accept: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+  },
+  acceptText: { fontSize: 14, fontWeight: '700' },
+  decline: { paddingVertical: 10, paddingHorizontal: 14 },
+  declineText: { fontSize: 14, color: vola.textMuted },
+  disabled: { opacity: 0.4 },
+});
