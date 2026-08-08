@@ -16697,6 +16697,97 @@ The frontend reviewer found two that were live rather than latent:
   land where the two agree. Worth remembering that a table of cases is not
   coverage unless the cases separate the implementations.
 
+## 2026-08-08 — Friends on the web, closing a gap that was hiding in plain sight
+
+Web has been able to *use* the social graph for weeks — `ShareToFriend` sends a
+plan or a sequence to a friend — while being unable to *build* one. The empty
+state said so out loud: **"Add a training partner on your phone."** An
+instruction to go and use a different device, sitting inside a panel on the
+device that could not do the job.
+
+Nothing was missing but the screen. `/v1/friends`, `/v1/friends/requests`,
+`/v1/friends/requests/{username}/accept`, `/v1/friends/{username}` and
+`/v1/users/{username}` have all been complete since the social work landed;
+`apps/web/src/lib/api.ts` had exactly one of them (`listFriends`, for the share
+picker) because that was all anything had needed.
+
+### The platform split this half belongs to
+
+Stated during the feed work and worth writing down properly: **the social
+SURFACE is mobile only** — the feed, posts, pictures. **Web sees shared content
+and manages friends, and nothing else social.** So this is friend management
+with no feed on it, and that is the design rather than a phase.
+
+### Mirrored from mobile deliberately, copy included
+
+Same four sections in the same order — Add a friend, Want to be your friend,
+Waiting on, Friends — and the same strings wherever a string already existed.
+The copy is the hard-won part: the exact-match explanation on a 404, the
+two-step remove, the distinction between "nobody yet" and "we could not ask".
+Two screens wording the same refusal differently teach an athlete that one of
+them is lying.
+
+**One divergence, recorded rather than hidden**, because review caught the
+entry claiming otherwise. Mobile says one thing for every existing link —
+`already in your lists` — and web says three: already your friend, they have
+asked you, you have already asked. Web is right and mobile should follow, since
+each is a different thing to do next and the single string hides which. Until
+it does, the two screens genuinely differ here, which is the thing this section
+otherwise argues against. It is a small backport and it is not in this PR.
+
+What web adds rather than copies is a `mounted` ref alongside the single-flight
+abort. `/dashboard/shared` already carries it, with a reviewer's note attached:
+an action's reload runs in a `finally` that can land after navigation, and
+`load()` starts two fresh requests, so the effect cleanup can only abort the
+flight that existed when it ran.
+
+### The one piece a web test can reach, and why it is not a boolean
+
+`apps/web`'s vitest is node-only and pure-logic **by policy** — the config says
+so, and says to widen it when a render-path bug argues for it. So the testable
+piece is `linkState()`, extracted rather than inlined: given a handle and the
+two lists, what relationship already exists.
+
+It returns four states plus `"unknown"`, and the `"unknown"` is the whole
+reason it is not a predicate. `null` for either list means NOT LOADED, and
+treating that as "no relationship" is indistinguishable from "no relationship"
+— so the card would offer **Add friend** during the first moments of every
+visit, including for people already in the list underneath. The athlete taps
+it and collects a 409. Mobile records the same reasoning in one line: *saying
+nothing is better than saying wrong.*
+
+The comparison is also case-insensitive, and that direction matters: handles
+are lowercase-canonical server-side, but this one is compared against something
+a person typed. A case-sensitive check is a false NEGATIVE — it offers Add to
+an existing friend, which is exactly the bug the function exists to prevent.
+
+### The badge, and a rule that stopped being waived
+
+The notifications work deliberately did **not** badge `friend_requests` on web,
+and said why twice — in the type comment and on the Sharing entry: *a badge on
+a screen that cannot act on what it counts is a dead end.* That reasoning was
+right and is now spent, because the screen exists. Friends is badged, the count
+is incoming-only server-side, and the two comments say the rule is satisfied
+rather than deleted.
+
+### Verified, and not
+
+`pnpm run verify` green, and `pnpm run build:web` compiles the route (`ƒ
+/dashboard/friends`). The route is confirmed auth-gated by observation — a
+signed-out request redirects to Clerk.
+
+`linkState` is mutation-tested five ways: treating a null list as empty,
+comparing case-sensitively, matching substrings, swapping two labels, and
+returning null for a known link each turn a test red, and each is a version of
+the same shipped bug — an **Add friend** button offered for somebody already
+asked.
+
+**The rendered page has not been seen.** It is behind auth, and signing in is
+not something to automate; the browser extension that carries a real session
+was not connected. So the layout, the token colours in both themes, and the
+two-step remove's live region are unverified — everything about how it *looks*
+rests on it being the same markup vocabulary as its tokenised siblings.
+
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
 - **Two position taxonomies now sit on one Library screen.** The filter chips are nine coarse families; the glossary is eleven curated entries. Since the guard split they disagree in a visible way: a beginner can read the Closed Guard card, learn the distinction, and then find no chip that filters to those 37 techniques. Adding North-South, and later Leg Entanglement, closed the cheap half each time (a position the glossary advertised that no chip could reach) — but doing it twice by hand is the evidence that hand-maintenance is the actual bug: the vocabulary is copied across four client files and one backend map, and the taxonomy PR updated one of the four until review caught it. Keying the chips on the glossary's ids, or a shared constant with a test asserting it matches positions.json, is the real answer and is design work, not a patch.
 

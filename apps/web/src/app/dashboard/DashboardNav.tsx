@@ -43,9 +43,12 @@ const navItems: {
   needs?: (m: Module[]) => boolean;
   /** Which pending-count keys this destination can actually DO something
    *  about. A badge on a screen that cannot act on what it counts is a dead
-   *  end, so this is deliberately not "every count the server returns" —
-   *  friend requests are answered on the phone, and web has no screen for
-   *  them, so nothing here badges them. */
+   *  end, so this is deliberately not "every count the server returns".
+   *
+   *  `friend_requests` used to be excluded on exactly that ground — they were
+   *  answered on the phone and web had no screen for them. `/dashboard/friends`
+   *  is that screen, so the rule is now SATISFIED rather than waived, and the
+   *  count is badged where it can be answered. */
   badges?: string[];
 }[] = [
   { href: "/dashboard", label: "Today" },
@@ -114,11 +117,22 @@ const navItems: {
       m.some((x) => x.enabled && x.capabilities.catalog === "techniques"),
   },
   {
+    href: "/dashboard/friends",
+    label: "Friends",
+    // Requests waiting on YOU, which this screen accepts and declines from —
+    // the count is incoming-only server-side, so it never badges something you
+    // sent and cannot answer.
+    //
+    // UNGATED for the same reason Sharing is: who asks to be your friend is
+    // decided by other people, not by which disciplines you have enabled.
+    badges: ["friend_requests"],
+  },
+  {
     href: "/dashboard/shared",
     label: "Sharing",
     // The share inbox, which this screen accepts and declines from. NOT
-    // `friend_requests`: those are answered on mobile, and pointing someone at
-    // a web screen that cannot answer them is worse than staying quiet.
+    // `friend_requests` — those are badged on Friends, one row up, which is
+    // where they can be answered.
     badges: ["shares"],
     // UNGATED, unlike everything above it, and deliberately: what lands here
     // is decided by other people. Gating it on the recipient's own enabled
