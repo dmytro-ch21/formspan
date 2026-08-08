@@ -31,9 +31,10 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 type createRequest struct {
-	DisplayName *string `json:"display_name"`
-	DateOfBirth *string `json:"date_of_birth"`
-	Sex         *string `json:"sex"`
+	DisplayName *string  `json:"display_name"`
+	DateOfBirth *string  `json:"date_of_birth"`
+	Sex         *string  `json:"sex"`
+	HeightCM    *float64 `json:"height_cm"`
 }
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
@@ -45,10 +46,16 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !ValidHeightCM(req.HeightCM) {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"height must be between 50 and 260 cm")
+		return
+	}
 	p, err := h.repo.Create(r.Context(), claims.UserID, NewProfile{
 		DisplayName: req.DisplayName,
 		DateOfBirth: req.DateOfBirth,
 		Sex:         req.Sex,
+		HeightCM:    req.HeightCM,
 	})
 	if err != nil {
 		writeError(w, r, err)
@@ -165,12 +172,13 @@ func (h *Handler) SetExerciseUnit(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateRequest struct {
-	Username    *string `json:"username"`
-	DisplayName *string `json:"display_name"`
-	DateOfBirth *string `json:"date_of_birth"`
-	Sex         *string `json:"sex"`
-	UnitSystem  *string `json:"unit_system"`
-	TrackEffort *bool   `json:"track_effort"`
+	Username    *string  `json:"username"`
+	DisplayName *string  `json:"display_name"`
+	DateOfBirth *string  `json:"date_of_birth"`
+	Sex         *string  `json:"sex"`
+	HeightCM    *float64 `json:"height_cm"`
+	UnitSystem  *string  `json:"unit_system"`
+	TrackEffort *bool    `json:"track_effort"`
 	// Off by default and the only switch that makes training readable by
 	// another athlete. Absent means "leave it alone", like every other field
 	// here — a PATCH that omits it can never silently publish anything.
@@ -209,11 +217,17 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !ValidHeightCM(req.HeightCM) {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"height must be between 50 and 260 cm")
+		return
+	}
 	p, err := h.repo.Update(r.Context(), claims.UserID, ProfileUpdate{
 		Username:                 req.Username,
 		DisplayName:              req.DisplayName,
 		DateOfBirth:              req.DateOfBirth,
 		Sex:                      req.Sex,
+		HeightCM:                 req.HeightCM,
 		UnitSystem:               req.UnitSystem,
 		TrackEffort:              req.TrackEffort,
 		ShareTrainingWithFriends: req.ShareTrainingWithFriends,

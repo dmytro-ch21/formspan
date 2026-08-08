@@ -260,6 +260,9 @@ function RootStack() {
         <Stack.Screen name="settings" options={{ title: 'Settings' }} />
         <Stack.Screen name="settings/units" options={{ title: 'Units' }} />
         <Stack.Screen name="profile/edit" options={{ title: 'Edit profile' }} />
+        {/* The check-in for one day. Titled here so the back button from it
+            reads sensibly rather than "[date]". */}
+        <Stack.Screen name="checkin/[date]" options={{ title: 'Check in' }} />
         <Stack.Screen name="exercise/[id]" options={{ title: 'Exercise' }} />
         <Stack.Screen name="technique/[id]" options={{ title: 'Technique' }} />
         <Stack.Screen name="position/[id]" options={{ title: 'Position' }} />

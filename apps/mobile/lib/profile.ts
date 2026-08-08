@@ -19,6 +19,8 @@ export type Profile = {
   display_name: string | null;
   date_of_birth: string | null;
   sex: string | null;
+  /** Centimetres. What waist-to-height and the body-fat estimate need. */
+  height_cm: number | null;
   unit_system: UnitSystem;
   track_effort: boolean;
   /**
@@ -44,6 +46,8 @@ export type ProfilePatch = Partial<{
   display_name: string | null;
   date_of_birth: string | null;
   sex: string | null;
+  /** Centimetres. What waist-to-height and the body-fat estimate need. */
+  height_cm: number | null;
 }>;
 
 /**

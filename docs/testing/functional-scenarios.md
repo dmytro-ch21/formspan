@@ -6318,3 +6318,94 @@ whole user-visible property.
   for choosing a colour; greying them out would make the picker unusable.
 - **A fresh install with no stored flag comes up in colour**, and an unreadable
   keychain does the same rather than taking the palette down with it.
+
+## Body check-ins and phases (`/v1/body`, mobile Today + check-in screen)
+
+Logged on the phone by the platform rule — a bathroom scale is not a desk. The
+analytical surface (history, charts) stays on web and does not exist yet.
+
+### The daily check-in
+
+- **A weight alone is a complete check-in.** The girths are behind a disclosure
+  and must never be required; a form that asks for nine measurements every
+  morning is the one people stop opening.
+- **Re-saving the same day updates it** rather than creating a second row or
+  failing. This is what makes a retry safe.
+- **A girth-only save does not erase that morning's weight.** The single
+  highest-value scenario here: absent means "not measured", never "clear it".
+- **Notes ARE replaced by an empty string** — an empty note is a real edit where
+  an absent measurement is not.
+- **Deleting the day is the only way to clear a mistyped value**, and the copy
+  says so. Deleting a day that is not there is a 404.
+- **An empty check-in is refused** — no weight, no girths, no note, no photo.
+  Otherwise it creates a day the trend has to skip over.
+- Out-of-range values are refused with a sentence naming the field (a 900kg
+  bodyweight, a 700cm waist — mis-keyed decimals, not medical limits).
+
+### The trend, and what the card says
+
+- **The card shows a 7-day rolling mean, never this morning's number.** Feed a
+  week with a 1.4kg swing on it and confirm the card does not show the spike.
+- **Under three readings there is no trend** and the card says so rather than
+  showing one morning as a trend, or a zero.
+- **A rate needs two trends at least a week apart.** A three-day span reports
+  nothing.
+- **A month-old run of readings is not this week's trend** — the window is
+  anchored on the date, not on "the last N rows".
+
+### Phases
+
+- **At most one runs at a time.** Starting a second is a 409 telling you to end
+  the first, not a 400.
+- **Ending one frees the slot**; ending it twice is a 404 and does not move the
+  recorded date.
+- **A phase belonging to another athlete cannot be ended** — 404, not 403,
+  because confirming the id exists is itself the leak.
+- **`making_weight` is refused without both a date and a target weight.**
+  Without them there is nothing to count down to.
+- Past phases are kept. The numbers recorded during one are only readable
+  against it.
+
+### What the phase makes the card say
+
+- **A cut running too fast reads as "faster than ideal", not as praise.** The
+  sign is the trap here — a cut's rate is negative — so this is worth an
+  explicit scenario at −2%/week.
+- A cut barely moving reads as too slow, including one going the wrong way.
+- **A bulk uses the opposite convention**: +1%/week is too fast, −0.4% too slow.
+- **Recomp and maintenance treat drift either way as too fast**, because flat
+  is the target.
+- **A recomposition with weight flat, waist down and a limb up reads as
+  working** — the one case the scale cannot answer and girths can.
+- **Making weight shows kilos to go, days left, and whether the required rate is
+  safe.** A deadline in the past must not produce a NaN or an Infinity on screen.
+
+### Derived numbers
+
+- **Waist-to-height appears only once waist and height both exist**, and is
+  shown instead of BMI.
+- **The body-fat estimate is labelled as an estimate**, with its error stated.
+- **It refuses to compute without sex** rather than defaulting — defaulting
+  applies the wrong regression and produces a confident wrong number. Worth
+  testing with hips present, so a null cannot be mistaken for a missing input.
+- **Mis-typed girths (waist below neck) produce nothing, never "NaN%".**
+- The estimate moves down as the waist comes in — the direction is the reliable
+  part.
+
+### Photos
+
+- **The upload never passes through the API.** The client asks for a signed URL
+  and PUTs to storage directly.
+- **The storage key is derived from the caller and the date.** A client cannot
+  obtain a signature over another athlete's object — the security property of
+  the whole endpoint.
+- **A photo is never visible to anyone else**: not in the friends' feed, not in
+  the admin console, not through any public origin.
+- **The read URL expires**, so a cached one is a broken image. It is minted per
+  response and must not be stored.
+- **With no object storage configured the endpoint reports 503** and the rest of
+  the check-in still works — unset is a supported state.
+- **A partial R2 config fails at startup**, deliberately, rather than silently
+  behaving as though storage were absent.
+- Photos are downscaled on the device before upload; a raw 4–5MB frame must not
+  be sent.

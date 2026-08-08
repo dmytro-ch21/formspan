@@ -17479,6 +17479,198 @@ data, "Push A" is an inference about what they meant, and the fix does not need
 it renamed to be verified.
 
 
+## 2026-08-08 — The check-in: what you weigh, what you measure, and what you are trying to do about it
+
+The Today screen gained the thing that was missing between "what did I train"
+and "did it work": a body check-in, and a **phase** to read it against.
+
+### Scale weight is noise, and the whole design falls out of that
+
+Body mass swings 1–2kg inside a day on water, glycogen and the previous
+evening's meal. Two consecutive mornings can differ by more than a *good week*
+of fat loss — so any rate computed from two readings is dominated by the noise
+and will cheerfully report gaining in the middle of a working cut. That is not a
+rounding problem; it is the reason people quit diets that are succeeding.
+
+So nothing in `lib/anthropometry.ts` reads a single weight. The card's big
+number is a **seven-day rolling mean**, and the rate under it runs between two
+of those a fortnight apart. Seven days specifically because eating and training
+both run on a weekly cycle, so the window cancels the Saturday and the Monday
+rather than half of each. Below three readings it returns null and the card says
+"weigh in for a few days" — a trend of one morning is not a trend.
+
+### Two cadences, deliberately not one form
+
+Weight is daily and one field. Girths are **weekly** and behind a disclosure,
+because they do not move faster than that and below a week the tape error is
+larger than the change. Nine fields every morning is how a ten-second habit
+becomes one nobody keeps, so the check-in asks for a weight most days and the
+rest only when it is actually due.
+
+Each girth carries its own one-line method on the field, because the largest
+source of error in self-measurement is not the tape — it is measuring a slightly
+different place next week, which produces noise shaped exactly like progress.
+
+### A phase, not a field
+
+The smaller design is a `body_goal` column on the profile. It cannot express the
+case this product actually has: making 77.1kg by a specific Saturday. **A target
+with no date has no rate, and a rate is the only thing that can tell somebody
+they are cutting too fast.** So a phase is a span — `cut`, `lean_bulk`,
+`recomposition`, `maintenance`, `making_weight` — with a start, an optional
+target date and weight, and an end. History is kept: the numbers recorded in
+March are only readable against the phase that was running in March.
+
+**Deliberately not the same type as a workout's `Goal`.** That one is
+powerlifting / hypertrophy / endurance and describes how a programme is written.
+Different axes — a hypertrophy block runs perfectly well inside a cut — and one
+type covering both would make that unsayable.
+
+At most one phase runs at a time, enforced by a **partial unique index** rather
+than an application check: two concurrent starts are exactly the race a check
+loses, and the athlete would end up measuring against two targets with no way to
+tell which the card used.
+
+### The rates are cited, and the sign is the trap
+
+Cut targets 0.5–1%/week — Garthe et al. (2011) ran elite athletes at ~0.7%/week
+against ~1.4% and found the slow group held, and in places added, lean mass
+where the fast group did not. Lean bulk targets 0.25–0.5%/week for the
+symmetrical reason: past that the surplus outruns what can be built from it.
+
+`judgeRate` exists as one function because **a cut's rate is negative**, so "too
+fast" is *below* `-max` and "too slow" is *above* `-min` — a comparison that
+reads backwards and gets inverted the moment it is written inline at a call
+site. Inverted, the card congratulates somebody who is crash-dieting. It is
+written once, with a test that fails if the two swap.
+
+`recompSignal` is the other one worth naming: a recomposition holds weight
+perfectly flat while the body changes underneath it, which is precisely when
+people conclude the plan failed. Waist down and a limb up is the cheapest honest
+evidence available without a scanner, and it is the only thing here the scale
+cannot answer at all.
+
+### Photos: the storage was free, the design was not
+
+R2 is $0.015/GB-month with **free egress** and a 10 GB-month free tier. A 300 KB
+weekly photo is ~15 MB per athlete per year — roughly 640 athlete-years inside
+the free tier. Storage was never the question.
+
+What was: **there was no upload path at all.** `MEDIA_BASE_URL` joins a storage
+key onto a public origin at read time, and files reach that bucket out of band.
+A body photo cannot live that way — the catalog's media is public and
+CDN-cacheable precisely because it is identical for everyone.
+
+So `internal/platform/objectstore` presigns SigV4 URLs and the client talks to
+storage directly. The bytes never pass through the API, which keeps a
+multi-megabyte upload on bad gym wifi from being the API's problem. **The key is
+derived from the authenticated caller and the date, never accepted** — that is
+the entire security property, and it would be lost the moment the key became an
+input. Reads are 15-minute presigned GETs minted per response; a stored URL
+simply expires.
+
+**It is hand-written rather than `aws-sdk-go-v2`**, which is a dozen modules for
+one signing function in a backend with four direct dependencies and no web
+framework by choice. That is only defensible because it is exactly testable: the
+suite runs AWS's own published vector. It earned its place immediately — the
+first implementation produced the wrong signature, and rather than assume the
+expected hex was misremembered it was recomputed with an independent Python
+implementation, which matched AWS. The bug was an empty bucket name yielding
+`//test.txt` instead of `/test.txt` — virtual-hosted style — which would have
+failed every upload with an error naming the region rather than the cause.
+
+### Also: height moved onto the profile
+
+Waist-to-height and the Navy body-fat estimate both need it and neither could be
+derived from anything stored. On the profile rather than per check-in because it
+is a fact about the athlete that does not move week to week; per check-in it
+would nag every time and let rows disagree.
+
+Body fat is rendered as an estimate and says so — a tape regression carries ±3–4
+points against a scan, and worse at the leanness these athletes live at. It
+earns its place because the *direction* it moves is reliable even where the
+absolute number is not. Waist-to-height is shown instead of BMI, which cannot
+tell muscle from fat and reads "obese" for a lean 95kg grappler.
+
+### Verified
+
+`pnpm run verify` green; 1024 mobile tests, the full backend suite against a
+branch-private database. Four anthropometry guards mutation-tested — and **two
+of them initially survived**, which is the part worth recording: the
+"refuses a short span" test was passing because the trend was null rather than
+because the span guard fired, and "refuses to guess when sex is unknown" was
+passing because the female branch wanted hips. Both were green against deleted
+guards. Supplying the missing inputs made them real.
+
+The upsert's `COALESCE` was mutation-tested too: without it a girth-only
+check-in erases the weight recorded that morning.
+
+### What review caught, because it is the interesting part
+
+Nine blocking findings across the two reviewers, and the pattern in them is
+worth more than the list: **every one was a silent failure.** Nothing crashed,
+nothing 500'd, no test went red.
+
+- **`measured_side` flipped to "right" on any save that omitted it.** Girths
+  taken on the left, then that evening's weight-only save, and the left-side
+  series is relabelled — destroying the one thing the field exists to record.
+  Fixed with a pointer on the wire and a COALESCE against the *parameter*
+  (coalescing against `EXCLUDED` reintroduces it, because the insert has already
+  defaulted it).
+- **Asking for a photo upload URL erased the day's notes**, because it routed an
+  internal partial write through the full-save path, which replaces notes by
+  design. Now a narrow `AttachPhotoKey`.
+- **Deleting a check-in did not delete the photo — and the key is
+  deterministic**, so requesting an upload URL for that day handed back a
+  working link to the photo the athlete had just deleted. That is the single
+  worst thing in a feature whose own docs call this its most sensitive data.
+- **`CreatePhase` was not idempotent** despite the handler comment, the
+  contract, and the client-generated id all saying it was: a retry hit the
+  primary key and returned 400 "that already exists". Now `ON CONFLICT (id) DO
+  NOTHING` with a re-fetch **scoped to (id, user_id)**, the shape `activity`
+  already uses — unscoped it would hand a guessed UUID somebody else's phase.
+- **`height_cm` was accepted on profile create and silently dropped**, and was
+  absent from the contract entirely.
+- **`new Date().toISOString().slice(0,10)` is the UTC date**, so west of
+  Greenwich an evening weigh-in wrote tomorrow's row. `lib/calendar.ts`'s
+  `dayString` exists for exactly this and the same screen was already using it
+  twenty lines away.
+- **The Today card never refreshed** — a mount-only effect on a tab screen that
+  lives for the process. Weigh in, come back, and it still said "Check in".
+- **The photo flow destroyed typed-but-unsaved input**, and because notes are
+  replace-semantics the next save then persisted the emptied note.
+- **`expo-image-picker` was missing from `app.json` plugins**, so no
+  `NSPhotoLibraryUsageDescription` reached a device build and iOS would kill the
+  process at the permission prompt. Invisible in Expo Go, which is where all
+  day-to-day testing happens.
+
+Two more worth recording. `recompSignal`'s mixed branches were **optimistic**: a
+growing waist beside a growing limb read as "working", and so did a shrinking
+waist beside a shrinking limb — which is losing muscle. And five tests were
+passing for the wrong reason, found by mutation: a `girthsDue` fixture that was
+already sorted so `.pop()` worked either way, `recompSignal`'s single-signal
+branches never exercised at all, the trend window's boundary unpinned, and
+`judgeRate`'s band edges untested. All five now fail when the guard is removed.
+
+### Not verified
+
+- **Nothing here has been seen on a device.** No screenshot, no photo uploaded,
+  no signed URL exercised against real R2 — the presigner is correct against
+  AWS's vector, which is not the same as correct against Cloudflare's
+  implementation of it.
+- **Photos are dark until the R2 credentials exist.** All four unset is a
+  supported state (the endpoint reports 503 and the rest of the check-in works);
+  a partial config is fatal at startup, deliberately, because a half-configured
+  bucket loses photos silently.
+- **Check-ins are online-only**, against this app's offline-first spine. A
+  deliberate call — a check-in is thirty seconds by a scale at home, not a set
+  logged in a basement — but if weighing in at a gym turns out to be common,
+  this is the note saying it was decided rather than overlooked.
+- **No deletion path for the photos on account closure.** The key layout is
+  prefixed by user id specifically so that is a prefix operation when it is
+  built; it is not built.
+
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

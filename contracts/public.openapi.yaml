@@ -37,6 +37,102 @@ components:
       description: Clerk-issued session token, verified server-side via Clerk's JWKS.
 
   schemas:
+    BodyCheckin:
+      type: object
+      description: >
+        One day's measurements. Weight is kilograms and girths are centimetres —
+        always, whatever the athlete's display units say. Storing a converted
+        value would make every historical row ambiguous the moment somebody
+        changed the setting.
+      required: [user_id, measured_on, measured_side, notes, created_at, updated_at]
+      properties:
+        user_id: { type: string }
+        measured_on: { type: string, format: date }
+        weight_kg: { type: number, nullable: true }
+        neck_cm: { type: number, nullable: true }
+        shoulders_cm: { type: number, nullable: true }
+        chest_cm: { type: number, nullable: true }
+        waist_cm: { type: number, nullable: true }
+        hips_cm: { type: number, nullable: true }
+        thigh_cm: { type: number, nullable: true }
+        calf_cm: { type: number, nullable: true }
+        upper_arm_cm: { type: number, nullable: true }
+        forearm_cm: { type: number, nullable: true }
+        measured_side:
+          type: string
+          enum: [left, right]
+          description: >
+            Which side the limb girths were taken on — one value for the row,
+            not one per site. The rule that matters is consistency, and an
+            athlete measuring a left thigh and a right arm has two series that
+            cannot be compared to anything.
+        photo_url:
+          type: string
+          description: >
+            A short-lived presigned link, minted per response. Absent when there
+            is no photo or the environment has no object storage. Never store
+            it — it expires.
+        notes: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    BodyCheckinInput:
+      type: object
+      description: >
+        Every field optional and independently so, but at least one measurement
+        is required — an empty check-in creates a day the trend then has to skip
+        over. An omitted field means "not measured" and leaves any stored value
+        alone.
+      properties:
+        weight_kg: { type: number, nullable: true }
+        neck_cm: { type: number, nullable: true }
+        shoulders_cm: { type: number, nullable: true }
+        chest_cm: { type: number, nullable: true }
+        waist_cm: { type: number, nullable: true }
+        hips_cm: { type: number, nullable: true }
+        thigh_cm: { type: number, nullable: true }
+        calf_cm: { type: number, nullable: true }
+        upper_arm_cm: { type: number, nullable: true }
+        forearm_cm: { type: number, nullable: true }
+        measured_side: { type: string, enum: [left, right] }
+        notes: { type: string }
+
+    BodyPhase:
+      type: object
+      required: [id, user_id, kind, started_on, notes, created_at, updated_at]
+      properties:
+        id: { type: string }
+        user_id: { type: string }
+        kind:
+          type: string
+          enum: [cut, lean_bulk, recomposition, maintenance, making_weight]
+        started_on: { type: string, format: date }
+        target_on: { type: string, format: date, nullable: true }
+        target_weight_kg: { type: number, nullable: true }
+        ended_on:
+          type: string
+          format: date
+          nullable: true
+          description: Null while this is the live phase. At most one per athlete.
+        notes: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    BodyPhaseInput:
+      type: object
+      required: [id, kind, started_on]
+      properties:
+        id:
+          type: string
+          description: Client-generated, so a retry is not a second phase.
+        kind:
+          type: string
+          enum: [cut, lean_bulk, recomposition, maintenance, making_weight]
+        started_on: { type: string, format: date }
+        target_on: { type: string, format: date, nullable: true }
+        target_weight_kg: { type: number, nullable: true }
+        notes: { type: string }
+
     Theme:
       type: object
       required: [week_start, title, notes, created_at, updated_at]
@@ -482,6 +578,15 @@ components:
           nullable: true
         sex:
           $ref: "#/components/schemas/Sex"
+        height_cm:
+          type: number
+          nullable: true
+          description: >
+            Centimetres. What waist-to-height and the body-fat estimate are
+            derived from — neither can be computed without it. On the profile
+            rather than on each check-in because it is a fact about the athlete
+            that does not move week to week; per check-in it would be asked for
+            every time and let rows disagree.
         unit_system:
           type: string
           enum: [metric, imperial]
@@ -533,6 +638,15 @@ components:
           nullable: true
         sex:
           $ref: "#/components/schemas/Sex"
+        height_cm:
+          type: number
+          nullable: true
+          description: >
+            Centimetres. What waist-to-height and the body-fat estimate are
+            derived from — neither can be computed without it. On the profile
+            rather than on each check-in because it is a fact about the athlete
+            that does not move week to week; per check-in it would be asked for
+            every time and let rows disagree.
 
     ProfileUpdate:
       type: object
@@ -558,6 +672,15 @@ components:
           nullable: true
         sex:
           $ref: "#/components/schemas/Sex"
+        height_cm:
+          type: number
+          nullable: true
+          description: >
+            Centimetres. What waist-to-height and the body-fat estimate are
+            derived from — neither can be computed without it. On the profile
+            rather than on each check-in because it is a fact about the athlete
+            that does not move week to week; per check-in it would be asked for
+            every time and let rows disagree.
         unit_system:
           type: string
           enum: [metric, imperial]
@@ -6093,6 +6216,277 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /body/checkins:
+    get:
+      operationId: listBodyCheckins
+      summary: The caller's body check-ins, over a window
+      description: >
+        A check-in is what the athlete weighed and measured on one calendar day.
+
+
+        **Two cadences share one resource.** Body weight is read daily and is
+        noisy — it swings on water, glycogen and the previous evening's meal —
+        so the honest number is a trend across days rather than any one morning.
+        Girths move far more slowly and are taken weekly at most, because below
+        that the measurement error is larger than the change. A day therefore
+        commonly carries a weight and no girths, and that is not an incomplete
+        row.
+
+
+        Every measure is independently optional for the same reason. Requiring
+        the set would turn a ten-second habit into a five-minute one, and the
+        habit is the feature.
+
+
+        Both bounds are required — an unbounded list grows for the life of the
+        account and every caller wants a window.
+      tags: [Body]
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Check-ins in the window, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [checkins]
+                properties:
+                  checkins:
+                    type: array
+                    items: { $ref: "#/components/schemas/BodyCheckin" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /body/checkins/{date}:
+    put:
+      operationId: saveBodyCheckin
+      summary: Record or update one day's measurements
+      description: >
+        **PUT, keyed on the day.** The client names the resource and sending it
+        twice is the same as sending it once, which is what makes a check-in
+        recorded with no signal safe to retry.
+
+
+        **An omitted measure means "not measured", never "clear it".** A weekly
+        girth check-in sends girths and no weight, and must not erase the weight
+        recorded that morning — so absent fields are left alone. The consequence
+        is that a value cannot be cleared through this endpoint; deleting the
+        day is how a mistyped measurement is removed.
+
+
+        Notes are the exception and ARE replaced, because an empty note is a
+        real edit rather than an absent measurement.
+      tags: [Body]
+      parameters:
+        - name: date
+          in: path
+          required: true
+          schema: { type: string, format: date }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BodyCheckinInput" }
+      responses:
+        "200":
+          description: The stored check-in.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BodyCheckin" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    delete:
+      operationId: deleteBodyCheckin
+      summary: Remove one day entirely
+      description: >
+        The documented way to clear a mistyped measurement, since the save
+        deliberately cannot null a field.
+      tags: [Body]
+      parameters:
+        - name: date
+          in: path
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        "204": { description: Deleted. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /body/checkins/{date}/photo:
+    post:
+      operationId: createBodyCheckinPhotoUpload
+      summary: A short-lived URL to upload the day's progress photo to
+      description: >
+        Returns a presigned PUT. **The bytes never pass through this API** —
+        proxying them would push multi-megabyte bodies through a process sized
+        for JSON and make the API the thing that fails on bad gym wifi.
+
+
+        **The storage key is derived from the authenticated caller and the date
+        in the path, never accepted from the client.** That is the whole
+        security property: a caller cannot obtain a signature over somebody
+        else's object.
+
+
+        Unlike the exercise catalog's media, which is public and CDN-cacheable
+        on purpose, these objects are private. They are read through a
+        short-lived presigned URL minted per response and returned as
+        `photo_url` on the check-in; a stored URL would simply expire.
+
+
+        `503` when the environment has no object storage configured, which is a
+        supported state rather than a fault — local development and CI have no
+        bucket.
+      tags: [Body]
+      parameters:
+        - name: date
+          in: path
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Upload the JPEG to `upload_url` with the given content type.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [upload_url, content_type, max_bytes, expires_in, checkin]
+                properties:
+                  upload_url: { type: string }
+                  content_type: { type: string, example: image/jpeg }
+                  max_bytes: { type: integer, description: What the client must downscale below. }
+                  expires_in: { type: integer, description: Seconds the signature is valid for. }
+                  checkin: { $ref: "#/components/schemas/BodyCheckin" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503":
+          description: Object storage is not configured on this environment.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /body/phases:
+    get:
+      operationId: listBodyPhases
+      summary: The caller's body-composition phases, newest first
+      description: >
+        A phase is what the athlete is trying to do, between two dates — a cut,
+        a lean bulk, a recomposition, maintenance, or making weight for a
+        division.
+
+
+        **Deliberately not the same thing as a workout's `goal`.** That one is
+        powerlifting / hypertrophy / endurance and describes how a programme is
+        written; these are different axes, and a hypertrophy block runs
+        perfectly well inside a cut.
+
+
+        **A span rather than a field on the profile**, because a target with no
+        date has no rate — and a rate is the only thing that can tell somebody
+        they are cutting too fast. Spans also keep history: the numbers recorded
+        in March are only readable against the phase that was running in March.
+
+
+        `kinds` travels with the response so a client renders its picker from
+        the server's vocabulary rather than a copy that can drift.
+      tags: [Body]
+      responses:
+        "200":
+          description: Every phase, and the vocabulary.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [phases, kinds]
+                properties:
+                  phases:
+                    type: array
+                    items: { $ref: "#/components/schemas/BodyPhase" }
+                  kinds:
+                    type: array
+                    items: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      operationId: createBodyPhase
+      summary: Start a phase
+      description: >
+        At most one phase runs at a time, enforced by a partial unique index
+        rather than an application check — two concurrent starts are exactly the
+        race a check loses, and the athlete would end up measuring against two
+        targets. A second live phase is `409`; end the running one first.
+
+
+        `id` is client-generated so a retry is not a second phase, the same
+        contract sessions and workouts use for offline creation.
+
+
+        `making_weight` requires both `target_on` and `target_weight_kg`:
+        without them it is a cut with extra words and the countdown has nothing
+        to count.
+      tags: [Body]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BodyPhaseInput" }
+      responses:
+        "201":
+          description: The phase that was started.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BodyPhase" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409":
+          description: A phase is already running.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /body/phases/{id}/end:
+    post:
+      operationId: endBodyPhase
+      summary: End a running phase
+      description: >
+        A sub-resource verb rather than a PATCH setting `ended_on`: ending is
+        the only mutation a phase has, and a general PATCH would invite editing
+        the start date of a span that measurements are already anchored to.
+
+
+        An empty body means today. Ending an already-ended phase is `404` rather
+        than a second write that would move the recorded date.
+      tags: [Body]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ended_on: { type: string, format: date }
+      responses:
+        "200":
+          description: The ended phase.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BodyPhase" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /admin/techniques/{techniqueID}:
     patch:

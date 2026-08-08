@@ -14,6 +14,7 @@ import {
 
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
 
+import { CheckinCard } from '@/components/CheckinCard';
 import { Text, View } from '@/components/Themed';
 import { Image } from 'expo-image';
 
@@ -61,6 +62,8 @@ import { formatVolume, type UnitSystem } from '@/lib/units';
 import { enabledSports, labelFor, usesBelt, type Module } from '@/lib/modules';
 import { useModules } from '@/lib/ModulesProvider';
 import { useAccent } from '@/lib/AccentProvider';
+import { shiftDate } from '@/lib/anthropometry';
+import { listCheckins, listPhases, type Checkin, type Phase } from '@/lib/body';
 import { accentGlow } from '@/lib/palette';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
@@ -591,11 +594,53 @@ export default function TodayScreen() {
   // whenever the app first launched — use it on Sunday evening, reopen it on
   // Monday, and the header still says Sunday while `startOfWeek` anchors to
   // *last* Monday, reporting last week's training as this week's.
+  const [checkins, setCheckins] = useState<Checkin[]>([]);
+  const [phase, setPhase] = useState<Phase | null>(null);
+  const [checkinsLoaded, setCheckinsLoaded] = useState(false);
+  /**
+   * Refreshed on FOCUS, not once on mount.
+   *
+   * This is a tab screen and stays mounted for the life of the process, so a
+   * mount-only fetch meant the card still said "Check in" with yesterday's
+   * trend after you had just weighed in and come back — and stayed that way
+   * until the app was killed. That is the feature's primary daily loop. Raised
+   * in review; the rest of this screen already refreshes on focus.
+   */
+  const refreshCheckins = useCallback(() => {
+    let live = true;
+    // `dayString`, NOT `toISOString().slice(0,10)` — that is the UTC date, so
+    // west of Greenwich an evening weigh-in lands on tomorrow's row. This
+    // screen already uses `dayString` twenty lines up; `lib/calendar.ts` exists
+    // for exactly this. Raised in review.
+    const today = dayString(new Date());
+    Promise.all([
+      listCheckins(getToken, { from: shiftDate(today, -30), to: today }),
+      listPhases(getToken),
+    ])
+      .then(([cs, ps]) => {
+        if (!live) return;
+        setCheckins(cs);
+        setPhase(ps.find((p) => p.ended_on === null) ?? null);
+      })
+      .catch(() => {
+        // Offline, or the endpoint is not deployed yet. `loaded` stays false so
+        // the card says it could not refresh rather than asserting you have
+        // never weighed in — two different sentences. Raised in review.
+      })
+      .finally(() => {
+        if (live) setCheckinsLoaded(true);
+      });
+    return () => {
+      live = false;
+    };
+  }, [getToken]);
+
   useFocusEffect(
     useCallback(() => {
       setNow(new Date());
       refreshSessions();
       refreshPlan();
+      refreshCheckins();
       // On focus only, not on every day-step: the funnel is an aggregate over
       // every session ever logged and does not change because you looked at
       // Thursday.
@@ -606,7 +651,7 @@ export default function TodayScreen() {
       // Settings can have changed any of these while this screen sat mounted.
       const stop = readSuggestionPrefs();
       return stop;
-    }, [refreshSessions, refreshPlan, refreshFunnel, refreshRoadmaps, readSuggestionPrefs]),
+    }, [refreshSessions, refreshPlan, refreshFunnel, refreshRoadmaps, readSuggestionPrefs, refreshCheckins]),
   );
 
   // The same staleness arrives without a focus change when the app is
@@ -780,6 +825,17 @@ export default function TodayScreen() {
    * their block is about guard retention a fortnight after they moved on. It
    * degrades to absent offline, which is the honest answer.
    */
+  /**
+   * The body check-in, and the phase it is measured against.
+   *
+   * Fetched here rather than inside the card so the card stays a pure render —
+   * the same shape every other Today block uses. A failure costs the card and
+   * nothing else: a missing weigh-in must not take the screen down.
+   *
+   * The window is 30 days because the trend needs 7 and the rate needs 14 with
+   * a full window at each end; 30 covers both with room for gaps.
+   */
+
   const [theme, setTheme] = useState<Theme | null>(null);
   const weekStartKey = dayString(startOfWeek(now));
   useEffect(() => {
@@ -1324,6 +1380,17 @@ export default function TodayScreen() {
             {theme.notes !== '' && <Text style={styles.themeNotes}>{theme.notes}</Text>}
           </View>
         )}
+
+        {/* The check-in, above the week's readout: it is the one block here
+            that asks for something rather than reporting. */}
+        <CheckinCard
+          checkins={checkins}
+          phase={phase}
+          today={dayString(new Date())}
+          units={units}
+          loaded={checkinsLoaded}
+          unitsReady={unitsReady}
+        />
 
         {week.sessions > 0 && (
           <StatRow testID="week-summary">
