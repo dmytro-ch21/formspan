@@ -183,11 +183,32 @@ broken checkout and is nothing of the sort. This has happened; it cost a
 confusing debugging session and it will happen again, because nothing prevents
 it.
 
-Diagnose with `SELECT version FROM schema_migrations;` against `vola_test` and
-compare to the highest file in `backend/migrations/`. If the database is ahead,
-find the branch: `find . -name "0000NN*" -not -path "*/node_modules/*"` — the
-migration will be sitting uncommitted in somebody's worktree, which is why
-`git log --all` does not know about it.
+**Two different problems produce this error and they look identical**, so
+diagnose before acting. Both say `no migration found for version NN`, and the
+number alone does not tell you which:
+
+```bash
+docker compose exec -T postgres psql -U vola -d vola_test -tc 'SELECT version FROM schema_migrations;'
+ls backend/migrations/ | grep -o '^[0-9]*' | sort -u | tail -1   # highest in THIS worktree
+```
+
+If the database is ahead of your worktree, the discriminator is whether that
+version exists on `main`:
+
+- **It exists on `main`** (`git show origin/main:backend/migrations/ | grep NN`)
+  — *your branch is stale*, not the database. A worktree on a branch that
+  predates the migration reports `no migration found for version 45` while the
+  database is perfectly healthy. Rebase or pull; touch nothing else. This is the
+  common case and the one most likely to be misread as the hazard below.
+- **It exists nowhere in git** — somebody's unmerged migration reached the
+  shared database. Find it with `find . -name "0000NN*" -not -path
+  "*/node_modules/*"`; it will be uncommitted in a worktree, which is why
+  `git log --all` does not know about it. That branch should move to its own
+  database (below), and the shared one can be rolled back with the recipe at
+  the end of this section.
+
+Reaching for the rollback recipe when the real answer was "pull" is how you
+turn a stale checkout into a damaged shared database.
 
 **If you are the branch with the unmerged migration, use your own database.**
 `createdb -U vola vola_test_<branch>` and point `TEST_DATABASE_URL` at it. That
