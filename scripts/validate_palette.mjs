@@ -294,12 +294,24 @@ function loadPalette() {
     if (!m) throw new Error(`validate_palette: no '${key}' in Colors.ts — renamed or removed?`);
     return m[1];
   };
-  const block = (name) => {
+  const block = (name, expected) => {
     const m = src.match(new RegExp(`export const ${name} = \\{([\\s\\S]*?)\\} as const;`));
     if (!m) throw new Error(`validate_palette: no '${name}' block in Colors.ts`);
-    return Object.fromEntries(
+    const out = Object.fromEntries(
       [...m[1].matchAll(/(\w+):\s*'(#[0-9A-Fa-f]{6})'/g)].map((x) => [x[1], x[2]]),
     );
+    // A block that parses EMPTY is the failure this whole file exists to not
+    // have: every `for (const [k, hex] of Object.entries(...))` below would run
+    // zero times and the gate would pass having checked nothing. Reachable
+    // without anyone noticing — one entry stops being an inline hex literal and
+    // the regex quietly returns {}. `accentBlock` already guards this; these
+    // did not.
+    const n = Object.keys(out).length;
+    if (n === 0) throw new Error(`validate_palette: '${name}' parsed empty — entries no longer inline hex?`);
+    if (expected != null && n !== expected) {
+      throw new Error(`validate_palette: '${name}' parsed ${n} entries, expected ${expected}`);
+    }
+    return out;
   };
   const ramp = src.match(/gridLevels:\s*\[([^\]]+)\]/);
   if (!ramp) throw new Error('validate_palette: no gridLevels in Colors.ts');
@@ -326,10 +338,10 @@ function loadPalette() {
       tileHold: one('tileHold'),
       ramp: [...ramp[1].matchAll(/'(#[0-9A-Fa-f]{6})'/g)].map((m) => m[1]),
     },
-    BELT: block('beltAccent'),
-    BELT_ON: block('beltAccentOn'),
+    BELT: block('beltAccent', 5),
+    BELT_ON: block('beltAccentOn', 5),
     ACCENTS: accentBlock(src),
-    SPORTS: block('sportColors'),
+    SPORTS: block('sportColors', 4),
     MONO: {
       rest: monoOne('gridRest'),
       ramp: monoRamp,
@@ -341,10 +353,14 @@ function loadPalette() {
       accent: monoOne('accent'),
       sport: monoSportMatch[1],
     },
+    MONO_MEDAL: block('monoMedalFace', 2),
+    MONO_BELT: block('monoBeltAccent', 5),
+    MONO_BELT_ON: block('monoBeltAccentOn', 5),
   };
 }
 
-const { S, P, BELT, BELT_ON, ACCENTS, SPORTS, MONO } = loadPalette();
+const { S, P, BELT, BELT_ON, ACCENTS, SPORTS, MONO, MONO_MEDAL, MONO_BELT, MONO_BELT_ON } =
+  loadPalette();
 
 heading('Text');
 ratio('text on surface', P.text, S.surface, 4.5);
@@ -423,6 +439,28 @@ for (const [name, hex] of Object.entries(MONO_TILES)) {
   ratio(`mono ${name} on surface`, hex, S.surface, 4.5);
 }
 separation('mono tiles keep two steps', MONO_TILES.advance, MONO_TILES.defend);
+
+/*
+  The sets that live OUTSIDE `palette` and therefore outside the mono spread.
+
+  Every one of these shipped still in full colour after the first monochrome
+  pass — a gold PR medal, a blue belt edge — because `vola` is one object and
+  these are not in it. They are checked here so the next one added is caught by
+  a failing gate rather than by looking at a phone.
+*/
+heading('Monochrome — the sets that are not part of `vola`');
+ratio('mono medal gold on surface', MONO_MEDAL.gold, S.surface, 3, 'A badge is a graphic that carries meaning.');
+ratio('mono medal silver on surface', MONO_MEDAL.silver, S.surface, 3);
+// The two tiers mean different things — a live record versus a standing one —
+// so unlike the sports these still have to separate. The gold tier's star is
+// redundant encoding on top, not instead.
+separation('mono medal gold vs silver', MONO_MEDAL.gold, MONO_MEDAL.silver);
+for (const [belt, hex] of Object.entries(MONO_BELT)) {
+  // Same 3:1 on both grounds the coloured belt accents promise.
+  ratio(`mono belt ${belt} on raised`, hex, S.raised, 3);
+  ratio(`mono belt ${belt} on surface`, hex, S.surface, 3);
+  ratio(`mono belt ${belt} — ink on it`, MONO_BELT_ON[belt], hex, 4.5);
+}
 
 // Sports DO co-occur — a Recent list mixes them in one column — so unlike the
 // belts these must be distinguishable from each other, pairwise, under CVD.

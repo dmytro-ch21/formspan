@@ -266,6 +266,112 @@ export const mono = {
 export const monoSport = '#98A3B5';
 
 /**
+ * The metals, and their monochrome reading.
+ *
+ * A personal-record medal is the one badge in the app whose whole point is that
+ * it looks like a medal, so it was drawn in real gold and silver and — being
+ * outside `palette` — sailed straight through the mono swap. In a black-and-white
+ * app a gold disc is the only warm thing on the screen, which is exactly the
+ * "everything else is silver except this" the mode exists to remove.
+ *
+ * The two tiers still have to separate, because they mean different things: gold
+ * is a record set in the last 30 days, silver a standing one. In mono that
+ * becomes bright versus mid, ΔE ~24 apart — and the gold tier's star is still
+ * there underneath it, which is why `Medal` could survive greyscale even before
+ * this existed.
+ */
+export const medalFace = { gold: '#C9A227', silver: '#8A94A6' } as const;
+export const medalRim = { gold: '#F2D98A', silver: '#C3CAD6' } as const;
+
+export const monoMedalFace = { gold: '#D7DEE8', silver: '#79839A' } as const;
+export const monoMedalRim = { gold: '#F3F6FA', silver: '#A7B0BE' } as const;
+
+/**
+ * The belt accents in monochrome — a lightness ramp, lightest belt to darkest.
+ *
+ * Intuitive rather than clever: a white belt's card is the pale one and a black
+ * belt's is the dark one, matching the belt render beside it. Encoding *rank* as
+ * brightness was the alternative and it inverts that, which would put a bright
+ * edge on a card showing a dark belt.
+ *
+ * Unlike the accent set these do not need to separate pairwise — an athlete has
+ * one belt — but the Plan tab's syllabus cards show several at once, so a
+ * readable ramp is worth having anyway. Each still clears 3:1, which is the
+ * promise the coloured set makes and the validator checks.
+ */
+export const monoBeltAccent = {
+  white: '#F3F6FA',
+  blue: '#C2CAD8',
+  purple: '#9AA4B5',
+  brown: '#7A8496',
+  black: '#646E82',
+} as const;
+
+/** The darkest step is too dark for near-black ink; everything above it is not. */
+export const monoBeltAccentOn = {
+  white: '#080B12',
+  blue: '#080B12',
+  purple: '#080B12',
+  brown: '#080B12',
+  black: '#FFFFFF',
+} as const;
+
+/**
+ * The belt as a physical object, as it really is.
+ *
+ * Moved out of `components/Belt.tsx` so the monochrome twin below can sit beside
+ * it — they were literals in the component, which is precisely why a
+ * black-and-white app still had a blue belt in it.
+ */
+export const strap = {
+  // Not pure white: #FFF on a dark ground glares, and a real belt is closer to
+  // unbleached cotton anyway.
+  white: '#EDEAE3',
+  blue: '#1B4CC4',
+  purple: '#6A2D9B',
+  brown: '#5C3A21',
+  // Not pure black either — it would disappear into `vola.bg`. This reads as
+  // black beside the other straps while staying visible on its own.
+  black: '#1A1A1A',
+} as const;
+
+/**
+ * The rank bar. Red on a black belt, black on everything else — the actual
+ * construction, not a stylistic choice.
+ */
+export const rankBar = {
+  white: '#1A1A1A',
+  blue: '#1A1A1A',
+  purple: '#1A1A1A',
+  brown: '#1A1A1A',
+  black: '#B01B2E',
+} as const;
+
+/**
+ * The belt as a physical object, in monochrome.
+ *
+ * `components/Belt.tsx` draws a real strap, and a real strap is dyed cotton —
+ * so unlike everything else in this file these values are a *picture*, not a
+ * signal. In mono they become the greyscale reading of that picture: the
+ * lightness order of the real belts, which is already the order the ranks run
+ * in, so the drawing still reads as a progression rather than as five
+ * identical straps.
+ *
+ * Black stays nearly black and white stays nearly white — those two are already
+ * achromatic and there is nothing to convert. The middle three are what change.
+ */
+export const monoStrap = {
+  white: '#EDEAE3',
+  blue: '#6E7787',
+  purple: '#565E6C',
+  brown: '#3E444F',
+  black: '#1A1A1A',
+} as const;
+
+/** The rank bar's red has no greyscale equivalent that is not just "a bar". */
+export const monoRankBar = '#8A94A6';
+
+/**
  * A discipline's colour — categorical, and **fixed regardless of the accent**.
  *
  * Same rule as the grid and the completed-set tint: the accent is chrome and
@@ -362,6 +468,10 @@ export const beltAccent = {
  * 3.8:1 — under AA for anything small — so they take the near-black ground,
  * which clears comfortably on all three.
  */
+/** The five belts, named once. `Medal`'s tiers likewise. */
+export type BeltKey = keyof typeof beltAccent;
+export type MedalTier = 'gold' | 'silver';
+
 export const beltAccentOn = {
   white: '#080B12',
   blue: '#080B12',
@@ -438,6 +548,31 @@ const scheme = {
 export const activeSportColors: Record<SportKey, string> = isMono
   ? { strength: monoSport, bjj: monoSport, running: monoSport, nutrition: monoSport }
   : sportColors;
+
+/**
+ * The rest of the sets that live outside `palette` and therefore outside the
+ * spread that swaps it.
+ *
+ * Every one of these was still in full colour after the first monochrome pass —
+ * a gold PR medal, a blue belt edge — because `vola` is one object and these are
+ * not in it. Same shape as `activeSportColors`: the literal stays parseable for
+ * the validator, and the swap happens here where the components read it.
+ */
+export const activeMedalFace: Record<MedalTier, string> = isMono ? monoMedalFace : medalFace;
+export const activeMedalRim: Record<MedalTier, string> = isMono ? monoMedalRim : medalRim;
+export const activeBeltAccent: Record<BeltKey, string> = isMono ? monoBeltAccent : beltAccent;
+export const activeBeltAccentOn: Record<BeltKey, string> = isMono
+  ? monoBeltAccentOn
+  : beltAccentOn;
+
+/** The strap itself — a picture rather than a signal. See `monoStrap`. */
+export const activeStrap: Record<BeltKey, string> = isMono ? monoStrap : strap;
+// Spread rather than four re-typed literals: only the black belt's bar has a
+// colour to lose, and hand-copying the other four is how a mono twin silently
+// diverges from the original it is supposed to mirror.
+export const activeRankBar: Record<BeltKey, string> = isMono
+  ? { ...rankBar, black: monoRankBar }
+  : rankBar;
 
 export default {
   light: scheme,

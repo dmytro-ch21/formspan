@@ -37,6 +37,7 @@ import { vola } from '@/constants/Colors';
 import { Icon } from '@/components/ui/Icon';
 import { sportColor, sportIcon, sportTint } from '@/components/ui/sport';
 import { useAccent } from '@/lib/AccentProvider';
+import { accentGlow } from '@/lib/palette';
 
 /**
  * "1 exercise", not "1 exercises".
@@ -449,7 +450,7 @@ export default function WorkoutsScreen() {
         <Pressable
           style={({ pressed }) => [
             styles.fab,
-            { backgroundColor: accent.accent, shadowColor: accent.accent },
+            { backgroundColor: accent.accent }, accentGlow(accent.accent),
             pressed && styles.fabPressed,
           ]}
           onPress={() => setComposing(true)}
