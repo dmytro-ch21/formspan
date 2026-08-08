@@ -603,6 +603,27 @@ export function isValidationError(err: unknown): boolean {
   return err instanceof ApiError && err.code === "invalid_input";
 }
 
+/**
+ * A miss. On the social endpoints this is deliberately ONE answer for several
+ * different things — no such handle, not your friend, a request already
+ * answered — because distinguishing them would make the API an oracle over
+ * whether an account exists. Callers must not try to be more specific than the
+ * server is willing to be.
+ */
+export function isNotFound(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 404;
+}
+
+/**
+ * The other side got there first, or the relationship already exists. On the
+ * friend endpoints a 409 and a 404 mean the same thing to a SCREEN: the row it
+ * is looking at is a ghost, so reload rather than leave a control that can
+ * only fail again.
+ */
+export function isConflict(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 409;
+}
+
 async function request<T>(
   getToken: Token,
   path: string,
@@ -2342,6 +2363,97 @@ export async function listFriends(
   // this — it is the loading state — so a nil slice arriving from a future
   // server regression would render as a spinner that never resolves.
   return body.friends ?? [];
+}
+
+export type FriendRequests = {
+  incoming: FriendCard[];
+  outgoing: FriendCard[];
+};
+
+/**
+ * Somebody else, as the API is willing to describe them: two fields and no
+ * more. A dedicated type rather than a trimmed profile — a struct that never
+ * had the private fields cannot leak them.
+ */
+export type PublicProfile = {
+  username: string;
+  display_name: string | null;
+};
+
+/**
+ * Exact-match handle lookup. There is no search and no prefix match: the API
+ * refuses to be an enumeration surface, so a typo returns the same 404 as an
+ * account that does not exist.
+ *
+ * Lowercased and trimmed here because the handle rule is lowercase-canonical
+ * and an athlete typing what a friend told them will not be careful about it.
+ */
+export async function lookupUser(
+  getToken: Token,
+  username: string,
+  signal?: AbortSignal,
+): Promise<PublicProfile> {
+  return request<PublicProfile>(
+    getToken,
+    `/users/${encodeURIComponent(username.trim().toLowerCase())}`,
+    {},
+    signal,
+  );
+}
+
+export async function listRequests(
+  getToken: Token,
+  signal?: AbortSignal,
+): Promise<FriendRequests> {
+  const body = await request<FriendRequests>(
+    getToken,
+    "/friends/requests",
+    {},
+    signal,
+  );
+  // Both halves defaulted — but NOT for `listFriends`'s reason, and the
+  // difference is worth stating rather than copying the comment. `requests`
+  // itself is non-null here, so a nil half would not read as "still loading";
+  // it would crash the `.length` checks the screen guards its sections with.
+  // The backend initialises both to `[]Card{}`, so this only fires on a
+  // contract-violating 200 — at which point rendering "no requests" beats
+  // throwing.
+  return { incoming: body.incoming ?? [], outgoing: body.outgoing ?? [] };
+}
+
+export async function sendFriendRequest(
+  getToken: Token,
+  username: string,
+): Promise<void> {
+  await request<void>(getToken, "/friends/requests", {
+    method: "POST",
+    body: JSON.stringify({ username }),
+  });
+}
+
+export async function acceptRequest(
+  getToken: Token,
+  username: string,
+): Promise<void> {
+  await request<void>(
+    getToken,
+    `/friends/requests/${encodeURIComponent(username)}/accept`,
+    { method: "POST" },
+  );
+}
+
+/**
+ * Decline, cancel, or unfriend — ONE verb, because all three are "this
+ * relationship, gone" and the screen knows which of them it offered. The API
+ * deliberately does not distinguish, so neither does this.
+ */
+export async function removeFriend(
+  getToken: Token,
+  username: string,
+): Promise<void> {
+  await request<void>(getToken, `/friends/${encodeURIComponent(username)}`, {
+    method: "DELETE",
+  });
 }
 
 export type ShareCard = {

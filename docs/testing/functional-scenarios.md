@@ -5311,8 +5311,10 @@ saw. Close the app and nothing happens, by construction.
 The rule is that a badge must point at a screen that can answer it. A number
 you cannot open is a dead end.
 
-- Web badges **Sharing** (the share inbox) and NOT friend requests — friend
-  requests are answered on mobile, and web has no screen for them.
+- Web badges **Sharing** (the share inbox) and, since `/dashboard/friends`
+  exists, **Friends** too. It used to badge only Sharing on the grounds that
+  friend requests were answered on the phone and web had no screen for them —
+  that reason is gone, so the rule is satisfied rather than waived.
 - Mobile badges **Friends** and, now that `app/shared/` exists, **Sharing** too.
   The gap recorded when the counts first shipped — a mobile-only athlete never
   learning a share arrived — is closed; both numbers open something.
@@ -5533,7 +5535,7 @@ All of these must be indistinguishable 404s:
   making it from a failed request is inventing the absence of a message.
 - Accept, then background and reopen: the row does not come back.
 
-## Friends (`/v1/friends`, mobile Friends screen)
+## Friends (`/v1/friends`, mobile Friends screen + web `/dashboard/friends`)
 
 ### Happy path
 
@@ -5571,6 +5573,35 @@ All of these must be indistinguishable 404s:
 - Search 404 copy teaches exact-match ("handles are exact").
 - A result already in any list shows "already in your lists", not Add.
 - Remove is two-step in place, announced via live region.
+
+### Web screen (`/dashboard/friends`)
+
+Same four sections in the same order as mobile, and deliberately the same copy
+— two screens that word the same refusal differently teach an athlete that one
+of them is lying. So run the mobile list above here too, and then:
+
+- **The route is auth-gated.** Signed out, `/dashboard/friends` redirects to
+  sign-in like every other `/dashboard` route.
+- **The nav badges it**, and the count is incoming-only — something you SENT
+  must never raise a badge on a screen where the only thing you can do is
+  cancel it.
+- **A result card while the lists are still loading offers no Add button.** It
+  says "Checking…". Offering Add to somebody already asked earns a 409 for a
+  tap the screen knew would fail — search for an existing friend on a slow
+  connection and watch what the card does before the lists land.
+- The card distinguishes **already your friend** / **they have asked you** /
+  **you have already asked** rather than collapsing them into one "linked".
+- **Case does not matter**: searching `RHONDA` when `rhonda` is already a
+  friend must not offer Add.
+- Remove is two-step in place and **announces** — a label swapping on an
+  already-focused button is silent to a screen reader otherwise. Clicking away
+  (blur) abandons the confirmation rather than leaving it armed.
+- Accept / Decline / Cancel are labelled per row: "Accept" repeated down a list
+  is indistinguishable when navigating by buttons.
+- A failed load renders as the error, never as "Nobody yet".
+- **The share panel no longer sends you to your phone.** `ShareToFriend`'s
+  empty state links to `/dashboard/friends`; check it does, since that string
+  was true for as long as web could use the social graph without building one.
 
 ## Username lookup (`GET /v1/users/{username}`)
 

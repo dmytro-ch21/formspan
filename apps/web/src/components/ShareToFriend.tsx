@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useAuth } from "@clerk/nextjs";
 
 import {
@@ -209,9 +210,17 @@ export function ShareToFriend({
           )}
 
           {friends?.length === 0 && (
+            // No longer "on your phone". That line was true for as long as web
+            // could USE the social graph without being able to build one, and
+            // it stopped being true the moment `/dashboard/friends` existed —
+            // an instruction to go and use a different device, for something
+            // the screen behind this panel can now do.
             <p className="text-sm text-text-muted">
-              Nobody yet. Add a training partner on your phone, then share this
-              with them.
+              Nobody yet.{" "}
+              <Link href="/dashboard/friends" className="underline">
+                Add a training partner
+              </Link>
+              , then share this with them.
             </p>
           )}
 
