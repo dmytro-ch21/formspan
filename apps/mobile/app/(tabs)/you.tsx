@@ -20,19 +20,28 @@ import { useAuthToken } from '@/lib/useAuthToken';
 /**
  * You — the athlete, and the way in to everything about them.
  *
- * Edit and Settings live in the top-right rather than as rows in a list,
- * because they're two different kinds of change: Edit alters *facts about
- * you* that the app reasons over (which sports you do, your date of birth),
- * while Settings alters *how the app behaves* (units now, more later).
- * Mixing them into one list makes "change my units" and "change my birthday"
- * look like the same kind of action, and they aren't.
+ * The destinations are ROWS, not controls in the header.
+ *
+ * They were three text controls in the top-right until the header's centred
+ * wordmark ran out of room for them — see `ScreenHeader`, which now refuses to
+ * draw a wordmark it cannot fit, and would have dropped it on this tab
+ * permanently had the cluster stayed. Rows are the better home anyway: they
+ * carry a line saying what is behind each one, and a count that reads.
+ *
+ * The distinction the old pair was making survives, and is easier to see now
+ * that both sit under the facts they act on: Edit alters *facts about you*
+ * that the app reasons over (which sports you do, your date of birth), while
+ * Settings alters *how the app behaves*. They are grouped under Profile for
+ * that reason, and People is its own section above — everything involving
+ * another person, each row badged with what is waiting.
  */
 /** The server caps counts here — see friend.maxBadgeCount. At the cap the value
  *  means "this many or more", so the badge stops claiming to be exact. */
 const BADGE_CAP = 100;
 
 export default function YouScreen() {
-  const accent = useAccent();
+  // No `useAccent` here any more — the accent is only used by the rows, and
+  // `NavRow` reads it itself.
   const getToken = useAuthToken();
   const router = useRouter();
 
@@ -45,15 +54,21 @@ export default function YouScreen() {
   // which is the same claim this screen was fixed to stop making, merely
   // contradicted by a banner instead of withheld.
   const [answered, setAnswered] = useState(false);
-  // How many friend requests are waiting on this athlete to answer.
+  // What is waiting on this athlete to answer, per source.
   //
   // Starts at 0 and is only ever REPLACED by a successful read — never reset
   // on failure. The distinction matters more than it looks: 0 renders no
   // badge, which is an assertion that nothing is waiting, and a gym dead-spot
   // must not make that claim. Keeping the last known number is the honest
-  // degradation, and the Friends screen itself is where a real error surfaces
+  // degradation, and the screens themselves are where a real error surfaces
   // as copy.
-  const [waiting, setWaiting] = useState(0);
+  //
+  // BOTH sources now. Shares were left unbadged when the counts shipped, for
+  // the right reason at the time — the phone had no sharing surface, so it
+  // would have been a number you could not open. `app/shared/` closed that,
+  // and the rule it was protecting ("badge only what can be answered here")
+  // is now satisfied rather than waived.
+  const [waiting, setWaiting] = useState({ friend_requests: 0, shares: 0 });
 
   // On focus, so returning from Edit shows what was just saved.
   useFocusEffect(
@@ -91,7 +106,15 @@ export default function YouScreen() {
       const counting = new AbortController();
       getPendingCounts(getToken, counting.signal)
         .then((counts) => {
-          if (!counting.signal.aborted) setWaiting(counts.friend_requests ?? 0);
+          if (counting.signal.aborted) return;
+          // `?? 0` per key rather than trusting the shape: a key ABSENT means
+          // this build's server has no such source, which renders as no badge
+          // — the same as zero, and correctly so for a client newer than its
+          // server.
+          setWaiting({
+            friend_requests: counts.friend_requests ?? 0,
+            shares: counts.shares ?? 0,
+          });
         })
         .catch(() => {});
       return () => counting.abort();
@@ -115,50 +138,22 @@ export default function YouScreen() {
 
   return (
     <ScrollView contentContainerStyle={styles.scroll} testID="you-screen">
-      <ScreenHeader
-        title="You"
-        action={
-          <View style={styles.actions}>
-            <Pressable
-              onPress={() => router.push('/profile/edit')}
-              hitSlop={10}
-              accessibilityRole="button"
-              testID="you-edit"
-            >
-              <Text style={[styles.action, { color: accent.ink }]}>Edit</Text>
-            </Pressable>
-            <Pressable
-              onPress={() => router.push('/friends')}
-              hitSlop={10}
-              accessibilityRole="button"
-              accessibilityLabel={
-                waiting === 0
-                  ? 'Friends'
-                  : waiting >= BADGE_CAP
-                    ? 'Friends, over 99 waiting'
-                    : `Friends, ${waiting} waiting`
-              }
-              testID="you-friends"
-            >
-              {/* Only `friend_requests`, deliberately: this app has no screen
-                  for a shared sequence, so badging shares here would be a
-                  number you cannot open. That gap is real and recorded — a
-                  mobile-only athlete never learns a share arrived. */}
-              <Text style={[styles.action, { color: accent.ink }]}>
-                Friends{waiting > 0 ? ` (${waiting >= BADGE_CAP ? '99+' : waiting})` : ''}
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={() => router.push('/settings')}
-              hitSlop={10}
-              accessibilityRole="button"
-              testID="you-settings"
-            >
-              <Text style={[styles.action, { color: accent.ink }]}>Settings</Text>
-            </Pressable>
-          </View>
-        }
-      />
+      {/*
+        NO `action`, and that is the fix rather than a simplification.
+
+        Three text controls here came to ~173pt, and `ScreenHeader` draws an
+        88pt wordmark centred across the same row — so on a 375pt device the
+        word "Friends" sat on the wordmark's tail, and the notification badge
+        (`Friends (3)`) made it wider still, asynchronously, after paint.
+        `ScreenHeader` now refuses to draw the wordmark it cannot fit, so the
+        collision is impossible either way; leaving the cluster there would
+        simply have cost the wordmark on this tab permanently.
+
+        The rows below are also the better home for a count: a number beside a
+        labelled row reads, where a parenthetical crammed into a 14pt header
+        label is something you squint at.
+      */}
+      <ScreenHeader title="You" />
 
       <View style={styles.body}>
         {error && <Text style={styles.error}>{error}</Text>}
@@ -200,28 +195,35 @@ export default function YouScreen() {
                 strength-only account never sees an empty BJJ block. */}
             <RoadmapSummary />
 
+            {/* Everything that involves another person, in one place.
+
+                Both rows are BADGED, and both badges point at a screen that
+                can answer them — the rule the notification counts were built
+                on. Shares could not be badged when the counts shipped, because
+                the phone had no sharing surface; `app/shared/` closed that. */}
+            <Text style={styles.sectionLabel}>People</Text>
+            {/* The entry point a Social screen would take over: friends'
+                activity with a friend-management pane above it, absorbing
+                `app/friends/`. When that lands this row changes its label, its
+                detail line and its href, and nothing else moves. */}
+            <NavRow
+              label="Friends"
+              detail="Training partners, and requests waiting on you"
+              badge={waiting.friend_requests}
+              onPress={() => router.push('/friends')}
+              testID="you-friends"
+            />
             {/* The RECEIVE half of sharing, and the reason the Share button on
                 a plan is a whole feature rather than half of one: the social
                 graph lives on this phone, so being sent a plan you could only
-                answer on a laptop was the gap.
-
-                A row here rather than a fourth header action — the header
-                already carries three, and this is a destination you visit
-                because somebody sent you something, not a control you reach
-                for. Under You because that is where Friends is. */}
-            <Pressable
+                answer on a laptop was the gap. */}
+            <NavRow
+              label="Sharing"
+              detail="What partners sent you, and what you sent them"
+              badge={waiting.shares}
               onPress={() => router.push('/shared')}
-              style={styles.navRow}
-              accessibilityRole="button"
-              accessibilityLabel="Sharing. What training partners sent you, and what you sent them"
               testID="you-shared"
-            >
-              <View style={styles.navBody}>
-                <Text style={styles.navLabel}>Sharing</Text>
-                <Text style={styles.muted}>What partners sent you, and what you sent them</Text>
-              </View>
-              <Text style={[styles.navChevron, { color: accent.ink }]}>›</Text>
-            </Pressable>
+            />
 
             <Text style={styles.sectionLabel}>Profile</Text>
             <View style={styles.card}>
@@ -244,6 +246,22 @@ export default function YouScreen() {
               />
               {profile?.date_of_birth && <Row label="Born" value={profile.date_of_birth} />}
             </View>
+            {/* Directly under the facts they change, which is the distinction
+                the old header pair was making and is easier to see here: Edit
+                alters facts about YOU that the app reasons over, Settings
+                alters how the app BEHAVES. */}
+            <NavRow
+              label="Edit profile"
+              detail="Your name, sports and date of birth"
+              onPress={() => router.push('/profile/edit')}
+              testID="you-edit"
+            />
+            <NavRow
+              label="Settings"
+              detail="Units, accent, and how VOLA behaves"
+              onPress={() => router.push('/settings')}
+              testID="you-settings"
+            />
           </>
         )}
       </View>
@@ -260,11 +278,86 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
+/**
+ * What a count renders as, or null for no badge at all.
+ *
+ * `0` deliberately renders NOTHING rather than a zero: a badge is believed,
+ * and "0" would be an assertion that nothing is waiting — which is a claim
+ * this screen must not make from a failed read. The cap is the server's
+ * (`friend.maxBadgeCount`), so at the cap the number means "this many or
+ * more" and the badge stops pretending to be exact.
+ */
+export function badgeText(n: number): string | null {
+  if (n <= 0) return null;
+  return n >= BADGE_CAP ? '99+' : String(n);
+}
+
+/**
+ * The spoken version, which cannot be the visual one.
+ *
+ * "3" beside a label is obvious to look at and meaningless to hear, and
+ * "99+" is not a phrase. A screen reader gets the sentence.
+ */
+export function rowLabelFor(label: string, n: number): string {
+  const badge = badgeText(n);
+  if (badge === null) return label;
+  return `${label}, ${n >= BADGE_CAP ? 'over 99' : n} waiting`;
+}
+
+/** One destination: a label, a line saying what is behind it, and a count. */
+function NavRow({
+  label,
+  detail,
+  badge = 0,
+  onPress,
+  testID,
+}: {
+  label: string;
+  detail: string;
+  badge?: number;
+  onPress: () => void;
+  testID: string;
+}) {
+  const accent = useAccent();
+  const count = badgeText(badge);
+  return (
+    <Pressable
+      onPress={onPress}
+      style={styles.navRow}
+      accessibilityRole="button"
+      accessibilityLabel={rowLabelFor(label, badge)}
+      // The detail line as a HINT, not folded into the label. An
+      // `accessibilityLabel` REPLACES the concatenation of child text, so
+      // without this the second line is simply never spoken — sighted users
+      // gained it and screen-reader users lost the one the old Sharing row
+      // had. A hint is the right slot: spoken after the name, and silenceable.
+      accessibilityHint={detail}
+      testID={testID}
+    >
+      <View style={styles.navBody}>
+        <Text style={styles.navLabel}>{label}</Text>
+        <Text style={styles.muted}>{detail}</Text>
+      </View>
+      {count !== null && (
+        <View
+          style={[styles.badge, { backgroundColor: accent.accent }]}
+          // The row's own label already says "3 waiting"; announcing the pill
+          // too would read the number twice.
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+          testID={`${testID}-badge`}
+        >
+          <Text style={[styles.badgeText, { color: accent.on }]}>{count}</Text>
+        </View>
+      )}
+      <Text style={[styles.navChevron, { color: accent.ink }]}>›</Text>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   scroll: { gap: 12, paddingBottom: TAB_BAR_CLEARANCE },
   body: { paddingHorizontal: 20, gap: 10 },
-  actions: { flexDirection: 'row', gap: 16 },
-  action: { fontWeight: '700', fontSize: 14 },
   navRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -278,6 +371,17 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   navBody: { flex: 1, gap: 2 },
+  // A filled pill rather than an outline: this is a count that wants to be
+  // seen from across the screen, and the accent is the athlete's own.
+  badge: {
+    minWidth: 22,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: { fontSize: 12, fontWeight: '800', fontVariant: ['tabular-nums'] },
   navLabel: { fontSize: 15, fontWeight: '700' },
   navChevron: { fontSize: 22, fontWeight: '700' },
   name: { fontSize: 26, fontWeight: '800', marginTop: 4 },

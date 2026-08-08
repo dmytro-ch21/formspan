@@ -16144,6 +16144,134 @@ restored; the list is unchanged.
 
 ## Open items / known gaps as of this entry
 
+## 2026-08-07 — The You header stops overlapping its own wordmark
+
+Reported as *"Friends overlaps with the wordmark"*, and the first useful thing
+was that the screen named in the report is not the screen with the bug.
+`app/friends/index.tsx` has no wordmark on it at all — it is a pushed route
+with only the native header, and its `Stack.Screen options={{ title }}` is
+indistinguishable from seventeen siblings. The wordmark lives in exactly one
+component, and only the four tab screens render it.
+
+### Two causes, one of which explains why it looked intermittent
+
+`ScreenHeader` publishes an `action` slot **with no width contract** while
+drawing an 88pt wordmark centred across the same row.
+
+1. `you.tsx` passed three text controls — Edit, Friends, Settings, ~173pt at
+   14pt/700. On a 393pt device the row is 353pt, the wordmark spans
+   ~132.5→220.5 and the cluster starts at ~180; on a 375pt device the word
+   "Friends" lands on the wordmark's tail. `pointerEvents="none"` meant taps
+   still worked, so it read as a smudge rather than a broken control.
+2. `justifyContent: 'space-between'` with a **variable number of flow
+   children**. Two children — the other three tabs — puts the chip hard right.
+   Three children put it in the row's *interior*, which is the wordmark's band.
+   `SyncChip` is silent when idle, so that half came and went with sync state,
+   and nobody traced it to the layout.
+
+The notifications PR then widened the cluster again (`Friends (3)`) without
+anyone re-checking the geometry, and did it **asynchronously** — the count
+arrives after paint. That is the proof the contract cannot be kept by callers,
+and the reason the fix is in `ScreenHeader` rather than in `you.tsx`.
+
+### Grouped, then measured
+
+The right side is now **one flow child**, so the row has exactly two whatever
+the chip is doing and however many controls a caller passes. That kills the
+chip-in-the-centre case outright, and it is also what makes the arithmetic
+true: only with two children does `space-between` guarantee `rightStart ===
+row − right`.
+
+Then `wordmarkFits({row, left, right})` — pure, exported, and the only part of
+this layout a test can reach. The three widths come from `onLayout`, the
+wordmark renders optimistically until all three are known so the tabs that
+always fitted never blink, and it is **conditionally rendered rather than faded
+to zero** because that node carries `accessibilityRole="header"` and the label
+"VOLA": hiding it by opacity would leave a screen reader announcing a brand
+name that is not on screen.
+
+**It measures rather than computing, and that is the point.** `fabClearance`
+already documents the trap — `PixelRatio.getFontScale()` is a `Dimensions`
+snapshot, a module-scope const freezes it at bundle load, and iOS does not
+restart the JS bundle when you change text size and come back. A measured width
+already *embodies* the font scale: a `Text` at Accessibility Large lays out
+wider and `onLayout` reports it. There is no factor here to go stale, which is
+why the obvious future edit (`if (fontScale > 1.3) hide`) is warned against in
+the docstring rather than left to look like a simplification.
+
+Absolute positioning turns out to be load-bearing in a way worth recording: out
+of flow, mounting and unmounting the wordmark changes no measured frame, so
+hiding it cannot re-fire `onLayout` and cannot oscillate. A refactor to a flow
+slot would break that silently — which is also why a flow slot was rejected,
+along with the fact that RN's `flexShrink` defaults to 0, so an over-full row
+would not shrink the 88pt image, it would wrap the labels. "Setti/ngs" on two
+lines is worse than the overlap.
+
+### The controls moved, and that is what keeps the wordmark
+
+The structural fix alone is correct and has an honest consequence: the You
+cluster overlaps the mark at *every* width — a 173pt cluster does not clear it
+until a ~458pt row, which is a tablet — so the wordmark would have been hidden
+on that tab permanently. Edit, Friends and Settings are rows now, in the
+pattern the Sharing row established a day earlier: a label, a line saying what
+is behind it, and room for a count that actually reads. People is its own
+section; Edit and Settings sit directly under the profile facts they change,
+which is the distinction the old header pair was making and is easier to see
+there.
+
+The Friends row is shaped to become the **Social** screen's entry point —
+friends' activity with a friend-management pane above it, absorbing
+`app/friends/`. When that lands it changes a label, a detail line and an href.
+
+### Shares get badged, closing a gap the counts recorded
+
+The notifications PR left shares unbadged on mobile and said why: *"this app
+has no screen for a shared sequence, so badging shares here would be a number
+you cannot open."* `app/shared/` closed that yesterday, so the rule it was
+protecting — badge only what can be answered here — is now satisfied rather
+than waived. Both counts come from `getPendingCounts`, keyed per source, and
+both keep the rule that matters: **only ever replaced by a successful read,
+never reset on failure.** Zero renders no badge, and no badge asserts nothing
+is waiting; a gym dead-spot must not make that claim.
+
+That rule had no screen-level test — the badge's coverage was all backend-side
+— and it cannot be seen by a first-load test, because the starting value is
+already 0 and both implementations render nothing. `youScreen.test.tsx` mocks
+`useFocusEffect` to hand the test a `refocus()` so the second read can fail
+against a non-zero previous value.
+
+### A type error CI structurally cannot see
+
+Review found `app/shared/index.tsx`'s `DESTINATION` map typed `=> string`,
+which expo-router's typed routes reject — and which had merged green the day
+before. The reason is worth recording, because it will recur:
+`.expo/types/router.d.ts` is **generated by Metro and gitignored**, so a
+machine that has never run the dev server has no route types to check against
+and `tsc` has nothing to complain about. CI never runs Metro. So it is green
+there and red on any developer's machine the moment they start the app — the
+inverse of the usual "works on my machine", and invisible to the very gate that
+exists to prevent it. `Href` now. Worth knowing that `pnpm run verify` is
+strictly weaker on a fresh checkout than on a working one.
+
+### Verified, and not
+
+**Verified on a 393pt Simulator (iPhone 15 Pro):** all four tabs draw the
+wordmark centred and unobstructed, and the four destinations render as rows
+under People and Profile. Screenshots taken.
+
+**Not verified at 375pt.** The SE simulator is a fresh device with no Clerk
+session, so it lands on the sign-in screen, and signing in is not something to
+automate. The arithmetic is not in doubt — with no `action` the cluster is a
+silent chip, and `wordmarkFits({row: 335, left: 53, right: 0})` is comfortably
+true — but that is a
+calculation, not a screenshot.
+
+**Nothing here can prove a text measurement.** jest has no font metrics and
+runs no Yoga pass, so "Settings at 14pt/700 ≈ 55pt" — and therefore the 375pt
+collision itself — is unverifiable in the suite. That is an argument for the
+design rather than a hole in it: the fix contains no width constant for a test
+to ratify.
+
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
 - **Two position taxonomies now sit on one Library screen.** The filter chips are nine coarse families; the glossary is eleven curated entries. Since the guard split they disagree in a visible way: a beginner can read the Closed Guard card, learn the distinction, and then find no chip that filters to those 37 techniques. Adding North-South, and later Leg Entanglement, closed the cheap half each time (a position the glossary advertised that no chip could reach) — but doing it twice by hand is the evidence that hand-maintenance is the actual bug: the vocabulary is copied across four client files and one backend map, and the taxonomy PR updated one of the four until review caught it. Keying the chips on the glossary's ids, or a shared constant with a test asserting it matches positions.json, is the real answer and is design work, not a patch.
 
