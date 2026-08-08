@@ -50,7 +50,47 @@ Full detail: [docs/architecture/api-conventions.md](docs/architecture/api-conven
 
 ## Git / PR workflow (hard rule)
 
-Every change goes on a feature branch — **never commit directly to `main`.** If the primary working directory has uncommitted changes that aren't yours to touch (check `git status` first), use an isolated `git worktree` branched from `origin/main` instead of disturbing them.
+Every change goes on a feature branch — **never commit directly to `main`.**
+
+**One agent, one branch, one worktree, and a clean tree at both ends. Always —
+not only when the primary checkout looks busy.** This used to say "if the
+primary working directory has uncommitted changes that aren't yours to touch,
+use a worktree instead", and a conditional rule is one every session gets to
+talk itself out of. Measured on 2026-08-08: **nine trees, four of them dirty,
+carrying 39 uncommitted files between them** — including the primary checkout,
+sitting on somebody's feature branch with 18 uncommitted files in it. Nobody
+decided that; it is what "share the tree when it seems fine" adds up to.
+
+So, every time:
+
+1. **`git fetch origin` first, and branch from `origin/main`** — never from
+   whatever HEAD happens to be. A branch cut from another session's
+   half-finished work inherits it, and you will not notice until the diff is
+   full of changes you cannot explain.
+2. **Work in your own `git worktree`** under `.claude/worktrees/<short-name>`,
+   never in the primary checkout. The primary is shared: other sessions read
+   it, and it is the tree device builds are normally run from, because it is
+   the one that has `apps/mobile/.env.local` (a worktree needs that copied in
+   first — see the `EXPO_PUBLIC_*` trap below). Leaving it dirty or parked on
+   a feature branch therefore breaks somebody else's work, not yours.
+3. **Start clean and finish clean.** `git status --short` should be empty
+   before you begin and after you are done. Commit your work or discard it;
+   do not park it in a shared tree for later.
+4. **Touch only what your task is about.** Shared config — `.claude/*`,
+   `docker-compose.yml`, another app's files — is not yours to edit in
+   passing. If you genuinely must (a temporary preview entry, say), restore it
+   and *verify* the restore rather than assuming it.
+5. **Claim your migration number against `origin/main` at REBASE time, not
+   when you write it.** Two branches picking `000043` is not something
+   golang-migrate resolves — it refuses to start at all, breaking CI, local
+   dev and every deploy. And the collision is **invisible in
+   `git diff origin/main...HEAD`**, because a three-dot diff uses the merge
+   base, which predates the other branch. It only exists in the merged tree.
+   This has already happened once.
+6. **Clean up after the merge**: `git worktree remove <path>`,
+   `git worktree prune`, `git branch -D <branch>`. Stale worktrees pin stale
+   branches, hide dirty state, and make `git worktree list` useless as a
+   picture of what is actually in flight.
 
 Before every push, run the full local check suite — **one command**:
 
