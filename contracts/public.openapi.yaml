@@ -2592,6 +2592,27 @@ components:
       schema: { type: string }
 
   responses:
+    RateLimited:
+      description: >
+        Too many requests. Carries a `Retry-After` header in whole seconds,
+        rounded UP so that obeying it exactly succeeds.
+
+
+        **Applies to EVERY authenticated endpoint**, not only the ones that
+        name it below. The default budget is attached to authentication itself
+        rather than per route, so a route cannot be added without it; listing
+        it on all sixty would be noise, and listing it on none would leave the
+        two deliberately-tight limits undocumented. The two that name it are
+        the writes that put something in another person's inbox, and they are
+        an order of magnitude stricter than the default.
+
+
+        The response never says WHICH limit was hit — that is in the server
+        log, where it can be tuned from, and not in the reply, where it is
+        free reconnaissance.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
     NotModified:
       description: >
         The representation is unchanged since the `ETag` in `If-None-Match`.
@@ -2781,6 +2802,7 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
         "409":
           description: >
             You already sent them this exact thing and they have not answered.
@@ -3021,6 +3043,7 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
         "409":
           description: Already connected, or a request is pending in either direction.
           content:

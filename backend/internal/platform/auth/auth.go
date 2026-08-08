@@ -27,6 +27,43 @@ type Verifier struct {
 	keyfunc      keyfunc.Keyfunc
 	issuer       string
 	adminUserIDs map[string]bool
+	limiter      Limiter
+	reject       Rejector
+}
+
+// Limiter is the per-athlete request budget, satisfied by
+// platform/ratelimit. Declared here as a consumer-side interface so this
+// package does not import that one — the same shape as share.Friends and
+// notification.Counter.
+type Limiter interface {
+	// Allow spends a request for this user, reporting whether one was
+	// available and how long until the next is.
+	Allow(userID string) (bool, time.Duration)
+}
+
+// Rejector writes the 429. Passed in for the same reason as Limiter: this
+// package should not learn the response shape of another one.
+type Rejector func(w http.ResponseWriter, r *http.Request, policy string, retryAfter time.Duration)
+
+// UseLimiter attaches the DEFAULT per-athlete limit to every authenticated
+// request.
+//
+// HERE, INSIDE RequireAuth, RATHER THAN PER ROUTE, and that placement is the
+// point. Sixty-odd routes call RequireAuth; a limiter wired per route is one
+// somebody forgets on the sixty-first, and the forgetting is silent. Putting
+// it at the single chokepoint that already exists for "every authenticated
+// request" makes an unlimited authenticated route impossible to write rather
+// than merely discouraged.
+//
+// It also has to be here for a duller reason: the key is the authenticated
+// user id, which does not exist until this middleware has verified the token.
+// Anything wrapped around the mux runs too early to know who is calling.
+//
+// Optional — a nil limiter leaves every request unlimited, which is what the
+// tests and any future no-limit deployment want.
+func (v *Verifier) UseLimiter(l Limiter, reject Rejector) {
+	v.limiter = l
+	v.reject = reject
 }
 
 // NewVerifier fetches and caches the issuer's JWKS. issuer is the Clerk
@@ -117,6 +154,18 @@ func (v *Verifier) RequireAuth(next http.Handler) http.Handler {
 		httplog.SetUserID(r.Context(), claims.UserID)
 
 		ctx := context.WithValue(r.Context(), claimsContextKey, claims)
+
+		// The default budget, spent AFTER the token is verified and before
+		// the handler runs. After verification because an unverifiable
+		// request has no athlete to charge, and charging the wrong one would
+		// let an attacker spend somebody else's budget with a junk token.
+		if v.limiter != nil {
+			if ok, retryAfter := v.limiter.Allow(claims.UserID); !ok {
+				v.reject(w, r.WithContext(ctx), "default", retryAfter)
+				return
+			}
+		}
+
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

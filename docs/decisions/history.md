@@ -15948,6 +15948,103 @@ which is why it survived — a developer's second run is always warm.
 Neither client has been exercised end to end. Two accounts, a real friendship
 and an actual send is the only thing that proves the round trip, and none of it
 has been seen on a device — which now stands on ten merged PRs.
+## 2026-08-08 — Rate limiting, once, in the platform layer
+
+`internal/platform/ratelimit`, attached to `RequireAuth`, plus two tighter
+budgets on the writes that reach another person. Six features shipped
+recording "no rate limiting" as a residual; this is that, and the reason it is
+one package rather than a counter in six modules.
+
+### Keyed by athlete, not by IP
+
+Every abusable route is behind `RequireAuth`, so an abuser holds a real
+account — which makes the account the right unit. IP is actively wrong: a
+gym's wifi, a university and every mobile carrier NAT put hundreds of athletes
+behind one address, so an IP limit tight enough to matter throttles a whole
+gym because of one person in it.
+
+### Inside RequireAuth, which is what makes it unforgettable
+
+Sixty-odd routes call `RequireAuth`. A limiter wired per route is one somebody
+forgets on the sixty-first, silently. Attaching it to the single chokepoint
+that already means "every authenticated request" makes an unlimited
+authenticated route impossible to write rather than merely discouraged — and
+it has to live there anyway, since the key is the user id, which does not
+exist until the token is verified.
+
+**After verification, not before**, and that ordering is a security property
+rather than tidiness: charging before verification lets an attacker exhaust a
+victim's budget with junk tokens — a denial of service against a named
+account, delivered through the mechanism meant to prevent one. Pinned by a
+test that goes red when the check moves earlier.
+
+`auth` declares `Limiter` as a one-method consumer-side interface, so it does
+not import `ratelimit` — the third use of that shape after `share.Copier` and
+`notification.Counter`.
+
+### Token bucket, because the traffic it must not break is bursty
+
+The mobile outbox pushes **one request per pending row, in a loop, with no
+batching and no cap**, so an athlete returning from a week offline sends a long
+burst of entirely legitimate writes. A fixed window rejects the tail of that.
+A bucket with a deep burst lets it through and then throttles the sustained
+rate.
+
+The thing that made this safe to add at all was already true: the outbox lists
+429 in `RETRYABLE_4XX`, so a throttled row stays pending and syncs later rather
+than being dropped as permanently rejected. Had it not, this feature would
+have silently destroyed training data.
+
+### In-memory, therefore per-instance
+
+One Railway service today, so one process sees every request and the limit is
+exact. A second replica makes the effective limit N times the configured one —
+approximate, still bounded, not broken. Fixing it needs a shared store, and
+Postgres would put a write on the hot path of the most-polled endpoint in the
+app. Deliberately not solved before there is a second instance to solve it for.
+
+### The numbers are an opening position
+
+Default burst 120 at 2/second sustained; friend requests 10 then one per six
+minutes; shares 30 then one per two minutes. Sized against real use rather
+than against the attack — sharing one sequence to a squad of fifteen is
+ordinary, so shares get the deeper bucket.
+
+**Every rejection logs at WARN with its policy name**, because a limit nobody
+can see is a limit nobody can tune, and the only way to learn one of these is
+wrong is evidence that real athletes are hitting it. The policy name stays out
+of the response: which limit you tripped is free reconnaissance.
+
+### Sweeping cannot be a free reset
+
+One bucket per athlete who ever called the API, held for the life of the
+process, is a slow leak — bounded by real accounts, but a ceiling of "everyone
+we ever had" is still a ceiling. The sweeper drops only buckets that have
+refilled to FULL: dropping a partly-spent one hands back a fresh burst, which
+is exactly the reset an abuser wants — go quiet, come back full. Pinned.
+
+### A test that could not fail
+
+Worth recording. The Retry-After rounding test used a 3-second refill, so the
+wait was already a whole second and rounding up versus down gave the same
+answer — the assertion could not distinguish the two. Mutating the rounding
+found it green. The interval is 2.5 seconds now, and the test asserts both
+that the hint rounds up AND that waiting the rounded-down value still fails.
+
+### Gaps
+
+- **Per-instance, as above.** Revisit when a second replica exists.
+- **Unauthenticated routes are unlimited.** `/v1/healthz` is the only one, and
+  it touches no database. Anything public added later needs its own answer,
+  and IP is the only key available there — with the shared-NAT caveat.
+- The numbers have never met real traffic. The logging is what turns them from
+  guesses into something tunable.
+- No `X-RateLimit-*` headers on successful responses. Clients cannot see how
+  much budget is left, only that it ran out. Cheap to add if a client wants to
+  pace itself.
+
+
+## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
 - **Two position taxonomies now sit on one Library screen.** The filter chips are nine coarse families; the glossary is eleven curated entries. Since the guard split they disagree in a visible way: a beginner can read the Closed Guard card, learn the distinction, and then find no chip that filters to those 37 techniques. Adding North-South, and later Leg Entanglement, closed the cheap half each time (a position the glossary advertised that no chip could reach) — but doing it twice by hand is the evidence that hand-maintenance is the actual bug: the vocabulary is copied across four client files and one backend map, and the taxonomy PR updated one of the four until review caught it. Keying the chips on the glossary's ids, or a shared constant with a test asserting it matches positions.json, is the real answer and is design work, not a patch.

@@ -5183,6 +5183,45 @@ too.
   offers a seconds target for a `time` exercise, and the session screen asks for
   seconds when logging one.
 
+## Rate limiting (platform — every authenticated endpoint)
+
+### The limit exists
+
+- Burst through the default budget on any authenticated route → **429** with
+  a `Retry-After` header and code `rate_limited`.
+- **Obeying `Retry-After` exactly must succeed.** Wait the advertised seconds
+  and retry; a second 429 means the header rounds down and is lying.
+- Waiting less than advertised still fails.
+- One athlete exhausting their budget must not affect another's. Test with two
+  accounts, not one — an IP-keyed limiter passes a single-account test and
+  throttles a whole gym in production.
+
+### The limits that protect people
+
+- `POST /v1/friends/requests` and `POST /v1/shares` are an order of magnitude
+  tighter than the default. Burst through each and confirm the OTHER is
+  unaffected (separate buckets), and that ordinary reads still work.
+- Re-requesting after a decline is still possible but now bounded — that was
+  the residual this closes.
+
+### What must NOT break
+
+- **A mobile sync burst.** The outbox pushes one request per pending row with
+  no batching or cap. Log a long offline session, sync, and confirm every row
+  lands. If some are throttled they must stay pending and drain on the next
+  sync — `429` is in the client's `RETRYABLE_4XX`, so it must never be treated
+  as a permanent rejection that drops the row.
+- Polling `/v1/notifications` on every navigation must not trip the default.
+
+### Security
+
+- **An invalid or missing token must not spend anybody's budget.** Fire junk
+  bearer tokens naming a victim; their real requests must be unaffected. A
+  limiter charged before verification is a denial-of-service against a named
+  account delivered through the anti-abuse mechanism.
+- The 429 body must not say which limit was hit.
+- The limiter fails OPEN when it cannot identify a caller, never closed.
+
 ## Notifications (`GET /v1/notifications`, nav badge + You-tab badge)
 
 ### What counts

@@ -31,6 +31,7 @@ Every route is prefixed with a version: `/v1/...`. Added now, while it's cheap (
 | 401 | Missing, malformed, or expired auth |
 | 404 | The resource doesn't exist for this caller |
 | 409 | Conflict — e.g. attempting to create a resource that already exists |
+| 429 | Rate limited. Carries `Retry-After` in whole seconds, rounded **up** so that obeying it exactly succeeds. Applies to every authenticated endpoint — the default budget hangs off authentication itself, not off routes, so a route cannot be added without one. The body never names which limit was hit. |
 | 410 | The resource was really here and is really gone — currently only `POST /v1/shares/{id}/accept`, when the sender deleted the thing between sending and accepting. Distinct from 404 because the caller was genuinely sent something, and a silent miss would read to them as a bug. Note it carries the `not_found` **code**: the code enum is part of the contract and closed, and a 410 is a not-found with provenance. |
 | 499 | The caller disconnected before the response was written (nginx's convention). **The one response with no body** — nothing is listening, and a JSON error shape would be misleading if it somehow were. Not a failure: it is not logged at ERROR and should not count toward an error-rate alert. |
 | 500 | Unexpected server error |
