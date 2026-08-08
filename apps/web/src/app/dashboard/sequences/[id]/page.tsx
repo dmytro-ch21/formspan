@@ -94,9 +94,13 @@ export default function SequenceDetailPage() {
           <ShareToFriend resourceType="sequence" resourceId={s.id} />
           {s.editable && (
             <>
+            {/* Tokens, not raw `neutral-*`. Share moved to the design system
+                when workouts started mounting it beside tokenized controls,
+                and leaving its neighbours behind made this row a pill next to
+                two rectangles. */}
             <Link
               href={`/dashboard/sequences/${s.id}/edit`}
-              className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm font-medium dark:border-neutral-700"
+              className="rounded-pill border border-line px-5 py-2 text-sm font-bold transition hover:bg-surface-raised"
             >
               Edit
             </Link>
@@ -105,7 +109,7 @@ export default function SequenceDetailPage() {
               onClick={() => (confirming ? remove() : setConfirming(true))}
               onBlur={() => setConfirming(false)}
               disabled={deleting}
-              className="rounded-lg border border-red-300 px-3 py-1.5 text-sm font-medium text-red-700 disabled:opacity-40 dark:border-red-900 dark:text-red-400"
+              className="rounded-pill border border-danger/40 px-5 py-2 text-sm font-bold text-danger transition hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {/* aria-live, because a label swapping in place on an already
                   focused button is not reliably announced — the confirm step

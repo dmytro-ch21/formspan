@@ -15786,7 +15786,168 @@ turns all three red again.
 - Neither has been heard on a phone yet, same caveat as the sounds themselves.
 
 
-## Open items / known gaps as of this entry
+## 2026-08-07 — Workouts become shareable, and the generic share module gets its bill
+
+PR #175 built sharing generically and claimed a price: *"a module becomes
+shareable by implementing Copier and registering itself in cmd/api/main.go."*
+This is that claim being tested by the second caller, and it held. **The backend
+change is two methods on the workout repository and one line in a map.** No new
+endpoint, no second inbox, no change inside `internal/modules/share` beyond one
+error string that named `sequence` as the only valid kind.
+
+The dependency direction survived too: `workout` still does not import `share`,
+and `share` still imports nothing it shares. The pairing happens once, in
+`cmd/api/main.go`.
+
+### The copy is three columns short, and each omission is load-bearing
+
+`CopyTo` inserts a new row rather than cloning one, and what it *declines* to
+carry is the interesting part:
+
+- **`source` defaults to `'user'`.** Copying it from a seeded VOLA Workout
+  produces `('seed', <owner>)`, which the `workouts_owned_rows_are_never_seeded`
+  CHECK from PR #176 rejects — so it does not make a subtly wrong row, it fails
+  the accept transaction and every share of a VOLA Workout 500s. Had the CHECK
+  not existed, the next deploy's seeder would have owned the recipient's copy.
+- **`visibility` is forced to `'private'`.** The shelf's plans are `'public'`, so
+  carrying it through would publish the recipient's copy to every athlete on the
+  platform as a side effect of accepting a share. That one fails *silently*,
+  which makes it the worse of the two.
+- **The id is server-generated.** Ids in this table are client-supplied, so
+  reusing the sender's would collide on the primary key and — worse — hand the
+  recipient's template to the sender's offline sync retries, which `Create`
+  treats as idempotent replays of their own row.
+
+`Describe` tests **visibility, not ownership**, so a VOLA Workout or another
+athlete's published plan can be passed on. That is not a loophole: "Copy to my
+workouts" already gives anyone their own copy of exactly those, so sharing one
+hands over nothing they could not fetch themselves.
+
+### Mobile gets the whole of sharing, not the send half
+
+Web already had `ShareToFriend` and `/dashboard/shared`; mobile had neither.
+Adding only a Share button there would have been a message into a room nobody
+can open — **and the social graph lives on the phone.** You add a training
+partner on mobile, so being sent a plan you could only answer on a laptop was
+the actual gap. So mobile gets `app/shared/` too: inbox, sent list, accept,
+decline, cancel, reached from a row under You beside where Friends already is.
+
+Both new mobile surfaces are **online-only**, deliberately, against this app's
+offline-first spine. A share is a message to another person — queueing one
+against a stale cache sends a plan you have since rewritten to somebody who may
+have unfriended you. Accepting is worse: the copy is made server-side inside a
+transaction this device cannot hold.
+
+### `shareBlockedReason`, and why sharing needed a gate the web app does not
+
+Sharing sends **what the server holds**, and on the phone that is routinely not
+what is on screen. Three distinct states, three different honest answers, and a
+pure function so the precedence is testable:
+
+- **not synced** — the row exists only on this phone. Its id is
+  client-generated, so a share returns a flat 404 naming nothing the athlete did
+  wrong. This is the ordinary state of a plan built in a gym with no signal.
+- **owed** — pushed once, edited since; the recipient would get the old version.
+- **unsaved on screen** — the same gate "Start session" already has.
+
+The order matters and is checked `unsynced` first: a local-only row is *also*
+always owed, so an implementation that checked `owed` first would tell every
+offline athlete to save a plan they had already saved. The test fixture sets
+both flags for exactly that reason — with only `unsynced` set, either order
+passes, which is the version of the test that certifies nothing.
+
+### What the mutation pass turned up
+
+- **A test whose mutation broke the SQL rather than the guard.** Loosening
+  `CopyTo`'s visibility predicate with an untyped `$1 IS NOT NULL` gave Postgres
+  a parameter-type error, so four tests went red for the wrong reason and it
+  looked covered. Redone with an always-true typed predicate, **nothing failed**
+  — every existing test either shares a row that stays visible or deletes it
+  outright, and against a deleted row a bare `WHERE id = $1` finds nothing
+  either. The arm needed its own test: Carol publishes a plan, Alice passes it
+  on, Carol makes it private, Bob accepts — and without the re-applied predicate
+  he walks away owning a copy of a private template.
+- **A guard the fixture could not reach.** `row_number()` re-derives the copy's
+  item positions, but `Create` and `ReplaceItems` both write dense positions
+  already, so copying `position` verbatim was indistinguishable and the mutation
+  stayed green. The gap is now made directly in SQL. Unreachable through today's
+  write paths, which is exactly why the defensive densify is worth keeping —
+  `workout_items_position_unique` turns a positions bug into a hard failure.
+- **An assertion that only proved a button exists.** "Share is offered on a plan
+  that is not yours" passed against a `canEdit` gate, because a disabled button
+  is still in the tree. It asserts `accessibilityState.disabled` now.
+
+### What review caught, and it was the good stuff
+
+Three blocking findings, none of them in the sharing logic itself:
+
+- **The share gate latched shut after the thing it exists for.** `requestSync()`
+  returns immediately and pushes in the background, so at `setSaving(false)` the
+  row is still `dirty` in SQLite. Keyed on `saving`, the flags were read at
+  exactly the moment they were guaranteed stale — and then never again. Share
+  stayed disabled saying *"Save your changes first"* seconds after the push had
+  landed and the Save button itself had disappeared: advice pointing at a
+  control no longer on screen, on the feature's headline flow, recoverable only
+  by leaving the plan and coming back. It keys on `lastSyncAt` now, and the test
+  for it needed a *subscribable* sync mock — a frozen one cannot express "the
+  background push finished", which is precisely why the bug had no test.
+- **The mobile share sheet was probably unusable under VoiceOver.** The scrim
+  was a `Pressable` **parent** with `accessibilityRole="button"` wrapping the
+  whole sheet, and an accessibility element does not expose its descendants on
+  iOS — so the sheet reads as one screen-sized "Close" button, friend rows and
+  all. `app/(tabs)/library.tsx` records this exact bug and this exact fix
+  ("opening the sheet announced 'Close filter options, button' instead of the
+  sheet"): the backdrop becomes a **sibling**, hidden from assistive tech, with
+  `accessibilityViewIsModal` on the wrapper — which also deletes the
+  `onStartShouldSetResponder` tap-swallowing trick entirely. Still unverified on
+  a device, which is where this one has to be confirmed.
+- **A test fixture leaking into the shared database, silently.** `t.Cleanup` is
+  LIFO and `seedExercises` runs from `makeWorkout`, i.e. after `person()` — so a
+  plain `DELETE FROM exercises` fires while `workout_items` still reference the
+  row. `workout_items.exercise_id` has no ON DELETE, the delete fails on the
+  foreign key, `_, _ =` discards the error, and nine published rows survive
+  every run. Measured at nine before and zero after. The sibling
+  `seedTechniques` gets away with the same shape only because its foreign key
+  cascades — so "it follows the neighbour" was the reasoning that shipped it.
+
+Two more where the test could not see what it claimed:
+
+- The **densify** test's fixture had its exercise ids sorting the same way as
+  its positions, so `ORDER BY exercise_id` produced identical output and the
+  order half proved nothing. The gap is inverted now, and the expectation reads
+  backwards from how the fixture was built — which is the point.
+- The **friends list** had no height cap where web's has `max-h-64`. Long enough
+  and the top rows leave the screen entirely, since the sheet is bottom-anchored
+  and had no scroll of its own. Not cramped — unreachable.
+
+And the `items` dependency on that same gate effect: two SQLite reads per
+keystroke, buying nothing, since typing never changes the *persisted* flags.
+
+### Two things found by falling into them
+
+**The identity-unstable token getter, again.** The mobile inbox test mocked
+`useAuthToken` as `() => async () => 'token'` — a fresh arrow per render, which
+is precisely what `lib/useAuthToken.ts` exists to prevent and what its docstring
+records as three live bugs. It reproduced the symptom immediately: the accepted
+row was cleared correctly and then refetched straight back, and the failure read
+exactly like a bug in the accept path. `jest.setup.js` already provides a stable
+one; both new test files now use it and say why.
+
+**A pre-existing cold-cache flake in `workoutDetailScreen.test.tsx`**, hit while
+adding to that file and fixed there. `jest.setTimeout(30_000)` — added by that
+file precisely for the cold-start cost — raises the ceiling on the *test*, and
+RNTL's `findBy*`/`waitFor` keep their own separate 1000ms budget it does not
+touch. So the first render paid ~2s of module-graph instantiation and the first
+`findByLabelText` gave up at one second, inside a test allowed thirty.
+**Verified against `origin/main`'s copy of the file with `jest --clearCache`:
+identical failure, so it long predates this work.** It passed on every warm run,
+which is why it survived — a developer's second run is always warm.
+
+### Not verified
+
+Neither client has been exercised end to end. Two accounts, a real friendship
+and an actual send is the only thing that proves the round trip, and none of it
+has been seen on a device — which now stands on ten merged PRs.
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
 - **Two position taxonomies now sit on one Library screen.** The filter chips are nine coarse families; the glossary is eleven curated entries. Since the guard split they disagree in a visible way: a beginner can read the Closed Guard card, learn the distinction, and then find no chip that filters to those 37 techniques. Adding North-South, and later Leg Entanglement, closed the cheap half each time (a position the glossary advertised that no chip could reach) — but doing it twice by hand is the evidence that hand-maintenance is the actual bug: the vocabulary is copied across four client files and one backend map, and the taxonomy PR updated one of the four until review caught it. Keying the chips on the glossary's ids, or a shared constant with a test asserting it matches positions.json, is the real answer and is design work, not a patch.

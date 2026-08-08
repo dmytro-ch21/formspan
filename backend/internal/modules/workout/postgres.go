@@ -480,3 +480,115 @@ func (r *PostgresRepository) Delete(ctx context.Context, userID, id string) erro
 	}
 	return tx.Commit(ctx)
 }
+
+// --- share.Copier -----------------------------------------------------------
+//
+// The two methods that make a workout shareable. This is the whole of what the
+// module owes the share system: say what it is called, and know how to
+// duplicate it. **Nothing here imports the share package** — these satisfy an
+// interface declared over there, and cmd/api/main.go is what pairs them up.
+// Read `internal/modules/share/share.go` for why the dependency runs that way.
+
+// Describe returns the workout's name for a recipient's inbox card.
+//
+// VISIBILITY, not ownership, and the same `visibleTo` both reads use — so a
+// caller can pass on a VOLA Workout or another athlete's published plan. That
+// is not a loophole: "Copy to my workouts" already gives them their own copy of
+// exactly those, so sharing one hands over nothing they could not fetch
+// themselves. ok=false covers "no such id" and "not visible to you" alike,
+// collapsed so that sharing cannot be used to test whether a guessed id is real
+// — and workout ids are CLIENT-SUPPLIED here, so they are guessable
+// ("push-day-a") in a way a uuid is not. The same reasoning `requireOwner`
+// records for the write paths.
+func (r *PostgresRepository) Describe(ctx context.Context, resourceID, sharerID string) (string, bool, error) {
+	var name string
+	err := r.pool.QueryRow(ctx, `
+		SELECT name FROM workouts WHERE `+visibleTo+` AND id = $2`,
+		sharerID, resourceID).Scan(&name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("workout: describe: %w", err)
+	}
+	return name, true, nil
+}
+
+// CopyTo duplicates a workout and its items into another athlete's ownership,
+// inside the share module's transaction.
+//
+// A SERVER-GENERATED id, always — never the source's. Ids in this table are
+// client-supplied, so reusing one would collide on the primary key, and worse,
+// would make the recipient's template answer to the sender's offline sync
+// retries: `Create`'s `ON CONFLICT (id) DO NOTHING` path treats a repeated id
+// from its owner as an idempotent retry.
+//
+// Three columns are deliberately NOT copied, and each would be a live bug:
+//
+//   - `source` must default to 'user'. Copying it from a seeded VOLA Workout
+//     would insert `('seed', <owner>)`, which the
+//     `workouts_owned_rows_are_never_seeded` CHECK rejects — so accepting a
+//     shared VOLA Workout would fail the whole transaction. If it somehow got
+//     past, the next deploy's seeder would own the recipient's copy.
+//   - `visibility` is forced to 'private'. The shelf's plans are 'public', so
+//     copying it through would publish the recipient's copy to every athlete
+//     on the platform as a side effect of accepting a share.
+//   - `created_at`/`updated_at` default to now. This copy is new to them.
+//
+// The items are re-inserted rather than pointed at, because that is what
+// snapshot semantics MEAN: after this returns the two templates have no
+// relationship, and the sender can reorder, retarget or delete theirs without
+// touching what the recipient now owns. `position` is re-derived from the read
+// order rather than copied, so a source with gaps yields a dense one — and
+// `workout_items_position_unique` makes that a correctness matter, not tidiness.
+func (r *PostgresRepository) CopyTo(ctx context.Context, tx pgx.Tx, resourceID, sharerID, newOwnerID string) (string, bool, error) {
+	var (
+		name, notes string
+		sport       Sport
+		goal        *Goal
+	)
+	// The SAME visibility predicate the share was authorized under, re-applied
+	// at accept time. Authorization happened when the share was SENT and this
+	// runs whenever the recipient gets round to accepting; a bare `WHERE id =
+	// $1` would copy whatever holds that id by then. With client-supplied ids,
+	// one freed by a delete and re-taken by another athlete is not hypothetical.
+	err := tx.QueryRow(ctx, `
+		SELECT name, sport, goal, notes
+		FROM workouts WHERE `+visibleTo+` AND id = $2`,
+		sharerID, resourceID).Scan(&name, &sport, &goal, &notes)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Deleted between sending and accepting — or no longer the sharer's to
+		// pass on. The share module clears the dead row rather than letting it
+		// fail this way forever.
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("workout: copy read: %w", err)
+	}
+
+	var newID string
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO workouts (id, owner_user_id, name, sport, goal, notes, visibility)
+		VALUES (gen_random_uuid()::text, $1, $2, $3, $4, $5, 'private')
+		RETURNING id`,
+		newOwnerID, name, sport, goal, notes).Scan(&newID); err != nil {
+		return "", false, fmt.Errorf("workout: copy insert: %w", err)
+	}
+
+	// One statement rather than read-then-loop: the items never leave the
+	// database, so a long template costs one round trip and cannot half-copy.
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO workout_items (
+			workout_id, exercise_id, position, target_sets, target_reps,
+			target_weight_kg, target_seconds, target_distance_m, notes
+		)
+		SELECT $1, exercise_id,
+		       row_number() OVER (ORDER BY position) - 1,
+		       target_sets, target_reps, target_weight_kg, target_seconds,
+		       target_distance_m, notes
+		FROM workout_items WHERE workout_id = $2`,
+		newID, resourceID); err != nil {
+		return "", false, fmt.Errorf("workout: copy items: %w", err)
+	}
+	return newID, true, nil
+}

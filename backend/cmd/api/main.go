@@ -78,6 +78,7 @@ func main() {
 	curriculumHandler := curriculum.NewHandler(curriculum.NewPostgresRepository(pool))
 	sequenceRepo := sequence.NewPostgresRepository(pool)
 	friendRepo := friend.NewPostgresRepository(pool)
+	workoutRepo := workout.NewPostgresRepository(pool)
 	sequenceHandler := sequence.NewHandler(sequenceRepo)
 	friendHandler := friend.NewHandler(friendRepo)
 
@@ -88,10 +89,15 @@ func main() {
 	// repository; nothing in the share module changes, which is the entire
 	// reason it was built generically instead of four times.
 	//
+	// "workout" is the line that claim was making a promise about, and it cost
+	// exactly what was advertised: two methods on the workout repository and a
+	// key here. No new endpoint, no second inbox, no change in this package.
+	//
 	// The KEY IS WIRE FORMAT: it is stored in shares.resource_type and sent by
 	// clients, so renaming one orphans every stored row of that type.
 	shareRegistry := share.Registry{
 		"sequence": sequenceRepo,
+		"workout":  workoutRepo,
 	}
 	shareRepo := share.NewPostgresRepository(pool, shareRegistry, friendRepo)
 	shareHandler := share.NewHandler(shareRepo, shareRegistry)
@@ -111,7 +117,7 @@ func main() {
 	exerciseRepo := exercise.NewPostgresRepository(pool)
 	exerciseHandler := exercise.NewHandler(exerciseRepo, os.Getenv("MEDIA_BASE_URL"))
 	exerciseContentHandler := exercise.NewContentHandler(exerciseRepo)
-	workoutHandler := workout.NewHandler(workout.NewPostgresRepository(pool))
+	workoutHandler := workout.NewHandler(workoutRepo)
 	techniqueRepo := technique.NewPostgresRepository(pool)
 	techniqueHandler := technique.NewHandler(techniqueRepo)
 	techniqueContentHandler := technique.NewContentHandler(techniqueRepo)

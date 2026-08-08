@@ -286,10 +286,15 @@ components:
         resource_type:
           type: string
           description: >
-            What kind of thing this is — "sequence" today, more later. It is
-            WIRE FORMAT, stored in the row and sent by clients, so a value that
-            ships can never be renamed without orphaning stored shares.
-          example: sequence
+            What kind of thing this is — "sequence" or "workout" today, more
+            later. DELIBERATELY NOT AN ENUM: the set is whatever the running
+            build has registered, so a client that hard-codes it starts
+            rejecting kinds a newer server can legitimately send. Render an
+            unknown value rather than failing on it.
+
+            It is WIRE FORMAT, stored in the row and sent by clients, so a value
+            that ships can never be renamed without orphaning stored shares.
+          example: workout
         resource_label:
           type: string
           description: >
@@ -2760,8 +2765,12 @@ paths:
                 to_username: { type: string }
                 resource_type:
                   type: string
-                  description: Must be a type this build can copy.
-                  example: sequence
+                  description: >
+                    Must be a type this build can copy — "sequence" or
+                    "workout" today. Anything else is 400 `invalid_input`,
+                    rejected BEFORE the handle is resolved, so a bogus type
+                    cannot be used to probe whether an account exists.
+                  example: workout
                 resource_id: { type: string }
       responses:
         "204": { description: Sent — it now sits pending in their inbox. }

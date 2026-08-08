@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { useEffect, useState } from 'react';
+import { act, configure, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 
 import WorkoutDetailScreen from '../workout/[id]';
 import type { Workout } from '@/lib/workouts';
@@ -52,15 +53,35 @@ import type { Workout } from '@/lib/workouts';
  */
 jest.setTimeout(30_000);
 
+/**
+ * …and `jest.setTimeout` alone did not do it, which is why the FIRST test in
+ * this file failed on any cold cache.
+ *
+ * It raises the ceiling on the whole test. RNTL's `findBy*` and `waitFor` have
+ * their own, separate 1000ms budget that it does not touch — so the first
+ * render paid ~2s of module-graph instantiation and the first `findByLabelText`
+ * gave up at one second, inside a test allowed thirty. Reproduced against
+ * `origin/main`'s copy of this file with `jest --clearCache`: same failure,
+ * same test, so it long predates the sharing work that ran into it.
+ *
+ * It passed on every warm run, which is precisely why it survived — a
+ * developer's second run is always warm, and CI's cache usually is too.
+ */
+configure({ asyncUtilTimeout: 10_000 });
+
 // Typed to accept args so the `(...a) => mock(...a)` forwarding below
 // typechecks; a zero-arg jest.fn() rejects a spread call.
 const mockCachedWorkouts = jest.fn((..._a: unknown[]): Promise<unknown> => Promise.resolve([]));
 const mockDirtyWorkoutIDs = jest.fn(
   (..._a: unknown[]): Promise<Set<string>> => Promise.resolve(new Set<string>()),
 );
+const mockUnsyncedWorkoutIDs = jest.fn(
+  (..._a: unknown[]): Promise<Set<string>> => Promise.resolve(new Set<string>()),
+);
 jest.mock('@/lib/sessionStore', () => ({
   cachedWorkouts: (...a: unknown[]) => mockCachedWorkouts(...a),
   dirtyWorkoutIDs: (...a: unknown[]) => mockDirtyWorkoutIDs(...a),
+  unsyncedWorkoutIDs: (...a: unknown[]) => mockUnsyncedWorkoutIDs(...a),
   deleteLocalWorkout: jest.fn(),
   renameLocalWorkout: (...a: unknown[]) => mockRenameLocal(...a),
   saveLocalWorkoutItems: jest.fn(async () => {}),
@@ -81,16 +102,54 @@ const mockFetchExercises = jest.fn((..._a: unknown[]): Promise<unknown> => Promi
 jest.mock('@/lib/exercises', () => ({
   fetchExercises: (...a: unknown[]) => mockFetchExercises(...a),
 }));
+/**
+ * A SUBSCRIBABLE sync mock, not a frozen object.
+ *
+ * The share gate depends on `lastSyncAt`, and a fixed value cannot express
+ * "the background push has now finished" — which is the exact transition a bug
+ * shipped in. So this mirrors the real hook's shape (`lib/sync.ts:415`:
+ * `useState(syncState)` plus `useEffect(() => subscribeSync(setS), [])`), and
+ * `emitSync` is the test's stand-in for a completed push.
+ *
+ * `mock`-prefixed aliases rather than `require('react')` inside the factory:
+ * jest allows out-of-scope names beginning with `mock`, and the require costs a
+ * lint warning against the mobile ratchet.
+ */
+const mockUseState = useState;
+const mockUseEffect = useEffect;
+const mockSyncState = {
+  syncing: false,
+  pending: 0,
+  deferred: 0,
+  lastSyncAt: null as string | null,
+  lastError: null,
+  online: true,
+};
+const mockSyncListeners = new Set<(s: typeof mockSyncState) => void>();
 jest.mock('@/lib/sync', () => ({
   request: jest.fn(),
   syncNow: jest.fn(async () => {}),
   // The shared ScreenHeader renders the sync chip now, so every screen test
   // needs this — a screen that could not read sync state would fail on the
   // header before reaching anything it asserts.
-  useSyncState: () => ({
-    syncing: false, pending: 0, deferred: 0, lastSyncAt: null, lastError: null, online: true,
-  }),
+  useSyncState: () => {
+    const [s, setS] = mockUseState(mockSyncState);
+    mockUseEffect(() => {
+      mockSyncListeners.add(setS);
+      return () => {
+        mockSyncListeners.delete(setS);
+      };
+    }, []);
+    return s;
+  },
 }));
+
+/** A background push completing, as the screen would see it. */
+function emitSync(next: Partial<typeof mockSyncState>) {
+  Object.assign(mockSyncState, next);
+  const snapshot = { ...mockSyncState };
+  mockSyncListeners.forEach((l) => l(snapshot));
+}
 jest.mock('@/lib/sessions', () => ({
   applySuggestions: jest.fn(),
   fetchSuggestions: jest.fn(async () => new Map()),
@@ -134,6 +193,8 @@ beforeEach(() => {
   mockRenameLocal.mockResolvedValue(true);
   mockGetWorkout.mockReset();
   mockDirtyWorkoutIDs.mockReset().mockResolvedValue(new Set<string>());
+  mockUnsyncedWorkoutIDs.mockReset().mockResolvedValue(new Set<string>());
+  mockSyncState.lastSyncAt = null;
 });
 
 it('keeps the LOCAL copy on screen when the local row is dirty', async () => {
@@ -258,4 +319,133 @@ describe('renaming', () => {
     expect(screen.queryByTestId('workout-rename')).toBeNull();
     expect(screen.getAllByText('VOLA Full Body').length).toBeGreaterThan(0);
   });
+});
+
+/**
+ * The share gate: what it sends is what the SERVER holds.
+ *
+ * These are the arms `shareBlockedReason` exists for, asserted where the flags
+ * are actually read off SQLite — a pure test of the function proves the
+ * wording, not the wiring, and the wiring is what would silently ship a share
+ * button on a plan the server has never heard of.
+ *
+ * The failure is invisible from inside the app: the sender sees "Sent ✓" and
+ * the recipient gets nothing, or gets a version of the plan neither of them is
+ * looking at. Nobody reports that; they both assume it worked.
+ */
+describe('sharing a plan the server does not have', () => {
+  it('refuses, and says syncing rather than saving, when the row is local-only', async () => {
+    // A plan built in a gym with no signal. Its id is client-generated, so a
+    // share would come back a flat 404 naming nothing the athlete did wrong —
+    // and telling them to Save what they already saved is worse than useless.
+    //
+    // BOTH flags, because that is the real shape of this state: a row created
+    // offline has never reached the server AND owes it everything. With only
+    // `unsynced` set, the two reasons could be checked in either order and
+    // this test could not tell — which is the version of it that passes while
+    // every offline plan says "Save your changes first".
+    mockCachedWorkouts.mockResolvedValue([plan('Made In The Gym')]);
+    mockGetWorkout.mockRejectedValue(new Error('offline'));
+    mockUnsyncedWorkoutIDs.mockResolvedValue(new Set(['w1']));
+    mockDirtyWorkoutIDs.mockResolvedValue(new Set(['w1']));
+
+    render(<WorkoutDetailScreen />);
+
+    // `includeHiddenElements`, because the visible reason is deliberately
+    // hidden from assistive tech — the button's own accessibilityLabel carries
+    // the same sentence, and RNTL excludes a11y-hidden nodes by default. The
+    // assertion is about what a SIGHTED athlete reads.
+    const reason = await screen.findByTestId('share-disabled-reason', {
+      includeHiddenElements: true,
+    });
+    expect(reason.props.children).toMatch(/Not synced yet/);
+    expect(screen.getByTestId('workout-share').props.accessibilityState.disabled).toBe(true);
+  });
+
+  it('refuses, and says SAVE, when the row is on the server but owes it an edit', async () => {
+    // Pushed once, edited since. The recipient would get the old version, and
+    // this one really is fixed by saving — so the copy must not say "sync".
+    mockCachedWorkouts.mockResolvedValue([plan('Push Day A')]);
+    mockGetWorkout.mockResolvedValue(plan('Push Day A'));
+    mockDirtyWorkoutIDs.mockResolvedValue(new Set(['w1']));
+
+    render(<WorkoutDetailScreen />);
+
+    const reason = await screen.findByTestId('share-disabled-reason', {
+      includeHiddenElements: true,
+    });
+    expect(reason.props.children).toMatch(/Save your changes first/);
+  });
+
+  it('allows it once the server holds the same plan', async () => {
+    mockCachedWorkouts.mockResolvedValue([plan('Push Day A')]);
+    mockGetWorkout.mockResolvedValue(plan('Push Day A'));
+
+    render(<WorkoutDetailScreen />);
+
+    await screen.findByTestId('workout-share');
+    await waitFor(() =>
+      expect(screen.getByTestId('workout-share').props.accessibilityState.disabled).toBe(false),
+    );
+    // And no reason line at all, because there is nothing to explain.
+    expect(
+      screen.queryByTestId('share-disabled-reason', { includeHiddenElements: true }),
+    ).toBeNull();
+  });
+
+  it('offers Share on a plan that is not yours, unlike Save and Delete', async () => {
+    // Passing on a plan you can READ is not a write to it — the server tests
+    // visibility rather than ownership for exactly this reason, and a VOLA
+    // Workout is already one tap from "Copy to my workouts". A share button
+    // gated on `canEdit` would have looked correct and quietly removed the
+    // only way to hand a training partner the plan you are both following.
+    const theirs = plan('VOLA Full Body', { owner_user_id: null });
+    mockCachedWorkouts.mockResolvedValue([theirs]);
+    mockGetWorkout.mockResolvedValue(theirs);
+
+    render(<WorkoutDetailScreen />);
+
+    await screen.findByTestId('workout-readonly');
+    // PRESENT AND USABLE. Asserting presence alone left this green against a
+    // `canEdit` gate, because a disabled button is still in the tree — so the
+    // assertion covered nothing that could actually go wrong.
+    await waitFor(() =>
+      expect(screen.getByTestId('workout-share').props.accessibilityState.disabled).toBe(false),
+    );
+  });
+});
+
+it('re-enables Share once the background push lands', async () => {
+  /**
+   * The bug review caught, and the reason this effect keys on `lastSyncAt`.
+   *
+   * `requestSync()` returns IMMEDIATELY and pushes in the background, so at
+   * `setSaving(false)` the row is still `dirty` in SQLite. Keyed on `saving`,
+   * the flags were read at exactly the moment they were guaranteed stale and
+   * then never again — Share stayed disabled telling the athlete to "Save your
+   * changes first" seconds after the push had landed and the Save button
+   * itself had disappeared. Advice pointing at a control that is no longer on
+   * screen, on the feature's headline flow: edit, save, share.
+   */
+  mockCachedWorkouts.mockResolvedValue([plan('Push Day A')]);
+  mockGetWorkout.mockResolvedValue(plan('Push Day A'));
+  // Saved locally, push still in flight.
+  mockDirtyWorkoutIDs.mockResolvedValue(new Set(['w1']));
+
+  render(<WorkoutDetailScreen />);
+  expect(
+    (await screen.findByTestId('share-disabled-reason', { includeHiddenElements: true }))
+      .props.children,
+  ).toMatch(/Save your changes first/);
+
+  // The push lands: SQLite is clean, and sync announces it.
+  mockDirtyWorkoutIDs.mockResolvedValue(new Set<string>());
+  act(() => emitSync({ lastSyncAt: '2026-08-07T12:00:00Z' }));
+
+  await waitFor(() =>
+    expect(screen.getByTestId('workout-share').props.accessibilityState.disabled).toBe(false),
+  );
+  expect(
+    screen.queryByTestId('share-disabled-reason', { includeHiddenElements: true }),
+  ).toBeNull();
 });

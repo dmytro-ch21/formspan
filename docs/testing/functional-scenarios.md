@@ -5207,17 +5207,24 @@ too.
 
 ### Clients badge only what they can act on
 
-- Web badges **Sharing** (share inbox) and NOT friend requests — friend
-  requests are answered on mobile, and a badge pointing at a screen that
-  cannot answer is a dead end.
-- Mobile badges the **Friends** row and NOT shares, for the mirror reason.
-- **Known gap to test around:** a mobile-only athlete is never told a share
-  arrived. Real, recorded, unfixed until mobile gets a sharing surface.
+The rule is that a badge must point at a screen that can answer it. A number
+you cannot open is a dead end.
+
+- Web badges **Sharing** (the share inbox) and NOT friend requests — friend
+  requests are answered on mobile, and web has no screen for them.
+- Mobile badges **Friends** and, now that `app/shared/` exists, **Sharing** too.
+  The gap recorded when the counts first shipped — a mobile-only athlete never
+  learning a share arrived — is closed; both numbers open something.
 - A failed count leaves the previous number alone — it must not zero, since
   zero renders no badge and thereby asserts nothing is waiting.
 - Web refetches on route change, not on a timer.
 
-## Sharing (`/v1/shares`, web Share control + `/dashboard/shared`)
+## Sharing (`/v1/shares`, both clients' Share control + Sharing screens)
+
+Two kinds are shareable: **sequences** and **workouts**. Everything in this
+section that says "sequence" should be run for a workout too — the module is
+generic, so a bug in one kind is usually a bug in the registration of the other,
+not in the share module.
 
 ### Happy path
 
@@ -5226,6 +5233,10 @@ too.
 - B accepts → lands on **B's own copy**, with every step and note, in order.
 - The copy is INDEPENDENT: A renames, reorders, then deletes the original; B's
   copy is unchanged and still there.
+- Same round trip for a **workout**, and check the TARGETS survive: sets, reps,
+  weight, seconds, distance and per-item notes, in order. A copy that carries
+  only the exercise ids is a list of movements rather than a plan, and every
+  field is separately omittable from the copy.
 
 ### Friends only, and one 404 for every miss
 
@@ -5276,16 +5287,61 @@ All of these must be indistinguishable 404s:
 - Web: both lists load in ONE round trip; the copy says rows disappear once
   answered and that the app does not say which way.
 
+### Sharing a workout specifically
+
+- **A shared VOLA Workout must arrive private and unmarked.** Share one of the
+  seeded plans, accept it, then check the recipient's copy in the database:
+  `source = 'user'` and `visibility = 'private'`. The first fails LOUDLY if
+  wrong (the CHECK rejects an owned seeded row, so the accept 500s); the second
+  fails silently, and its symptom is the recipient's private copy appearing on
+  the VOLA Workouts shelf for every athlete on the platform.
+- The original is untouched by all of it: still ownerless, still public, still
+  seeded, and still refreshed by the next `cmd/seed` run.
+- The copy gets a NEW id. Ids here are client-supplied, so reusing the sender's
+  would collide — and would make the recipient's plan answer to the sender's
+  offline sync retries.
+- **Revoke between send and accept:** C publishes a plan, A passes it on, C makes
+  it private again, B accepts → **410**, and B has no copy. Authorization
+  happened when the share was sent; this is the check at the moment of copying.
+- Accept a shared workout, then start a session from the copy — it must behave
+  like any owned template (editable, deletable, startable).
+
 ### Web surfaces
 
 - Share panel: friends load on OPEN, not on mount; `null` vs `[]` distinguished
   so a failed load never reads as "you have no friends"; Escape closes it.
 - Share is offered on a sequence the athlete can READ but not edit (VOLA
-  content) — visibility, not ownership.
+  content) — visibility, not ownership. **Same on a workout**, where it sits
+  outside the same `canEdit` gate that hides Save and Delete.
+- **Share is disabled while a workout has unsaved edits**, with the reason
+  visible — sharing sends the SAVED version, the same trap "Start session" is
+  disabled for. Edit, do not save, and confirm the button explains itself
+  rather than just going grey.
 - Inbox: accepting navigates to the copy's own URL; a failed accept refreshes
-  rather than leaving a button that can only fail again.
+  rather than leaving a button that can only fail again. A shared **workout**
+  lands on `/dashboard/workouts/<new id>`.
 - "Shared with you" is ungated in the nav even for an athlete with no BJJ
   module enabled — what arrives is decided by other people.
+
+### Mobile surfaces (`app/shared/`, You → Sharing)
+
+- The **round trip works phone-to-phone**: A shares from a plan's screen, B
+  opens You → Sharing, accepts, and lands on their own copy. This is the reason
+  the screen exists — the social graph lives on the phone, so a send path
+  without a receive path was a message into a room nobody could open.
+- **Share is refused on a plan the server does not have, and says SYNC not
+  SAVE.** Build a template in airplane mode and open it: the button is disabled
+  and the reason names syncing. Telling someone to save what they already saved
+  is the wrong advice, and the two states are easy to collapse because an
+  offline row is *both* unsynced and owed.
+- Edit a synced plan without saving → the reason changes to "Save your changes
+  first". Save → the button becomes usable.
+- An accepted plan appears in the Workouts tab without a manual pull — the copy
+  was made server-side, so this device has never heard of it until a sync.
+- Both lists are online-only: with no signal, they say so rather than showing an
+  empty inbox. "Nothing waiting" is a claim about other people's actions, and
+  making it from a failed request is inventing the absence of a message.
+- Accept, then background and reopen: the row does not come back.
 
 ## Friends (`/v1/friends`, mobile Friends screen)
 

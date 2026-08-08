@@ -10,14 +10,16 @@ import (
 
 	"github.com/dmytro-ch21/vola/backend/internal/modules/friend"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/sequence"
+	"github.com/dmytro-ch21/vola/backend/internal/modules/workout"
 )
 
-// NOTE ON THE IMPORTS. The share package itself must never import sequence or
-// friend — that rule is the module's whole architecture. This TEST imports
-// both, deliberately, because it wires the same registry cmd/api/main.go does
-// and a test against a stub registry would prove only that the stub works.
-// The dependency the rule forbids is a compile-time one in shipped code; a
-// test assembling the real pairing is the thing that shows the pairing holds.
+// NOTE ON THE IMPORTS. The share package itself must never import sequence,
+// workout or friend — that rule is the module's whole architecture. This TEST
+// imports all three, deliberately, because it wires the same registry
+// cmd/api/main.go does and a test against a stub registry would prove only that
+// the stub works. The dependency the rule forbids is a compile-time one in
+// shipped code; a test assembling the real pairing is the thing that shows the
+// pairing holds.
 
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
@@ -34,12 +36,17 @@ func testPool(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-// harness builds the real wiring: the sequence repo as the registered Copier,
-// the friend repo as the friendship test.
+// harness builds the real wiring: the registered Copiers, and the friend repo
+// as the friendship test.
+//
+// The registry mirrors cmd/api/main.go's, and that is the point of building it
+// from real repositories — registering a stub here would show only that the
+// stub satisfies the interface, which the compiler already says.
 type harness struct {
 	pool  *pgxpool.Pool
 	repo  *PostgresRepository
 	seqs  *sequence.PostgresRepository
+	wrks  *workout.PostgresRepository
 	frnds *friend.PostgresRepository
 }
 
@@ -47,9 +54,13 @@ func newHarness(t *testing.T) *harness {
 	t.Helper()
 	pool := testPool(t)
 	seqs := sequence.NewPostgresRepository(pool)
+	wrks := workout.NewPostgresRepository(pool)
 	frnds := friend.NewPostgresRepository(pool)
-	reg := Registry{"sequence": seqs}
-	return &harness{pool: pool, repo: NewPostgresRepository(pool, reg, frnds), seqs: seqs, frnds: frnds}
+	reg := Registry{"sequence": seqs, "workout": wrks}
+	return &harness{
+		pool: pool, repo: NewPostgresRepository(pool, reg, frnds),
+		seqs: seqs, wrks: wrks, frnds: frnds,
+	}
 }
 
 func person(t *testing.T, pool *pgxpool.Pool, id, handle string) string {
@@ -63,6 +74,9 @@ func person(t *testing.T, pool *pgxpool.Pool, id, handle string) string {
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM shares WHERE from_user_id = $1 OR to_user_id = $1`, id)
 		_, _ = pool.Exec(ctx, `DELETE FROM bjj_sequences WHERE owner_user_id = $1`, id)
+		// workout_items cascade. Includes the copies accepting produced, whose
+		// ids the test never sees — they are server-generated.
+		_, _ = pool.Exec(ctx, `DELETE FROM workouts WHERE owner_user_id = $1`, id)
 		_, _ = pool.Exec(ctx, `DELETE FROM friendships WHERE user_a = $1 OR user_b = $1`, id)
 		_, _ = pool.Exec(ctx, `DELETE FROM profiles WHERE user_id = $1`, id)
 	})
@@ -905,5 +919,428 @@ func TestPendingCountIsTheInboxNotTheSentList(t *testing.T) {
 	// And the accepted row does not resurface on the sender's side either.
 	if n, err := h.repo.PendingCount(ctx, alice); err != nil || n != 0 {
 		t.Fatalf("sender count after accept: %d (%v)", n, err)
+	}
+}
+
+// ── Workouts, the second registered kind ─────────────────────────────────────
+//
+// These live here rather than in the workout package because what is worth
+// pinning is the PAIRING: the registry, the copier, and the transaction that
+// makes accepting atomic. A test of `CopyTo` alone would call it outside the
+// transaction the share module hands it, which is the one place its guarantees
+// live.
+
+// seedExercises inserts the catalog rows these tests reference, and — the part
+// that took a review to notice — actually removes them again.
+//
+// **The obvious version of this leaks, silently.** `t.Cleanup` is LIFO, and this
+// runs from `makeWorkout`, i.e. AFTER `person()` has registered its own cleanup
+// — so a plain `DELETE FROM exercises` fires FIRST, while `workout_items` rows
+// still reference the exercise. `workout_items.exercise_id` has **no ON DELETE**
+// (migration 000006), so the delete fails on the foreign key, `_, _ =` discards
+// the error, and the fixture survives into the database every other package
+// shares. Measured at nine published `sh_ex_*` rows left behind per clean run.
+//
+// The sibling `seedTechniques` above gets away with the same shape only because
+// `bjj_sequence_steps.technique_id` is ON DELETE CASCADE (000035). The foreign
+// keys differ, so "it follows the neighbour" does not transfer — which is
+// precisely how this was written wrong.
+//
+// So the cleanup clears whatever references the row rather than depending on
+// registration order, and it LOGS a failure instead of swallowing it. Both
+// halves are what `workout/postgres_test.go`'s `seedDraftExercise` records
+// learning the hard way, after its own rows "had to be cleared out of the
+// shared database by hand".
+func seedExercises(t *testing.T, pool *pgxpool.Pool, ids ...string) []string {
+	t.Helper()
+	ctx := context.Background()
+	for _, id := range ids {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO exercises (id, name, sport, movement_pattern, load_type, status)
+			VALUES ($1, $1, 'strength', 'squat', 'weight_reps', 'published')
+			ON CONFLICT (id) DO NOTHING`, id); err != nil {
+			t.Fatalf("seed exercise %s: %v", id, err)
+		}
+		t.Cleanup(func() {
+			// Order-independent: whatever still points at this exercise goes
+			// first. `workout_items` cascades from `workouts`, so removing the
+			// parent is enough — and that also catches the server-generated
+			// copies accepting produced, whose ids no test ever sees.
+			if _, err := pool.Exec(ctx, `
+				DELETE FROM workouts
+				WHERE id IN (SELECT workout_id FROM workout_items WHERE exercise_id = $1)`,
+				id); err != nil {
+				t.Logf("cleanup workouts referencing %s: %v", id, err)
+			}
+			if _, err := pool.Exec(ctx, `DELETE FROM exercises WHERE id = $1`, id); err != nil {
+				t.Logf("cleanup exercise %s: %v", id, err)
+			}
+		})
+	}
+	return ids
+}
+
+func makeWorkout(t *testing.T, h *harness, owner, id, name string) string {
+	t.Helper()
+	ids := seedExercises(t, h.pool, "sh_ex_"+owner+"_1", "sh_ex_"+owner+"_2")
+	five, eight, ninety := 5, 8, 90
+	goal := workout.Goal("hypertrophy")
+	if _, err := h.wrks.Create(context.Background(), workout.NewWorkout{
+		ID: id, OwnerUserID: owner, Name: name, Sport: "strength",
+		Goal: &goal, Notes: "as written", Visibility: "private",
+		Items: []workout.Item{
+			{ExerciseID: ids[0], TargetSets: &five, TargetReps: &eight, Notes: "first"},
+			{ExerciseID: ids[1], TargetSets: &five, TargetSeconds: &ninety, Notes: "second"},
+		},
+	}); err != nil {
+		t.Fatalf("create workout: %v", err)
+	}
+	return id
+}
+
+func TestSharedWorkoutBecomesAnIndependentCopy(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	alice := person(t, h.pool, "sh_wka", "sh_wka_h")
+	bob := person(t, h.pool, "sh_wkb", "sh_wkb_h")
+	befriend(t, h, alice, "sh_wka_h", bob, "sh_wkb_h")
+	id := makeWorkout(t, h, alice, "sh_wk_push_a", "Push Day A")
+
+	if err := h.repo.Create(ctx, alice,
+		New{ToUsername: "sh_wkb_h", ResourceType: "workout", ResourceID: id}); err != nil {
+		t.Fatalf("share: %v", err)
+	}
+	inbox, err := h.repo.Inbox(ctx, bob)
+	if err != nil || len(inbox) != 1 {
+		t.Fatalf("inbox: %+v %v", inbox, err)
+	}
+	// Describe is what puts a NAME on the card rather than an id.
+	if inbox[0].ResourceType != "workout" || inbox[0].ResourceLabel != "Push Day A" {
+		t.Fatalf("card: %+v", inbox[0])
+	}
+
+	got, err := h.repo.Accept(ctx, bob, inbox[0].ID)
+	if err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	// A NEW id, never the sender's. Ids here are client-supplied, so reusing
+	// one would collide on the primary key — and would hand the recipient's
+	// template to the sender's offline sync retries, which `Create` treats as
+	// idempotent replays of their own row.
+	if got.ResourceID == id {
+		t.Fatalf("the copy reused the sender's id %q", got.ResourceID)
+	}
+	copied, err := h.wrks.Get(ctx, bob, got.ResourceID)
+	if err != nil {
+		t.Fatalf("bob cannot read his copy: %v", err)
+	}
+	if copied.OwnerUserID == nil || *copied.OwnerUserID != bob {
+		t.Fatalf("copy is not bob's: %+v", copied.OwnerUserID)
+	}
+	if copied.Name != "Push Day A" || copied.Notes != "as written" ||
+		copied.Goal == nil || *copied.Goal != "hypertrophy" {
+		t.Fatalf("copy lost its fields: %+v", copied)
+	}
+	if len(copied.Items) != 2 {
+		t.Fatalf("copy has %d items, want 2", len(copied.Items))
+	}
+	// The TARGETS, not just the exercise ids — a copy that drops them is a
+	// list of movements rather than a plan, and every field is separately
+	// omittable from the INSERT ... SELECT.
+	if copied.Items[0].TargetSets == nil || *copied.Items[0].TargetSets != 5 ||
+		copied.Items[0].TargetReps == nil || *copied.Items[0].TargetReps != 8 ||
+		copied.Items[0].Notes != "first" {
+		t.Fatalf("first item lost its targets: %+v", copied.Items[0])
+	}
+	if copied.Items[1].TargetSeconds == nil || *copied.Items[1].TargetSeconds != 90 {
+		t.Fatalf("second item lost its duration: %+v", copied.Items[1])
+	}
+	// Order preserved, and dense from zero — see the gapped fixture below for
+	// why this assertion is not the whole of that claim.
+	if copied.Items[0].Position != 0 || copied.Items[1].Position != 1 {
+		t.Fatalf("positions are not dense from zero: %+v", copied.Items)
+	}
+
+	// SNAPSHOT SEMANTICS. Alice renaming hers must not reach into his.
+	if _, err := h.wrks.Rename(ctx, alice, id, "Push Day A (v2)"); err != nil {
+		t.Fatalf("rename original: %v", err)
+	}
+	after, err := h.wrks.Get(ctx, bob, got.ResourceID)
+	if err != nil {
+		t.Fatalf("re-read copy: %v", err)
+	}
+	if after.Name != "Push Day A" {
+		t.Fatalf("the sender's rename propagated: %q", after.Name)
+	}
+}
+
+// A copy of a VOLA Workout must not arrive marked as one, on either column
+// that says so — and both are omissions from an INSERT, which is the kind of
+// bug that reads as correct.
+//
+// `source` is the sharper of the two: `workouts_owned_rows_are_never_seeded`
+// forbids ('seed', <owner>), so copying it through does not produce a subtly
+// wrong row — it fails the accept transaction outright, and every share of a
+// VOLA Workout 500s. `visibility` fails quietly instead, which is worse:
+// accepting would publish the recipient's private copy to the whole platform.
+func TestAcceptingAVolaWorkoutDoesNotCopyItsSourceOrVisibility(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	alice := person(t, h.pool, "sh_wva", "sh_wva_h")
+	bob := person(t, h.pool, "sh_wvb", "sh_wvb_h")
+	befriend(t, h, alice, "sh_wva_h", bob, "sh_wvb_h")
+	ids := seedExercises(t, h.pool, "sh_ex_vola_1")
+
+	// The shape `cmd/seed` writes: ownerless, public, and marked as the
+	// deploy's to refresh.
+	const volaID = "sh_wk_public_plan"
+	if _, err := h.pool.Exec(ctx, `
+		INSERT INTO workouts (id, owner_user_id, name, sport, goal, notes, visibility, source)
+		VALUES ($1, NULL, 'VOLA Full Body', 'strength', 'general', '', 'public', 'seed')`,
+		volaID); err != nil {
+		t.Fatalf("seed VOLA workout: %v", err)
+	}
+	t.Cleanup(func() { _, _ = h.pool.Exec(ctx, `DELETE FROM workouts WHERE id = $1`, volaID) })
+	if _, err := h.pool.Exec(ctx, `
+		INSERT INTO workout_items (workout_id, exercise_id, position, target_sets)
+		VALUES ($1, $2, 0, 3)`, volaID, ids[0]); err != nil {
+		t.Fatalf("seed VOLA item: %v", err)
+	}
+
+	// Alice does not own it and can still pass it on: `Describe` tests
+	// VISIBILITY, and "Copy to my workouts" already gives her the same copy.
+	if err := h.repo.Create(ctx, alice,
+		New{ToUsername: "sh_wvb_h", ResourceType: "workout", ResourceID: volaID}); err != nil {
+		t.Fatalf("sharing a VOLA Workout: %v", err)
+	}
+	inbox, _ := h.repo.Inbox(ctx, bob)
+	if len(inbox) != 1 {
+		t.Fatalf("inbox: %+v", inbox)
+	}
+	got, err := h.repo.Accept(ctx, bob, inbox[0].ID)
+	if err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+
+	var source, visibility string
+	var owner *string
+	if err := h.pool.QueryRow(ctx,
+		`SELECT source, visibility, owner_user_id FROM workouts WHERE id = $1`,
+		got.ResourceID).Scan(&source, &visibility, &owner); err != nil {
+		t.Fatalf("read copy: %v", err)
+	}
+	if source != "user" {
+		t.Fatalf("the copy claims source %q — the next deploy would own it", source)
+	}
+	if visibility != "private" {
+		t.Fatalf("accepting published bob's copy to everyone: visibility %q", visibility)
+	}
+	if owner == nil || *owner != bob {
+		t.Fatalf("copy is not bob's: %+v", owner)
+	}
+
+	// And the original is untouched — still ownerless, still the deploy's.
+	var stillSeed bool
+	if err := h.pool.QueryRow(ctx, `
+		SELECT owner_user_id IS NULL AND source = 'seed' AND visibility = 'public'
+		FROM workouts WHERE id = $1`, volaID).Scan(&stillSeed); err != nil {
+		t.Fatalf("check original: %v", err)
+	}
+	if !stillSeed {
+		t.Fatalf("sharing mutated the VOLA original")
+	}
+}
+
+// A private workout is not somebody else's to pass on, and the refusal is the
+// same 404 as an unknown handle — because workout ids are CLIENT-SUPPLIED and
+// therefore guessable ("push-day-a"), which makes any distinguishable answer
+// an existence oracle over every athlete's private templates.
+func TestAStrangersPrivateWorkoutCannotBeShared(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	alice := person(t, h.pool, "sh_wpa", "sh_wpa_h")
+	bob := person(t, h.pool, "sh_wpb", "sh_wpb_h")
+	carol := person(t, h.pool, "sh_wpc", "sh_wpc_h")
+	befriend(t, h, alice, "sh_wpa_h", bob, "sh_wpb_h")
+	// Carol's, and she is friends with neither.
+	hers := makeWorkout(t, h, carol, "sh_wk_carol", "Carol's Push")
+
+	err := h.repo.Create(ctx, alice,
+		New{ToUsername: "sh_wpb_h", ResourceType: "workout", ResourceID: hers})
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("sharing a stranger's private workout: want ErrNotFound, got %v", err)
+	}
+	// Indistinguishable from an id that never existed — the whole point.
+	err = h.repo.Create(ctx, alice,
+		New{ToUsername: "sh_wpb_h", ResourceType: "workout", ResourceID: "sh_wk_no_such_thing"})
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("sharing an unknown id: want ErrNotFound, got %v", err)
+	}
+	if inbox, _ := h.repo.Inbox(ctx, bob); len(inbox) != 0 {
+		t.Fatalf("bob received something: %+v", inbox)
+	}
+}
+
+// Deleting the template between sending and accepting is ErrGone, not a 404:
+// the recipient genuinely was sent something, and a silent miss would read as
+// a bug in the app rather than as the sender changing their mind.
+func TestAcceptingADeletedWorkoutIsGone(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	alice := person(t, h.pool, "sh_wga", "sh_wga_h")
+	bob := person(t, h.pool, "sh_wgb", "sh_wgb_h")
+	befriend(t, h, alice, "sh_wga_h", bob, "sh_wgb_h")
+	id := makeWorkout(t, h, alice, "sh_wk_doomed", "Doomed Plan")
+
+	if err := h.repo.Create(ctx, alice,
+		New{ToUsername: "sh_wgb_h", ResourceType: "workout", ResourceID: id}); err != nil {
+		t.Fatalf("share: %v", err)
+	}
+	inbox, _ := h.repo.Inbox(ctx, bob)
+	if len(inbox) != 1 {
+		t.Fatalf("inbox: %+v", inbox)
+	}
+	if err := h.wrks.Delete(ctx, alice, id); err != nil {
+		t.Fatalf("delete original: %v", err)
+	}
+	if _, err := h.repo.Accept(ctx, bob, inbox[0].ID); !errors.Is(err, ErrGone) {
+		t.Fatalf("accepting a deleted workout: want ErrGone, got %v", err)
+	}
+}
+
+// The copy's positions are RE-DERIVED, not carried over.
+//
+// This test exists because the obvious version of it cannot fail. `Create` and
+// `ReplaceItems` both assign positions from the array index, so every workout
+// the API can produce is already dense from zero — and against such a fixture,
+// copying `position` verbatim and re-deriving it with `row_number()` are
+// indistinguishable. Mutating the query to the verbatim copy left the suite
+// green, which is the whole reason this exists: the guard was shaped around
+// the code rather than around the failure.
+//
+// So the gap is made directly in SQL. It is not reachable through today's write
+// paths, which is exactly why the defensive `row_number()` is worth keeping and
+// worth pinning: `workout_items_position_unique` turns a positions bug into a
+// hard insert failure rather than a cosmetic one, and the next write path to
+// arrive is not obliged to be dense.
+func TestCopiedItemPositionsAreDensifiedRatherThanCarried(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	alice := person(t, h.pool, "sh_wda", "sh_wda_h")
+	bob := person(t, h.pool, "sh_wdb", "sh_wdb_h")
+	befriend(t, h, alice, "sh_wda_h", bob, "sh_wdb_h")
+	id := makeWorkout(t, h, alice, "sh_wk_gapped", "Gapped Plan")
+
+	// 0,1 → 7,3, i.e. the gap is INVERTED as well as opened.
+	//
+	// Left in ascending order (3 then 7), the fixture's exercise ids happen to
+	// sort the same way as its positions, so a mutant ordering by `exercise_id`
+	// — or one with no ORDER BY at all, scanning in insert order — produces the
+	// same output and the order half of this test proves nothing. Swapping them
+	// makes "first" genuinely have to come from `position`.
+	//
+	// Applied via a temporary slot because `workout_items_position_unique` is
+	// enforced per statement: a straight swap collides with the row it is about
+	// to overwrite.
+	if _, err := h.pool.Exec(ctx,
+		`UPDATE workout_items SET position = -1 WHERE workout_id = $1 AND position = 0`, id); err != nil {
+		t.Fatalf("park first item: %v", err)
+	}
+	if _, err := h.pool.Exec(ctx,
+		`UPDATE workout_items SET position = 3 WHERE workout_id = $1 AND position = 1`, id); err != nil {
+		t.Fatalf("gap second item: %v", err)
+	}
+	if _, err := h.pool.Exec(ctx,
+		`UPDATE workout_items SET position = 7 WHERE workout_id = $1 AND position = -1`, id); err != nil {
+		t.Fatalf("gap first item: %v", err)
+	}
+
+	if err := h.repo.Create(ctx, alice,
+		New{ToUsername: "sh_wdb_h", ResourceType: "workout", ResourceID: id}); err != nil {
+		t.Fatalf("share: %v", err)
+	}
+	inbox, _ := h.repo.Inbox(ctx, bob)
+	if len(inbox) != 1 {
+		t.Fatalf("inbox: %+v", inbox)
+	}
+	got, err := h.repo.Accept(ctx, bob, inbox[0].ID)
+	if err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	copied, err := h.wrks.Get(ctx, bob, got.ResourceID)
+	if err != nil {
+		t.Fatalf("read copy: %v", err)
+	}
+	if len(copied.Items) != 2 {
+		t.Fatalf("copy has %d items, want 2", len(copied.Items))
+	}
+	if copied.Items[0].Position != 0 || copied.Items[1].Position != 1 {
+		t.Fatalf("gapped positions were carried over: %d, %d",
+			copied.Items[0].Position, copied.Items[1].Position)
+	}
+	// And the order came from POSITION while the gap was closed.
+	//
+	// Note the expectation is inverted relative to how the fixture was built:
+	// the item created first sits at position 7 now, so it must come SECOND.
+	// That is the whole point of inverting the gap — with the ids and the
+	// positions agreeing, ordering by either produces this same list.
+	if copied.Items[0].Notes != "second" || copied.Items[1].Notes != "first" {
+		t.Fatalf("densifying did not order by position: %+v", copied.Items)
+	}
+}
+
+// Revoking a workout's visibility between sending and accepting stops the copy.
+//
+// This is the arm `CopyTo` re-applies `visibleTo` for, and NOTHING ELSE HERE
+// REACHES IT. Every other test either shares a row that stays visible, or
+// deletes it outright — and against a deleted row a bare `WHERE id = $1` finds
+// nothing either, so the deletion test passes with the predicate removed. It
+// was mutated to a bare id and the suite stayed green.
+//
+// The failure it hides: Carol publishes a plan, Alice passes it on, Carol makes
+// it private again, and Bob accepts — walking away with an owned copy of a
+// private template that was never his to read. Authorization happened when the
+// share was SENT; this is what makes it hold at the moment the copy is made.
+func TestAcceptingStopsWhenTheWorkoutStopsBeingVisible(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	alice := person(t, h.pool, "sh_wra", "sh_wra_h")
+	bob := person(t, h.pool, "sh_wrb", "sh_wrb_h")
+	carol := person(t, h.pool, "sh_wrc", "sh_wrc_h")
+	befriend(t, h, alice, "sh_wra_h", bob, "sh_wrb_h")
+
+	// Carol's, and published — so Alice may pass it on without owning it.
+	id := makeWorkout(t, h, carol, "sh_wk_published", "Carol's Published Plan")
+	if _, err := h.pool.Exec(ctx,
+		`UPDATE workouts SET visibility = 'public' WHERE id = $1`, id); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if err := h.repo.Create(ctx, alice,
+		New{ToUsername: "sh_wrb_h", ResourceType: "workout", ResourceID: id}); err != nil {
+		t.Fatalf("share a published plan: %v", err)
+	}
+	inbox, _ := h.repo.Inbox(ctx, bob)
+	if len(inbox) != 1 {
+		t.Fatalf("inbox: %+v", inbox)
+	}
+
+	// Carol changes her mind. The row still exists; it is simply no longer
+	// Alice's to hand out.
+	if _, err := h.pool.Exec(ctx,
+		`UPDATE workouts SET visibility = 'private' WHERE id = $1`, id); err != nil {
+		t.Fatalf("unpublish: %v", err)
+	}
+
+	if _, err := h.repo.Accept(ctx, bob, inbox[0].ID); !errors.Is(err, ErrGone) {
+		t.Fatalf("accepting a now-private workout: want ErrGone, got %v", err)
+	}
+	// And no copy was left behind by a half-committed transaction.
+	var copies int
+	if err := h.pool.QueryRow(ctx,
+		`SELECT count(*) FROM workouts WHERE owner_user_id = $1`, bob).Scan(&copies); err != nil {
+		t.Fatalf("count bob's workouts: %v", err)
+	}
+	if copies != 0 {
+		t.Fatalf("bob ended up with %d copies of a private plan", copies)
 	}
 }

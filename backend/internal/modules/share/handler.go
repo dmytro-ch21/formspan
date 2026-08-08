@@ -29,7 +29,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
-			`send {"to_username": "...", "resource_type": "sequence", "resource_id": "..."}`)
+			`send {"to_username": "...", "resource_type": "sequence"|"workout", "resource_id": "..."}`)
 		return
 	}
 	in := New{
@@ -104,8 +104,13 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, ErrGone):
 		// 410 rather than 404, because the recipient DID receive something and
 		// deserves to know it evaporated instead of wondering what they broke.
+		//
+		// Says "is no longer available" rather than "the sender deleted it".
+		// Deletion is only one way in: a workout the sender never owned can
+		// also be un-published by its owner between the send and the accept,
+		// and naming a culprit would then be a guess presented as a fact.
 		apihttp.WriteError(w, http.StatusGone, apihttp.CodeNotFound,
-			"the sender deleted this before you accepted it")
+			"this is no longer available to copy")
 	case errors.Is(err, ErrInvalidInput):
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
 			"that is not something this app can share")

@@ -1,5 +1,5 @@
 import { useAuth } from '@clerk/clerk-expo';
-import { request as requestSync } from '@/lib/sync';
+import { request as requestSync, useSyncState } from '@/lib/sync';
 import { Image } from 'expo-image';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -16,6 +16,8 @@ import {
   KeyboardAwareFlatList,
   KeyboardAwareScrollView,
 } from '@/components/KeyboardAwareScroll';
+import { ShareToFriend } from '@/components/ShareToFriend';
+import { shareBlockedReason } from '@/lib/shares';
 import { Text, View } from '@/components/Themed';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { fetchExercises, pickImage, type Exercise } from '@/lib/exercises';
@@ -40,6 +42,7 @@ import {
   renameLocalWorkout,
   saveLocalWorkoutItems,
   startLocalSession,
+  unsyncedWorkoutIDs,
 } from '@/lib/sessionStore';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
@@ -75,6 +78,58 @@ export default function WorkoutDetailScreen() {
   );
 
   const canEdit = workout !== null && workout.owner_user_id !== null && workout.owner_user_id === userId;
+
+  /**
+   * What the SERVER holds, as far as this device knows.
+   *
+   * Read from SQLite rather than derived from `workout`, because the two
+   * questions the share gate asks are local bookkeeping the wire type
+   * deliberately does not carry: has this row ever reached the server
+   * (`remote`), and does this device owe it an edit (`dirty`/`name_dirty`).
+   */
+  const [syncState, setSyncState] = useState({ unsynced: false, owed: false });
+  /**
+   * `lastSyncAt`, NOT `saving` alone and NOT `items` — and that is the whole of
+   * this effect's correctness.
+   *
+   * `requestSync()` returns immediately and pushes in the background, so at
+   * `setSaving(false)` the row is still `dirty` in SQLite. Keyed on `saving`,
+   * the flags were therefore read at exactly the moment they were guaranteed
+   * stale, and then never again: Share stayed disabled saying "Save your
+   * changes first" seconds after the push had landed and the Save button
+   * itself had disappeared — advice pointing at a control that is no longer on
+   * screen, on the feature's headline flow. Recovery meant leaving the plan
+   * and coming back.
+   *
+   * `items` was in here too. It re-read SQLite twice per keystroke and bought
+   * nothing: typing never changes the PERSISTED flags, and the
+   * unsaved-on-screen arm is computed in render below.
+   */
+  const { lastSyncAt } = useSyncState();
+  useEffect(() => {
+    if (!id || !userId) return;
+    let live = true;
+    Promise.all([unsyncedWorkoutIDs(userId), dirtyWorkoutIDs(userId)])
+      .then(([unsynced, owed]) => {
+        if (!live) return;
+        const next = { unsynced: unsynced.has(id), owed: owed.has(id) };
+        // Compared by VALUE. The flags are unchanged on most sync ticks, and a
+        // fresh object every time would re-render this whole screen on each one.
+        setSyncState((prev) =>
+          prev.unsynced === next.unsynced && prev.owed === next.owed ? prev : next,
+        );
+      })
+      // A read failure must not gate the button SHUT. The server is the real
+      // authority — it answers 404 for a plan it has never seen — so failing
+      // open costs a confusing error at worst, where failing closed removes the
+      // feature with no explanation at all.
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [id, userId, saving, lastSyncAt]);
+
+  const blockedFromSharing = shareBlockedReason({ ...syncState, unsavedOnScreen: dirty });
 
   const load = useCallback(async () => {
     if (!id || !userId) return;
@@ -400,6 +455,27 @@ export default function WorkoutDetailScreen() {
             </Text>
           )}
         </Pressable>
+
+        {/*
+          Send it to a training partner.
+
+          OUTSIDE the `canEdit` gate, like web's: passing on a plan you can read
+          is not a write to it, and the server tests VISIBILITY rather than
+          ownership for exactly that reason — a VOLA Workout is already one tap
+          from "Copy to my workouts", so sharing one hands over nothing they
+          could not fetch themselves.
+
+          Below Start rather than beside it. Starting is what you came here to
+          do; sharing is a thing you occasionally decide to do afterwards, and
+          a full-width row of two equal buttons would make them read as a pair.
+        */}
+        <ShareToFriend
+          resourceType="workout"
+          resourceId={workout.id}
+          disabled={blockedFromSharing !== null}
+          disabledReason={blockedFromSharing ?? undefined}
+          testID="workout-share"
+        />
 
         {!canEdit && (
           <>
