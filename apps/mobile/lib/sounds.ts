@@ -65,7 +65,6 @@ export const SOUND_NAMES = [
   'workComplete',
   'sessionComplete',
   'tick',
-  'setLogged',
   'pr',
 ] as const;
 
@@ -81,7 +80,6 @@ const SOURCES: Record<SoundName, number> = {
   workComplete: require('@/assets/sounds/work-done.m4a'),
   sessionComplete: require('@/assets/sounds/session-done.m4a'),
   tick: require('@/assets/sounds/tick.m4a'),
-  setLogged: require('@/assets/sounds/set-logged.m4a'),
   pr: require('@/assets/sounds/pr.m4a'),
 };
 

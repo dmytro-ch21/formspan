@@ -54,8 +54,8 @@ import {
   saveLocalSets,
 } from '@/lib/sessionStore';
 import { ApiError, isPermanentRejection } from '@/lib/apiError';
+import * as Haptics from 'expo-haptics';
 import { report } from '@/lib/report';
-import { playSound } from '@/lib/sounds';
 import {
   describeSet,
   emptySet,
@@ -524,14 +524,25 @@ export default function SessionScreen() {
       ? fillForward(marked, index, measuresFor(catalog.get(exerciseID)?.load_type ?? 'reps'))
       : marked;
     commit(next);
-    // Ticking on only. Un-ticking is a correction, not a confirmation — the
-    // same reason it fills nothing and never starts rest.
+    // A haptic, not a sound. This fires 20+ times a session — more than
+    // anything else the app does — and a chime that often is the one thing
+    // guaranteed to wear out its welcome. A buzz is felt through a pocket,
+    // survives a loud gym, needs no preference of its own (it already rides
+    // the OS System Haptics setting), and costs nothing when the phone is
+    // face-down on a bench.
+    //
+    // BOTH directions, which is where this parts company with the sound it
+    // replaces. That fired on tick-on only, because a chime reads as approval
+    // and un-ticking is a correction rather than an achievement. A haptic
+    // carries no such verdict — it is a receipt that the tap landed, and that
+    // is worth exactly as much when you are undoing a mis-tap mid-set.
     //
     // Deliberately NOT in `recordTimedSet`: a work countdown that reaches zero
-    // ticks its own set, and the countdown has already played `workComplete`
-    // by then. Firing this on top would put two sounds in the same moment for
-    // one event, and the louder one already said it.
-    if (now) playSound('setLogged');
+    // ticks its own set, and `Countdown` has already fired a success
+    // notification haptic by then. Adding this on top would be two buzzes for
+    // one event — the same collision the sound was kept out of, for the same
+    // reason.
+    Haptics.selectionAsync().catch(() => {});
     if (now && autoRest) startRest(exerciseID);
   }
 
