@@ -112,19 +112,30 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "assets" / "audio"                       # full family, gitignored
 BUNDLE_DIR = ROOT / "apps" / "mobile" / "assets" / "sounds"
 
-# The only four the app actually plays, mapped to the filenames `lib/sounds.ts`
+# Exactly the sounds the app plays, mapped to the filenames `lib/sounds.ts`
 # already `require`s. Everything else in the family renders to assets/audio/ for
 # auditioning and is deliberately NOT checked in — the script is the source of
-# truth, and shipping thirteen unused assets would bloat the binary for nothing.
-# Wiring a new one up is: add it here, add the name to SoundName.
+# truth, and shipping the unused ones would bloat the binary for nothing.
+# Wiring one up is: add it here, add the name to SOUND_NAMES, add the `require`
+# to SOURCES.
+#
+# No counts in this comment on purpose. It said "four" while six were bundled,
+# which is the third time a hard-coded number in this feature went stale — the
+# other two being `toHaveLength(4)` in the sound tests and the note in
+# .gitignore.
 BUNDLE = {
     "rest-complete": "rest-done",
     "work-complete": "work-done",
     "session-complete": "session-done",
     "rest-tick": "tick",
-    # The timer four above kept the filenames they shipped under; these two are
-    # new, so they just use the family name.
-    "set-logged": "set-logged",
+    # The timer four above kept the filenames they shipped under; `pr` is new
+    # so it just uses the family name.
+    #
+    # `set-logged` is deliberately NOT here. It was bundled and wired, then
+    # pulled back out: at 20+ plays a session it was the one sound in the
+    # family certain to grate, and a haptic says the same thing without
+    # occupying the room. The recipe stays in S so it can still be auditioned —
+    # being unbundled is not the same as being deleted.
     "pr": "pr",
 }
 
@@ -457,7 +468,7 @@ S = [
        notes=[(0.000, "C#6", "glass", 0.80, 0.30, 0.72, 0.0, 0.12),
               (0.048, "F#5", "glass", 0.78, 0.34, 0.68, 0.0, -0.12)]),
 
-  dict(name="set-logged", desc="A set recorded mid-workout. Fires 20+ times a session, so it stays small.",
+  dict(name="set-logged", desc="A set recorded mid-workout. Unbundled — a set tick is a haptic now; this was too frequent to be a sound.",
        level=-14, rt60=0.55, wet=0.18, lp=7600,
        notes=[(0.000, "G#5", "marimba", 0.55, 0.90, 0.85, 0.0, -0.15),
               (0.030, "C#6", "marimba", 1.00, 1.05, 0.90, 0.0, 0.10),

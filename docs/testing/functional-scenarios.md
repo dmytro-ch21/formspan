@@ -5131,24 +5131,33 @@ not inferred from the absence of an error.
   and never fatal — do not wire it into `verify` on the strength of one green
   run.
 
-### Logging and record sounds
+### Set feedback, and the record chime
 
-Same discipline as above — these have to be *heard*. Both ride the one global
-Timer sounds toggle; there is no separate preference, so muting silences these
-too.
+The set feedback is a **haptic**, not a sound — verify it with the phone in
+your hand and the ringer irrelevant. The record chime still has to be heard.
 
-- **Ticking a set chimes; un-ticking is silent.** Tick, un-tick, tick again →
-  two sounds, not three. Un-ticking is a correction, and the screen already
-  treats it as one: it fills nothing and never starts rest.
-- **A timed set that runs out makes ONE sound, not two.** The countdown reaching
-  zero ticks its own set, and it has already played the work chime by then —
-  so you must hear the work chime alone, with no set chime under it. This is
-  the collision the wiring deliberately avoids by not putting the sound in
-  `recordTimedSet`. Stopping a work timer early makes no sound at all, because
-  stopping early does not tick.
-- **Twenty sets is twenty chimes.** Log a full session and judge whether it
-  wears; it sits ~10 dB under the rest chime for exactly this reason. This is a
-  taste call that can only be made by doing it, not by reading the level.
+- **Ticking a set buzzes, and so does un-ticking.** Both directions, unlike the
+  chime this replaced: a haptic is a receipt that the tap landed, not a verdict
+  on it, and confirming a mis-tap correction is worth as much as confirming the
+  tick. Tick, un-tick, tick → three buzzes.
+- **It is a haptic in Settings' sense, not the app's.** There is no in-app
+  preference, and muting Timer sounds must NOT silence it — they are unrelated
+  channels now. **On iOS**, turning off System Haptics must silence it:
+  `expo-haptics` uses `UISelectionFeedbackGenerator`, which the OS gates. Do
+  **not** assert this on Android — the module calls `Vibrator.vibrate` directly
+  rather than `performHapticFeedback`, so the system touch-feedback setting may
+  not gate it, and behaviour varies by version and OEM. That is a property of
+  `expo-haptics`, not of this screen, and every other haptic in the app already
+  makes the same bet.
+- **A timed set that runs out buzzes ONCE, not twice.** The countdown reaching
+  zero ticks its own set, and it has already fired its own success haptic by
+  then — so you must feel one buzz, not two. This is the collision the wiring
+  avoids by staying out of `recordTimedSet`. Stopping a work timer early does
+  not tick, so it produces neither.
+- **Twenty sets is twenty buzzes, and that is the point.** Log a full session:
+  it should read as tactile confirmation, not as a phone going off. The sound
+  that used to do this job was pulled for exactly this reason, so if the haptic
+  wears too, the answer is removing it rather than making it softer.
 - **A session that sets a PR plays two sounds, in sequence, never together.**
   The card opens with the session chime, then the PR chime lands about a second
   later as the record rows animate in. If they fire simultaneously the delay has

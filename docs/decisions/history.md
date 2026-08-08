@@ -16082,6 +16082,68 @@ that the hint rounds up AND that waiting the rounded-down value still fails.
 
 ## Open items / known gaps as of this entry
 
+## 2026-08-07 — The set sound becomes a set haptic
+
+`setLogged` is out of the bundle one PR after going into it, replaced by
+`Haptics.selectionAsync()` in `toggleDone`. Five sounds bundled now, out of a
+family of seventeen.
+
+### Why it did not survive contact
+
+It was flagged as the risk when it shipped: 20+ plays a session, more than
+everything else in the family put together, levelled ~10 dB under the rest
+chime specifically to survive that. The open question recorded at the time was
+whether "quiet enough" exists at that frequency. The answer is no — and the
+tell is that the fix everyone reaches for is a preference, which is an
+admission that the default is wrong.
+
+A haptic says the same thing and costs nothing. It is felt through a pocket, it
+survives a loud gym, it does not compete with the music the athlete is training
+to, and it needs no preference of its own because it already rides the OS
+haptics setting — the toggle this was about to grow, built by somebody else and
+already on the phone.
+
+That last claim is an **iOS** one, and review was right to pin it down:
+`expo-haptics` uses `UISelectionFeedbackGenerator` there, which the OS gates on
+System Haptics. On Android the module drives `Vibrator.vibrate` directly rather
+than `performHapticFeedback`, so the system setting may not gate it at all. The
+bet is unchanged from every other haptic already in the app, but the functional
+scenario now says iOS rather than asserting it universally.
+
+### It fires both ways now, which the sound did not
+
+The chime fired on tick-ON only: a sound reads as approval, and un-ticking is a
+correction rather than an achievement, so celebrating it would have been wrong.
+A haptic carries no verdict. It is a receipt that the tap landed, and that is
+worth exactly as much when you are undoing a mis-tap mid-set with bad hands. So
+`toggleDone` now buzzes unconditionally.
+
+What did NOT change is the collision rule: still nothing in `recordTimedSet`. A
+work countdown that reaches zero ticks its own set and `Countdown` has already
+fired a success haptic by then, so adding one there would be two buzzes for one
+event — the same trap in the same place, one modality across.
+
+### Unbundled is not deleted
+
+`set-logged` stays in the generator's `S` table and still renders to
+`assets/audio/` for auditioning; only its `BUNDLE` entry, its `SOUND_NAMES`
+entry, its `SOURCES` require and the checked-in `.m4a` are gone. If a context
+ever wants it — a web session screen, say, where there is no hand on the phone
+to feel anything — the recipe is still there.
+
+The separate-preference question the last entry left open is now closed
+unasked: there is nothing left to gate.
+
+### Unrelated, found while writing this
+
+The `## Open items / known gaps as of this entry` heading had been lost in a
+merge, leaving that whole list orphaned under the sharing entry's "Not
+verified" prose and reading as though those gaps belonged to sharing. Heading
+restored; the list is unchanged.
+
+
+## Open items / known gaps as of this entry
+
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
 - **Two position taxonomies now sit on one Library screen.** The filter chips are nine coarse families; the glossary is eleven curated entries. Since the guard split they disagree in a visible way: a beginner can read the Closed Guard card, learn the distinction, and then find no chip that filters to those 37 techniques. Adding North-South, and later Leg Entanglement, closed the cheap half each time (a position the glossary advertised that no chip could reach) — but doing it twice by hand is the evidence that hand-maintenance is the actual bug: the vocabulary is copied across four client files and one backend map, and the taxonomy PR updated one of the four until review caught it. Keying the chips on the glossary's ids, or a shared constant with a test asserting it matches positions.json, is the real answer and is design work, not a patch.
 
