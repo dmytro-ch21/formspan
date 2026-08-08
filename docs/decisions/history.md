@@ -16134,7 +16134,106 @@ unasked: there is nothing left to gate.
 
 ### Unrelated, found while writing this
 
-The `## Open items / known gaps as of this entry` heading had been lost in a
+The `## 2026-08-08 — Device verification finally happens, and finds the keyboard fix compensating twice
+
+Task #13 — the device pass owed across roughly a dozen merged PRs — finally ran,
+on an iPhone 15 Pro Simulator against `origin/main`, served from its own Metro so
+nothing raced the primary checkout's long-running dev server. Most of what it
+checked was fine. The keyboard work (#165) was the exception, and not in the way
+the task predicted.
+
+**The case the task said was broken is not broken.** #13 was written expecting
+that "moving between two same-height number pads on the session screen" is the
+case the platform does not handle. On the device it is handled: focusing a field
+below the pad scrolls it into view, moving to its same-height sibling re-scrolls,
+and jumping to a field in a *different exercise* while the pad is already up —
+so no keyboard event fires at all — also re-scrolls. That is `useEnsureVisible`
+doing exactly the job its docstring claims, and the claim is now checked rather
+than argued.
+
+**The case nobody predicted is a double compensation.** On the reflection
+wizard's note step, focusing a field scrolled the wizard's title off the top and
+parked ~200pt of blank between the last line of content and the footer. Two
+mechanisms were both fixing the same overlap:
+
+- `KeyboardAwareFooter` pads itself by `containerBottom - keyboardTop` (+24pt).
+  Because it is the last child of a `flex: 1` column, that padding **shrinks the
+  sibling scroll view**, whose bottom now sits above the keyboard.
+- `automaticallyAdjustKeyboardInsets` had already inset that scroll view — from
+  the frame it had one layout pass *earlier*, before the footer grew. Measured
+  at 393x852: footer lift 328pt, surplus inset 246pt.
+
+The surplus inset is legal scroll range with nothing in it, which is what the
+void was. This is precisely the double-count `KeyboardAwareScroll.tsx` already
+refuses on Android, where the window resize does the shortening — the file
+argues the case and then does not apply it to its own footer.
+
+The fix is a `KeyboardAwareScreen` context so the footer can tell the scroll
+view beside it to stand down. A context because the two are **siblings**: the
+footer cannot be a descendant of the scroll view, that being the entire reason
+it exists, so neither can discover the other by nesting. It renders no view of
+its own — callers already own a themed, `flex: 1` root, and that column is
+load-bearing for the footer's padding trick.
+
+**Why a wrapper rather than `automaticallyAdjustKeyboardInsets={false}` at the
+one call site:** that prop already spreads-over cleanly, so the one-liner works
+today. It is also exactly the opt-in this file was written to end — it was
+correct and exported before, adopted by one screen out of thirteen, and the
+other twelve each reinvented some fraction of it. A rule that only holds while
+someone remembers it is the failure mode, not the fix.
+
+Verified both ways: `keyboardFooterCoordination.test.tsx` pins that the footer's
+presence reaches the scroll view and that a screen *without* one still gets the
+inset — turning it off everywhere would trade this bug for the worse one the
+inset exists to solve. Both guards mutation-tested (predicate inverted; footer
+registration removed) and both go red. On the device the void is simply gone:
+the field already clears the keyboard, so `scrollTargetFor`'s "already clear"
+branch correctly declines to scroll at all.
+
+### What device verification also settled
+
+- The reported Library-search bug is fixed: with the keyboard up the last of many
+  matches is fully visible with clearance, and the list will not scroll further.
+- `sign-in`/`sign-up` at 375pt — the two screens that had no scroll container at
+  all before #165 — keep the focused field visible and the submit button
+  reachable.
+- The You header (#187) keeps its wordmark with no collision at 393pt; VOLA
+  Workout bands (#181) all span their tiles with no degenerate angle; the
+  Community marker lands on the community row only; Social (#192), the share
+  inbox (#182), the work timer (#167) and hold-to-confirm (#171) all behave.
+
+### Two reported "bugs" that turned out to be decisions
+
+Worth recording because both were re-derived from the device and both are
+already argued in code, so the next person to notice them can stop sooner:
+
+- **The BJJ session delete uses an `Alert` while the strength session uses
+  hold-to-confirm.** Deliberate — `app/session/[id].tsx` states the rule: a hold
+  says "this can't be undone" better than a dialog, and the deletes that kept
+  their dialog do so because they carry a fact the button cannot ("removed
+  everywhere, not just on this phone").
+- **Stopping the work timer rewrites the set's prescribed duration** (45s became
+  25s). Deliberate — `startWork`'s docstring: the clock records what happened,
+  never what was asked for, and stopping early deliberately does not tick the
+  set.
+
+### Gaps this leaves
+
+- **The You header at 375pt is still unverified** — the width where "Friends"
+  actually collided. The only 375pt device available is signed out, and signing
+  it in needs credentials.
+- **The celebration (#172) was not observed.** Finishing a session with zero
+  logged sets showed no flares, which is plausibly correct rather than broken;
+  nothing here distinguishes the two.
+- **Simulator hardware-keyboard latching wastes a lot of time.** Once it is on,
+  `ConnectHardwareKeyboard=false` in `com.apple.iphonesimulator.plist` does not
+  clear it at either the global or per-device key, and neither does restarting
+  Simulator.app; only the I/O menu does. Diagnose it in one step by launching
+  Safari with `simctl` and tapping the address bar — no keyboard there means it
+  is device-wide, not the app.
+
+
+## Open items / known gaps as of this entry` heading had been lost in a
 merge, leaving that whole list orphaned under the sharing entry's "Not
 verified" prose and reading as though those gaps belonged to sharing. Heading
 restored; the list is unchanged.
