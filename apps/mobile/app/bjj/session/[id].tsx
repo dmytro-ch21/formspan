@@ -31,6 +31,7 @@ import {
 import { request as requestSync } from '@/lib/sync';
 import { fetchTechniques, type TechniqueSummary } from '@/lib/techniques';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { carriedTheStreak, fetchHistory, localZone, streakRange, weekStreak } from '@/lib/history';
 
 /**
  * Reading a BJJ session back.
@@ -66,6 +67,35 @@ export default function BjjSessionScreen() {
   const [session, setSession] = useState<LocalSession | null>(null);
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [celebrating, setCelebrating] = useState<SessionSummary | null>(null);
+  /*
+    The weekly streak is sport-agnostic, so a week opened on the mat carries it
+    exactly as a week opened under a barbell does — and for this app's core
+    athlete it is usually the mat that opens it. Wiring only the strength card
+    would have left the chime firing almost never for a BJJ+strength athlete:
+    silent here for want of the props, and silent on the week's first strength
+    session because by then the week already holds one.
+  */
+  const [celebrationStreak, setCelebrationStreak] = useState<{
+    weeks: number;
+    carried: boolean;
+  } | null>(null);
+  useEffect(() => {
+    if (!celebrating) return;
+    let live = true;
+    const { from, to } = streakRange();
+    fetchHistory(getToken, { from, to, tz: localZone() })
+      .then((h) => {
+        if (!live) return;
+        setCelebrationStreak({ weeks: weekStreak(h.days), carried: carriedTheStreak(h.days) });
+      })
+      .catch(() => {
+        // No history, no streak line and no chime — same silence as the
+        // strength card, for the same reason.
+      });
+    return () => {
+      live = false;
+    };
+  }, [celebrating, getToken]);
   const [loading, setLoading] = useState(true);
   const [techniques, setTechniques] = useState<TechniqueSummary[]>([]);
 
@@ -218,7 +248,10 @@ export default function BjjSessionScreen() {
         records: [],
         recordExerciseIDs: [],
       };
-      if (worthCelebrating(bjjSummary)) setCelebrating(bjjSummary);
+      if (worthCelebrating(bjjSummary)) {
+        setCelebrationStreak(null);
+        setCelebrating(bjjSummary);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -532,6 +565,11 @@ export default function BjjSessionScreen() {
           // because the card takes one formatter, not one per sport.
           formatTonnage={(v) => `${Math.round(v)}`}
           onDismiss={() => setCelebrating(null)}
+          streak={celebrationStreak}
+          // Settled by construction: BJJ has no record equivalent yet, so the
+          // summary hard-codes `records: []` and there is no lookup to wait
+          // for. Nothing can arrive later and outrank the streak chime here.
+          recordsSettled
         />
       )}
     </KeyboardAwareScrollView>

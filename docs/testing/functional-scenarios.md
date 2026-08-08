@@ -5169,6 +5169,28 @@ your hand and the ringer irrelevant. The record chime still has to be heard.
   on a guess would celebrate something the records screen may then contradict.
 - **The PR chime fires once.** Leave the card open long enough for any refetch;
   it must not chime twice.
+- **The streak chime, and it never doubles with the PR.** Finish the FIRST
+  session of a week that sets no record → session chime, then the streak chime
+  about a second later, and "N weeks in a row" on the card. Finish a first
+  session of the week that DOES set a record → session chime, then the PR
+  chime, and **no streak chime** — one celebratory sound per session, and the
+  PR outranks it.
+- **The second session of the same week is silent beyond the session chime.**
+  The card still shows the streak line; only the first session of a week
+  carries it. If you hear it on a Thursday, the rule has drifted to firing on
+  every session.
+- **A BJJ session opens the week too.** Finish the first BJJ session of a week
+  → streak chime and the line, exactly as a strength session gives. The streak
+  is sport-agnostic, so if the mat is silent and the barbell is not, the BJJ
+  card has lost its props.
+- **A stray Thursday chime is not automatically a bug.** A session STARTED
+  offline mid-week and synced at finish can race its own row to the server; the
+  week then counts one session and this one is told it carried the streak.
+  Narrow and known. Reproduce it before treating it as the rule drifting.
+- **Finish a session offline → no streak chime and no streak line.** History is
+  online-only, and the week's count cannot include a finish the server has not
+  seen. Same honest silence as the PR row beside it, and the same cost: a
+  session logged in a dead spot loses its chime.
 - **A PR can legitimately produce neither row nor chime, and it is not this
   wiring's bug.** Finishing online kicks off the sync and then fetches records
   more or less immediately; if the server has not ingested the finish yet, the

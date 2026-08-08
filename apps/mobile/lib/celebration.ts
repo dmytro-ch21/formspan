@@ -113,6 +113,29 @@ export function badgeFor(summary: Pick<SessionSummary, 'records'>): Badge | null
  * celebrate, and congratulating someone for it is the kind of hollow praise
  * that teaches people to ignore the app. They get the ordinary finished screen.
  */
+/**
+ * Should the streak chime play?
+ *
+ * One celebratory sound per session, and the personal record outranks the
+ * streak: a PR is rare and a streak recurs every week, so hearing the smaller
+ * one instead would be the wrong trade every time they coincide.
+ *
+ * `recordsSettled` is what makes that precedence real rather than a race. The
+ * two lookups are independent, and without the gate a fast history would chime
+ * the streak and latch the PR out. An EMPTY records result is an answer;
+ * a pending one is not, which is why this cannot be inferred from the array.
+ *
+ * Extracted from the card so the rule is testable without rendering anything —
+ * the precedence is the part worth pinning, not the JSX around it.
+ */
+export function celebratesStreak(opts: {
+  recordsSettled: boolean;
+  hasRecords: boolean;
+  carried: boolean;
+}): boolean {
+  return opts.recordsSettled && !opts.hasRecords && opts.carried;
+}
+
 export function worthCelebrating(summary: Pick<SessionSummary, 'sets' | 'rounds'>): boolean {
   return summary.sets > 0 || (summary.rounds ?? 0) > 0;
 }

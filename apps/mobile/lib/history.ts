@@ -239,6 +239,41 @@ export function buildGrid(
  * The current week counts only once it has a session, so an unbroken run
  * doesn't appear to reset every Monday morning.
  */
+/**
+ * Did the session that just finished carry the weekly streak forward?
+ *
+ * True when the current week holds exactly ONE session — the one just logged.
+ * Train four times a week and only the first carries anything; the other three
+ * are training, not milestones, and celebrating them would make the sound mean
+ * nothing by Thursday.
+ *
+ * **Counts from the server's history, so it is only as good as what has
+ * synced.** Precisely: history counts the session ROW, by `started_at` and
+ * with no `ended_at` filter — so it is the session's CREATION reaching the
+ * server that matters, not the finish. Rows normally sync at session start,
+ * long before this runs.
+ *
+ * That cuts both ways, and both are accepted:
+ *
+ * - **False negative** (the common one): nothing synced, the week looks empty,
+ *   no chime. Offline the phone cannot know what the week holds, and silence
+ *   is not a claim while a guessed celebration is. A session logged in a dead
+ *   spot loses its chime, which is the right way round.
+ * - **False positive** (narrow): a session started offline mid-week, syncing
+ *   only as it finishes. If this lookup beats the row's push, the week counts
+ *   only the earlier session, `n === 1`, and the week's SECOND session is told
+ *   it carried the streak. Small window, real, and not worth a second source
+ *   of truth to close — but do not read a stray Thursday chime as the rule
+ *   having drifted.
+ */
+export function carriedTheStreak(days: HistoryDay[], from = today()): boolean {
+  const week = startOfWeek(from);
+  const n = days
+    .filter((d) => startOfWeek(d.date) === week)
+    .reduce((total, d) => total + d.sessions, 0);
+  return n === 1;
+}
+
 export function weekStreak(days: HistoryDay[], from = today()): number {
   const trained = new Set(days.filter((d) => d.sessions > 0).map((d) => startOfWeek(d.date)));
   let week = startOfWeek(from);

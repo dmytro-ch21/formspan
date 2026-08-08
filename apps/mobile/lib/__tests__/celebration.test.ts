@@ -1,13 +1,14 @@
 import {
   badgeFor,
-  summariseSession,
+  celebratesStreak,
   feltFor,
   formatDuration,
   recordsFromSession,
   statsFor,
   subtitleFor,
-  worthCelebrating,
+  summariseSession,
   type SessionSummary,
+  worthCelebrating,
 } from '../celebration';
 import type { ExerciseRecords, PersonalRecord } from '../records';
 
@@ -264,5 +265,36 @@ describe('building the summary from a finished session', () => {
 
   it('starts with no records — they arrive later, or not at all', () => {
     expect(summariseSession(session, vol, true).records).toEqual([]);
+  });
+});
+
+describe('whether the streak chime plays', () => {
+  const at = (o: Partial<Parameters<typeof celebratesStreak>[0]>) =>
+    celebratesStreak({ recordsSettled: true, hasRecords: false, carried: true, ...o });
+
+  it('plays when this session carried the streak and set no record', () => {
+    expect(at({})).toBe(true);
+  });
+
+  it('yields to the PR chime when the session also set a record', () => {
+    // The precedence that matters: a PR is rare, a streak recurs weekly.
+    expect(at({ hasRecords: true })).toBe(false);
+  });
+
+  it('waits for the records lookup rather than racing it', () => {
+    // THE case this gate exists for. Without it a fast history chimes the
+    // streak and latches the PR out — the wrong sound, and only sometimes,
+    // which is the worst kind of bug to be told about.
+    expect(at({ recordsSettled: false })).toBe(false);
+    // ...and once records answer "none", it plays.
+    expect(at({ recordsSettled: true })).toBe(true);
+  });
+
+  it('stays quiet on a session that did not carry the streak', () => {
+    expect(at({ carried: false })).toBe(false);
+  });
+
+  it('stays quiet when nothing applies', () => {
+    expect(at({ recordsSettled: false, hasRecords: true, carried: false })).toBe(false);
   });
 });

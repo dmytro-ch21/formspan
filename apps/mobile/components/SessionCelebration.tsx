@@ -8,6 +8,7 @@ import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import {
   badgeFor,
+  celebratesStreak,
   feltFor,
   statsFor,
   subtitleFor,
@@ -95,12 +96,18 @@ export function SessionCelebration({
   summary,
   formatTonnage,
   onDismiss,
+  streak = null,
+  recordsSettled = false,
   testID = 'session-celebration',
 }: {
   summary: SessionSummary;
   /** Injected so the card never has to know about unit preferences. */
   formatTonnage: (kg: number) => string;
   onDismiss: () => void;
+  /** Weekly streak, once history answers. `carried` means this session did it. */
+  streak?: { weeks: number; carried: boolean } | null;
+  /** Whether the records lookup has finished — see the chime below. */
+  recordsSettled?: boolean;
   testID?: string;
 }) {
   const accent = useAccent();
@@ -151,6 +158,32 @@ export function SessionCelebration({
     return () => clearTimeout(t);
   }, [hasRecords]);
 
+  /*
+    The streak chime — ONE celebratory sound per session, and the PR wins.
+
+    `chimed` is shared with the effect above rather than being its own flag,
+    which is what makes that precedence hold: whichever fires first latches,
+    and the gate on `recordsSettled` guarantees the PR gets to go first when
+    there is one. Without it the two lookups race and a fast history would
+    latch the PR out — the wrong way round, since a personal record is the
+    larger moment and a streak recurs every week.
+
+    Declared after the PR effect on purpose too: within one commit React runs
+    them in order, so if both become true together the PR still claims the
+    latch.
+  */
+  const carried = celebratesStreak({
+    recordsSettled,
+    hasRecords,
+    carried: streak?.carried === true,
+  });
+  useEffect(() => {
+    if (!carried || chimed.current) return;
+    chimed.current = true;
+    const t = setTimeout(() => playSound('streak'), 1100);
+    return () => clearTimeout(t);
+  }, [carried]);
+
   return (
     <Modal transparent animationType="fade" onRequestClose={onDismiss} visible>
       <View style={styles.scrim} testID={testID}>
@@ -175,6 +208,23 @@ export function SessionCelebration({
                 {badge.label}
               </Text>
             </RNView>
+          )}
+
+          {/*
+            Shown whenever there IS a streak, not only when this session
+            carried it — the number is worth seeing on a Thursday too. The
+            chime is the narrower event; the line is the state.
+          */}
+          {streak && streak.weeks > 0 && (
+            <Text
+              style={styles.streak}
+              // Arrives after the card opens, like the records below it — so a
+              // screen reader has to be told, or the line is only ever seen.
+              accessibilityLiveRegion="polite"
+              testID="celebration-streak"
+            >
+              {streak.weeks} week{streak.weeks === 1 ? '' : 's'} in a row
+            </Text>
           )}
 
           {/* What the session measurably was. */}
@@ -307,6 +357,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.6,
   },
   feltValue: { fontSize: 13, color: vola.textMuted, marginTop: 2 },
+  streak: { fontSize: 12.5, color: vola.textDim, marginTop: 10, letterSpacing: 0.2 },
   records: { alignSelf: 'stretch', gap: 8, marginTop: 12 },
   recordRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   recordName: { flex: 1, fontSize: 13, fontWeight: '600', textTransform: 'capitalize' },

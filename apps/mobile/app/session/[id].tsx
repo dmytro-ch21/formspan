@@ -18,6 +18,7 @@ import {
   type SessionSummary,
 } from '@/lib/celebration';
 import { fetchRecords } from '@/lib/records';
+import { carriedTheStreak, fetchHistory, localZone, streakRange, weekStreak } from '@/lib/history';
 import { elapsedOf } from '@/lib/countdown';
 import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
@@ -191,6 +192,22 @@ export default function SessionScreen() {
    * Writing to state the effect does not depend on cannot do that.
    */
   const [celebrationRecords, setCelebrationRecords] = useState<SessionRecord[]>([]);
+  /*
+    Whether the records lookup has finished, either way.
+
+    The streak chime waits on this. Both lookups race, and if the streak landed
+    first it would chime and then latch the PR chime out — backwards, because a
+    personal record is the bigger moment. Gating on "records are known" makes
+    the precedence a property instead of a timing accident, and it is a
+    separate flag from the array because an EMPTY result is an answer while a
+    pending one is not.
+  */
+  const [recordsSettled, setRecordsSettled] = useState(false);
+  /** `null` until history answers; `carried` is what decides the chime. */
+  const [celebrationStreak, setCelebrationStreak] = useState<{
+    weeks: number;
+    carried: boolean;
+  } | null>(null);
 
   /**
    * Personal records arrive after the card does, if at all.
@@ -211,11 +228,41 @@ export default function SessionScreen() {
       .catch(() => {
         // No network, no PR row. Deliberately silent — a failed lookup is not
         // an error the athlete needs to hear about on a celebration screen.
+      })
+      .finally(() => {
+        // `finally`, so a failure still settles: offline the answer is "no
+        // records", and the streak chime must not wait forever for a lookup
+        // that is never coming back.
+        if (live) setRecordsSettled(true);
       });
     return () => {
       live = false;
     };
   }, [celebrating, getToken, id]);
+
+  /*
+    The weekly streak, fetched the same way and for the same reason as the
+    records above: the card opens on what the phone already knows and this
+    fills in behind it. Its own effect rather than chained onto the records
+    one, so a slow history cannot hold up the PR row.
+  */
+  useEffect(() => {
+    if (!celebrating) return;
+    let live = true;
+    const { from, to } = streakRange();
+    fetchHistory(getToken, { from, to, tz: localZone() })
+      .then((h) => {
+        if (!live) return;
+        setCelebrationStreak({ weeks: weekStreak(h.days), carried: carriedTheStreak(h.days) });
+      })
+      .catch(() => {
+        // Same silence as the records lookup. No history, no streak line, no
+        // chime — the phone cannot know what the week holds.
+      });
+    return () => {
+      live = false;
+    };
+  }, [celebrating, getToken]);
 
   const [autoRest, setAutoRest] = useState(false);
   useEffect(() => {
@@ -1110,6 +1157,8 @@ export default function SessionScreen() {
                   // praise that teaches people to stop reading the app.
                   if (worthCelebrating(summary)) {
                     setCelebrationRecords([]);
+                    setRecordsSettled(false);
+                    setCelebrationStreak(null);
                     setCelebrating(summary);
                   }
                 }
@@ -1159,6 +1208,8 @@ export default function SessionScreen() {
           // Merged at render, so filling the records in cannot feed back into
           // the effect that fetches them.
           summary={{ ...celebrating, records: celebrationRecords }}
+          streak={celebrationStreak}
+          recordsSettled={recordsSettled}
           formatTonnage={(v) => formatVolume(v, units)}
           onDismiss={() => {
             setCelebrating(null);

@@ -1,4 +1,11 @@
-import { formatDuration, spanRange, thisWeek, SPANS, type HistoryDay } from '../history';
+import {
+  carriedTheStreak,
+  formatDuration,
+  spanRange,
+  thisWeek,
+  SPANS,
+  type HistoryDay,
+} from '../history';
 
 /**
  * The You screen's calendar maths.
@@ -154,5 +161,56 @@ describe('formatDuration', () => {
     // the rendered width stops growing.
     expect(formatDuration(100 * 3600 + 59 * 60)).toBe('100h');
     expect(formatDuration(312 * 3600 + 45 * 60)).toBe('312h');
+  });
+});
+
+describe('carriedTheStreak', () => {
+  // A Wednesday. startOfWeek is Monday, so this week is 2026-08-03..09.
+  const wed = '2026-08-05';
+
+  it('is true for the only session of the week', () => {
+    expect(carriedTheStreak([day('2026-08-05', { sessions: 1 })], wed)).toBe(true);
+  });
+
+  it('is false for the second session of the same week', () => {
+    // Train four times a week and only the first carries anything. If this
+    // ever goes true, the chime fires on every session and means nothing by
+    // Thursday.
+    expect(
+      carriedTheStreak([day('2026-08-03', { sessions: 1 }), day('2026-08-05', { sessions: 1 })], wed),
+    ).toBe(false);
+  });
+
+  it('is false for two sessions logged on the SAME day', () => {
+    // Counts sessions, not days with sessions — a double day is still not a
+    // streak being carried twice.
+    expect(carriedTheStreak([day('2026-08-05', { sessions: 2 })], wed)).toBe(false);
+  });
+
+  it('is false when the week is empty, which is what "not synced yet" looks like', () => {
+    // The finish has not reached the server, so history cannot see it. Silence
+    // is the honest answer; a chime here would be a guess.
+    expect(carriedTheStreak([day('2026-07-29', { sessions: 1 })], wed)).toBe(false);
+  });
+
+  it('ignores previous weeks entirely, however long the run', () => {
+    // The streak's LENGTH is not what this decides — only whether this week
+    // has just been opened.
+    const days = [
+      day('2026-07-20', { sessions: 3 }),
+      day('2026-07-27', { sessions: 2 }),
+      day('2026-08-05', { sessions: 1 }),
+    ];
+    expect(carriedTheStreak(days, wed)).toBe(true);
+  });
+
+  it('is false on an empty history', () => {
+    expect(carriedTheStreak([], wed)).toBe(false);
+  });
+
+  it('counts days with zero sessions as absent, not as the one', () => {
+    expect(
+      carriedTheStreak([day('2026-08-04', { sessions: 0 }), day('2026-08-05', { sessions: 1 })], wed),
+    ).toBe(true);
   });
 });
