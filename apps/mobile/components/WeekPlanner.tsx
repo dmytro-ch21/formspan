@@ -474,6 +474,13 @@ export function WeekPlanner({
               ) : (
                 mine.map((p) => {
                   const target = plannedEntryTarget(p, names);
+                  // One lookup feeding the title, the label and the chevron.
+                  // They were two copies agreeing by luck: both fall back when
+                  // the name is empty, so they match today — but the predicate
+                  // deciding to open a blank-named workout would leave the row
+                  // navigating while still announcing the sport fallback. That
+                  // is the same drift this fix exists to remove.
+                  const name = target ? names[target] : null;
                   return (
                   <Pressable
                     key={p.id}
@@ -482,7 +489,7 @@ export function WeekPlanner({
                     onLongPress={() => confirmRemove(p)}
                     accessibilityRole="button"
                     accessibilityLabel={`${
-                      (p.workoutId && names[p.workoutId]) || labelFor(modules, p.sport)
+                      name || labelFor(modules, p.sport)
                     }, planned.${target ? ' Opens the workout.' : ''} Long press to remove.`}
                     testID={`plan-entry-${p.id}`}
                   >
@@ -522,9 +529,10 @@ export function WeekPlanner({
                       <Text style={styles.entryTitle} numberOfLines={1}>
                         {/* Falls back to the discipline when the plan names a
                             template the cache no longer holds — see lib/plan.ts
-                            on why there is no foreign key. */}
-                        {(p.workoutId && names[p.workoutId]) ||
-                          `${labelFor(modules, p.sport)} session`}
+                            on why there is no foreign key. Same `name` the
+                            chevron and the label read, so a row can never
+                            announce one thing and open another. */}
+                        {name || `${labelFor(modules, p.sport)} session`}
                       </Text>
                     </RNView>
                     {/* Only when there is somewhere to go. A chevron on an

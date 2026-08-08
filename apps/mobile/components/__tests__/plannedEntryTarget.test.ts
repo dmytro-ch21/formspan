@@ -44,18 +44,22 @@ describe('plannedEntryTarget', () => {
   });
 
   /**
-   * A name is a name, including a falsy-looking one.
+   * A cached-but-empty name counts as nowhere to go, deliberately.
    *
    * Guarding on `names[id]` truthiness is the simple reading, and an empty
-   * string is the case where it silently differs from "the cache holds this
-   * id". A workout saved with a blank name is reachable in the app (the rename
-   * field abandons blanks, but nothing backfills rows created before that), and
-   * it should still open rather than becoming quietly inert.
+   * string is the one input where it differs from "the cache holds this id".
+   * The argument for opening it: a blank-named workout is still a workout, and
+   * the row is not really broken. The argument that wins: an empty name already
+   * renders as the "<Sport> session" fallback, so a row that opened would take
+   * you to a screen titled something the row never showed — and the row would
+   * carry a chevron while looking exactly like the untemplated rows beside it.
+   *
+   * Pinned so the choice is visible. If it should flip, the guard becomes
+   * `names[p.workoutId] !== undefined` and this test flips with it; the
+   * chevron and `onPress` stay in lockstep either way, which is the property
+   * the fix actually rests on.
    */
-  it('treats a cached-but-empty name as nowhere to go, and says so deliberately', () => {
-    // Documenting the current behaviour rather than asserting it is ideal: an
-    // empty name renders as the "<Sport> session" fallback anyway, so a row
-    // that opened would show a title the plan row never displayed.
+  it('treats a cached-but-empty name as nowhere to go', () => {
     expect(plannedEntryTarget({ workoutId: 'w1' }, { w1: '' })).toBeNull();
   });
 });
