@@ -137,6 +137,7 @@ BUNDLE = {
     # occupying the room. The recipe stays in S so it can still be auditioned —
     # being unbundled is not the same as being deleted.
     "pr": "pr",
+    "notification": "notification",
 }
 
 # ---------------------------------------------------------------------------
@@ -525,7 +526,7 @@ S = [
        notes=[(0.000, "F#5", "bell", 1.00, 1.05, 0.62, 0.06, 0.00),
               (0.000, "F#3", "pad",  0.30, 0.95, 0.70, 0.0, 0.0)]),
 
-  dict(name="notification", desc="The signature bell — push notifications, general alerts.",
+  dict(name="notification", desc="The signature bell. NOT push — there is no push system; this fires in-app when MORE is found waiting than last time you looked.",
        level=-9, rt60=1.20, wet=0.26, lp=8400,
        notes=[(0.000, "C#6", "bell",  0.90, 1.05, 0.92, 0.10, 0.00),
               (0.022, "G#5", "glass", 0.45, 0.90, 0.90, 0.10, -0.20),

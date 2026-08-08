@@ -1,5 +1,5 @@
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet } from 'react-native';
 
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
@@ -11,7 +11,8 @@ import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { isNotFound } from '@/lib/apiError';
-import { getPendingCounts } from '@/lib/friends';
+import { playSound } from '@/lib/sounds';
+import { anyArrived, getPendingCounts } from '@/lib/friends';
 import { getProfile, type Profile } from '@/lib/profile';
 import { UNIT_SYSTEMS } from '@/lib/units';
 import { useModules } from '@/lib/ModulesProvider';
@@ -69,6 +70,22 @@ export default function YouScreen() {
   // and the rule it was protecting ("badge only what can be answered here")
   // is now satisfied rather than waived.
   const [waiting, setWaiting] = useState({ friend_requests: 0, shares: 0 });
+  /*
+    The last counts we actually saw, so a rise can be told from a first look.
+
+    A ref, not state: it must not cause a render (the badge already renders
+    from `waiting`), and it has to survive the focus/blur cycle that refetches.
+    Null until something has been counted once — see `announcesArrival` for why
+    an opening count is deliberately silent.
+
+    Holds the whole shape rather than a total, because `anyArrived` compares
+    per source; a total cannot tell a swap from no change.
+
+    Process-lifetime, so a cold launch is always silent even if things were
+    waiting before. That is correct: "arrived" is a claim about while you were
+    looking, and after a relaunch the app has no basis for it.
+  */
+  const lastWaiting = useRef<{ friend_requests: number; shares: number } | null>(null);
 
   // On focus, so returning from Edit shows what was just saved.
   useFocusEffect(
@@ -111,10 +128,29 @@ export default function YouScreen() {
           // this build's server has no such source, which renders as no badge
           // — the same as zero, and correctly so for a client newer than its
           // server.
-          setWaiting({
+          const next = {
             friend_requests: counts.friend_requests ?? 0,
             shares: counts.shares ?? 0,
-          });
+          };
+          // Read BEFORE the assignment, or it is compared against itself.
+          const seen = lastWaiting.current;
+          lastWaiting.current = next;
+          setWaiting(next);
+          /*
+            The badge is updated FIRST, and the cue cannot reach back and stop
+            it. This had the chime above `setWaiting`, and the YOU screen's own
+            tests caught what that costs: anything throwing between the abort
+            check and the badge update is swallowed by the `.catch` below and
+            the badge silently never renders — the decoration breaking the
+            thing it decorates, which `lib/sounds.ts` forbids in as many words
+            for exactly this reason. A count you can see is the feature; the
+            noise is a nicety.
+          */
+          try {
+            if (anyArrived(seen, next)) playSound('notification');
+          } catch {
+            // A cue is never worth a badge.
+          }
         })
         .catch(() => {});
       return () => counting.abort();

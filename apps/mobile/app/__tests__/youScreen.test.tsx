@@ -36,7 +36,15 @@ jest.mock('@/lib/profile', () => ({
 const mockCounts = jest.fn((..._a: unknown[]): Promise<Record<string, number>> =>
   Promise.resolve({}),
 );
+// Spread the real module rather than listing exports: this stubs the network
+// call and nothing else, so a helper added to `lib/friends` later cannot
+// silently arrive here as `undefined`. Listing them is how `anyArrived` became
+// a hole that took the badge down in five of these tests.
+const mockPlay = jest.fn();
+jest.mock('@/lib/sounds', () => ({ playSound: (...a: unknown[]) => mockPlay(...a) }));
+
 jest.mock('@/lib/friends', () => ({
+  ...jest.requireActual('@/lib/friends'),
   getPendingCounts: (...a: unknown[]) => mockCounts(...a),
 }));
 
@@ -87,6 +95,10 @@ jest.mock('expo-router', () => ({
 beforeEach(() => {
   mockGetProfile.mockReset().mockResolvedValue({ display_name: 'Rhonda', unit_system: 'metric' });
   mockCounts.mockReset().mockResolvedValue({});
+  // Reset too, or a future test added ABOVE the throwing-cue one could satisfy
+  // its `toHaveBeenCalledWith` with somebody else's chime. No test can fire the
+  // cue today, which is exactly when this is cheap to add.
+  mockPlay.mockReset();
 });
 
 describe('what a count renders as', () => {
@@ -153,6 +165,38 @@ describe('the People rows', () => {
       expect(screen.getByTestId('you-shared-badge', { includeHiddenElements: true })).toBeTruthy();
       expect(screen.queryByTestId('you-friends-badge', { includeHiddenElements: true })).toBeNull();
     });
+  });
+
+  it('still badges when the arrival cue throws', async () => {
+    // The PROPERTY this pins: a throwing cue cannot take the badge down.
+    // Precisely, that is "committed before the cue, OR the cue is wrapped" —
+    // both defences have to go for this to regress, which is what a regression
+    // pin should ask. It does not pin the line order on its own.
+    //
+    // Written because it did exactly that. The chime was above `setWaiting`,
+    // `anyArrived` arrived here as `undefined` through an incomplete mock, and
+    // the throw was swallowed by the fetch's own `.catch` — five tests in this
+    // file timed out waiting for a badge that was never going to render. The
+    // mock hole is fixed above; this pins the code so the next hole is
+    // survivable rather than silent.
+    mockPlay.mockImplementationOnce(() => {
+      throw new Error('audio is broken');
+    });
+    mockCounts.mockResolvedValue({ friend_requests: 0, shares: 0 });
+    const { rerender } = render(<YouScreen />);
+    await waitFor(() => expect(mockCounts).toHaveBeenCalled());
+
+    // A rise, so the cue actually fires and actually throws.
+    mockCounts.mockResolvedValue({ friend_requests: 2, shares: 0 });
+    await act(async () => {
+      refocus();
+      rerender(<YouScreen />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('you-friends-badge', { includeHiddenElements: true })).toBeTruthy();
+    });
+    expect(mockPlay).toHaveBeenCalledWith('notification');
   });
 
   it('keeps the last known count when a refresh fails', async () => {

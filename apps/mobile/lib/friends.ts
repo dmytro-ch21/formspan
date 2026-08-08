@@ -87,6 +87,53 @@ export function removeFriend(getToken: TokenGetter, username: string): Promise<v
  * must leave the previous number alone rather than zero it: a badge is
  * believed, and "0" asserts that nothing is waiting.
  */
+/**
+ * Whether a freshly-fetched pending count should announce itself.
+ *
+ * Two rules, and both are the difference between a useful cue and an annoying
+ * one:
+ *
+ * **A first count never announces.** `prev` is null until something has been
+ * counted at least once, so opening the app to three waiting requests is
+ * silent — they were already there, and a chime would be claiming they just
+ * arrived. Only a rise from a number we have already seen means "new".
+ *
+ * **Only a rise.** Answering a request lowers the count, and celebrating your
+ * own inbox getting shorter would be nonsense.
+ *
+ * Note what is NOT here: a failed fetch. The caller must leave `prev`
+ * untouched on error, because the count endpoint is online-only and a network
+ * blip resolving to 0 would first go silent (a fall) and then chime on the
+ * next success (a rise) — announcing an arrival that never happened.
+ */
+export function announcesArrival(prev: number | null, next: number): boolean {
+  return prev !== null && next > prev;
+}
+
+/**
+ * The same rule across every badged source: any one rising is news.
+ *
+ * Per-source rather than on the total, because a total hides a SWAP — answer a
+ * friend request in the same window a share arrives and the total is unchanged
+ * while something genuinely new is sitting there. A missed chime is a benign
+ * failure and a false one is not, so a total would have been defensible; this
+ * costs one loop and avoids both.
+ *
+ * `prev[k] ?? 0` only matters if a source key appears that was not there
+ * before, which the caller's fixed-shape object prevents today. If a third
+ * source is ever added, first sight of it will compare against zero and chime
+ * — which is the right answer for "something new is waiting" and the wrong one
+ * for "the server just started reporting a source it always had". Worth
+ * knowing before adding one.
+ */
+export function anyArrived(
+  prev: Record<string, number> | null,
+  next: Record<string, number>,
+): boolean {
+  if (prev === null) return false;
+  return Object.keys(next).some((k) => announcesArrival(prev[k] ?? 0, next[k]));
+}
+
 export async function getPendingCounts(
   getToken: TokenGetter,
   signal?: AbortSignal,

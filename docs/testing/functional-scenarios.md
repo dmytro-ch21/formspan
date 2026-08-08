@@ -5115,7 +5115,7 @@ not inferred from the absence of an error.
   physical switch flipped.
 - **Play music, then let a rest finish** → the music ducks and comes back. It
   must not stop, and the chime must not vanish underneath it.
-- **Settings → Timer sounds off** → silence, and it survives a relaunch.
+- **Settings → Sounds off** → silence, and it survives a relaunch.
   Toggling it back ON previews the chime immediately.
 - **No microphone permission prompt, ever.** If iOS asks for the microphone,
   `allowsRecording` has been set true somewhere.
@@ -5141,7 +5141,7 @@ your hand and the ringer irrelevant. The record chime still has to be heard.
   on it, and confirming a mis-tap correction is worth as much as confirming the
   tick. Tick, un-tick, tick → three buzzes.
 - **It is a haptic in Settings' sense, not the app's.** There is no in-app
-  preference, and muting Timer sounds must NOT silence it — they are unrelated
+  preference, and muting Sounds must NOT silence it — they are unrelated
   channels now. **On iOS**, turning off System Haptics must silence it:
   `expo-haptics` uses `UISelectionFeedbackGenerator`, which the OS gates. Do
   **not** assert this on Android — the module calls `Vibrator.vibrate` directly
@@ -5176,6 +5176,37 @@ your hand and the ringer irrelevant. The record chime still has to be heard.
   the rows, so the two can never disagree — if you see a record row and hear
   nothing, that IS a regression, but seeing neither is the pre-existing fetch
   race and reproduces without any sound involved.
+
+### The waiting-for-you chime
+
+**This is not a push notification and must not be tested as one.** There is no
+push system — no `expo-notifications`, no token, no APNs. This fires in-app,
+on the YOU tab, when a focus refetch finds MORE waiting than the last count it
+saw. Close the app and nothing happens, by construction.
+
+- **Cold launch with requests already waiting → silence.** Every launch. The
+  first count of a process has nothing to compare against, and a chime there
+  would announce old requests as new on every single open.
+- **Have someone send you a request while the app is open, then return to the
+  YOU tab → one chime.** This is the whole feature. Focus is the trigger, so
+  it lands when you look, not when it arrives.
+- **Focus the tab again without anything changing → silence.** The common path
+  by a wide margin, and the one that decides whether this is a cue or a
+  nuisance.
+- **Answer a request so the count falls → silence.** Rises only.
+- **Go offline, focus the tab, come back online, focus again → silence.** The
+  count endpoint is online-only and a failed fetch must leave the last-seen
+  number untouched. If a blip makes it chime, the failure path is writing 0
+  and then "rising" back — the bug this is guarding against.
+- **Both sources, and only this tab.** Friend requests and shares each chime,
+  because the YOU badge now shows both — the chime follows the badge, so a
+  sound never announces something the screen cannot then show you.
+- **A share arriving while you answer a friend request still chimes.** Totals
+  are unchanged across that swap; the rule compares each source separately, so
+  it must fire. If it does not, the implementation has drifted to comparing
+  sums and the swap is silently invisible.
+- **Muting Sounds silences it** — it goes through `playSound` like every
+  other sound.
 
 ### Known limitation, not a bug
 

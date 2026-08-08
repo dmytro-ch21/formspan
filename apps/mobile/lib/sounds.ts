@@ -15,13 +15,32 @@ import { PREF_SOUNDS, readPref, writePref } from './prefs';
  *
  * **`playsInSilentMode: true` — it rings with the ringer switch off.** The
  * strongest argument against is that silencing a phone is a clear instruction,
- * and normally it would be. It does not apply here: this app never makes an
- * unsolicited sound. Every one of these fires as the direct result of a
- * countdown the athlete started themselves, seconds earlier, and a rest timer
- * you cannot hear is not a rest timer — hearing it is the entire feature. A
- * phone left on silent is the normal state for most people, so respecting the
- * switch would mean the feature silently does nothing for most users. There is
- * an in-app mute for anyone who disagrees, and it is one tap.
+ * and normally it would be. For the timer sounds it does not apply: a rest
+ * timer you cannot hear is not a rest timer, hearing it is the entire feature,
+ * each one fires as the direct result of a countdown the athlete started
+ * seconds earlier, and a phone left on silent is the normal state for most
+ * people — so respecting the switch would mean the feature silently does
+ * nothing for most users.
+ *
+ * **That argument used to say "this app never makes an unsolicited sound", and
+ * that is no longer true.** The arrival cue fires because somebody ELSE sent a
+ * friend request, and it rings on a silenced phone. This is a deliberate
+ * decision rather than an oversight, and it is written down because the
+ * original reasoning would otherwise look like it still covers a case it does
+ * not:
+ *
+ *   - The session is process-wide. `setAudioModeAsync` cannot be made
+ *     per-sound, so the only alternatives were "no arrival cue" or "no timer
+ *     sounds on a silenced phone". Neither is better.
+ *   - The cue only fires with the app FOCUSED and in your hand — it plays as
+ *     you arrive on a screen whose badge is changing in front of you. It is
+ *     not a background alert, and it cannot fire from a pocket.
+ *   - It is one tap to mute, and the toggle now says so.
+ *
+ * If a genuinely unsolicited sound is ever added — one that can fire while the
+ * app is backgrounded — this decision has to be reopened, because at that
+ * point the silent switch is being overridden for something the user has no
+ * part in and cannot see.
  *
  * **`interruptionMode: 'duckOthers'` — it ducks music, never stops it.** People
  * train to their own music. `doNotMix` would kill the track on every rest and
@@ -66,6 +85,7 @@ export const SOUND_NAMES = [
   'sessionComplete',
   'tick',
   'pr',
+  'notification',
 ] as const;
 
 export type SoundName = (typeof SOUND_NAMES)[number];
@@ -81,6 +101,7 @@ const SOURCES: Record<SoundName, number> = {
   sessionComplete: require('@/assets/sounds/session-done.m4a'),
   tick: require('@/assets/sounds/tick.m4a'),
   pr: require('@/assets/sounds/pr.m4a'),
+  notification: require('@/assets/sounds/notification.m4a'),
 };
 
 let players: Partial<Record<SoundName, AudioPlayer>> = {};
