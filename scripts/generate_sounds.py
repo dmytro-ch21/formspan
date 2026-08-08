@@ -122,6 +122,10 @@ BUNDLE = {
     "work-complete": "work-done",
     "session-complete": "session-done",
     "rest-tick": "tick",
+    # The timer four above kept the filenames they shipped under; these two are
+    # new, so they just use the family name.
+    "set-logged": "set-logged",
+    "pr": "pr",
 }
 
 # ---------------------------------------------------------------------------

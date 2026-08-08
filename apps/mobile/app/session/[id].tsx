@@ -55,6 +55,7 @@ import {
 } from '@/lib/sessionStore';
 import { ApiError, isPermanentRejection } from '@/lib/apiError';
 import { report } from '@/lib/report';
+import { playSound } from '@/lib/sounds';
 import {
   describeSet,
   emptySet,
@@ -523,6 +524,14 @@ export default function SessionScreen() {
       ? fillForward(marked, index, measuresFor(catalog.get(exerciseID)?.load_type ?? 'reps'))
       : marked;
     commit(next);
+    // Ticking on only. Un-ticking is a correction, not a confirmation — the
+    // same reason it fills nothing and never starts rest.
+    //
+    // Deliberately NOT in `recordTimedSet`: a work countdown that reaches zero
+    // ticks its own set, and the countdown has already played `workComplete`
+    // by then. Firing this on top would put two sounds in the same moment for
+    // one event, and the louder one already said it.
+    if (now) playSound('setLogged');
     if (now && autoRest) startRest(exerciseID);
   }
 

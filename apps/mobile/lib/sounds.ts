@@ -8,7 +8,7 @@ import { PREF_SOUNDS, readPref, writePref } from './prefs';
  * A named vocabulary rather than file paths at call sites, so a screen asks
  * for "the rest finished" and never for "rest-done.m4a". The files are
  * synthesised by `scripts/generate_sounds.py` — checked in as a recipe, not as
- * four opaque binaries — and bundled locally, because the whole point is a
+ * opaque binaries — and bundled locally, because the whole point is a
  * chime in a basement gym with no signal.
  *
  * ## Three audio-session decisions, none of them defaults
@@ -51,7 +51,25 @@ import { PREF_SOUNDS, readPref, writePref } from './prefs';
  * `Haptics.*(...).catch(() => {})` calls beside it.
  */
 
-export type SoundName = 'restComplete' | 'workComplete' | 'sessionComplete' | 'tick';
+/**
+ * Every sound, named once.
+ *
+ * The array is the source of truth and `SoundName` derives from it, rather
+ * than the other way round, so that a test can assert "a player exists for
+ * every sound" without hard-coding how many there are. It used to be a bare
+ * union against `toHaveLength(4)`, which meant adding a sound failed three
+ * unrelated tests that had no opinion about the new sound at all.
+ */
+export const SOUND_NAMES = [
+  'restComplete',
+  'workComplete',
+  'sessionComplete',
+  'tick',
+  'setLogged',
+  'pr',
+] as const;
+
+export type SoundName = (typeof SOUND_NAMES)[number];
 
 /**
  * `require` rather than a path string: Metro resolves these at build time and
@@ -63,6 +81,8 @@ const SOURCES: Record<SoundName, number> = {
   workComplete: require('@/assets/sounds/work-done.m4a'),
   sessionComplete: require('@/assets/sounds/session-done.m4a'),
   tick: require('@/assets/sounds/tick.m4a'),
+  setLogged: require('@/assets/sounds/set-logged.m4a'),
+  pr: require('@/assets/sounds/pr.m4a'),
 };
 
 let players: Partial<Record<SoundName, AudioPlayer>> = {};

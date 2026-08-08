@@ -15729,6 +15729,63 @@ open tab forever.
   tests only.
 
 
+## 2026-08-07 — Two more sounds get wired up
+
+`setLogged` and `pr` come out of the un-bundled thirteen and into the app. Six
+sounds bundled now, still out of a family of seventeen.
+
+### Where each one fires, and the one place it deliberately does not
+
+`setLogged` goes in `toggleDone`, gated on ticking *on*. Un-ticking stays
+silent, which is the same rule the screen already applies to prefill and to the
+rest timer: un-ticking is a correction, not a confirmation.
+
+It is deliberately **not** in `recordTimedSet`. A work countdown that reaches
+zero ticks its own set, and `Countdown` has already played `workComplete` by
+then — so putting the set chime there too would fire two sounds for one event,
+and the louder one has already said it. That is the whole reason the wiring is
+two call sites rather than one shared "a set became complete" hook.
+
+`pr` goes in `SessionCelebration`, in its own effect rather than the mount one,
+because the records are not there when the card opens — they need the network
+and arrive a moment later, which is why the record rows animate in instead of
+being part of the first paint. That lag usually separates the two sounds on its
+own, but a cached response would fire both in the same frame, so a 1100 ms delay
+makes the ordering a property rather than a race: `sessionComplete` runs ~1.9 s
+and the PR chime lands on its tail rather than its attack.
+
+**Offline it stays silent, and that is the feature.** `recordsFromSession`
+returns empty without a network, so a genuine PR logged in a basement gym gets
+the session chime and nothing else. The alternative — the phone deciding
+locally that something was a record — would be a second opinion that can
+disagree with the records screen, and a chime fired on a guess is worse than no
+chime.
+
+### The test that hard-coded four
+
+Adding two sounds turned three tests red that had no opinion about the new
+sounds: `preloads every sound once` and two siblings asserted
+`toHaveLength(4)`. Bumping it to six would have bought exactly one more sound
+before the same thing happened again.
+
+`SOUND_NAMES` is now an exported `as const` array, `SoundName` derives from it,
+and the tests assert against `SOUND_NAMES.length`. `SOURCES` stays
+`Record<SoundName, number>`, so a name without a file is still a compile error.
+Mutation-checked rather than assumed: making the preload loop skip one sound
+turns all three red again.
+
+### Open, and deliberately so
+
+- **`setLogged` has no preference of its own.** It rides the single Timer sounds
+  toggle with everything else, so an athlete who wants rest chimes but not a
+  noise on every set has to choose. It fires 20+ times a session — far more than
+  anything else in the family — and it is levelled ~10 dB below the rest chime
+  for that reason, but whether that is enough is a judgement nobody can make
+  from a spectrum. If it wears, a second toggle is the answer, not a quieter
+  file.
+- Neither has been heard on a phone yet, same caveat as the sounds themselves.
+
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
