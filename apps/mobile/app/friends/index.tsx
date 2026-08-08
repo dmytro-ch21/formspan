@@ -15,6 +15,7 @@ import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { ApiError, isNotFound } from '@/lib/apiError';
+import { playSound } from '@/lib/sounds';
 import {
   acceptRequest,
   lookupUser,
@@ -125,12 +126,21 @@ export default function FriendsScreen() {
     }
   }
 
-  async function act(key: string, fn: () => Promise<void>) {
+  /*
+    `confirms` is opt-in per call site rather than something derived from the
+    key, because three of the five actions routed through here are removals —
+    decline, cancel, unfriend. A chime on those would celebrate ending a
+    friendship, and keying off the string prefix would make that one typo away.
+  */
+  async function act(key: string, fn: () => Promise<void>, opts?: { confirms?: boolean }) {
     if (busy) return;
     setBusy(key);
     setActionError(null);
     try {
       await fn();
+      // After the call, before the reload: the action is done once `fn`
+      // resolves, and a failed refresh does not undo it.
+      if (opts?.confirms) playSound('success');
       await load();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
@@ -221,7 +231,9 @@ export default function FriendsScreen() {
             ) : (
               <Pressable
                 onPress={() =>
-                  void act(`add-${result.username}`, () => sendFriendRequest(getToken, result.username))
+                  void act(`add-${result.username}`, () => sendFriendRequest(getToken, result.username), {
+                    confirms: true,
+                  })
                 }
                 disabled={busy !== null}
                 accessibilityRole="button"
@@ -252,7 +264,11 @@ export default function FriendsScreen() {
                   {c.display_name && <Text style={styles.muted}>{c.display_name}</Text>}
                 </RNView>
                 <Pressable
-                  onPress={() => void act(`accept-${c.username}`, () => acceptRequest(getToken, c.username))}
+                  onPress={() =>
+                    void act(`accept-${c.username}`, () => acceptRequest(getToken, c.username), {
+                      confirms: true,
+                    })
+                  }
                   disabled={busy !== null}
                   accessibilityRole="button"
                   accessibilityLabel={`Accept ${c.username}`}

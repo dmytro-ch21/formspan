@@ -28,6 +28,9 @@ jest.mock('@/lib/friends', () => ({
   listFriends: (...a: unknown[]) => mockListFriends(...a),
 }));
 
+const mockPlay = jest.fn();
+jest.mock('@/lib/sounds', () => ({ playSound: (...a: unknown[]) => mockPlay(...a) }));
+
 const mockShareResource = jest.fn((..._a: unknown[]): Promise<void> => Promise.resolve());
 jest.mock('@/lib/shares', () => ({
   ...jest.requireActual('@/lib/shares'),
@@ -49,6 +52,7 @@ const friend = (username: string, display_name: string | null = null) => ({
 beforeEach(() => {
   mockListFriends.mockReset().mockResolvedValue([friend('rhonda')]);
   mockShareResource.mockReset().mockResolvedValue(undefined);
+  mockPlay.mockReset();
 });
 
 async function openSheet() {
@@ -133,4 +137,39 @@ it('sends the resource it was given, not one it inferred', async () => {
       'w1',
     ),
   );
+});
+
+it('confirms a send out loud — there is no toast, only a row changing to "Sent ✓"', async () => {
+  await openSheet();
+  fireEvent.press(await screen.findByTestId('share-to-rhonda'));
+
+  expect(await screen.findByText('Sent ✓')).toBeTruthy();
+  expect(mockPlay).toHaveBeenCalledWith('success');
+});
+
+it('confirms an "already sent" the same way, because the outcome is the same', async () => {
+  // A 409 means it is already sitting unanswered in their inbox — what the
+  // sender wanted, and what the UI already renders identically. A silent
+  // second tap would read as the press having missed.
+  mockShareResource.mockRejectedValue(
+    new ApiError("you already sent them this, and they haven't answered yet", 'already_exists', 409),
+  );
+
+  await openSheet();
+  fireEvent.press(await screen.findByTestId('share-to-rhonda'));
+
+  expect(await screen.findByText('Sent ✓')).toBeTruthy();
+  expect(mockPlay).toHaveBeenCalledWith('success');
+});
+
+it('stays silent when the send really failed', async () => {
+  // The case that makes the other two mean anything: a confirmation that also
+  // plays on failure is not a confirmation.
+  mockShareResource.mockRejectedValue(new ApiError('the server fell over', 'internal', 500));
+
+  await openSheet();
+  fireEvent.press(await screen.findByTestId('share-to-rhonda'));
+
+  await waitFor(() => expect(screen.getByText(/fell over/)).toBeTruthy());
+  expect(mockPlay).not.toHaveBeenCalled();
 });

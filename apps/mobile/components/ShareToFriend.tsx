@@ -11,6 +11,7 @@ import {
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { ApiError } from '@/lib/apiError';
+import { playSound } from '@/lib/sounds';
 import { listFriends, type FriendCard } from '@/lib/friends';
 import { shareResource } from '@/lib/shares';
 import { useAccent } from '@/lib/AccentProvider';
@@ -91,12 +92,20 @@ export function ShareToFriend({
       try {
         await shareResource(getToken, username, resourceType, resourceId);
         setSentTo((prev) => [...prev, username]);
+        // The one place a send is confirmed. There is no toast in this app —
+        // the only other signal is a row quietly changing to "Sent", which is
+        // easy to miss on a list you are about to close.
+        playSound('success');
       } catch (err) {
         // A 409 says it is ALREADY sitting unanswered in their inbox — the
         // outcome the sender wanted. Reporting it in red would make a no-op
         // look like a failure. `code` is contract; the message is not.
         if (err instanceof ApiError && err.code === 'already_exists') {
           setSentTo((prev) => [...prev, username]);
+          // Chimes here too. A 409 means it is ALREADY in their inbox, which
+          // is the outcome the sender wanted — the UI already treats the two
+          // identically, and a silent success would read as the tap missing.
+          playSound('success');
         } else {
           setError(err instanceof Error ? err.message : String(err));
         }

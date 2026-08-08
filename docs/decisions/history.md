@@ -16576,8 +16576,6 @@ cannot know what the week holds, and a guessed streak is a claim that the
 records screen might then contradict.
 
 
-## Open items / known gaps as of this entry
-
 ## 2026-08-07 — A friends' feed, and the first time one athlete can read another's training
 
 Every read of `sessions` in this system has been `WHERE user_id = $1`, without
@@ -16787,6 +16785,75 @@ not something to automate; the browser extension that carries a real session
 was not connected. So the layout, the token colours in both themes, and the
 two-step remove's live region are unverified — everything about how it *looks*
 rests on it being the same markup vocabulary as its tokenised siblings.
+
+## 2026-08-08 — A confirmation sound, and the four places that deserved one
+
+`success` joins the bundle (eight of seventeen). The wiring was trivial; the
+useful part was discovering that "generic confirmation" had almost nowhere
+generic to go.
+
+### Most of what looks like a confirmation is not one
+
+The obvious reading is "chime when something saves". The codebase disagrees in
+three separate ways:
+
+- **The saves are autosaves.** `saveLocalSets`, `saveLocalBjjDetail` and
+  `saveLocalWorkoutItems` fire continuously while you edit. A chime there is
+  `set-logged` again — the sound pulled after a single PR for firing 20+ times
+  a session.
+- **The deliberate confirmations already have feedback.** Finishing, deleting:
+  all go through `HoldToConfirm`, which has fired a success haptic since it was
+  written. A sound on top would double up.
+- **There is no toast system.** Confirmations are inline state changes, which
+  is precisely why some of them are missable.
+
+What survived was the social layer — sending a share, accepting one, sending a
+friend request, accepting one. **Four discrete, user-initiated, once-per-action
+moments with no haptic and no sound at all**, the only part of the app where a
+confirmation genuinely had nothing to say it had happened. Pleasing symmetry
+too: `success` when you send, `notification` on their phone when it lands.
+
+### Three of the five friend actions are removals
+
+`act()` on the friends screen routes add, accept, decline, cancel and unfriend
+through one helper, and the last three all call `removeFriend`. Hooking it
+wholesale — or keying off the action name, which is sitting right there in the
+`key` string — would have made unfriending somebody play a happy noise.
+
+`confirms` is therefore opt-in per call site, passed by exactly two of five.
+That is the kind of rule that survives review and dies later to a convenience
+refactor, so a test presses Decline and asserts silence; confirming
+unconditionally in `act()` turns it red. The friends screen had no test file at
+all before this.
+
+The other easy mistake is the 409. "Already in their inbox" is an ERROR to the
+type system and a SUCCESS to the athlete, so it chimes — while a genuine
+failure does not, and a chime moved into `finally` reddens that test.
+
+### Review found the two moments I had not pinned
+
+The first pass tested three of the four and the entry claimed all of them,
+which was an overstatement rather than a rounding error: the shared screen had
+no failure-silence test (so moving its chime *above* the await reddened
+nothing) and nothing pressed Add at all (so dropping `confirms: true` from that
+call site reddened nothing). Both now exist and both were mutation-checked.
+
+The lesson is narrow and worth keeping: "mutation-tested" is a claim about each
+guard, not about a diff. Three guards checked and one absent still reads as
+covered right up until the untested one silently disappears.
+
+### And the heading, a fourth time
+
+`## Open items / known gaps as of this entry` was stranded again on `main`, this
+time with TWO entries below it and its list orphaned at the very end. The
+convention documented two days ago — append immediately before the heading —
+is right, but the branches that landed in between were cut before it existed,
+so they appended after. This entry restores the heading above its list and
+sits, correctly, before it. That should be the last repair: every branch open
+now postdates the rule.
+
+
+## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
 - **Two position taxonomies now sit on one Library screen.** The filter chips are nine coarse families; the glossary is eleven curated entries. Since the guard split they disagree in a visible way: a beginner can read the Closed Guard card, learn the distinction, and then find no chip that filters to those 37 techniques. Adding North-South, and later Leg Entanglement, closed the cheap half each time (a position the glossary advertised that no chip could reach) — but doing it twice by hand is the evidence that hand-maintenance is the actual bug: the vocabulary is copied across four client files and one backend map, and the taxonomy PR updated one of the four until review caught it. Keying the chips on the glossary's ids, or a shared constant with a test asserting it matches positions.json, is the real answer and is design work, not a patch.
