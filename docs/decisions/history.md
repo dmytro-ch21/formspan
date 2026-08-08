@@ -16259,8 +16259,6 @@ lesson is that appending before a trailing section is not merge-safe when two
 branches both do it; the list itself has never changed.
 
 
-## Open items / known gaps as of this entry
-
 ## 2026-08-07 — The You header stops overlapping its own wordmark
 
 Reported as *"Friends overlaps with the wordmark"*, and the first useful thing
@@ -16388,6 +16386,64 @@ runs no Yoga pass, so "Settings at 14pt/700 ≈ 55pt" — and therefore the 375p
 collision itself — is unverifiable in the suite. That is an argument for the
 design rather than a hole in it: the fix contains no width constant for a test
 to ratify.
+
+## 2026-08-07 — Two ways the shared test database bites, written down
+
+No code. Two hazards in `CLAUDE.md`, both hit for real this week, plus a repair
+to this file's own structure.
+
+### One `vola_test`, nine worktrees
+
+A branch carrying an unmerged migration runs `migrate up` and leaves the shared
+database ahead of `main`. Every *other* branch then fails with `no migration
+found for version 46` — including branches that have never opened a Go file. It
+presents as a broken checkout and is nothing of the sort.
+
+It happened with `000046_share_training_with_friends`, uncommitted in the
+`social` worktree, which is why `git log --all` knew nothing about it and the
+only way to find the culprit was `find` across the worktrees. Rolled back with
+that branch's own `.down.sql` — their files untouched, and one `migrate up`
+from their worktree restores it.
+
+The fix is per-branch databases (`vola_test_<branch>`), one command, now the
+documented expectation for anyone carrying schema changes. Deliberately NOT
+enforced in code: there is nowhere obvious to put the guard, and a note read at
+the moment of confusion beats a check nobody wired up. Revisit if it recurs.
+
+### `migrate down` means all the way down
+
+`cmd/migrate` takes no step argument. `down` calls golang-migrate's `m.Down()`,
+which unwinds **every** migration and leaves an empty schema — and "down" is
+exactly what somebody wanting to step back one will type. That the obvious
+command for the situation is the destructive one is the whole reason to write
+it down.
+
+The documented alternative pipes the migration's own `.down.sql` plus a
+`schema_migrations` update through `psql` in one transaction. Piped rather than
+heredoc'd deliberately: an unquoted heredoc expands `$$` in any migration
+defining a function body, and `psql`'s `\i` resolves against the container's
+filesystem rather than yours. **The first draft used `\i` and would not have
+worked.** It was caught by running it — on a scratch database, rolling 45 back
+to 44 and then forward again. A recipe in `CLAUDE.md` that has never been
+executed is a liability, and this one nearly shipped as one.
+
+### And the heading that keeps coming apart
+
+Third time. `## Open items / known gaps as of this entry` was stranded again —
+sitting above the You-header entry with its own list orphaned 130 lines below,
+so those gaps read as belonging to whichever entry happened to land under it.
+
+The mechanism is finally clear, and it is not merge bad luck. Entries are
+appended at that heading, and branches have been anchoring on **both sides** of
+it: insert before and the heading keeps its list, insert after and the heading
+is left behind while the list drifts. Two branches doing different things
+reconcile into exactly this. `CLAUDE.md` now says which side — new entries go
+immediately **before** the heading, so the heading and its list stay adjacent
+forever. Repairing it a fourth time without stating the rule would have been
+the actual mistake.
+
+
+## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
 - **Two position taxonomies now sit on one Library screen.** The filter chips are nine coarse families; the glossary is eleven curated entries. Since the guard split they disagree in a visible way: a beginner can read the Closed Guard card, learn the distinction, and then find no chip that filters to those 37 techniques. Adding North-South, and later Leg Entanglement, closed the cheap half each time (a position the glossary advertised that no chip could reach) — but doing it twice by hand is the evidence that hand-maintenance is the actual bug: the vocabulary is copied across four client files and one backend map, and the taxonomy PR updated one of the four until review caught it. Keying the chips on the glossary's ids, or a shared constant with a test asserting it matches positions.json, is the real answer and is design work, not a patch.
