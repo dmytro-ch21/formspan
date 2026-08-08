@@ -16443,6 +16443,46 @@ forever. Repairing it a fourth time without stating the rule would have been
 the actual mistake.
 
 
+## 2026-08-08 — The same migration error, two opposite causes
+
+A correction to yesterday's `CLAUDE.md` entry, made the same day it landed.
+
+That note documented one cause of `no migration found for version NN` — a
+branch's unmerged migration reaching the shared `vola_test` — and told the
+reader to diagnose by comparing the database's version to the highest file in
+`backend/migrations/`, then go hunting for the branch. The social session,
+resolving its half, reported the other cause and it is the more common one:
+
+**A worktree on a stale branch produces a byte-identical error.**
+`.claude/worktrees/library-content` sits on `feat/exercise-parity`, whose
+migrations stop at 000039, so `migrate up` there says `no migration found for
+version 45` against a perfectly healthy database. Same sentence, same shape,
+opposite fix — pull, rather than roll a shared database back.
+
+As written, the guidance would have sent that reader looking for somebody
+else's uncommitted migration and, finding none, possibly reaching for the
+rollback recipe. That turns a stale checkout into a damaged shared database,
+which is worse than the problem the note was written for.
+
+The discriminator is one question, and it is now the first thing the section
+asks: **does that version exist on `main`?** If yes, your branch is behind. If
+it exists nowhere in git, it is somebody's uncommitted migration. Both paths
+are spelled out; neither requires guessing.
+
+Worth naming the failure mode rather than just patching it. The original note
+was written from a real incident, verified by running its own recipe, and still
+generalised from one instance to a rule. A troubleshooting note that names one
+cause reads as complete, and the second cause has to be actively looked for —
+which in this case took another session hitting it and saying so.
+
+Also, incidentally: the local Postgres now holds `vola_test_library`,
+`vola_test_social`, `vola_merge` and `vola_mig` alongside `vola_test`. The
+first two are the per-branch pattern working as documented. The last two look
+like abandoned scratch databases; nobody has claimed them, and they are
+harmless, but they are the kind of thing that accumulates until somebody
+wonders which one is real.
+
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
