@@ -5264,8 +5264,38 @@ you cannot open is a dead end.
   The gap recorded when the counts first shipped — a mobile-only athlete never
   learning a share arrived — is closed; both numbers open something.
 - A failed count leaves the previous number alone — it must not zero, since
-  zero renders no badge and thereby asserts nothing is waiting.
+  zero renders no badge and thereby asserts nothing is waiting. **Test this
+  with a non-zero previous value**: from a cold start both behaviours render
+  nothing, so the honest one and the wrong one look identical. Get a badge
+  showing, go offline, leave the tab and come back — the number must still be
+  there.
+- A count that really does drop to zero DOES clear the badge. Without this the
+  rule above is satisfied by a badge that can never go out.
+- On mobile both badges sit on their rows under **People**, not in the header.
+  At 100 or more the badge reads `99+`, and the row's spoken label says "over
+  99 waiting" — "99+" is not a phrase, and a bare number beside a label is
+  meaningless to hear.
 - Web refetches on route change, not on a timer.
+
+## The You tab's header and rows (mobile)
+
+The header carries the screen name, the wordmark and the sync chip — **and no
+controls**. Edit, Friends, Settings and Sharing are rows in the body.
+
+- **The wordmark is visible and unobstructed on all four tabs.** It is centred
+  absolutely, so anything competing for the row lands on top of it rather than
+  pushing it aside. Check Today, Plan, Library and You.
+- **Check it with the sync chip showing as well as hidden** — go offline, or
+  log something and watch the pending count. The chip is half of the original
+  bug: it used to be placed in the row's interior whenever a third element was
+  present, which is why the fault came and went.
+- **Check at 375pt (iPhone SE) and at Accessibility Large.** These are text
+  labels, so they grow with the system setting; the header must still either
+  fit the wordmark or drop it cleanly, never overlap it. Changing text size and
+  returning to the app has to re-decide — the widths are measured, not read
+  from a snapshot taken at launch.
+- The four destinations all open: Friends, Sharing, Edit profile, Settings.
+- With a pending friend request AND a pending share, both rows badge at once.
 
 ## Sharing (`/v1/shares`, both clients' Share control + Sharing screens)
 
