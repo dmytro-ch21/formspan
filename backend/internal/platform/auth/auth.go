@@ -62,6 +62,12 @@ type Rejector func(w http.ResponseWriter, r *http.Request, policy string, retryA
 // Optional — a nil limiter leaves every request unlimited, which is what the
 // tests and any future no-limit deployment want.
 func (v *Verifier) UseLimiter(l Limiter, reject Rejector) {
+	// A limiter with no rejector would panic on the FIRST refusal — long
+	// after boot, on the one code path nobody exercises by hand. Refusing the
+	// combination here turns that into an immediate, obvious failure.
+	if l != nil && reject == nil {
+		panic("auth: UseLimiter needs a rejector to write the 429")
+	}
 	v.limiter = l
 	v.reject = reject
 }

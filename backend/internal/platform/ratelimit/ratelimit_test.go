@@ -230,6 +230,39 @@ func TestMiddlewareLetsUnidentifiedRequestsThrough(t *testing.T) {
 	}
 }
 
+// The Burst clamp is load-bearing and had NO failing test: review deleted it
+// and the whole suite stayed green, because the only Burst-0 fixture was the
+// fail-open test, whose key func returns false so Allow never runs. Without
+// the clamp a Burst-0 policy rejects 100% of its traffic forever.
+func TestABurstOfZeroIsClampedRatherThanBlockingEverything(t *testing.T) {
+	c := newClock()
+	l := New(Policy{Name: "p", Burst: 0, Every: time.Second}, c.now)
+	if ok, _ := l.Allow("u1"); !ok {
+		t.Fatalf("a Burst-0 policy refused its very first request")
+	}
+}
+
+// A non-positive Every is refused at construction, loudly.
+//
+// The two bad values fail in opposite directions and only one is survivable:
+// zero divides into an infinite refill and silently DISABLES the limit, while
+// negative makes the refill DRAIN the bucket, so after the first burst every
+// request 429s forever with a Retry-After that waiting can never satisfy. On
+// the default policy that is a total authenticated-API outage from a sign
+// typo — which is why this panics at boot rather than clamping quietly.
+func TestNonPositiveEveryIsRefusedAtConstruction(t *testing.T) {
+	for _, every := range []time.Duration{0, -time.Second} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Fatalf("New accepted Every=%v", every)
+				}
+			}()
+			New(Policy{Name: "p", Burst: 5, Every: every}, nil)
+		}()
+	}
+}
+
 func contains(haystack, needle string) bool {
 	return len(haystack) >= len(needle) && (func() bool {
 		for i := 0; i+len(needle) <= len(haystack); i++ {

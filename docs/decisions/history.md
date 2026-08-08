@@ -16023,6 +16023,40 @@ we ever had" is still a ceiling. The sweeper drops only buckets that have
 refilled to FULL: dropping a partly-spent one hands back a fresh burst, which
 is exactly the reset an abuser wants — go quiet, come back full. Pinned.
 
+### What review changed
+
+One **blocking**: the contract's `Error` schema has a closed `code` enum, and
+`rate_limited` was not in it — so every 429 body violated the spec's own
+schema. `lint:openapi` cannot catch that; it is structural, and spec-vs-code
+drift is manual discipline here. The `apihttp.go` comment even said adding the
+code was "a deliberate contract change rather than an implementation detail",
+and then the contract half was not made. The doc line restating the codes was
+worse: it had ALREADY rotted, missing `forbidden` long before it was missing
+`rate_limited`, so it now points at the enum instead of restating it.
+
+**A sign typo would have taken the whole API down.** `New` clamped `Burst` but
+not `Every`. `Every == 0` divides into an infinite refill and silently
+disables the policy; `Every < 0` makes the refill DRAIN the bucket, so after
+the first burst every request 429s forever with a `Retry-After` that waiting
+can never satisfy — on the default policy, on every authenticated route. Both
+are boot-time literals, so `New` panics on a non-positive `Every` rather than
+clamping quietly.
+
+**And my own comment was wrong in a way that cost coverage.** This file claimed
+the verified path was untestable without a live JWKS. `Verify` calls exactly
+one method of `keyfunc.Keyfunc`, so an in-package fake drives it entirely
+offline — and everything the claim excused went untested: that a verified
+request spends exactly one token charged to the verified subject, that an
+exhausted budget rejects before the handler, and that a nil limiter does not
+panic. The old no-limiter test could not fail at all, since the nil guard sits
+after `Verify` and the test never authenticated. All three are real tests now,
+including a forged token signed by the wrong key and naming a victim — the
+attack the ordering exists to stop.
+
+Two more guards had no failing test and do now: the `Burst < 1` clamp (without
+it a Burst-0 policy refuses 100% of traffic forever) and charging the verified
+subject rather than the raw header.
+
 ### A test that could not fail
 
 Worth recording. The Retry-After rounding test used a 3-second refill, so the
@@ -16039,6 +16073,8 @@ that the hint rounds up AND that waiting the rounded-down value still fails.
   and IP is the only key available there — with the shared-NAT caveat.
 - The numbers have never met real traffic. The logging is what turns them from
   guesses into something tunable.
+- The two tight limiters are swept alongside the default now; a "smaller
+  leak" is still the leak the sweeper exists to not have.
 - No `X-RateLimit-*` headers on successful responses. Clients cannot see how
   much budget is left, only that it ran out. Cheap to add if a client wants to
   pace itself.

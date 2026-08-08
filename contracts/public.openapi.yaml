@@ -246,6 +246,7 @@ components:
                 - forbidden
                 - not_found
                 - already_exists
+                - rate_limited
                 - internal
             message:
               type: string

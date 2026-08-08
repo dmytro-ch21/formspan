@@ -101,13 +101,6 @@ func main() {
 	// anything an attacker picks, but a ceiling of "everyone we ever had" is
 	// still a ceiling worth not having. Sweeping drops only FULL buckets, so
 	// it can never hand somebody a fresh burst by forgetting them.
-	go func() {
-		for range time.Tick(10 * time.Minute) {
-			if n := defaultLimiter.Sweep(30 * time.Minute); n > 0 {
-				logger.Info("ratelimit: swept idle buckets", "dropped", n, "remaining", defaultLimiter.Len())
-			}
-		}
-	}()
 
 	// Tighter budgets for the two writes that put something in ANOTHER
 	// person's inbox — the abuse the residuals kept naming. A friend request
@@ -124,12 +117,29 @@ func main() {
 		}
 		return claims.UserID, true
 	}
-	limitFriendRequests := ratelimit.Middleware(ratelimit.New(ratelimit.Policy{
+	friendRequestLimiter := ratelimit.New(ratelimit.Policy{
 		Name: "friend_request", Burst: 10, Every: 6 * time.Minute,
-	}, nil), byUser)
-	limitShares := ratelimit.Middleware(ratelimit.New(ratelimit.Policy{
+	}, nil)
+	shareLimiter := ratelimit.New(ratelimit.Policy{
 		Name: "share", Burst: 30, Every: 2 * time.Minute,
-	}, nil), byUser)
+	}, nil)
+	limitFriendRequests := ratelimit.Middleware(friendRequestLimiter, byUser)
+	limitShares := ratelimit.Middleware(shareLimiter, byUser)
+
+	// ALL THREE, not just the default. The two tight maps are smaller — only
+	// athletes who ever sent a request or a share — but "smaller leak" is
+	// still the leak this sweeper exists to not have, and review pointed out
+	// that sweeping one of three quietly reads as sweeping all of them.
+	sweepable := []*ratelimit.Limiter{defaultLimiter, friendRequestLimiter, shareLimiter}
+	go func() {
+		for range time.Tick(10 * time.Minute) {
+			for _, l := range sweepable {
+				if n := l.Sweep(30 * time.Minute); n > 0 {
+					logger.Info("ratelimit: swept idle buckets", "policy", l.PolicyName(), "dropped", n, "remaining", l.Len())
+				}
+			}
+		}
+	}()
 
 	sequenceRepo := sequence.NewPostgresRepository(pool)
 	friendRepo := friend.NewPostgresRepository(pool)

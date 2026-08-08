@@ -85,8 +85,28 @@ func New(p Policy, now func() time.Time) *Limiter {
 	if now == nil {
 		now = time.Now
 	}
+	// Burst clamps quietly: 0 means "allow nothing, forever", which is never
+	// what anybody meant to configure and is harmless to round up to 1.
 	if p.Burst < 1 {
 		p.Burst = 1
+	}
+	// Every PANICS, and the asymmetry is deliberate — the two bad values fail
+	// in opposite directions and only one of them is survivable.
+	//
+	// Every == 0 divides by zero into an infinite refill, silently DISABLING
+	// the policy: the limit quietly does nothing.
+	//
+	// Every < 0 makes the refill DRAIN the bucket as time passes, so after
+	// the first burst every request 429s forever with a Retry-After that
+	// waiting can never satisfy. On the default policy — which every
+	// authenticated route depends on — a single sign typo is a total API
+	// outage that no amount of client backoff escapes.
+	//
+	// Both are boot-time configuration, fixed literals at a call site nobody
+	// reaches at runtime, so failing loudly at startup costs nothing and
+	// turns the worse of the two from a mystery outage into a stack trace.
+	if p.Every <= 0 {
+		panic("ratelimit: policy " + p.Name + " has a non-positive Every; a negative one drains the bucket and 429s forever")
 	}
 	return &Limiter{policy: p, now: now, buckets: map[string]*bucket{}}
 }
@@ -168,6 +188,10 @@ func (l *Limiter) Sweep(idle time.Duration) int {
 	}
 	return dropped
 }
+
+// PolicyName identifies which limit a log line is about — the sweeper logs
+// three of these and they are indistinguishable otherwise.
+func (l *Limiter) PolicyName() string { return l.policy.Name }
 
 // Len is the number of tracked buckets, for the sweeper's log line and tests.
 func (l *Limiter) Len() int {

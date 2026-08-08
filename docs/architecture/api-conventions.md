@@ -51,7 +51,7 @@ Every error response, from every endpoint, shares one shape:
 
 `code` is a stable, machine-readable token — it's part of the API contract (mirrored in `contracts/public.openapi.yaml`'s `Error` schema `enum`), and renaming one is a breaking change requiring a version bump. `message` is for humans and may reword between releases; clients must not pattern-match on it.
 
-Current codes: `invalid_input`, `unauthorized`, `not_found`, `already_exists`, `internal`.
+Current codes: see the `Error` schema's `enum` in [contracts/public.openapi.yaml](../../contracts/public.openapi.yaml) — that enum is the single source. This line used to restate them and rotted twice: it was missing `forbidden` long before it was missing `rate_limited`, because nothing made restating them stay true.
 
 **Never leak internal error details in a 500.** An unmapped/unexpected error is logged server-side with its real detail and returns only a generic `{"error": {"code": "internal", "message": "internal error"}}` to the client — raw database errors, stack traces, or other implementation details must never reach the response body. See `internal/platform/apihttp.WriteError` and how `profile.writeError` uses it.
 
