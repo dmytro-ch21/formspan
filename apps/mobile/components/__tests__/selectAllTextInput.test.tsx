@@ -50,9 +50,12 @@ describe('selectAllRange', () => {
   });
 
   it('is an empty range for an empty value, not a null', () => {
-    // A new workout opens its rename field on a blank name. Selecting nothing
-    // is correct; returning undefined would make the field uncontrolled and
-    // quietly reintroduce the caret-at-end behaviour for that one case.
+    // Not because an empty value can be got wrong on screen — for empty text a
+    // caret at the end and {0,0} are the same position, so nothing visible
+    // hangs on this. It is the SHAPE that matters: returning undefined here
+    // would make the field uncontrolled from mount, and "controlled from mount"
+    // is the property the whole fix rests on. A future edit that special-cases
+    // the empty string would be reintroducing the race for one input.
     expect(selectAllRange('')).toEqual({ start: 0, end: 0 });
   });
 });

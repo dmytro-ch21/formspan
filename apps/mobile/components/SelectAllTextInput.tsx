@@ -76,7 +76,11 @@ export function SelectAllTextInput({
   onChangeText,
   onSelectionChange,
   ...props
-}: TextInputProps) {
+}: /* `selection` omitted: this component owns it, and a caller passing one
+      would be silently discarded by the explicit prop below. A compile error
+      is the honest answer — the whole point here is that the selection is
+      stated in exactly one place. */
+Omit<TextInputProps, 'selection'>) {
   // Lazy initialiser, so the range is the value the field opened with rather
   // than whatever it holds on a later render.
   const [selection, setSelection] = useState<Range | undefined>(() => selectAllRange(value ?? ''));

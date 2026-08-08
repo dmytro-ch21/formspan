@@ -51,6 +51,15 @@ const IMPORTS_MODULE = /from ['"]@\/components\/KeyboardAwareScroll['"]/;
  */
 const OPT_OUT = 'keyboard-container: provided by parent';
 
+/**
+ * What counts as "this file takes typing".
+ *
+ * A list rather than one literal because a wrapper around `TextInput` is
+ * invisible to a substring search for the thing it wraps. Add the tag whenever
+ * a new input wrapper appears, or its call sites silently leave the scan.
+ */
+const INPUT_TAGS = ['<TextInput', '<SelectAllTextInput'];
+
 function tsxFilesUnder(dir: string): string[] {
   const out: string[] = [];
   const walk = (d: string) => {
@@ -73,7 +82,14 @@ const screensWithInputs = SEARCH_DIRS.flatMap((d) => tsxFilesUnder(join(MOBILE_R
   // `<TextInput` rather than `TextInput`, so a file that merely mentions the
   // name in a comment or a type import is not dragged in. `SwipeToDelete.tsx`
   // is exactly that case and would otherwise be a permanent false positive.
-  .filter(({ source }) => source.includes('<TextInput'))
+  //
+  // `<SelectAllTextInput` counts as an input too, and leaving it out would have
+  // been a real hole: a screen using only the wrapper contains no `<TextInput`
+  // at all, so it would escape this scan entirely while taking typing exactly
+  // like the thirteen that do not. The wrapper carries `OPT_OUT` for ITSELF —
+  // that is a claim about a leaf component with no scroll container, not a
+  // licence for the screens that render it.
+  .filter(({ source }) => INPUT_TAGS.some((tag) => source.includes(tag)))
   .map(({ path, source }) => ({ file: relative(MOBILE_ROOT, path), source }));
 
 describe('keyboard handling reaches every screen that takes typing', () => {
