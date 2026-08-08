@@ -2444,6 +2444,17 @@ most of the value is in the floor working alone.
   and a build where it is slower or hidden has lost the point of the screen.
 - Re-saving the same reflection (a retry, a second sync) does not duplicate
   its tags — the whole set is replaced, not appended.
+- **Note step, keyboard up:** focusing either free-text field keeps that field
+  visible, keeps the Skip/Save footer above the keyboard and reachable, and
+  leaves **no band of blank** between the last line of content and the footer.
+  The blank is the regression to watch: the footer's padding already shortens
+  the scroll view clear of the keyboard, so a scroll view that *also* carries
+  the platform's keyboard inset ends up with scroll range that has nothing in
+  it. A field already clearing the keyboard should not scroll the step at all.
+- The same screen, **drilled** step, whose content is long enough to scroll:
+  with the search keyboard up the last result stays reachable. That is the
+  other side of the same trade — the platform inset has to stay on for
+  scrollables that have no footer, or those screens lose their reach.
 
 #### The technique funnel (`drilled → attempted → scored`)
 

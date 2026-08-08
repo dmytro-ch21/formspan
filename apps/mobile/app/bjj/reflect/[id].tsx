@@ -12,6 +12,7 @@ import {
 
 import {
   KeyboardAwareFooter,
+  KeyboardAwareScreen,
   KeyboardAwareScrollView,
 } from '@/components/KeyboardAwareScroll';
 import { LibraryTile, categoryBadge } from '@/components/LibraryTile';
@@ -214,76 +215,82 @@ export default function ReflectScreen() {
   const last = step === STEPS.length - 1;
 
   return (
-    <View style={styles.container} testID="bjj-reflect-screen">
-      <Stack.Screen
-        options={{
-          title: `Step ${step + 1} of ${STEPS.length}`,
-          headerRight: () => (
-            <Pressable onPress={finish} hitSlop={12} accessibilityRole="button" testID="bjj-reflect-done">
-              <Text style={[styles.headerAction, { color: accent.ink }]}>Done</Text>
-            </Pressable>
-          ),
-        }}
-      />
+    /* The scroll view and the footer below it are siblings compensating for
+       the same keyboard. `KeyboardAwareScreen` is how they find that out —
+       without it both do, and the surplus inset shows up as a band of blank
+       between the last line of content and the footer. */
+    <KeyboardAwareScreen>
+      <View style={styles.container} testID="bjj-reflect-screen">
+        <Stack.Screen
+          options={{
+            title: `Step ${step + 1} of ${STEPS.length}`,
+            headerRight: () => (
+              <Pressable onPress={finish} hitSlop={12} accessibilityRole="button" testID="bjj-reflect-done">
+                <Text style={[styles.headerAction, { color: accent.ink }]}>Done</Text>
+              </Pressable>
+            ),
+          }}
+        />
 
-      {/* Progress. Three segments rather than a percentage: the athlete needs
-          to know how much is left, and "60%" of an optional flow means
-          nothing. */}
-      <RNView style={styles.progress} accessible accessibilityLabel={`Step ${step + 1} of ${STEPS.length}`}>
-        {STEPS.map((s, i) => (
-          <RNView
-            key={s.key}
-            style={[
-              styles.progressBar,
-              i <= step && [styles.progressBarOn, { backgroundColor: accent.accent }],
-            ]}
-          />
-        ))}
-      </RNView>
+        {/* Progress. Three segments rather than a percentage: the athlete needs
+            to know how much is left, and "60%" of an optional flow means
+            nothing. */}
+        <RNView style={styles.progress} accessible accessibilityLabel={`Step ${step + 1} of ${STEPS.length}`}>
+          {STEPS.map((s, i) => (
+            <RNView
+              key={s.key}
+              style={[
+                styles.progressBar,
+                i <= step && [styles.progressBarOn, { backgroundColor: accent.accent }],
+              ]}
+            />
+          ))}
+        </RNView>
 
-      <KeyboardAwareScrollView contentContainerStyle={styles.scroll}>
-        {error && (
-          <Text style={styles.error} accessibilityLiveRegion="polite">
-            {error}
-          </Text>
-        )}
+        <KeyboardAwareScrollView contentContainerStyle={styles.scroll}>
+          {error && (
+            <Text style={styles.error} accessibilityLiveRegion="polite">
+              {error}
+            </Text>
+          )}
 
-        <Text style={styles.stepTitle}>{current.title}</Text>
-        <Text style={styles.stepBlurb}>{current.blurb}</Text>
+          <Text style={styles.stepTitle}>{current.title}</Text>
+          <Text style={styles.stepBlurb}>{current.blurb}</Text>
 
-        {current.key === 'drilled' && (
-          <DrilledStep
-            userID={userId ?? ''}
-            detail={detail} onChange={persist} getToken={getToken} />
-        )}
-        {current.key === 'live' && <LiveStep detail={detail} onChange={persist} getToken={getToken} />}
-        {current.key === 'note' && <NoteStep detail={detail} onChange={persistSoon} />}
-      </KeyboardAwareScrollView>
+          {current.key === 'drilled' && (
+            <DrilledStep
+              userID={userId ?? ''}
+              detail={detail} onChange={persist} getToken={getToken} />
+          )}
+          {current.key === 'live' && <LiveStep detail={detail} onChange={persist} getToken={getToken} />}
+          {current.key === 'note' && <NoteStep detail={detail} onChange={persistSoon} />}
+        </KeyboardAwareScrollView>
 
-      {/* A footer, not an RNView: it is a SIBLING of the scroll view, so the
-          keyboard inset that rescues the list above cannot reach it. On the
-          note step — the one step whose whole content is a text field — the
-          keyboard sat straight over the only control that finishes the
-          wizard. */}
-      <KeyboardAwareFooter style={styles.footer}>
-        <Pressable
-          onPress={() => (last ? finish() : setStep((s) => s + 1))}
-          style={styles.skip}
-          accessibilityRole="button"
-          testID="bjj-reflect-skip"
-        >
-          <Text style={styles.skipText}>{last ? 'Skip' : 'Skip this'}</Text>
-        </Pressable>
-        <Pressable
-          onPress={() => (last ? finish() : setStep((s) => s + 1))}
-          style={[styles.next, { backgroundColor: accent.accent }]}
-          accessibilityRole="button"
-          testID="bjj-reflect-next"
-        >
-          <Text style={[styles.nextText, { color: accent.on }]}>{last ? 'Save it' : 'Next'}</Text>
-        </Pressable>
-      </KeyboardAwareFooter>
-    </View>
+        {/* A footer, not an RNView: it is a SIBLING of the scroll view, so the
+            keyboard inset that rescues the list above cannot reach it. On the
+            note step — the one step whose whole content is a text field — the
+            keyboard sat straight over the only control that finishes the
+            wizard. */}
+        <KeyboardAwareFooter style={styles.footer}>
+          <Pressable
+            onPress={() => (last ? finish() : setStep((s) => s + 1))}
+            style={styles.skip}
+            accessibilityRole="button"
+            testID="bjj-reflect-skip"
+          >
+            <Text style={styles.skipText}>{last ? 'Skip' : 'Skip this'}</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => (last ? finish() : setStep((s) => s + 1))}
+            style={[styles.next, { backgroundColor: accent.accent }]}
+            accessibilityRole="button"
+            testID="bjj-reflect-next"
+          >
+            <Text style={[styles.nextText, { color: accent.on }]}>{last ? 'Save it' : 'Next'}</Text>
+          </Pressable>
+        </KeyboardAwareFooter>
+      </View>
+    </KeyboardAwareScreen>
   );
 }
 

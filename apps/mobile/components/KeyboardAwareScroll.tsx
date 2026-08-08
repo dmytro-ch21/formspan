@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
@@ -171,9 +172,12 @@ export function dismissModeFor(os: string): 'interactive' | 'on-drag' {
 /**
  * Where to scroll so a field clears the keyboard, or null to leave it alone.
  *
- * Pure, because it is the only arithmetic here and `apps/mobile` has no
- * component test runner — extracting it is the difference between this being
- * covered and being hoped about.
+ * Pure, because it is the only arithmetic worth pinning here — extracting it
+ * is the difference between this being covered and being hoped about. (This
+ * used to add "and `apps/mobile` has no component test runner", which stopped
+ * being true: `screenHeader.test.tsx` and `keyboardFooterCoordination.test.tsx`
+ * both render. Rendering still cannot produce a keyboard or a Yoga pass, so
+ * the arithmetic is still better off out here.)
  */
 export function scrollTargetFor(a: {
   /** Field's absolute Y on screen. */
@@ -384,14 +388,95 @@ function useKeyboardAware(scrollToY: (y: number) => void) {
 const scrollDefaults = {
   keyboardShouldPersistTaps: 'handled',
   keyboardDismissMode: dismissModeFor(Platform.OS),
-  /**
-   * The fix for problem 2, and the reason these wrappers exist at all.
-   * iOS-only by design — see the note at the top for why Android needs
-   * nothing here.
-   */
-  automaticallyAdjustKeyboardInsets: true,
   scrollEventThrottle: 16,
 } as const;
+
+/**
+ * Does this scroll view still need the platform's keyboard inset?
+ *
+ * **Only when nothing else has already shortened it.** `automaticallyAdjust‑
+ * KeyboardInsets` is the fix for problem 2, but it is not the only thing that
+ * can solve problem 2, and running it alongside something that already has is
+ * where the fourth failure mode came from:
+ *
+ * A `KeyboardAwareFooter` sibling pads itself by the keyboard's height, and
+ * because it is the last child of a `flex: 1` column that padding SHRINKS the
+ * scroll view — whose bottom now sits above the keyboard, exactly as Android's
+ * `resize` mode arranges by itself. At that point the honest inset is zero.
+ *
+ * But the native inset was computed one frame earlier, from the frame the
+ * scroll view had BEFORE the footer grew, so it is the full pre-shrink overlap
+ * and it stays. The scroll view ends up carrying a keyboard-height of inset it
+ * no longer overlaps, which is legal scroll range with nothing in it: focusing
+ * the note field scrolled the wizard's title off the top and parked ~200pt of
+ * blank between the last line of content and the footer. Measured on an iPhone
+ * 15 Pro: footer lift 328pt, surplus inset 246pt, void ~200pt.
+ *
+ * This is the same double-count the file already refuses on Android, where the
+ * window resize does the shortening — see `keyboardInsetFor`. One compensation
+ * per scroll view, whichever one is doing it.
+ */
+export function needsPlatformKeyboardInset(a: { hasLiftingFooter: boolean }): boolean {
+  return !a.hasLiftingFooter;
+}
+
+/**
+ * Whether a `KeyboardAwareFooter` shares this screen with the scroll view.
+ *
+ * A context because the two are SIBLINGS — the footer cannot be a descendant
+ * of the scroll view (that is the whole reason it exists), so neither can
+ * discover the other by nesting. `KeyboardAwareScreen` is the common parent
+ * that lets them agree on who is compensating.
+ *
+ * Defaulting to "no footer" is the safe direction: a scroll view rendered
+ * outside a `KeyboardAwareScreen` keeps the platform inset it has always had,
+ * so the twelve screens with no footer are untouched by this.
+ */
+const FooterCtx = createContext<{ register: () => () => void; hasFooter: boolean }>({
+  register: () => () => {},
+  hasFooter: false,
+});
+
+/**
+ * Wraps a screen whose scroll view and `KeyboardAwareFooter` are siblings.
+ *
+ * It exists because the alternative — asking the screen with a footer to also
+ * remember `automaticallyAdjustKeyboardInsets={false}` — is precisely the
+ * opt-in this file was written to end: correct, invisible when forgotten, and
+ * forgotten by twelve screens out of thirteen last time.
+ *
+ * **Renders no view of its own.** Callers already have a root with their own
+ * theming and `flex: 1`, and inserting a second box would either drop the
+ * themed background or add a layout node between the column and its children —
+ * and that column is load-bearing, since it is what lets the footer's padding
+ * shrink the scroll view (see `KeyboardAwareFooter`).
+ *
+ * Counting registrations rather than storing a boolean so the footer can mount
+ * and unmount (the wizard's is always rendered, but a screen that shows one
+ * only on the last step is an obvious next call site) without stranding the
+ * scroll view in the wrong mode.
+ *
+ * **A footer that mounts while the keyboard is already up needs checking on a
+ * device first.** In `RCTScrollViewComponentView.mm`, `updateProps` only stores
+ * `automaticallyAdjustKeyboardInsets` and `_keyboardWillChangeFrame:` returns
+ * early when it is off — so flipping it true→false mid-keyboard leaves the
+ * inset that is already applied in place, and the later hide notification is
+ * ignored, stranding it past dismissal. The wizard is safe because its footer
+ * mounts with the screen, keyboard down; a "footer on the last step" screen
+ * reached by typing on the step before is exactly the case that is not, and
+ * wants either a keyboard dismiss on step change or a device check. Nothing in
+ * jest can see this — the prop is inert without native code.
+ */
+export function KeyboardAwareScreen({ children }: { children: React.ReactNode }) {
+  const [footers, setFooters] = useState(0);
+  const register = useCallback(() => {
+    setFooters((n) => n + 1);
+    return () => setFooters((n) => n - 1);
+  }, []);
+  const value = useMemo(() => ({ register, hasFooter: footers > 0 }), [register, footers]);
+
+  return <FooterCtx.Provider value={value}>{children}</FooterCtx.Provider>;
+}
 
 export const KeyboardAwareScrollView = forwardRef<ScrollView, ScrollViewProps>(
   function KeyboardAwareScrollView({ children, onScroll, ...props }, forwardedRef) {
@@ -400,6 +485,7 @@ export const KeyboardAwareScrollView = forwardRef<ScrollView, ScrollViewProps>(
       scrollRef.current?.scrollTo({ y, animated: true });
     }, []);
     const { ensureVisible, handleScroll, setContainer } = useKeyboardAware(scrollToY);
+    const { hasFooter } = useContext(FooterCtx);
 
     return (
       <Ctx.Provider value={ensureVisible}>
@@ -407,6 +493,9 @@ export const KeyboardAwareScrollView = forwardRef<ScrollView, ScrollViewProps>(
           // Before the spread so a caller can override any of them; the
           // defaults are a floor, not a cage.
           {...scrollDefaults}
+          automaticallyAdjustKeyboardInsets={needsPlatformKeyboardInset({
+            hasLiftingFooter: hasFooter,
+          })}
           {...props}
           ref={(node) => {
             scrollRef.current = node;
@@ -454,11 +543,15 @@ export function KeyboardAwareFlatList<ItemT>({ onScroll, ...props }: FlatListPro
     innerRef.current?.scrollToOffset({ offset: y, animated: true });
   }, []);
   const { ensureVisible, handleScroll, setContainer } = useKeyboardAware(scrollToY);
+  const { hasFooter } = useContext(FooterCtx);
 
   return (
     <Ctx.Provider value={ensureVisible}>
       <FlatList<ItemT>
         {...scrollDefaults}
+        automaticallyAdjustKeyboardInsets={needsPlatformKeyboardInset({
+          hasLiftingFooter: hasFooter,
+        })}
         {...props}
         ref={(node) => {
           innerRef.current = node;
@@ -499,6 +592,17 @@ export function KeyboardAwareFlatList<ItemT>({ onScroll, ...props }: FlatListPro
 export function KeyboardAwareFooter({ style, children, ...props }: ViewProps) {
   const [inset, setInset] = useState(0);
   const ref = useRef<View>(null);
+
+  /**
+   * Tells the scroll view above to stand down.
+   *
+   * The padding below shrinks that scroll view clear of the keyboard, so the
+   * platform inset it would otherwise apply is a second compensation for the
+   * same overlap — see `needsPlatformKeyboardInset`. Registered from an effect
+   * rather than during render because it sets state on an ancestor.
+   */
+  const { register } = useContext(FooterCtx);
+  useEffect(() => register(), [register]);
 
   /**
    * Same reason the scrollers have one: `Keyboard` listeners are global, so a

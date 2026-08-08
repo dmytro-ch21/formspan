@@ -1042,13 +1042,14 @@ export default function SessionScreen() {
           // and overlays instead — see TIMER_BAR_SPACE.
           timerState.timer && timerState.minimized ? { paddingTop: TIMER_BAR_SPACE } : null,
         ]}
-        keyboardShouldPersistTaps="handled"
-        // Kept alongside the focus-scrolling above it: this is what slides the
-        // content back down when the keyboard goes, and what lets the last
-        // field scroll past the fold at all. The two are complementary — see
-        // the note in KeyboardAwareScroll.tsx for why neither is sufficient
-        // alone.
-        automaticallyAdjustKeyboardInsets
+        // `keyboardShouldPersistTaps` and `automaticallyAdjustKeyboardInsets`
+        // used to be restated here. They were the wrapper's defaults already,
+        // and restating the inset is now actively unsafe: it is no longer a
+        // constant but a value the wrapper computes from whether a
+        // `KeyboardAwareFooter` shares the screen. Pinning it `true` here would
+        // silently defeat that coordination the day this screen grows a finish
+        // bar, and bring back the blank band the wizard just lost. The wrapper
+        // is the authority — see `needsPlatformKeyboardInset`.
       >
         {/* Three numbers while you train — time, sets, reps — and volume
             on top once you finish.
