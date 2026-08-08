@@ -1,5 +1,10 @@
 "use client";
 
+import { useCallback, useEffect, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
+import { useAuth } from "@clerk/nextjs";
+
+import { getPendingCounts } from "@/lib/api";
 import { useModules } from "@/lib/ModulesProvider";
 import type { Module } from "@/lib/modules";
 import { NavLink } from "./NavLink";
@@ -36,6 +41,12 @@ const navItems: {
   href: string;
   label: string;
   needs?: (m: Module[]) => boolean;
+  /** Which pending-count keys this destination can actually DO something
+   *  about. A badge on a screen that cannot act on what it counts is a dead
+   *  end, so this is deliberately not "every count the server returns" —
+   *  friend requests are answered on the phone, and web has no screen for
+   *  them, so nothing here badges them. */
+  badges?: string[];
 }[] = [
   { href: "/dashboard", label: "Today" },
   // Between Today and Workouts on purpose: the calendar is what you open
@@ -105,6 +116,10 @@ const navItems: {
   {
     href: "/dashboard/shared",
     label: "Sharing",
+    // The share inbox, which this screen accepts and declines from. NOT
+    // `friend_requests`: those are answered on mobile, and pointing someone at
+    // a web screen that cannot answer them is worse than staying quiet.
+    badges: ["shares"],
     // UNGATED, unlike everything above it, and deliberately: what lands here
     // is decided by other people. Gating it on the recipient's own enabled
     // disciplines would hide a real thing a real friend sent — a chain from a
@@ -117,6 +132,41 @@ const navItems: {
 
 export function DashboardNav() {
   const { modules, known } = useModules();
+  const { getToken } = useAuth();
+  const pathname = usePathname();
+  const [counts, setCounts] = useState<Record<string, number>>({});
+
+  // POLLED ON NAVIGATION, not live and not on a timer.
+  //
+  // No websocket and no interval: the number's job is to stop a share sitting
+  // unnoticed for days, not to update within seconds, and a timer in the
+  // persistent layout would run for every athlete on every open tab forever.
+  // Refetching when the route changes covers the case that matters — you
+  // accept something, move on, and the badge is right when you next look —
+  // and the layout persists across client navigation, so this component is
+  // not remounting each time.
+  const inflight = useRef<AbortController | null>(null);
+  const load = useCallback(() => {
+    inflight.current?.abort();
+    const c = new AbortController();
+    inflight.current = c;
+    getPendingCounts(getToken, c.signal)
+      .then((next) => {
+        if (!c.signal.aborted) setCounts(next);
+      })
+      .catch(() => {
+        // Silent, and it keeps the LAST known counts rather than zeroing them.
+        // A badge is not worth an error banner in a sidebar — but zeroing on
+        // failure would actively assert "nothing is waiting", which is the one
+        // thing this must never say. See the backend: a failed counter fails
+        // the whole request for the same reason.
+      });
+  }, [getToken]);
+
+  useEffect(() => {
+    load();
+    return () => inflight.current?.abort();
+  }, [load, pathname]);
 
   // Fail OPEN, not closed. `known` is false only when we could not get an
   // answer at all — and "we couldn't ask" is not "you train nothing". An
@@ -129,7 +179,12 @@ export function DashboardNav() {
   return (
     <nav className="flex flex-col gap-0.5 px-3" aria-label="Main">
       {visible.map((item) => (
-        <NavLink key={item.href} href={item.href} label={item.label} />
+        <NavLink
+          key={item.href}
+          href={item.href}
+          label={item.label}
+          count={(item.badges ?? []).reduce((n, key) => n + (counts[key] ?? 0), 0)}
+        />
       ))}
     </nav>
   );

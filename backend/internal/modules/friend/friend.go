@@ -20,6 +20,23 @@ import (
 	"time"
 )
 
+// maxBadgeCount bounds every counting query. A badge cannot usefully render
+// more than a couple of digits, and counting a capped subquery is what stops
+// one athlete making another athlete's most-polled endpoint expensive.
+//
+// 100 rather than 99, so that every value BELOW the cap is exact and the cap
+// itself is the one that means "this many or more" — which is what lets a
+// client render "99+" truthfully. Capping at 99 made 99 ambiguous and the
+// clients' own "99+" branch unreachable, so an athlete with 150 waiting saw a
+// bare "99" presented as fact.
+//
+// THREE PLACES MUST AGREE ON THIS NUMBER: here, share.maxBadgeCount, and
+// `maximum: 100` on the notifications response in contracts/public.openapi.yaml.
+// It is deliberately NOT centralised in the notification package — that would
+// have the counted modules import the counter, inverting a dependency that
+// exists to point the other way. The cost is this comment.
+const maxBadgeCount = 100
+
 var (
 	ErrNotFound     = errors.New("friend: not found")
 	ErrInvalidInput = errors.New("friend: invalid input")
@@ -82,6 +99,10 @@ type Repository interface {
 	// module consumes; it is declared there as its own one-method interface,
 	// so that package does not import this one.
 	FriendID(ctx context.Context, callerID, username string) (id string, ok bool, err error)
+	// PendingCount is how many requests are waiting on the caller to answer —
+	// INCOMING only. Satisfies notification.Counter, which is declared over
+	// there so that package does not import this one.
+	PendingCount(ctx context.Context, callerID string) (int, error)
 }
 
 // pairOf returns the canonical ordering the schema requires.

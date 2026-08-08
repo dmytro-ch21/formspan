@@ -15648,6 +15648,86 @@ The tiles have not been seen. Generated artwork is exactly the kind of thing
 that reads well as code and lands flat on a screen — whether the band and bloom
 actually make seventeen tiles feel distinct, or just make them all look faintly
 smudged, is a question only a device answers.
+## 2026-08-07 — Notifications, with no notifications table
+
+`GET /v1/notifications`, `internal/modules/notification`, a badge on web's
+Sharing nav item and on mobile's Friends row. The gap two reviews named from
+opposite directions: a share sat in an inbox discoverable only by visiting the
+page it sat on, and the nav label was the only inbound pull.
+
+### Nothing is stored, because the pending row IS the notification
+
+Everything that arrives from another person already exists as a pending row —
+a friend request, a share. Writing a second copy would mean two truths that can
+disagree: a notification surviving the request it describes, a read flag saying
+answered while the thing is still sitting there, a backfill the first time a
+source is added. Deriving costs two counting queries and cannot drift.
+
+That is also why there is **no read/unread state**. Unread would be a third
+truth stacked on the second; ANSWERING is what clears a count, which is the
+only definition that cannot go out of sync. The consequence, stated plainly
+because it is a real product decision: you cannot dismiss a friend request by
+looking at it. It is still waiting for you.
+
+### Counts, not a feed
+
+The items behind these numbers already have screens that render them with the
+right verbs attached. A feed would be a third rendering of the same rows whose
+only affordance is "go to one of the other two", needing its own pagination,
+empty state and cross-source ordering. The number was what was missing, not
+another list.
+
+### Sources register, as copiers do
+
+`notification.Counter` is one method, and the module imports neither friend nor
+share — `cmd/api/main.go` is again the only place that knows which modules have
+something that waits. Same shape as the share registry a day earlier, and for
+the same reason: the fourth source to arrive should be one line.
+
+The counters count only what the caller can ACT ON. Friend requests are
+**incoming only** — an outgoing one is pending too and is not waiting for you,
+so badging it would send someone to a screen to look at something they already
+did. Shares are the **inbox, never the sent list** — a badge over the sent list
+would tick down as other people answered, which is a slow leak of exactly what
+that list refuses to say. Both predicates are mutation-verified, including the
+inverted forms, not just the deleted ones.
+
+### The one answer a badge must never give
+
+A counter that fails fails the whole request. A zero does not say "I could not
+check", it says "nothing is waiting for you" — and a badge is believed. The
+clients hold the same line from the other end: a failed fetch keeps the last
+known number rather than zeroing it, since zero renders no badge at all.
+
+Counts are capped at 99. A badge cannot render more usefully, and counting a
+bounded subquery is what stops one athlete making another athlete's
+most-polled endpoint expensive by sending them things.
+
+### Each client badges only what it can open
+
+Web badges Sharing and **not** friend requests; mobile badges Friends and
+**not** shares. A badge pointing at a screen that cannot answer what it counts
+is a dead end. That falls out of the platform split — friends were built on
+the phone, sharing at the desk — and it leaves a real hole: **a mobile-only
+athlete is never told a share arrived.** Recorded rather than papered over; it
+closes when mobile gets a sharing surface, not before.
+
+Web polls on route change rather than on a timer or a socket. The number's job
+is to stop something sitting unnoticed for days, not to update within seconds,
+and an interval in a persistent layout would run for every athlete on every
+open tab forever.
+
+### Gaps
+
+- **No push, and none of this reaches a closed app.** Push needs a custom dev
+  client (this is still Expo Go), APNs/FCM credentials, and a delivery path on
+  the server — none of which exists. In-app badges are the honest floor.
+- The mobile-only-athlete hole above.
+- **Still no rate limiting.** Sixth entry, and the counting endpoint is now the
+  most-polled thing in the app.
+- Neither badge has been seen rendering — typecheck, lint, build and backend
+  tests only.
+
 
 ## Open items / known gaps as of this entry
 
