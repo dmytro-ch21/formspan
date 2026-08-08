@@ -3243,6 +3243,16 @@ assert anything about sync, and a second device is expected to show nothing.
   changes**. Removing a plan must never touch a session.
 - Renaming a template renames it wherever it is planned, without replanning —
   the plan stores the id, not the name.
+- **Tapping a planned entry that names a template opens that workout**, and the
+  entry draws a chevron. Long-press must still remove it — adding a tap handler
+  to a `Pressable` is exactly how a long-press gets swallowed, so check both on
+  the same row.
+- **An entry with nowhere to go draws no chevron and does nothing when tapped.**
+  Two ways to get one: plan a discipline with no template at all, and plan a
+  template then delete it (the plan keeps no foreign key, so the row survives
+  pointing at nothing and falls back to "<Sport> session"). The chevron is the
+  part that matters — a row that advertises a screen it cannot open reads as
+  broken, which is how this was found.
 
 ### The period switcher, and the week that folds away
 
