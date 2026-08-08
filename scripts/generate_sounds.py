@@ -138,6 +138,7 @@ BUNDLE = {
     # being unbundled is not the same as being deleted.
     "pr": "pr",
     "notification": "notification",
+    "streak": "streak",
 }
 
 # ---------------------------------------------------------------------------
@@ -549,7 +550,7 @@ S = [
               (0.310, "C#7", "glass", 0.22, 0.55, 1.00, 0.20, -0.10),
               (0.000, "F#3", "pad",   0.32, 1.20, 0.78, 0.0, 0.0)]),
 
-  dict(name="streak", desc="Streak or milestone reached. Sits between success and pr.",
+  dict(name="streak", desc="The weekly streak carried forward — the first session of a new week, and only that one.",
        level=-8, rt60=1.10, wet=0.27, lp=8800,
        notes=[(0.000, "C#6", "glass", 0.85, 0.80, 0.96, 0.14, -0.16),
               (0.105, "D#6", "glass", 0.85, 0.85, 0.97, 0.14, 0.04),

@@ -16483,6 +16483,99 @@ harmless, but they are the kind of thing that accumulates until somebody
 wonders which one is real.
 
 
+## 2026-08-08 — The streak gets a sound, and a rule about which sound wins
+
+`streak` joins the bundle (seven of seventeen) and plays when the session just
+finished is the one that carried the weekly streak forward.
+
+### A state that had no moment
+
+Unlike the last two sounds, the feature was already there: `weekStreak` counts
+consecutive weeks with at least one session, deliberately weekly rather than
+daily so rest days are not punished, and the YOU tab has rendered "N weeks in a
+row" for a while. What did not exist was an *event*. A streak is a number you
+look at, and nothing in the app ever said "you just extended it".
+
+Session finish is where that moment lives, and the celebration card already had
+the shape for it — records are fetched after the card opens and fill in behind
+it. The streak follows the identical pattern, in its own effect rather than
+chained onto the records one so a slow history cannot hold up the PR row.
+
+**It fires on the first session of a week and only that one.**
+`carriedTheStreak` is true when the current week holds exactly one session.
+Train four times a week and the other three are training, not milestones;
+celebrating them would make the sound mean nothing by Thursday. The card still
+shows the streak line every time, because the number is worth seeing on a
+Thursday even though the chime is not.
+
+### One celebratory sound per session, and the PR wins
+
+A session can set a record AND open a week. Without a rule that is
+`sessionComplete`, then `pr`, then `streak` — three sounds for one moment.
+
+`celebratesStreak` encodes the precedence: a PR is rare, a streak recurs every
+week, so hearing the smaller one instead would be the wrong trade every time
+they coincide. Both chimes share one `chimed` ref, so whichever fires first
+latches the other out.
+
+**The gate that makes it real is `recordsSettled`, not the records array.** The
+two lookups are independent and race; a fast history would chime the streak and
+latch the PR out — the wrong sound, and only sometimes, which is the worst
+possible way to be told about it. An empty records result is an ANSWER and a
+pending one is not, which is exactly the distinction an array cannot carry. Same
+`null`-versus-`0` shape as the arrival cue two entries up, in a different
+costume.
+
+Pinned by mutation rather than argument: dropping the gate reddens the
+race test, dropping the `!hasRecords` term reddens the precedence test, and on
+the rule itself, counting days instead of sessions, `>= 1` instead of `=== 1`,
+and dropping the week filter each redden their own case.
+
+### Review moved the scope, and it was right to
+
+The first pass wired only the strength card. The BJJ card renders the same
+component and was left with the defaults — a deliberate no-op, and a bad one:
+**the weekly streak is sport-agnostic**, so for this app's actual athlete it is
+usually the mat that opens the week. Wiring only strength meant the chime was
+silent on the BJJ finish for want of props, and then silent on the week's first
+strength session because by then the week already held one. A streak sound that
+almost never fires for a BJJ+strength athlete is not a wired-up feature, it is a
+feature that compiles.
+
+The BJJ card now passes `streak`, and `recordsSettled` unconditionally —
+settled by construction there, since BJJ has no record equivalent yet and the
+summary hard-codes `records: []`. Nothing can arrive late to outrank it.
+
+Also from review, and worth keeping: the streak line now carries
+`accessibilityLiveRegion="polite"`, matching the records block below it. Both
+arrive after the card opens, and a line that only ever appears is invisible to
+anyone who heard the card rather than saw it.
+
+### The false positive, stated rather than discovered later
+
+`carriedTheStreak` reads "the week holds exactly one session" as "the session
+just finished opened the week", and the comment originally justified that in
+terms of the finish syncing. That was imprecise in a way that would mislead the
+next person: history counts the session ROW, by `started_at` with no `ended_at`
+filter, and rows normally sync at session START — long before this runs.
+
+Which exposes a narrow window the original write-up missed. A session started
+offline mid-week, syncing only as it finishes, can have this lookup beat its
+own row's push: the week counts only the earlier session, `n === 1`, and the
+week's SECOND session is told it carried the streak. Small, real, and not worth
+a second source of truth. It is documented in both directions now, because the
+scenario doc says "a Thursday chime means the rule has drifted" and this is a
+Thursday chime with no drift.
+
+### Offline it is silent, again
+
+`carriedTheStreak` counts from server history, so it is false until the finish
+syncs — no chime and no streak line. The cost is a missed celebration for a
+session logged in a basement gym, which is the right way round: the phone
+cannot know what the week holds, and a guessed streak is a claim that the
+records screen might then contradict.
+
+
 ## Open items / known gaps as of this entry
 
 ## 2026-08-07 — A friends' feed, and the first time one athlete can read another's training
