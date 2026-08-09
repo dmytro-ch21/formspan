@@ -5320,6 +5320,41 @@ feedback at all** before — no haptic, no toast, only a row quietly changing.
   offers a seconds target for a `time` exercise, and the session screen asks for
   seconds when logging one.
 
+## Session share card (`GET /v1/sessions/{id}/card`, mobile Share)
+
+### The numbers
+
+- Finish a 60-minute strength session at 80 kg bodyweight → calories land near
+  **185**, not 400–600. A figure double that means gross is being reported
+  instead of net.
+- Remove the bodyweight check-in → calories are **absent**, and the card asks
+  for one rather than assuming 70 kg.
+- Weight is read **as at the session**: a check-in recorded after it must not
+  change an old card's estimate.
+- Score is absent below 8 prior sessions of that sport. With 10 easy priors and
+  one much bigger session, the big one scores 100 — anything less means it is
+  ranking against itself.
+- Effort tracking off → `basis: "volume"`, and the number still appears.
+
+### One 404 for every miss
+
+Somebody else's session, an id that never existed, and a session still running
+must be indistinguishable. An unfinished session has no duration, so every
+number would describe something still happening.
+
+### Sharing
+
+- Finish a session (strength or BJJ) → Share renders a card and opens the OS
+  share sheet with Instagram among the targets.
+- **The captured image must not be blank.** The card is mounted off-screen
+  rather than hidden, because `display:none` captures nothing and `opacity:0`
+  captures blank on some iOS versions — both fail silently.
+- Cancelling the share sheet is silent, not an error.
+- The same session always renders the same mountain, on the completion screen
+  and in the exported image. Different sessions should visibly differ — if
+  every card shows the same peak, the hash is clustering.
+- Share is absent, not disabled, when there is no session id.
+
 ## Rate limiting (platform — every authenticated endpoint)
 
 ### The limit exists

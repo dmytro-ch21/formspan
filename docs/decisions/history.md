@@ -18154,12 +18154,48 @@ come from the later Adult Compendium. Both are plausible and conservative so
 they stay, but the attribution says "unverified" rather than claiming a source,
 because the package's whole pitch is that a reader can check it.
 
+### The endpoint, and the card that renders it
+
+`GET /v1/sessions/{id}/card` serves the three things the phone cannot compute:
+the calorie estimate (needs bodyweight, height, age and sex), the score (needs
+the last twenty sessions of that sport), and the exercise or technique list
+(needs names the offline store does not carry). One endpoint rather than three
+— the card renders once and either has its numbers or does not.
+
+`components/SessionCard.tsx` is one component at three densities: the
+completion screen, the feed row and the 1080px export. Everything comes from a
+plain `data` prop with no fetching, which is what lets it be mounted OFF-SCREEN
+for `captureRef` — a card that reads the session screen's state could only ever
+be rendered by the session screen. The predecessor left a note saying it was
+meant to become a shareable image later; this is that.
+
+Share goes through the OS share sheet with a PNG, not an Instagram deep link:
+`instagram-stories://` needs a Meta app id and a custom dev client, which is
+the same wall Google sign-in hit under Expo Go. The sheet needs neither and
+offers Instagram anyway.
+
+Three bugs the tests caught rather than the reading:
+
+- **The session ranked against itself.** The history query did not exclude the
+  session being scored, so it always tied with itself — dragging every
+  percentile toward the middle, worst for the athlete with the least history.
+- **FNV's low bits are barely mixed**, and `% 8` reads exactly those. The peak
+  and the headline stayed correlated across seeds: measured over 300 ids they
+  took 16 of 32 combinations, so half the intended variety never appeared.
+- **A mutation that went red for the wrong reason.** Deleting the
+  `measured_on <= session` predicate fails on parameter arity, not on a wrong
+  answer, so it proved nothing. A semantic mutation that keeps the arity valid
+  is what actually pins that calories use the weight as at the session.
+
 ### Gaps
 
-- **Nothing consumes any of this.** No endpoint returns either number, no
-  screen renders the mountains, and `_layout.tsx` still loads only SpaceMono.
-  Expo's default bundling means ~1.5 MB of unused assets would ship in a native
-  build until the card lands.
+- **The feed still shows plain rows.** The card is on the completion screen
+  only; feed integration and the `share_training_details` preference are the
+  remaining pieces of the design.
+- **The card does not yet fetch its own numbers.** The endpoint exists and the
+  component renders calories and score when given them, but the completion
+  screen still builds its card from the local summary alone — so a shared card
+  currently carries no calorie figure and no score.
 - `internal/platform/` is a stretch for shared *domain* logic — the existing
   neighbours are infrastructure. Defensible because the card spans session, bjj
   and body, but worth revisiting if a third consumer disagrees.

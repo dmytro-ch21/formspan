@@ -29,6 +29,7 @@ import (
 	"github.com/dmytro-ch21/vola/backend/internal/modules/profile"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/sequence"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/session"
+	"github.com/dmytro-ch21/vola/backend/internal/modules/sessioncard"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/share"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/technique"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/theme"
@@ -144,6 +145,7 @@ func main() {
 		}
 	}()
 
+	sessionCardHandler := sessioncard.NewHandler(sessioncard.NewPostgresRepository(pool))
 	sequenceRepo := sequence.NewPostgresRepository(pool)
 	friendRepo := friend.NewPostgresRepository(pool)
 	workoutRepo := workout.NewPostgresRepository(pool)
@@ -290,6 +292,11 @@ func main() {
 	// over every ownable thing in the app and gets its own /v1/shares surface;
 	// a per-resource share verb would be the fourth private implementation of
 	// one idea and would have to be undone.
+	// The share card's numbers. Under the session it describes rather than a
+	// top-level /v1/cards, because it is a projection of one session and has
+	// no life without it.
+	mux.Handle("GET /v1/sessions/{sessionID}/card", verifier.RequireAuth(http.HandlerFunc(sessionCardHandler.Get)))
+
 	mux.Handle("GET /v1/sequences", verifier.RequireAuth(http.HandlerFunc(sequenceHandler.List)))
 	mux.Handle("POST /v1/sequences", verifier.RequireAuth(http.HandlerFunc(sequenceHandler.Create)))
 	mux.Handle("GET /v1/sequences/{sequenceID}", verifier.RequireAuth(http.HandlerFunc(sequenceHandler.Get)))
