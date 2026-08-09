@@ -10,6 +10,7 @@ import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { cachedExercises } from '@/lib/sessionStore';
 import {
+  basisFor,
   describeEvidence,
   fetchRecords,
   formatRecord,
@@ -111,6 +112,9 @@ export function RecordsCard({
             const fresh = er.records.some((r) => r.is_recent);
             const name = names.get(er.exercise_id) ?? er.exercise_id;
             const evidence = describeEvidence(primary, units);
+            // Feeds the accessibility string only — see the note at the value
+            // label for why this row carries no separate visual marker.
+            const modelled = basisFor(primary.kind) === 'modelled';
 
             return (
               <Pressable
@@ -120,7 +124,13 @@ export function RecordsCard({
                 accessibilityLabel={[
                   name,
                   `${RECORD_LABEL[primary.kind]} ${formatRecord(primary, units)}`,
-                  evidence,
+                  // Said in words for a screen reader, because the visual cue
+                  // for this is a style and a style announces nothing.
+                  modelled ? 'an estimate' : null,
+                  evidence.measured,
+                  // "reported" out loud, so the rating is not heard as another
+                  // measurement in the same list.
+                  evidence.reported ? `reported ${evidence.reported}` : null,
                   ...rest.map(
                     (r) => `${RECORD_LABEL[r.kind]} ${formatRecord(r, units)}`,
                   ),
@@ -151,19 +161,38 @@ export function RecordsCard({
                         this is the fact. */}
                     {fresh && <Text style={styles.fresh}>New · </Text>}
                     {[
-                      evidence || null,
+                      evidence.measured || null,
                       ...rest.map(
                         (r) =>
                           `${RECORD_LABEL[r.kind]} ${formatRecord(r, units)}`,
                       ),
                     ]
                       .filter(Boolean)
-                      .join(' · ') || '—'}
+                      // The em dash means "no set detail to show". It is only
+                      // right when there is nothing else on the line — beside a
+                      // rating it reads as a rendering fault rather than as an
+                      // absence, which is the case for a timed or distance
+                      // record that carries an RPE.
+                      .join(' · ') || (evidence.reported ? '' : '—')}
+                    {/* The rating, set apart rather than joined with the same
+                        middle dot as the measurements. It is the athlete's
+                        account of the set, not another column of it. */}
+                    {evidence.reported ? (
+                      <Text style={styles.reported}> · {evidence.reported}</Text>
+                    ) : null}
                   </Text>
                 </RNView>
 
                 <RNView style={styles.value}>
                   <StatValue value={formatRecord(primary, units)} size={19} />
+                  {/* No visual basis marker here, deliberately. A trailing "~"
+                      was tried and dropped: at 9pt in `textDim` it was close to
+                      invisible, a tilde after an uppercase label means nothing
+                      to anyone, and it was redundant with the label already
+                      reading "EST. 1RM". The distinction is carried by the
+                      label the athlete can read and by "an estimate" in the
+                      accessibility string. Web has the room to spell it out and
+                      does; a phone row does not. */}
                   <Text style={styles.valueLabel}>
                     {RECORD_LABEL[primary.kind].toUpperCase()}
                   </Text>
@@ -222,6 +251,14 @@ const styles = StyleSheet.create({
   name: { fontSize: 15, fontWeight: '700' },
   evidence: { fontSize: 12, color: vola.textMuted },
   fresh: { color: vola.lime, fontWeight: '700' },
+  // Dimmer than the measurements it sits beside, and italic. The rating is
+  // real information and is not the record — it should read as an aside, not
+  // as another number in the row.
+  // `textMuted`, NOT `textDim`. This file's own comment calls the rating "real
+  // information", and `constants/Colors.ts` measures `textDim` at 2.51:1 and
+  // says outright it is therefore not used to carry information. Italic alone
+  // still sets it apart from the upright measurements beside it.
+  reported: { color: vola.textMuted, fontStyle: 'italic' },
   value: { alignItems: 'flex-end', gap: 1 },
   valueLabel: { fontSize: 9, fontWeight: '700', letterSpacing: 0.8, color: vola.textDim },
   muted: { color: vola.textMuted, fontSize: 13 },

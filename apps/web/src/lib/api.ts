@@ -1858,6 +1858,42 @@ export const RECORD_LABEL: Record<RecordKind, string> = {
 };
 
 /**
+ * What kind of number a record is.
+ *
+ * `measured` is what happened, `modelled` is derived from what happened by a
+ * documented formula and may consume reported inputs, `reported` is the
+ * athlete's own account. The full argument and the three reading rules live in
+ * `backend/internal/modules/session/basis.go`.
+ */
+export type Basis = "measured" | "modelled" | "reported";
+
+/**
+ * The classification, third copy.
+ *
+ * `RecordKind` already exists in Go, in `apps/mobile/lib/records.ts` and here,
+ * because each side needs its own type for a shared wire format — so the basis
+ * lives beside each copy rather than being shipped per row, which would put a
+ * constant on every record and let a cached row carry a stale classification.
+ * `apps/mobile/lib/__tests__/basisParity.test.ts` reads the Go source and this
+ * file, and pins all three together.
+ *
+ * A `Record<RecordKind, Basis>`, so a new kind fails to compile here rather
+ * than defaulting to `measured` — an unclassified number rendering as a
+ * measurement is the failure this exists to prevent.
+ */
+export const RECORD_BASIS: Record<RecordKind, Basis> = {
+  heaviest_weight: "measured",
+  most_reps: "measured",
+  longest_time: "measured",
+  furthest_distance: "measured",
+  // A rep-max curve over reps and weight (Brzycki — see the backend's
+  // onerm.go), with RIR/RPE folded in as effective reps.
+  // Deliberately kept that way — RIR is how a submaximal set becomes a 1RM
+  // estimate — which is exactly why it has to be labelled rather than banned.
+  estimated_1rm: "modelled",
+};
+
+/**
  * The caller's records.
  *
  * `scope: "all"` is the desk view — everything they've actually trained,

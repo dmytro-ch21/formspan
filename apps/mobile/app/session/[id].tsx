@@ -1420,13 +1420,49 @@ export default function SessionScreen() {
                           point: a number you can argue with. */}
                       <Text style={styles.hintReason}>{hint.reason}</Text>
                       {hint.last_weight_kg != null && (
-                        <Text style={styles.hintLast}>
+                        /*
+                          Three kinds of number on one line, joined by three
+                          identical separators: `Last 5 × 100kg · 2 RIR · Est.
+                          1RM 120kg` is a measurement, an opinion and a model
+                          output presented as one list. See
+                          `backend/internal/modules/session/basis.go`.
+
+                          The rating is set apart. The estimate is not, because
+                          it already says "Est." in the text itself — the same
+                          call the records card makes, for the same reason.
+
+                          The label spells both out, because italic announces
+                          nothing and this line is read as a unit anyway.
+                        */
+                        <Text
+                          style={styles.hintLast}
+                          accessibilityLabel={[
+                            // "by", not "×": VoiceOver's handling of U+00D7
+                            // varies with punctuation verbosity and can skip it
+                            // entirely. This label exists because styles are
+                            // silent, so it should not depend on a glyph being
+                            // spoken. The visible text keeps the ×.
+                            `Last ${hint.last_reps != null ? `${hint.last_reps} by ` : ''}${formatWeight(hint.last_weight_kg, u)}`,
+                            hint.last_rir != null
+                              ? `reported ${hint.last_rir} RIR`
+                              : hint.last_rpe != null
+                                ? `reported RPE ${hint.last_rpe}`
+                                : null,
+                            hint.estimated_1rm_kg != null
+                              ? `estimated 1RM ${formatEstimate(hint.estimated_1rm_kg, u)}`
+                              : null,
+                          ]
+                            .filter(Boolean)
+                            .join('. ')}
+                        >
                           Last {hint.last_reps != null ? `${hint.last_reps} × ` : ''}
                           {formatWeight(hint.last_weight_kg, u)}
-                          {hint.last_rir != null ? ` · ${hint.last_rir} RIR` : ''}
-                          {hint.last_rir == null && hint.last_rpe != null
-                            ? ` · RPE ${hint.last_rpe}`
-                            : ''}
+                          {hint.last_rir != null ? (
+                            <Text style={styles.hintReported}> · {hint.last_rir} RIR</Text>
+                          ) : null}
+                          {hint.last_rir == null && hint.last_rpe != null ? (
+                            <Text style={styles.hintReported}> · RPE {hint.last_rpe}</Text>
+                          ) : null}
                           {/* Read off the same set the plan reasons from, so
                               the two can't tell different stories. Absent
                               rather than zero when there can't be one. */}
@@ -2348,6 +2384,24 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
   hintLast: { fontSize: 12, color: vola.textMuted, fontVariant: ['tabular-nums'] },
+  /*
+    The colour is set EXPLICITLY, and it has to be.
+
+    `Text` here is `@/components/Themed`'s, which renders
+    `<DefaultText style={[{ color }, style]}>` — so every nested Text is handed
+    a full-contrast `color` before its own style is applied. Relying on
+    inheritance from the muted parent therefore does the opposite of what it
+    looks like: the rating renders at 11.5:1 inside a 4.67:1 line and becomes
+    the BRIGHTEST number on it, which is the hierarchy this change exists to
+    build, inverted. Caught in review; the first version of this comment
+    confidently claimed the colour was inherited.
+
+    `textMuted`, not `textDim`: `constants/Colors.ts` measures dim at 2.51:1 and
+    says outright it is not used to carry information, and the rating is
+    information. Italic alone separates it from the upright measurement. Same
+    values `RecordsCard` uses, so the two screens teach one convention.
+  */
+  hintReported: { color: vola.textMuted, fontStyle: 'italic' },
   hintReason: { fontSize: 12, color: vola.textMuted },
   hintApply: {
     borderRadius: 999,

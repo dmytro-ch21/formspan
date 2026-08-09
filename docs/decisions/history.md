@@ -17723,6 +17723,241 @@ dialog. After any device registration, re-push the freshly signed `.app` to
 every phone (`devicectl device install app` over Wi-Fi suffices; all three
 UDIDs are in the profile).
 
+## 2026-08-09 — "What you did" and "how it felt" stop being the same kind of number
+
+Task #12. The brief was to separate objective metrics from subjective session
+ratings so a self-rating cannot contaminate a measurement. Two things about it
+changed on contact with the code.
+
+### The stated problem had mostly already been fixed
+
+The task named `lib/trend.ts`, `lib/report.ts` and `lib/adherence.ts` as
+"readers that compute across both". **None of them touch a rating.** `trend.ts`
+counts days trained on purpose — a tonnage chart is one a BJJ athlete cannot
+appear in, and this app has already shipped that bug. `adherence.ts` matches
+plans to sessions by day and sport. `report.ts` is client-error reporting and
+has nothing to do with training data at all. Whatever was true when the task was
+written, those three were clean by the time it was picked up.
+
+Nothing in the app aggregates a reported value today. So this is mostly a guard
+against a defect that has not happened yet — which is the cheap moment to build
+one, and worth saying plainly rather than dressing up as a rescue.
+
+### The one real instance is deliberate, and stays
+
+`estimated_1rm` — **a personal record** — is computed from a self-rating.
+`session/postgres.go`'s candidate CTE folds RIR/RPE into effective reps
+(`reps + COALESCE(rir, GREATEST(0, 10 - LEAST(rpe, 10)), 0)`), which is what
+turns a submaximal set into a one-rep-max estimate.
+
+That is a head-on collision with the task's own rule, *"a PR is never judged by,
+ranked by, or gated on a subjective rating"*. The rule loses. RIR-based 1RM
+estimation is standard practice, the SQL around it is careful and was already
+corrected once by review after a real bug, and stripping RIR out would make the
+estimate **worse**, not more objective.
+
+### So: three kinds, not two
+
+A measured/subjective binary cannot describe an estimate — and this app already
+knew that, one layer up. `units.ts` renders an estimate at whole display units
+because *"a logged set is a measurement — 62.55kg is what was on the bar. A
+one-rep max derived from a rep-max curve is not, and '143.88kg' invites reading
+a modelled number as a measured one."* The distinction was correct and was
+living in a formatter.
+
+- **measured** — what happened. Weight, reps, seconds, distance, rounds, mat
+  time, body weight and girths.
+- **modelled** — derived by a documented formula, and may legitimately consume
+  reported inputs. `estimated_1rm`.
+- **reported** — the athlete's own account. RIR, RPE, session RPE, notes.
+
+And the three reading rules, which now live in `basis.go` next to what enforces
+them: a measured value is never judged or ranked by a reported one; a modelled
+value may consume reported inputs but must say it is modelled and be able to
+state them; and no aggregate may span a window where a reported input was
+collected for only part of it — the `TrackEffortProvider` trap, where an athlete
+toggling effort collection off makes an average silently change its sample.
+
+### A marker, not new tables
+
+Rejected: separate tables, and a nested `reported` object in the payloads. Both
+move field shapes, and `session_sets.rir`/`rpe` and
+`bjj_session_details.session_rpe` are carried by the offline outbox, the SQLite
+mirror on every phone and a hand-maintained OpenAPI contract. That is a
+migration-shaped change to express something a marker expresses exactly as well.
+
+The marker is also the truer model: `rir` is not stored in the wrong place — it
+belongs on the set it describes. What was missing was the statement that it is a
+different KIND of fact from the reps beside it. **No contract change, and no
+migration.**
+
+The classification is keyed on the record KIND, not carried per row: every
+`estimated_1rm` that has ever existed is modelled, so shipping it per record
+would put a constant on every row and let a phone's cache hold a stale
+classification if the vocabulary ever changed.
+
+### What actually changed on screen
+
+- **The BJJ session detail put "60 min on the mat", "25 min rolling" and
+  "— effort" in three identical tiles.** Two measurements and an opinion, given
+  equal weight by the layout. Effort is now a labelled line below the
+  measurements, reading "HOW IT FELT", and says "Not recorded" rather than
+  rendering absence as an em dash in a row of numbers.
+- **`describeEvidence` returned `"5 × 100kg · 2 RIR"`** — one string, one
+  separator, an opinion presented as another column of the measurement. It now
+  returns the two halves separately and the rating renders dimmed and italic,
+  set apart. Same split on web's records page, which had its own copy.
+- **Estimates are marked** on the records card, the web records page and the web
+  session detail. `RECORD_LABEL` already read "Est. 1RM", but that is the
+  record's name; the marker says what sort of number it is and survives the
+  label being reworded.
+
+### Keeping three copies of one rule honest
+
+`RecordKind` exists in Go, in `apps/mobile/lib/records.ts` and in
+`apps/web/src/lib/api.ts`, so the classification does too.
+`basisParity.test.ts` reads `basis.go`, parses the constant names out of
+`records.go` (the convention is not even consistent — `RecordOneRM` is
+`estimated_1rm`, so guessing would make the test agree with a guess), and
+compares the mapping to the TypeScript one. Same technique `planHero.test.ts`
+uses on web's angle formula. Mutation-tested: reclassifying `estimated_1rm` in
+Go turns the mobile suite red.
+
+### From review
+
+Both reviewers independently flagged that **web's copy was pinned by nothing** —
+exhaustive over keys by type, so an omitted kind fails to compile, but a wrong
+*value* would not, and web is the analytical surface where numbers get
+interrogated. Both said close it now rather than record it, and they were right:
+the parity test already reads Go, so reading one more TypeScript file was a few
+lines. Mutation-tested — flipping `estimated_1rm` to `measured` in web's map now
+turns the suite red, where a moment earlier nothing in the repo would have
+noticed.
+
+The backend reviewer also caught a doc error worth more than it looks: three
+comments this change added said the estimate is **Epley**. It is **Brzycki**,
+and `onerm.go` is emphatic about why — Epley evaluates a true single at 1.033×
+the weight, so a genuine 100kg 1RM would report 103kg, wrong at exactly the most
+checkable moment. A future reader "fixing" `onerm.go` to match my comments would
+have reintroduced the boundary error its docstring exists to warn against.
+
+Two more taken: `ReportedFields()` was dropped (referenced by nothing, with a
+docstring claiming consumers that did not exist), and the catalog's load-type
+list — hand-copied in two test files — is now one shared `recordedLoadTypes`.
+
+The frontend reviewer talked me out of a visual marker on the phone. A trailing
+`~` on the record label was close to invisible at 9pt in `textDim`, means
+nothing to anyone as a glyph, and duplicated a label already reading "EST. 1RM".
+Dropped. Web has room to spell out "estimate" and does. Two contrast fixes came
+with it: the reported text used `textDim`, which `constants/Colors.ts` measures
+at 2.51:1 and explicitly says is not used to carry information — the same file
+in which I had written that the rating *is* real information.
+
+And the a11y hole that mattered: on web the measured/reported split was carried
+by italic alone, so a screen reader heard `"5 × 100kg · 2 RIR"` — the exact
+flattening this change exists to undo, reproduced in speech. It now carries an
+`sr-only` "reported", matching what mobile already said out loud.
+
+### Closing the gaps it left
+
+The entry above originally ended with four of them. Three are now shut and the
+fourth is enforced, all in the same branch:
+
+**Rule 3 has a guard now, and it is a scan rather than a unit test — because
+there is still nothing to unit-test.** Nothing aggregates a reported value, so
+the only way to enforce "no aggregate spans a window a rating may not cover" is
+to notice the first one that appears. `reportedAggregation.test.ts` walks the
+backend and both clients for a SQL aggregate over `rir`/`rpe`/`session_rpe`, and
+for client identifiers named for the act (`avgRpe`, `rpeAverage`, `totalRir`).
+
+The interesting part is what it deliberately does NOT flag: `GREATEST` and
+`LEAST` are excluded and the file says they must never be added, because
+`postgres.go` uses `GREATEST(0, 10 - LEAST(ss.rpe, 10))` to turn one set's RPE
+into effective reps — a per-row conversion, and precisely the computation rule 2
+permits. A guard that failed on correct code is a guard that gets deleted, so a
+fourth test asserts the exclusion still holds. Mutation-tested three ways: a SQL
+`AVG(rpe)`, a client `averageRpe`, and someone adding `LEAST` to the aggregate
+list — the last one goes red *before* the guard starts failing on correct code.
+
+Honest limit, stated in the file: it cannot catch
+`sets.reduce((a, s) => a + (s.rpe ?? 0), 0)` assigned to something vaguely
+named. A scan cannot read intent. What it buys is that the obvious way in is
+closed and a deliberate one has to be argued for — which is the moment someone
+reads rule 3.
+
+**The load-type list is read from the migration instead of copied out of it.**
+It was a literal in two test files, which left the hole the guard was supposed
+to close: a load type added to the schema and not to the list is invisible, so
+the record kind it brings goes unclassified. A hand-copied vocabulary cannot
+guard against forgetting to update a hand-copied vocabulary. It now parses the
+CHECK out of `000004_create_exercises.up.sql` — no database needed, because the
+migration is a file and the constraint is the same text `migrate up` applies.
+Verified by adding a sixth load type to the migration and watching
+`TestRecordKindsFor_CoversEveryLoadType` go red.
+
+**The strength session's "last time" hint no longer flattens all three.** It
+rendered `Last 5 × 100kg · 2 RIR · Est. 1RM 120kg` — a measurement, an opinion
+and a model output joined by three identical separators, on the busiest screen
+in the app. The rating is now set apart; the estimate is not, because the text
+already says "Est." — the same call the records card makes. The accessibility
+label spells both out, since italic announces nothing.
+
+**Web's evidence split is pinned, structurally.** `describe` on the records page
+is a second implementation of `describeEvidence`, and a divergence there could
+push a rating back into the measured half on one platform only. It cannot be
+*run* from this suite — the file is a Next client component whose imports
+jest-expo will not resolve — so the check is on source text: that it returns two
+halves, that `rir`/`rpe` go to `reported` and never to `measured`, and that the
+RIR-over-RPE precedence survives. That limit is stated in the test, the same
+trade `keyboardCoverage.test.ts` makes. Mutation-tested by pushing the rating
+into the measured half.
+
+### And what review caught in the closing
+
+One blocking finding, and it was the kind only a reader who knows the codebase
+would see. The session hint's rating span was styled `{ fontStyle: 'italic' }`
+with a comment claiming the colour stayed muted "by inheritance". It does not:
+`Text` on that screen is `components/Themed`'s, which renders
+`<DefaultText style={[{ color }, style]}>` — so every nested Text is handed a
+full-contrast colour *before* its own style applies. The rating would have
+rendered at 11.5:1 inside a 4.67:1 line, making the opinion the **brightest
+number on the line**: the hierarchy this whole change exists to build, inverted,
+on the busiest screen in the app. No test can see it, and the comment asserted
+the opposite of what shipped.
+
+Three more, all latent rather than live, all worth having:
+
+- The migration parse matched `'([a-z_]+)'`, which **silently dropped any load
+  type containing a digit** — a future `'zone2'` parsed back to the original
+  five with no error. That is the same silent short list the derivation exists
+  to prevent, one notch narrower. Now `'([^']+)'` plus a quote-count check, and
+  verified by adding `'zone2'` and watching the coverage test go red.
+- `MIN`/`MAX` were missing from the aggregate list. They are aggregates with
+  rule 3's problem exactly — "worst rating in the block" is a claim about a
+  window the rating may not cover — and their row-wise counterparts are the
+  `LEAST`/`GREATEST` the guard deliberately excludes, which is the distinction
+  the exclusion turns on.
+- The client pattern was camelCase-only, so `avg_rpe` walked through — and
+  snake_case is this repo's wire convention, so that is the spelling a future
+  aggregate endpoint's response type would actually arrive in.
+
+Also: one anchor per scanned directory rather than three across five (two dirs
+had none, so a broken path would have gone unnoticed while the count still
+cleared the floor), and the accessibility label says "5 by 100kg" rather than
+carrying `×`, since VoiceOver's handling of U+00D7 varies and a label written
+because styles are silent should not depend on a glyph being spoken.
+
+### Still open
+
+- **The evidence split is checked structurally, not behaviourally.** The text
+  check catches the drift that would actually happen; it would not catch a
+  rewrite that preserved the shape and changed the output. Running web's
+  function from this suite needs it extracted to a pure module first.
+- **The rule-3 scan reads names and shapes, not intent.** A `reduce` assigned to
+  something vague, or a rating wrapped before it is aggregated
+  (`AVG(COALESCE(rpe, 0))`), still walks through. Both limits are named in the
+  test file. It closes the obvious door, not every door.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

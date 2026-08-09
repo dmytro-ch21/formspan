@@ -147,7 +147,8 @@ func TestBestOneRM(t *testing.T) {
 func TestRecordKindsFor_CoversEveryLoadType(t *testing.T) {
 	// Mirrors exercises_load_type_valid in migration 000004. Adding a value
 	// there without adding it here is exactly what this catches.
-	for _, lt := range []string{"weight_reps", "reps", "time", "distance", "distance_time"} {
+	// Shared with basis_test.go — see `recordedLoadTypes` there.
+	for _, lt := range recordedLoadTypes {
 		if len(RecordKindsFor(lt)) == 0 {
 			t.Errorf("load type %q holds no records — new catalog type without a record kind?", lt)
 		}

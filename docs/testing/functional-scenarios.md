@@ -1018,6 +1018,13 @@ most prominent thing.
 - Which kinds appear follows `load_type`: a plank offers longest-time only, a run furthest-distance, bodyweight work most-reps. No exercise should advertise a record for a measure it doesn't take.
 - Evidence travels with every record — reps, weight, effort, date and session.
 
+**Measured, modelled, reported** (see `backend/internal/modules/session/basis.go`)
+- **The estimated 1RM is marked as an estimate wherever it renders** — mobile records card, `/dashboard/records`, and the session detail's records list. It is computed from RIR/RPE as effective reps, so it is the one record that is not a measurement, and it sits directly beside ones that are.
+- **The set's evidence keeps the two halves apart.** `5 × 100kg` is what was on the bar; `2 RIR` is what the athlete reckoned was left. They must not be joined by the same separator into one string — that was the defect. Check a record whose set carries a rating *and* one whose set does not.
+- **A missing rating renders as nothing, not as a zero or a dash in a row of numbers.** `TrackEffortProvider` lets an athlete turn effort collection off, so absence is ordinary and must not read as an effort of zero.
+- **A record is never ranked or gated by a rating.** Seed two sets where the heavier one reports a *lower* RPE: the heavier still wins `heaviest_weight`. (Deliberately not true of `estimated_1rm`, which consumes RIR by design — that is what the marking is for.)
+- Every record kind must have a basis. Adding a kind without classifying it fails `TestBasisFor_ClassifiesEveryRecordKind`, and the Go/TypeScript copies are pinned together by `basisParity.test.ts`.
+
 **Web (`/dashboard/records`) — the fuller view**
 - Lists every exercise trained, not the shortlist, with pinned ones first.
 - Each record shows its value, the set behind it, and a link to that session. Following the link must land on the session the record actually came from.
@@ -2947,6 +2954,18 @@ differ here — deliberately, and stated rather than implied.
 The half that was missing when logging shipped. Its absence did not read as an
 incomplete feature — it read as a broken one, because the reflection could be
 written and then never seen again.
+
+### What the numbers are
+
+- **Mat time and rolling time are tiles; effort is not.** The screen used to put
+  "60 min on the mat", "25 min rolling" and "— effort" in three identical tiles
+  — two measurements and an opinion, given equal weight by the layout. Effort
+  now sits below them under its own label, and the layout is the assertion: a
+  build where the three render alike has lost the distinction. See
+  `backend/internal/modules/session/basis.go`.
+- **A session with no effort recorded says so**, rather than showing a dash
+  where a number goes. The three-tap floor never asks for effort, so absent is
+  the common case and must not read as zero.
 
 ### Routing
 

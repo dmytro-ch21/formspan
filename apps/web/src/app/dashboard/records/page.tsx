@@ -8,6 +8,7 @@ import {
   fetchPinnedExercises,
   fetchRecords,
   listExercises,
+  RECORD_BASIS,
   RECORD_LABEL,
   setPinnedExercises,
   type Exercise,
@@ -326,14 +327,46 @@ function RecordCell({
   record: PersonalRecord;
   units: UnitSystem;
 }) {
+  // One call, not three. Pure and identically argued each time, so the repeats
+  // were harmless — but they were three places for a later edit to change one
+  // and miss the others, and the mobile twin reads as a single `evidence`.
+  const evidence = describe(record, units);
+
   return (
     <div className="rounded-card border border-line-soft bg-surface-raised px-4 py-3">
-      <dt className="eyebrow text-[0.625rem]">{RECORD_LABEL[record.kind]}</dt>
+      <dt className="eyebrow text-[0.625rem]">
+        {RECORD_LABEL[record.kind]}
+        {/* A modelled number says so. `RECORD_LABEL` already reads "Est. 1RM",
+            but that is the record's NAME — this says what sort of number it is,
+            and stays right if the label is ever reworded. */}
+        {RECORD_BASIS[record.kind] === "modelled" && (
+          <span className="ml-1 font-normal normal-case text-text-dim">
+            estimate
+          </span>
+        )}
+      </dt>
       <dd className="stat mt-0.5 text-2xl">{formatValue(record, units)}</dd>
       {/* The evidence, and a way to go and look at it. A record you can open
           is one you can argue with; a bare number is one you have to trust. */}
       <p className="mt-1 text-xs text-text-muted">
-        {describe(record, units) || "—"}
+        {/* The em dash means "no set detail". Beside a rating it reads as a
+            rendering fault rather than an absence — which is the case for a
+            timed or distance record carrying an RPE. */}
+        {evidence.measured || (evidence.reported ? "" : "—")}
+        {evidence.reported && (
+          <span className="ml-1 italic">
+            {/* Said out loud, because italic is silent. Without this a screen
+                reader hears "5 × 100kg · 2 RIR" — the exact flattening this
+                change exists to undo, reproduced in speech. Mobile carries the
+                same word in its accessibility label. */}
+            <span className="sr-only">reported </span>
+            {/* `text-text-muted`, not `text-text-dim`: the rating is real
+                information, and dim measures ~3.4:1 at this size. Italic alone
+                still sets it apart from the upright measurement. */}
+            <span aria-hidden="true">· </span>
+            {evidence.reported}
+          </span>
+        )}
       </p>
       <Link
         href={`/dashboard/sessions/${record.session_id}`}
@@ -371,16 +404,32 @@ function formatValue(r: PersonalRecord, units: UnitSystem): string {
   }
 }
 
-function describe(r: PersonalRecord, units: UnitSystem): string {
-  const bits: string[] = [];
+/**
+ * The set behind the number, split by what kind of fact each half is.
+ *
+ * This returned one string with the same separator between the two halves —
+ * `"5 × 100kg · 2 RIR"` — which presents an opinion as another column of the
+ * measurement. `5 × 100kg` is what was on the bar; `2 RIR` is what the athlete
+ * reckoned was left. See `backend/internal/modules/session/basis.go`.
+ *
+ * The mobile twin is `describeEvidence` in `apps/mobile/lib/records.ts`, and it
+ * splits the same way.
+ */
+function describe(
+  r: PersonalRecord,
+  units: UnitSystem,
+): { measured: string; reported: string } {
+  const measured: string[] = [];
   if (r.reps != null && r.weight_kg != null) {
-    bits.push(`${r.reps} × ${formatWeight(r.weight_kg, units)}`);
+    measured.push(`${r.reps} × ${formatWeight(r.weight_kg, units)}`);
   } else if (r.reps != null) {
-    bits.push(`${r.reps} reps`);
+    measured.push(`${r.reps} reps`);
   }
-  if (r.rir != null) bits.push(`${r.rir} RIR`);
-  else if (r.rpe != null) bits.push(`RPE ${r.rpe}`);
-  return bits.join(" · ");
+  // RIR wins where both are present, matching the estimator's own precedence.
+  const reported: string[] = [];
+  if (r.rir != null) reported.push(`${r.rir} RIR`);
+  else if (r.rpe != null) reported.push(`RPE ${r.rpe}`);
+  return { measured: measured.join(" · "), reported: reported.join(" · ") };
 }
 
 function Chip({
