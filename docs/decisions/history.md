@@ -17806,24 +17806,68 @@ by italic alone, so a screen reader heard `"5 × 100kg · 2 RIR"` — the exact
 flattening this change exists to undo, reproduced in speech. It now carries an
 `sr-only` "reported", matching what mobile already said out loud.
 
-### Gaps
+### Closing the gaps it left
 
-- **Rule 3 is unenforced.** Nothing aggregates a reported value, so there is no
-  reader to point a test at. The first one to appear should bring the guard.
-- **The two evidence-splitting functions are not pinned to each other.**
-  `describeEvidence` (mobile) and `describe` (web's records page) implement the
-  same split independently. Drift there produces inconsistent wording rather
-  than a misclassification, which is why it was left — but it is the same shape
-  of risk as the basis maps, one severity down.
-- **The strength session's "last time" hint still flattens all three.**
-  `app/session/[id].tsx` renders `Last 5 × 100kg · 2 RIR · Est. 1RM 120kg` —
-  measured, reported and modelled joined by one separator, mid-workout where
-  space is genuinely tight. Outside this change's scope and left deliberately.
-- **A new load type is still invisible to the guards.** `recordedLoadTypes`
-  mirrors migration 000004's CHECK by hand; a load type added there and not here
-  slips past both coverage tests. Deriving it would need a database, which these
-  tests deliberately avoid.
+The entry above originally ended with four of them. Three are now shut and the
+fourth is enforced, all in the same branch:
 
+**Rule 3 has a guard now, and it is a scan rather than a unit test — because
+there is still nothing to unit-test.** Nothing aggregates a reported value, so
+the only way to enforce "no aggregate spans a window a rating may not cover" is
+to notice the first one that appears. `reportedAggregation.test.ts` walks the
+backend and both clients for a SQL aggregate over `rir`/`rpe`/`session_rpe`, and
+for client identifiers named for the act (`avgRpe`, `rpeAverage`, `totalRir`).
+
+The interesting part is what it deliberately does NOT flag: `GREATEST` and
+`LEAST` are excluded and the file says they must never be added, because
+`postgres.go` uses `GREATEST(0, 10 - LEAST(ss.rpe, 10))` to turn one set's RPE
+into effective reps — a per-row conversion, and precisely the computation rule 2
+permits. A guard that failed on correct code is a guard that gets deleted, so a
+fourth test asserts the exclusion still holds. Mutation-tested three ways: a SQL
+`AVG(rpe)`, a client `averageRpe`, and someone adding `LEAST` to the aggregate
+list — the last one goes red *before* the guard starts failing on correct code.
+
+Honest limit, stated in the file: it cannot catch
+`sets.reduce((a, s) => a + (s.rpe ?? 0), 0)` assigned to something vaguely
+named. A scan cannot read intent. What it buys is that the obvious way in is
+closed and a deliberate one has to be argued for — which is the moment someone
+reads rule 3.
+
+**The load-type list is read from the migration instead of copied out of it.**
+It was a literal in two test files, which left the hole the guard was supposed
+to close: a load type added to the schema and not to the list is invisible, so
+the record kind it brings goes unclassified. A hand-copied vocabulary cannot
+guard against forgetting to update a hand-copied vocabulary. It now parses the
+CHECK out of `000004_create_exercises.up.sql` — no database needed, because the
+migration is a file and the constraint is the same text `migrate up` applies.
+Verified by adding a sixth load type to the migration and watching
+`TestRecordKindsFor_CoversEveryLoadType` go red.
+
+**The strength session's "last time" hint no longer flattens all three.** It
+rendered `Last 5 × 100kg · 2 RIR · Est. 1RM 120kg` — a measurement, an opinion
+and a model output joined by three identical separators, on the busiest screen
+in the app. The rating is now set apart; the estimate is not, because the text
+already says "Est." — the same call the records card makes. The accessibility
+label spells both out, since italic announces nothing.
+
+**Web's evidence split is pinned, structurally.** `describe` on the records page
+is a second implementation of `describeEvidence`, and a divergence there could
+push a rating back into the measured half on one platform only. It cannot be
+*run* from this suite — the file is a Next client component whose imports
+jest-expo will not resolve — so the check is on source text: that it returns two
+halves, that `rir`/`rpe` go to `reported` and never to `measured`, and that the
+RIR-over-RPE precedence survives. That limit is stated in the test, the same
+trade `keyboardCoverage.test.ts` makes. Mutation-tested by pushing the rating
+into the measured half.
+
+### Still open
+
+- **The evidence split is checked structurally, not behaviourally.** The text
+  check catches the drift that would actually happen; it would not catch a
+  rewrite that preserved the shape and changed the output. Running web's
+  function from this suite needs it extracted to a pure module first.
+- **A per-row `reduce` over a rating remains invisible** to the rule-3 scan, per
+  the limit above.
 
 ## Open items / known gaps as of this entry
 

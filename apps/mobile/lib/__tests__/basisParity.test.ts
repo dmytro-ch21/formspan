@@ -27,6 +27,7 @@ import { RECORD_BASIS, basisFor, describeEvidence, type PersonalRecord } from '.
 const GO_BASIS = resolve(__dirname, '../../../../backend/internal/modules/session/basis.go');
 const GO_RECORDS = resolve(__dirname, '../../../../backend/internal/modules/session/records.go');
 const WEB_API = resolve(__dirname, '../../../web/src/lib/api.ts');
+const WEB_API_PAGE = resolve(__dirname, '../../../web/src/app/dashboard/records/page.tsx');
 
 /**
  * Reads web's `RECORD_BASIS` out of its source.
@@ -181,5 +182,55 @@ describe('describeEvidence keeps the two halves apart', () => {
     // `TrackEffortProvider` makes RIR/RPE optional and toggleable, so "absent"
     // is an ordinary state and must not render as a value.
     expect(describeEvidence(record({ rir: null, rpe: null }), 'metric').reported).toBe('');
+  });
+});
+
+/**
+ * Web splits the evidence the same way.
+ *
+ * `apps/web/src/app/dashboard/records/page.tsx` has its own `describe`, because
+ * it is a separate app with its own formatters. Two independent implementations
+ * of one split is the same drift risk as the basis maps, one severity down: a
+ * divergence here produces inconsistent wording or, worse, a rating pushed back
+ * into the measured half on one platform only.
+ *
+ * **This is a structural check on source text, and that limit is real.** It
+ * cannot run web's function — the file is a Next client component whose imports
+ * jest-expo will not resolve — so it proves the shape of the code, not its
+ * output. `keyboardCoverage.test.ts` accepts the same trade for the same reason
+ * and says so. What it catches is the realistic drift: someone reversing the
+ * RIR/RPE precedence, or pushing a rating into `measured`.
+ */
+describe('web splits the evidence the same way', () => {
+  const webDescribe = (() => {
+    const src = readFileSync(WEB_API_PAGE, 'utf8');
+    const start = src.indexOf('function describe(');
+    if (start === -1) throw new Error('web records page has no `describe` — did it move?');
+    // To the end of the function, which is the next line starting with `}`.
+    const end = src.indexOf('\n}', start);
+    return src.slice(start, end);
+  })();
+
+  it('actually extracted the function', () => {
+    expect(webDescribe).toContain('reported');
+    expect(webDescribe.length).toBeGreaterThan(100);
+  });
+
+  it('returns the two halves rather than one joined string', () => {
+    expect(webDescribe).toMatch(/measured:\s*measured\.join/);
+    expect(webDescribe).toMatch(/reported:\s*reported\.join/);
+  });
+
+  it('pushes the rating into reported, never into measured', () => {
+    // The defect, restored, would be `measured.push(...RIR...)`.
+    expect(webDescribe).toMatch(/reported\.push\(`\$\{r\.rir\}\s*RIR`\)/);
+    expect(webDescribe).not.toMatch(/measured\.push\([^)]*rir/i);
+    expect(webDescribe).not.toMatch(/measured\.push\([^)]*rpe/i);
+  });
+
+  it('prefers RIR over RPE, as Go and mobile do', () => {
+    // `if (r.rir != null) … else if (r.rpe != null)` — the else-if is the
+    // precedence, and reversing it is the drift worth catching.
+    expect(webDescribe).toMatch(/if\s*\(r\.rir\s*!=\s*null\)[\s\S]*?else if\s*\(r\.rpe\s*!=\s*null\)/);
   });
 });

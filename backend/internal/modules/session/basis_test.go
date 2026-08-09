@@ -1,6 +1,11 @@
 package session
 
-import "testing"
+import (
+	"fmt"
+	"os"
+	"regexp"
+	"testing"
+)
 
 // The classification has to be total, and it has to fail loudly when it is not.
 //
@@ -11,19 +16,46 @@ import "testing"
 //
 // Needs no database and no fixtures; these are pure vocabulary.
 
-// recordedLoadTypes is the catalog's load-type vocabulary, mirroring the CHECK
-// in migrations/000004_create_exercises.up.sql.
+// recordedLoadTypes is the catalog's load-type vocabulary, READ FROM THE
+// MIGRATION rather than copied out of it.
 //
-// Package-level and shared with onerm_test.go, which carried its own literal
-// copy of the same list. Two hand-maintained copies of one vocabulary is two
-// chances to forget the same thing — and the thing they guard is precisely
-// "a new load type brought a new record kind and nobody classified it".
+// It was a literal list in two test files, and that left the hole this guard is
+// supposed to close: a load type added to the schema and not to the list is
+// invisible to every check below, so the new record kind it brings goes
+// unclassified and renders as a measurement. A hand-copied vocabulary cannot
+// guard against forgetting to update a hand-copied vocabulary.
 //
-// It does not close the hole: a load type added to the migration and not to
-// this list is still invisible to both guards. Deriving it from the CHECK
-// constraint would need a database, which these tests deliberately do not use.
-// One place to remember instead of three is the honest improvement here.
-var recordedLoadTypes = []string{"weight_reps", "reps", "time", "distance", "distance_time"}
+// Parsing the CHECK needs no database — the migration is a file, and the
+// constraint is the same text `migrate up` will apply. That is the whole reason
+// this is sound: there is no second source to drift from, and a database would
+// only tell us what this file already says.
+//
+// Panics rather than returning an error. A parse that quietly returned nothing
+// would make every loop below pass by iterating zero times, which is the exact
+// failure mode `TestAllRecordKinds_CoversTheVocabulary` exists to prevent.
+var recordedLoadTypes = loadTypesFromMigration()
+
+func loadTypesFromMigration() []string {
+	const rel = "../../../migrations/000004_create_exercises.up.sql"
+	src, err := os.ReadFile(rel)
+	if err != nil {
+		panic(fmt.Sprintf("session: cannot read the exercises migration (%s): %v", rel, err))
+	}
+	// `load_type IN ('weight_reps', 'reps', ...)` — anchored on the column so a
+	// different IN-list in the same file cannot be picked up by accident.
+	m := regexp.MustCompile(`load_type\s+IN\s*\(([^)]*)\)`).FindSubmatch(src)
+	if m == nil {
+		panic("session: the exercises migration has no `load_type IN (...)` CHECK — did it move or get renamed?")
+	}
+	var out []string
+	for _, q := range regexp.MustCompile(`'([a-z_]+)'`).FindAllSubmatch(m[1], -1) {
+		out = append(out, string(q[1]))
+	}
+	if len(out) == 0 {
+		panic("session: parsed the load_type CHECK but found no values in it")
+	}
+	return out
+}
 
 // allRecordKinds is the vocabulary, written out.
 //
