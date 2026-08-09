@@ -16,6 +16,7 @@ import {
   KINDS,
   LIVE_ROWS,
   describeRPE,
+  MAX_RPE,
   rollingMinutes,
   techniqueOutcomeCount,
   type SessionDetail,
@@ -396,14 +397,29 @@ export default function BjjSessionScreen() {
       </Text>
 
       {/* The numbers a mat session actually has. Deliberately not a volume
-          tile — see the file header. */}
+          tile — see the file header.
+
+          Effort is NOT in this row, and that is the point. Mat time and rolling
+          time are measured; effort is what the athlete reckoned afterwards.
+          Three identical tiles said all three were the same kind of fact, and
+          the one that isn't sat on the end reading as a third measurement. See
+          `backend/internal/modules/session/basis.go`. */}
       <RNView style={styles.stats}>
         <Stat value={minutes > 0 ? `${minutes}` : '—'} unit="min on the mat" />
         <Stat value={rolling > 0 ? `${rolling}` : '—'} unit="min rolling" />
-        <Stat
-          value={detail?.session_rpe ? `${detail.session_rpe}` : '—'}
-          unit={detail?.session_rpe ? describeRPE(detail.session_rpe).toLowerCase() : 'effort'}
-        />
+      </RNView>
+
+      {/* Below the measurements, labelled as the athlete's own account.
+          Rendered even when absent, because "didn't say" is a real answer for a
+          field the three-tap floor never asks for — and a missing rating must
+          not read as an effort of zero. */}
+      <RNView style={styles.reported} testID="bjj-session-reported">
+        <Text style={styles.reportedLabel}>HOW IT FELT</Text>
+        <Text style={styles.reportedValue}>
+          {detail?.session_rpe
+            ? `${detail.session_rpe}/${MAX_RPE} · ${describeRPE(detail.session_rpe)}`
+            : 'Not recorded'}
+        </Text>
       </RNView>
 
       {/* Only when it says something the title doesn't. The name defaults to
@@ -619,6 +635,12 @@ const styles = StyleSheet.create({
   renameAction: { fontSize: 16, fontWeight: '700' },
 
   stats: { flexDirection: 'row', gap: 12, marginBottom: 12 },
+  // Deliberately NOT a `stat` tile. The measurements above are boxed and
+  // centred; this is a labelled line, so the difference is visible before any
+  // of the words are read.
+  reported: { marginBottom: 12, gap: 2 },
+  reportedLabel: { fontSize: 9, fontWeight: '700', letterSpacing: 0.8, color: vola.textDim },
+  reportedValue: { fontSize: 14, color: vola.textMuted, fontStyle: 'italic' },
   stat: {
     flex: 1,
     backgroundColor: vola.surface,

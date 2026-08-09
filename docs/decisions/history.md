@@ -17671,6 +17671,116 @@ branches never exercised at all, the trend window's boundary unpinned, and
   built; it is not built.
 
 
+## 2026-08-09 — "What you did" and "how it felt" stop being the same kind of number
+
+Task #12. The brief was to separate objective metrics from subjective session
+ratings so a self-rating cannot contaminate a measurement. Two things about it
+changed on contact with the code.
+
+### The stated problem had mostly already been fixed
+
+The task named `lib/trend.ts`, `lib/report.ts` and `lib/adherence.ts` as
+"readers that compute across both". **None of them touch a rating.** `trend.ts`
+counts days trained on purpose — a tonnage chart is one a BJJ athlete cannot
+appear in, and this app has already shipped that bug. `adherence.ts` matches
+plans to sessions by day and sport. `report.ts` is client-error reporting and
+has nothing to do with training data at all. Whatever was true when the task was
+written, those three were clean by the time it was picked up.
+
+Nothing in the app aggregates a reported value today. So this is mostly a guard
+against a defect that has not happened yet — which is the cheap moment to build
+one, and worth saying plainly rather than dressing up as a rescue.
+
+### The one real instance is deliberate, and stays
+
+`estimated_1rm` — **a personal record** — is computed from a self-rating.
+`session/postgres.go`'s candidate CTE folds RIR/RPE into effective reps
+(`reps + COALESCE(rir, GREATEST(0, 10 - LEAST(rpe, 10)), 0)`), which is what
+turns a submaximal set into a one-rep-max estimate.
+
+That is a head-on collision with the task's own rule, *"a PR is never judged by,
+ranked by, or gated on a subjective rating"*. The rule loses. RIR-based 1RM
+estimation is standard practice, the SQL around it is careful and was already
+corrected once by review after a real bug, and stripping RIR out would make the
+estimate **worse**, not more objective.
+
+### So: three kinds, not two
+
+A measured/subjective binary cannot describe an estimate — and this app already
+knew that, one layer up. `units.ts` renders an estimate at whole display units
+because *"a logged set is a measurement — 62.55kg is what was on the bar. A
+one-rep max derived from a rep-max curve is not, and '143.88kg' invites reading
+a modelled number as a measured one."* The distinction was correct and was
+living in a formatter.
+
+- **measured** — what happened. Weight, reps, seconds, distance, rounds, mat
+  time, body weight and girths.
+- **modelled** — derived by a documented formula, and may legitimately consume
+  reported inputs. `estimated_1rm`.
+- **reported** — the athlete's own account. RIR, RPE, session RPE, notes.
+
+And the three reading rules, which now live in `basis.go` next to what enforces
+them: a measured value is never judged or ranked by a reported one; a modelled
+value may consume reported inputs but must say it is modelled and be able to
+state them; and no aggregate may span a window where a reported input was
+collected for only part of it — the `TrackEffortProvider` trap, where an athlete
+toggling effort collection off makes an average silently change its sample.
+
+### A marker, not new tables
+
+Rejected: separate tables, and a nested `reported` object in the payloads. Both
+move field shapes, and `session_sets.rir`/`rpe` and
+`bjj_session_details.session_rpe` are carried by the offline outbox, the SQLite
+mirror on every phone and a hand-maintained OpenAPI contract. That is a
+migration-shaped change to express something a marker expresses exactly as well.
+
+The marker is also the truer model: `rir` is not stored in the wrong place — it
+belongs on the set it describes. What was missing was the statement that it is a
+different KIND of fact from the reps beside it. **No contract change, and no
+migration.**
+
+The classification is keyed on the record KIND, not carried per row: every
+`estimated_1rm` that has ever existed is modelled, so shipping it per record
+would put a constant on every row and let a phone's cache hold a stale
+classification if the vocabulary ever changed.
+
+### What actually changed on screen
+
+- **The BJJ session detail put "60 min on the mat", "25 min rolling" and
+  "— effort" in three identical tiles.** Two measurements and an opinion, given
+  equal weight by the layout. Effort is now a labelled line below the
+  measurements, reading "HOW IT FELT", and says "Not recorded" rather than
+  rendering absence as an em dash in a row of numbers.
+- **`describeEvidence` returned `"5 × 100kg · 2 RIR"`** — one string, one
+  separator, an opinion presented as another column of the measurement. It now
+  returns the two halves separately and the rating renders dimmed and italic,
+  set apart. Same split on web's records page, which had its own copy.
+- **Estimates are marked** on the records card, the web records page and the web
+  session detail. `RECORD_LABEL` already read "Est. 1RM", but that is the
+  record's name; the marker says what sort of number it is and survives the
+  label being reworded.
+
+### Keeping three copies of one rule honest
+
+`RecordKind` exists in Go, in `apps/mobile/lib/records.ts` and in
+`apps/web/src/lib/api.ts`, so the classification does too.
+`basisParity.test.ts` reads `basis.go`, parses the constant names out of
+`records.go` (the convention is not even consistent — `RecordOneRM` is
+`estimated_1rm`, so guessing would make the test agree with a guess), and
+compares the mapping to the TypeScript one. Same technique `planHero.test.ts`
+uses on web's angle formula. Mutation-tested: reclassifying `estimated_1rm` in
+Go turns the mobile suite red.
+
+### Gaps
+
+- **`apps/web`'s own copy is pinned only through mobile's test.** The parity
+  test compares Go to `apps/mobile`; web's `RECORD_BASIS` is checked by nothing
+  but review. Both TypeScript copies are exhaustive `Record<RecordKind, Basis>`
+  maps, so a *missing* kind fails to compile — but a *wrong* one would not.
+- **Rule 3 is unenforced.** Nothing aggregates a reported value, so there is no
+  reader to point a test at. The first one to appear should bring the guard.
+
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

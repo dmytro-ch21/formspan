@@ -40,6 +40,51 @@ export const RECORD_LABEL: Record<RecordKind, string> = {
   furthest_distance: 'Furthest',
 };
 
+/**
+ * What kind of number this is — see `backend/internal/modules/session/basis.go`,
+ * which carries the full argument and the three reading rules.
+ *
+ * In short: `measured` is what happened, `modelled` is derived from what
+ * happened by a documented formula and may consume reported inputs, `reported`
+ * is the athlete's own account. The distinction exists because a heaviest lift
+ * and an estimated 1RM used to render as peers, and one of them is computed
+ * from a self-rating.
+ */
+export type Basis = 'measured' | 'modelled' | 'reported';
+
+/**
+ * Classifies a record kind.
+ *
+ * **A local map rather than a field on the wire.** The basis is a property of
+ * the vocabulary, not of a row — every `estimated_1rm` that has ever existed is
+ * modelled — so sending it per record would ship a constant on every row and
+ * let a row cached on a phone carry a stale classification if the vocabulary
+ * ever changed. `RecordKind` already exists in three places (Go, here, and
+ * `apps/web/src/lib/api.ts`); the classification belongs beside each copy, and
+ * `basisParity.test.ts` reads the Go source to keep them from drifting.
+ *
+ * A `Record<RecordKind, Basis>` rather than a function with a fallback: the map
+ * is exhaustive by type, so a new kind fails to compile here instead of
+ * silently defaulting to `measured` — which is the failure this whole
+ * distinction exists to prevent.
+ */
+export const RECORD_BASIS: Record<RecordKind, Basis> = {
+  heaviest_weight: 'measured',
+  most_reps: 'measured',
+  longest_time: 'measured',
+  furthest_distance: 'measured',
+  // The one modelled record: Epley over reps and weight, with RIR/RPE folded in
+  // as effective reps. Kept that way deliberately — RIR is genuinely how a
+  // submaximal set becomes a 1RM estimate, and removing it would make the
+  // estimate worse rather than more objective. What it needs is a label, not a
+  // different formula.
+  estimated_1rm: 'modelled',
+};
+
+export function basisFor(kind: RecordKind): Basis {
+  return RECORD_BASIS[kind];
+}
+
 async function call<T>(
   getToken: TokenGetter,
   path: string,
@@ -129,16 +174,43 @@ export function formatRecord(r: PersonalRecord, u: UnitSystem): string {
 }
 
 /**
- * "5 × 100kg · 2 RIR" — the set behind the number, so it can be checked.
+ * The set behind the number, split by what kind of fact each half is.
  *
- * The weight here is `formatWeight`, not `formatEstimate`, whatever kind of
- * record it evidences: this is the set that was logged.
+ * This used to return one string — `"5 × 100kg · 2 RIR"` — with the same
+ * separator between the two halves, which is precisely the flattening this
+ * distinction exists to undo. `5 × 100kg` is what was on the bar. `2 RIR` is
+ * what the athlete reckoned was left in the tank. Joining them with a middle
+ * dot presents an opinion as another column of the measurement.
+ *
+ * Returned as parts rather than a pre-joined string so the caller can style
+ * them differently; nothing here decides how that looks.
+ *
+ * The weight is `formatWeight`, not `formatEstimate`, whatever kind of record
+ * it evidences: this is the set that was logged, and it was measured even when
+ * the number it supports is modelled.
  */
-export function describeEvidence(r: PersonalRecord, u: UnitSystem): string {
-  const bits: string[] = [];
-  if (r.reps != null && r.weight_kg != null) bits.push(`${r.reps} × ${formatWeight(r.weight_kg, u)}`);
-  else if (r.reps != null) bits.push(`${r.reps} reps`);
-  if (r.rir != null) bits.push(`${r.rir} RIR`);
-  else if (r.rpe != null) bits.push(`RPE ${r.rpe}`);
-  return bits.join(' · ');
+export type Evidence = {
+  /** What was logged: "5 × 100kg", "12 reps". Empty when the set carried none. */
+  measured: string;
+  /** What the athlete reported: "2 RIR", "RPE 8". Empty when not collected —
+   *  which is a normal state, since `TrackEffortProvider` makes it optional. */
+  reported: string;
+};
+
+export function describeEvidence(r: PersonalRecord, u: UnitSystem): Evidence {
+  const measured: string[] = [];
+  if (r.reps != null && r.weight_kg != null) {
+    measured.push(`${r.reps} × ${formatWeight(r.weight_kg, u)}`);
+  } else if (r.reps != null) {
+    measured.push(`${r.reps} reps`);
+  }
+
+  // RIR wins where both are present, matching the estimator's own precedence
+  // (`backend/internal/modules/session/postgres.go` — "RIR is the observed
+  // quantity and wins where both are present").
+  const reported: string[] = [];
+  if (r.rir != null) reported.push(`${r.rir} RIR`);
+  else if (r.rpe != null) reported.push(`RPE ${r.rpe}`);
+
+  return { measured: measured.join(' · '), reported: reported.join(' · ') };
 }

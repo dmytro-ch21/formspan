@@ -20,6 +20,7 @@ import {
   measuresFor,
   MEASURE_KEY,
   MEASURE_LABEL,
+  RECORD_BASIS,
   RECORD_LABEL,
   pickImage,
   replaceSets,
@@ -593,7 +594,14 @@ export default function SessionPage({
                 className="flex justify-between gap-4 text-sm"
               >
                 <span className="capitalize">{exerciseID.replace(/-/g, " ")}</span>
-                <span className="text-text-muted">{RECORD_LABEL[record.kind]}</span>
+                <span className="text-text-muted">
+                  {RECORD_LABEL[record.kind]}
+                  {/* Same marker the records page carries: an estimate is not a
+                      measurement, and this list puts the two side by side. */}
+                  {RECORD_BASIS[record.kind] === "modelled" && (
+                    <span className="ml-1 text-text-dim">estimate</span>
+                  )}
+                </span>
               </li>
             ))}
           </ul>

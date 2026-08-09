@@ -10,6 +10,7 @@ import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { cachedExercises } from '@/lib/sessionStore';
 import {
+  basisFor,
   describeEvidence,
   fetchRecords,
   formatRecord,
@@ -111,6 +112,10 @@ export function RecordsCard({
             const fresh = er.records.some((r) => r.is_recent);
             const name = names.get(er.exercise_id) ?? er.exercise_id;
             const evidence = describeEvidence(primary, units);
+            // "Est." rather than a longer word, and only on the modelled kind.
+            // The row is one line on a phone; the point is that the number
+            // beside it was computed, not that the reader learns a taxonomy.
+            const modelled = basisFor(primary.kind) === 'modelled';
 
             return (
               <Pressable
@@ -120,7 +125,13 @@ export function RecordsCard({
                 accessibilityLabel={[
                   name,
                   `${RECORD_LABEL[primary.kind]} ${formatRecord(primary, units)}`,
-                  evidence,
+                  // Said in words for a screen reader, because the visual cue
+                  // for this is a style and a style announces nothing.
+                  modelled ? 'an estimate' : null,
+                  evidence.measured,
+                  // "reported" out loud, so the rating is not heard as another
+                  // measurement in the same list.
+                  evidence.reported ? `reported ${evidence.reported}` : null,
                   ...rest.map(
                     (r) => `${RECORD_LABEL[r.kind]} ${formatRecord(r, units)}`,
                   ),
@@ -151,7 +162,7 @@ export function RecordsCard({
                         this is the fact. */}
                     {fresh && <Text style={styles.fresh}>New · </Text>}
                     {[
-                      evidence || null,
+                      evidence.measured || null,
                       ...rest.map(
                         (r) =>
                           `${RECORD_LABEL[r.kind]} ${formatRecord(r, units)}`,
@@ -159,6 +170,12 @@ export function RecordsCard({
                     ]
                       .filter(Boolean)
                       .join(' · ') || '—'}
+                    {/* The rating, set apart rather than joined with the same
+                        middle dot as the measurements. It is the athlete's
+                        account of the set, not another column of it. */}
+                    {evidence.reported ? (
+                      <Text style={styles.reported}> · {evidence.reported}</Text>
+                    ) : null}
                   </Text>
                 </RNView>
 
@@ -166,6 +183,11 @@ export function RecordsCard({
                   <StatValue value={formatRecord(primary, units)} size={19} />
                   <Text style={styles.valueLabel}>
                     {RECORD_LABEL[primary.kind].toUpperCase()}
+                    {/* A modelled number gets a mark a measured one does not.
+                        `RECORD_LABEL` already reads "Est. 1RM", but that is the
+                        name of the record — this says what sort of number it
+                        is, and it stays right if the label is ever reworded. */}
+                    {modelled ? <Text style={styles.modelled}> ~</Text> : null}
                   </Text>
                 </RNView>
               </Pressable>
@@ -222,6 +244,13 @@ const styles = StyleSheet.create({
   name: { fontSize: 15, fontWeight: '700' },
   evidence: { fontSize: 12, color: vola.textMuted },
   fresh: { color: vola.lime, fontWeight: '700' },
+  // Dimmer than the measurements it sits beside, and italic. The rating is
+  // real information and is not the record — it should read as an aside, not
+  // as another number in the row.
+  reported: { color: vola.textDim, fontStyle: 'italic' },
+  // The modelled mark. Same size as the label it trails so it reads as part of
+  // it rather than as a stray character.
+  modelled: { color: vola.textDim },
   value: { alignItems: 'flex-end', gap: 1 },
   valueLabel: { fontSize: 9, fontWeight: '700', letterSpacing: 0.8, color: vola.textDim },
   muted: { color: vola.textMuted, fontSize: 13 },
