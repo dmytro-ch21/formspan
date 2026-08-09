@@ -60,6 +60,17 @@ const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
 export default function RootLayout() {
   const [loaded, error] = useFonts({
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
+    // Barlow is the brand face. Loaded here rather than per screen because a
+    // font that arrives after first paint reflows whatever is already on
+    // screen, and the splash is held until `loaded` anyway.
+    //
+    // The condensed cut carries the numerals on the session card: a stat strip
+    // set in the regular face either runs out of room or drops a size, and the
+    // numbers are the design.
+    Barlow: require('../assets/fonts/Barlow-Regular.ttf'),
+    BarlowSemiBold: require('../assets/fonts/Barlow-SemiBold.ttf'),
+    BarlowCondensedSemiBold: require('../assets/fonts/BarlowCondensed-SemiBold.ttf'),
+    BarlowCondensedBold: require('../assets/fonts/BarlowCondensed-Bold.ttf'),
   });
 
   // Expo Router uses Error Boundaries to catch errors in the navigation tree.
