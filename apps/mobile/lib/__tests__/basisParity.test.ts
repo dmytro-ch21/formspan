@@ -26,6 +26,32 @@ import { RECORD_BASIS, basisFor, describeEvidence, type PersonalRecord } from '.
 
 const GO_BASIS = resolve(__dirname, '../../../../backend/internal/modules/session/basis.go');
 const GO_RECORDS = resolve(__dirname, '../../../../backend/internal/modules/session/records.go');
+const WEB_API = resolve(__dirname, '../../../web/src/lib/api.ts');
+
+/**
+ * Reads web's `RECORD_BASIS` out of its source.
+ *
+ * Web is checked here rather than in its own suite for the reason the file
+ * header gives: this is where the anchor copy (Go) is already being read, and
+ * a third copy pinned by nothing is exactly how one of three ends up wrong.
+ * Both reviewers landed on the same point independently — web's map is
+ * exhaustive over KEYS by type, so an omitted kind fails to compile, but a
+ * wrong VALUE would not, and web is the analytical surface where people go to
+ * interrogate a number.
+ *
+ * Same technique `planHero.test.ts` uses to reach into web from this suite.
+ */
+function webBasisByKind(): Record<string, string> {
+  const src = readFileSync(WEB_API, 'utf8');
+  const start = src.indexOf('export const RECORD_BASIS');
+  if (start === -1) throw new Error('web api.ts has no RECORD_BASIS — did it move?');
+  const body = src.slice(start, src.indexOf('};', start));
+  const out: Record<string, string> = {};
+  for (const m of body.matchAll(/^\s*([a-z0-9_]+):\s*"(measured|modelled|reported)"/gm)) {
+    out[m[1]] = m[2];
+  }
+  return out;
+}
 
 /**
  * Reads `BasisFor`'s switch out of the Go source.
@@ -79,6 +105,22 @@ describe('the basis classification agrees across languages', () => {
     expect(Object.keys(go).length).toBeGreaterThanOrEqual(5);
     expect(go['estimated_1rm']).toBe('modelled');
     expect(go['heaviest_weight']).toBe('measured');
+  });
+
+  it('classifies exactly the same kinds on web', () => {
+    expect(Object.keys(webBasisByKind()).sort()).toEqual(Object.keys(RECORD_BASIS).sort());
+  });
+
+  it('assigns the same basis on web as Go does', () => {
+    // Against GO, not against this app's map — web agreeing with mobile while
+    // both drift from the anchor is a state this should catch, not bless.
+    expect(webBasisByKind()).toEqual(goBasisByKind());
+  });
+
+  it('actually extracted the web mapping', () => {
+    const web = webBasisByKind();
+    expect(Object.keys(web).length).toBeGreaterThanOrEqual(5);
+    expect(web['estimated_1rm']).toBe('modelled');
   });
 });
 

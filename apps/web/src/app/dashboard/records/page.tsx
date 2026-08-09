@@ -327,6 +327,11 @@ function RecordCell({
   record: PersonalRecord;
   units: UnitSystem;
 }) {
+  // One call, not three. Pure and identically argued each time, so the repeats
+  // were harmless — but they were three places for a later edit to change one
+  // and miss the others, and the mobile twin reads as a single `evidence`.
+  const evidence = describe(record, units);
+
   return (
     <div className="rounded-card border border-line-soft bg-surface-raised px-4 py-3">
       <dt className="eyebrow text-[0.625rem]">
@@ -344,12 +349,22 @@ function RecordCell({
       {/* The evidence, and a way to go and look at it. A record you can open
           is one you can argue with; a bare number is one you have to trust. */}
       <p className="mt-1 text-xs text-text-muted">
-        {describe(record, units).measured || "—"}
-        {/* The rating, set apart rather than joined to the measurements with
-            the same middle dot. It is the athlete's account of the set. */}
-        {describe(record, units).reported && (
-          <span className="ml-1 italic text-text-dim">
-            · {describe(record, units).reported}
+        {/* The em dash means "no set detail". Beside a rating it reads as a
+            rendering fault rather than an absence — which is the case for a
+            timed or distance record carrying an RPE. */}
+        {evidence.measured || (evidence.reported ? "" : "—")}
+        {evidence.reported && (
+          <span className="ml-1 italic">
+            {/* Said out loud, because italic is silent. Without this a screen
+                reader hears "5 × 100kg · 2 RIR" — the exact flattening this
+                change exists to undo, reproduced in speech. Mobile carries the
+                same word in its accessibility label. */}
+            <span className="sr-only">reported </span>
+            {/* `text-text-muted`, not `text-text-dim`: the rating is real
+                information, and dim measures ~3.4:1 at this size. Italic alone
+                still sets it apart from the upright measurement. */}
+            <span aria-hidden="true">· </span>
+            {evidence.reported}
           </span>
         )}
       </p>

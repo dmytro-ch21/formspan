@@ -112,9 +112,8 @@ export function RecordsCard({
             const fresh = er.records.some((r) => r.is_recent);
             const name = names.get(er.exercise_id) ?? er.exercise_id;
             const evidence = describeEvidence(primary, units);
-            // "Est." rather than a longer word, and only on the modelled kind.
-            // The row is one line on a phone; the point is that the number
-            // beside it was computed, not that the reader learns a taxonomy.
+            // Feeds the accessibility string only — see the note at the value
+            // label for why this row carries no separate visual marker.
             const modelled = basisFor(primary.kind) === 'modelled';
 
             return (
@@ -169,7 +168,12 @@ export function RecordsCard({
                       ),
                     ]
                       .filter(Boolean)
-                      .join(' · ') || '—'}
+                      // The em dash means "no set detail to show". It is only
+                      // right when there is nothing else on the line — beside a
+                      // rating it reads as a rendering fault rather than as an
+                      // absence, which is the case for a timed or distance
+                      // record that carries an RPE.
+                      .join(' · ') || (evidence.reported ? '' : '—')}
                     {/* The rating, set apart rather than joined with the same
                         middle dot as the measurements. It is the athlete's
                         account of the set, not another column of it. */}
@@ -181,13 +185,16 @@ export function RecordsCard({
 
                 <RNView style={styles.value}>
                   <StatValue value={formatRecord(primary, units)} size={19} />
+                  {/* No visual basis marker here, deliberately. A trailing "~"
+                      was tried and dropped: at 9pt in `textDim` it was close to
+                      invisible, a tilde after an uppercase label means nothing
+                      to anyone, and it was redundant with the label already
+                      reading "EST. 1RM". The distinction is carried by the
+                      label the athlete can read and by "an estimate" in the
+                      accessibility string. Web has the room to spell it out and
+                      does; a phone row does not. */}
                   <Text style={styles.valueLabel}>
                     {RECORD_LABEL[primary.kind].toUpperCase()}
-                    {/* A modelled number gets a mark a measured one does not.
-                        `RECORD_LABEL` already reads "Est. 1RM", but that is the
-                        name of the record — this says what sort of number it
-                        is, and it stays right if the label is ever reworded. */}
-                    {modelled ? <Text style={styles.modelled}> ~</Text> : null}
                   </Text>
                 </RNView>
               </Pressable>
@@ -247,10 +254,11 @@ const styles = StyleSheet.create({
   // Dimmer than the measurements it sits beside, and italic. The rating is
   // real information and is not the record — it should read as an aside, not
   // as another number in the row.
-  reported: { color: vola.textDim, fontStyle: 'italic' },
-  // The modelled mark. Same size as the label it trails so it reads as part of
-  // it rather than as a stray character.
-  modelled: { color: vola.textDim },
+  // `textMuted`, NOT `textDim`. This file's own comment calls the rating "real
+  // information", and `constants/Colors.ts` measures `textDim` at 2.51:1 and
+  // says outright it is therefore not used to carry information. Italic alone
+  // still sets it apart from the upright measurements beside it.
+  reported: { color: vola.textMuted, fontStyle: 'italic' },
   value: { alignItems: 'flex-end', gap: 1 },
   valueLabel: { fontSize: 9, fontWeight: '700', letterSpacing: 0.8, color: vola.textDim },
   muted: { color: vola.textMuted, fontSize: 13 },

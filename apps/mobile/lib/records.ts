@@ -61,7 +61,8 @@ export type Basis = 'measured' | 'modelled' | 'reported';
  * let a row cached on a phone carry a stale classification if the vocabulary
  * ever changed. `RecordKind` already exists in three places (Go, here, and
  * `apps/web/src/lib/api.ts`); the classification belongs beside each copy, and
- * `basisParity.test.ts` reads the Go source to keep them from drifting.
+ * `basisParity.test.ts` reads the Go AND the web source to keep all three from
+ * drifting.
  *
  * A `Record<RecordKind, Basis>` rather than a function with a fallback: the map
  * is exhaustive by type, so a new kind fails to compile here instead of
@@ -73,11 +74,12 @@ export const RECORD_BASIS: Record<RecordKind, Basis> = {
   most_reps: 'measured',
   longest_time: 'measured',
   furthest_distance: 'measured',
-  // The one modelled record: Epley over reps and weight, with RIR/RPE folded in
-  // as effective reps. Kept that way deliberately — RIR is genuinely how a
-  // submaximal set becomes a 1RM estimate, and removing it would make the
-  // estimate worse rather than more objective. What it needs is a label, not a
-  // different formula.
+  // The one modelled record: a rep-max curve over reps and weight (Brzycki —
+  // `backend/internal/modules/session/onerm.go` is emphatic about which and
+  // why), with RIR/RPE folded in as effective reps. Kept that way deliberately:
+  // RIR is genuinely how a submaximal set becomes a 1RM estimate, and removing
+  // it would make the estimate worse rather than more objective. What it needs
+  // is a label, not a different formula.
   estimated_1rm: 'modelled',
 };
 

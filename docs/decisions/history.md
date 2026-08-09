@@ -17771,14 +17771,58 @@ compares the mapping to the TypeScript one. Same technique `planHero.test.ts`
 uses on web's angle formula. Mutation-tested: reclassifying `estimated_1rm` in
 Go turns the mobile suite red.
 
+### From review
+
+Both reviewers independently flagged that **web's copy was pinned by nothing** —
+exhaustive over keys by type, so an omitted kind fails to compile, but a wrong
+*value* would not, and web is the analytical surface where numbers get
+interrogated. Both said close it now rather than record it, and they were right:
+the parity test already reads Go, so reading one more TypeScript file was a few
+lines. Mutation-tested — flipping `estimated_1rm` to `measured` in web's map now
+turns the suite red, where a moment earlier nothing in the repo would have
+noticed.
+
+The backend reviewer also caught a doc error worth more than it looks: three
+comments this change added said the estimate is **Epley**. It is **Brzycki**,
+and `onerm.go` is emphatic about why — Epley evaluates a true single at 1.033×
+the weight, so a genuine 100kg 1RM would report 103kg, wrong at exactly the most
+checkable moment. A future reader "fixing" `onerm.go` to match my comments would
+have reintroduced the boundary error its docstring exists to warn against.
+
+Two more taken: `ReportedFields()` was dropped (referenced by nothing, with a
+docstring claiming consumers that did not exist), and the catalog's load-type
+list — hand-copied in two test files — is now one shared `recordedLoadTypes`.
+
+The frontend reviewer talked me out of a visual marker on the phone. A trailing
+`~` on the record label was close to invisible at 9pt in `textDim`, means
+nothing to anyone as a glyph, and duplicated a label already reading "EST. 1RM".
+Dropped. Web has room to spell out "estimate" and does. Two contrast fixes came
+with it: the reported text used `textDim`, which `constants/Colors.ts` measures
+at 2.51:1 and explicitly says is not used to carry information — the same file
+in which I had written that the rating *is* real information.
+
+And the a11y hole that mattered: on web the measured/reported split was carried
+by italic alone, so a screen reader heard `"5 × 100kg · 2 RIR"` — the exact
+flattening this change exists to undo, reproduced in speech. It now carries an
+`sr-only` "reported", matching what mobile already said out loud.
+
 ### Gaps
 
-- **`apps/web`'s own copy is pinned only through mobile's test.** The parity
-  test compares Go to `apps/mobile`; web's `RECORD_BASIS` is checked by nothing
-  but review. Both TypeScript copies are exhaustive `Record<RecordKind, Basis>`
-  maps, so a *missing* kind fails to compile — but a *wrong* one would not.
 - **Rule 3 is unenforced.** Nothing aggregates a reported value, so there is no
   reader to point a test at. The first one to appear should bring the guard.
+- **The two evidence-splitting functions are not pinned to each other.**
+  `describeEvidence` (mobile) and `describe` (web's records page) implement the
+  same split independently. Drift there produces inconsistent wording rather
+  than a misclassification, which is why it was left — but it is the same shape
+  of risk as the basis maps, one severity down.
+- **The strength session's "last time" hint still flattens all three.**
+  `app/session/[id].tsx` renders `Last 5 × 100kg · 2 RIR · Est. 1RM 120kg` —
+  measured, reported and modelled joined by one separator, mid-workout where
+  space is genuinely tight. Outside this change's scope and left deliberately.
+- **A new load type is still invisible to the guards.** `recordedLoadTypes`
+  mirrors migration 000004's CHECK by hand; a load type added there and not here
+  slips past both coverage tests. Deriving it would need a database, which these
+  tests deliberately avoid.
 
 
 ## Open items / known gaps as of this entry

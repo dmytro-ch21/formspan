@@ -1874,8 +1874,8 @@ export type Basis = "measured" | "modelled" | "reported";
  * because each side needs its own type for a shared wire format — so the basis
  * lives beside each copy rather than being shipped per row, which would put a
  * constant on every record and let a cached row carry a stale classification.
- * `apps/mobile/lib/__tests__/basisParity.test.ts` reads the Go source and pins
- * the copies together.
+ * `apps/mobile/lib/__tests__/basisParity.test.ts` reads the Go source and this
+ * file, and pins all three together.
  *
  * A `Record<RecordKind, Basis>`, so a new kind fails to compile here rather
  * than defaulting to `measured` — an unclassified number rendering as a
@@ -1886,7 +1886,8 @@ export const RECORD_BASIS: Record<RecordKind, Basis> = {
   most_reps: "measured",
   longest_time: "measured",
   furthest_distance: "measured",
-  // Epley over reps and weight, with RIR/RPE folded in as effective reps.
+  // A rep-max curve over reps and weight (Brzycki — see the backend's
+  // onerm.go), with RIR/RPE folded in as effective reps.
   // Deliberately kept that way — RIR is how a submaximal set becomes a 1RM
   // estimate — which is exactly why it has to be labelled rather than banned.
   estimated_1rm: "modelled",

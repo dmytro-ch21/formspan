@@ -11,6 +11,20 @@ import "testing"
 //
 // Needs no database and no fixtures; these are pure vocabulary.
 
+// recordedLoadTypes is the catalog's load-type vocabulary, mirroring the CHECK
+// in migrations/000004_create_exercises.up.sql.
+//
+// Package-level and shared with onerm_test.go, which carried its own literal
+// copy of the same list. Two hand-maintained copies of one vocabulary is two
+// chances to forget the same thing — and the thing they guard is precisely
+// "a new load type brought a new record kind and nobody classified it".
+//
+// It does not close the hole: a load type added to the migration and not to
+// this list is still invisible to both guards. Deriving it from the CHECK
+// constraint would need a database, which these tests deliberately do not use.
+// One place to remember instead of three is the honest improvement here.
+var recordedLoadTypes = []string{"weight_reps", "reps", "time", "distance", "distance_time"}
+
 // allRecordKinds is the vocabulary, written out.
 //
 // Deliberately a literal list rather than one derived from `RecordKindsFor`,
@@ -44,7 +58,7 @@ func TestBasisFor_ClassifiesEveryRecordKind(t *testing.T) {
 // the wrong directory passes by finding nothing.
 func TestAllRecordKinds_CoversTheVocabulary(t *testing.T) {
 	// Every kind any load type can produce must appear in the list above.
-	for _, lt := range []string{"weight_reps", "reps", "time", "distance", "distance_time"} {
+	for _, lt := range recordedLoadTypes {
 		for _, k := range RecordKindsFor(lt) {
 			found := false
 			for _, known := range allRecordKinds {

@@ -71,9 +71,9 @@ package session
 // `BasisFor` maps a `RecordKind`, not a `Record`. The basis is a property of
 // the vocabulary — every `estimated_1rm` that has ever existed is modelled —
 // so serving it per row would ship a constant on every record and let a cached
-// row carry a stale classification if the vocabulary ever changed. The clients
-// derive it from `kind` the same way, and `basisParity` keeps the copies
-// honest.
+// row carry a stale classification if the vocabulary ever changed. Both clients
+// derive it from `kind` the same way, and `basisParity.test.ts` reads this file
+// and web's copy to keep all three honest.
 type Basis string
 
 const (
@@ -100,17 +100,11 @@ func BasisFor(k RecordKind) (Basis, bool) {
 	case RecordHeaviest, RecordMostReps, RecordLongest, RecordFurthest:
 		return Measured, true
 	case RecordOneRM:
-		// The one modelled record. Epley over reps and weight, with RIR/RPE
-		// folded in as effective reps — see the `candidate` CTE in postgres.go.
+		// The one modelled record. Brzycki over reps and weight — see
+		// `EstimateOneRM`, which is emphatic about which curve and why — with
+		// RIR/RPE folded in as effective reps by the `candidate` CTE in
+		// postgres.go.
 		return Modelled, true
 	}
 	return "", false
 }
-
-// ReportedFields names the per-set fields that are the athlete's own account.
-//
-// Exported so the clients and the tests can agree on one list rather than each
-// carrying its own idea of what counts as an opinion. `notes` is here for the
-// same reason RIR is: it is true as a report and is not a measurement of
-// anything.
-func ReportedFields() []string { return []string{"rir", "rpe", "notes"} }
