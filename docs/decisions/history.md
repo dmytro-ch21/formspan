@@ -17705,6 +17705,16 @@ cause in the dependency graph. Open question this leaves: whether
 rather than a latent device crash — it needs the mobile app's node_modules,
 so it is cheap locally and awkward in the backend-only CI jobs.
 
+The alignment had one piece of fallout the pre-merge checker caught before
+CI could: `expo-image` 57.0.2 wires an `expo-observe` integration at module
+scope, and jest-expo's native-module stub is truthy where a device without
+the module returns null — so `observe.getIntegrations()` threw at import
+time and took down all seven suites that render an image. Fixed with a
+pass-through mock in `jest.setup.js` (the `expo-audio` precedent in the same
+file: a native module screens need to merely exist, not behaviour anything
+asserts). The app imports only `{ Image }`, so the mock is a props-preserving
+wrapper over React Native's own `Image`.
+
 Also learned this week, recorded here because it cost a debugging session:
 **registering a new device regenerates the free-team provisioning profile and
 invalidates the profile embedded in every earlier install** — the app on the
