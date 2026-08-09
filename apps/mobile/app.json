@@ -45,7 +45,8 @@
         {
           "photosPermission": "VOLA uses your photos so you can attach a progress picture to a check-in. Pictures stay private to your account and are never shown to anyone else."
         }
-      ]
+      ],
+      "expo-sharing"
     ],
     "experiments": {
       "typedRoutes": true
