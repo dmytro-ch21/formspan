@@ -79,6 +79,7 @@ func main() {
 	bjjHandler := bjj.NewHandler(bjjRepo)
 	bjjSessionHandler := bjj.NewSessionHandler(bjjRepo)
 	bjjProficiencyHandler := bjj.NewProficiencyHandler(bjjRepo)
+	bjjPositionHandler := bjj.NewPositionHandler(bjjRepo)
 	bjjFocusHandler := bjj.NewFocusHandler(bjjRepo)
 	curriculumHandler := curriculum.NewHandler(curriculum.NewPostgresRepository(pool))
 	// RATE LIMITS. Six features shipped recording "no rate limiting" as a
@@ -256,6 +257,10 @@ func main() {
 	// The technique funnel, read across every session. Under /v1/bjj because
 	// it is discipline-scoped evidence, not a property of the account.
 	mux.Handle("GET /v1/bjj/proficiency", verifier.RequireAuth(http.HandlerFunc(bjjProficiencyHandler.List)))
+	// The position map — where the athlete scores and where they get stuck.
+	// The third view `bjj_session_tags` was shaped for, and the last one to be
+	// read back: every tag has carried a position since the table was written.
+	mux.Handle("GET /v1/bjj/positions", verifier.RequireAuth(http.HandlerFunc(bjjPositionHandler.List)))
 	// What the athlete is deliberately working on. Read by the reflection
 	// wizard (mobile) and set from the analytical surface (web), per the
 	// platform split: choosing a focus for the next few weeks is planning.
