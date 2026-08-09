@@ -68,3 +68,55 @@ export function headlineFor(data: CardData): string {
       return ORDINARY[hash32(data.id, HEADLINE_SEED) % ORDINARY.length];
   }
 }
+
+/**
+ * A finished session, as the card wants it.
+ *
+ * Built from the SAME `SessionSummary` the celebration card already renders,
+ * rather than from a second fetch. Two summaries of one session would drift —
+ * the card would say four exercises while the screen behind it said five — and
+ * this one is already the thing both completion screens compute.
+ *
+ * `stats` comes straight from `statsFor` so the card and the screen can never
+ * disagree about which four numbers matter for a sport. That is also why the
+ * caller passes them in rather than the adapter importing `celebration`:
+ * `celebration` imports `records`, which imports the API client, and the card
+ * has to stay free of anything that fetches so it can render off-screen.
+ */
+export function cardFromSummary(input: {
+  id: string;
+  summary: { title: string; sport: string; records: readonly unknown[] };
+  stats: { label: string; value: string }[];
+  /** `carried` means this session is what kept the streak alive. */
+  streak?: { weeks: number; carried: boolean } | null;
+  handle?: string;
+  now?: Date;
+}): CardData {
+  const { id, summary, stats, streak, handle } = input;
+  const when = input.now ?? new Date();
+
+  const badges: string[] = [];
+  const prCount = summary.records.length;
+  if (prCount > 0) {
+    badges.push(prCount === 1 ? 'Personal best' : `${prCount} personal bests`);
+  }
+  // Only when THIS session carried it. "4 weeks" on a session that merely
+  // happened during a streak claims credit the session did not earn.
+  if (streak?.carried && streak.weeks > 1) {
+    badges.push(`${streak.weeks} weeks unbroken`);
+  }
+
+  return {
+    id,
+    sport: summary.sport,
+    title: summary.title,
+    eyebrow: summary.sport === 'bjj' ? 'BJJ' : summary.sport.toUpperCase(),
+    dateLabel: when
+      .toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+      .toUpperCase(),
+    stats: stats.map((s) => ({ label: s.label, value: s.value })),
+    badges,
+    handle,
+    highlight: prCount > 0 ? 'pr' : streak?.carried ? 'streak' : undefined,
+  };
+}

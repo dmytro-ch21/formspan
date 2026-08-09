@@ -1649,6 +1649,7 @@ export default function SessionScreen() {
           // Merged at render, so filling the records in cannot feed back into
           // the effect that fetches them.
           summary={{ ...celebrating, records: celebrationRecords }}
+          sessionID={id}
           streak={celebrationStreak}
           recordsSettled={recordsSettled}
           formatTonnage={(v) => formatVolume(v, units)}

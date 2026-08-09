@@ -577,6 +577,7 @@ export default function BjjSessionScreen() {
       {celebrating && (
         <SessionCelebration
           summary={celebrating}
+          sessionID={id}
           // BJJ never shows a tonnage tile, so this is never called — passed
           // because the card takes one formatter, not one per sport.
           formatTonnage={(v) => `${Math.round(v)}`}
