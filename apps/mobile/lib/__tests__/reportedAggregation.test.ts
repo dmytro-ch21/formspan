@@ -35,10 +35,13 @@ import { extname, join, relative, resolve } from 'node:path';
  * shapes this actually arrives in.
  *
  * **Cannot:** `sets.reduce((a, s) => a + (s.rpe ?? 0), 0)` assigned to
- * something vague. A scan cannot read intent, and pretending otherwise would be
- * the "regex standing in for behaviour" mistake `CLAUDE.md` records. What it
- * buys is that the *obvious* way in is closed and a deliberate one has to be
- * argued for — which is the point at which someone reads rule 3.
+ * something vague; a rating wrapped before it is aggregated
+ * (`AVG(COALESCE(rpe, 0))`, `AVG(CAST(rpe AS numeric))`, `AVG(weight_kg * rpe)`
+ * — all probed in review, none match); or a name where the rating is not the
+ * last word (`meanRpeByWeek`). A scan cannot read intent, and pretending
+ * otherwise would be the "regex standing in for behaviour" mistake `CLAUDE.md`
+ * records. What it buys is that the *obvious* way in is closed and a deliberate
+ * one has to be argued for — which is the point at which someone reads rule 3.
  *
  * A failure here is not necessarily a bug. It is a claim that needs rule 3
  * answered: either the window is one where the rating was collected throughout,
@@ -81,12 +84,31 @@ const REPORTED = ['rir', 'rpe', 'session_rpe'];
  * about collection, not an average of opinions, and is the honest thing to
  * report ALONGSIDE one.
  */
-const AGGREGATES = ['avg', 'sum', 'stddev', 'variance', 'var_samp', 'var_pop', 'percentile_cont', 'percentile_disc'];
+const AGGREGATES = [
+  'avg',
+  'sum',
+  // `MIN`/`MAX` are aggregates too, and they have rule 3's problem exactly:
+  // "worst rating in the block" is a claim about a window the rating may not
+  // cover. Their row-wise counterparts are `LEAST`/`GREATEST`, which is the
+  // distinction the exclusion below turns on — not the other way round.
+  'min',
+  'max',
+  'stddev',
+  'variance',
+  'var_samp',
+  'var_pop',
+  'percentile_cont',
+  'percentile_disc',
+];
 
 /** Client identifiers named for averaging a rating. */
 const NAMED_AGGREGATION = new RegExp(
-  `\\b(avg|average|mean|sum|total)[A-Za-z]*(${REPORTED.join('|')})\\b` +
-    `|\\b(${REPORTED.join('|')})[A-Za-z]*(Avg|Average|Mean|Sum|Total)\\b`,
+  // `[A-Za-z0-9_]*`, so snake_case is caught. JSON here is snake_case mirroring
+  // Postgres columns, so a response type for a future aggregate endpoint would
+  // arrive as `avg_rpe` and the camelCase-only pattern would have waved it
+  // through. Raised in review.
+  `\\b(avg|average|mean|sum|total)[A-Za-z0-9_]*(${REPORTED.join('|')})\\b` +
+    `|\\b(${REPORTED.join('|')})[A-Za-z0-9_]*(Avg|Average|Mean|Sum|Total)\\b`,
   'i',
 );
 
@@ -143,9 +165,14 @@ describe('reading rule 3: no aggregate spans a window a rating may not cover', (
   it('actually found the source to scan', () => {
     expect(scanned.length).toBeGreaterThan(200);
     const files = scanned.map((s) => s.file);
-    // Named anchors, so "found 200 files" cannot be satisfied by the wrong 200.
+    // One anchor per SEARCH entry, so a single broken path cannot go unnoticed
+    // while the total still clears the floor — `apps/mobile/app` and
+    // `backend/migrations` had no anchor at first, and those are exactly where
+    // a new screen or a new view would put an aggregate.
     expect(files).toContain('backend/internal/modules/session/postgres.go');
+    expect(files).toContain('backend/migrations/000025_bjj_sessions.up.sql');
     expect(files).toContain('apps/mobile/lib/records.ts');
+    expect(files).toContain('apps/mobile/app/session/[id].tsx');
     expect(files).toContain('apps/web/src/lib/api.ts');
   });
 

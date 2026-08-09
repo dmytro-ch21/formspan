@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"regexp"
@@ -47,9 +48,20 @@ func loadTypesFromMigration() []string {
 	if m == nil {
 		panic("session: the exercises migration has no `load_type IN (...)` CHECK — did it move or get renamed?")
 	}
+	// `[^']+`, not `[a-z_]+`. The narrow class silently DROPPED any value with a
+	// digit or a capital in it — a future `'zone2'` parsed back to the original
+	// five with no error, which is the same silent short list this whole
+	// derivation exists to prevent, one notch narrower. Raised in review.
 	var out []string
-	for _, q := range regexp.MustCompile(`'([a-z_]+)'`).FindAllSubmatch(m[1], -1) {
+	for _, q := range regexp.MustCompile(`'([^']+)'`).FindAllSubmatch(m[1], -1) {
 		out = append(out, string(q[1]))
+	}
+	// Every value is two quotes, so a parse that missed one is arithmetic rather
+	// than a judgement call. `len(out) == 0` alone only catches total failure.
+	if quotes := bytes.Count(m[1], []byte("'")); quotes != 2*len(out) {
+		panic(fmt.Sprintf(
+			"session: the load_type CHECK has %d quote characters but parsed %d values — the parse is dropping some",
+			quotes, len(out)))
 	}
 	if len(out) == 0 {
 		panic("session: parsed the load_type CHECK but found no values in it")

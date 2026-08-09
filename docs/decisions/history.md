@@ -17860,14 +17860,51 @@ RIR-over-RPE precedence survives. That limit is stated in the test, the same
 trade `keyboardCoverage.test.ts` makes. Mutation-tested by pushing the rating
 into the measured half.
 
+### And what review caught in the closing
+
+One blocking finding, and it was the kind only a reader who knows the codebase
+would see. The session hint's rating span was styled `{ fontStyle: 'italic' }`
+with a comment claiming the colour stayed muted "by inheritance". It does not:
+`Text` on that screen is `components/Themed`'s, which renders
+`<DefaultText style={[{ color }, style]}>` — so every nested Text is handed a
+full-contrast colour *before* its own style applies. The rating would have
+rendered at 11.5:1 inside a 4.67:1 line, making the opinion the **brightest
+number on the line**: the hierarchy this whole change exists to build, inverted,
+on the busiest screen in the app. No test can see it, and the comment asserted
+the opposite of what shipped.
+
+Three more, all latent rather than live, all worth having:
+
+- The migration parse matched `'([a-z_]+)'`, which **silently dropped any load
+  type containing a digit** — a future `'zone2'` parsed back to the original
+  five with no error. That is the same silent short list the derivation exists
+  to prevent, one notch narrower. Now `'([^']+)'` plus a quote-count check, and
+  verified by adding `'zone2'` and watching the coverage test go red.
+- `MIN`/`MAX` were missing from the aggregate list. They are aggregates with
+  rule 3's problem exactly — "worst rating in the block" is a claim about a
+  window the rating may not cover — and their row-wise counterparts are the
+  `LEAST`/`GREATEST` the guard deliberately excludes, which is the distinction
+  the exclusion turns on.
+- The client pattern was camelCase-only, so `avg_rpe` walked through — and
+  snake_case is this repo's wire convention, so that is the spelling a future
+  aggregate endpoint's response type would actually arrive in.
+
+Also: one anchor per scanned directory rather than three across five (two dirs
+had none, so a broken path would have gone unnoticed while the count still
+cleared the floor), and the accessibility label says "5 by 100kg" rather than
+carrying `×`, since VoiceOver's handling of U+00D7 varies and a label written
+because styles are silent should not depend on a glyph being spoken.
+
 ### Still open
 
 - **The evidence split is checked structurally, not behaviourally.** The text
   check catches the drift that would actually happen; it would not catch a
   rewrite that preserved the shape and changed the output. Running web's
   function from this suite needs it extracted to a pure module first.
-- **A per-row `reduce` over a rating remains invisible** to the rule-3 scan, per
-  the limit above.
+- **The rule-3 scan reads names and shapes, not intent.** A `reduce` assigned to
+  something vague, or a rating wrapped before it is aggregated
+  (`AVG(COALESCE(rpe, 0))`), still walks through. Both limits are named in the
+  test file. It closes the obvious door, not every door.
 
 ## Open items / known gaps as of this entry
 

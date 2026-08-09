@@ -1437,7 +1437,12 @@ export default function SessionScreen() {
                         <Text
                           style={styles.hintLast}
                           accessibilityLabel={[
-                            `Last ${hint.last_reps != null ? `${hint.last_reps} × ` : ''}${formatWeight(hint.last_weight_kg, u)}`,
+                            // "by", not "×": VoiceOver's handling of U+00D7
+                            // varies with punctuation verbosity and can skip it
+                            // entirely. This label exists because styles are
+                            // silent, so it should not depend on a glyph being
+                            // spoken. The visible text keeps the ×.
+                            `Last ${hint.last_reps != null ? `${hint.last_reps} by ` : ''}${formatWeight(hint.last_weight_kg, u)}`,
                             hint.last_rir != null
                               ? `reported ${hint.last_rir} RIR`
                               : hint.last_rpe != null
@@ -2379,11 +2384,24 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
   hintLast: { fontSize: 12, color: vola.textMuted, fontVariant: ['tabular-nums'] },
-  // Italic only — the colour stays `textMuted` (inherited), because the rating
-  // is real information and `constants/Colors.ts` measures `textDim` at 2.51:1
-  // and says outright it is not used to carry any. Same treatment as the
-  // records card, so the two screens teach one convention rather than two.
-  hintReported: { fontStyle: 'italic' },
+  /*
+    The colour is set EXPLICITLY, and it has to be.
+
+    `Text` here is `@/components/Themed`'s, which renders
+    `<DefaultText style={[{ color }, style]}>` — so every nested Text is handed
+    a full-contrast `color` before its own style is applied. Relying on
+    inheritance from the muted parent therefore does the opposite of what it
+    looks like: the rating renders at 11.5:1 inside a 4.67:1 line and becomes
+    the BRIGHTEST number on it, which is the hierarchy this change exists to
+    build, inverted. Caught in review; the first version of this comment
+    confidently claimed the colour was inherited.
+
+    `textMuted`, not `textDim`: `constants/Colors.ts` measures dim at 2.51:1 and
+    says outright it is not used to carry information, and the rating is
+    information. Italic alone separates it from the upright measurement. Same
+    values `RecordsCard` uses, so the two screens teach one convention.
+  */
+  hintReported: { color: vola.textMuted, fontStyle: 'italic' },
   hintReason: { fontSize: 12, color: vola.textMuted },
   hintApply: {
     borderRadius: 999,
