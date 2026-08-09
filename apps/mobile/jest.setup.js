@@ -45,6 +45,26 @@ jest.mock('expo-audio', () => ({
   setAudioModeAsync: () => Promise.resolve(),
 }));
 
+/*
+  `expo-image` 57.0.2 broke under jest at import time, same class of failure
+  as `expo-audio` above: its module scope wires an `expo-observe` integration,
+  and `requireOptionalNativeModule('ExpoObserve')` — null on a device without
+  the module, which is the guarded path — returns jest-expo's truthy stub
+  here, so `observe.getIntegrations()` throws before any test runs and takes
+  down every suite that renders an image.
+
+  Mocked as a pass-through to React Native's Image rather than stubbing the
+  observe internals: the app imports only `{ Image }` (verified — no
+  `prefetch`, no `useImage`, no `ImageBackground`), no test asserts on
+  expo-image behaviour, and a props-preserving component keeps testID/source
+  queries working in the suites that render one.
+*/
+jest.mock('expo-image', () => {
+  const React = require('react');
+  const { Image } = require('react-native');
+  return { Image: (props) => React.createElement(Image, props) };
+});
+
 jest.mock('expo-router', () => {
   const React = require('react');
   const { Text } = require('react-native');

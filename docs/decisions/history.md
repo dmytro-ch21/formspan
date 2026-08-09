@@ -17670,6 +17670,58 @@ branches never exercised at all, the trend window's boundary unpinned, and
   prefixed by user id specifically so that is a prefix operation when it is
   built; it is not built.
 
+## 2026-08-09 — Dependency drift finally detonated: every device install of `main` crashed at launch, fixed by `expo install --fix`
+
+The morning after the body check-in merged (#205), Release builds of `main`
+died at launch on all three phones — icon tap, instant close, no dialog. The
+crash report was unambiguous once pulled from the device (`devicectl device
+copy from --domain-type systemCrashLogs`): a **dyld missing-symbol abort**,
+`ExpoModulesCore.BaseModule.willDestroy` referenced by
+`ExpoImageManipulator.framework` and absent from the packaged
+`ExpoModulesCore.framework`. #205 added `expo-image-manipulator@~57.0.8` (for
+check-in photos); that version calls an API added in `expo-modules-core`
+57.0.8, but `expo@57.0.8` resolved core at 57.0.7 in the lockfile. Two
+findings worth keeping:
+
+- **`npx expo install --check` had been reporting this class of drift for
+  weeks** (six packages when the CLAUDE.md gotcha about Expo Go segfaults was
+  written; ten by today) and nothing gates on it. The drift was tolerable
+  right up until one drifted pair shared a dyld boundary, at which point it
+  became a 100%-reproducible launch crash that shipped to every device.
+- **`devicectl device process launch` reporting "Launched application" proves
+  the process spawned, not that it survived** — the install-and-launch pass
+  reported success on all three phones while every one of them was crashing
+  within two seconds. Verification now means: launch, wait, then check the
+  process table (`devicectl device info processes`) and the crash-log
+  directory for a fresh `.ips`.
+
+The fix is `npx expo install --fix` — the full ten-package patch alignment
+(`expo` 57.0.8→57.0.11, `react-native` 0.86.0→0.86.2, `react-native-worklets`
+0.10.0→0.10.1, the rest patch bumps), taken deliberately as one change since
+partial bumps are exactly how the mismatch arose. A clean rebuild was tried
+first and crashed identically, ruling out stale DerivedData and pinning the
+cause in the dependency graph. Open question this leaves: whether
+`expo install --check` should join `verify` or CI so drift is a red build
+rather than a latent device crash — it needs the mobile app's node_modules,
+so it is cheap locally and awkward in the backend-only CI jobs.
+
+The alignment had one piece of fallout the pre-merge checker caught before
+CI could: `expo-image` 57.0.2 wires an `expo-observe` integration at module
+scope, and jest-expo's native-module stub is truthy where a device without
+the module returns null — so `observe.getIntegrations()` threw at import
+time and took down all seven suites that render an image. Fixed with a
+pass-through mock in `jest.setup.js` (the `expo-audio` precedent in the same
+file: a native module screens need to merely exist, not behaviour anything
+asserts). The app imports only `{ Image }`, so the mock is a props-preserving
+wrapper over React Native's own `Image`.
+
+Also learned this week, recorded here because it cost a debugging session:
+**registering a new device regenerates the free-team provisioning profile and
+invalidates the profile embedded in every earlier install** — the app on the
+other phones stops opening days before its nominal 7-day expiry, with no
+dialog. After any device registration, re-push the freshly signed `.app` to
+every phone (`devicectl device install app` over Wi-Fi suffices; all three
+UDIDs are in the profile).
 
 ## Open items / known gaps as of this entry
 
