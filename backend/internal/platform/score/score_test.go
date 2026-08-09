@@ -169,3 +169,43 @@ func TestMedianHandlesBothParities(t *testing.T) {
 		t.Fatalf("Median sorted the caller's slice in place: %v", h)
 	}
 }
+
+// The percentile ROUNDS rather than truncating. Review changed
+// int(pct + 0.5) to int(pct) and the suite stayed green, because every
+// percentile it produced happened to be a whole number.
+func TestPercentileRoundsRatherThanTruncating(t *testing.T) {
+	// 19 sessions above, 1 equal: (0 + 0.5) / 20 * 100 = 2.5 → 3, not 2.
+	h := make([]float64, 20)
+	for i := range h {
+		h[i] = 1000
+	}
+	h[0] = 500
+	got, ok := Of(500, h, BasisEffort)
+	if !ok {
+		t.Fatal("refused")
+	}
+	if got.Value != 3 {
+		t.Fatalf("got %d, want 3 — a truncating cast would give 2", got.Value)
+	}
+}
+
+// Median must describe the SAME window Of ranks against. Review removed its
+// cap and the suite stayed green, which would have had the two functions
+// describing different stretches of history while sitting next to each other
+// on the card.
+func TestMedianUsesTheSameWindowAsTheScore(t *testing.T) {
+	h := make([]float64, 0, 40)
+	for i := 0; i < 20; i++ {
+		h = append(h, 1000) // recent
+	}
+	for i := 0; i < 20; i++ {
+		h = append(h, 10) // ancient, outside the window
+	}
+	m, ok := Median(h)
+	if !ok {
+		t.Fatal("refused")
+	}
+	if m != 1000 {
+		t.Fatalf("median %.0f — ancient sessions outside the window are leaking in", m)
+	}
+}

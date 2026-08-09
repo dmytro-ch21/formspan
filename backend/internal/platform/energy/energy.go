@@ -36,9 +36,18 @@ import (
 	"time"
 )
 
-// MET values, 2011 Compendium. Named rather than inlined so the one place a
-// value is chosen reads as a decision, and so a reviewer can check them
-// against the source without reading the arithmetic.
+// MET values, named rather than inlined so the one place a value is chosen
+// reads as a decision, and so a reviewer can check them against the source
+// without reading the arithmetic.
+//
+// PROVENANCE, honestly. Four of these were read straight off the Compendium
+// and match word for word: 3.5, 5.0, 10.3 and 5.3. The other two — 5.8 for
+// supersets and 3.0 for bodyweight — were taken from the same family of
+// tables, but review could not match them to a 2011 entry and believes they
+// may come from the later Adult Compendium revision. Both are plausible and
+// both sit on the conservative side, so they stay; the attribution is marked
+// unverified rather than asserted, because this package's whole pitch is that
+// a reader can check it.
 const (
 	// METStrengthGeneral — "resistance training, multiple exercises, 8–15 reps
 	// at varied resistance". THE DEFAULT, deliberately: it is the entry that
@@ -93,7 +102,11 @@ type Block struct {
 // the conventional baseline and the estimate gets coarser — worth doing, where
 // guessing bodyweight is not.
 func Estimate(p Profile, blocks []Block) (kcal float64, ok bool) {
-	if p.WeightKG == nil || *p.WeightKG <= 0 {
+	// NOT `<= 0`: that is FALSE for NaN, so a NaN weight passed the guard and
+	// produced a NaN estimate. Postgres `numeric` accepts 'NaN' and the body
+	// module's own range check has the same hole, so nothing upstream would
+	// have caught it. Inverted, it fails closed.
+	if p.WeightKG == nil || !(*p.WeightKG > 0) {
 		return 0, false
 	}
 	restPerMin := restingKcalPerMinute(p)
@@ -167,7 +180,7 @@ const (
 
 // PrecisionOf reports which path Estimate would take.
 func PrecisionOf(p Profile) Precision {
-	if p.WeightKG == nil || *p.WeightKG <= 0 {
+	if p.WeightKG == nil || !(*p.WeightKG > 0) {
 		return PrecisionNone
 	}
 	if age, ok := ageYears(p.DateOfBirth); ok && p.HeightCM != nil && p.Sex != nil && age > 0 {
@@ -230,6 +243,12 @@ func StrengthBlocks(minutes float64, workingSets int, anyLoaded bool, heavyCompo
 // opposite directions.
 func MatBlocks(sessionMinutes float64, rounds int, roundMinutes int) []Block {
 	live := float64(rounds) * float64(roundMinutes)
+	if live < 0 {
+		// Negative rounds would push time INTO the practice block and price
+		// more minutes than the session contains — the opposite of what the
+		// clamp below promises.
+		live = 0
+	}
 	if live > sessionMinutes {
 		// More rolling than session is a data error somewhere; trust the
 		// smaller number rather than inventing time.

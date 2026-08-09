@@ -18078,6 +18078,95 @@ module load with the same symptom and the opposite cause.
 
 
 
+## 2026-08-09 — Two numbers for the share card, and what each refuses to claim
+
+`internal/platform/energy` and `internal/platform/score`, plus the eight
+mountain backgrounds and the Barlow faces. Groundwork: nothing calls either
+package and no screen renders the assets yet.
+
+### Calories, deliberately smaller than a smartwatch's
+
+An hour of ordinary lifting is **~185 kcal**. Consumer apps report 400–600 for
+the same hour, and three mistakes explain the gap — all avoided here, each one
+making the number smaller. Gross instead of net (`MET × kg × hours` includes
+what you would burn lying still). A 1-MET baseline derived from a single 70 kg
+40-year-old man, 20–30% high for many people, so the multiple is applied to the
+athlete's own Mifflin–St Jeor resting rate. And "vigorous lifting" priced over
+wall-clock, when the Compendium's entry for ordinary multi-exercise work is 3.5
+because a weights session is mostly rest.
+
+**No bodyweight, no number.** A 55 kg and a 105 kg athlete doing identical work
+differ by nearly half; there is no honest default and the card asks for a
+check-in instead. Height, age and sex are softer — without them the estimate
+falls back and `PrecisionOf` says so.
+
+BJJ splits live rounds (10.3) from everything else (5.3) using
+`rounds × round_minutes`, which the app already records.
+
+### A score that can disappoint
+
+The VOLA Score is a **percentile of Foster's sRPE against your own last 20
+sessions**, not a sum of weighted components. Component sums average to the
+middle and land 70–90 for everything; a number that is never bad is decoration,
+which is the call this project already made about curriculum mastery. Half your
+sessions fall below 50 by construction. Ties count as half, because repeating a
+workout exactly is ordinary and a strict "must beat it" rule would score the
+second one lower for no reason an athlete could accept. Below eight prior
+sessions there is no score at all — a percentile against three is noise wearing
+a number.
+
+Never a comparison with other people: no leaderboards, and the social scope is
+closed.
+
+### Three things the tests caught that reading did not
+
+**A unit bug.** The fallback resting rate used 4.184 — joules per calorie —
+where the constant is ~5 kcal per litre of O2. That made the generic baseline
+*lower* than Mifflin–St Jeor, inverting the exact relationship the fallback
+exists to describe. The check is that 3.5 ml/kg/min at 5 kcal/L is ~1
+kcal/kg/hour, the familiar MET shorthand.
+
+**An overclaim in a doc comment.** It said three easy hours "does not beat one
+hard hour by much" because effort multiplies. False — 3 × 180 and 9 × 60 are
+both exactly 540, and that equivalence *is* the model. What multiplying rules
+out is the additive shape, where a three-hour stroll outranks a brutal hour
+nearly threefold.
+
+**A CI outage scheduled for 2027-01-01.** Review found it: the reference
+athlete's date of birth was the literal `1996-01-01` while `ageYears` reads
+`time.Now()`, so on New Year's Day the athlete turns 31, Mifflin drops 1780 →
+1775, and the assertion fails on every branch at once. Worse, the helper
+formatted with `%.1f`, so the failure would have read `got 1.2, want 1.2
+(±0.0)` — indistinguishable from a pass. The birthday is computed now and the
+format is `%g`.
+
+Review also found five guards with no failing test, all now pinned: negative
+minutes could *subtract* calories, the percentile truncated instead of
+rounding, `Median` described a different window than the score it sits beside,
+the density boundary was exclusive where its comment said inclusive, and a NaN
+bodyweight passed `<= 0` (which is false for NaN) into a NaN estimate.
+
+### Provenance, marked rather than asserted
+
+Four MET values match the 2011 Compendium word for word. Two — 5.8 for
+supersets, 3.0 for bodyweight — could not be matched to a 2011 entry and may
+come from the later Adult Compendium. Both are plausible and conservative so
+they stay, but the attribution says "unverified" rather than claiming a source,
+because the package's whole pitch is that a reader can check it.
+
+### Gaps
+
+- **Nothing consumes any of this.** No endpoint returns either number, no
+  screen renders the mountains, and `_layout.tsx` still loads only SpaceMono.
+  Expo's default bundling means ~1.5 MB of unused assets would ship in a native
+  build until the card lands.
+- `internal/platform/` is a stretch for shared *domain* logic — the existing
+  neighbours are infrastructure. Defensible because the card spans session, bjj
+  and body, but worth revisiting if a third consumer disagrees.
+- The image ceiling is 1254 px, which is short for a full-bleed 9:16 story. The
+  folder README carries the constraint.
+
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

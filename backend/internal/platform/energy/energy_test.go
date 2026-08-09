@@ -3,6 +3,7 @@ package energy
 import (
 	"math"
 	"testing"
+	"time"
 )
 
 func f(v float64) *float64 { return &v }
@@ -10,14 +11,30 @@ func s(v string) *string   { return &v }
 
 // The reference athlete from the design: 80 kg, 180 cm, 30, male.
 // Mifflin–St Jeor = 10(80) + 6.25(180) − 5(30) + 5 = 1780 kcal/day.
+//
+// THE BIRTHDAY IS COMPUTED, NOT LITERAL, and that is the whole point. A fixed
+// "1996-01-01" made this athlete 30 only until 2027-01-01, after which Mifflin
+// drops 1780 → 1775 and the assertion fails — a CI outage scheduled for a
+// specific future date, on every branch at once, for a reason nobody would
+// look for. Review caught it. Thirty years and a day ago is always thirty.
 func reference() Profile {
-	return Profile{WeightKG: f(80), HeightCM: f(180), DateOfBirth: s("1996-01-01"), Sex: s("male")}
+	born := time.Now().UTC().AddDate(-30, 0, -1)
+	return Profile{
+		WeightKG:    f(80),
+		HeightCM:    f(180),
+		DateOfBirth: s(born.Format("2006-01-02")),
+		Sex:         s("male"),
+	}
 }
 
+// %g, not %.1f. With one decimal place a drift of 0.0035 prints as
+// "got 1.2, want 1.2 (±0.0)" — a failure message indistinguishable from a
+// pass, which is the worst possible thing to hand somebody debugging on the
+// morning it starts failing.
 func near(t *testing.T, got, want, tol float64, what string) {
 	t.Helper()
 	if math.Abs(got-want) > tol {
-		t.Fatalf("%s: got %.1f, want %.1f (±%.1f)", what, got, want, tol)
+		t.Fatalf("%s: got %g, want %g (±%g)", what, got, want, tol)
 	}
 }
 
@@ -36,11 +53,20 @@ func TestAnHourOfLiftingIsAboutOneEightyFive(t *testing.T) {
 	}
 	near(t, kcal, 185, 3, "60 min strength")
 
-	// And the specific mistake this package exists to avoid: the same session
-	// priced GROSS at a vigorous MET is roughly what the inflated apps report.
-	gross := METStrengthGeneral * 80 * 1.0 // MET × kg × hours
-	if gross < kcal*1.4 {
-		t.Fatalf("gross (%.0f) should be far above net (%.0f) — the discount is the point", gross, kcal)
+	// And the mistake this package exists to avoid, priced out: the same hour
+	// read GROSS at a vigorous MET is 480 kcal — squarely in the 400–600 band
+	// the package doc cites, and 2.6× what the honest model says.
+	//
+	// The constant here is the VIGOROUS one because that is what the claim is
+	// about; an earlier version said "vigorous" in the comment and computed
+	// the general 3.5, which tested something real while documenting something
+	// else.
+	inflated := METStrengthHeavy * 1.2 * 80 * 1.0 // ≈ vigorous MET × kg × hours
+	if inflated < 400 || inflated > 600 {
+		t.Fatalf("fixture drifted: %.0f is outside the 400–600 band the doc cites", inflated)
+	}
+	if kcal > inflated/2 {
+		t.Fatalf("net (%.0f) should be far below the inflated figure (%.0f)", kcal, inflated)
 	}
 }
 
@@ -193,5 +219,59 @@ func TestZeroDurationIsZero(t *testing.T) {
 	kcal, ok := Estimate(reference(), StrengthBlocks(0, 0, true, false))
 	if !ok || kcal != 0 {
 		t.Fatalf("got %.2f ok=%v", kcal, ok)
+	}
+}
+
+// Negative minutes must contribute NOTHING, not subtract. Review deleted the
+// `b.Minutes <= 0` guard and the suite stayed green, because the only zero-ish
+// case tested was minutes=0, which passes trivially through a multiplication.
+func TestNegativeMinutesCannotSubtractCalories(t *testing.T) {
+	base, _ := Estimate(reference(), []Block{{MET: 5, Minutes: 60}})
+	got, ok := Estimate(reference(), []Block{{MET: 5, Minutes: 60}, {MET: 5, Minutes: -10}})
+	if !ok {
+		t.Fatal("refused")
+	}
+	if got != base {
+		t.Fatalf("a negative block changed the total: %.2f vs %.2f", got, base)
+	}
+}
+
+// Negative rounds must not INVENT practice time. MatBlocks defended against
+// rolling exceeding the session but not against it going negative, so
+// MatBlocks(90, -2, 6) priced 102 minutes inside a 90-minute session.
+func TestNegativeRoundsCannotInventMatTime(t *testing.T) {
+	blocks := MatBlocks(90, -2, 6)
+	total := 0.0
+	for _, b := range blocks {
+		if b.Minutes < 0 {
+			t.Fatalf("negative block: %+v", b)
+		}
+		total += b.Minutes
+	}
+	if total > 90 {
+		t.Fatalf("priced %.0f minutes in a 90 minute session", total)
+	}
+}
+
+// A NaN bodyweight must be refused. `<= 0` is FALSE for NaN, so the guard let
+// one through and produced a NaN estimate; nothing between Postgres (whose
+// numeric accepts 'NaN') and here would have caught it.
+func TestNaNWeightIsRefused(t *testing.T) {
+	nan := math.NaN()
+	p := Profile{WeightKG: &nan}
+	if kcal, ok := Estimate(p, StrengthBlocks(60, 18, true, false)); ok || kcal != 0 {
+		t.Fatalf("NaN weight produced %.2f ok=%v", kcal, ok)
+	}
+	if got := PrecisionOf(p); got != PrecisionNone {
+		t.Fatalf("precision %q, want none", got)
+	}
+}
+
+// The density boundary is "a working set every two minutes OR FASTER", so
+// exactly 0.5 must be dense. Review flipped >= to > and the suite stayed green
+// because only 0.6 and 0.3 were tested.
+func TestDensityBoundaryIsInclusive(t *testing.T) {
+	if got := StrengthBlocks(40, 20, true, false); got[0].MET != METStrengthDense {
+		t.Fatalf("exactly one set per two minutes should be dense, got MET %.1f", got[0].MET)
 	}
 }
