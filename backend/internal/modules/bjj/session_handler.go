@@ -178,6 +178,40 @@ func (h *ProficiencyHandler) List(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// PositionHandler serves the position map.
+type PositionHandler struct {
+	repo PositionReader
+}
+
+func NewPositionHandler(repo PositionReader) *PositionHandler {
+	return &PositionHandler{repo: repo}
+}
+
+// List is self-scoped (RequireAuth), like every other read of an athlete's own
+// training record: there is no path parameter to scope it by, deliberately.
+func (h *PositionHandler) List(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.ClaimsFromContext(r.Context())
+
+	rows, err := h.repo.ListPositions(r.Context(), claims.UserID)
+	if err != nil {
+		apihttp.WriteInternal(w, r, "bjj", err)
+		return
+	}
+	live := 0
+	for _, p := range rows {
+		if p.Live() > 0 {
+			live++
+		}
+	}
+	apihttp.WriteJSON(w, http.StatusOK, map[string]any{
+		"positions": rows,
+		// Folded from the same rows being shown, so the headline cannot
+		// disagree with the list under it — and `min_live` travels with the
+		// data so the client is not keeping its own copy of "enough evidence".
+		"summary": PositionsSummary{Positions: live, MinLive: MinLiveExchanges},
+	})
+}
+
 // FocusHandler serves the athlete's current working set.
 type FocusHandler struct {
 	repo FocusRepository

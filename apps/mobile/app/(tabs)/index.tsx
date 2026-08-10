@@ -27,8 +27,8 @@ import { RoadmapLine } from '@/components/RoadmapLine';
 import { SectionHeader } from '@/components/ui/Section';
 import { TrendStrip } from '@/components/ui/TrendStrip';
 import { SessionCard, type Metric } from '@/components/ui/SessionCard';
-import { Stat, StatRow } from '@/components/ui/Stat';
 import { TrainingCalendar } from '@/components/TrainingCalendar';
+import { WeekReview } from '@/components/WeekReview';
 import { vola } from '@/constants/Colors';
 import { formatDuration } from '@/lib/history';
 import { addDays, dayString, startOfWeek, weekDays } from '@/lib/calendar';
@@ -38,6 +38,7 @@ import { listPlannedBetween, type PlannedSession } from '@/lib/plan';
 import { formatElapsed } from '@/lib/rest';
 import type { LoggedSet, Session } from '@/lib/sessions';
 import { cachedWorkouts, listLocalSessions } from '@/lib/sessionStore';
+import { reviewWeek } from '@/lib/weekReview';
 import { listWorkingCurricula, type Curriculum } from '@/lib/curriculum';
 import { fetchProficiency } from '@/lib/proficiency';
 import {
@@ -98,65 +99,6 @@ function isWorkingSet(set: LoggedSet): boolean {
 
 function workingSets(s: Session): number {
   return s.sets.filter(isWorkingSet).length;
-}
-
-type WeekSummary = {
-  sessions: number;
-  volumeKg: number;
-  /**
-   * Time trained, so the third stat can follow the data rather than the
-   * toggles — the registry's rule, and the web dashboard's `loadMetric` does
-   * the same thing for the same reason. An athlete with strength enabled who
-   * spent the week on the mat should read "3h 20m", not a flat "0kg", and
-   * "0kg" is the same fabricated-zero trap `describeSession` documents.
-   */
-  seconds: number;
-  /**
-   * The days trained, as `dayString` keys rather than just a count.
-   *
-   * The week strip needs to know *which* days and the stat row needs to know
-   * how many, and those two answers must come from one pass over one list —
-   * a strip lit on five days above a card reading "4 days" is the kind of
-   * contradiction that costs more trust than either number earns.
-   */
-  dayKeys: Set<string>;
-};
-
-/**
- * This week's training, computed from the local store rather than fetched.
- *
- * Deliberately local. Today has to answer on a gym floor with no signal, and a
- * summary that blanks out offline would be worse than no summary at all. It
- * also cannot disagree with the session list directly beneath it, which a
- * separately-fetched rollup eventually would.
- */
-function summariseWeek(sessions: Session[], now: Date): WeekSummary {
-  const from = startOfWeek(now).getTime();
-  const dayKeys = new Set<string>();
-  let count = 0;
-  let volumeKg = 0;
-  let seconds = 0;
-
-  for (const s of sessions) {
-    const started = new Date(s.started_at);
-    if (started.getTime() < from) continue;
-    count++;
-    dayKeys.add(dayString(started));
-    // Finished sessions only. An open one has no duration yet, and counting
-    // now-minus-start would make this week's total climb while the phone sits
-    // in a locker.
-    if (s.ended_at) {
-      seconds += (new Date(s.ended_at).getTime() - started.getTime()) / 1000;
-    }
-    for (const set of s.sets) {
-      // Weight × reps over working sets — the same rule the in-session header
-      // uses, so the two can never report different numbers.
-      if (isWorkingSet(set) && set.weight_kg != null && set.reps != null) {
-        volumeKg += set.weight_kg * set.reps;
-      }
-    }
-  }
-  return { sessions: count, volumeKg, seconds, dayKeys };
 }
 
 /** Weight × reps over a session's working sets. */
@@ -815,7 +757,11 @@ export default function TodayScreen() {
     }, [tickingId]),
   );
 
-  const week = useMemo(() => summariseWeek(sessions, now), [sessions, now]);
+  // Local, for the reason the old `summariseWeek` recorded and this inherits:
+  // Today has to answer on a gym floor with no signal, and a summary that
+  // blanks out offline is worse than none. It also cannot disagree with the
+  // calendar directly beneath it, which a separately-fetched rollup would.
+  const review = useMemo(() => reviewWeek(sessions, weekPlan, now), [sessions, weekPlan, now]);
 
   /**
    * This week's theme, if there is one.
@@ -1392,56 +1338,22 @@ export default function TodayScreen() {
           unitsReady={unitsReady}
         />
 
-        {week.sessions > 0 && (
-          <StatRow testID="week-summary">
-            {/* The three discs are the only colour in this card, and each one
-                is a different hue on purpose: they are three unrelated
-                measures, not a ramp, so a single accent-coloured set would
-                imply they belong to one scale. `heart` for sessions rather
-                than a barbell — a week's count spans every discipline, and a
-                barbell would claim it was all lifting. */}
-            <Stat
-              label="Sessions"
-              value={String(week.sessions)}
-              size={22}
-              fit
-              icon="heart"
-              tone={accent.accent}
-            />
-            <Stat
-              label="Days"
-              value={String(week.dayKeys.size)}
-              size={22}
-              fit
-              icon="calendar"
-              tone={vola.warn}
-            />
-            {/* Whichever measure the week actually produced. Dash until the
-                unit is known, rather than a number in the wrong one: this used
-                to render kilograms for a moment to an athlete set to pounds,
-                and on a finished-session mount that moment is exactly when it
-                is read. */}
-            {week.volumeKg > 0 ? (
-              <Stat
-                label="Volume"
-                value={unitsReady ? formatVolume(week.volumeKg, units) : '—'}
-                size={22}
-                fit
-                icon="barbell"
-                tone={vola.info}
-              />
-            ) : (
-              <Stat
-                label="Time"
-                value={week.seconds > 0 ? formatDuration(week.seconds) : '—'}
-                size={22}
-                fit
-                icon="timer"
-                tone={vola.info}
-              />
-            )}
-          </StatRow>
-        )}
+        {/*
+          The week, summed up — what happened, against what was meant to, and
+          which way it moved.
+
+          This replaced a bare three-stat row. The figures are the same ones
+          (`Stat` still renders them, discs and all); what it adds is the
+          comparison, the per-discipline split and the plan. A count of sessions
+          says nothing on its own, and one tonnage figure hides whether the week
+          was three lifts or three classes.
+        */}
+        <WeekReview
+          review={review}
+          modules={modules}
+          units={units}
+          unitsReady={unitsReady}
+        />
 
         {recent.length > 0 && (
           <View style={styles.section}>
