@@ -18396,6 +18396,128 @@ sixty-minute session of thirty sets ties one of ten.
   an app that now compiles its own binary — judged a disproportionate price for
   a directory the OS purges under pressure.
 
+## 2026-08-09 — The position map, and a week that says how it went
+
+Two additions, one for BJJ and one for everything: **where the rounds actually
+go**, and **what the week added up to**.
+
+### `bjj_session_tags.position` finally gets read back
+
+The table has carried a `position` on every tag since it was written, and until
+now nothing selected it. The BJJ design doc named a "position heatmap" as one of
+three views the schema was shaped for; `ListProficiency` was the second, and
+this is the third. `GET /v1/bjj/positions` folds every tag by position: scored,
+attempted, conceded, defended, drilled, the session count, and when it was last
+seen.
+
+**Why position and not technique.** `ListProficiency` already answers "how is my
+triangle going", which is the narrower question. The one an athlete acts on is
+*where am I losing the round* — and that is not a technique question, because
+getting passed from half guard is a hundred different passes and one problem. A
+position is also the unit a coach thinks in and the unit a drilling plan is
+written in.
+
+**Scored and conceded stay side by side.** No ratio, no rating, for the same
+reason `Proficiency` refuses to be a 1–5: a ratio hides its denominator, and "3
+scored, 14 conceded from half guard" is a finding where "0.18" is a number
+nobody can argue with. The client computes a rate for ordering; the API reports
+facts.
+
+**Drilled is counted and excluded from the ordering.** A position you have only
+ever drilled has told you nothing about a live round, so 50 reps of mount must
+not outrank three concessions from back control. That single rule is the
+difference between a map of your game and a map of your gym's curriculum.
+
+**It describes and does not prescribe, and there is a test enforcing that.**
+Concessions from a position are equally consistent with a hole in the athlete's
+game and with them deliberately starting every round there. Nothing in this data
+separates the two, so a "drill this" would be confidently wrong about a third of
+the time — and wrong in the direction of telling a guard player to stop playing
+guard. `headline()` names where things go worst and stops; its test asserts the
+string matches none of `/drill|should|work on|need to|fix/`, which is what stops
+that sentence being added later by someone who thinks it is obviously helpful.
+
+On the client, `winShare` counts **`scored + defended`**, not `scored` alone.
+Stopping a submission from side control is a won exchange exactly as much as
+finishing one is; counting only offence marks a survival-based game as a total
+collapse, which is both wrong and the reading most likely to make someone
+abandon a position they are actually fine in. Below `min_live` (5) a row is
+shown with **no verdict attached** — `thin` is a refusal, not a category — and
+the threshold travels on the response so the client cannot hold a different
+copy of "enough evidence".
+
+**One known way these numbers can be too high, recorded rather than papered
+over.** `ListProficiency` reads technique-tagged rows *only*, because the same
+real exchange can be written twice — the wizard's technique step writes a tagged
+row and its live grid writes an untagged category row — and summing both counts
+one armbar twice. That rule cannot be reused here: untagged grid rows carry a
+position and are the fast path's whole output, so excluding them would drop most
+of the evidence this view exists for, and an untagged row records a category
+rather than which tagged row it duplicates, so there is nothing to dedup on. So
+an athlete who logs one exchange in both places is counted twice on this screen.
+Today that is held off by wizard copy ("one row per thing that happened"), which
+is guidance, not enforcement. Closing it properly needs a link between the two
+rows at *write* time; a `WHERE technique_id IS NOT NULL` here would make the two
+modules agree and silently delete most of the map. The repository comment says
+all of this at the query, so the next reader does not "fix" it. Found by review.
+
+The screen is `/bjj/positions`, reached from a row on You. Its own route rather
+than a section of `/bjj`, which is the *rank* screen: a belt and a promotion
+history read once every few months, versus a page of numbers read after a hard
+week. The split is a bar whose two segment **widths** carry the ratio, so it
+survives greyscale and the monochrome accent with hue doing no work.
+
+### The week, summed up
+
+Today had a three-stat row: sessions, days, and whichever of volume or time the
+week produced. It answered "how much" and nothing else. `WeekReview` replaces it
+with the same three tiles — same discs, same hues, `Stat` still renders them —
+plus the three things that make them mean something: a **week-over-week delta**
+on each, a **per-discipline split**, and **the plan**, if there was one.
+
+`summariseWeek` is gone; `reviewWeek` computes everything it did. Leaving both
+would have been two implementations of "this week's tonnage" one edit apart from
+disagreeing on screen.
+
+**The load-bearing part is a refusal to compare.** The local session list is
+bounded by COUNT, not by date — `listLocalSessions(userId, 30)`. For an athlete
+training twice a day that is nine days, so last week is *partially* present, and
+summing it produces a confident number that is simply too small. Every delta
+drawn from it then reads as a decline the athlete did not have. So `reviewWeek`
+reports `previous` only when the list demonstrably reaches back **past** the
+previous Monday, and returns `null` otherwise; the card says why rather than
+letting the arrows vanish unexplained. The boundary is `<` and not `<=` on
+purpose: a list whose oldest row sits exactly on that Monday cannot rule out
+having been truncated there.
+
+Local rather than fetched, inheriting the reason the old summary recorded: Today
+has to answer on a gym floor with no signal, and it must not disagree with the
+calendar directly beneath it.
+
+### Verification
+
+Both pure modules are mutation-tested — 37 new tests, and every guard checked by
+breaking it and watching the suite go red. What that turned up:
+
+- **A comment that was simply wrong.** `reviewWeek` passes only this week's
+  sessions to `matchPlans`, and the comment claimed that was what stopped last
+  week's session meeting this week's plan. The mutant survived: `matchPlans`
+  keys on `day + sport`, and an out-of-week session can never share a day with
+  an in-week plan, so passing the whole list returns the same answer. The
+  narrowing is for cost. The comment now says so — fixing the claim was the
+  honest move, not writing a test that could not fail.
+- **An ordering test that pins nothing, left in place and labelled.** The
+  backend's `ORDER BY … , t.position` tiebreaker resisted two attempts at a
+  test: repeating the query five times and comparing (which tests Postgres's
+  determinism, not ours) and asserting tied rows come back alphabetically (which
+  they do anyway, because a small sort-based aggregate emits them in order).
+  Both passed with the tiebreaker deleted. The tiebreaker stays — a capped list
+  whose tail depends on aggregate order hashes differently between identical
+  requests, and the ETag on this endpoint is a body hash, so that is a permanent
+  cache miss — but the test is renamed to the weaker claim it actually earns and
+  says in place why. A test that cannot fail is worse than no test, because it
+  reads as coverage.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

@@ -2488,6 +2488,72 @@ components:
         tried_live: { type: integer, description: How many were ever taken into a live round. }
         landed: { type: integer, description: How many ever worked live. }
 
+    PositionStat:
+      type: object
+      description: >
+        One position's accumulated evidence, both directions. The four live
+        counts are pairwise disjoint: `attempted` is "went for it and it did
+        NOT land" and `defended` is "they went for it and the athlete stopped
+        them", so exchanges the athlete initiated are `scored + attempted` and
+        exchanges done to them are `conceded + defended`.
+      required: [position, scored, attempted, conceded, defended, drilled, sessions, last_seen]
+      properties:
+        position:
+          type: string
+          description: >
+            Reported verbatim rather than mapped to a known vocabulary, so a
+            value this build does not recognise still appears instead of
+            vanishing into an "other" bucket.
+          example: Half Guard - Bottom
+        scored: { type: integer, description: The athlete finished from here. }
+        attempted:
+          type: integer
+          description: Went for it here and it did not land. Disjoint from `scored`.
+        conceded: { type: integer, description: They finished the athlete here. }
+        defended:
+          type: integer
+          description: The athlete stopped them finishing here. Disjoint from `conceded`.
+        drilled:
+          type: integer
+          description: >
+            Reps practised, not live. Kept separate because it is not evidence
+            about a round, and excluded from this endpoint's ordering.
+        sessions:
+          type: integer
+          description: >
+            How many separate sessions contributed — the honesty check on every
+            count above. Twelve exchanges in one bad night is not the evidence
+            twelve across six weeks is.
+        last_seen:
+          type: string
+          format: date-time
+          description: >
+            The most recent session in which this position appeared AT ALL,
+            drilling included — taken from the session's `started_at`, not from
+            when the reflection was written, so an offline row synced a week
+            late does not misreport training recency. Note this can therefore be
+            fresher than the last LIVE exchange, while the ordering above
+            deliberately ignores drilling.
+
+    PositionsSummary:
+      type: object
+      description: >
+        The small amount of interpretation this endpoint is willing to do.
+        Deliberately NOT a recommendation: concessions from a position are
+        equally consistent with a hole in the athlete's game and with them
+        starting every round there on purpose, and nothing in this data
+        separates the two.
+      required: [positions, min_live]
+      properties:
+        positions: { type: integer, description: Positions with any live evidence at all. }
+        min_live:
+          type: integer
+          description: >
+            Below this many live exchanges a position should be shown but not
+            drawn a conclusion from. Sent rather than hard-coded in the client
+            so the two cannot disagree about what "enough evidence" means.
+          example: 5
+
     Focus:
       type: object
       description: >
@@ -4658,6 +4724,68 @@ paths:
                       $ref: "#/components/schemas/Proficiency"
                   summary:
                     $ref: "#/components/schemas/ProficiencySummary"
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+        "304":
+          $ref: "#/components/responses/NotModified"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /bjj/positions:
+    get:
+      summary: Where the athlete scores, and where they get stuck
+      operationId: getBjjPositions
+      description: >
+        Per-position evidence for the caller, most live evidence first. Reads
+        `position` off every tag the athlete has recorded, in both directions,
+        summed across every session.
+
+
+        `scored` and `conceded` are reported side by side rather than folded
+        into a ratio or a rating, for the same reason `Proficiency` refuses to
+        be a 1-5: a ratio hides its denominator, and "3 scored, 14 conceded
+        from half guard" is a finding where "0.18" is a number nobody can
+        argue with. A client may compute a rate for ordering; this reports
+        the facts.
+
+
+        `drilled` is counted but EXCLUDED from the ordering. A position the
+        athlete has only ever drilled has told them nothing about a live
+        round, so 50 reps of mount must not outrank three concessions from
+        back control.
+
+
+        Unlike `/bjj/proficiency`, this reads BOTH technique-tagged and
+        untagged tags, and cannot deduplicate them: an untagged row carries a
+        position and is the reflection wizard's fast path, so excluding it would
+        drop most of the evidence — but it records a category rather than which
+        tagged row it duplicates, so there is nothing to match on. An athlete
+        who records one exchange in both places is therefore counted twice here.
+
+
+        Tags with an empty position are skipped — an unlabelled bucket in a
+        position map is noise, not a finding. Capped at 60 rows with no
+        pagination; the vocabulary is about nine families, so the cap guards
+        against a hand-typed value flooding the list rather than paging real
+        data.
+      parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
+      responses:
+        "200":
+          description: The caller's position map, and the context to read it with.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [positions, summary]
+                properties:
+                  positions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PositionStat"
+                  summary:
+                    $ref: "#/components/schemas/PositionsSummary"
           headers:
             ETag:
               $ref: "#/components/headers/ETag"

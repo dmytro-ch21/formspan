@@ -231,6 +231,25 @@ export default function YouScreen() {
                 strength-only account never sees an empty BJJ block. */}
             <RoadmapSummary />
 
+            {/* Where the rounds actually go.
+
+                Gated on the module rather than on data, the same way the belt
+                above is: a strength-only account should not be offered a BJJ
+                screen that would only ever be empty for them.
+
+                A link and not a card, unlike Records and the roadmap. Those two
+                are payoffs read at a glance; this one is a page of numbers you
+                sit with after a hard week, and inlining it here would put a
+                three-section readout in the middle of the account tab. */}
+            {bjjEnabled && (
+              <NavRow
+                label="Position map"
+                detail="Where you score, and where you get stuck"
+                onPress={() => router.push('/bjj/positions')}
+                testID="you-bjj-positions"
+              />
+            )}
+
             {/* Everything that involves another person, in one place.
 
                 Both rows are BADGED, and both badges point at a screen that

@@ -810,7 +810,11 @@ most prominent thing.
 - **With no session open**, the start buttons render and `resume-session` does
   not. `start-session-strength` is the primary; `start-session-running` is
   visibly secondary.
-- **`week-summary` counts only this week**, Monday-based, in the device's
+- The stat row was `week-summary` and is now `week-review-stats`, inside a
+  `week-review` group that ALWAYS renders (the old row was hidden at zero
+  sessions; the group now shows a verdict line instead). A test asserting the
+  row's absence on an untrained week must assert the row, not the group.
+- **`week-review-stats` counts only this week**, Monday-based, in the device's
   timezone. Log a session, check the count rises; a session from last Sunday
   must not be included.
 - **Volume matches the session screen.** Working sets only — completed and not
@@ -827,7 +831,7 @@ most prominent thing.
   recomputes from `started_at` rather than incrementing.
 - **The date is never stale.** The regression to watch, because a tab screen
   never unmounts: use the app late on Sunday, background it, reopen on Monday.
-  The header must read Monday and `week-summary` must be **empty or this
+  The header must read Monday and `week-review-stats` must be **empty or this
   week's** — not Sunday's date over last week's totals, which is what a
   mount-frozen clock produces. Both the focus and the app-foreground path need
   checking; they are different code paths and only one involves a tab change.
@@ -837,7 +841,7 @@ most prominent thing.
 - **A second unfinished session is still reachable.** Start one on web (or from
   a workout) while another is open: the newest owns the resume card and the
   older appears in the list marked `unfinished`. It must not vanish — it still
-  counts toward `week-summary`, so hiding it makes the header disagree with the
+  counts toward `week-review-stats`, so hiding it makes the header disagree with the
   list below it.
 - **A permanently-refused session says why.** Retry must surface `sync-error`
   rather than spinning silently; `syncSessions` reports failures in its return
@@ -6530,3 +6534,73 @@ analytical surface (history, charts) stays on web and does not exist yet.
   behaving as though storage were absent.
 - Photos are downscaled on the device before upload; a raw 4–5MB frame must not
   be sent.
+
+## The BJJ position map (`GET /v1/bjj/positions`, mobile `/bjj/positions`)
+
+### The aggregate
+
+- **Counts fold across every session, not just the most recent.** Two sessions
+  each conceding from half guard read as one total, and the `sessions` count
+  says it came from two.
+- **`drilled` never counts as live evidence.** A position drilled 50 times and
+  never taken into a round must rank *below* one with three concessions — this
+  is the ordering rule and the difference between a map of your game and a map
+  of your gym's curriculum.
+- **A tag with no position is skipped**, not shown as an empty bucket.
+- **The map is scoped to the caller.** Another athlete's tags on the same
+  position must not appear — worth testing with the same position name on both
+  accounts, so a leak shows up as a wrong number rather than an extra row.
+- The response is capped (60 rows) and the ordering is total, so two identical
+  requests hash identically — the ETag on this endpoint is a body hash, so a
+  reordering tail would be a permanent cache miss.
+
+### Reading it
+
+- **A successful defence counts as a won exchange.** A position where the
+  athlete only ever survived must not read as 0%. The single most consequential
+  sign error available here.
+- **A missed attempt counts as a lost one.** Two scores and four misses is not a
+  2–0 record.
+- **Below the threshold a row is shown with no verdict.** `min_live` comes from
+  the response, not a client constant, so the two cannot disagree.
+- **At exactly the threshold a verdict appears** — off by one here silently
+  withholds every verdict for a whole extra round of evidence.
+- **Nothing on the screen tells the athlete what to drill.** Concessions are
+  equally consistent with a hole in the game and with starting every round there
+  on purpose; the copy names where things go and stops.
+- **Tied rows keep a stable order** across two loads of unchanged data.
+- The split bar is readable in greyscale and under the monochrome accent —
+  segment widths carry the ratio, not hue.
+- **A deep link does not bypass the module gate.** With BJJ off, `/bjj/positions`
+  renders the disabled state rather than the map — the route itself still exists,
+  because file-based routing cannot remove it, so "absent" here means the content
+  is gated, exactly as `/bjj` is.
+
+## The weekly sum-up (mobile Today)
+
+- **Sessions, days and the load figure match the calendar directly beneath
+  them.** Both read the same local list; a card claiming four days above a strip
+  lit on five is the contradiction that costs more trust than either number
+  earns.
+- **No comparison is drawn when the device cannot prove last week.** The local
+  list is bounded by count, so an athlete training twice a day may hold only
+  nine days — the deltas must be absent and explained, never computed from a
+  partial week and shown as a decline.
+- **A week with no lifting shows time, not "0 kg".**
+- **A week nobody planned is not a week at 0% adherence** — the plan line is
+  absent entirely.
+- **A session left running contributes no duration.** The week's total must not
+  climb while the phone sits in a locker.
+- **Two sessions on one day count as one trained day.**
+- **A Sunday-evening session stays in its own week** west of Greenwich — the
+  bucketing is on the local day, and a UTC-only test passes against exactly this
+  bug.
+- Warm-up and uncompleted sets are excluded from the tonnage, matching every
+  other volume count in the app.
+- The verdict line names what happened without scoring or grading the week.
+- **A known over-count, worth a test that PINS it rather than one that denies
+  it.** Unlike `/bjj/proficiency`, this endpoint sums both technique-tagged and
+  untagged tags and cannot dedup them, so one exchange recorded in both the
+  wizard's technique step and its live grid appears twice. A test should assert
+  the current (doubled) number, so that if someone ever links the two rows at
+  write time the test fails and forces the decision to be made deliberately.

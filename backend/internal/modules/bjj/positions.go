@@ -2,6 +2,7 @@ package bjj
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -87,6 +88,32 @@ func (p PositionStat) Live() int {
 const maxPositionRows = 60
 
 // ListPositions returns the caller's position map, most live evidence first.
+//
+// # BOTH TAGGED AND UNTAGGED ROWS, and unlike ListProficiency it cannot dedup
+//
+// `ListProficiency` reads technique-tagged rows ONLY, and records why: the same
+// real event can be written twice — the wizard's technique step writes a
+// technique-tagged row and its live grid writes an untagged category row for
+// the same exchange — so summing both would count one armbar twice. Its rule is
+// that the tagged row is the specific record and the untagged one the catch-all.
+//
+// **That rule cannot be applied here.** Untagged grid rows carry a position (the
+// athlete picks one) and are the fast path's entire output, so excluding them
+// would drop most of the evidence this view exists to show. And the two rows
+// cannot be linked — an untagged row records a category, not which tagged row it
+// duplicates — so there is nothing to dedup ON.
+//
+// The consequence is real and is stated rather than hidden: **an athlete who
+// records the same exchange in both places sees it counted twice here.** Today
+// that is held off by copy in the reflection wizard ("Record it here rather than
+// in the grid below — one row per thing that happened"), which is guidance and
+// not enforcement.
+//
+// So do not "fix" this into the proficiency convention. Adding
+// `AND t.technique_id IS NOT NULL` would make the numbers agree with that module
+// and silently delete most of the position evidence. If the double-count is ever
+// worth closing properly it needs a link between the two rows at WRITE time, not
+// a WHERE clause here.
 func (r *PostgresRepository) ListPositions(
 	ctx context.Context, userID string,
 ) ([]PositionStat, error) {
@@ -118,7 +145,10 @@ func (r *PostgresRepository) ListPositions(
 			t.position
 		LIMIT $2`, userID, maxPositionRows)
 	if err != nil {
-		return nil, err
+		// Wrapped like `ListProficiency`'s: `WriteInternal` prefixes only "bjj",
+		// so with two aggregate queries in this module an unwrapped SQLSTATE in
+		// the logs does not say which one failed.
+		return nil, fmt.Errorf("bjj: list positions: %w", err)
 	}
 	defer rows.Close()
 
@@ -128,7 +158,7 @@ func (r *PostgresRepository) ListPositions(
 		var p PositionStat
 		if err := rows.Scan(&p.Position, &p.Scored, &p.Attempted, &p.Conceded,
 			&p.Defended, &p.Drilled, &p.Sessions, &p.LastSeen); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("bjj: scan position: %w", err)
 		}
 		out = append(out, p)
 	}

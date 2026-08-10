@@ -158,8 +158,18 @@ export function Stat({
   // Grouped, or VoiceOver reads the figure and its label as two unrelated
   // stops with nothing connecting them. The icon is inside the group and
   // unlabelled, so it adds nothing to what is announced.
+  //
+  // **The delta has to be in the label.** Grouping collapses the child Texts,
+  // so an arrow rendered inside the group is visible and inaccessible — and it
+  // is the one part of a tile that says whether the number is good news. The
+  // arrow glyph itself stays out: "up 12 percent" is the reading, "↑" is not.
+  const spoken =
+    rounded == null || rounded === 0
+      ? `${value} ${label}`
+      : `${value} ${label}, ${rounded > 0 ? 'up' : 'down'} ${Math.abs(rounded)} percent`;
+
   return (
-    <RNView style={styles.stat} accessible accessibilityLabel={`${value} ${label}`}>
+    <RNView style={styles.stat} accessible accessibilityLabel={spoken}>
       {icon && (
         <RNView style={[styles.badge, { backgroundColor: `${tone ?? vola.textMuted}22` }]}>
           <Icon name={icon} size={17} color={tone ?? vola.textMuted} />
