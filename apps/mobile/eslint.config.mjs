@@ -55,8 +55,16 @@ export default defineConfig([
      *
      * `lib/db.ts` is exempt because it is the one legitimate caller — it makes
      * the call the queue wraps.
+     *
+     * NO `files` NARROWING. It was scoped to TypeScript extensions only, which
+     * left `.js`, `.jsx` and `.mjs` unguarded — verified by probe: a `lib/foo.js`
+     * calling `db.withTransactionAsync()` linted clean. Every source file here
+     * is TypeScript today, so it was theoretical; a rule whose entire job is to
+     * stop something coming back should not have a hole that a file extension
+     * opens. Nothing forces the narrowing either — `no-restricted-syntax` is a
+     * core rule, so it carries none of the plugin-loading constraint this
+     * config documents for the `@typescript-eslint` blocks.
      */
-    files: ["**/*.ts", "**/*.tsx"],
     ignores: ["lib/db.ts"],
     rules: {
       "no-restricted-syntax": [

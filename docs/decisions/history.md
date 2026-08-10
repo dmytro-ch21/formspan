@@ -18520,6 +18520,10 @@ breaking it and watching the suite go red. What that turned up:
 
 ## 2026-08-04 — Two transactions, one connection: the Plan tab's intermittent SQLite banner
 
+*Dated when the work was done; it sat uncommitted in a worktree and landed on
+2026-08-10, which is why it appears below later entries. The date is kept rather
+than corrected because the bug and its diagnosis belong to that day.*
+
 The Plan tab intermittently rendered `Calling the 'execAsync' function has
 failed → Caused by: cannot rollback - no transaction is active` in place of the
 week's training. Intermittent, so it had survived a while: it appeared once and
