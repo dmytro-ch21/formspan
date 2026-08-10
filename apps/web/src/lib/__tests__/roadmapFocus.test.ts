@@ -21,17 +21,20 @@ let n = 0;
 /** A roadmap step. `criteria` non-null is what makes it a step rather than
  *  reading — the distinction the whole feature turns on. */
 const step = (id: string, mastered: boolean): CurriculumItem => ({
+  kind: "technique",
   technique_id: id,
   name: id,
   position: "Guard - Bottom",
   category: "Sweep",
   order: n++,
+  phase: null,
   notes: "",
   criteria: {
     target_scored: 25,
     target_defended: 8,
     target_sessions: 12,
     min_hit_rate: 0.35,
+    target_drilled_sessions: null,
   },
   progress: {
     scored: 0,
@@ -39,6 +42,7 @@ const step = (id: string, mastered: boolean): CurriculumItem => ({
     sessions: 0,
     attempts: 0,
     hit_rate: null,
+    drilled_sessions: 0,
     mastered,
   },
 });
@@ -46,6 +50,20 @@ const step = (id: string, mastered: boolean): CurriculumItem => ({
 /** An item with no criteria — something to study, not to work. */
 const reading = (id: string): CurriculumItem => ({
   ...step(id, false),
+  criteria: null,
+  progress: null,
+});
+
+/** A concept — authored text, no technique behind it at all. */
+const concept = (title: string): CurriculumItem => ({
+  kind: "concept",
+  title,
+  name: "",
+  position: "",
+  category: "",
+  order: n++,
+  phase: null,
+  notes: "",
   criteria: null,
   progress: null,
 });
@@ -58,9 +76,19 @@ const focus = (id: string): BjjFocus => ({
   started_on: "2026-01-01",
 });
 
-const ids = (list: { technique_id: string }[]) => list.map((x) => x.technique_id);
+const ids = (list: { technique_id?: string }[]) => list.map((x) => x.technique_id);
 
 describe("what the roadmap puts in focus", () => {
+  it("never proposes a concept — an idea cannot be a focus row", () => {
+    const p = proposeFocus(
+      [concept("Position before submission"), step("a", false)],
+      [],
+    );
+    expect(p.next).toEqual(["a"]);
+    expect(ids(p.added)).toEqual(["a"]);
+  });
+
+
   it("brings in unmastered steps, in roadmap order", () => {
     // Order is the content of a syllabus — someone put the retention before the
     // sweep on purpose — so this asserts the sequence, not the set.

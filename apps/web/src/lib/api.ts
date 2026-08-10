@@ -2059,6 +2059,10 @@ export type CurriculumCriteria = {
    *  defensible: volume alone is satisfied by 25-from-30 and 25-from-400
    *  alike, and only the first is skill. */
   min_hit_rate: number | null;
+  /** Distinct sessions this must be DRILLED in — the criterion for the
+   *  movement fundamentals nobody scores with. Sessions, not reps: forty in
+   *  one class is one class. The ONE criterion practice counts toward. */
+  target_drilled_sessions: number | null;
 };
 
 export type CurriculumProgress = {
@@ -2070,15 +2074,38 @@ export type CurriculumProgress = {
   /** Null when `attempts` is 0. Zero from zero is not a rate, and rendering it
    *  as 0% reports a failure the athlete has not had. */
   hit_rate: number | null;
+  /** Distinct sessions in which this was drilled — reported even where no
+   *  criterion reads it. */
+  drilled_sessions: number;
   mastered: boolean;
 };
 
+/** One named section of a curriculum — "Survive the bad places first" — with
+ *  the phase's objective in the description. Items point at one via their
+ *  `phase` index. Purely structure: no criteria, no progress of its own. */
+export type CurriculumPhase = {
+  order: number;
+  title: string;
+  description: string;
+};
+
 export type CurriculumItem = {
-  technique_id: string;
+  /** A `technique` points into the library and may carry criteria; a `concept`
+   *  is authored text and NEVER does — no evidence stream could measure one,
+   *  and nothing in this feature is completable by hand. */
+  kind: "technique" | "concept";
+  /** Absent on concept items, which point at nothing. */
+  technique_id?: string;
+  /** The concept's own heading; absent on technique items, whose name is the
+   *  library's. */
+  title?: string;
   name: string;
   position: string;
   category: string;
   order: number;
+  /** Index into the curriculum's `phases`, or null for an unphased item —
+   *  every curriculum predating phases is entirely unphased, legally. */
+  phase: number | null;
   notes: string;
   /** Null means this item is reading rather than a roadmap step. */
   criteria: CurriculumCriteria | null;
@@ -2096,6 +2123,10 @@ export type Curriculum = {
   /** A hint for ordering, never a gate. Working white-belt fundamentals at
    *  purple is not a mistake. */
   belt: string | null;
+  /** Which browse section this belongs to — "belt", "foundations". Same
+   *  contract as `belt`: a grouping hint, never a gate, null for an athlete's
+   *  own list. */
+  track: string | null;
   visibility: Visibility;
   enrolled: boolean;
   /** "YYYY-MM-DD". Null unless enrolled, and the anchor every criterion is
@@ -2119,6 +2150,9 @@ export type Curriculum = {
   mastered_items: number;
   created_at: string;
   updated_at: string;
+  /** Present on a single read, absent from the list — same lazy contract as
+   *  `items`. Empty for a flat curriculum. */
+  phases?: CurriculumPhase[];
   /** Present on a single read, absent from the list. */
   items?: CurriculumItem[];
 };
@@ -2126,22 +2160,34 @@ export type Curriculum = {
 /** One item as the client sends it. Flattened to match the column names, and
  *  the library fields are absent because they are the catalog's. */
 export type CurriculumItemWrite = {
-  technique_id: string;
+  /** Omitted means technique — what every write predating kinds sent. A
+   *  concept needs `title` and refuses `technique_id` and every criterion. */
+  kind?: "technique" | "concept";
+  technique_id?: string;
+  title?: string;
+  /** Index into the accompanying `phases` array, or null. */
+  phase?: number | null;
   notes?: string;
   target_scored?: number | null;
   target_defended?: number | null;
   target_sessions?: number | null;
   min_hit_rate?: number | null;
+  target_drilled_sessions?: number | null;
 };
 
 export type CurriculumWrite = {
   name?: string;
   description?: string;
   belt?: string | null;
+  track?: string | null;
   visibility?: Visibility;
-  /** Omit to leave the list alone; `[]` empties it; a list replaces it. Three
-   *  distinct states — collapsing the first two makes every metadata edit
-   *  delete every item. */
+  /** Only read when `items` is present — the two replace together, because an
+   *  item names its phase by index into this array. Sending phases without
+   *  items is a 400. */
+  phases?: { title: string; description?: string }[];
+  /** Omit to leave the content — items AND phases — alone; `[]` empties it; a
+   *  list replaces it. Three distinct states — collapsing the first two makes
+   *  every metadata edit delete every item. */
   items?: CurriculumItemWrite[];
 };
 

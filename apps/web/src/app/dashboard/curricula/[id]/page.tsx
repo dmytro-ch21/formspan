@@ -16,6 +16,7 @@ import {
   type Curriculum,
   type CurriculumItem,
 } from "@/lib/api";
+import { groupByPhase } from "@/lib/curriculumPhases";
 import { proposeFocus } from "@/lib/roadmapFocus";
 
 /**
@@ -239,16 +240,32 @@ export default function CurriculumDetailPage() {
 
       <section>
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-neutral-500">
-          {items.length} technique{items.length === 1 ? "" : "s"}
+          {items.length} item{items.length === 1 ? "" : "s"}
         </h2>
         {items.length === 0 ? (
           <p className="text-sm text-neutral-500">Nothing in it yet.</p>
         ) : (
-          <ul className="space-y-2">
-            {items.map((it) => (
-              <ItemRow key={it.technique_id} item={it} enrolled={c.enrolled} />
+          <div className="space-y-6">
+            {groupByPhase(c.phases ?? [], items).map((group) => (
+              <div key={group.phase?.order ?? -1}>
+                {group.phase && (
+                  <header className="mb-2">
+                    <h3 className="font-semibold">{group.phase.title}</h3>
+                    {group.phase.description && (
+                      <p className="mt-0.5 max-w-2xl text-sm text-neutral-600 dark:text-neutral-400">
+                        {group.phase.description}
+                      </p>
+                    )}
+                  </header>
+                )}
+                <ul className="space-y-2">
+                  {group.items.map((it) => (
+                    <ItemRow key={it.order} item={it} enrolled={c.enrolled} />
+                  ))}
+                </ul>
+              </div>
             ))}
-          </ul>
+          </div>
         )}
       </section>
 
@@ -295,6 +312,23 @@ function Back() {
 function ItemRow({ item, enrolled }: { item: CurriculumItem; enrolled: boolean }) {
   const { criteria: crit, progress: p } = item;
   const mastered = p?.mastered ?? false;
+
+  if (item.kind === "concept") {
+    // A concept is authored text — an idea the phase is teaching, not a step
+    // the record can complete. No criteria block, no "something to study"
+    // footer: its whole body IS the content, and dressing it as an incomplete
+    // technique would misreport it.
+    return (
+      <li className="rounded-xl border border-neutral-200 bg-neutral-50 p-3 dark:border-neutral-800 dark:bg-neutral-900/50">
+        <p className="font-medium">{item.title}</p>
+        {item.notes && (
+          <p className="mt-1 text-sm leading-relaxed text-neutral-600 dark:text-neutral-400">
+            {item.notes}
+          </p>
+        )}
+      </li>
+    );
+  }
 
   return (
     <li
@@ -344,6 +378,14 @@ function ItemRow({ item, enrolled }: { item: CurriculumItem; enrolled: boolean }
           )}
           {crit.target_sessions !== null && (
             <Bar label="Sessions" have={p?.sessions} need={crit.target_sessions} enrolled={enrolled} />
+          )}
+          {crit.target_drilled_sessions !== null && (
+            <Bar
+              label="Classes drilled"
+              have={p?.drilled_sessions}
+              need={crit.target_drilled_sessions}
+              enrolled={enrolled}
+            />
           )}
           {crit.min_hit_rate !== null && (
             <HitRate have={p?.hit_rate ?? null} need={crit.min_hit_rate} enrolled={enrolled} />
