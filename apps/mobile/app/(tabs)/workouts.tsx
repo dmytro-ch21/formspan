@@ -133,7 +133,6 @@ export default function WorkoutsScreen() {
     try {
       const list = await listWorkouts(getToken, scope, controller.signal);
       if (!controller.signal.aborted) {
-        setEverLoaded(true);
         // Cleared on success, not at request start — an error wiped up
         // front leaves the screen looking fine throughout a retry.
         setError(null);
@@ -141,18 +140,84 @@ export default function WorkoutsScreen() {
         // people's shared templates under this athlete's cache rows would
         // make them reappear as if they were theirs.
         if (scope === 'mine' && userId) {
-          await cacheWorkouts(userId, list);
-          // Render the RECONCILED cache, not the raw response.
-          //
-          // `cacheWorkouts` already keeps rows the server hasn't heard of and
-          // drops ones it has deleted; rendering `list` threw that away. A
-          // workout created offline vanished from the list the moment a stale
-          // `listWorkouts` response landed — reliably, not rarely, because
-          // creating one fires the sync request and this reload together —
-          // and came back on the next focus. Reading back through the cache
-          // makes what is on screen the same thing that is on disk.
-          setWorkouts(await cachedWorkouts(userId));
+          // Resolved to whatever this load should render, THEN committed once
+          // below — so there is exactly one abort check in front of exactly one
+          // `setWorkouts`, however the cache behaves.
+          let next = list;
+          try {
+            // Re-checked here, not just at :85. `cacheWorkouts` reconciles —
+            // it DELETEs rows missing from `list` — so letting a superseded
+            // response reach it lets stale data delete fresh rows, possibly
+            // after the newer load has already read the cache back. The queue
+            // widened this window from a microtask to however long the catalog
+            // write ahead of it takes.
+            if (controller.signal.aborted) return;
+            await cacheWorkouts(userId, list);
+            // Render the RECONCILED cache, not the raw response.
+            //
+            // `cacheWorkouts` already keeps rows the server hasn't heard of and
+            // drops ones it has deleted; rendering `list` threw that away. A
+            // workout created offline vanished from the list the moment a stale
+            // `listWorkouts` response landed — reliably, not rarely, because
+            // creating one fires the sync request and this reload together —
+            // and came back on the next focus. Reading back through the cache
+            // makes what is on screen the same thing that is on disk.
+            next = await cachedWorkouts(userId);
+          } catch (cacheErr) {
+            // A CACHE failure is not a PLAN failure.
+            //
+            // By here the server has already answered, so the athlete's plan is
+            // in hand. Letting a write to the offline cache reach the outer
+            // catch put a red SQLite banner ("cannot rollback - no transaction
+            // is active") over the week's training instead of the training —
+            // the loudest possible presentation of the least important failure
+            // on this screen.
+            //
+            // Fall back to READING the cache, not to `list`. What just failed
+            // is a write; `cachedWorkouts` is a plain SELECT with no
+            // transaction, so it will almost certainly still answer — and it
+            // keeps the offline-created workouts that `list` structurally
+            // cannot contain. Rendering `list` here would show a confident
+            // "No workouts yet" to an athlete holding unpushed templates,
+            // whenever the server list happened to be empty.
+            let readErr: unknown;
+            try {
+              const fallback = await cachedWorkouts(userId);
+              // Non-empty only — the same guard the cache-first read above
+              // uses. On a first launch the write is what would have populated
+              // the cache, so a failed write leaves it empty, and preferring it
+              // would render "No workouts yet" over a list the server just
+              // returned. Empty here means "no local answer", not "none exist".
+              //
+              // Known inversion, accepted: an athlete who deletes their ONLY
+              // workout offline has a legitimately empty cache (the tombstone
+              // is filtered by `deleted_at IS NULL`), so this hands the render
+              // to `list` and the deleted workout reappears for one frame.
+              // Telling the two apart needs a count that ignores `deleted_at`
+              // — a new store export for a case that is already transient, on
+              // an already-failing path, and self-corrects on the next focus.
+              if (fallback.length > 0) next = fallback;
+            } catch (err) {
+              // Both halves of the cache are unusable. `list` is all that's
+              // left, and it is still the server's current answer.
+              readErr = err;
+            }
+            // Logged rather than shown. It is invisible to the athlete by
+            // design, and a cache that fails every write would otherwise rot
+            // the offline plan behind a screen that looks perfectly healthy.
+            //
+            // Both errors, because they are different halves: reporting only
+            // the write would describe a wholly unusable cache by naming the
+            // half that is merely the first to fail. In dev this raises a
+            // LogBox notice (RN patches `console.warn` under `__DEV__` only);
+            // release builds have no LogBox, so the athlete never sees it.
+            console.warn('[plan] cache write failed; rendered without it', cacheErr, readErr);
+          }
+          if (controller.signal.aborted) return;
+          setEverLoaded(true);
+          setWorkouts(next);
         } else {
+          setEverLoaded(true);
           setWorkouts(list);
         }
       }

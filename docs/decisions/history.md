@@ -18518,6 +18518,158 @@ breaking it and watching the suite go red. What that turned up:
   says in place why. A test that cannot fail is worse than no test, because it
   reads as coverage.
 
+## 2026-08-04 — Two transactions, one connection: the Plan tab's intermittent SQLite banner
+
+*Dated when the work was done; it sat uncommitted in a worktree and landed on
+2026-08-10, which is why it appears below later entries. The date is kept rather
+than corrected because the bug and its diagnosis belong to that day.*
+
+The Plan tab intermittently rendered `Calling the 'execAsync' function has
+failed → Caused by: cannot rollback - no transaction is active` in place of the
+week's training. Intermittent, so it had survived a while: it appeared once and
+not on the next launch.
+
+**The mechanism, read out of the installed `expo-sqlite` rather than guessed.**
+`withTransactionAsync` is a bare `BEGIN` / task / `COMMIT` with a `ROLLBACK` in
+the catch, and its own doc comment says it "can be interrupted by other async
+queries". The whole app shares ONE connection. So two overlapping calls do this:
+
+    A: BEGIN                  -- transaction open
+    A: ...awaits, yielding...
+    B: BEGIN                  -- throws "cannot start a transaction within a transaction"
+    B: ROLLBACK (its catch)   -- SUCCEEDS, ending *A's* transaction
+    A: ...remaining writes... -- now autocommit, one transaction per statement
+    A: COMMIT                 -- "cannot commit - no transaction is active"
+    A: ROLLBACK (its catch)   -- "cannot rollback - no transaction is active"
+
+Worth naming precisely, because the obvious reading is wrong: the inner `BEGIN`
+is **not** a no-op that SQLite quietly absorbs. It throws, and the interloper's
+own error handling is what destroys the outer transaction. `cacheWorkouts`
+(Plan) and `cacheExercises` (Library, the session screens, `records/pinned`,
+the seed) are the two blocks that overlap.
+
+**The banner was the visible half; the quiet half is worse.** B's `ROLLBACK`
+discards A's reconcile `DELETE`, so a workout deleted on the server survives in
+the cache — flashing back on every tab focus and, offline, listed as still
+existing and dead-ending on tap. That is exactly the guarantee `cacheWorkouts`'
+RECONCILE comment exists to provide, undone at random by a race. Nothing was
+watching for it because the loud symptom was on a different screen.
+
+**Reproduced before anything changed, deterministically**, in the `node:sqlite`
+fixture — same engine, and it emits the identical message. The collision is
+pure async ordering, not timing: start both without awaiting between them and
+they interleave at the first `await` inside the transaction body, every run.
+No Simulator lottery required, and the reproduction became the regression test.
+
+**Fix: a process-wide queue in `lib/db.ts` (`withTransaction`)**, the same shape
+as `syncSessions`' `syncInFlight`, including the `.catch` on the chain — without
+it one failed transaction rejects every transaction queued behind it for the
+life of the process. JS here is single-threaded, so serialising the bodies is
+genuinely sufficient. `withExclusiveTransactionAsync` was the alternative and is
+worse: it opens a second connection, and expo's own docs note other async writes
+then abort with `database is locked` — trading a rare error for a common one,
+given how much of this app writes outside a transaction.
+
+**An eslint rule (`no-restricted-syntax`) now fails the build on a direct
+`db.withTransactionAsync`,** with `lib/db.ts` exempt as the one legitimate
+caller. A comment would not have held: the two call sites were written years
+apart by the same reasoning, and the next one would be too.
+
+**Separately, the screen stopped amplifying it.** `load()` awaited
+`cacheWorkouts` inside the same `try` as the network fetch, so a failed write to
+an offline cache reached `setError` — by which point `listWorkouts` had already
+answered and the plan was in hand. This is a real fix on its own: any future
+cache-write failure, from any cause, no longer replaces the athlete's training
+with a database error.
+
+The fallback **re-reads the cache** rather than rendering the network list. What
+failed is a *write*; `cachedWorkouts` is a plain `SELECT` with no transaction
+and will almost certainly still answer, and it keeps the offline-created
+workouts `list` structurally cannot contain — otherwise an athlete holding
+unpushed templates would get a confident "No workouts yet" whenever the server
+list happened to be empty. It falls through to `list` only if the cache read
+also fails or comes back empty (a first launch, where the failed write is
+exactly what would have populated it). And the failure is `console.warn`ed:
+per this repo's own new functional-scenarios entry it "belongs in a log", and a
+cache failing every write would otherwise rot the offline plan behind a screen
+that looks perfectly healthy.
+
+**Review caught things worth recording, because two were demonstrated rather
+than theorised:**
+
+- **The new test leaked its own mock into every test after it.**
+  `beforeEach` used `mockCacheWorkouts.mockClear()`, which wipes the call log
+  but *leaves a `mockRejectedValue` in place*. So the failed-cache-write test
+  poisoned everything declared below it — already silently weakening the
+  shared-scope test, and guaranteed to fail whatever got appended next, for a
+  reason nowhere near where it was written. Now `mockReset()` plus an explicit
+  `mockResolvedValue(undefined)`, since `mockReset` also drops the
+  implementation `jest.fn()` was constructed with — which is presumably why
+  `mockClear` was reached for in the first place. Confirmed by appending a copy
+  of the file's first test at the end: red before, green after.
+- **The mutation record in the first draft was wrong**, in a repo whose test
+  discipline rests on mutation records. It claimed all four `cacheRace` tests
+  fail with the queue removed, and that one carries the athlete's message.
+  Neither holds: two fail (the other two target the chain's `.catch`, which
+  needs its own mutation), and `Promise.all` surfaces the *interloper's*
+  `cannot start a transaction within a transaction` because the outer block has
+  not reached its `COMMIT` yet. Corrected in both places. The lesson is that a
+  mutation record has to name which mutation and which failure, or it is just
+  confidence.
+- **`setEverLoaded(true)` fired before the now-queued cache write**, and the
+  empty-state gate is `loading && !everLoaded` — so on a first launch, with the
+  seed's 466-row `cacheExercises` ahead in the queue, the screen would flash
+  "No workouts yet" before the real list arrived. Both it and `setWorkouts` now
+  sit behind a single abort re-check after the awaits; previously the abort was
+  checked once, before them, so a scope switch mid-load could let a stale
+  `mine` result overwrite the `shared` list. Both pre-existed, and the queue
+  widened the window from one local write to however many transactions are
+  ahead of it.
+- **The eslint selector had two silent bypasses** — `db["withTransactionAsync"]`
+  (a `Literal`, so `property.name` is undefined) and
+  `const { withTransactionAsync } = db` (no `MemberExpression` at all). Three
+  selectors now, all three verified to fire.
+- **The abort check was the one guard in the diff with no test** — deleting it
+  left the suite green, which is exactly the failure mode `apps/mobile`'s test
+  discipline exists to prevent. Now covered: park `cacheWorkouts` mid-flight,
+  switch scope to supersede the load, release it, and assert the stale `mine`
+  result never lands on the Shared tab. It waits on an *increase* in cache
+  reads rather than an absolute count, because the focus effect runs `load()`
+  more than once — the first draft pinned "2" and got 4.
+
+Two review suggestions were **declined**, both because they conflict with
+something else the same review asked for. Moving `setEverLoaded(true)` back in
+front of the cache awaits would restore the "No workouts yet" flash the review
+itself flagged one round earlier; the permanent-spinner case it protects
+against needs `txChain` to stall forever, which needs a nested
+`withTransaction`, which does not exist and is now guarded by both a comment
+and lint. And discriminating "cache never written" from "cache legitimately
+empty" — the case where an athlete deletes their only workout offline and it
+reappears for one frame — needs a row count that ignores `deleted_at`, a new
+store export for a transient glitch on an already-failing path. Both are
+written down where the code is, rather than silently dropped.
+
+- **The regression tests were checked by mutation, per this suite's rule**, and
+  it takes three different mutations to cover the five: removing the queue fails
+  the two race tests, removing only the chain's `.catch` fails the other two,
+  and reverting the screen's try/catch fails the new `workoutsScreen` test.
+  Worth recording that the first mutation does **not** reproduce the athlete's
+  `cannot rollback` string in the test output — `Promise.all` rejects with
+  whichever settles first, which is the interloper's `cannot start a transaction
+  within a transaction`. Same single collision, different half of it reported.
+  A first draft of this entry claimed otherwise; review caught it, which is the
+  argument for the mutation record being specific rather than confident.
+- **Not fixed, and now written down in `withTransaction`'s comment:** a plain
+  `runAsync` from elsewhere can still land between a `BEGIN` and its `COMMIT`
+  and be swallowed into a transaction it knows nothing about, so a failing
+  `cacheWorkouts` would roll back an unrelated interleaved write. Nothing
+  observed has hit it. Closing it means funnelling every write through the
+  queue — a much larger change than this bug warranted.
+- **Not device-reproduced.** The fixture reproduction is deterministic and
+  emits the identical error string, which is stronger evidence than a lucky
+  Simulator hit on an intermittent race; and per this file's own rule, a
+  worktree cannot build the mobile app anyway without copying `.env.local` in.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

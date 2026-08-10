@@ -6604,3 +6604,45 @@ analytical surface (history, charts) stays on web and does not exist yet.
   wizard's technique step and its live grid appears twice. A test should assert
   the current (doubled) number, so that if someone ever links the two rows at
   write time the test fails and forces the decision to be made deliberately.
+
+## Concurrent SQLite writes on the shared connection (mobile, `lib/db.ts`)
+
+`expo-sqlite` gives the whole app ONE connection, and its `withTransactionAsync`
+is an unguarded `BEGIN`/`COMMIT`: two overlapping calls end each other's
+transaction, which surfaced as `cannot rollback - no transaction is active`
+rendered over the Plan tab and, silently, as a lost reconcile. `withTransaction`
+serialises them. These are the properties worth holding.
+
+### Happy path
+
+- Opening Plan while the Library, a session screen or a sync is caching the
+  catalog completes both writes. Neither errors, and both caches hold their
+  full contents afterwards.
+- The Plan tab's reconcile still removes a workout deleted on the server even
+  when a catalog write overlaps it — the case that failed silently, with the
+  deleted template flashing back on every tab focus.
+- Rapid tab-switching between Plan and Library (the manual reproduction) shows
+  no database error on either screen.
+
+### Edge cases & errors
+
+- A transaction whose body throws rolls its own writes back and leaves the
+  queue able to run whatever was queued behind it. One failed write must not
+  kill every later transaction for the life of the process.
+- A cache write that fails for ANY reason still leaves the Plan tab showing the
+  week's training: the response is already in hand by then, so the screen falls
+  back rather than surfacing a database error. The failure is logged, not shown.
+- That fallback re-reads the cache rather than rendering the network list, so a
+  workout created offline and not yet pushed still appears — the case where
+  rendering the list would show "No workouts yet" to someone holding one. It
+  falls through to the network list only when the cache read also fails or comes
+  back empty (a first launch, where the failed write is what would have filled
+  it).
+- Switching scope (`My workouts` → `Shared`) while a load is queued behind other
+  transactions must not let the stale `mine` result overwrite the shared list
+  when it finally resumes.
+- On a first launch, with the seed's catalog write ahead in the queue, the Plan
+  tab must not flash "No workouts yet" before the list it is about to render
+  arrives.
+- Nothing calls `db.withTransactionAsync` directly outside `lib/db.ts` — lint
+  fails the build on it, since a comment alone did not hold the line before.

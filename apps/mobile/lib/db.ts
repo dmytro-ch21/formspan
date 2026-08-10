@@ -621,6 +621,77 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
   await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION};`);
 }
 
+/**
+ * One transaction at a time, process-wide. **Use this, never
+ * `db.withTransactionAsync` directly** — an eslint rule enforces it.
+ *
+ * `expo-sqlite` hands the whole app ONE connection, and its
+ * `withTransactionAsync` is a bare `BEGIN` / task / `COMMIT` with a `ROLLBACK`
+ * in the catch — its own doc comment says it "can be interrupted by other async
+ * queries". So two overlapping calls on that shared connection do this:
+ *
+ *   A: BEGIN                     -- transaction open
+ *   A: ...awaits, yielding...
+ *   B: BEGIN                     -- throws "cannot start a transaction within
+ *                                   a transaction"
+ *   B: ROLLBACK  (its catch)     -- SUCCEEDS, and ends *A's* transaction,
+ *                                   discarding everything A had written
+ *   A: ...remaining writes...    -- now in autocommit, one txn per statement
+ *   A: COMMIT                    -- "cannot commit - no transaction is active"
+ *   A: ROLLBACK  (its catch)     -- "cannot rollback - no transaction is active"
+ *
+ * That last line is what the athlete saw: the Plan tab rendered
+ * "cannot rollback - no transaction is active" where the week's plan goes,
+ * because `cacheWorkouts` and `cacheExercises` overlap whenever Plan loads
+ * while Library, a session screen or a sync is caching the catalog.
+ *
+ * The banner was the visible half. The quiet half is worse: B's rollback
+ * discards A's reconcile, so a workout deleted on the server survives in the
+ * cache — re-breaking, at random, the exact guarantee `cacheWorkouts`'
+ * RECONCILE comment exists to provide.
+ *
+ * A JS-side queue is the right size of fix: JS here is single-threaded, so
+ * nothing can slip between the `BEGIN` and the `COMMIT` once the bodies are
+ * serialised. `withExclusiveTransactionAsync` was the alternative and is worse
+ * — it opens a SECOND connection, and expo's own docs note that other async
+ * writes then abort with `database is locked`, which trades a rare error for a
+ * common one given how much of this app writes outside a transaction.
+ *
+ * Same shape as `syncSessions`' queue, including the `.catch` on the chain:
+ * without it one failed transaction rejects every transaction queued behind it
+ * forever.
+ *
+ * **What this does NOT fix.** Transactions no longer collide with each other,
+ * but a plain `runAsync` from elsewhere can still land *between* a `BEGIN` and
+ * its `COMMIT` and be swallowed into a transaction it knows nothing about — so
+ * a failing `cacheWorkouts` would roll back an unrelated write that happened to
+ * interleave. There is a second, rarer way in: if expo's own `ROLLBACK` throws
+ * while a transaction is genuinely open (a `SQLITE_BUSY`-class failure, not the
+ * bug above — there it throws precisely BECAUSE none is open), the transaction
+ * leaks open, the next queued one fails to `BEGIN`, and its rollback discards
+ * both. The queue recovers on the one after; the data does not come back.
+ * Closing either means funnelling every write through this queue, which is a
+ * much larger change than the bug on the table warranted.
+ *
+ * **Do not call this from inside a transaction body.** The inner call queues
+ * behind an outer one that cannot finish until the inner resolves. That is not
+ * a local hazard: `txChain` stays pending forever, so EVERY subsequent
+ * transaction in the process hangs and no row is ever written again — a silent,
+ * permanent, app-wide freeze. Nothing nests today. There is no cheap runtime
+ * guard, because a nested call and a legitimately concurrent one are
+ * indistinguishable without async-context tracking (React Native has none).
+ */
+let txChain: Promise<unknown> = Promise.resolve();
+
+export function withTransaction(
+  db: SQLite.SQLiteDatabase,
+  task: () => Promise<void>,
+): Promise<void> {
+  const run = txChain.then(() => db.withTransactionAsync(task));
+  txChain = run.catch(() => {});
+  return run;
+}
+
 export function getDb(): Promise<SQLite.SQLiteDatabase> {
   if (!dbPromise) {
     dbPromise = (async () => {

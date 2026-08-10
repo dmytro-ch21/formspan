@@ -46,6 +46,55 @@ export default defineConfig([
     },
   },
   {
+    /*
+     * `db.withTransactionAsync` is unsafe on this app's ONE shared connection:
+     * two overlapping calls end each other's transaction, which surfaced as
+     * "cannot rollback - no transaction is active" rendered over the Plan tab
+     * and, silently, as a lost reconcile. `lib/db.ts`'s `withTransaction`
+     * serialises them; this rule is what stops the direct call coming back.
+     *
+     * `lib/db.ts` is exempt because it is the one legitimate caller — it makes
+     * the call the queue wraps.
+     *
+     * NO `files` NARROWING. It was scoped to TypeScript extensions only, which
+     * left `.js`, `.jsx` and `.mjs` unguarded — verified by probe: a `lib/foo.js`
+     * calling `db.withTransactionAsync()` linted clean. Every source file here
+     * is TypeScript today, so it was theoretical; a rule whose entire job is to
+     * stop something coming back should not have a hole that a file extension
+     * opens. Nothing forces the narrowing either — `no-restricted-syntax` is a
+     * core rule, so it carries none of the plugin-loading constraint this
+     * config documents for the `@typescript-eslint` blocks.
+     */
+    ignores: ["lib/db.ts"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        /*
+         * Three selectors, because one is trivially bypassed without meaning
+         * to: `db["withTransactionAsync"](...)` puts the name on a Literal
+         * where `property.name` is undefined, and destructuring produces no
+         * MemberExpression at all. The destructuring form is the one someone
+         * writes without thinking about it.
+         */
+        {
+          selector: "MemberExpression[property.name='withTransactionAsync']",
+          message:
+            "Use withTransaction(db, fn) from lib/db.ts. Calling db.withTransactionAsync directly races other transactions on the shared connection — see the comment there.",
+        },
+        {
+          selector: "MemberExpression[property.value='withTransactionAsync']",
+          message:
+            "Use withTransaction(db, fn) from lib/db.ts. Calling db.withTransactionAsync directly races other transactions on the shared connection — see the comment there.",
+        },
+        {
+          selector: "ObjectPattern > Property[key.name='withTransactionAsync']",
+          message:
+            "Use withTransaction(db, fn) from lib/db.ts. Destructuring withTransactionAsync off the database escapes the queue that keeps transactions from destroying each other — see the comment there.",
+        },
+      ],
+    },
+  },
+  {
     rules: {
       /*
        * `rules-of-hooks` is THE rule this was added for, and it is an error.

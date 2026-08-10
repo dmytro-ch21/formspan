@@ -3,7 +3,7 @@ import type { TokenGetter } from './useAuthToken';
 import type * as SQLite from 'expo-sqlite';
 
 import { ApiError, isNotFound, isOffline, isPermanentRejection } from './apiError';
-import { getDb } from './db';
+import { getDb, withTransaction } from './db';
 import type { Exercise } from './exercises';
 import type { Workout, WorkoutItem } from './workouts';
 import {
@@ -1046,7 +1046,10 @@ export async function hydrateSession(
 export async function cacheWorkouts(userID: string, list: Workout[]): Promise<void> {
   const db = await getDb();
   const now = new Date().toISOString();
-  await db.withTransactionAsync(async () => {
+  // Serialised against every other transaction — this one and `cacheExercises`
+  // used to overlap on the shared connection and destroy each other's. See
+  // `withTransaction`.
+  await withTransaction(db, async () => {
     // RECONCILE, don't just accumulate.
     //
     // This only ever upserted, and nothing anywhere deleted from the table —
@@ -1172,7 +1175,7 @@ export async function cacheExercises(list: Exercise[]): Promise<void> {
   if (list.length === 0) return;
   const db = await getDb();
   const now = new Date().toISOString();
-  await db.withTransactionAsync(async () => {
+  await withTransaction(db, async () => {
     for (const e of list) {
       await db.runAsync(
         `INSERT INTO exercise_cache
