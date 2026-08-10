@@ -2545,7 +2545,16 @@ components:
         separates the two.
       required: [positions, min_live]
       properties:
-        positions: { type: integer, description: Positions with any live evidence at all. }
+        positions:
+          type: integer
+          description: >
+            Positions with any live evidence at all, AMONG THE RETURNED ROWS.
+            The distinction only bites past the row cap: `position` is free text
+            on write (`Tag.Validate` checks category, event, count and
+            technique_id, never the position), so a drifted client could invent
+            enough distinct positions to make the cap bind — and then this
+            counts what was shown rather than what exists. Unreachable for any
+            client using the app's own vocabulary.
         min_live:
           type: integer
           description: >
