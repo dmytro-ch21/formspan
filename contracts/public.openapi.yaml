@@ -2947,9 +2947,9 @@ components:
         item_count:
           type: integer
           description: >
-            How many techniques are in it. Present on the LIST as well as the
-            single read, so a card can say "12 techniques" without fetching
-            them.
+            How many items are in it — techniques AND concepts. Present on the
+            LIST as well as the single read, so a card can say "12 items"
+            without fetching them.
         countable_items:
           type: integer
           description: >
@@ -2992,8 +2992,8 @@ components:
         Every field optional so PATCH can be partial; POST requires `name`.
         Omitting `items` leaves the content — items AND phases, which travel
         as one unit because an item names its phase by index — alone, `[]`
-        empties it, and a list replaces it wholesale. `phases` is only read
-        when `items` is present.
+        empties it, and a list replaces it wholesale. Sending `phases` without
+        `items` is a 400 rather than a silent no-op.
 
 
         `id`, `editable`, `enrolled` and all progress are absent by design: the

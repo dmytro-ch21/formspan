@@ -76,9 +76,9 @@ type Curriculum struct {
 	// syllabus is a dozen techniques and a list is a dozen syllabuses; sending
 	// every item on every list read is the N+1 in its lazy form.
 	Items []Item `json:"items,omitempty"`
-	// ItemCount is how many techniques are in it, present on BOTH the list and
-	// the single read -- a card has to be able to say "12 techniques" without
-	// fetching all of them.
+	// ItemCount is how many items are in it — techniques AND concepts —
+	// present on BOTH the list and the single read: a card has to be able to
+	// say "12 items" without fetching all of them.
 	ItemCount int `json:"item_count"`
 	// CountableItems and MasteredItems ship THE PROGRESS RULE rather than
 	// leaving each client to invent it.
@@ -285,9 +285,11 @@ const (
 	// MaxPhases is generous next to the real material — the largest belt
 	// curriculum drafted has eleven.
 	MaxPhases = 20
-	// MaxBody is the same ceiling the other small writes here use, raised for
-	// the item array.
-	MaxBody = 64 << 10
+	// MaxBody rose with MaxItems: 150 items plus authored phase prose can
+	// brush 64 KB, and the failure there is a truncated decode reported as
+	// "invalid JSON body" — deterministic but misleading. Still trivially
+	// bounded.
+	MaxBody = 128 << 10
 	// maxList caps the list response.
 	//
 	// api-conventions.md is explicit that a list endpoint without a LIMIT

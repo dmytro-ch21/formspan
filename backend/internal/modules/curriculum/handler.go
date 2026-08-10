@@ -292,6 +292,15 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 			in.Track = &track
 		}
 	}
+	// Phases travel WITH items — an item names its phase by index into the
+	// array it arrived with. Refused rather than ignored: silently dropping
+	// the phases would 200 a request whose structure was thrown away, which is
+	// a client bug nobody gets to see.
+	if req.Items == nil && len(req.Phases) > 0 {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"phases can only be sent alongside items — the two replace together")
+		return
+	}
 	if req.Items != nil {
 		phases := toPhases(req.Phases)
 		items := make([]NewItem, 0, len(*req.Items))

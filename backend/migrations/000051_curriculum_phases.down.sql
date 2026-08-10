@@ -2,6 +2,20 @@
 -- names no technique means nothing to the schema this returns to.
 DELETE FROM curriculum_items WHERE kind = 'concept';
 
+-- A drilled-anchored item may legally carry target_sessions under this
+-- migration's constraint, but the OLD criteria_anchored being restored below
+-- has no drilled disjunct — re-adding it would abort validating that row and
+-- kill the rollback mid-file. Strip the now-unanchored sessions target first.
+-- (min_hit_rate cannot occur here: hit_rate_needs_volume pins it to
+-- target_scored, which this WHERE excludes.)
+--
+-- Drilled-only rows themselves survive and, after the DROP COLUMN below,
+-- silently become criteria-less reading items. Deliberate: a down migration's
+-- job is a schema the old binary can run, not a lossless inverse.
+UPDATE curriculum_items SET target_sessions = NULL
+WHERE target_scored IS NULL AND target_defended IS NULL
+  AND target_sessions IS NOT NULL;
+
 ALTER TABLE curriculum_items DROP CONSTRAINT curriculum_items_criteria_anchored;
 ALTER TABLE curriculum_items ADD CONSTRAINT curriculum_items_criteria_anchored CHECK (
     target_scored IS NOT NULL

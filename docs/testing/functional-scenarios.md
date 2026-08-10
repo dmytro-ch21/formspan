@@ -6116,6 +6116,9 @@ library pointer; `track` is the browse-section hint; and
   content, and they travel with `items` — sending `items` without `phases`
   replaces the structure with none (flat), which is the documented contract,
   not a bug.
+- Sending `phases` WITHOUT `items` → `400`, not a silent no-op. The phases
+  would otherwise be thrown away with a `200`, which is a client bug nobody
+  gets to see.
 - **A concept item is text and nothing else.** `kind: concept` needs a `title`,
   refuses `technique_id`, and refuses every criterion field with `400` — no
   evidence stream could measure one, and nothing here is completable by hand.
