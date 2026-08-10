@@ -27,24 +27,26 @@ export function groupByPhase(
   phases: CurriculumPhase[],
   items: CurriculumItem[],
 ): PhaseGroup[] {
-  const known = new Map(phases.map((p) => [p.order, p]));
+  // An item's `phase` is an INDEX INTO THE ARRAY — that is the contract's own
+  // definition — not a match against the `order` field. The two coincide
+  // today because the server writes dense zero-based orders, but the array
+  // position is the promise; matching on `order` would silently unphase
+  // everything the day the field ever became sparse.
   const unphased: CurriculumItem[] = [];
-  const perPhase = new Map<number, CurriculumItem[]>(
-    phases.map((p) => [p.order, []]),
-  );
+  const perPhase: CurriculumItem[][] = phases.map(() => []);
   for (const it of items) {
-    if (it.phase !== null && known.has(it.phase)) {
-      perPhase.get(it.phase)!.push(it);
+    if (it.phase !== null && it.phase >= 0 && it.phase < phases.length) {
+      perPhase[it.phase].push(it);
     } else {
       unphased.push(it);
     }
   }
   const groups: PhaseGroup[] = [];
   if (unphased.length > 0) groups.push({ phase: null, items: unphased });
-  for (const p of [...phases].sort((a, b) => a.order - b.order)) {
+  phases.forEach((p, i) => {
     // Empty phases still render: a titled, described section with nothing in
     // it yet is authoring in progress, not nothing.
-    groups.push({ phase: p, items: perPhase.get(p.order) ?? [] });
-  }
+    groups.push({ phase: p, items: perPhase[i] });
+  });
   return groups;
 }

@@ -248,7 +248,7 @@ export default function CurriculumDetailPage() {
           <div className="space-y-6">
             {groupByPhase(c.phases ?? [], items).map((group) => (
               <div key={group.phase?.order ?? -1}>
-                {group.phase && (
+                {group.phase ? (
                   <header className="mb-2">
                     <h3 className="font-semibold">{group.phase.title}</h3>
                     {group.phase.description && (
@@ -257,6 +257,16 @@ export default function CurriculumDetailPage() {
                       </p>
                     )}
                   </header>
+                ) : (
+                  (c.phases?.length ?? 0) > 0 && (
+                    /* Only in a MIXED curriculum. Unphased items lead the
+                       page, and without a heading they read as an untitled
+                       preamble of the first phase rather than as items nobody
+                       assigned. A flat curriculum keeps no chrome at all. */
+                    <h3 className="mb-2 text-sm font-medium text-neutral-500">
+                      Unassigned
+                    </h3>
+                  )
                 )}
                 <ul className="space-y-2">
                   {group.items.map((it) => (

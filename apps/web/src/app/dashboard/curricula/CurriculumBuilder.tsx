@@ -44,8 +44,10 @@ import {
  * item's index here, where both halves of the invariant are in one place.
  */
 
-/** A phase as the builder holds it. */
-type PhaseDraft = { title: string; description: string };
+/** A phase as the builder holds it — with the same local key items carry,
+ *  because this list reorders too and an index key would carry focus and IME
+ *  state to whatever row lands at that index. Stripped before saving. */
+type PhaseDraft = { _key: string; title: string; description: string };
 
 /** An item as the builder holds it: the wire shape plus a stable local key,
  *  because concept rows have no technique_id to key a reorderable list on —
@@ -53,8 +55,10 @@ type PhaseDraft = { title: string; description: string };
  *  whatever row lands at that index after a move. Stripped before saving. */
 type ItemDraft = CurriculumItemWrite & { _key: string };
 
-let keyCounter = 0;
-const nextKey = () => `k${keyCounter++}`;
+/** Random rather than a module counter: a counter resets on Fast Refresh
+ *  while preserved state keeps the old keys, and the next added row would
+ *  collide. Dev-only, but free to rule out. */
+const nextKey = () => crypto.randomUUID();
 
 export function CurriculumBuilder({ existing }: { existing?: Curriculum }) {
   const { getToken } = useAuth();
@@ -69,6 +73,7 @@ export function CurriculumBuilder({ existing }: { existing?: Curriculum }) {
   const [phases, setPhases] = useState<PhaseDraft[]>(
     () =>
       existing?.phases?.map((p) => ({
+        _key: nextKey(),
         title: p.title,
         description: p.description,
       })) ?? [],
@@ -155,7 +160,7 @@ export function CurriculumBuilder({ existing }: { existing?: Curriculum }) {
   }, []);
 
   const addPhase = useCallback(() => {
-    setPhases((prev) => [...prev, { title: "", description: "" }]);
+    setPhases((prev) => [...prev, { _key: nextKey(), title: "", description: "" }]);
   }, []);
 
   const patchPhase = useCallback((idx: number, patch: Partial<PhaseDraft>) => {
@@ -365,7 +370,7 @@ export function CurriculumBuilder({ existing }: { existing?: Curriculum }) {
           <ul className="space-y-2">
             {phases.map((p, idx) => (
               <li
-                key={idx}
+                key={p._key}
                 className="rounded-xl border border-neutral-200 p-3 dark:border-neutral-800"
               >
                 <div className="flex items-start gap-2">
@@ -582,14 +587,17 @@ function BuilderRow({
               value={item.title ?? ""}
               onChange={(e) => onPatch({ title: e.target.value })}
               placeholder="Concept title — an idea, not a technique"
-              aria-label="Concept title"
+              // Named per row, like the remove buttons: forty rows of
+              // identical "Concept title" tells a screen-reader user nothing
+              // about which one they are editing.
+              aria-label={`Title of concept ${item.title || "(untitled)"}`}
               className="w-full rounded-lg border border-neutral-300 px-3 py-1.5 text-sm font-medium dark:border-neutral-700 dark:bg-neutral-900"
             />
             <textarea
               value={item.notes ?? ""}
               onChange={(e) => onPatch({ notes: e.target.value })}
               placeholder="The idea itself (optional)"
-              aria-label="Concept body"
+              aria-label={`Body of concept ${item.title || "(untitled)"}`}
               rows={2}
               className="w-full rounded-lg border border-neutral-300 px-3 py-1.5 text-sm dark:border-neutral-700 dark:bg-neutral-900"
             />
@@ -611,7 +619,11 @@ function BuilderRow({
                   phase: e.target.value === "" ? null : Number(e.target.value),
                 })
               }
-              aria-label="Phase"
+              aria-label={`Phase for ${
+                isConcept
+                  ? item.title || "untitled concept"
+                  : technique?.name ?? item.technique_id
+              }`}
               className="max-w-32 rounded-lg border border-neutral-300 px-2 py-1 text-xs dark:border-neutral-700 dark:bg-neutral-900"
             >
               <option value="">No phase</option>

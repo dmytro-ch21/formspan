@@ -270,21 +270,32 @@ function trackSections(
     belt: "Belt roadmaps",
     foundations: "Foundations",
   };
+  // `!track`, not `=== null`: the column is unconstrained TEXT, so an empty
+  // string is reachable via a raw API write, and it must not render an empty
+  // heading sorted among the named sections.
+  const keyOf = (c: Curriculum) => (c.track ? c.track : null);
   const order = (t: string | null) =>
     t === "belt" ? 0 : t === "foundations" ? 1 : t !== null ? 2 : 3;
-  const groups = new Map<string, Curriculum[]>();
+  // Grouped on the track VALUE, not the display title — two tracks that
+  // happen to render the same title must not merge into one section under
+  // whichever arrived first's sort order.
+  const groups = new Map<string | null, Curriculum[]>();
   for (const c of list) {
-    const key =
-      c.track === null
-        ? "From other athletes"
-        : (titles[c.track] ??
-          c.track.charAt(0).toUpperCase() + c.track.slice(1));
+    const key = keyOf(c);
     (groups.get(key) ?? groups.set(key, []).get(key)!).push(c);
   }
   return [...groups.entries()]
-    .map(([title, l]) => ({ title, list: l, o: order(l[0].track) }))
-    .sort((a, b) => a.o - b.o || a.title.localeCompare(b.title))
-    .map(({ title, list: l }) => ({ title, list: l }));
+    .sort(
+      (a, b) =>
+        order(a[0]) - order(b[0]) || (a[0] ?? "").localeCompare(b[0] ?? ""),
+    )
+    .map(([track, l]) => ({
+      title:
+        track === null
+          ? "From other athletes"
+          : (titles[track] ?? track.charAt(0).toUpperCase() + track.slice(1)),
+      list: l,
+    }));
 }
 
 function EmptyState({ scope }: { scope: Scope }) {
