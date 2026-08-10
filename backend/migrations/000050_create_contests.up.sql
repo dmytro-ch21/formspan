@@ -103,13 +103,21 @@ CREATE TABLE IF NOT EXISTS contests
     -- did not note it. A sport-wide "didn't place" is expressible by entering
     -- the matches and leaving this null; inventing a sentinel like 0 or 99
     -- would make every ORDER BY and every AVG wrong in a different way.
-    placement     SMALLINT
+    -- INTEGER, not SMALLINT, and the file's own scope is why: this table has
+    -- to hold a 10k as well as a bracket. SMALLINT tops out at 32,767 and the
+    -- Peachtree Road Race fields around 60,000 — finishing 41,203rd is a real
+    -- placement. Worse than the ceiling is HOW it fails: an overflow raises
+    -- SQLSTATE 22003, not a constraint violation, so a repository translating
+    -- pgconn errors by CONSTRAINT NAME would let it through as an unmapped
+    -- internal error rather than invalid input. Free to widen now; a table
+    -- rewrite and a second migration later.
+    placement     INTEGER
                   CONSTRAINT contests_placement_positive CHECK (placement IS NULL OR placement > 0),
 
     -- How big the bracket was, which is what gives a placement its meaning:
     -- third of four and third of sixty-four are not the same result, and
     -- storing only the placement loses that permanently.
-    entrants      SMALLINT
+    entrants      INTEGER
                   CONSTRAINT contests_entrants_positive CHECK (entrants IS NULL OR entrants > 0),
 
     note          TEXT NOT NULL DEFAULT '',
@@ -197,12 +205,21 @@ CREATE TABLE IF NOT EXISTS contest_matches
     -- One match per slot in one entry. Stops a double-submitted form silently
     -- doubling a competitive record, which is the kind of corruption nobody
     -- notices until the numbers are quoted.
+    -- DEFERRABLE INITIALLY IMMEDIATE, decided now because it is free at
+    -- creation and a migration afterwards. It behaves identically today; what
+    -- it buys is that a future "reorder the matches" edit can swap positions
+    -- inside one transaction. Without it, swapping 2 and 3 violates the
+    -- constraint mid-UPDATE and the module is forced into delete-and-reinsert,
+    -- which is a worse shape to discover later than to allow for now.
     CONSTRAINT contest_matches_unique_position UNIQUE (contest_id, position)
+        DEFERRABLE INITIALLY IMMEDIATE
 );
 
--- Reading one entry's matches back, in bracket order.
-CREATE INDEX IF NOT EXISTS contest_matches_contest_idx
-    ON contest_matches (contest_id, position);
+-- NO SEPARATE INDEX ON (contest_id, position). The unique constraint above
+-- creates exactly that btree, so a `CREATE INDEX` on the same two columns in
+-- the same order was a byte-for-byte duplicate — pure write amplification on
+-- every match insert, buying nothing. "Read one entry's matches in bracket
+-- order" is served by the constraint's own index.
 
 -- "What keeps ending my matches" — every match one athlete has had, by method.
 -- Partial on `method <> ''` because an unrecorded method cannot appear in that
