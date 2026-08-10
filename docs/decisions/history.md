@@ -18935,7 +18935,7 @@ they lacked was the document's structure and about a third of its coverage.
   list skipped entirely: **the front headlock** (darce), **leg-lock
   foundations** (single-leg X sweep before the ankle lock, positional
   responsibility as the concept), and chain wrestling.
-- **Purple — "connections"** (11 phases, 21 milestones + 1 reading + 4
+- **Purple — "connections"** (11 phases, 22 milestones + 1 reading + 4
   concepts): opens with **personal game architecture** — A/B/emergency games,
   techniques-become-decision-trees — then the existing K-guard trio framed
   as "one guard, all the way down" and extended with its 50/50 entry, new
@@ -18957,7 +18957,7 @@ they lacked was the document's structure and about a third of its coverage.
 
 Novice-fundamentals and white-belt-basics verified byte-identical to main;
 all technique ids resolve against the live library; seeder idempotent over
-the new shape (32/26/22 items, 12/11/9 phases, twice).
+the new shape (32/27/22 items, 12/11/9 phases, twice).
 
 Open questions:
 

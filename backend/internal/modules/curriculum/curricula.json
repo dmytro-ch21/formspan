@@ -780,6 +780,13 @@
             "target_scored": 18,
             "target_sessions": 14,
             "min_hit_rate": 0.35
+          },
+          {
+            "technique_id": "back-escape-body-triangle",
+            "notes": "Locked legs around your waist are a problem you solve, not one you survive.",
+            "target_scored": 15,
+            "target_sessions": 12,
+            "min_hit_rate": 0.3
           }
         ]
       },
@@ -972,7 +979,7 @@
       },
       {
         "title": "Tactics, and the standard",
-        "description": "Purple belt is the first belt with a scoreboard brain: pace, score, boundaries, when to stabilise and when to scramble, how to protect a lead and how to chase one.",
+        "description": "Purple belt is the first belt with a scoreboard brain: pace, score, boundaries, when to stabilise and when to scramble, how to protect a lead and how to chase one. And as at every belt: promotion is your coach’s call, made on the mat, never a progress bar.",
         "items": [
           {
             "kind": "concept",
@@ -993,7 +1000,7 @@
     "name": "Brown belt: one game, no leaks",
     "belt": "brown",
     "track": "belt",
-    "description": "The brown belt question is: how do I impose, adapt, refine, and teach a complete game? Almost nothing here is new — it is material you have had for years, held to a standard nobody applies at blue. Nearly half of it is scored on attacks that never land on you rather than on ones you hit, and the rest is a single connected game where every escape ends in an attack.",
+    "description": "The brown belt question is: how do I impose, adapt, refine, and teach a complete game? Almost nothing here is new — it is material you have had for years, held to a standard nobody applies at blue. A third of it is scored on attacks that never land on you rather than on ones you hit, and the rest is a single connected game where every escape ends in an attack.",
     "phases": [
       {
         "title": "What brown belt is",
@@ -1038,7 +1045,7 @@
       },
       {
         "title": "The submissions stop landing",
-        "description": "Scored on absence: the room's best attacks, measured by how rarely they arrive. A defended count is evidence that you faced the attack and it failed — which is the only version of safety that can be logged honestly.",
+        "description": "The room’s best attacks, scored on facing them and stopping them. A defended count is evidence that the attack arrived and failed — which is the only version of safety that can be logged honestly.",
         "items": [
           {
             "technique_id": "rear-naked-choke",
@@ -1155,7 +1162,7 @@
             "technique_id": "outside-heel-hook-outside-ashi",
             "notes": "The outside heel hook, from the position that makes it safe to hold and quick to release — control first, and let go the moment it is answered.",
             "target_scored": 12,
-            "target_defended": 6,
+            "target_defended": 4,
             "target_sessions": 10,
             "min_hit_rate": 0.3
           }
