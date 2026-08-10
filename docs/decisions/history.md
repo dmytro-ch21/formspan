@@ -18915,6 +18915,58 @@ Open questions this leaves:
   diff and a deploy, which is exactly why the criteria live in content rather
   than schema.
 
+## 2026-08-10 — The roadmap content, part 2: blue, purple and brown rebuilt in phases
+
+The remaining three belts, same discipline as the white-belt rebuild and one
+decision worth recording: **every one of the 42 existing milestones survived
+verbatim** — notes and criteria pulled from the flat lists by technique id at
+generation time rather than retyped, so the rebuild could not silently drift
+a number. The flat lists were already well-calibrated (brown's
+defended-heavy "attacks that never land on you" framing in particular); what
+they lacked was the document's structure and about a third of its coverage.
+
+- **Blue — "building a game"** (12 phases, 24 milestones + 8 concepts, was
+  14 flat): the belt's four questions as the opening concept, then defensive
+  consolidation, the retention ladder, the closed-guard chain, half guard,
+  **two guards that answer each other** (the existing De La Riva pair joined
+  by butterfly — the document's complementary-pairs rule, stated as the
+  principle so academies playing other pairs read it right), one-pressure-
+  one-movement passing, pins-that-go-somewhere, and the three areas the flat
+  list skipped entirely: **the front headlock** (darce), **leg-lock
+  foundations** (single-leg X sweep before the ankle lock, positional
+  responsibility as the concept), and chain wrestling.
+- **Purple — "connections"** (11 phases, 22 milestones + 1 reading + 4
+  concepts): opens with **personal game architecture** — A/B/emergency games,
+  techniques-become-decision-trees — then the existing K-guard trio framed
+  as "one guard, all the way down" and extended with its 50/50 entry, new
+  back-take (berimbolo, deep half waiter) and **kimura trap** phases, the
+  front-headlock system (Peruvian necktie beside the existing defence-only
+  guillotine), and entanglements-as-positions (heel-hook defence and 50/50
+  sweep beside the existing criteria-less saddle-awareness item, which stays
+  a reading item on purpose). Closes with the tactical concepts — the first
+  belt with a scoreboard brain.
+- **Brown — "one game, no leaks"** (9 phases, 16 milestones + 6 concepts):
+  the existing set reorganised to make its own thesis legible — "the pins
+  stop working on you" and "the submissions stop landing" as named phases —
+  plus the only two additions the theme tolerates (an outside heel hook for
+  the submission-families phase, the rear body-lock mat return for standing)
+  and the document's brown-belt heart as concepts: the complete defensive
+  chain, diagnose-before-you-drill, adapt-to-the-body, and teaching. Brown
+  deliberately has the fewest new milestones and the most prose: the
+  document's own claim is that brown is refinement, not accumulation.
+
+Novice-fundamentals and white-belt-basics verified byte-identical to main;
+all technique ids resolve against the live library; seeder idempotent over
+the new shape (32/27/22 items, 12/11/9 phases, twice).
+
+Open questions:
+
+- The clients still render none of this (phases, tracks, concepts) — the web
+  and mobile PRs are now the whole remaining plan.
+- Purple's game-architecture phase teaches "swap the pieces for yours" while
+  necessarily demonstrating one concrete game (K-guard). A future
+  personal-game feature could make that real; today the concepts carry it.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
