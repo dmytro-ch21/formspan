@@ -194,15 +194,23 @@ function formatRate(rate: number): string {
 }
 
 const styles = StyleSheet.create({
+  // NO SELF-MARGINS. This card carried `marginHorizontal: 16` and
+  // `marginBottom: 14` while its siblings on Today carry neither and the
+  // scroll spaces its children with `gap: 12` — so it sat 32pt narrower than
+  // every card around it and left a wider gap beneath itself than between any
+  // other pair. A component that insets itself can only be correct on the one
+  // screen it was written against; spacing belongs to the container.
+  //
+  // Radius and padding match `themeCard`, its immediate neighbour, for the
+  // same reason: three cards on one screen at three different radii read as
+  // three different families rather than one.
   card: {
     borderWidth: 1,
     borderColor: vola.line,
-    borderRadius: 18,
+    borderRadius: 14,
     backgroundColor: vola.surface,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    marginHorizontal: 16,
-    marginBottom: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
   },
   head: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   dot: { width: 7, height: 7, borderRadius: 4 },
@@ -211,12 +219,14 @@ const styles = StyleSheet.create({
   doneText: { fontSize: 11, color: vola.textMuted, fontWeight: '600' },
 
   // Tabular figures so the number does not shuffle as it changes.
-  big: { fontSize: 34, fontWeight: '800', fontVariant: ['tabular-nums'], marginTop: 8 },
-  bigMuted: { fontSize: 34, fontWeight: '800', color: vola.textDim, marginTop: 8 },
-  caption: { fontSize: 12, color: vola.textMuted, marginTop: 1 },
-  verdict: { fontSize: 13, color: vola.textMuted, marginTop: 8, lineHeight: 18 },
+  // The number and its caption are one unit — hence the tight gap between
+  // them and the wider one above. Every other block steps by 10.
+  big: { fontSize: 34, fontWeight: '800', fontVariant: ['tabular-nums'], marginTop: 10 },
+  bigMuted: { fontSize: 34, fontWeight: '800', color: vola.textDim, marginTop: 10 },
+  caption: { fontSize: 12, color: vola.textMuted, marginTop: 2 },
+  verdict: { fontSize: 13, color: vola.textMuted, marginTop: 10, lineHeight: 18 },
 
-  actions: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 14 },
+  actions: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 12 },
   primary: {
     minHeight: 42,
     paddingHorizontal: 20,
