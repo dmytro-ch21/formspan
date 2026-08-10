@@ -183,6 +183,10 @@ type updateRequest struct {
 	// another athlete. Absent means "leave it alone", like every other field
 	// here — a PATCH that omits it can never silently publish anything.
 	ShareTrainingWithFriends *bool `json:"share_training_with_friends"`
+	// How much of a shared session travels — see the profile struct. Absent
+	// means unchanged here too, so no PATCH can widen a disclosure it did not
+	// name.
+	ShareTrainingDetails *bool `json:"share_training_details"`
 }
 
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
@@ -231,6 +235,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		UnitSystem:               req.UnitSystem,
 		TrackEffort:              req.TrackEffort,
 		ShareTrainingWithFriends: req.ShareTrainingWithFriends,
+		ShareTrainingDetails:     req.ShareTrainingDetails,
 	})
 	if err != nil {
 		writeError(w, r, err)

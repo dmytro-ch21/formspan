@@ -66,13 +66,23 @@ export default function SettingsScreen() {
    */
   const getToken = useAuthToken();
   const [sharing, setSharing] = useState<boolean | null>(null);
+  const [details, setDetails] = useState<boolean | null>(null);
   const [sharingBusy, setSharingBusy] = useState(false);
+  const [detailsBusy, setDetailsBusy] = useState(false);
+  // ONE error line for both switches, so the message has to name which one it
+  // is about. It used to end in a fixed "Your sharing setting is unchanged",
+  // which would be a false statement about the other toggle.
   const [sharingError, setSharingError] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
     getProfile(getToken)
       .then((p) => {
-        if (live) setSharing(p.share_training_with_friends);
+        if (!live) return;
+        setSharing(p.share_training_with_friends);
+        // `?? false` rather than a bare read: an older server that does not
+        // send the field must land on OFF, not on undefined-rendered-as-off
+        // with a switch that then claims to be on after one tap.
+        setDetails(p.share_training_details ?? false);
       })
       .catch((err: unknown) => {
         if (!live) return;
@@ -84,6 +94,7 @@ export default function SettingsScreen() {
         // it would have worked all along.
         if (isNotFound(err)) {
           setSharing(false);
+          setDetails(false);
           return;
         }
         // Anything else is a real failure, and an indefinitely dimmed switch
@@ -224,7 +235,6 @@ export default function SettingsScreen() {
           hint="Accepted friends see your finished sessions — name, sport, time and volume, including ones from before you turned this on. Never your notes. Off, and nobody sees anything."
           value={sharing ?? false}
           disabled={sharing === null || sharingBusy}
-          last
           onChange={(on) => {
             // Optimistic, then reverted on failure — the honest shape for a
             // control whose truth lives on the server.
@@ -236,17 +246,49 @@ export default function SettingsScreen() {
               .catch((err: unknown) => {
                 setSharing(previous);
                 setSharingError(
-                  err instanceof Error ? err.message : 'Could not save that just now.',
+                  `${err instanceof Error ? err.message : 'Could not save that just now.'} Your sharing setting is unchanged.`,
                 );
               })
               .finally(() => setSharingBusy(false));
           }}
           testID="settings-share-training"
         />
+        {/* SUBORDINATE, and dimmed rather than hidden while the switch above
+            is off. Hiding it would make the detail setting something an
+            athlete discovers only after opting in — and the honest reading of
+            a control that does nothing is a disabled one, not an absent one.
+            Its own state either way: turning sharing off and on again must not
+            quietly re-publish a level of detail that was never re-chosen. */}
+        <Toggle
+          label="Include what you trained"
+          hint={
+            sharing
+              ? 'Adds the exercises or techniques — up to five, with your top set or how it went. The numbers say you trained hard; this says what you are working on. What was done TO you in a roll is never included.'
+              : 'Turn on sharing above first. Until then your friends see nothing at all, so there is nothing for this to add to.'
+          }
+          value={details ?? false}
+          disabled={details === null || detailsBusy || !sharing}
+          last
+          onChange={(on) => {
+            const previous = details;
+            setDetails(on);
+            setDetailsBusy(true);
+            setSharingError(null);
+            updateProfile(getToken, { share_training_details: on })
+              .catch((err: unknown) => {
+                setDetails(previous);
+                setSharingError(
+                  `${err instanceof Error ? err.message : 'Could not save that just now.'} What you share is unchanged.`,
+                );
+              })
+              .finally(() => setDetailsBusy(false));
+          }}
+          testID="settings-share-details"
+        />
       </Section>
       {sharingError && (
         <Text style={styles.unsynced} accessibilityLiveRegion="polite" testID="sharing-error">
-          {sharingError} Your sharing setting is unchanged.
+          {sharingError}
         </Text>
       )}
 

@@ -1,14 +1,29 @@
 import { Stack, useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, RefreshControl, StyleSheet, View as RNView } from 'react-native';
+import { memo, useCallback, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Pressable,
+  RefreshControl,
+  StyleSheet,
+  useWindowDimensions,
+  View as RNView,
+} from 'react-native';
 
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
+import { SessionCard } from '@/components/SessionCard';
 import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { sportColor, sportIcon, sportTint } from '@/components/ui/sport';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
-import { agoLabel, fetchFeed, feedMetrics, FEED_PAGE, type FeedItem } from '@/lib/feed';
+import {
+  agoLabel,
+  cardFromFeedItem,
+  fetchFeed,
+  feedMetrics,
+  FEED_PAGE,
+  type FeedItem,
+} from '@/lib/feed';
 import { getPendingCounts, listFriends } from '@/lib/friends';
 import { labelFor } from '@/lib/modules';
 import { useModules } from '@/lib/ModulesProvider';
@@ -50,83 +65,97 @@ import { useAuthToken } from '@/lib/useAuthToken';
  * offering to. Once. Not a banner, not a modal, not repeated.
  */
 
-/** One finished session, as somebody else's feed shows it.
+/**
+ * One finished session, as somebody else's feed shows it.
  *
- *  NOT `SessionCard`: that is a button and needs somewhere to go, and there is
- *  nowhere — no endpoint accepts a session id from anyone but its owner. It is
- *  also missing the field that matters most here, which is WHO. Same visual
- *  vocabulary (the discipline's rule and tinted glyph), different thing. */
-function FeedRow({
+ * **THE SAME CARD THE ATHLETE SAW WHEN THEY FINISHED IT.** That is the point
+ * of the redesign: the thing you are proud of at the end of a session is the
+ * thing your training partners see, rather than a list row that happens to
+ * describe the same workout. `SessionCard` takes a plain `CardData` and reads
+ * nothing from a screen, which is what lets the completion screen, this feed
+ * and the exported PNG all be one component.
+ *
+ * The attribution sits ABOVE the card rather than inside it. Who trained is
+ * the question this screen exists to answer — on your own Today tab it is
+ * never in question, which is why the card itself does not carry it — and a
+ * header strip keeps the poster below it a poster. It is also why the card is
+ * built without a handle: its foot falls back to the wordmark, so a column of
+ * these reads as posters instead of as repeated signatures.
+ *
+ * What the card cannot show here — calories, the VOLA Score, a PR badge — is
+ * documented at `cardFromFeedItem`. All three are derived from the owner's own
+ * profile or history, and none of them may cross to a reader.
+ */
+const FeedRow = memo(function FeedRow({
   item,
   sportLabel,
   now,
   units,
+  width,
 }: {
   item: FeedItem;
   sportLabel: string;
   now: number;
   units: UnitSystem;
+  width: number;
 }) {
   const tone = sportColor(item.sport) ?? vola.textMuted;
   const glyph = sportIcon(item.sport);
   const metrics = feedMetrics(item, units);
   const who = item.display_name || `@${item.from}`;
   const when = agoLabel(item.ended_at, now);
+  const card = cardFromFeedItem(item, units, now);
 
   return (
-    <View
-      style={styles.row}
-      // ONE stop per row. Left to its parts, VoiceOver walks who, when, what
-      // and every chip as separate elements — four-plus stops to read one
-      // card, on a screen that is nothing but cards.
+    <RNView
+      style={styles.post}
+      // ONE stop per post. Left to its parts, VoiceOver walks who, when, the
+      // headline, every stat and every detail line as separate elements —
+      // a dozen stops to read one card, on a screen that is nothing but cards.
+      // The card itself is `importantForAccessibility="no-hide-descendants"`
+      // below, so it contributes nothing and this label is the whole reading.
       accessible
       accessibilityLabel={[
         who,
         item.name || sportLabel,
         ...metrics.map((m) => `${m.value} ${m.label}`),
+        ...(item.detail ?? []).map((d) =>
+          [d.name, d.figure ?? d.outcome, d.count && d.count > 1 ? `${d.count} times` : null]
+            .filter(Boolean)
+            .join(' '),
+        ),
         when,
       ]
         .filter(Boolean)
         .join(', ')}
       testID={`feed-${item.id}`}
     >
-      <RNView style={[styles.rule, { backgroundColor: tone }]} />
-      {glyph && (
-        <RNView style={[styles.badge, { backgroundColor: sportTint(tone) }]}>
-          <Icon name={glyph} size={18} color={tone} />
-        </RNView>
-      )}
-      <RNView style={styles.rowBody}>
-        <RNView style={styles.rowHead}>
-          {/* The person leads. The whole point of this screen is whose
-              training this is — on your own Today tab that is never in
-              question, which is why the card there does not carry it. */}
+      <RNView style={styles.by}>
+        {glyph && (
+          <RNView style={[styles.byBadge, { backgroundColor: sportTint(tone) }]}>
+            <Icon name={glyph} size={15} color={tone} />
+          </RNView>
+        )}
+        <RNView style={styles.byBody}>
+          {/* The person leads. */}
           <Text style={styles.who} numberOfLines={1}>
             {who}
           </Text>
-          <Text style={styles.when}>{agoLabel(item.ended_at, now)}</Text>
+          <Text style={styles.byMeta} numberOfLines={1}>
+            {[sportLabel, when].filter(Boolean).join(' · ')}
+          </Text>
         </RNView>
-        <Text style={styles.what} numberOfLines={1}>
-          {item.name || sportLabel}
-        </Text>
-        {metrics.length > 0 && (
-          <RNView style={styles.chips}>
-            {/* The unit comes with the number. "12" alone is not a reading —
-                the value and its label were computed together and only the
-                value was being rendered, so a set count and a duration looked
-                identical. The Today tab's cards give each chip an icon for the
-                same reason. */}
-            {metrics.map((m) => (
-              <Text key={m.label} style={styles.chip}>
-                {m.value} {m.label}
-              </Text>
-            ))}
-          </RNView>
-        )}
       </RNView>
-    </View>
+
+      {/* Hidden from the reader entirely: the label above already reads the
+          whole post, and a card full of decorative text would otherwise make
+          VoiceOver say all of it twice. */}
+      <RNView importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
+        <SessionCard data={card} width={width} />
+      </RNView>
+    </RNView>
   );
-}
+});
 
 export default function SocialScreen() {
   const getToken = useAuthToken();
@@ -134,6 +163,13 @@ export default function SocialScreen() {
   const router = useRouter();
   const { modules } = useModules();
   const { units } = useUnits();
+  // The card is square and sized from the content width, so it fills the
+  // column on every device instead of carrying a fixed size that is right on
+  // one phone. `styles.scroll` pads 20 a side; the clamp keeps it from
+  // becoming a wall on a tablet, where a full-width square would be taller
+  // than the viewport and only ever show one post.
+  const { width: screenWidth } = useWindowDimensions();
+  const cardWidth = Math.min(screenWidth - 40, 460);
 
   const [items, setItems] = useState<FeedItem[] | null>(null);
   const [total, setTotal] = useState(0);
@@ -327,6 +363,7 @@ export default function SocialScreen() {
             sportLabel={labelFor(modules, item.sport)}
             now={now}
             units={units}
+            width={cardWidth}
           />
         ))}
 
@@ -406,34 +443,21 @@ const styles = StyleSheet.create({
   },
   emptyTitle: { fontSize: 15, fontWeight: '700' },
 
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    borderWidth: 1,
-    borderColor: vola.line,
-    borderRadius: 14,
-    backgroundColor: vola.surface,
-    paddingVertical: 12,
-    paddingRight: 14,
-    overflow: 'hidden',
-  },
-  rule: { width: 4, alignSelf: 'stretch' },
-  badge: {
-    width: 34,
-    height: 34,
+  // A post is the attribution strip plus the card, with more air between
+  // posts than inside one — otherwise a column of square cards reads as a
+  // contact sheet and the eye cannot tell where one session ends.
+  post: { gap: 8, marginBottom: 12 },
+  by: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  byBadge: {
+    width: 30,
+    height: 30,
     borderRadius: 999,
     alignItems: 'center',
     justifyContent: 'center',
-    marginLeft: 8,
   },
-  rowBody: { flex: 1, gap: 2, minWidth: 0 },
-  rowHead: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
-  who: { flex: 1, fontSize: 15, fontWeight: '700' },
-  when: { fontSize: 11, color: vola.textDim },
-  what: { fontSize: 13, color: vola.textMuted },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 4 },
-  chip: { fontSize: 11, color: vola.textDim, fontVariant: ['tabular-nums'] },
+  byBody: { flex: 1, minWidth: 0 },
+  who: { fontSize: 15, fontWeight: '700' },
+  byMeta: { fontSize: 11, color: vola.textDim, marginTop: 1 },
 
   more: { alignSelf: 'center', paddingVertical: 12, paddingHorizontal: 24 },
   moreText: { fontSize: 14, fontWeight: '700' },

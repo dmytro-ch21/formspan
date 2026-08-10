@@ -66,9 +66,18 @@ type Profile struct {
 	// Turning it ON is retroactive: friends see finished sessions from before
 	// the switch too. That is a real consequence and the settings copy says so
 	// rather than leaving it to be discovered.
-	ShareTrainingWithFriends bool      `json:"share_training_with_friends"`
-	CreatedAt                time.Time `json:"created_at"`
-	UpdatedAt                time.Time `json:"updated_at"`
+	ShareTrainingWithFriends bool `json:"share_training_with_friends"`
+	// ShareTrainingDetails decides how MUCH of a session travels once
+	// ShareTrainingWithFriends has let it travel at all: the numbers alone, or
+	// the exercise/technique list with them.
+	//
+	// Two switches rather than one because they disclose different things — the
+	// numbers say you trained hard, the detail says what you are working on,
+	// and a competitor may reasonably want to share the first and not the
+	// second. Off by default; does nothing while the switch above is off.
+	ShareTrainingDetails bool      `json:"share_training_details"`
+	CreatedAt            time.Time `json:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
 }
 
 // NewProfile is the input for onboarding. Module enablement isn't set here —
@@ -98,6 +107,7 @@ type ProfileUpdate struct {
 	UnitSystem               *string
 	TrackEffort              *bool
 	ShareTrainingWithFriends *bool
+	ShareTrainingDetails     *bool
 }
 
 // Module is one discipline as a client sees it: the registry's definition

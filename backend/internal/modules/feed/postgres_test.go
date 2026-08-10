@@ -2,6 +2,8 @@ package feed
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/dmytro-ch21/vola/backend/internal/modules/friend"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/session"
+	"github.com/dmytro-ch21/vola/backend/internal/modules/sessioncard"
 )
 
 // NOTE ON THE IMPORTS. The `feed` package must never import `friend` or
@@ -17,7 +20,10 @@ import (
 // both, deliberately: it wires the same pairing `cmd/api/main.go` does, and it
 // compares the SQL volume rule against `session.Summarise`, which is the only
 // way to know the duplication has not drifted. A test against a stub would
-// show only that the stub agrees with itself.
+// show only that the stub agrees with itself. `sessioncard` is imported for
+// the same reason and only here — one client component renders both packages'
+// `Detail`, so the wire shapes are pinned against each other rather than
+// against a comment.
 //
 // **What this file is really for.** A feed is the first athlete-to-athlete
 // read of training data in this system, so the tests that matter are the ones
@@ -548,5 +554,333 @@ func TestTheFeedWorksWhicheverSideOfThePairYouAreOn(t *testing.T) {
 	}
 	if got := ids(page); len(got) != 1 || got[0] != "fd_pair_theirs" {
 		t.Fatalf("the caller is user_b in the stored pair and saw nothing: %+v", got)
+	}
+}
+
+// ── The detail band: a second opt-in, and what it must not carry ─────────────
+
+// wantsDetail flips the narrower switch. Separate from `person` on purpose:
+// every existing test in this file was written against a feed that had no
+// detail at all, and they must keep passing unchanged — which they only do if
+// the new column defaults off and nothing seeds it silently.
+func wantsDetail(t *testing.T, pool *pgxpool.Pool, id string) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE profiles SET share_training_details = true WHERE user_id = $1`, id); err != nil {
+		t.Fatalf("set share_training_details for %s: %v", id, err)
+	}
+}
+
+func TestDetailNeedsItsSecondOptIn(t *testing.T) {
+	// The whole point of two switches. Bob is in the feed — master switch on,
+	// accepted friend, finished session — and the numbers must arrive while the
+	// exercise names do not.
+	//
+	// **BOTH HALVES IN ONE TEST, deliberately.** A negative-only test passes
+	// against a feed that never attaches detail to anybody, which is exactly
+	// the state this code was in yesterday; asserting the flag flips the
+	// outcome is what makes it a test of the flag.
+	h := newHarness(t)
+	ctx := context.Background()
+	alice := person(t, h.pool, "fd_da", "fd_da_h", true)
+	bob := person(t, h.pool, "fd_db", "fd_db_h", true)
+	befriend(t, h, alice, "fd_da_h", bob, "fd_db_h")
+	ex := seedExercise(t, h.pool, "fd_d_squat")
+	train(t, h, bob, "fd_d_s1", "Lower", true, []session.Set{
+		{ExerciseID: ex, Position: 1, SetType: session.SetTypeWorking, Reps: iptr(5), WeightKg: fptr(140), Completed: true},
+		{ExerciseID: ex, Position: 2, SetType: session.SetTypeWorking, Reps: iptr(8), WeightKg: fptr(100), Completed: true},
+	})
+
+	page, err := h.repo.List(ctx, alice, 30, 0)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("want bob's session in the feed, got %+v", ids(page))
+	}
+	if got := page.Items[0].WorkingSets; got != 2 {
+		t.Fatalf("the numbers should arrive regardless of the detail switch: working_sets = %d", got)
+	}
+	if d := page.Items[0].Detail; len(d) != 0 {
+		t.Fatalf("detail crossed the wire without its opt-in: %+v", d)
+	}
+
+	wantsDetail(t, h.pool, bob)
+	page, err = h.repo.List(ctx, alice, 30, 0)
+	if err != nil {
+		t.Fatalf("list after opting in: %v", err)
+	}
+	if len(page.Items) != 1 || len(page.Items[0].Detail) != 1 {
+		t.Fatalf("opting in did not attach the detail: %+v", page.Items)
+	}
+	// The TOP set, paired with the reps done AT that weight. `MAX(reps)` would
+	// say "140 kg × 8" — a set nobody performed.
+	if got := page.Items[0].Detail[0]; got.Name != ex || got.Figure != "140 kg × 5" {
+		t.Fatalf("wrong top set: %+v", got)
+	}
+}
+
+func TestOneFriendsDetailSwitchDoesNotSpeakForAnother(t *testing.T) {
+	// The flag is read per OWNER, per row. A page-level "does anyone want
+	// detail" read would publish the whole page's exercises the moment one
+	// friend opted in, and the shape that produces it (hoisting the flag out
+	// of the row loop) is an easy simplification to make.
+	h := newHarness(t)
+	ctx := context.Background()
+	alice := person(t, h.pool, "fd_ma", "fd_ma_h", true)
+	open := person(t, h.pool, "fd_mo", "fd_mo_h", true)
+	shy := person(t, h.pool, "fd_ms", "fd_ms_h", true)
+	befriend(t, h, alice, "fd_ma_h", open, "fd_mo_h")
+	befriend(t, h, alice, "fd_ma_h", shy, "fd_ms_h")
+	wantsDetail(t, h.pool, open)
+	ex := seedExercise(t, h.pool, "fd_m_squat")
+	set := []session.Set{
+		{ExerciseID: ex, Position: 1, SetType: session.SetTypeWorking, Reps: iptr(5), WeightKg: fptr(100), Completed: true},
+	}
+	train(t, h, open, "fd_m_open", "Open", true, set)
+	train(t, h, shy, "fd_m_shy", "Shy", true, set)
+
+	page, err := h.repo.List(ctx, alice, 30, 0)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(page.Items) != 2 {
+		t.Fatalf("want both sessions, got %+v", ids(page))
+	}
+	for _, it := range page.Items {
+		switch it.ID {
+		case "fd_m_open":
+			if len(it.Detail) != 1 {
+				t.Fatalf("the opted-in friend's detail is missing: %+v", it)
+			}
+		case "fd_m_shy":
+			if len(it.Detail) != 0 {
+				t.Fatalf("another athlete's switch published this one's session: %+v", it)
+			}
+		}
+	}
+}
+
+func TestDetailIsCappedAndTheRestIsCounted(t *testing.T) {
+	// "+4 more" is what stops a five-line card implying a five-exercise
+	// session. The cap is server-side, so an opted-in athlete's whole
+	// programme never crosses the wire to be trimmed on somebody else's phone.
+	h := newHarness(t)
+	ctx := context.Background()
+	alice := person(t, h.pool, "fd_ca", "fd_ca_h", true)
+	bob := person(t, h.pool, "fd_cb", "fd_cb_h", true)
+	befriend(t, h, alice, "fd_ca_h", bob, "fd_cb_h")
+	wantsDetail(t, h.pool, bob)
+
+	sets := []session.Set{}
+	for i := 0; i < MaxDetail+3; i++ {
+		ex := seedExercise(t, h.pool, fmt.Sprintf("fd_c_ex%d", i))
+		sets = append(sets, session.Set{
+			ExerciseID: ex, Position: i + 1, SetType: session.SetTypeWorking,
+			Reps: iptr(5), WeightKg: fptr(60), Completed: true,
+		})
+	}
+	train(t, h, bob, "fd_c_s1", "Everything", true, sets)
+
+	page, err := h.repo.List(ctx, alice, 30, 0)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("want one session, got %+v", ids(page))
+	}
+	it := page.Items[0]
+	if len(it.Detail) != MaxDetail {
+		t.Fatalf("cap not applied: got %d lines, want %d", len(it.Detail), MaxDetail)
+	}
+	if it.More != 3 {
+		t.Fatalf("the uncapped remainder was not counted: more = %d, want 3", it.More)
+	}
+}
+
+func TestWhatWasDoneToYouIsNotPublished(t *testing.T) {
+	// `conceded` is the most valuable half of the BJJ schema and the one thing
+	// the feed must not carry: your own card reviews what you got caught in,
+	// a friend's feed is not where that goes. This is the one screen where the
+	// athlete is not the reader.
+	h := newHarness(t)
+	ctx := context.Background()
+	alice := person(t, h.pool, "fd_ba", "fd_ba_h", true)
+	bob := person(t, h.pool, "fd_bb", "fd_bb_h", true)
+	befriend(t, h, alice, "fd_ba_h", bob, "fd_bb_h")
+	wantsDetail(t, h.pool, bob)
+
+	landed := seedTechnique(t, h.pool, "fd_b_armbar")
+	caught := seedTechnique(t, h.pool, "fd_b_triangle")
+	rollID := "fd_b_roll"
+	started := time.Now().UTC().Add(-time.Hour)
+	if _, err := h.sessions.Create(ctx, session.NewSession{
+		ID: rollID, UserID: bob, Sport: "bjj", Name: "Open mat", StartedAt: started,
+	}); err != nil {
+		t.Fatalf("create bjj session: %v", err)
+	}
+	for _, tag := range []struct {
+		technique, event string
+		count            int
+	}{
+		{landed, "scored", 3},
+		{caught, "conceded", 2},
+	} {
+		if _, err := h.pool.Exec(ctx, `
+			INSERT INTO bjj_session_tags (session_id, user_id, category, event, technique_id, count)
+			VALUES ($1, $2, 'submission', $3, $4, $5)`,
+			rollID, bob, tag.event, tag.technique, tag.count); err != nil {
+			t.Fatalf("tag %s: %v", tag.event, err)
+		}
+	}
+	if _, err := h.sessions.Finish(ctx, bob, rollID, started.Add(90*time.Minute)); err != nil {
+		t.Fatalf("finish roll: %v", err)
+	}
+
+	page, err := h.repo.List(ctx, alice, 30, 0)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("want the roll in the feed, got %+v", ids(page))
+	}
+	it := page.Items[0]
+	if len(it.Detail) != 1 {
+		t.Fatalf("want exactly the scored technique, got %+v", it.Detail)
+	}
+	if it.Detail[0].Name != landed || it.Detail[0].Outcome != "scored" || it.Detail[0].Count != 3 {
+		t.Fatalf("wrong technique line: %+v", it.Detail[0])
+	}
+	if it.More != 0 {
+		// A `conceded` row counted into `more` would publish that it happened
+		// while pretending not to name it — worse than either honest option.
+		t.Fatalf("a concealed outcome leaked through the count: more = %d", it.More)
+	}
+}
+
+// seedTechnique owns the library row this file depends on, following the rule
+// the rest of the repo settled on after `exercise`'s catalog seeding made
+// three packages pass only under `-p 1` in the right order.
+func seedTechnique(t *testing.T, pool *pgxpool.Pool, id string) string {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO techniques (id, name, category, position, function)
+		VALUES ($1, $1, 'Submission', 'Guard - Bottom', 'finish')
+		ON CONFLICT (id) DO NOTHING`, id); err != nil {
+		t.Fatalf("seed technique %s: %v", id, err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM techniques WHERE id = $1`, id) })
+	return id
+}
+
+func iptr(v int) *int         { return &v }
+func fptr(v float64) *float64 { return &v }
+
+// TestDetailMatchesTheCardsWireShape pins the one duplication this module
+// chose to accept.
+//
+// `feed.Detail` and `sessioncard.Detail` are separate Go types because modules
+// here do not import each other — but ONE mobile component renders both, so
+// the JSON has to be identical. A comment saying so is not enforcement; this
+// is. Add a field to either struct without the other and it goes red.
+//
+// NO DATABASE, so it runs on every machine rather than only where
+// TEST_DATABASE_URL is set. That matters: the drift it guards against is a
+// one-line edit somebody makes while the integration tests are skipping.
+func TestDetailMatchesTheCardsWireShape(t *testing.T) {
+	mine, err := json.Marshal(Detail{Name: "Back Squat", Figure: "140 kg × 5", Outcome: "scored", Count: 3})
+	if err != nil {
+		t.Fatalf("marshal feed detail: %v", err)
+	}
+	theirs, err := json.Marshal(sessioncard.Detail{
+		Name: "Back Squat", Figure: "140 kg × 5", Outcome: "scored", Count: 3,
+	})
+	if err != nil {
+		t.Fatalf("marshal card detail: %v", err)
+	}
+	if string(mine) != string(theirs) {
+		t.Fatalf("the feed and the card disagree about a Detail on the wire:\n feed: %s\n card: %s",
+			mine, theirs)
+	}
+
+	// And the empty case, which is where `omitempty` drift shows up: a field
+	// the card omits and the feed sends as "" renders as a blank line rather
+	// than no line, and only an empty value catches it.
+	mine, err = json.Marshal(Detail{Name: "Roll"})
+	if err != nil {
+		t.Fatalf("marshal empty feed detail: %v", err)
+	}
+	theirs, err = json.Marshal(sessioncard.Detail{Name: "Roll"})
+	if err != nil {
+		t.Fatalf("marshal empty card detail: %v", err)
+	}
+	if string(mine) != string(theirs) {
+		t.Fatalf("the two disagree once fields are empty:\n feed: %s\n card: %s", mine, theirs)
+	}
+
+	// The caps have to agree too — the client trims to whatever it is given,
+	// so a feed that sent eight lines where the card sends five would silently
+	// render a different card in the two places.
+	if MaxDetail != sessioncard.MaxDetail {
+		t.Fatalf("detail caps diverged: feed %d, card %d", MaxDetail, sessioncard.MaxDetail)
+	}
+}
+
+func TestAFriendsDetailUsesTheOneDefinitionOfAWorkingSet(t *testing.T) {
+	// The same rule `workingVolume` uses two functions above, and the same one
+	// `session.Summarise` defines: `completed AND set_type <> 'warmup'`.
+	//
+	// The detail query said `set_type = 'working'` first, which was wrong in
+	// both directions. A template opens with every set `completed = false`, so
+	// a PLANNED set could be published as somebody's top lift — on the one
+	// surface where the reader has no way to know it never happened. And an
+	// exercise trained only on an AMRAP set vanished from the band while still
+	// counting in `working_sets` and `tonnage_kg` on the very same row.
+	h := newHarness(t)
+	ctx := context.Background()
+	alice := person(t, h.pool, "fd_wa", "fd_wa_h", true)
+	bob := person(t, h.pool, "fd_wb", "fd_wb_h", true)
+	befriend(t, h, alice, "fd_wa_h", bob, "fd_wb_h")
+	wantsDetail(t, h.pool, bob)
+
+	squat := seedExercise(t, h.pool, "fd_w_squat")
+	row := seedExercise(t, h.pool, "fd_w_row")
+	train(t, h, bob, "fd_w_s1", "Lower", true, []session.Set{
+		{ExerciseID: squat, Position: 1, SetType: session.SetTypeWorking,
+			Reps: iptr(5), WeightKg: fptr(120), Completed: true},
+		// Planned, heavier than anything performed, never done.
+		{ExerciseID: squat, Position: 2, SetType: session.SetTypeWorking,
+			Reps: iptr(1), WeightKg: fptr(200), Completed: false},
+		// An AMRAP finisher — performed, not a warm-up, so a working set.
+		{ExerciseID: row, Position: 3, SetType: session.SetTypeAMRAP,
+			Reps: iptr(20), WeightKg: fptr(60), Completed: true},
+	})
+
+	page, err := h.repo.List(ctx, alice, 30, 0)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("want one session, got %+v", ids(page))
+	}
+	figures := map[string]string{}
+	for _, d := range page.Items[0].Detail {
+		figures[d.Name] = d.Figure
+	}
+	if got := figures[squat]; got != "120 kg × 5" {
+		t.Fatalf("published %q — a planned set nobody performed reached a friend's feed", got)
+	}
+	if got, ok := figures[row]; !ok {
+		t.Fatalf("an exercise trained on an AMRAP set is missing: %+v", page.Items[0].Detail)
+	} else if got != "60 kg × 20" {
+		t.Fatalf("AMRAP figure %q", got)
+	}
+	// And the band agrees with the numbers beside it on the same row — the
+	// divergence this rule exists to prevent.
+	if page.Items[0].WorkingSets != len(page.Items[0].Detail) {
+		t.Fatalf("the row counts %d working sets but names %d exercises; one set per exercise "+
+			"was logged, so these must agree",
+			page.Items[0].WorkingSets, len(page.Items[0].Detail))
 	}
 }

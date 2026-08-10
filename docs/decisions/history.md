@@ -18078,6 +18078,324 @@ module load with the same symptom and the opposite cause.
 
 
 
+## 2026-08-09 — Two numbers for the share card, and what each refuses to claim
+
+`internal/platform/energy` and `internal/platform/score`, plus the eight
+mountain backgrounds and the Barlow faces. Groundwork: nothing calls either
+package and no screen renders the assets yet.
+
+### Calories, deliberately smaller than a smartwatch's
+
+An hour of ordinary lifting is **~185 kcal**. Consumer apps report 400–600 for
+the same hour, and three mistakes explain the gap — all avoided here, each one
+making the number smaller. Gross instead of net (`MET × kg × hours` includes
+what you would burn lying still). A 1-MET baseline derived from a single 70 kg
+40-year-old man, 20–30% high for many people, so the multiple is applied to the
+athlete's own Mifflin–St Jeor resting rate. And "vigorous lifting" priced over
+wall-clock, when the Compendium's entry for ordinary multi-exercise work is 3.5
+because a weights session is mostly rest.
+
+**No bodyweight, no number.** A 55 kg and a 105 kg athlete doing identical work
+differ by nearly half; there is no honest default and the card asks for a
+check-in instead. Height, age and sex are softer — without them the estimate
+falls back and `PrecisionOf` says so.
+
+BJJ splits live rounds (10.3) from everything else (5.3) using
+`rounds × round_minutes`, which the app already records.
+
+### A score that can disappoint
+
+The VOLA Score is a **percentile of Foster's sRPE against your own last 20
+sessions**, not a sum of weighted components. Component sums average to the
+middle and land 70–90 for everything; a number that is never bad is decoration,
+which is the call this project already made about curriculum mastery. Half your
+sessions fall below 50 by construction. Ties count as half, because repeating a
+workout exactly is ordinary and a strict "must beat it" rule would score the
+second one lower for no reason an athlete could accept. Below eight prior
+sessions there is no score at all — a percentile against three is noise wearing
+a number.
+
+Never a comparison with other people: no leaderboards, and the social scope is
+closed.
+
+### Three things the tests caught that reading did not
+
+**A unit bug.** The fallback resting rate used 4.184 — joules per calorie —
+where the constant is ~5 kcal per litre of O2. That made the generic baseline
+*lower* than Mifflin–St Jeor, inverting the exact relationship the fallback
+exists to describe. The check is that 3.5 ml/kg/min at 5 kcal/L is ~1
+kcal/kg/hour, the familiar MET shorthand.
+
+**An overclaim in a doc comment.** It said three easy hours "does not beat one
+hard hour by much" because effort multiplies. False — 3 × 180 and 9 × 60 are
+both exactly 540, and that equivalence *is* the model. What multiplying rules
+out is the additive shape, where a three-hour stroll outranks a brutal hour
+nearly threefold.
+
+**A CI outage scheduled for 2027-01-01.** Review found it: the reference
+athlete's date of birth was the literal `1996-01-01` while `ageYears` reads
+`time.Now()`, so on New Year's Day the athlete turns 31, Mifflin drops 1780 →
+1775, and the assertion fails on every branch at once. Worse, the helper
+formatted with `%.1f`, so the failure would have read `got 1.2, want 1.2
+(±0.0)` — indistinguishable from a pass. The birthday is computed now and the
+format is `%g`.
+
+Review also found five guards with no failing test, all now pinned: negative
+minutes could *subtract* calories, the percentile truncated instead of
+rounding, `Median` described a different window than the score it sits beside,
+the density boundary was exclusive where its comment said inclusive, and a NaN
+bodyweight passed `<= 0` (which is false for NaN) into a NaN estimate.
+
+### Provenance, marked rather than asserted
+
+Four MET values match the 2011 Compendium word for word. Two — 5.8 for
+supersets, 3.0 for bodyweight — could not be matched to a 2011 entry and may
+come from the later Adult Compendium. Both are plausible and conservative so
+they stay, but the attribution says "unverified" rather than claiming a source,
+because the package's whole pitch is that a reader can check it.
+
+### The endpoint, and the card that renders it
+
+`GET /v1/sessions/{id}/card` serves the three things the phone cannot compute:
+the calorie estimate (needs bodyweight, height, age and sex), the score (needs
+the last twenty sessions of that sport), and the exercise or technique list
+(needs names the offline store does not carry). One endpoint rather than three
+— the card renders once and either has its numbers or does not.
+
+`components/SessionCard.tsx` is one component at three densities: the
+completion screen, the feed row and the 1080px export. Everything comes from a
+plain `data` prop with no fetching, which is what lets it be mounted OFF-SCREEN
+for `captureRef` — a card that reads the session screen's state could only ever
+be rendered by the session screen. The predecessor left a note saying it was
+meant to become a shareable image later; this is that.
+
+Share goes through the OS share sheet with a PNG, not an Instagram deep link:
+`instagram-stories://` needs a Meta app id and a custom dev client, which is
+the same wall Google sign-in hit under Expo Go. The sheet needs neither and
+offers Instagram anyway.
+
+Three bugs the tests caught rather than the reading:
+
+- **The session ranked against itself.** The history query did not exclude the
+  session being scored, so it always tied with itself — dragging every
+  percentile toward the middle, worst for the athlete with the least history.
+- **FNV's low bits are barely mixed**, and `% 8` reads exactly those. The peak
+  and the headline stayed correlated across seeds: measured over 300 ids they
+  took 16 of 32 combinations, so half the intended variety never appeared.
+- **A mutation that went red for the wrong reason.** Deleting the
+  `measured_on <= session` predicate fails on parameter arity, not on a wrong
+  answer, so it proved nothing. A semantic mutation that keeps the arity valid
+  is what actually pins that calories use the weight as at the session.
+
+### Gaps
+
+- **The feed still shows plain rows.** The card is on the completion screen
+  only; feed integration and the `share_training_details` preference are the
+  remaining pieces of the design.
+- **The card does not yet fetch its own numbers.** The endpoint exists and the
+  component renders calories and score when given them, but the completion
+  screen still builds its card from the local summary alone — so a shared card
+  currently carries no calorie figure and no score.
+- `internal/platform/` is a stretch for shared *domain* logic — the existing
+  neighbours are infrastructure. Defensible because the card spans session, bjj
+  and body, but worth revisiting if a third consumer disagrees.
+- The image ceiling is 1254 px, which is short for a full-bleed 9:16 story. The
+  folder README carries the constraint.
+
+
+## 2026-08-09 — The card fetches its own numbers, the feed shows the card, and detail gets its own switch
+
+The three gaps the previous entry left open, closed in that order. Together they
+finish the redesign: the card an athlete sees when they finish a session is now
+literally the same component their training partners see in the feed and the same
+one that exports to a PNG — one card at three sizes, not three renderings that
+drift.
+
+### The card fetches its own numbers
+
+`GET /v1/sessions/{id}/card` existed and nothing called it. `SessionCelebration`
+now does, silently and without blocking the render: the card is complete without
+calories or a score, so their arrival is an enhancement rather than a loading
+state, and a failure leaves a card rather than an error. Offline it simply never
+arrives, permanently, which is the honest resting state.
+
+The stat strip stays FOUR wide. Calories and the score do not add columns, they
+take them — the first two stats stay and the rest move down into the detail
+band, where the names are anyway. A fifth column makes the digits unreadable at
+the only distance this card is ever read from.
+
+### The feed shows the card
+
+`app/social/index.tsx` rendered plain list rows. It now renders the poster, with
+the attribution ABOVE it rather than inside: who trained is the question the
+screen exists to answer, and a header strip keeps the poster below it a poster.
+The card is built without a handle so its foot falls back to the wordmark —
+otherwise a column of posts prints the same person twice, six inches apart.
+
+**What a friend's card cannot carry, and why that is not an oversight.** No
+calories, no VOLA Score, no PR badge. Each is derived from the OWNER's private
+data, and the reasoning is worth keeping because all three would be easy to
+"restore" later:
+
+- The calorie estimate comes from bodyweight, height, age and sex. Publishing it
+  publishes an inference about somebody's body, and nobody opted into that by
+  opting into a feed.
+- The score is a percentile against the owner's own last twenty sessions. Next
+  to a history the reader cannot see it is meaningless, and it invites exactly
+  the between-people comparison this app has no leaderboards to avoid.
+- A PR is derived from the owner's history, which a feed row does not carry.
+  Inferring one would be the card claiming something the server never said.
+
+Three tests pin their absence.
+
+### `share_training_details` — the second switch
+
+Migration `000049`. The feed's package doc has said since it was written that a
+row carries no exercises and no technique ids, and that "enlarging it is a
+privacy decision rather than a feature". This is that decision, made as one
+rather than slipped in: `detail` on a feed row, gated on a second opt-in that
+defaults off and does nothing while the master switch is off.
+
+**Why two switches and not one.** The numbers say you trained hard; the detail
+says what you are working on. Somebody who competes against their training
+partners can reasonably want the first and not the second, and one flag cannot
+express that.
+
+Enforced in the query, not the client. Honouring it client-side would ship the
+data and then decline to draw it, which is not a privacy control. It is read
+live and per OWNER per row, so one friend opting in never speaks for another,
+and switching it off strips the detail from every past row at once — the same
+property the master switch has.
+
+`conceded` is excluded, and only from the feed. What was done TO you is the half
+of a roll worth reviewing on your own card; a friend's feed is not where it
+goes. It is excluded from the "+N more" count as well — a hidden outcome counted
+would publish that it happened while pretending not to name it.
+
+Two queries for a whole page, not two per row. The id set the page query already
+authorised is what the detail queries fan out over, which is also why neither
+re-checks ownership — and that makes the id set load-bearing in a way a future
+reader has to know about, so it says so where it is built.
+
+Settings gets the toggle, dimmed rather than hidden while sharing is off: the
+honest reading of a control that does nothing is a disabled one, not an absent
+one, and hiding it would make the setting something you discover only after
+opting in.
+
+### A time bomb found on the way
+
+The card's bodyweight lookup compared `measured_on` against `$2::date` — a cast
+applied to the session's timestamp. That resolves through the Go process's local
+zone on the way out and the Postgres server's `TimeZone` on the way back. A
+session ending 01:38 UTC cast back a day, missed the same-day weigh-in, and the
+card silently dropped its calorie estimate.
+
+It failed for roughly seven hours a day and passed for the other seventeen, so
+it would have shipped green from a UTC CI runner and broken on a laptop, or the
+reverse. The day is computed in Go in UTC now, and the regression test forces
+`time.Local` to a negative offset so it is red on a UTC runner too — a zone bug
+that only reproduces in one timezone is not covered by a suite that runs in
+another. That is the same lesson `apps/mobile`'s `TZ=America/Los_Angeles` was
+learned from, arriving in the backend for the first time.
+
+### Two process notes worth more than they look
+
+**`pnpm run test:mobile` from the repo root tests the PRIMARY checkout, not your
+worktree.** A green 1,074-test run was recorded here against files that did not
+contain the change under test. Run it from inside the worktree, or it proves
+nothing — which is the same failure mode as a test that skips.
+
+**The new native deps now matter differently.** `react-native-view-shot` and
+`expo-sharing` were added before the dev-client switch landed, when a mismatched
+JS package was a cosmetic warning. Under a development build it is a launch-time
+`dyld` abort. `expo install --check` reports the tree aligned, but anyone pulling
+this branch needs `pnpm --dir apps/mobile run ios` rather than `start` — Metro
+cannot deliver a native module to a binary that does not contain it.
+
+### What review caught, and it was not the privacy machinery
+
+The two `[blocking]` findings were both in code the privacy work merely passed
+through, which is worth recording because the attention had been on the switches.
+
+**"Working set" had two definitions and the new one published lifts nobody
+performed.** `session.Summarise` — the domain, and what every other surface
+reports — says `completed AND set_type <> 'warmup'`. Four new queries said
+`set_type = 'working'`, which is wrong in both directions at once. A template
+opens with every set `completed = false`, so a PLANNED set the athlete skipped
+could come back as the top set: the regression test, run against the old code,
+publishes "200 kg × 1" for a session whose heaviest performed lift was 120. On a
+friend's feed the reader has no way to know it never happened. And back-off,
+drop, AMRAP and failure sets — all written by this app's own UI — were dropped
+entirely, so a session that ended on an AMRAP lost its hardest set from the
+effort average and lost the exercise from the detail band, while `working_sets`
+and `tonnage_kg` on the same row still counted it.
+
+Notably the existing tests could not have caught it: every fixture set was
+`Completed: true, SetTypeWorking`, which is the one combination where the two
+definitions agree.
+
+**The score flattered exactly the athlete it was most likely to mislead.** The
+history query folded the basis into SQL with a `CASE WHEN $4`, so a prior
+session that recorded no effort arrived as load ZERO — and any real load beats a
+zero. An athlete whose first effort-tracked session followed eight untracked
+ones scored ~100 "of your last 8". That is precisely the flattery this package
+was written not to do, and it struck at the moment somebody first switched
+effort tracking on. Effort and duration come back separately now and the basis
+is decided in Go: sessions without effort are SILENT, not zero, and if too few
+priors spoke, the basis falls back to volume over the full window — the fallback
+the package doc already promised for an athlete who does not track effort at
+all. `Basis` travels with the score, so the meaning is never silently different.
+
+Smaller things, each real: the contract edit had split
+`share_training_with_friends`'s description in half, orphaning its off-by-default
+and retroactivity paragraphs onto the NEW field — so the most security-sensitive
+field in the spec silently lost its documentation, and YAML validation cannot
+see that. The off-screen export card was hidden from the eye and from touch but
+not from VoiceOver, which traverses off-screen elements, so a VoiceOver user
+walked past Done into an invisible duplicate card reading out the calorie figure.
+A genuine capture failure was indistinguishable from a dismissed share sheet, so
+it rendered as Share → "Preparing…" → Share and said nothing. And `styles(u)`
+rebuilt ~25 `StyleSheet` entries per card per render, which is invisible on the
+completion screen and once per post per re-render in a feed.
+
+The score's doc claimed the volume basis was "tonnage, or rolling minutes"; the
+implementation is duration for both sports. The doc was wrong, not the code —
+tonnage is meaningless for BJJ, so a shared basis has to be something both have —
+but the consequence is now stated rather than hidden: under the volume basis a
+sixty-minute session of thirty sets ties one of ten.
+
+### Gaps
+
+- **None of this is device-verified.** The feed of cards, the settings toggle and
+  the fetched numbers have been typechecked, linted, unit-tested and (for the
+  backend) integration-tested against Postgres, but not seen on a phone. The
+  mountains and gradients in particular are a visual judgement no test makes.
+- **The detail band is capped at five and rendered at three.** The server sends
+  five, the card draws three plus a count. Deliberate — a feed post is scanned —
+  but it means two of the five never appear anywhere, which is waste on the wire.
+- **The feed's `Detail` and the card's are separate Go types** pinned against
+  each other by a marshalling test. That is the module-boundary rule holding,
+  but a third consumer would make a shared wire package the better answer.
+- **Instagram Stories still gets no direct hand-off.** The OS share sheet is the
+  path, which the dev-client switch has now unblocked in principle (`vola://` is
+  registered) without anyone having built it. What remains is a Facebook App ID
+  registered with Meta — an account decision, not a technical one.
+- **The feed is an unvirtualized `ScrollView`.** That predates this branch, but
+  it now holds full cards (~25-35 native views each, 30 per page, growing by 30
+  per "Show older") rather than light metric rows. `React.memo` and a style cache
+  take the per-render cost out; the structural fix is `KeyboardAwareFlatList`,
+  which already exists in this codebase for exactly this reason, and is a change
+  to a screen nobody has run on a device yet.
+- **The athlete never sees the card at readable size before sharing it.** The
+  export mounts off-screen and the only preview is the share sheet's thumbnail,
+  so the calorie figure — an inference from body data — is posted sight-unseen.
+  It is the owner's own deliberate act, so this is not a leak; it still sits
+  awkwardly beside privacy-by-default, and a preview step is the answer.
+- **The share leaves its temp file behind**, ~1-2 MB per share in the cache
+  directory. Deleting it needs `expo-file-system`, a third native dependency on
+  an app that now compiles its own binary — judged a disproportionate price for
+  a directory the OS purges under pressure.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

@@ -1,5 +1,5 @@
 import * as Haptics from 'expo-haptics';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Modal, Pressable, StyleSheet, View as RNView } from 'react-native';
 
 import { Medal } from '@/components/ui/Medal';
@@ -15,6 +15,11 @@ import {
   type SessionSummary,
 } from '@/lib/celebration';
 import { RECORD_LABEL } from '@/lib/records';
+import { cardFromSummary } from '@/lib/sessionCard';
+import { getSessionCard, type SessionCardNumbers } from '@/lib/sessionCardApi';
+import { useAuthToken } from '@/lib/useAuthToken';
+import { shareCard } from '@/lib/shareCard';
+import { SessionCard } from '@/components/SessionCard';
 import { playSound } from '@/lib/sounds';
 
 /**
@@ -98,6 +103,7 @@ export function SessionCelebration({
   onDismiss,
   streak = null,
   recordsSettled = false,
+  sessionID,
   testID = 'session-celebration',
 }: {
   summary: SessionSummary;
@@ -108,12 +114,70 @@ export function SessionCelebration({
   streak?: { weeks: number; carried: boolean } | null;
   /** Whether the records lookup has finished — see the chime below. */
   recordsSettled?: boolean;
+  /**
+   * The session's id, which the shareable card needs.
+   *
+   * Optional, and Share is hidden without it rather than disabled: an
+   * affordance that is present but cannot work is worse than one that is not
+   * there. It also keeps this component renderable by anything that has a
+   * summary but no id.
+   *
+   * NO HANDLE. There was a `handle` prop here that no caller ever passed, so
+   * the card's foot always fell back to the wordmark anyway — but dropping it
+   * rather than threading it is a decision, not tidying. The exported PNG
+   * travels off-platform, and stamping `@handle` on it publishes the athlete's
+   * VOLA handle wherever the image lands, which they did not choose by tapping
+   * Share. The wordmark is the better mark on a poster and the more private
+   * one. The feed builds its cards without a handle for a different reason —
+   * the attribution is already above them — and both land in the same place.
+   */
+  sessionID?: string;
   testID?: string;
 }) {
   const accent = useAccent();
+  const getToken = useAuthToken();
   const badge = badgeFor(summary);
   const stats = statsFor(summary, formatTonnage);
   const felt = feltFor(summary);
+
+  const cardRef = useRef<RNView>(null);
+  const [sharing, setSharing] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
+
+  // The server's numbers, once they arrive. The card is COMPLETE without them
+  // — duration, volume and PRs all come from the local store — so this never
+  // blocks the celebration and a gym dead-spot costs the calorie figure rather
+  // than the moment.
+  const [numbers, setNumbers] = useState<SessionCardNumbers | null>(null);
+  useEffect(() => {
+    if (!sessionID) return;
+    const c = new AbortController();
+    getSessionCard(getToken, sessionID, c.signal)
+      .then((n) => {
+        if (!c.signal.aborted) setNumbers(n);
+      })
+      .catch(() => {
+        // Silent by design. See above: these decorate, they do not carry.
+      });
+    return () => c.abort();
+  }, [sessionID, getToken]);
+
+  const card = sessionID
+    ? cardFromSummary({ id: sessionID, summary, stats, streak, numbers })
+    : null;
+
+  const onShare = useCallback(async () => {
+    if (sharing) return;
+    setSharing(true);
+    setShareError(null);
+    const result = await shareCard(cardRef);
+    // A dismissed share sheet is an ordinary outcome and stays quiet; a device
+    // that cannot share at all, or an image that was never produced, both get a
+    // message. `capture` used to be folded in with the dismissal, so a genuine
+    // failure rendered as Share → "Preparing…" → Share and said nothing.
+    if (!result.ok && result.reason !== 'failed') setShareError(result.message);
+    setSharing(false);
+  }, [sharing]);
 
   useEffect(() => {
     // The haptic is the part that lands even face-down in a bag; the sound
@@ -269,21 +333,87 @@ export function SessionCelebration({
             </RNView>
           )}
 
-          <Pressable
-            onPress={onDismiss}
-            style={[styles.done, { backgroundColor: accent.accent }]}
-            accessibilityRole="button"
-            testID="celebration-done"
-          >
-            <Text style={[styles.doneText, { color: accent.on }]}>Done</Text>
-          </Pressable>
+          {shareError && (
+            <Text style={styles.shareError} accessibilityLiveRegion="polite">
+              {shareError}
+            </Text>
+          )}
+
+          <RNView style={styles.actions}>
+            {card && (
+              <Pressable
+                onPress={onShare}
+                disabled={sharing}
+                style={styles.share}
+                accessibilityRole="button"
+                accessibilityLabel="Share this session"
+                testID="celebration-share"
+              >
+                <Text style={styles.shareText}>{sharing ? 'Preparing…' : 'Share'}</Text>
+              </Pressable>
+            )}
+            <Pressable
+              onPress={onDismiss}
+              style={[styles.done, { backgroundColor: accent.accent }, card && styles.doneShrunk]}
+              accessibilityRole="button"
+              testID="celebration-done"
+            >
+              <Text style={[styles.doneText, { color: accent.on }]}>Done</Text>
+            </Pressable>
+          </RNView>
         </View>
+
+        {/*
+          The card the export captures, mounted OFF TO THE SIDE rather than
+          hidden.
+
+          `captureRef` reads the native view tree, so the card has to be
+          genuinely laid out — `display: none` captures nothing and `opacity: 0`
+          captures blank on some iOS versions, both of which fail silently and
+          hand the athlete an empty image. Positioning it outside the visible
+          bounds keeps it real while keeping it out of the way, and
+          `pointerEvents="none"` stops it eating taps meant for Done.
+
+          HIDDEN FROM SCREEN READERS TOO, and that is not the same thing as
+          hidden from the eye. VoiceOver traverses off-screen elements, so
+          without the two props below a VoiceOver user swiping past Done walked
+          straight into an invisible duplicate card and heard the wordmark, the
+          date, the headline, every stat and — once the fetch lands — the
+          calorie figure and the score. The feed's posts hide their card the
+          same way, for the same reason.
+        */}
+        {card && (
+          <RNView
+            style={styles.offscreen}
+            pointerEvents="none"
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+          >
+            <SessionCard ref={cardRef} data={card} width={360} />
+          </RNView>
+        )}
       </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  actions: { flexDirection: 'row', gap: 10, alignItems: 'center' },
+  share: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: vola.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  shareText: { fontSize: 15, fontWeight: '700', color: vola.text },
+  doneShrunk: { flex: 1 },
+  shareError: { fontSize: 12, color: vola.textMuted, textAlign: 'center', marginBottom: 8 },
+  // Far enough left that no phone shows it, still laid out so it can be
+  // captured. See the comment at the mount site.
+  offscreen: { position: 'absolute', left: -10000, top: 0 },
   scrim: {
     flex: 1,
     backgroundColor: 'rgba(8,11,18,0.86)',

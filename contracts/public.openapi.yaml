@@ -448,6 +448,8 @@ components:
         - ended_at
         - working_sets
         - tonnage_kg
+        - detail
+        - more
       properties:
         id:
           type: string
@@ -482,6 +484,146 @@ components:
             volume rule the session endpoints report.
         tonnage_kg:
           type: number
+        detail:
+          type: array
+          description: >
+            What was actually done — up to five exercises or techniques. EMPTY
+            unless the OWNER has `share_training_details` on, and empty rather
+            than null so "opted out" and "an empty session" render identically;
+            distinguishing them would advertise who has the switch off.
+
+            Same wire shape as `SessionCardDetail` because one client component
+            renders both, with one deliberate difference: a feed row never
+            carries `conceded`. What was done TO you is the half of a roll worth
+            reviewing on your own card and is not published to friends.
+          items: { $ref: "#/components/schemas/FeedItemDetail" }
+        more:
+          type: integer
+          description: >
+            How many names `detail` left out, so a card can say "+4 more". Zero
+            whenever `detail` is empty.
+
+    FeedItemDetail:
+      type: object
+      description: >
+        One line of what was done. Structurally identical to
+        `SessionCardDetail`; separate because the two endpoints may not diverge
+        silently and a shared ref would hide it when they do. A backend test
+        marshals both and compares.
+      required: [name]
+      properties:
+        name: { type: string }
+        figure:
+          type: string
+          description: Strength only — the top working set, e.g. "140 kg × 5".
+        outcome:
+          type: string
+          description: >
+            BJJ only — `scored`, `attempted` or `drilled`. Never `conceded`:
+            see `detail` above.
+        count:
+          type: integer
+          description: BJJ only, present when more than one.
+
+    SessionCard:
+      type: object
+      description: >
+        The numbers a finished session's share card shows and the client cannot
+        compute for itself. Everything here is DERIVED on read — there is no
+        card table and no score column — so editing a set changes the card next
+        time it is opened rather than leaving a stale figure behind.
+      required: [calories, score, detail, more]
+      properties:
+        calories:
+          type: object
+          nullable: true
+          description: >
+            Null when there is no bodyweight on record at or before the
+            session. That is a refusal, not a gap: weight is the dominant input
+            and a 55 kg and a 105 kg athlete doing identical work differ by
+            nearly half, so there is no honest default. Clients ask for a
+            check-in rather than showing a guess.
+          allOf: [{ $ref: "#/components/schemas/SessionCalories" }]
+        score:
+          type: object
+          nullable: true
+          description: >
+            Null below eight prior sessions of the same sport. A percentile
+            against three is noise wearing a number.
+          allOf: [{ $ref: "#/components/schemas/SessionScore" }]
+        detail:
+          type: array
+          description: >
+            Exercises for strength, techniques for BJJ, capped server-side.
+            Trimming on the client would ship a whole session's list to render
+            five rows of it.
+          items: { $ref: "#/components/schemas/SessionCardDetail" }
+        more:
+          type: integer
+          description: How many rows `detail` omitted, for a "+4 more" line.
+
+    SessionCalories:
+      type: object
+      required: [kcal, precision]
+      properties:
+        kcal:
+          type: integer
+          description: >
+            NET kilocalories — the extra over resting, not the gross figure
+            that includes what you would burn lying still. Deliberately far
+            below what consumer trackers report: an hour of ordinary lifting is
+            around 185, not 400–600. Always rendered with a "≈".
+        precision:
+          type: string
+          enum: [estimated, coarse]
+          description: >
+            `estimated` when weight, height, age and sex are all known and the
+            resting rate comes from Mifflin–St Jeor. `coarse` with weight
+            alone, falling back to the conventional 1-MET baseline, which runs
+            20–30% high for many people. Two different claims, so clients
+            should not render them identically.
+
+    SessionScore:
+      type: object
+      required: [value, basis, compared]
+      properties:
+        value:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: >
+            The share of your own recent sessions of this sport that this one
+            beat. Never a comparison with other people. Half of all sessions
+            fall below 50 by construction — the number is meant to be able to
+            disappoint.
+        basis:
+          type: string
+          enum: [effort, volume]
+          description: >
+            `effort` is RPE × duration (what the session cost); `volume` is the
+            fallback when effort tracking is off (how big it was). The meaning
+            of the number changes with it, so it travels with it.
+        compared:
+          type: integer
+          description: How many prior sessions it was ranked against.
+
+    SessionCardDetail:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        figure:
+          type: string
+          description: Strength only — the top working set, e.g. "140 kg × 5".
+        outcome:
+          type: string
+          description: >
+            BJJ only — `scored`, `attempted`, `drilled`, `conceded`. The
+            difference between drilling a technique and hitting it live is the
+            reason anyone logs BJJ, so the card carries it.
+        count:
+          type: integer
+          description: BJJ only, present when more than one.
 
     FriendCard:
       type: object
@@ -539,6 +681,7 @@ components:
         - unit_system
         - track_effort
         - share_training_with_friends
+        - share_training_details
         - created_at
         - updated_at
       properties:
@@ -619,6 +762,23 @@ components:
             turning it off retracts everything at once. The consequence is that
             turning it ON is retroactive: accepted friends see finished
             sessions from before the switch. Clients must say so.
+        share_training_details:
+          type: boolean
+          description: >
+            How MUCH of a shared session travels once the switch above has let
+            it travel at all: the numbers alone, or the exercise/technique list
+            with them. Two switches because they disclose different things —
+            the numbers say you trained hard, the detail says what you are
+            working on.
+
+
+            Off by default, and SUBORDINATE: it does nothing while
+            share_training_with_friends is off, because the detail is only ever
+            attached to rows that switch already returned.
+
+
+            Read LIVE too, so turning it off strips the detail from every past
+            row immediately — and turning it ON is retroactive in the same way.
         created_at:
           type: string
           format: date-time
@@ -703,6 +863,11 @@ components:
             client that does not know about this field can never change it,
             which is what keeps an older build from publishing somebody's
             training by omission.
+        share_training_details:
+          type: boolean
+          description: >
+            Opt in or out of publishing the exercise/technique list alongside
+            the numbers. Absent means "leave alone", for the same reason.
 
     Flag:
       type: object
@@ -3181,6 +3346,13 @@ paths:
         rather than a feature.
 
 
+        The one enlargement is `detail`, and it took a SECOND opt-in —
+        `share_training_details`, also off by default — because the numbers and
+        the programme are different disclosures. It stays inside the limits
+        above: names and figures the owner chose to publish, still no sets, no
+        notes, no RPE and no ids, and never a `conceded` outcome.
+
+
         There is deliberately no `GET /feed/{id}`. The row is the whole of what
         a friend may see, so a per-item endpoint would be a second and wider
         path to the same data.
@@ -3219,6 +3391,42 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /sessions/{sessionID}/card:
+    get:
+      summary: The share card's numbers for one finished session
+      operationId: getSessionCard
+      description: >
+        One endpoint rather than three, because the card renders once and
+        either has its numbers or does not — three round trips would give it
+        three chances to half-arrive, and a card that pops a score in a second
+        after the calories is worse than one that waits.
+
+
+        Nested under the session because it is a projection of that session and
+        has no life without it.
+      parameters:
+      - name: sessionID
+        in: path
+        required: true
+        schema: { type: string }
+      responses:
+        "200":
+          description: The card's derived numbers.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionCard" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404":
+          description: >
+            No finished session of yours with that id — absent, somebody
+            else's, and still-running are one answer. An unfinished session has
+            no duration, so every number would be a claim about a session still
+            in progress.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429": { $ref: "#/components/responses/RateLimited" }
 
   /friends:
     get:

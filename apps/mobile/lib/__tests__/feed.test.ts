@@ -1,4 +1,4 @@
-import { agoLabel, feedMetrics, type FeedItem } from '../feed';
+import { agoLabel, cardFromFeedItem, feedMetrics, type FeedItem } from '../feed';
 
 /**
  * The two pure pieces of the feed, which is all of it that can be pinned here.
@@ -128,5 +128,76 @@ describe('volume speaks the athlete’s units', () => {
     expect(metric?.value).toBe('4.2t');
     expect(imperial?.value).toBe('9,259lb');
     expect(imperial?.value).not.toContain('kg');
+  });
+});
+
+describe("a friend's card", () => {
+  const now = Date.parse('2026-08-07T13:00:00Z');
+
+  it('carries no badge, because a PR is derived from a history you cannot see', () => {
+    // The completion card earns badges from `summary.records` and a streak,
+    // both of which are the OWNER's data. A feed row carries neither, so the
+    // only honest number of badges is none — inferring one from volume would
+    // be the card claiming something the server never said.
+    const card = cardFromFeedItem(item(), 'metric', now);
+    expect(card.badges).toEqual([]);
+    expect(card.highlight).toBeUndefined();
+  });
+
+  it('shows no handle, so the foot reads as the wordmark and not a signature', () => {
+    // The attribution sits above the card in the feed. Passing the handle too
+    // would print the person twice on every post, six inches apart.
+    expect(cardFromFeedItem(item(), 'metric', now).handle).toBeUndefined();
+  });
+
+  it('never invents calories or a score for somebody else', () => {
+    // Both exist on your own card and neither may cross to a reader: the
+    // calorie estimate is computed from the owner's bodyweight, height, age
+    // and sex, and the score is a percentile against a history the reader
+    // cannot see. The strip is time, sets and volume — the three things a
+    // feed row has always carried.
+    const labels = cardFromFeedItem(item(), 'metric', now).stats.map((s) => s.label);
+    expect(labels).toEqual(['time', 'sets', 'volume']);
+    expect(labels).not.toContain('Calories');
+    expect(labels).not.toContain('VOLA score');
+  });
+
+  it('passes the detail through, and survives a server that never sends it', () => {
+    // `detail` is absent on an older response shape and empty when the owner
+    // has not opted in. Both must land on an empty array rather than
+    // undefined — the card maps over it without a guard.
+    const withDetail = cardFromFeedItem(
+      item({ detail: [{ name: 'Back Squat', figure: '140 kg × 5' }], more: 2 }),
+      'metric',
+      now,
+    );
+    expect(withDetail.detail).toEqual([{ name: 'Back Squat', figure: '140 kg × 5' }]);
+    expect(withDetail.more).toBe(2);
+
+    const without = cardFromFeedItem(item(), 'metric', now);
+    expect(without.detail).toEqual([]);
+    expect(without.more).toBe(0);
+  });
+
+  it('leads with how recent it is, not with the date', () => {
+    // A feed is scanned for recency. Your own card records a day; this one
+    // answers "how long ago", which is the question being asked here.
+    expect(cardFromFeedItem(item(), 'metric', now).dateLabel).toBe('2H AGO');
+  });
+
+  it('reads volume in the athlete’s own units', () => {
+    // The one surface where the numbers are somebody else's and therefore
+    // hardest to sanity-check — an imperial athlete reading kilograms would
+    // have no way to notice. `feedMetrics` already had this bug once.
+    const imperial = cardFromFeedItem(item(), 'imperial', now).stats.find(
+      (s) => s.label === 'volume',
+    );
+    expect(imperial?.value).not.toMatch(/kg/);
+  });
+
+  it('names an unnamed session after its sport rather than leaving it blank', () => {
+    expect(cardFromFeedItem(item({ name: '', sport: 'bjj' }), 'metric', now).title).toBe(
+      'BJJ session',
+    );
   });
 });
