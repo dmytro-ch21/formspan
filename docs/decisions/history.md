@@ -18746,6 +18746,36 @@ first handler inherits the guarantee rather than having to remember it.
 - Nothing is device- or staging-verified; the migration was applied, exercised
   and reversed on a scratch local database only.
 
+## 2026-08-09 — PR #207's three review suggestions, closed
+
+The objective-vs-subjective branch merged with no blocking findings and three
+`[suggestion]`s, fixed here as a follow-up rather than left as review-comment
+archaeology:
+
+- **The dangling separator.** A timed or distance record whose set carried only
+  an RPE rendered its evidence line as "· RPE 8" — the rating's `· ` prefix was
+  unconditional on both the mobile records card and web's `RecordCell`, so it
+  separated nothing. The separator now renders only when a measurement stands
+  before it (mobile hoists the joined measured line into a `measuredLine` const
+  so the prefix can key off it; web keys off `evidence.measured` directly). The
+  scenario doc carries the case.
+- **The `estimate` marker was set in `text-text-dim`** (~3.4:1, below AA for
+  small text) on `/dashboard/records` and the session detail's records list —
+  while the same file's own comment rejects dim for the *rating* for exactly
+  that reason. Both markers now use the rating's treatment: muted contrast,
+  *italic* to set the word apart. On the session page the surrounding span is
+  already muted, so the italic alone carries the distinction there.
+- **`loadTypesFromMigration` was pinned to migration 000004**, which made the
+  parse a hand-copy one notch removed: an ALTER in a later migration lengthening
+  the `load_type` CHECK would leave the test silently reading the original five
+  values. It now globs every `*.up.sql`, takes the last file carrying the
+  anchored `load_type IN (...)` pattern (zero-padded names make Glob's sorted
+  order application order), and panics if one file holds two *distinct* lists,
+  since nothing orders matches within a file. Both behaviours were
+  mutation-tested with a throwaway 999998 migration — the scan followed a fake
+  ALTER adding `'zone2'`, and two distinct lists in one file panicked — then the
+  fixture was deleted.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
