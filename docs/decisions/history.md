@@ -17957,6 +17957,37 @@ because styles are silent should not depend on a glyph being spoken.
   something vague, or a rating wrapped before it is aggregated
   (`AVG(COALESCE(rpe, 0))`), still walks through. Both limits are named in the
   test file. It closes the obvious door, not every door.
+- **The set row still reads `8 × 132.3lb · 2 RIR`,** one separator, unstyled —
+  spotted on the device while verifying the rest. Left deliberately, on a line
+  worth stating because it is the one that decides where this distinction stops:
+  **that row is an echo of what you just typed, not a readout of history.** The
+  hint, the records card and the session detail all show you numbers from the
+  past, where nothing on screen says which kind each one is; the set row shows
+  you the value you entered two seconds ago into a field labelled RIR. The
+  ambiguity the distinction exists to remove is not present there, and mid-set
+  is the worst place in the app to spend width on a nuance.
+
+### Verified on a device
+
+Both new surfaces, on an iPhone 15 Pro against this branch:
+
+- The BJJ session detail in both states — `7/10 · Hard` under HOW IT FELT with
+  the two measurements boxed above it, and `Not recorded` where no rating was
+  given. The layout is the assertion, and it holds.
+- The session hint reading `Last 8 × 132.3lb · 2 RIR · Est. 1RM 176lb` with the
+  rating italic and **at the same brightness as the line around it** — which is
+  the review's blocking finding, confirmed fixed on a real screen. Had the
+  inherited-colour bug survived, `2 RIR` would have been visibly the brightest
+  thing on that line.
+
+Reaching the second one needed a logged set carrying an RIR, which the test
+account did not have; two scratch sessions were created and both deleted, and
+Today is back to the counts it started at. Incidentally it also demonstrated
+rule 2 working end to end: logging 2 RIR changed the suggestion from "no
+evidence this was easy" to "you had reserve left — same weight, 9 reps", and
+moved the estimated 1RM from 164lb to 176lb. A reported number legitimately
+driving a modelled one, which is exactly what the classification permits and
+labels.
 
 ## 2026-08-09 — Off Expo Go, onto a development build
 
