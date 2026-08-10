@@ -18857,6 +18857,64 @@ Open questions this leaves:
   criteria groups) was considered and deferred; nothing in this schema blocks
   it later.
 
+## 2026-08-10 — The roadmap content, part 1: White belt rebuilt in phases, and Novice Fundamentals
+
+The first content pass over the phase machinery #218 shipped, following the
+plan's "White + Novice Fundamentals first, validate the shape, then the rest".
+Pure content — `curricula.json` only, no schema or API change; blue, purple
+and brown stay byte-identical flat lists until the shape is proven.
+
+**`white-belt-basics` → "White belt: survive and escape"**: ten phases
+following the user's curriculum document's arc — how-this-belt-works, mount,
+side control, closed guard, half guard, open guard, back, turtle, standing,
+graduation standard — with **25 criteria-carrying milestones** (up from 14)
+and 12 concept items. The 25 was chosen against the design doc's own
+arithmetic: ~20–25 measurable techniques is a year-plus of real training,
+which is what a belt is. The source document's ~200 bullets were deliberately
+NOT imported one-per-item — the condensed-concepts decision from the plan —
+so each phase carries 1–2 concepts holding the ideas (the elbow–knee
+connection, the underhook battle, position before submission) and the
+milestones carry the time. Existing milestone notes and calibrated targets
+survived where the technique survived; new milestones copy the house style
+(escapes ~15–25 scored at 0.35–0.4, attacks lower-volume with a defended
+half, takedowns at 0.2 — a finished takedown against a resisting adult at
+one-in-five is honest). The graduation standard is the closing phase, as
+concepts — including "what it deliberately leaves out", because the document's
+strongest idea is that promotion reflects decisions, not a move list.
+
+**`novice-fundamentals`** (new, `track: "foundations"`, no belt): the
+document's Phases 1–3 as a roadmap of its own — safety/etiquette concepts,
+seven movement fundamentals, the positional-hierarchy map as four concepts,
+and survive-first postures. **All ten measurable items use
+`target_drilled_sessions` (6–8) and nothing else** — the criterion built for
+exactly this in #218 — so the whole roadmap completes from attending and
+drilling, before a novice can meaningfully log live rounds. That is the
+point: it finishes in ~2–3 months while a belt roadmap is just starting,
+which is the first-completion experience the flat roadmaps could never give.
+Its safety phase is concepts only, deliberately: "tapped early N times" is
+not a countable thing, and pretending otherwise would be the fabricated-zero
+mistake wearing a smile.
+
+Verified: every authored technique id exists in the catalog (the seed
+integration test, run against a live library); seeder idempotent over the
+phased format (re-run holds 37/18 items, 10/4 phases); full backend suite
+green serially.
+
+Open questions this leaves:
+
+- **Blue, purple and brown are still flat.** Rebuilding them is mechanical
+  now the shape exists, but each is a real authoring pass over its belt's
+  document sections.
+- **No mobility content yet** — decided out of curricula (it is a workout
+  plan, not a technique roadmap); the seeded-workout-plan route is unstarted.
+- **No client renders phases yet**, so this content currently reads as a long
+  flat list with `phase` indexes the apps ignore. The web/mobile PRs are next;
+  the browse surface should group by `track`.
+- The white-belt milestone set is a judgment call over a 542-entry catalog —
+  expect it to move once real athletes work it. Content edits are a seed-file
+  diff and a deploy, which is exactly why the criteria live in content rather
+  than schema.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
