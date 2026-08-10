@@ -9,6 +9,7 @@
     "expo-auth-session": "~57.0.6",
     "expo-constants": "~57.0.9",
     "expo-crypto": "~57.0.1",
+    "expo-dev-client": "~57.0.10",
     "expo-font": "~57.0.1",
     "expo-haptics": "~57.0.1",
     "expo-image": "~57.0.2",
@@ -48,9 +49,11 @@
     "typescript": "~6.0.3"
   },
   "scripts": {
-    "start": "NODE_OPTIONS=--dns-result-order=ipv4first expo start",
-    "android": "NODE_OPTIONS=--dns-result-order=ipv4first expo start --android",
-    "ios": "NODE_OPTIONS=--dns-result-order=ipv4first expo start --ios --localhost",
+    "start": "NODE_OPTIONS=--dns-result-order=ipv4first expo start --dev-client",
+    "android": "NODE_OPTIONS=--dns-result-order=ipv4first expo run:android",
+    "ios": "LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 NODE_OPTIONS=--dns-result-order=ipv4first expo run:ios",
+    "ios:device": "LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 NODE_OPTIONS=--dns-result-order=ipv4first expo run:ios --device --configuration Release",
+    "prebuild": "LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 expo prebuild --clean",
     "web": "NODE_OPTIONS=--dns-result-order=ipv4first expo start --web",
     "build:ios": "eas build --platform ios --profile preview",
     "build:ios:prod": "eas build --platform ios --profile production",
