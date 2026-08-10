@@ -17958,6 +17958,95 @@ because styles are silent should not depend on a glyph being spoken.
   (`AVG(COALESCE(rpe, 0))`), still walks through. Both limits are named in the
   test file. It closes the obvious door, not every door.
 
+## 2026-08-09 — Off Expo Go, onto a development build
+
+Phase 0 of [health-integration-design.md](health-integration-design.md).
+Nothing in HealthKit or Health Connect runs in Expo Go, so `apps/mobile` now
+runs on a **development build** (`expo-dev-client`). The same door also unblocks
+widgets, Live Activities, App Intents and OAuth's `vola://` callback.
+
+This was reached independently of, and lands after, the dyld crash entry above —
+the same failure found from the other end. That entry has the better evidence
+(device crash logs, the lockfile resolving core at 57.0.7) and this one does not
+repeat it. What the dev-client move adds is **why that class of drift stops
+being survivable**: Expo Go supplied the native side, so mismatched JS versions
+never had to link against anything, and `expo install --check` could be ignored
+for weeks precisely because it described a hazard with no way to fire. Owning
+the binary makes it permanently load-bearing. The entry above reads the crash as
+one drifted pair unluckily sharing a dyld boundary; from here it is better read
+as the first instance of a standing condition.
+
+CLAUDE.md carries the diagnosis that entry lacks: **the tell that separates a
+version problem from a stale-artifact one.** `prebuild --clean` plus a
+DerivedData wipe does not fix it, and the rebuilt frameworks come back with
+**identical UUIDs** — a clean tree producing identical binaries is not
+staleness. `nm -gU` on the exporter against `nm -u` on the importer settles it
+in one command. Both wrong turns were taken here first, at a ten-minute build
+each.
+
+### What actually changed
+
+`expo-dev-client`, and scripts repointed: `start` to `expo start --dev-client`,
+`ios` to `expo run:ios`, `android` to `expo run:android`, plus `ios:device`
+(Release) and `prebuild`. Two workarounds moved out of documentation and into
+the scripts, where they cannot be forgotten — the `LANG=en_US.UTF-8` CocoaPods
+locale fix on all three pod-install paths, and the existing
+`NODE_OPTIONS=--dns-result-order=ipv4first` Metro-binding prefix preserved on
+every script that starts Metro.
+
+**One test mock, and it is specifically the dev client's fault** — measured
+rather than assumed. `expo-haptics` reaches `expo/src/Expo.fx`, which requires
+`async-require/messageSocket` at module scope behind
+`__DEV__ && typeof globalThis.expo !== 'undefined'`. **The dev client is what
+defines that global under jest**, so the guard starts passing and the module
+reads a `null` `scriptURL` and calls `.match` on it. On the commit before
+`expo-dev-client`, three suites pass with no mock; installing it alone turns
+them red. The mock sits on `expo-haptics` rather than the module at fault
+because jest-expo resolves that path through its `native` variant and a
+`jest.mock` there never intercepts — tried, suites stayed red.
+
+`verify` green: 74 suites, 1074 tests.
+
+### Verified
+
+Screenshot-confirmed on a booted iPhone 15 Pro Simulator: bundles (`iOS
+Bundled`, 2106 modules), reaches the real sign-in screen with correct branding,
+and the dev-menu sheet self-identifies as a development build.
+
+**Deep links changed shape and the old form is dead.**
+`exp://127.0.0.1:8081/--/<route>` is gone; routes are now `vola://<route>`
+(verified — `vola://sign-up` lands on Create account) and Metro is pinned with
+`exp+vola://expo-development-client/?url=...`. The app registers three schemes
+(`vola`, `com.vola.fitness`, `exp+vola`) and they are not interchangeable. iOS
+shows an "Open in VOLA?" confirmation a scripted run has to tap through — it is
+not a hang.
+
+Three Expo Go traps in CLAUDE.md are **retired**, all one root cause: a binary
+we did not own, whose native side could drift from our JS. The replacement is
+the mirror image and quieter — a dev client's binary goes *stale*, so adding a
+native dependency and running `start` instead of `run:ios` fails at runtime
+module load with the same symptom and the opposite cause.
+
+### Not verified, deliberately
+
+- **OAuth.** The structural blocker is gone (Expo Go registered `exp://` and
+  could not hand a `vola://` callback to a project it merely hosted; the dev
+  build registers `vola://` itself) and the button renders. No flow was run.
+- **Android has never been built natively.** Health Connect will need it; expect
+  trouble there first.
+- **Nothing in CI exercises any of this, and that gap is new.** There is no
+  mobile build step and `ios/`/`android/` are gitignored, so no check runs
+  `prebuild` or `run:ios`. A green suite now says the JS typechecks, lints and
+  tests — it says nothing about whether the app links or launches. That was
+  acceptable while Expo Go supplied the binary. It is not now: the crash in the
+  entry above shipped to three phones through a fully green pipeline, and
+  nothing in this repo would catch its recurrence. An EAS build on a schedule is
+  the obvious answer.
+- **`app.json`'s `ios.backgroundColor` does nothing** — `prebuild` warns it
+  needs `expo-system-ui`, which is not installed. Pre-existing, surfaced here.
+
+
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

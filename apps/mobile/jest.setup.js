@@ -65,6 +65,49 @@ jest.mock('expo-image', () => {
   return { Image: (props) => React.createElement(Image, props) };
 });
 
+/*
+  `expo-haptics` is mocked for something happening two levels below it, and
+  **only `expo-dev-client` makes it necessary** — which is measured, not
+  assumed: on the commit before the dev client was added these three suites
+  (`holdToConfirm`, `bjjSessionScreen`, `workoutDetailScreen`) pass with no
+  haptics mock at all, and installing `expo-dev-client` alone turns them red.
+
+  The chain: `expo-haptics` imports from `'expo'`, whose `Expo.fx` requires
+  `async-require/messageSocket` at module scope — but only behind
+  `__DEV__ && typeof globalThis.expo !== 'undefined'`. The dev client is what
+  defines that global under jest, so the guard starts passing and the module
+  then reads `NativeSourceCode.getConstants().scriptURL` (`null` here) and
+  calls `.match` on it. Whole SUITE down, before any test runs.
+
+  **Note it is NOT every `expo-*` package** — only those importing from
+  `'expo'` (the SDK-57 `requireOptionalNativeModule` pattern).
+  `expo-linear-gradient`, used unmocked by several screens under test, imports
+  only react and react-native and never reaches `Expo.fx`. The symptom is the
+  reliable tell, not the package prefix: a suite going red at `Test suite
+  failed to run` with `reading 'match'` is this, and needs the same treatment.
+
+  **Mocked here rather than at the module actually at fault**, because that
+  does not work: jest-expo resolves `expo/src/async-require/messageSocket`
+  through its `native` platform variant, so a `jest.mock` on that path
+  registers under a different id and never intercepts (tried; suites stayed
+  red). Patching `scriptURL` is worse than useless — a well-formed URL
+  satisfies the guard and the module then opens a real WebSocket from the test
+  run.
+
+  Nothing asserts on haptics: no test file mentions it. The two references in
+  `lib/__tests__/countdown.test.ts` are comments, over a pure module that does
+  not import this one. Plain arrows rather than `jest.fn()` so no future test
+  can quietly assert against this shared default — it would have to re-mock
+  per-file, which is the rule this file's header sets.
+*/
+jest.mock('expo-haptics', () => ({
+  impactAsync: () => Promise.resolve(),
+  notificationAsync: () => Promise.resolve(),
+  selectionAsync: () => Promise.resolve(),
+  ImpactFeedbackStyle: { Light: 'light', Medium: 'medium', Heavy: 'heavy' },
+  NotificationFeedbackType: { Success: 'success', Warning: 'warning', Error: 'error' },
+}));
+
 jest.mock('expo-router', () => {
   const React = require('react');
   const { Text } = require('react-native');
