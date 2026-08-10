@@ -35,7 +35,7 @@ const visibleTo = `(c.visibility = 'public' OR c.owner_user_id = $1)`
 
 func (r *PostgresRepository) List(ctx context.Context, userID string) ([]Curriculum, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT c.id, c.owner_user_id, c.name, c.description, c.belt, c.visibility,
+		SELECT c.id, c.owner_user_id, c.name, c.description, c.belt, c.track, c.visibility,
 		       c.created_at, c.updated_at,
 		       e.user_id IS NOT NULL AS enrolled, e.started_on,
 		       n.items, n.countable
@@ -55,7 +55,9 @@ func (r *PostgresRepository) List(ctx context.Context, userID string) ([]Curricu
 		LEFT JOIN LATERAL (
 		    SELECT count(*) AS items,
 		           count(*) FILTER (
-		               WHERE i.target_scored IS NOT NULL OR i.target_defended IS NOT NULL
+		               WHERE i.target_scored IS NOT NULL
+		                  OR i.target_defended IS NOT NULL
+		                  OR i.target_drilled_sessions IS NOT NULL
 		           ) AS countable
 		    FROM curriculum_items i WHERE i.curriculum_id = c.id
 		) n ON true
@@ -103,7 +105,7 @@ func scanCurriculum(rows pgx.Rows, userID string) (*Curriculum, *time.Time, erro
 		startedOn *time.Time
 	)
 	if err := rows.Scan(
-		&c.ID, &c.OwnerUserID, &c.Name, &c.Description, &c.Belt, &c.Visibility,
+		&c.ID, &c.OwnerUserID, &c.Name, &c.Description, &c.Belt, &c.Track, &c.Visibility,
 		&c.CreatedAt, &c.UpdatedAt, &c.Enrolled, &startedOn,
 		&c.ItemCount, &c.CountableItems,
 	); err != nil {
@@ -122,7 +124,7 @@ func scanCurriculum(rows pgx.Rows, userID string) (*Curriculum, *time.Time, erro
 
 func (r *PostgresRepository) Working(ctx context.Context, userID, tz string) ([]Curriculum, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT c.id, c.owner_user_id, c.name, c.description, c.belt, c.visibility,
+		SELECT c.id, c.owner_user_id, c.name, c.description, c.belt, c.track, c.visibility,
 		       c.created_at, c.updated_at,
 		       true AS enrolled, e.started_on,
 		       -- Filled from the items below, like Get: counting criteria in SQL
@@ -167,6 +169,11 @@ func (r *PostgresRepository) Working(ctx context.Context, userID, tz string) ([]
 
 	out := make([]Curriculum, 0, len(found))
 	for _, p := range found {
+		phases, err := r.phases(ctx, p.c.ID)
+		if err != nil {
+			return nil, err
+		}
+		p.c.Phases = phases
 		items, err := r.items(ctx, userID, p.c.ID, p.started, tz)
 		if err != nil {
 			return nil, err
@@ -188,7 +195,7 @@ func (r *PostgresRepository) Working(ctx context.Context, userID, tz string) ([]
 
 func (r *PostgresRepository) Get(ctx context.Context, userID, id, tz string) (*Curriculum, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT c.id, c.owner_user_id, c.name, c.description, c.belt, c.visibility,
+		SELECT c.id, c.owner_user_id, c.name, c.description, c.belt, c.track, c.visibility,
 		       c.created_at, c.updated_at,
 		       e.user_id IS NOT NULL AS enrolled, e.started_on,
 		       -- Placeholders, filled below from the items this read fetches
@@ -219,6 +226,12 @@ func (r *PostgresRepository) Get(ctx context.Context, userID, id, tz string) (*C
 	}
 	rows.Close()
 
+	phases, err := r.phases(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	c.Phases = phases
+
 	// `started` is nil when the caller is not enrolled, which is what makes
 	// items() return criteria with no progress: browsing a syllabus shows what
 	// it asks of you, working one shows how far along you are.
@@ -242,6 +255,30 @@ func (r *PostgresRepository) Get(ctx context.Context, userID, id, tz string) (*C
 		}
 	}
 	return c, nil
+}
+
+// phases reads a curriculum's phase list. No authorization predicate of its
+// own: every caller has already resolved the curriculum through visibleTo, and
+// a phase without its curriculum is unreachable.
+func (r *PostgresRepository) phases(ctx context.Context, id string) ([]Phase, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT sort_order, title, description
+		FROM curriculum_phases WHERE curriculum_id = $1
+		ORDER BY sort_order`, id)
+	if err != nil {
+		return nil, fmt.Errorf("curriculum: phases: %w", err)
+	}
+	defer rows.Close()
+
+	var out []Phase
+	for rows.Next() {
+		var p Phase
+		if err := rows.Scan(&p.Order, &p.Title, &p.Description); err != nil {
+			return nil, fmt.Errorf("curriculum: scan phase: %w", err)
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
 }
 
 // items reads the list and, in the same round trip, the caller's evidence
@@ -278,7 +315,13 @@ func (r *PostgresRepository) items(ctx context.Context, userID, id string, since
 			       -- clear its spread requirement without ever being used on
 			       -- somebody who was resisting.
 			       COUNT(DISTINCT t.session_id)
-			           FILTER (WHERE t.event IN ('attempted', 'scored', 'defended')) AS sessions
+			           FILTER (WHERE t.event IN ('attempted', 'scored', 'defended')) AS sessions,
+			       -- The drilled spread, counted separately and read ONLY by
+			       -- target_drilled_sessions — the one criterion that is
+			       -- explicitly about practice. Sessions again, not volume:
+			       -- forty reps in one class is one class.
+			       COUNT(DISTINCT t.session_id)
+			           FILTER (WHERE t.event = 'drilled') AS drilled_sessions
 			FROM bjj_session_tags t
 			JOIN sessions s ON s.id = t.session_id AND s.user_id = t.user_id
 			WHERE t.user_id = $1
@@ -303,15 +346,20 @@ func (r *PostgresRepository) items(ctx context.Context, userID, id string, since
 			       OR (s.started_at AT TIME ZONE $4)::date >= $3::date)
 			GROUP BY t.technique_id
 		)
-		SELECT i.technique_id, lib.name, lib.position, lib.category, i.sort_order, i.notes,
+		SELECT i.kind, i.technique_id, i.title,
+		       COALESCE(lib.name, ''), COALESCE(lib.position, ''), COALESCE(lib.category, ''),
+		       i.sort_order, i.phase_order, i.notes,
 		       i.target_scored, i.target_defended, i.target_sessions, i.min_hit_rate,
+		       i.target_drilled_sessions,
 		       COALESCE(ev.scored, 0), COALESCE(ev.defended, 0),
-		       COALESCE(ev.attempts, 0), COALESCE(ev.sessions, 0)
+		       COALESCE(ev.attempts, 0), COALESCE(ev.sessions, 0),
+		       COALESCE(ev.drilled_sessions, 0)
 		FROM curriculum_items i
-		-- INNER: the FK is ON DELETE CASCADE, so an item whose technique is
-		-- gone cannot exist. This join agrees with the constraint rather than
-		-- quietly disagreeing with it.
-		JOIN techniques lib ON lib.id = i.technique_id
+		-- LEFT, for the CONCEPT rows only — their technique_id is NULL by
+		-- constraint. For technique rows the join still cannot miss: the FK is
+		-- ON DELETE CASCADE, so an item whose technique is gone cannot exist,
+		-- and the COALESCEs above only ever fire for concepts.
+		LEFT JOIN techniques lib ON lib.id = i.technique_id
 		LEFT JOIN ev ON ev.technique_id = i.technique_id
 		WHERE i.curriculum_id = $2
 		ORDER BY i.sort_order`, userID, id, since, zone(tz))
@@ -323,35 +371,44 @@ func (r *PostgresRepository) items(ctx context.Context, userID, id string, since
 	out := []Item{}
 	for rows.Next() {
 		var (
-			it       Item
-			scored   int
-			defended int
-			attempts int
-			sessions int
-			tScored  *int
-			tDef     *int
-			tSess    *int
-			minRate  *float64
+			it          Item
+			techniqueID *string
+			scored      int
+			defended    int
+			attempts    int
+			sessions    int
+			drilled     int
+			tScored     *int
+			tDef        *int
+			tSess       *int
+			minRate     *float64
+			tDrilled    *int
 		)
 		if err := rows.Scan(
-			&it.TechniqueID, &it.Name, &it.Position, &it.Category, &it.Order, &it.Notes,
-			&tScored, &tDef, &tSess, &minRate,
-			&scored, &defended, &attempts, &sessions,
+			&it.Kind, &techniqueID, &it.Title,
+			&it.Name, &it.Position, &it.Category,
+			&it.Order, &it.Phase, &it.Notes,
+			&tScored, &tDef, &tSess, &minRate, &tDrilled,
+			&scored, &defended, &attempts, &sessions, &drilled,
 		); err != nil {
 			return nil, fmt.Errorf("curriculum: scan item: %w", err)
 		}
-		if tScored != nil || tDef != nil {
+		if techniqueID != nil {
+			it.TechniqueID = *techniqueID
+		}
+		if tScored != nil || tDef != nil || tDrilled != nil {
 			it.Criteria = &Criteria{
-				TargetScored:   tScored,
-				TargetDefended: tDef,
-				TargetSessions: tSess,
-				MinHitRate:     minRate,
+				TargetScored:          tScored,
+				TargetDefended:        tDef,
+				TargetSessions:        tSess,
+				MinHitRate:            minRate,
+				TargetDrilledSessions: tDrilled,
 			}
 			// Progress only where the caller is actually working this — an
 			// un-enrolled reader is browsing, and there is no window to
 			// measure them over.
 			if since != nil {
-				p := Progress{Scored: scored, Defended: defended, Attempts: attempts, Sessions: sessions}
+				p := Progress{Scored: scored, Defended: defended, Attempts: attempts, Sessions: sessions, DrilledSessions: drilled}
 				if attempts > 0 {
 					// Guarded here rather than with NULLIF in SQL: zero from
 					// zero is not a rate, and rendering it as 0% would report a
@@ -385,17 +442,17 @@ func (r *PostgresRepository) Create(ctx context.Context, userID, tz string, in N
 
 	var id string
 	err = tx.QueryRow(ctx, `
-		INSERT INTO curricula (owner_user_id, source, name, description, belt, visibility)
+		INSERT INTO curricula (owner_user_id, source, name, description, belt, track, visibility)
 		-- source is always 'user' here. The seed and the admin console are the
 		-- only writers of the other two, and curricula_source_matches_owner
 		-- refuses an owned row that claims either.
-		VALUES ($1, 'user', $2, $3, $4, $5)
+		VALUES ($1, 'user', $2, $3, $4, $5, $6)
 		RETURNING id`,
-		userID, in.Name, in.Description, in.Belt, in.Visibility).Scan(&id)
+		userID, in.Name, in.Description, in.Belt, in.Track, in.Visibility).Scan(&id)
 	if err != nil {
 		return nil, translate(err, "create")
 	}
-	if err := replaceItems(ctx, tx, id, in.Items); err != nil {
+	if err := replaceContent(ctx, tx, id, in.Phases, in.Items); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -423,10 +480,11 @@ func (r *PostgresRepository) Update(ctx context.Context, userID, id, tz string, 
 			name        = COALESCE($3, name),
 			description = COALESCE($4, description),
 			belt        = CASE WHEN $5::boolean THEN $6 ELSE belt END,
-			visibility  = COALESCE($7, visibility),
+			track       = CASE WHEN $7::boolean THEN $8 ELSE track END,
+			visibility  = COALESCE($9, visibility),
 			updated_at  = now()
 		WHERE id = $1 AND owner_user_id = $2`,
-		id, userID, in.Name, in.Description, in.SetBelt, in.Belt, in.Visibility)
+		id, userID, in.Name, in.Description, in.SetBelt, in.Belt, in.SetTrack, in.Track, in.Visibility)
 	if err != nil {
 		return nil, translate(err, "update")
 	}
@@ -438,7 +496,7 @@ func (r *PostgresRepository) Update(ctx context.Context, userID, id, tz string, 
 		return nil, r.absentOrForbidden(ctx, tx, userID, id)
 	}
 	if in.Items != nil {
-		if err := replaceItems(ctx, tx, id, in.Items); err != nil {
+		if err := replaceContent(ctx, tx, id, in.Phases, in.Items); err != nil {
 			return nil, err
 		}
 	}
@@ -522,43 +580,74 @@ func (r *PostgresRepository) Delete(ctx context.Context, userID, id string) erro
 	return tx.Commit(ctx)
 }
 
-// replaceItems rewrites the list wholesale.
+// replaceContent rewrites the phases and items wholesale, as one unit.
 //
 // Delete-then-insert rather than a diff, matching SetFocus and every other
 // client-owned list here: the client holds the desired state and re-sends it,
-// so a retry after a partial failure converges instead of duplicating. Position
-// is assigned from the slice order, so it is always dense and always matches
-// what the client sent.
-func replaceItems(ctx context.Context, tx pgx.Tx, id string, items []NewItem) error {
+// so a retry after a partial failure converges instead of duplicating. Order
+// is assigned from slice order — for phases and items both — so it is always
+// dense and always matches what the client sent.
+//
+// Items go before phases on the way out and after them on the way in, because
+// the composite FK points from item to phase.
+func replaceContent(ctx context.Context, tx pgx.Tx, id string, phases []NewPhase, items []NewItem) error {
 	if _, err := tx.Exec(ctx, `DELETE FROM curriculum_items WHERE curriculum_id = $1`, id); err != nil {
 		return fmt.Errorf("curriculum: clear items: %w", err)
 	}
-	if len(items) == 0 {
+	if _, err := tx.Exec(ctx, `DELETE FROM curriculum_phases WHERE curriculum_id = $1`, id); err != nil {
+		return fmt.Errorf("curriculum: clear phases: %w", err)
+	}
+	if len(phases) == 0 && len(items) == 0 {
 		return nil
 	}
-	// One batch rather than up to 60 sequential round trips, matching
+	// One batch rather than up to 170 sequential round trips, matching
 	// workout.insertItems.
 	batch := &pgx.Batch{}
+	for i, p := range phases {
+		batch.Queue(`
+			INSERT INTO curriculum_phases (curriculum_id, sort_order, title, description)
+			VALUES ($1, $2, $3, $4)`,
+			id, i, p.Title, p.Description)
+	}
 	for i, it := range items {
 		var (
-			tScored *int
-			tDef    *int
-			tSess   *int
-			minRate *float64
+			tScored  *int
+			tDef     *int
+			tSess    *int
+			minRate  *float64
+			tDrilled *int
 		)
 		if it.Criteria != nil {
 			tScored = it.Criteria.TargetScored
 			tDef, tSess, minRate = it.Criteria.TargetDefended, it.Criteria.TargetSessions, it.Criteria.MinHitRate
+			tDrilled = it.Criteria.TargetDrilledSessions
+		}
+		// The kind default lives here as well as in validation: an empty kind
+		// is a technique, which is what every client predating kinds sends.
+		kind := it.Kind
+		if kind == "" {
+			kind = "technique"
+		}
+		// NULL, not '', for a concept's technique column — the CHECK requires
+		// it, and an empty-string FK target would be a miss anyway.
+		var techniqueID *string
+		if it.TechniqueID != "" {
+			t := it.TechniqueID
+			techniqueID = &t
 		}
 		batch.Queue(`
 			INSERT INTO curriculum_items
-				(curriculum_id, technique_id, sort_order, notes,
-				 target_scored, target_defended, target_sessions, min_hit_rate)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-			id, it.TechniqueID, i, it.Notes, tScored, tDef, tSess, minRate)
+				(curriculum_id, kind, technique_id, title, sort_order, phase_order, notes,
+				 target_scored, target_defended, target_sessions, min_hit_rate,
+				 target_drilled_sessions)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+			id, kind, techniqueID, it.Title, i, it.Phase, it.Notes,
+			tScored, tDef, tSess, minRate, tDrilled)
 	}
 	results := tx.SendBatch(ctx, batch)
-	for range items {
+	// One Exec per queued statement — phases first, then items, matching the
+	// queue order above.
+	for i := 0; i < len(phases)+len(items); i++ {
 		if _, err := results.Exec(); err != nil {
 			// Closed before returning, or the transaction cannot be rolled
 			// back -- the batch owns the connection until it is.

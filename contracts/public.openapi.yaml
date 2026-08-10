@@ -2631,6 +2631,18 @@ components:
             is defensible: a volume threshold alone is satisfied by 25-from-30
             and 25-from-400 alike, and only the first is skill. Requires
             `target_scored`.
+        target_drilled_sessions:
+          type: integer
+          nullable: true
+          example: 6
+          description: >
+            Distinct sessions this must be DRILLED in — the criterion for the
+            movement fundamentals a beginner will never score with (a
+            breakfall, a shrimp). Sessions rather than volume, because forty
+            reps in one class is one class. The ONE criterion drilled evidence
+            counts toward; every other threshold still excludes practice. A
+            criterion needs at least one of `target_scored`, `target_defended`
+            and this.
 
     CurriculumProgress:
       type: object
@@ -2638,7 +2650,7 @@ components:
         The caller's evidence against one item's criteria, recomputed on every
         read and stored nowhere. Absent when the caller is not enrolled — there
         is no window to measure them over — and when the item has no criteria.
-      required: [scored, defended, sessions, attempts, mastered]
+      required: [scored, defended, sessions, attempts, drilled_sessions, mastered]
       properties:
         scored: { type: integer, example: 26 }
         defended: { type: integer, example: 9 }
@@ -2655,6 +2667,14 @@ components:
           description: >
             Null when `attempts` is zero. Zero from zero is not a rate, and
             rendering it as 0% would report a failure the athlete has not had.
+        drilled_sessions:
+          type: integer
+          example: 4
+          description: >
+            Distinct sessions in which this was drilled — what
+            `target_drilled_sessions` measures, reported even where no
+            criterion reads it so a client can show practice alongside live
+            use.
         mastered: { type: boolean }
 
     SequenceStep:
@@ -2806,15 +2826,53 @@ components:
           items:
             $ref: "#/components/schemas/SequenceStepWrite"
 
+    CurriculumPhase:
+      type: object
+      description: >
+        One named section of a curriculum — "Survive the bad places first" —
+        with the phase's objective and performance expectations in the
+        description. Items point at a phase via their `phase` index. Purely
+        structure: a phase has no criteria and no progress of its own, because
+        the progress rule already counts the criteria-bearing items inside it.
+      required: [order, title, description]
+      properties:
+        order: { type: integer, example: 0 }
+        title: { type: string, example: Mount — escape first }
+        description: { type: string }
+
     CurriculumItem:
       type: object
-      required: [technique_id, name, position, category, order, notes]
+      description: >
+        One entry. A `technique` item points into the shared library and may
+        carry mastery criteria; a `concept` item is authored text — "position
+        before submission", a graduation standard — and NEVER carries criteria,
+        because no evidence stream could measure one and nothing here is
+        completable by hand. Concepts therefore never count toward progress
+        either; the progress rule (countable = carries criteria) already
+        excludes them.
+      required: [kind, name, position, category, order, phase, notes]
       properties:
-        technique_id: { type: string, example: arm-drag }
-        name: { type: string, example: Arm Drag }
-        position: { type: string, example: Guard - Bottom }
-        category: { type: string, example: Sweep }
+        kind: { type: string, enum: [technique, concept] }
+        technique_id:
+          type: string
+          example: arm-drag
+          description: Absent on concept items, which point at nothing.
+        title:
+          type: string
+          description: >
+            The concept's own heading. Absent on technique items — their name
+            is the library's, and storing one here could disagree with it.
+        name: { type: string, example: Arm Drag, description: "From the library; empty on concepts." }
+        position: { type: string, example: Guard - Bottom, description: "From the library; empty on concepts." }
+        category: { type: string, example: Sweep, description: "From the library; empty on concepts." }
         order: { type: integer, example: 0 }
+        phase:
+          type: integer
+          nullable: true
+          description: >
+            Index into the curriculum's `phases` array, or null for an
+            unphased item — every curriculum predating phases is entirely
+            unphased, and that is a legal shape, not a broken one.
         notes: { type: string }
         criteria:
           allOf:
@@ -2865,6 +2923,15 @@ components:
             Which belt's fundamentals this is, or null for an athlete's own
             list. A HINT FOR ORDERING, never a gate — working white-belt
             fundamentals at purple is not a mistake.
+        track:
+          type: string
+          nullable: true
+          example: belt
+          description: >
+            Which browse section this belongs to — "belt", "foundations", and
+            whatever comes next. Same contract as `belt`: a grouping hint,
+            never a gate, and null for an athlete's own list, which lives
+            under "mine" rather than in any section.
         visibility: { type: string, enum: [private, public] }
         enrolled: { type: boolean }
         started_on:
@@ -2880,9 +2947,9 @@ components:
         item_count:
           type: integer
           description: >
-            How many techniques are in it. Present on the LIST as well as the
-            single read, so a card can say "12 techniques" without fetching
-            them.
+            How many items are in it — techniques AND concepts. Present on the
+            LIST as well as the single read, so a card can say "12 items"
+            without fetching them.
         countable_items:
           type: integer
           description: >
@@ -2906,6 +2973,13 @@ components:
             fact. That shipped once, in reverse: a card read `countable_items`
             when it too was absent, and told every athlete their roadmap was a
             reading list.
+        phases:
+          type: array
+          description: >
+            Present on a single read, absent from the list response — the same
+            lazy contract as `items`. Empty for a flat curriculum.
+          items:
+            $ref: "#/components/schemas/CurriculumPhase"
         items:
           type: array
           description: Present on a single read, absent from the list response.
@@ -2916,8 +2990,10 @@ components:
       type: object
       description: >
         Every field optional so PATCH can be partial; POST requires `name`.
-        Omitting `items` leaves the list alone, `[]` empties it, and a list
-        replaces it wholesale.
+        Omitting `items` leaves the content — items AND phases, which travel
+        as one unit because an item names its phase by index — alone, `[]`
+        empties it, and a list replaces it wholesale. Sending `phases` without
+        `items` is a 400 rather than a silent no-op.
 
 
         `id`, `editable`, `enrolled` and all progress are absent by design: the
@@ -2932,20 +3008,45 @@ components:
           description: >
             On PATCH, an explicit `null` CLEARS the belt while omitting the
             field leaves it alone — the two are different requests.
+        track:
+          type: string
+          nullable: true
+          description: Same PATCH semantics as `belt` — `null` clears, omission leaves alone.
         visibility: { type: string, enum: [private, public] }
-        items:
+        phases:
           type: array
-          maxItems: 60
+          maxItems: 20
           items:
             type: object
-            required: [technique_id]
+            required: [title]
             properties:
+              title: { type: string }
+              description: { type: string }
+        items:
+          type: array
+          maxItems: 150
+          items:
+            type: object
+            description: >
+              `kind` defaults to `technique`, which needs `technique_id` and
+              refuses `title` and takes any of the criteria fields; a
+              `concept` needs `title`, and refuses `technique_id` and every
+              criterion. A criterion needs at least one of `target_scored`,
+              `target_defended` and `target_drilled_sessions`.
+            properties:
+              kind: { type: string, enum: [technique, concept] }
               technique_id: { type: string }
+              title: { type: string }
+              phase:
+                type: integer
+                nullable: true
+                description: Index into the request's `phases` array, or null.
               notes: { type: string }
               target_scored: { type: integer, nullable: true }
               target_defended: { type: integer, nullable: true }
               target_sessions: { type: integer, nullable: true }
               min_hit_rate: { type: number, format: float, nullable: true }
+              target_drilled_sessions: { type: integer, nullable: true }
 
     ExerciseWrite:
       type: object

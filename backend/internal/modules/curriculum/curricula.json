@@ -3,6 +3,7 @@
     "id": "white-belt-basics",
     "name": "White belt basics",
     "belt": "white",
+    "track": "belt",
     "description": "The first year, in the order it actually goes wrong: get out of the bad places first, then stop losing the guard you have, then the handful of attacks that genuinely work at white belt — finishing with the pin you passed to and the one submission you can hit from it.",
     "items": [
       {
@@ -116,6 +117,7 @@
     "id": "blue-belt-basics",
     "name": "Blue belt: building a game",
     "belt": "blue",
+    "track": "belt",
     "description": "You already know how to survive — this belt is about choosing where the fight happens. One guard you play on purpose, one pass you trust, and attacks that connect to each other instead of arriving one at a time.",
     "items": [
       {
@@ -228,6 +230,7 @@
     "id": "purple-belt-basics",
     "name": "Purple belt: connections",
     "belt": "purple",
+    "track": "belt",
     "description": "Purple is less about new moves than about joining up the ones you already have. This one stops the leaks first, then takes a single guard from entry all the way to the back, and a single pass all the way to its counter.",
     "items": [
       {
@@ -334,6 +337,7 @@
     "id": "brown-belt-basics",
     "name": "Brown belt: one game, no leaks",
     "belt": "brown",
+    "track": "belt",
     "description": "Almost nothing here is new — it is material you have had for years, held to a standard nobody applies at blue. Nearly half of it is scored on attacks that never land rather than on ones you hit, and the rest is a single connected game where every escape goes somewhere and the pass, the back and the mount are one motion. It runs from the deepest hole outwards and finishes on your feet, where the round starts.",
     "items": [
       {

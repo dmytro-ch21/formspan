@@ -5934,8 +5934,9 @@ so far — no client renders one yet, so these are API-level scenarios.
 
 ## Curricula and roadmaps (`/v1/curricula`)
 
-Seven routes over three tables, and no screen on any of the three apps yet — so
-every scenario below is an API-level one until a client exists.
+Seven routes over four tables (curricula, phases, items, enrollments), and no
+screen on any of the three apps yet — so every scenario below is an API-level
+one until a client exists.
 
 Two properties decide how these read. A curriculum is an ordered set of
 techniques, and one whose items carry completion criteria is a **roadmap** — the
@@ -6079,7 +6080,7 @@ have been failing at.
 - An unknown technique id → `400`, never `500`, **and the whole write rolls
   back**. A partly-applied list leaves the athlete holding a curriculum they did
   not author; on create, no curriculum row may survive at all.
-- 60 items accepted, 61 refused.
+- 150 items accepted, 151 refused; 20 phases accepted, 21 refused.
 - Zero or negative targets → `400`. `min_hit_rate` of `0` or above `1` → `400`;
   `1.0` is accepted and means every attempt lands.
 - A body over 64 KB is refused rather than read. An authenticated user is still a
@@ -6094,6 +6095,59 @@ have been failing at.
   techniques today; assert the current behaviour so that the day a prune lands —
   positions already have one — the consequence is visible rather than
   discovered.
+
+### Phases, concept items, tracks, and the drilled criterion (2026-08-10)
+
+The structure a real syllabus has. A phase is a named, described section; a
+`concept` item is authored text (a principle, a graduation standard) with no
+library pointer; `track` is the browse-section hint; and
+`target_drilled_sessions` is the one criterion practice counts toward.
+
+- **Phases and items round-trip together.** Create with two phases and items
+  pointing at them by index → the read returns `phases` ordered with dense
+  `order` from zero, and each item's `phase` index intact. A flat create (no
+  phases) still works — every pre-existing curriculum is unphased and legal.
+- An item whose `phase` index is out of range — negative, past the end, or any
+  index when no phases were sent — → `400`. The stale-index case (items kept,
+  `phases` forgotten) is the one a client actually hits.
+- An untitled phase → `400`.
+- **A metadata-only PATCH leaves phases alone.** Rename a curriculum without
+  sending `items`: phases and item-phase assignments survive. Phases are
+  content, and they travel with `items` — sending `items` without `phases`
+  replaces the structure with none (flat), which is the documented contract,
+  not a bug.
+- Sending `phases` WITHOUT `items` → `400`, not a silent no-op. The phases
+  would otherwise be thrown away with a `200`, which is a client bug nobody
+  gets to see.
+- **A concept item is text and nothing else.** `kind: concept` needs a `title`,
+  refuses `technique_id`, and refuses every criterion field with `400` — no
+  evidence stream could measure one, and nothing here is completable by hand.
+  A technique item carrying its own `title` → `400` (its name is the
+  library's).
+- **A concept never counts toward progress.** A curriculum of one concept and
+  one criteria-bearing technique has `countable_items: 1`. A concepts-only
+  curriculum has no progress at all — the same absence-of-a-number assertion
+  as the reading list.
+- Concept items come back with `kind: "concept"`, their `title`, empty
+  library fields, and no `technique_id` — and technique items still read
+  exactly as they did before the kinds existed (`kind: "technique"`,
+  no `title`), which is the backward-compatibility claim.
+- **`target_drilled_sessions` counts SPREAD, not volume.** One class with
+  `drilled, count: 40` → `drilled_sessions: 1`, not mastered against a target
+  of 3; three separate classes → mastered. The volume-satisfies-it
+  implementation passes every other drilled scenario, which is why the
+  one-big-class case is the assertion.
+- Drilled spread never leaks into the LIVE session spread: those three drilled
+  classes leave `sessions: 0`, so `target_sessions` still cannot be satisfied
+  by practice.
+- A drilled-only criterion is legal (the movement-fundamentals case) and
+  completes on drilled evidence alone. But `min_hit_rate` anchored only on a
+  drilled target → `400` — a rate still divides the offensive attempt count.
+- `drilled_sessions` appears in every progress block, even where no criterion
+  reads it — a client may show practice alongside live use.
+- **`track` copies `belt`'s PATCH semantics exactly**: omitted leaves it,
+  explicit `null` clears it, and it never gates anything. The four seeded
+  belt syllabuses read `track: "belt"`.
 
 ### Auth / security
 

@@ -12,6 +12,16 @@ import (
 // without a database wherever possible, because a check that needs
 // TEST_DATABASE_URL is a check that skipped silently for months.
 
+// allItems walks a curriculum the way the seeder does: flat items first, then
+// each phase's, so every shape check below covers both formats.
+func allItems(c SeedCurriculum) []SeedItem {
+	out := append([]SeedItem{}, c.Items...)
+	for _, p := range c.Phases {
+		out = append(out, p.Items...)
+	}
+	return out
+}
+
 func TestTheSeedFileParsesAndIsShaped(t *testing.T) {
 	data, err := SeedData()
 	if err != nil {
@@ -23,8 +33,8 @@ func TestTheSeedFileParsesAndIsShaped(t *testing.T) {
 
 	seen := map[string]bool{}
 	for _, c := range data {
-		if c.ID == "" || c.Name == "" || c.Belt == "" {
-			t.Errorf("%q: id, name and belt are all required", c.ID)
+		if c.ID == "" || c.Name == "" {
+			t.Errorf("%q: id and name are required", c.ID)
 		}
 		if seen[c.ID] {
 			// Two rows with one id means the second silently overwrites the
@@ -33,13 +43,47 @@ func TestTheSeedFileParsesAndIsShaped(t *testing.T) {
 		}
 		seen[c.ID] = true
 
-		if len(c.Items) == 0 {
+		for i, p := range c.Phases {
+			if p.Title == "" {
+				// curriculum_phases_title_nonempty, caught before a deploy.
+				t.Errorf("%s phase %d has no title", c.ID, i)
+			}
+		}
+
+		items := allItems(c)
+		if len(items) == 0 {
 			t.Errorf("%q has no items", c.ID)
 		}
 		inThis := map[string]bool{}
-		for i, it := range c.Items {
-			if it.TechniqueID == "" {
-				t.Errorf("%s item %d: empty technique_id", c.ID, i)
+		for i, it := range items {
+			// The shape rules the curriculum_items_kind_shape CHECK enforces,
+			// caught here rather than on a deploy.
+			switch it.Kind {
+			case "", "technique":
+				if it.TechniqueID == "" {
+					t.Errorf("%s item %d: empty technique_id", c.ID, i)
+				}
+				if it.Title != "" {
+					t.Errorf("%s item %d (%s): a technique's name is the library's, not %q",
+						c.ID, i, it.TechniqueID, it.Title)
+				}
+			case "concept":
+				if it.Title == "" {
+					t.Errorf("%s item %d: a concept needs a title", c.ID, i)
+				}
+				if it.TechniqueID != "" {
+					t.Errorf("%s item %d (%s): a concept points at nothing", c.ID, i, it.Title)
+				}
+				if it.TargetScored != nil || it.TargetDefended != nil ||
+					it.TargetSessions != nil || it.MinHitRate != nil ||
+					it.TargetDrilledSessions != nil {
+					t.Errorf("%s item %d (%s): a concept cannot carry criteria — no evidence stream could measure it",
+						c.ID, i, it.Title)
+				}
+				continue
+			default:
+				t.Errorf("%s item %d: unknown kind %q", c.ID, i, it.Kind)
+				continue
 			}
 			if inThis[it.TechniqueID] {
 				// curriculum_items_technique_unique would reject this at seed
@@ -59,8 +103,9 @@ func TestEverySeededCriterionIsLegal(t *testing.T) {
 		t.Fatalf("parse: %v", err)
 	}
 	for _, c := range data {
-		for _, it := range c.Items {
-			hasVolume := it.TargetScored != nil || it.TargetDefended != nil
+		for _, it := range allItems(c) {
+			hasVolume := it.TargetScored != nil || it.TargetDefended != nil ||
+				it.TargetDrilledSessions != nil
 
 			// curriculum_items_hit_rate_needs_volume: a rate divides the
 			// offensive attempt count, so on a defence-only item it would gate
@@ -69,16 +114,18 @@ func TestEverySeededCriterionIsLegal(t *testing.T) {
 				t.Errorf("%s/%s: min_hit_rate without target_scored", c.ID, it.TechniqueID)
 			}
 			// curriculum_items_criteria_anchored: a criterion is anchored on
-			// volume or it is not a criterion. Without this an item could be
-			// completed on a 100%% hit rate from a single score.
+			// volume — offensive, defensive, or drilled spread — or it is not a
+			// criterion. Without this an item could be completed on a 100%% hit
+			// rate from a single score.
 			if !hasVolume && (it.TargetSessions != nil || it.MinHitRate != nil) {
 				t.Errorf("%s/%s: criteria with no volume anchor", c.ID, it.TechniqueID)
 			}
 			// curriculum_items_targets_positive
 			for name, v := range map[string]*int{
-				"target_scored":   it.TargetScored,
-				"target_defended": it.TargetDefended,
-				"target_sessions": it.TargetSessions,
+				"target_scored":           it.TargetScored,
+				"target_defended":         it.TargetDefended,
+				"target_sessions":         it.TargetSessions,
+				"target_drilled_sessions": it.TargetDrilledSessions,
 			} {
 				if v != nil && *v <= 0 {
 					t.Errorf("%s/%s: %s is %d, must be positive", c.ID, it.TechniqueID, name, *v)
@@ -124,7 +171,11 @@ func TestEverySeededTechniqueExistsInTheLibrary(t *testing.T) {
 		t.Fatalf("parse: %v", err)
 	}
 	for _, c := range data {
-		for _, it := range c.Items {
+		for _, it := range allItems(c) {
+			if it.Kind == "concept" {
+				// A concept points at nothing, so there is nothing to check.
+				continue
+			}
 			var exists bool
 			err := pool.QueryRow(context.Background(),
 				`SELECT true FROM techniques WHERE id = $1`, it.TechniqueID).Scan(&exists)

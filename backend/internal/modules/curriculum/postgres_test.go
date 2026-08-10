@@ -1092,3 +1092,177 @@ func TestWorkingReturnsOnlyActiveEnrollmentsWithProgress(t *testing.T) {
 		t.Fatal("items or progress missing — Today cannot say what to work next without them")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Phases, concepts and the drilled criterion — the 2026-08-10 redesign.
+// ---------------------------------------------------------------------------
+
+func TestPhasesAndConceptsRoundTrip(t *testing.T) {
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	cleanupUser(t, pool, "phases1")
+	tech := seedTechnique(t, pool, "test-trap-roll")
+
+	c, err := repo.Create(ctx, "phases1", "", NewCurriculum{
+		Name:  "White belt",
+		Track: strp("belt"),
+		Phases: []NewPhase{
+			{Title: "Survive", Description: "Get out of the bad places first."},
+			{Title: "Attack"},
+		},
+		Items: []NewItem{
+			{Kind: "concept", Title: "Position before submission", Phase: intp(0)},
+			{TechniqueID: tech, Phase: intp(0), Criteria: &Criteria{TargetScored: intp(25)}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if c.Track == nil || *c.Track != "belt" {
+		t.Fatalf("track did not survive: %v", c.Track)
+	}
+	if len(c.Phases) != 2 || c.Phases[0].Title != "Survive" || c.Phases[1].Order != 1 {
+		t.Fatalf("phases did not round-trip: %+v", c.Phases)
+	}
+	if len(c.Items) != 2 {
+		t.Fatalf("items: got %d, want 2", len(c.Items))
+	}
+	concept, technique := c.Items[0], c.Items[1]
+	if concept.Kind != "concept" || concept.Title != "Position before submission" ||
+		concept.TechniqueID != "" || concept.Phase == nil || *concept.Phase != 0 {
+		t.Fatalf("concept did not round-trip: %+v", concept)
+	}
+	// A concept can never be countable — the progress rule must not see it.
+	if concept.Countable() || concept.Criteria != nil {
+		t.Fatal("a concept item carries criteria")
+	}
+	if technique.Kind != "technique" || technique.Name == "" || !technique.Countable() {
+		t.Fatalf("technique item wrong: %+v", technique)
+	}
+	if c.CountableItems != 1 {
+		t.Fatalf("countable = %d, want 1 — the concept must not count", c.CountableItems)
+	}
+
+	// Replacing content replaces phases and items together.
+	upd, err := repo.Update(ctx, "phases1", c.ID, "", Update{
+		Phases: []NewPhase{{Title: "Only phase"}},
+		Items:  []NewItem{{TechniqueID: tech, Phase: intp(0)}},
+	})
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if len(upd.Phases) != 1 || upd.Phases[0].Title != "Only phase" || len(upd.Items) != 1 {
+		t.Fatalf("replace did not take: %+v / %+v", upd.Phases, upd.Items)
+	}
+}
+
+func TestUpdatingWithoutItemsLeavesPhasesAlone(t *testing.T) {
+	// Items nil means "leave the content alone", and phases are content — a
+	// metadata rename must not strip a curriculum's structure.
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	cleanupUser(t, pool, "phases2")
+	tech := seedTechnique(t, pool, "test-phase-keep")
+
+	c, err := repo.Create(ctx, "phases2", "", NewCurriculum{
+		Name:   "Structured",
+		Phases: []NewPhase{{Title: "Survive"}},
+		Items:  []NewItem{{TechniqueID: tech, Phase: intp(0)}},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	upd, err := repo.Update(ctx, "phases2", c.ID, "", Update{Name: strp("Renamed")})
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if len(upd.Phases) != 1 || len(upd.Items) != 1 || upd.Items[0].Phase == nil {
+		t.Fatalf("metadata rename disturbed the content: %+v / %+v", upd.Phases, upd.Items)
+	}
+}
+
+func TestADrilledCriterionCountsSpreadNotVolume(t *testing.T) {
+	// The movement-fundamentals criterion: drilled across N separate classes.
+	// Forty reps in one class is one class — volume must not satisfy it.
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	cleanupUser(t, pool, "drill1")
+	tech := seedTechnique(t, pool, "test-breakfall")
+
+	c, err := repo.Create(ctx, "drill1", "", NewCurriculum{
+		Name: "Fundamentals",
+		Items: []NewItem{{TechniqueID: tech,
+			Criteria: &Criteria{TargetDrilledSessions: intp(3)}}},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := repo.Enroll(ctx, "drill1", c.ID, ""); err != nil {
+		t.Fatalf("enroll: %v", err)
+	}
+	backdateEnrollment(t, pool, "drill1", 60)
+
+	// One class, forty reps: one session's worth of spread.
+	logEvidence(t, pool, "drill1", tech, 5, map[string]int{"drilled": 40})
+	got, err := repo.Get(ctx, "drill1", c.ID, "")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Items[0].Progress.DrilledSessions != 1 {
+		t.Fatalf("drilled_sessions = %d, want 1 — volume is leaking into spread",
+			got.Items[0].Progress.DrilledSessions)
+	}
+	if got.Items[0].Progress.Mastered {
+		t.Fatal("mastered on one class")
+	}
+
+	// Two more classes clears the spread of three.
+	logEvidence(t, pool, "drill1", tech, 4, map[string]int{"drilled": 1})
+	logEvidence(t, pool, "drill1", tech, 3, map[string]int{"drilled": 1})
+	got, err = repo.Get(ctx, "drill1", c.ID, "")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if !got.Items[0].Progress.Mastered {
+		t.Fatalf("three drilled classes should clear a target of three: %+v", got.Items[0].Progress)
+	}
+	// And drilled spread must not leak the other way, into the LIVE session
+	// spread the older criteria read.
+	if got.Items[0].Progress.Sessions != 0 {
+		t.Fatalf("live sessions = %d, want 0 — drilling counted as live use",
+			got.Items[0].Progress.Sessions)
+	}
+}
+
+func TestTheTrackCanBeClearedAndNotOnlySet(t *testing.T) {
+	// Track copies belt's PATCH semantics: explicit null clears, omission
+	// leaves alone. Same test as the belt one, same reason.
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	cleanupUser(t, pool, "track1")
+
+	c, err := repo.Create(ctx, "track1", "", NewCurriculum{Name: "Mine", Track: strp("foundations")})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// An unrelated update leaves it alone.
+	upd, err := repo.Update(ctx, "track1", c.ID, "", Update{Name: strp("Renamed")})
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if upd.Track == nil || *upd.Track != "foundations" {
+		t.Fatalf("unrelated update disturbed track: %v", upd.Track)
+	}
+	// An explicit clear clears it.
+	upd, err = repo.Update(ctx, "track1", c.ID, "", Update{SetTrack: true})
+	if err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if upd.Track != nil {
+		t.Fatalf("track survived an explicit clear: %v", *upd.Track)
+	}
+}

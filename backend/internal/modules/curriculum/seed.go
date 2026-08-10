@@ -23,21 +23,43 @@ var seedJSON []byte
 // `Curriculum` type: that one carries per-caller state (enrolled, editable,
 // progress) which is meaningless in a content file, and reusing it would invite
 // somebody to author a value for it.
+//
+// Two content shapes, and a file may use either per curriculum: flat `items`
+// (the original format — every existing syllabus), or `phases` each carrying
+// its own items (the phase-structured belt curricula). Both at once is also
+// legal; the flat items come first, unphased.
 type SeedCurriculum struct {
-	ID          string     `json:"id"`
-	Name        string     `json:"name"`
-	Belt        string     `json:"belt"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Belt string `json:"belt"`
+	// Track is the browse section — "belt", "foundations". Empty seeds NULL,
+	// matching Belt's treatment one field up.
+	Track       string      `json:"track"`
+	Description string      `json:"description"`
+	Phases      []SeedPhase `json:"phases"`
+	Items       []SeedItem  `json:"items"`
+}
+
+type SeedPhase struct {
+	Title       string     `json:"title"`
 	Description string     `json:"description"`
 	Items       []SeedItem `json:"items"`
 }
 
 type SeedItem struct {
-	TechniqueID    string   `json:"technique_id"`
-	Notes          string   `json:"notes"`
-	TargetScored   *int     `json:"target_scored"`
-	TargetDefended *int     `json:"target_defended"`
-	TargetSessions *int     `json:"target_sessions"`
-	MinHitRate     *float64 `json:"min_hit_rate"`
+	// Kind is "technique" or "concept"; empty means technique, so the original
+	// flat format keeps meaning what it meant.
+	Kind        string `json:"kind"`
+	TechniqueID string `json:"technique_id"`
+	// Title is a concept's heading; empty on technique items, whose name is
+	// the library's.
+	Title                 string   `json:"title"`
+	Notes                 string   `json:"notes"`
+	TargetScored          *int     `json:"target_scored"`
+	TargetDefended        *int     `json:"target_defended"`
+	TargetSessions        *int     `json:"target_sessions"`
+	MinHitRate            *float64 `json:"min_hit_rate"`
+	TargetDrilledSessions *int     `json:"target_drilled_sessions"`
 }
 
 // SeedData parses the embedded syllabuses. Exported so a test can read them
@@ -93,20 +115,30 @@ func Seed(ctx context.Context, pool *pgxpool.Pool) (int, error) {
 }
 
 func seedOne(ctx context.Context, tx pgx.Tx, c SeedCurriculum) error {
+	// Empty-to-NULL for belt and track both: "" is not a belt and not a
+	// section, and a sentinel empty string would sort among the real ones.
+	var belt, track *string
+	if c.Belt != "" {
+		belt = &c.Belt
+	}
+	if c.Track != "" {
+		track = &c.Track
+	}
 	_, err := tx.Exec(ctx, `
-		INSERT INTO curricula (id, owner_user_id, source, name, description, belt, visibility)
-		VALUES ($1, NULL, 'seed', $2, $3, $4, 'public')
+		INSERT INTO curricula (id, owner_user_id, source, name, description, belt, track, visibility)
+		VALUES ($1, NULL, 'seed', $2, $3, $4, $5, 'public')
 		ON CONFLICT (id) DO UPDATE SET
 			name        = excluded.name,
 			description = excluded.description,
 			belt        = excluded.belt,
+			track       = excluded.track,
 			updated_at  = now()
 		-- Scoped to seed rows. Without this, an id collision with something the
 		-- admin console authored would let a deploy silently overwrite it --
 		-- which is the exact failure 000032's source column exists to prevent,
 		-- and the reason that column was added before there was a second writer.
 		WHERE curricula.source = 'seed'`,
-		c.ID, c.Name, c.Description, c.Belt)
+		c.ID, c.Name, c.Description, belt, track)
 	if err != nil {
 		return translate(err, "seed curriculum "+c.ID)
 	}
@@ -129,19 +161,48 @@ func seedOne(ctx context.Context, tx pgx.Tx, c SeedCurriculum) error {
 		return nil
 	}
 
+	// Items first, phases second: the composite FK points from item to phase.
 	if _, err := tx.Exec(ctx,
 		`DELETE FROM curriculum_items WHERE curriculum_id = $1`, c.ID); err != nil {
 		return fmt.Errorf("curriculum: clear seed items for %s: %w", c.ID, err)
 	}
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM curriculum_phases WHERE curriculum_id = $1`, c.ID); err != nil {
+		return fmt.Errorf("curriculum: clear seed phases for %s: %w", c.ID, err)
+	}
 
-	for i, it := range c.Items {
+	for i, p := range c.Phases {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO curriculum_phases (curriculum_id, sort_order, title, description)
+			VALUES ($1, $2, $3, $4)`,
+			c.ID, i, p.Title, p.Description); err != nil {
+			return fmt.Errorf("curriculum: seed %s phase %d (%s): %w", c.ID, i, p.Title, err)
+		}
+	}
+
+	// One dense sort order across the whole curriculum: flat items first,
+	// unphased, then each phase's items in phase order.
+	order := 0
+	insert := func(it SeedItem, phase *int) error {
+		kind := it.Kind
+		if kind == "" {
+			kind = "technique"
+		}
+		// NULL, not '', for a concept's technique column — the CHECK requires
+		// it.
+		var techniqueID *string
+		if it.TechniqueID != "" {
+			techniqueID = &it.TechniqueID
+		}
 		_, err := tx.Exec(ctx, `
 			INSERT INTO curriculum_items
-				(curriculum_id, technique_id, sort_order, notes,
-				 target_scored, target_defended, target_sessions, min_hit_rate)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-			c.ID, it.TechniqueID, i, it.Notes,
-			it.TargetScored, it.TargetDefended, it.TargetSessions, it.MinHitRate)
+				(curriculum_id, kind, technique_id, title, sort_order, phase_order, notes,
+				 target_scored, target_defended, target_sessions, min_hit_rate,
+				 target_drilled_sessions)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+			c.ID, kind, techniqueID, it.Title, order, phase, it.Notes,
+			it.TargetScored, it.TargetDefended, it.TargetSessions, it.MinHitRate,
+			it.TargetDrilledSessions)
 		if err != nil {
 			// Named loudly. The overwhelmingly likely cause is a technique_id
 			// that is not in the library -- a typo in the JSON, or a technique
@@ -149,7 +210,22 @@ func seedOne(ctx context.Context, tx pgx.Tx, c SeedCurriculum) error {
 			// reported as "invalid input" would send the next person looking at
 			// the criteria instead of the id.
 			return fmt.Errorf(
-				"curriculum: seed %s item %d (%s): %w", c.ID, i, it.TechniqueID, err)
+				"curriculum: seed %s item %d (%s): %w", c.ID, order, it.TechniqueID+it.Title, err)
+		}
+		order++
+		return nil
+	}
+	for _, it := range c.Items {
+		if err := insert(it, nil); err != nil {
+			return err
+		}
+	}
+	for pi, p := range c.Phases {
+		phase := pi
+		for _, it := range p.Items {
+			if err := insert(it, &phase); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

@@ -51,7 +51,12 @@ type Curriculum struct {
 	// bjj_promotions, so "Blue belt basics" can surface first — but working
 	// white-belt fundamentals at purple is not a mistake and nothing here
 	// refuses it.
-	Belt        *string `json:"belt"`
+	Belt *string `json:"belt"`
+	// Track is which browse section this belongs to — "belt", "foundations",
+	// and whatever comes next. Same contract as Belt: a hint for grouping,
+	// never a gate, and nil for an athlete's own list, which lives under
+	// "mine" rather than in any section.
+	Track       *string `json:"track"`
 	Description string  `json:"description"`
 	Visibility  string  `json:"visibility"`
 	// Enrolled reports whether the CALLER is working this one, and StartedOn
@@ -60,13 +65,20 @@ type Curriculum struct {
 	StartedOn *string   `json:"started_on"` // "YYYY-MM-DD", nil unless enrolled
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+	// Phases is the curriculum's internal structure — "Survive the bad places
+	// first", with the objective and performance expectations in the
+	// description. Same lazy contract as Items: nil on list responses,
+	// populated on a single read. Items point INTO this array via their Phase
+	// index; an item with a nil Phase is unphased, and a flat curriculum has
+	// no phases at all.
+	Phases []Phase `json:"phases,omitempty"`
 	// Items is nil on list responses and populated on a single read. A
 	// syllabus is a dozen techniques and a list is a dozen syllabuses; sending
 	// every item on every list read is the N+1 in its lazy form.
 	Items []Item `json:"items,omitempty"`
-	// ItemCount is how many techniques are in it, present on BOTH the list and
-	// the single read -- a card has to be able to say "12 techniques" without
-	// fetching all of them.
+	// ItemCount is how many items are in it — techniques AND concepts —
+	// present on BOTH the list and the single read: a card has to be able to
+	// say "12 items" without fetching all of them.
 	ItemCount int `json:"item_count"`
 	// CountableItems and MasteredItems ship THE PROGRESS RULE rather than
 	// leaving each client to invent it.
@@ -81,17 +93,37 @@ type Curriculum struct {
 	MasteredItems  int `json:"mastered_items"`
 }
 
-// Item is one technique in the list, plus the criteria that decide when it is
-// mastered and the caller's progress toward them.
+// Phase is one named section of a curriculum. Order is its identity — items
+// reference a phase by this number — and Description is where the phase's
+// objective and performance expectations live.
+type Phase struct {
+	Order       int    `json:"order"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+}
+
+// Item is one entry in the list. A `technique` item points into the shared
+// library and may carry mastery criteria; a `concept` item is authored text —
+// "position before submission", a graduation standard — and never carries
+// criteria, because no evidence stream could measure one and nothing here may
+// be completable by hand.
 type Item struct {
-	TechniqueID string `json:"technique_id"`
+	Kind string `json:"kind"`
+	// TechniqueID is empty on concept items, which point at nothing.
+	TechniqueID string `json:"technique_id,omitempty"`
+	// Title is the concept's own heading, and empty on technique items — their
+	// name is the library's, and storing one here could disagree with it.
+	Title string `json:"title,omitempty"`
 	// Name, Position and Category come from the shared library so a client can
 	// render the list without a second fetch — same reason Focus carries them.
+	// All empty on concept items.
 	Name     string `json:"name"`
 	Position string `json:"position"`
 	Category string `json:"category"`
 	Order    int    `json:"order"`
-	Notes    string `json:"notes"`
+	// Phase is the index of the phase this item belongs to, nil when unphased.
+	Phase *int   `json:"phase"`
+	Notes string `json:"notes"`
 	// Criteria is nil when this item has no completion criterion, which is what
 	// makes the same table serve a plain reading list and a roadmap.
 	Criteria *Criteria `json:"criteria"`
@@ -135,6 +167,16 @@ type Criteria struct {
 	// DISJOINT — `attempted` means "tried it live, it didn't land", not total
 	// tries — so this is a real hit rate rather than an estimate.
 	MinHitRate *float64 `json:"min_hit_rate"`
+	// TargetDrilledSessions is distinct sessions carrying a `drilled` tag for
+	// this technique, since enrolling — the criterion for the movement
+	// fundamentals a beginner will never score with (a breakfall, a shrimp).
+	//
+	// SESSIONS, not volume, on purpose: drilling a movement forty times in one
+	// class is one class, and spread across weeks is the only claim a drilled
+	// criterion can honestly make. This is the ONE place drilled evidence
+	// counts — every other criterion excludes it, because practice must not
+	// satisfy a bar about live use.
+	TargetDrilledSessions *int `json:"target_drilled_sessions"`
 }
 
 // Progress is the caller's evidence against one item's criteria.
@@ -152,8 +194,12 @@ type Progress struct {
 	Attempts int `json:"attempts"`
 	// HitRate is nil when Attempts is zero. Zero-from-zero is not a rate, and
 	// rendering it as 0% would report a failure the athlete has not had.
-	HitRate  *float64 `json:"hit_rate"`
-	Mastered bool     `json:"mastered"`
+	HitRate *float64 `json:"hit_rate"`
+	// DrilledSessions is distinct sessions in which this was drilled — the
+	// evidence TargetDrilledSessions measures, and reported even where no
+	// criterion reads it, so a client can show practice alongside live use.
+	DrilledSessions int  `json:"drilled_sessions"`
+	Mastered        bool `json:"mastered"`
 }
 
 // Met reports whether this progress clears every criterion.
@@ -169,6 +215,9 @@ func (p Progress) Met(c Criteria) bool {
 		return false
 	}
 	if c.TargetSessions != nil && p.Sessions < *c.TargetSessions {
+		return false
+	}
+	if c.TargetDrilledSessions != nil && p.DrilledSessions < *c.TargetDrilledSessions {
 		return false
 	}
 	if c.MinHitRate != nil {
@@ -227,12 +276,20 @@ const (
 // Bounds. Every list write is client-owned and replaced wholesale, so these
 // are the only thing standing between a typo and an unbounded row count.
 const (
-	// MaxItems is generous next to a belt syllabus (a dozen or so) and far
-	// under anything that would make the progress query expensive.
-	MaxItems = 60
-	// MaxBody is the same ceiling the other small writes here use, raised for
-	// the item array.
-	MaxBody = 64 << 10
+	// MaxItems was 60 when every item was a measurable technique. A
+	// phase-structured belt curriculum is mostly CONCEPT items — cheap text
+	// that never enters the progress query — so the ceiling rises with the
+	// redesign. Still far under anything that would make the progress query
+	// expensive, because that query only ever sees the technique items.
+	MaxItems = 150
+	// MaxPhases is generous next to the real material — the largest belt
+	// curriculum drafted has eleven.
+	MaxPhases = 20
+	// MaxBody rose with MaxItems: 150 items plus authored phase prose can
+	// brush 64 KB, and the failure there is a truncated decode reported as
+	// "invalid JSON body" — deterministic but misleading. Still trivially
+	// bounded.
+	MaxBody = 128 << 10
 	// maxList caps the list response.
 	//
 	// api-conventions.md is explicit that a list endpoint without a LIMIT
@@ -250,7 +307,9 @@ type NewCurriculum struct {
 	Name        string
 	Description string
 	Belt        *string
+	Track       *string
 	Visibility  string
+	Phases      []NewPhase
 	Items       []NewItem
 }
 
@@ -263,17 +322,39 @@ type Update struct {
 	// SetBelt distinguishes "leave it alone" from "clear it". Belt is only
 	// consulted when SetBelt is true, so a nil Belt with SetBelt set means
 	// null -- which a lone *string could not express.
-	SetBelt    bool
-	Belt       *string
+	SetBelt bool
+	Belt    *string
+	// Track gets the same treatment as Belt, for the same reason.
+	SetTrack   bool
+	Track      *string
 	Visibility *string
-	Items      []NewItem
+	// Items nil leaves the CONTENT — items and phases together — alone;
+	// non-nil replaces both wholesale. They travel as one because an item
+	// names its phase by index into the accompanying array: replacing items
+	// against somebody's idea of the previous phases is exactly the
+	// half-updated state wholesale replacement exists to rule out. Phases is
+	// only consulted when Items is non-nil.
+	Phases []NewPhase
+	Items  []NewItem
+}
+
+// NewPhase is one phase as a client sends it. Order is implied by array
+// position, exactly as item order is.
+type NewPhase struct {
+	Title       string
+	Description string
 }
 
 // NewItem is one item as a client sends it. The library fields (name, position,
 // category) are deliberately absent — they are the library's, and accepting
 // them would let a client store a name that disagrees with the catalog.
 type NewItem struct {
+	// Kind is "technique" or "concept"; empty means technique, which is what
+	// every client predating the kinds sends.
+	Kind        string
 	TechniqueID string
+	Title       string
+	Phase       *int
 	Notes       string
 	Criteria    *Criteria
 }
@@ -281,19 +362,48 @@ type NewItem struct {
 // ValidVisibility guards the two the schema allows.
 func ValidVisibility(v string) bool { return v == "private" || v == "public" }
 
-// ValidateItems checks what the database cannot, and returns the first problem.
+// ValidateContent checks what the database cannot, and returns the first
+// problem. Phases and items are validated together because an item names its
+// phase by index into the array it arrived with.
 //
 // The CHECK constraints catch most of this, but a constraint violation reaches
 // the client as a generic "invalid input" with no indication of which item —
 // and a curriculum is dozens of items deep, so "one of them is wrong" is not a
 // usable error.
-func ValidateItems(items []NewItem) error {
+func ValidateContent(phases []NewPhase, items []NewItem) error {
+	if len(phases) > MaxPhases {
+		return ErrInvalidInput
+	}
+	for _, p := range phases {
+		// Mirrors curriculum_phases_title_nonempty.
+		if p.Title == "" {
+			return ErrInvalidInput
+		}
+	}
 	if len(items) > MaxItems {
 		return ErrInvalidInput
 	}
 	seen := make(map[string]struct{}, len(items))
 	for _, it := range items {
-		if it.TechniqueID == "" {
+		// Mirrors the phase FK: an index outside the array names a phase that
+		// does not exist.
+		if it.Phase != nil && (*it.Phase < 0 || *it.Phase >= len(phases)) {
+			return ErrInvalidInput
+		}
+		// Mirrors curriculum_items_kind_shape. A concept is authored text and
+		// nothing else; a technique is a library pointer and never carries its
+		// own title.
+		switch it.Kind {
+		case "concept":
+			if it.TechniqueID != "" || it.Title == "" || it.Criteria != nil {
+				return ErrInvalidInput
+			}
+			continue
+		case "", "technique":
+			if it.TechniqueID == "" || it.Title != "" {
+				return ErrInvalidInput
+			}
+		default:
 			return ErrInvalidInput
 		}
 		// Mirrors curriculum_items_technique_unique. Caught here so the client
@@ -307,8 +417,9 @@ func ValidateItems(items []NewItem) error {
 		}
 		c := it.Criteria
 		// Mirrors curriculum_items_criteria_anchored: a criterion is anchored
-		// on volume, offensive or defensive, or it is not a criterion.
-		if c.TargetScored == nil && c.TargetDefended == nil {
+		// on volume — offensive, defensive, or drilled spread — or it is not a
+		// criterion.
+		if c.TargetScored == nil && c.TargetDefended == nil && c.TargetDrilledSessions == nil {
 			return ErrInvalidInput
 		}
 		// Mirrors curriculum_items_hit_rate_needs_volume. A rate divides the
@@ -324,6 +435,9 @@ func ValidateItems(items []NewItem) error {
 			return ErrInvalidInput
 		}
 		if c.TargetSessions != nil && *c.TargetSessions <= 0 {
+			return ErrInvalidInput
+		}
+		if c.TargetDrilledSessions != nil && *c.TargetDrilledSessions <= 0 {
 			return ErrInvalidInput
 		}
 		if c.MinHitRate != nil && (*c.MinHitRate <= 0 || *c.MinHitRate > 1) {
