@@ -33,12 +33,26 @@ export type Profile = {
    * found out.
    */
   share_training_with_friends: boolean;
+  /**
+   * How MUCH of a shared session travels — the numbers alone, or the exercise
+   * and technique list with them.
+   *
+   * SUBORDINATE to the switch above: it does nothing while that one is off,
+   * which is why the settings screen dims it there rather than letting an
+   * athlete configure a disclosure that is not happening.
+   *
+   * Optional on the type only so a client built against an older response
+   * still parses; read it as `?? false`, never assume it is present. False is
+   * the safe reading either way — a privacy switch that fails open is not one.
+   */
+  share_training_details?: boolean;
 };
 
 /** The fields the edit screen can change. Omitted keys are left alone. */
 export type ProfilePatch = Partial<{
   track_effort: boolean;
   share_training_with_friends: boolean;
+  share_training_details: boolean;
   /** Claim or rename only — never null. The server treats null as "leave
    *  unchanged" (the profile-wide COALESCE contract), so a clear cannot be
    *  expressed and the save path must OMIT the key rather than null it. */

@@ -1,5 +1,6 @@
 import { apiRequest } from './apiRequest';
 import { formatDuration } from './history';
+import type { CardData } from './sessionCard';
 import { formatVolume, type UnitSystem } from './units';
 import type { TokenGetter } from './useAuthToken';
 
@@ -38,6 +39,39 @@ export type FeedItem = {
   ended_at: string;
   working_sets: number;
   tonnage_kg: number;
+  /**
+   * What was actually done — up to five exercises or techniques.
+   *
+   * EMPTY unless the owner turned `share_training_details` on, which is a
+   * second opt-in separate from the one that puts them in the feed at all.
+   * Empty rather than absent, and rendered identically to an empty session on
+   * purpose: a client that drew "this athlete has details hidden" would
+   * advertise who has the switch off.
+   *
+   * Optional on the type only so a client built against the older response
+   * shape still parses — read it through `?? []`, never assume it is there.
+   */
+  detail?: FeedDetail[];
+  /** How many names `detail` left out, for a "+4 more" line. */
+  more?: number;
+};
+
+/**
+ * One line of what was done.
+ *
+ * The same wire shape as the session card's own detail, because ONE component
+ * renders both — with one difference the server enforces: a feed row never
+ * carries a `conceded` outcome. What was done TO you is the half of a roll
+ * worth reviewing on your own card, and a friend's feed is not where it goes.
+ */
+export type FeedDetail = {
+  name: string;
+  /** Strength: the top working set, e.g. "140 kg × 5". */
+  figure?: string;
+  /** BJJ: `scored`, `attempted` or `drilled`. Never `conceded`. */
+  outcome?: string;
+  /** BJJ: how many times, when more than one. */
+  count?: number;
 };
 
 export type FeedPage = {
@@ -127,4 +161,65 @@ export function feedMetrics(item: FeedItem, units: UnitSystem): { label: string;
     out.push({ label: 'volume', value: formatVolume(item.tonnage_kg, units) });
   }
   return out;
+}
+
+/**
+ * A feed row as the poster card renders it.
+ *
+ * The feed and the completion screen show THE SAME CARD. That is the whole
+ * point of the redesign — the thing you are proud of at the end of a session
+ * is the thing your training partners see — and it is why `SessionCard` takes
+ * a plain `CardData` and reads nothing from a screen.
+ *
+ * ## What a friend's card cannot carry, and why it is not an oversight
+ *
+ * **No calories and no VOLA Score.** Both exist on your own card and neither
+ * may appear on somebody else's, because of where they come from rather than
+ * how interesting they are:
+ *
+ *   - The calorie estimate is computed from the owner's bodyweight, height,
+ *     age and sex. Publishing it publishes an inference about their body, and
+ *     nobody opted into that by opting into a feed.
+ *   - The score is a percentile against the owner's OWN last twenty sessions,
+ *     so it is only meaningful next to a history the reader cannot see. "78"
+ *     with no baseline is a number that invites comparison between people,
+ *     which this app has no leaderboards precisely to avoid.
+ *
+ * So the strip is the three things a feed row has always carried — time, sets,
+ * volume — and the card is complete without the other two.
+ *
+ * ## No badges either
+ *
+ * A PR is derived from the owner's history and the feed row does not carry it.
+ * Rather than infer one, the card simply gets none, which is already its
+ * commonest state.
+ *
+ * `units` and `now` are threaded in rather than read from providers, so this
+ * stays pure and testable — the same rule `feedMetrics` and `agoLabel` follow.
+ */
+export function cardFromFeedItem(item: FeedItem, units: UnitSystem, now: number): CardData {
+  const metrics = feedMetrics(item, units);
+  return {
+    id: item.id,
+    sport: item.sport,
+    title: item.name || labelForSport(item.sport),
+    eyebrow: item.sport === 'bjj' ? 'BJJ' : item.sport.toUpperCase(),
+    // WHEN, not the date. A feed is scanned for recency — "2h ago" is the
+    // question being asked — where a card kept on your own session is a
+    // record of a day and gets the date.
+    dateLabel: agoLabel(item.ended_at, now).toUpperCase(),
+    stats: metrics.map((m) => ({ label: m.label, value: m.value })),
+    detail: item.detail ?? [],
+    more: item.more ?? 0,
+    // Never a badge on somebody else's card — see above.
+    badges: [],
+    // No handle: the row already carries the person in its header, and the
+    // card's foot falling back to the wordmark is what makes a feed of these
+    // read as posters rather than as repeated signatures.
+  };
+}
+
+/** A sport's own word, for a session that was never named. */
+function labelForSport(sport: string): string {
+  return sport === 'bjj' ? 'BJJ session' : 'Training';
 }
