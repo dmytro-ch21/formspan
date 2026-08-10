@@ -194,7 +194,7 @@ cd backend && go run ./cmd/seed             # reference content (exercise catalo
 cd backend && go run ./cmd/exportcontent    # carry console-authored content into the seed files (techniques.json, exercises.json), then review the diff and commit
 pnpm run dev:api                            # :8080
 pnpm run dev:web                            # :3000
-pnpm run dev:mobile                          # Expo — Metro on :8081, press i/a/w for iOS Sim/Android/web
+pnpm run dev:mobile                          # Metro on :8081 for the development build — first run (and any new native dep) needs `pnpm --dir apps/mobile run ios` to build/install it
 pnpm run dev:admin                          # :3001 (or next available port — runs alongside apps/web)
 ```
 
