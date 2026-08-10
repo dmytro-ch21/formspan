@@ -18776,6 +18776,87 @@ archaeology:
   ALTER adding `'zone2'`, and two distinct lists in one file panicked — then the
   fixture was deleted.
 
+## 2026-08-10 — Roadmaps get the structure a real syllabus has: phases, concept items, tracks, and a drilled criterion
+
+The user brought a complete belt-by-belt BJJ curriculum (white through brown,
+each belt phase-organised: safety and movement first, then the positional
+hierarchy, then position-by-position survive-escape-control-attack) and asked
+for the roadmap feature to be redesigned around it — the four seeded 14-item
+flat lists were judged "not good", and rightly: a real syllabus is mostly
+*conceptual* material (base, frames, positional hierarchy, graduation
+standards) with measurable techniques as milestones, and a flat technique list
+cannot say "survive the bad places before you learn to attack", which is the
+entire pedagogy of the document. This PR is the schema and API
+(migration 000051); the rebuilt content, web builder, and mobile screens
+follow separately.
+
+Four additions, none moving an existing column's meaning:
+
+- **`curriculum_phases`** — named, described sections within one curriculum,
+  keyed `(curriculum_id, sort_order)` with no surrogate id (phases are
+  replaced wholesale with their items, so nothing needs a stable phase
+  identity). Items point at a phase via a nullable `phase_order` with a
+  composite FK; NULL means unphased, which is what every pre-existing
+  curriculum is — a legal shape, not a broken one. On the wire, phases and
+  items travel as ONE unit through the existing wholesale-replace semantics
+  (`items` non-nil replaces both), because an item names its phase by index
+  into the accompanying array.
+- **Item kinds** — `technique` (what every item was) or `concept`: authored
+  title + notes, no library pointer, and NEVER criteria. The criteria ban is
+  the load-bearing half: every criterion is measured over `bjj_session_tags`
+  keyed on a technique, and a concept has none — a criterion on one would be
+  a bar no evidence could clear, or a completion somebody would eventually
+  make hand-markable, and 000034 closed that door deliberately. Concepts also
+  never count toward progress; the progress rule (countable = carries
+  criteria) already excludes them with no new rule. `MaxItems` rose 60 → 150,
+  because concept items are cheap text the progress query never sees.
+- **`target_drilled_sessions`** — the drilled-spread criterion: distinct
+  sessions carrying a `drilled` tag, since enrolling. This is the one place
+  drilled evidence counts, added for the movement fundamentals a beginner
+  will never *score* (a breakfall, a shrimp) — 000034's "drilled never
+  counts" rule protected live criteria from practice, and this is the
+  opposite claim made explicitly. SESSIONS rather than volume: forty reps in
+  one class is one class, and mutation-tested exactly so — one session with
+  `count = 40` reads as one session's spread. A criterion may now anchor on
+  scored, defended, or drilled spread; `min_hit_rate` still requires
+  `target_scored` specifically.
+- **`curricula.track`** — the browse-section hint ("belt", "foundations"),
+  same nullable-unconstrained-TEXT contract as `belt`, PATCH-clearable the
+  same raw-JSON way. The four seeded belt syllabuses now carry
+  `track: "belt"`; the planned non-belt roadmaps (Novice Fundamentals with
+  drilled-based criteria; focused programs like leg-lock literacy) get
+  "foundations". Mobility was deliberately ruled OUT of curricula — it is
+  exercises on a schedule, which is what workout plans already are, and
+  forcing exercise items into the technique-mastery engine would mean
+  inventing fake criteria for a hip opener.
+
+The seed format gained `phases` (each with nested items) and `track`,
+back-compatibly — flat `items` still parse, and the seeder assigns one dense
+sort order across both. `seedOne` now also maps empty belt/track to NULL
+rather than storing `''`, which the old format never exercised (every syllabus
+had a belt) but the non-belt roadmaps will.
+
+Verified: migration up and down both exercised on a scratch database (down
+deletes concept rows before restoring `NOT NULL` on `technique_id`); the full
+backend suite green serially; the drilled-criterion guard mutation-tested red.
+One process note: the mutation test was reverted with `git checkout --`
+against a file that had never been committed, which un-did every edit to
+`curriculum.go` and cost a full re-apply — mutation-test AFTER the first
+commit, or revert by re-adding the guard by hand.
+
+Open questions this leaves:
+
+- **Content is unchanged** — the four belt roadmaps are still the flat
+  14-item lists, now merely *capable* of phases. The rebuild from the user's
+  curriculum document (condensed concepts per phase, ~20–25 criteria-carrying
+  milestones per belt, Novice Fundamentals) is the next PR.
+- **Clients render nothing new yet.** Web builder has no phase authoring, the
+  mobile detail screen renders a flat list, and `track` drives no browse
+  sections anywhere.
+- The graduation-standard idea ("any two escapes from mount" — N-of-M
+  criteria groups) was considered and deferred; nothing in this schema blocks
+  it later.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

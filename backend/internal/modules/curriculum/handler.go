@@ -16,6 +16,13 @@ type Handler struct {
 	repo Repository
 }
 
+// invalidContentMsg is one message for every shape problem ValidateContent can
+// find. Deliberately generic about WHICH rule broke — the rules are the
+// contract's, and a client that needs per-item detail should validate before
+// sending — but it names all of them so the message stays actionable.
+const invalidContentMsg = "items must be unique techniques or titled concepts with positive targets, " +
+	"phases must be titled and referenced by index, and there are limits of 150 items and 20 phases"
+
 func NewHandler(repo Repository) *Handler { return &Handler{repo: repo} }
 
 // zoneOf reads the caller's timezone off the query string.
@@ -90,52 +97,83 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	apihttp.WriteJSON(w, http.StatusOK, c)
 }
 
+// phaseRequest is the wire shape of one phase. Order is implied by array
+// position, exactly as item order is.
+type phaseRequest struct {
+	Title       string `json:"title"`
+	Description string `json:"description"`
+}
+
 // itemRequest is the wire shape of one item.
 //
 // Criteria is flattened rather than nested, matching the column names 1:1 the
 // way the rest of this API does. A nil target_scored means no criterion at all,
 // which is what makes a curriculum able to be a plain reading list.
 type itemRequest struct {
-	TechniqueID    string   `json:"technique_id"`
+	// Kind is "technique" or "concept"; absent means technique, which is what
+	// every client predating the kinds sends.
+	Kind        string `json:"kind"`
+	TechniqueID string `json:"technique_id"`
+	// Title is a concept's heading, and refused on technique items — their
+	// name is the library's.
+	Title string `json:"title"`
+	// Phase is an index into the request's `phases` array, or null.
+	Phase          *int     `json:"phase"`
 	Notes          string   `json:"notes"`
 	TargetScored   *int     `json:"target_scored"`
 	TargetDefended *int     `json:"target_defended"`
 	TargetSessions *int     `json:"target_sessions"`
 	MinHitRate     *float64 `json:"min_hit_rate"`
+	// TargetDrilledSessions is the drilled-spread criterion — distinct classes
+	// this must be drilled in — for the movement fundamentals nobody scores.
+	TargetDrilledSessions *int `json:"target_drilled_sessions"`
 }
 
 func (i itemRequest) toDomain() NewItem {
-	out := NewItem{TechniqueID: i.TechniqueID, Notes: i.Notes}
-	// ANY of the four makes this a criterion, not just a volume target.
+	out := NewItem{Kind: i.Kind, TechniqueID: i.TechniqueID, Title: i.Title, Phase: i.Phase, Notes: i.Notes}
+	// ANY of the five makes this a criterion, not just a volume target.
 	//
 	// Keyed on the volume fields alone, `{"target_sessions": 12}` and
 	// `{"min_hit_rate": 0.4}` were accepted with 201 and the criterion silently
-	// thrown away -- the database would have refused both, and ValidateItems
+	// thrown away -- the database would have refused both, and ValidateContent
 	// exists precisely so the client hears WHICH item is wrong rather than a
-	// constraint name. Building it here and letting ValidateItems reject it is
-	// what makes that promise true.
+	// constraint name. Building it here and letting ValidateContent reject it
+	// is what makes that promise true.
 	//
-	// EITHER volume target is what makes a criterion legal. Defence-only is the
-	// case that justified adding the `defended` event: "not get caught in guard
-	// pull N times" has no offensive half.
+	// ANY volume target is what makes a criterion legal. Defence-only is the
+	// case that justified adding the `defended` event ("not get caught in
+	// guard pull N times" has no offensive half); drilled-only is the movement
+	// fundamentals case.
 	if i.TargetScored != nil || i.TargetDefended != nil ||
-		i.TargetSessions != nil || i.MinHitRate != nil {
+		i.TargetSessions != nil || i.MinHitRate != nil ||
+		i.TargetDrilledSessions != nil {
 		out.Criteria = &Criteria{
-			TargetScored:   i.TargetScored,
-			TargetDefended: i.TargetDefended,
-			TargetSessions: i.TargetSessions,
-			MinHitRate:     i.MinHitRate,
+			TargetScored:          i.TargetScored,
+			TargetDefended:        i.TargetDefended,
+			TargetSessions:        i.TargetSessions,
+			MinHitRate:            i.MinHitRate,
+			TargetDrilledSessions: i.TargetDrilledSessions,
 		}
 	}
 	return out
 }
 
+func toPhases(reqs []phaseRequest) []NewPhase {
+	out := make([]NewPhase, 0, len(reqs))
+	for _, p := range reqs {
+		out = append(out, NewPhase{Title: p.Title, Description: p.Description})
+	}
+	return out
+}
+
 type createRequest struct {
-	Name        string        `json:"name"`
-	Description string        `json:"description"`
-	Belt        *string       `json:"belt"`
-	Visibility  string        `json:"visibility"`
-	Items       []itemRequest `json:"items"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Belt        *string        `json:"belt"`
+	Track       *string        `json:"track"`
+	Visibility  string         `json:"visibility"`
+	Phases      []phaseRequest `json:"phases"`
+	Items       []itemRequest  `json:"items"`
 }
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
@@ -160,13 +198,13 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	phases := toPhases(req.Phases)
 	items := make([]NewItem, 0, len(req.Items))
 	for _, it := range req.Items {
 		items = append(items, it.toDomain())
 	}
-	if err := ValidateItems(items); err != nil {
-		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
-			"items must be unique techniques with positive targets, and at most 60 of them")
+	if err := ValidateContent(phases, items); err != nil {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, invalidContentMsg)
 		return
 	}
 
@@ -179,7 +217,9 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		Name:        req.Name,
 		Description: req.Description,
 		Belt:        req.Belt,
+		Track:       req.Track,
 		Visibility:  req.Visibility,
+		Phases:      phases,
 		Items:       items,
 	})
 	if err != nil {
@@ -197,8 +237,15 @@ type updateRequest struct {
 	// belt syllabus after all" were the same request, and the second was
 	// impossible. `belt: null` is a meaningful state the contract already
 	// advertises as nullable.
-	Belt       json.RawMessage `json:"belt"`
+	Belt json.RawMessage `json:"belt"`
+	// Track gets the belt treatment for the same absent-versus-null reason.
+	Track      json.RawMessage `json:"track"`
 	Visibility *string         `json:"visibility"`
+	// Phases travels with Items and is only read when Items is present — an
+	// item names its phase by index into this array, so replacing one against
+	// the other's previous state is the half-update wholesale replacement
+	// exists to rule out.
+	Phases []phaseRequest `json:"phases"`
 	// Pointer to a slice so the three states stay distinct: absent leaves the
 	// list alone, [] empties it, and a list replaces it. A plain slice collapses
 	// the first two, which would make every metadata edit silently delete every
@@ -234,16 +281,28 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 			in.Belt = &belt
 		}
 	}
+	if req.Track != nil {
+		in.SetTrack = true
+		if string(req.Track) != "null" {
+			var track string
+			if err := json.Unmarshal(req.Track, &track); err != nil {
+				apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "track must be a string or null")
+				return
+			}
+			in.Track = &track
+		}
+	}
 	if req.Items != nil {
+		phases := toPhases(req.Phases)
 		items := make([]NewItem, 0, len(*req.Items))
 		for _, it := range *req.Items {
 			items = append(items, it.toDomain())
 		}
-		if err := ValidateItems(items); err != nil {
-			apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
-				"items must be unique techniques with positive targets, and at most 60 of them")
+		if err := ValidateContent(phases, items); err != nil {
+			apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, invalidContentMsg)
 			return
 		}
+		in.Phases = phases
 		in.Items = items
 	}
 
