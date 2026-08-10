@@ -597,9 +597,11 @@ export default function SessionPage({
                 <span className="text-text-muted">
                   {RECORD_LABEL[record.kind]}
                   {/* Same marker the records page carries: an estimate is not a
-                      measurement, and this list puts the two side by side. */}
+                      measurement, and this list puts the two side by side.
+                      Italic rather than dim to set it apart — dim measures
+                      ~3.4:1 at this size, below AA for small text. */}
                   {RECORD_BASIS[record.kind] === "modelled" && (
-                    <span className="ml-1 text-text-dim">estimate</span>
+                    <span className="ml-1 italic">estimate</span>
                   )}
                 </span>
               </li>

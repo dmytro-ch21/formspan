@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"testing"
 )
@@ -37,28 +38,60 @@ import (
 var recordedLoadTypes = loadTypesFromMigration()
 
 func loadTypesFromMigration() []string {
-	const rel = "../../../migrations/000004_create_exercises.up.sql"
-	src, err := os.ReadFile(rel)
-	if err != nil {
-		panic(fmt.Sprintf("session: cannot read the exercises migration (%s): %v", rel, err))
+	// Every up migration, not the one file that happened to create the table.
+	// Pinned to 000004 this parse was a hand-copy one notch removed: an ALTER
+	// in a later migration lengthening the IN-list would leave this reading the
+	// original five values with no error — the same silent short list, sourced
+	// from a stale file instead of a stale literal. Migrations are zero-padded,
+	// so Glob's sorted order is application order and the last file carrying
+	// the constraint is the one the schema actually ends up with.
+	//
+	// The parse's contract: supersession must be WRITTEN as another
+	// `load_type IN (...)` list. An `= ANY (ARRAY[...])` rewrite or a
+	// conversion to an enum type is invisible here and would leave this
+	// silently reading the superseded list — keep the IN form.
+	const glob = "../../../migrations/*.up.sql"
+	paths, err := filepath.Glob(glob)
+	if err != nil || len(paths) == 0 {
+		panic(fmt.Sprintf("session: cannot list the migrations (%s): %v", glob, err))
 	}
-	// `load_type IN ('weight_reps', 'reps', ...)` — anchored on the column so a
-	// different IN-list in the same file cannot be picked up by accident.
-	m := regexp.MustCompile(`load_type\s+IN\s*\(([^)]*)\)`).FindSubmatch(src)
-	if m == nil {
-		panic("session: the exercises migration has no `load_type IN (...)` CHECK — did it move or get renamed?")
+	// `load_type IN ('weight_reps', 'reps', ...)` — anchored on the column at
+	// both ends so a different IN-list cannot be picked up by accident: `\b`
+	// on the left, or a future `payload_type IN (...)` in a later file would
+	// supersede the real list with no error.
+	re := regexp.MustCompile(`\bload_type\s+IN\s*\(([^)]*)\)`)
+	var list []byte
+	var from string
+	for _, p := range paths {
+		src, err := os.ReadFile(p)
+		if err != nil {
+			panic(fmt.Sprintf("session: cannot read migration %s: %v", p, err))
+		}
+		for _, m := range re.FindAllSubmatch(src, -1) {
+			// A later file superseding an earlier one is the point of the scan.
+			// Two DISTINCT lists in the SAME file is something else: there is
+			// no order to break the tie, so refuse to guess which is the
+			// constraint.
+			if from == p && !bytes.Equal(m[1], list) {
+				panic(fmt.Sprintf("session: %s has two different `load_type IN (...)` lists — cannot tell which is the CHECK", p))
+			}
+			list, from = m[1], p
+		}
+	}
+	if from == "" {
+		panic("session: no migration has a `load_type IN (...)` CHECK — did it move or get renamed?")
 	}
 	// `[^']+`, not `[a-z_]+`. The narrow class silently DROPPED any value with a
 	// digit or a capital in it — a future `'zone2'` parsed back to the original
 	// five with no error, which is the same silent short list this whole
 	// derivation exists to prevent, one notch narrower. Raised in review.
 	var out []string
-	for _, q := range regexp.MustCompile(`'([^']+)'`).FindAllSubmatch(m[1], -1) {
+	for _, q := range regexp.MustCompile(`'([^']+)'`).FindAllSubmatch(list, -1) {
 		out = append(out, string(q[1]))
 	}
 	// Every value is two quotes, so a parse that missed one is arithmetic rather
 	// than a judgement call. `len(out) == 0` alone only catches total failure.
-	if quotes := bytes.Count(m[1], []byte("'")); quotes != 2*len(out) {
+	if quotes := bytes.Count(list, []byte("'")); quotes != 2*len(out) {
 		panic(fmt.Sprintf(
 			"session: the load_type CHECK has %d quote characters but parsed %d values — the parse is dropping some",
 			quotes, len(out)))

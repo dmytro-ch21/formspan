@@ -115,6 +115,18 @@ export function RecordsCard({
             // Feeds the accessibility string only — see the note at the value
             // label for why this row carries no separate visual marker.
             const modelled = basisFor(primary.kind) === 'modelled';
+            // Joined ahead of the JSX so the rating's "· " below can key off
+            // whether anything actually precedes it — a timed record whose set
+            // carried only an RPE would otherwise open with a separator
+            // separating nothing.
+            const measuredLine = [
+              evidence.measured || null,
+              ...rest.map(
+                (r) => `${RECORD_LABEL[r.kind]} ${formatRecord(r, units)}`,
+              ),
+            ]
+              .filter(Boolean)
+              .join(' · ');
 
             return (
               <Pressable
@@ -160,25 +172,22 @@ export function RecordsCard({
                         to say "NEW" outright — the badge is the decoration and
                         this is the fact. */}
                     {fresh && <Text style={styles.fresh}>New · </Text>}
-                    {[
-                      evidence.measured || null,
-                      ...rest.map(
-                        (r) =>
-                          `${RECORD_LABEL[r.kind]} ${formatRecord(r, units)}`,
-                      ),
-                    ]
-                      .filter(Boolean)
-                      // The em dash means "no set detail to show". It is only
-                      // right when there is nothing else on the line — beside a
-                      // rating it reads as a rendering fault rather than as an
-                      // absence, which is the case for a timed or distance
-                      // record that carries an RPE.
-                      .join(' · ') || (evidence.reported ? '' : '—')}
+                    {/* The em dash means "no set detail to show". It is only
+                        right when there is nothing else on the line — beside a
+                        rating it reads as a rendering fault rather than as an
+                        absence, which is the case for a timed or distance
+                        record that carries an RPE. */}
+                    {measuredLine || (evidence.reported ? '' : '—')}
                     {/* The rating, set apart rather than joined with the same
                         middle dot as the measurements. It is the athlete's
-                        account of the set, not another column of it. */}
+                        account of the set, not another column of it. The
+                        separator only appears when a measurement stands before
+                        it — a rating alone opens the line. */}
                     {evidence.reported ? (
-                      <Text style={styles.reported}> · {evidence.reported}</Text>
+                      <Text style={styles.reported}>
+                        {measuredLine ? ' · ' : ''}
+                        {evidence.reported}
+                      </Text>
                     ) : null}
                   </Text>
                 </RNView>

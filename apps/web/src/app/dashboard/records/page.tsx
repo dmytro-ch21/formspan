@@ -339,8 +339,11 @@ function RecordCell({
         {/* A modelled number says so. `RECORD_LABEL` already reads "Est. 1RM",
             but that is the record's NAME — this says what sort of number it is,
             and stays right if the label is ever reworded. */}
+        {/* Muted + italic, the same treatment the rating gets below: dim
+            measures ~3.4:1 at this size, and this word is real information —
+            the italic is what sets it apart, not a lower contrast. */}
         {RECORD_BASIS[record.kind] === "modelled" && (
-          <span className="ml-1 font-normal normal-case text-text-dim">
+          <span className="ml-1 font-normal normal-case italic text-text-muted">
             estimate
           </span>
         )}
@@ -353,8 +356,10 @@ function RecordCell({
             rendering fault rather than an absence — which is the case for a
             timed or distance record carrying an RPE. */}
         {evidence.measured || (evidence.reported ? "" : "—")}
+        {/* The gap rides on the separator, not the rating, so a rating with
+            no measurement before it opens the line flush rather than 4px in. */}
         {evidence.reported && (
-          <span className="ml-1 italic">
+          <span className="italic">
             {/* Said out loud, because italic is silent. Without this a screen
                 reader hears "5 × 100kg · 2 RIR" — the exact flattening this
                 change exists to undo, reproduced in speech. Mobile carries the
@@ -362,8 +367,14 @@ function RecordCell({
             <span className="sr-only">reported </span>
             {/* `text-text-muted`, not `text-text-dim`: the rating is real
                 information, and dim measures ~3.4:1 at this size. Italic alone
-                still sets it apart from the upright measurement. */}
-            <span aria-hidden="true">· </span>
+                still sets it apart from the upright measurement. The separator
+                only renders when a measurement stands before it — a rating
+                alone opens the line. */}
+            {evidence.measured && (
+              <span aria-hidden="true" className="ml-1">
+                ·{" "}
+              </span>
+            )}
             {evidence.reported}
           </span>
         )}
