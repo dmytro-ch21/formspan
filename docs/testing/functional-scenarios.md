@@ -6347,6 +6347,32 @@ the schema rather than from taste:
   nothing rather than an error. Deliberate; test that an offline Plan tab still
   shows its templates.
 
+Phases, concepts and foundations on the phone (2026-08-10):
+
+- **The roadmap screen groups items by phase**, phase title and description
+  above each group, unphased items first (labelled "Unassigned" only on a
+  MIXED curriculum; a flat one keeps no chrome). Every item in the response
+  appears somewhere on screen — unit-covered by `groupByPhase`, assert the
+  rendering here.
+- **Step numbers count techniques continuously across groups and skip
+  concepts** — "step 9" means the ninth thing to learn, and prose does not
+  shift the milestones' numbers.
+- **A concept renders as a text card** — title and body, no step disc, no
+  criteria chips, no "reading" treatment — and never appears in the focus
+  panel's proposal (unit-covered; assert the rendering).
+- **The drilled criterion draws a "Classes drilled" chip** with the same
+  enrolled/browsing split as the live counters, reading `drilled_sessions`.
+- **Drilled-only training now draws the "started" rule** — the limitation the
+  old `hasEvidence` comment recorded as forced is closed; an athlete twenty
+  classes into a breakfall is no longer indistinguishable from one who never
+  saw it. Mutation-tested in `curriculumRow.test.ts`.
+- **The strip shows Foundations roadmaps** (track `foundations`, no belt) with
+  a neutral cover and glyph — no belt photograph, which would claim a rank the
+  curriculum never had — ordered before the belts (entry point, finishes
+  first), with enrolled cards still leading everything.
+- **The strip still hides athlete-authored curricula** — no edit path on the
+  phone, and a dead-end card is worse than none.
+
 #### What the technique row draws
 
 Presentation, but each of these is a claim about the athlete's record and can

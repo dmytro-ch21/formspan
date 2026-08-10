@@ -13,7 +13,9 @@ import {
   enrollInCurriculum,
   getCurriculum,
   type Curriculum,
+  type CurriculumItem,
 } from '@/lib/curriculum';
+import { groupByPhase } from '@/lib/curriculumPhases';
 import { criteriaChips, hasEvidence } from '@/lib/curriculumRow';
 import { proposeFocus, type FocusProposal } from '@/lib/roadmapFocus';
 import { useAuthToken } from '@/lib/useAuthToken';
@@ -210,24 +212,78 @@ export default function CurriculumScreen() {
         <FocusPanel proposal={proposal} busy={busy} onApply={() => confirmFocus(proposal)} />
       )}
 
-      <SectionHeader label={`${items.length} technique${items.length === 1 ? '' : 's'}`} />
-      {items.map((item, i) => (
-        <TechniqueRow
-          key={item.technique_id}
-          step={i + 1}
-          name={item.name}
-          position={item.position}
-          category={item.category}
-          notes={item.notes}
-          criteria={criteriaChips(item, curriculum.enrolled)}
-          mastered={item.progress?.mastered ?? false}
-          started={hasEvidence(item.progress)}
-          reading={item.criteria === null}
-          tone={accent.ink}
-          testID={`curriculum-item-${item.technique_id}`}
-        />
-      ))}
+      <SectionHeader label={`${items.length} item${items.length === 1 ? '' : 's'}`} />
+      {renderGroups(curriculum, accent.ink)}
     </ScrollView>
+  );
+}
+
+/**
+ * The items, grouped by phase — the structure the phased syllabuses carry.
+ *
+ * Step numbers count TECHNIQUES continuously across every group, so "step 9"
+ * still means the ninth thing to learn: concepts are ideas beside the path,
+ * not stops on it, and numbering them would shift every milestone's number by
+ * how much prose came before it. Unphased items lead, labelled only when
+ * phases exist — see `groupByPhase` for why they must not sink.
+ */
+function renderGroups(curriculum: Curriculum, tone: string) {
+  const items = curriculum.items ?? [];
+  const phases = curriculum.phases ?? [];
+  let step = 0;
+  return groupByPhase(phases, items).map((group) => (
+    <RNView key={group.phase ? `p${group.phase.order}` : 'unphased'} style={styles.group}>
+      {group.phase ? (
+        <RNView style={styles.phaseHeader}>
+          <Text style={styles.phaseTitle}>{group.phase.title}</Text>
+          {group.phase.description !== '' && (
+            <Text style={styles.note}>{group.phase.description}</Text>
+          )}
+        </RNView>
+      ) : (
+        phases.length > 0 && (
+          /* Only in a MIXED curriculum: without a label the leading unphased
+             items read as a preamble of the first phase rather than as items
+             nobody assigned. A flat curriculum keeps no chrome at all. */
+          <Text style={styles.unassigned}>Unassigned</Text>
+        )
+      )}
+      {group.items.map((item) =>
+        item.kind === 'concept' ? (
+          <ConceptCard key={`c${item.order}`} item={item} />
+        ) : (
+          <TechniqueRow
+            key={item.technique_id}
+            step={++step}
+            name={item.name}
+            position={item.position}
+            category={item.category}
+            notes={item.notes}
+            criteria={criteriaChips(item, curriculum.enrolled)}
+            mastered={item.progress?.mastered ?? false}
+            started={hasEvidence(item.progress)}
+            reading={item.criteria === null}
+            tone={tone}
+            testID={`curriculum-item-${item.technique_id}`}
+          />
+        ),
+      )}
+    </RNView>
+  ));
+}
+
+/**
+ * A concept: authored text — an idea the phase is teaching, not a step the
+ * record can complete. No criteria chips, no step number, no "reading"
+ * treatment: its body IS the content, and dressing it as an unfinished
+ * technique would misreport it.
+ */
+function ConceptCard({ item }: { item: CurriculumItem }) {
+  return (
+    <View style={styles.concept} testID={`curriculum-concept-${item.order}`}>
+      <Text style={styles.conceptTitle}>{item.title}</Text>
+      {item.notes !== '' && <Text style={styles.conceptBody}>{item.notes}</Text>}
+    </View>
   );
 }
 
@@ -360,4 +416,25 @@ const styles = StyleSheet.create({
   secondaryText: { fontSize: 14, fontWeight: '700' },
   pressed: { opacity: 0.6 },
   disabled: { opacity: 0.5 },
+  group: { gap: 12 },
+  phaseHeader: { gap: 4, marginTop: 8 },
+  phaseTitle: { color: vola.text, fontSize: 16, fontWeight: '800' },
+  unassigned: {
+    color: vola.textDim,
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 8,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  concept: {
+    backgroundColor: vola.surface,
+    borderColor: vola.lineSoft,
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 14,
+    gap: 6,
+  },
+  conceptTitle: { color: vola.text, fontSize: 14, fontWeight: '700' },
+  conceptBody: { color: vola.textMuted, fontSize: 13, lineHeight: 19 },
 });

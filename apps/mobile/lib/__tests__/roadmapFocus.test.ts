@@ -21,17 +21,20 @@ import type { CurriculumItem } from '../curriculum';
 let n = 0;
 
 const step = (id: string, mastered: boolean): CurriculumItem => ({
+  kind: 'technique',
   technique_id: id,
   name: id,
   position: 'Guard - Bottom',
   category: 'Sweep',
   order: n++,
+  phase: null,
   notes: '',
   criteria: {
     target_scored: 25,
     target_defended: 8,
     target_sessions: 12,
     min_hit_rate: 0.35,
+    target_drilled_sessions: null,
   },
   progress: {
     scored: 0,
@@ -39,6 +42,7 @@ const step = (id: string, mastered: boolean): CurriculumItem => ({
     sessions: 0,
     attempts: 0,
     hit_rate: null,
+    drilled_sessions: 0,
     mastered,
   },
 });
@@ -59,6 +63,7 @@ const defenceOnly = (id: string, mastered: boolean): CurriculumItem => ({
     target_defended: 18,
     target_sessions: 16,
     min_hit_rate: null,
+    target_drilled_sessions: null,
   },
 });
 
@@ -70,7 +75,26 @@ const focus = (id: string): Focus => ({
   started_on: '2026-01-01',
 });
 
+/** A concept — authored text, no technique behind it at all. */
+const concept = (title: string): CurriculumItem => ({
+  kind: 'concept',
+  title,
+  name: '',
+  position: '',
+  category: '',
+  order: n++,
+  phase: null,
+  notes: '',
+  criteria: null,
+  progress: null,
+});
+
 describe('what the roadmap puts in focus', () => {
+  it('never proposes a concept — an idea cannot be a focus row', () => {
+    const p = proposeFocus([concept('Position before submission'), step('a', false)], []);
+    expect(p.next).toEqual(['a']);
+  });
+
   it('brings in unmastered steps, in roadmap order', () => {
     const p = proposeFocus([step('a', false), step('b', false)], []);
     expect(p.next).toEqual(['a', 'b']);

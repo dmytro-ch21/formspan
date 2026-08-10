@@ -21,6 +21,7 @@ import type { Criteria, CurriculumItem, Progress } from '@/lib/curriculum';
  * | `hasEvidence`: `attempts` → `scored` *              | 1 red  |
  * | `hasEvidence`: drop the `defended` clause           | 1 red  |
  * | `hasEvidence`: drop the `sessions` clause           | 1 red  |
+ * | `hasEvidence`: drop the `drilled_sessions` clause   | 1 red  |
  * | `hasEvidence`: `p != null` → `true`                 | 1 red  |
  * | `criteriaChips`: `—` branch → `0%`                  | 1 red  |
  * | `criteriaChips`: `value` ignores `enrolled`         | 2 red  |
@@ -39,6 +40,7 @@ function progress(over: Partial<Progress> = {}): Progress {
     sessions: 0,
     attempts: 0,
     hit_rate: null,
+    drilled_sessions: 0,
     mastered: false,
     ...over,
   };
@@ -55,18 +57,21 @@ function criteria(over: Partial<Criteria> = {}): Criteria {
     target_defended: null,
     target_sessions: null,
     min_hit_rate: null,
+    target_drilled_sessions: null,
     ...over,
   };
 }
 
 function item(c: Criteria | null, p: Progress | null): CurriculumItem {
   return {
+    kind: 'technique',
     technique_id: 't1',
     name: 'Armbar from closed guard',
     position: 'Closed guard',
     category: 'Submission',
     notes: '',
     order: 1,
+    phase: null,
     criteria: c,
     progress: p,
   };
@@ -91,6 +96,14 @@ describe('hasEvidence', () => {
 
   it('counts defending it, which moves no other counter', () => {
     expect(hasEvidence(progress({ defended: 1 }))).toBe(true);
+  });
+
+  it('counts drilled-only training, now that the payload carries it', () => {
+    // The limitation the old comment recorded as forced: twenty drilled
+    // classes drew the same untouched rule as never having seen it. The API
+    // sends drilled_sessions since the phases redesign, so practice finally
+    // reads as started — while still clearing no live criterion.
+    expect(hasEvidence(progress({ drilled_sessions: 1 }))).toBe(true);
   });
 
   it('counts a live session on its own axis', () => {
@@ -180,6 +193,33 @@ describe('criteriaChips', () => {
     );
     expect(chips).toHaveLength(1);
     expect(chips[0].icon).toBe('calendar');
+  });
+
+  describe('the drilled criterion', () => {
+    it('renders a chip only when the target exists', () => {
+      const none = criteriaChips(item(criteria({ target_scored: 25 }), progress()), true);
+      expect(none.some((c) => c.label.includes('drilled'))).toBe(false);
+
+      const chips = criteriaChips(
+        item(criteria({ target_drilled_sessions: 6 }), progress({ drilled_sessions: 4 })),
+        true,
+      );
+      const drilled = chips.find((c) => c.label.includes('drilled'));
+      expect(drilled).toBeDefined();
+      expect(drilled!.value).toBe('4/6');
+      expect(drilled!.met).toBe(false);
+    });
+
+    it('clears at the target, and browsing shows the bar alone', () => {
+      const met = criteriaChips(
+        item(criteria({ target_drilled_sessions: 6 }), progress({ drilled_sessions: 6 })),
+        true,
+      );
+      expect(met.find((c) => c.label.includes('drilled'))!.met).toBe(true);
+
+      const browsing = criteriaChips(item(criteria({ target_drilled_sessions: 6 }), null), false);
+      expect(browsing.find((c) => c.label.includes('drilled'))!.value).toBe('6');
+    });
   });
 
   describe('the hit rate', () => {

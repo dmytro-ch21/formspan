@@ -42,6 +42,11 @@ export type Criteria = {
    *  alike. Computable only because `attempted` and `scored` are DISJOINT; see
    *  `lib/proficiency.ts`, which makes the same point. */
   min_hit_rate: number | null;
+  /** Distinct sessions this must be DRILLED in — the criterion for the
+   *  movement fundamentals nobody scores with (a breakfall, a shrimp).
+   *  Sessions rather than reps: forty in one class is one class. The ONE
+   *  criterion practice counts toward; every other threshold excludes it. */
+  target_drilled_sessions: number | null;
 };
 
 export type Progress = {
@@ -53,15 +58,40 @@ export type Progress = {
   /** Null when `attempts` is 0. Zero from zero is not a rate, and showing 0%
    *  reports a failure the athlete has not had. */
   hit_rate: number | null;
+  /** Distinct sessions in which this was drilled — sent even where no
+   *  criterion reads it, which is what finally lets `hasEvidence` see
+   *  drilled-only training. */
+  drilled_sessions: number;
   mastered: boolean;
 };
 
+/** One named section — "Survive the bad places first" — with the phase's
+ *  objective in the description. Items point at one via their `phase` index.
+ *  Purely structure: no criteria and no progress of its own. */
+export type CurriculumPhase = {
+  order: number;
+  title: string;
+  description: string;
+};
+
 export type CurriculumItem = {
-  technique_id: string;
+  /** A `technique` points into the library and may carry criteria; a
+   *  `concept` is authored text — "position before submission", a graduation
+   *  standard — and NEVER does: no evidence stream could measure one, and
+   *  nothing in this feature is completable by hand. */
+  kind: 'technique' | 'concept';
+  /** Absent on concept items, which point at nothing. */
+  technique_id?: string;
+  /** The concept's own heading; absent on technique items, whose name is the
+   *  library's. */
+  title?: string;
   name: string;
   position: string;
   category: string;
   order: number;
+  /** Index into the curriculum's `phases`, or null for an unphased item —
+   *  every curriculum predating phases is entirely unphased, legally. */
+  phase: number | null;
   notes: string;
   /** Null means reading rather than a roadmap step. */
   criteria: Criteria | null;
@@ -78,6 +108,10 @@ export type Curriculum = {
   /** A hint for ordering, never a gate — working white-belt fundamentals at
    *  purple is not a mistake. */
   belt: string | null;
+  /** Which browse section this belongs to — "belt", "foundations". Same
+   *  contract as `belt`: a grouping hint, never a gate, null for an athlete's
+   *  own list. */
+  track: string | null;
   visibility: 'private' | 'public';
   enrolled: boolean;
   /** "YYYY-MM-DD", null unless enrolled, and the anchor every criterion is
@@ -93,6 +127,9 @@ export type Curriculum = {
    *  card drawing a bar from it renders a placeholder as fact, which shipped
    *  once on web already. Only meaningful on a single read. */
   mastered_items: number;
+  /** Present on a single read, absent from the list — same lazy contract as
+   *  `items`. Empty for a flat curriculum. */
+  phases?: CurriculumPhase[];
   items?: CurriculumItem[];
 };
 
