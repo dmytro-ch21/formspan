@@ -26,6 +26,58 @@ import type { Module } from '@/lib/modules';
 // raises it. A cold CI runner went past the 5s default.
 jest.setTimeout(30_000);
 
+/**
+ * The clock is PINNED — to a Monday, mid-day, in the suite's LA timezone.
+ *
+ * This file first shipped reading the real clock, with 'AUG 10 – AUG 16'
+ * hard-coded as "next week" — true only during the week it was written. One
+ * real week later the suite went red on main with no code change, and the
+ * collapse test's `plan-add-2026-08-05` assertion had silently gone vacuous
+ * (the day was no longer in the rendered week, so `queryByTestId` returned
+ * null whether the collapse gate existed or not).
+ *
+ * Only `Date` is faked. Everything else stays real because the tests below
+ * need working timers: `waitFor` polls on `setTimeout`, and the stays-put test
+ * genuinely sleeps 50ms. The month-grid test's spy on
+ * `Date.prototype.toLocaleDateString` still counts, because the fake Date
+ * subclasses the real one and inherits its prototype.
+ */
+beforeAll(() => {
+  jest.useFakeTimers({
+    doNotFake: [
+      'hrtime',
+      'nextTick',
+      'performance',
+      'queueMicrotask',
+      'requestAnimationFrame',
+      'cancelAnimationFrame',
+      'requestIdleCallback',
+      'cancelIdleCallback',
+      'setImmediate',
+      'clearImmediate',
+      'setInterval',
+      'clearInterval',
+      'setTimeout',
+      'clearTimeout',
+    ],
+    // Monday 2026-08-03, noon local (the suite runs under
+    // TZ=America/Los_Angeles). A Monday so the shown week is unambiguous, and
+    // noon so no UTC-offset arithmetic can land it on another day.
+    now: new Date('2026-08-03T12:00:00'),
+  });
+  // Canary: Date faked, and ONLY Date. Sinon tags the globals it hijacks with
+  // `.clock`, so this fails immediately and legibly if the pin stops
+  // installing, or if a future jest grows the fakeable-API list past the
+  // `doNotFake` above — which would otherwise surface as the 50ms sleep below
+  // hanging to its 30s timeout.
+  expect('clock' in Date).toBe(true);
+  expect('clock' in setTimeout).toBe(false);
+});
+
+afterAll(() => {
+  jest.useRealTimers();
+});
+
 const mockListPlannedBetween = jest.fn((..._a: unknown[]): Promise<unknown> => Promise.resolve([]));
 jest.mock('@/lib/plan', () => ({
   ...jest.requireActual('@/lib/plan'),
@@ -134,7 +186,8 @@ it('names the week in the switcher, which is the only thing saying you moved', a
   fireEvent.press(screen.getByTestId('plan-week-next'));
   // The actual range, not merely "not THIS WEEK" — that passes against empty
   // text, and against a range formatted off `now` instead of `anchor`, which
-  // is the class of bug this file exists for.
+  // is the class of bug this file exists for. The week after the pinned
+  // Aug 3 – Aug 9, so it is a constant, not a claim about the real calendar.
   await waitFor(() =>
     expect(screen.getByTestId('plan-week-label')).toHaveTextContent('AUG 10 – AUG 16'),
   );
@@ -157,6 +210,12 @@ it('keeps the authoring rows behind a collapse, open by default', async () => {
   render(<WeekPlanner userId="u1" modules={modules} />);
   await waitFor(() => expect(mockListPlannedBetween).toHaveBeenCalled());
   expect(screen.getAllByText('Rest').length).toBeGreaterThan(0);
+  // Asserted PRESENT here so its absence below means the collapse removed it.
+  // Under the real clock this went vacuous the week after it was written —
+  // Aug 5 left the rendered week, the query was null on both sides of the
+  // toggle, and the assertion guarded nothing. The pinned clock keeps Aug 5 a
+  // plannable (not-past) day of the shown week permanently.
+  expect(screen.getByTestId('plan-add-2026-08-05')).toBeTruthy();
   expect(screen.getByTestId('plan-toggle-week')).toHaveTextContent('HIDE WEEK');
 
   fireEvent.press(screen.getByTestId('plan-toggle-week'));

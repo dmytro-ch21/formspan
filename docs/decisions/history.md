@@ -19065,6 +19065,42 @@ Open questions:
   frames before everything"), which is the redesign's vocabulary. Left for a
   design pass; the data is already on the wire.
 
+## 2026-08-10 — The week-planner test read the real clock, and one real week later it went red on main
+
+`weekPlanner.test.tsx` failed on main with no code change: the switcher-label
+test hard-coded `'AUG 10 – AUG 16'` as "next week", an expectation true only
+during the week the test was written (Aug 3–9). On Monday 2026-08-10 the
+component — correctly — rendered next week as `AUG 17 – AUG 23`. Diagnosed
+before touching anything, because the symptom was ambiguous between two very
+different bugs: a real Sunday-evening off-by-one in `startOfWeek` under the
+suite's `TZ=America/Los_Angeles`, or a test deriving expectations from real
+`now`. It was the latter — `lib/calendar`'s `startOfWeek` is local-time,
+Monday-anchored, and DST-safe (`setDate`, not millisecond arithmetic), and the
+label formats off `anchor` exactly as it should. No component change.
+
+The fix pins the clock: `jest.useFakeTimers` with everything in `doNotFake`
+**except `Date`**, set to Monday 2026-08-03 noon local. Faking only `Date` is
+the load-bearing part — `waitFor` polls on `setTimeout`, one test genuinely
+sleeps 50ms, and the month-grid test spies on
+`Date.prototype.toLocaleDateString` (which still counts, since the fake Date
+subclasses the real one). A blanket `useFakeTimers()` would have hung the
+suite.
+
+The quieter casualty the same drift caused: the collapse test's
+`queryByTestId('plan-add-2026-08-05')).toBeNull()` had gone **vacuous** — once
+Aug 5 left the rendered week the query was null on both sides of the toggle,
+so the assertion guarded nothing while staying green. The pinned clock puts
+Aug 5 permanently back in the shown week, and the test now asserts the button
+PRESENT before the collapse so its absence after means the collapse removed
+it. Mutation-tested: deleting the `{expanded && …}` gate turns exactly that
+test red.
+
+The general lesson joins the suite's existing ones (the 300s token, the UTC
+timezone trap): **a hard-coded date in an expectation is a claim about the
+real calendar, and it expires.** Any test whose subject computes off `new
+Date()` needs the clock pinned, not expectations that happen to hold this
+week.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
