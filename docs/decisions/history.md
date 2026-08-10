@@ -18203,6 +18203,131 @@ Three bugs the tests caught rather than the reading:
   folder README carries the constraint.
 
 
+## 2026-08-09 — The card fetches its own numbers, the feed shows the card, and detail gets its own switch
+
+The three gaps the previous entry left open, closed in that order. Together they
+finish the redesign: the card an athlete sees when they finish a session is now
+literally the same component their training partners see in the feed and the same
+one that exports to a PNG — one card at three sizes, not three renderings that
+drift.
+
+### The card fetches its own numbers
+
+`GET /v1/sessions/{id}/card` existed and nothing called it. `SessionCelebration`
+now does, silently and without blocking the render: the card is complete without
+calories or a score, so their arrival is an enhancement rather than a loading
+state, and a failure leaves a card rather than an error. Offline it simply never
+arrives, permanently, which is the honest resting state.
+
+The stat strip stays FOUR wide. Calories and the score do not add columns, they
+take them — the first two stats stay and the rest move down into the detail
+band, where the names are anyway. A fifth column makes the digits unreadable at
+the only distance this card is ever read from.
+
+### The feed shows the card
+
+`app/social/index.tsx` rendered plain list rows. It now renders the poster, with
+the attribution ABOVE it rather than inside: who trained is the question the
+screen exists to answer, and a header strip keeps the poster below it a poster.
+The card is built without a handle so its foot falls back to the wordmark —
+otherwise a column of posts prints the same person twice, six inches apart.
+
+**What a friend's card cannot carry, and why that is not an oversight.** No
+calories, no VOLA Score, no PR badge. Each is derived from the OWNER's private
+data, and the reasoning is worth keeping because all three would be easy to
+"restore" later:
+
+- The calorie estimate comes from bodyweight, height, age and sex. Publishing it
+  publishes an inference about somebody's body, and nobody opted into that by
+  opting into a feed.
+- The score is a percentile against the owner's own last twenty sessions. Next
+  to a history the reader cannot see it is meaningless, and it invites exactly
+  the between-people comparison this app has no leaderboards to avoid.
+- A PR is derived from the owner's history, which a feed row does not carry.
+  Inferring one would be the card claiming something the server never said.
+
+Three tests pin their absence.
+
+### `share_training_details` — the second switch
+
+Migration `000049`. The feed's package doc has said since it was written that a
+row carries no exercises and no technique ids, and that "enlarging it is a
+privacy decision rather than a feature". This is that decision, made as one
+rather than slipped in: `detail` on a feed row, gated on a second opt-in that
+defaults off and does nothing while the master switch is off.
+
+**Why two switches and not one.** The numbers say you trained hard; the detail
+says what you are working on. Somebody who competes against their training
+partners can reasonably want the first and not the second, and one flag cannot
+express that.
+
+Enforced in the query, not the client. Honouring it client-side would ship the
+data and then decline to draw it, which is not a privacy control. It is read
+live and per OWNER per row, so one friend opting in never speaks for another,
+and switching it off strips the detail from every past row at once — the same
+property the master switch has.
+
+`conceded` is excluded, and only from the feed. What was done TO you is the half
+of a roll worth reviewing on your own card; a friend's feed is not where it
+goes. It is excluded from the "+N more" count as well — a hidden outcome counted
+would publish that it happened while pretending not to name it.
+
+Two queries for a whole page, not two per row. The id set the page query already
+authorised is what the detail queries fan out over, which is also why neither
+re-checks ownership — and that makes the id set load-bearing in a way a future
+reader has to know about, so it says so where it is built.
+
+Settings gets the toggle, dimmed rather than hidden while sharing is off: the
+honest reading of a control that does nothing is a disabled one, not an absent
+one, and hiding it would make the setting something you discover only after
+opting in.
+
+### A time bomb found on the way
+
+The card's bodyweight lookup compared `measured_on` against `$2::date` — a cast
+applied to the session's timestamp. That resolves through the Go process's local
+zone on the way out and the Postgres server's `TimeZone` on the way back. A
+session ending 01:38 UTC cast back a day, missed the same-day weigh-in, and the
+card silently dropped its calorie estimate.
+
+It failed for roughly seven hours a day and passed for the other seventeen, so
+it would have shipped green from a UTC CI runner and broken on a laptop, or the
+reverse. The day is computed in Go in UTC now, and the regression test forces
+`time.Local` to a negative offset so it is red on a UTC runner too — a zone bug
+that only reproduces in one timezone is not covered by a suite that runs in
+another. That is the same lesson `apps/mobile`'s `TZ=America/Los_Angeles` was
+learned from, arriving in the backend for the first time.
+
+### Two process notes worth more than they look
+
+**`pnpm run test:mobile` from the repo root tests the PRIMARY checkout, not your
+worktree.** A green 1,074-test run was recorded here against files that did not
+contain the change under test. Run it from inside the worktree, or it proves
+nothing — which is the same failure mode as a test that skips.
+
+**The new native deps now matter differently.** `react-native-view-shot` and
+`expo-sharing` were added before the dev-client switch landed, when a mismatched
+JS package was a cosmetic warning. Under a development build it is a launch-time
+`dyld` abort. `expo install --check` reports the tree aligned, but anyone pulling
+this branch needs `pnpm --dir apps/mobile run ios` rather than `start` — Metro
+cannot deliver a native module to a binary that does not contain it.
+
+### Gaps
+
+- **None of this is device-verified.** The feed of cards, the settings toggle and
+  the fetched numbers have been typechecked, linted, unit-tested and (for the
+  backend) integration-tested against Postgres, but not seen on a phone. The
+  mountains and gradients in particular are a visual judgement no test makes.
+- **The detail band is capped at five and rendered at three.** The server sends
+  five, the card draws three plus a count. Deliberate — a feed post is scanned —
+  but it means two of the five never appear anywhere, which is waste on the wire.
+- **The feed's `Detail` and the card's are separate Go types** pinned against
+  each other by a marshalling test. That is the module-boundary rule holding,
+  but a third consumer would make a shared wire package the better answer.
+- **Instagram Stories still gets no direct hand-off.** The OS share sheet is the
+  path, which the dev-client switch has now unblocked in principle (`vola://` is
+  registered) without anyone having built it.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

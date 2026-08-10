@@ -5335,6 +5335,11 @@ feedback at all** before — no haptic, no toast, only a row quietly changing.
   one much bigger session, the big one scores 100 — anything less means it is
   ranking against itself.
 - Effort tracking off → `basis: "volume"`, and the number still appears.
+- **Run the card tests at more than one time of day, or force the zone.** The
+  bodyweight lookup once resolved the session's day through the machine's local
+  timezone, so a session ending just after UTC midnight missed a same-day
+  weigh-in and the calories vanished. It passed for seventeen hours a day. The
+  day is computed in UTC now; a test that only ever runs in UTC cannot tell.
 
 ### One 404 for every miss
 
@@ -5520,6 +5525,68 @@ has opted in, and the session is finished. Break each separately:
 - The row is labelled **Social** and opens the feed; friend management is a tap
   further, through the pane at the top.
 - The friend-request badge still rides on that row.
+
+### The feed shows the card
+
+The feed row IS the session card — the same component the athlete saw when they
+finished, at a different size. What follows is about the three numbers it must
+NOT show, which is the part a well-meaning change would undo.
+
+- A friend's card carries **no calorie figure**. It is computed from their
+  bodyweight, height, age and sex; publishing it publishes an inference about
+  their body.
+- A friend's card carries **no VOLA Score**. It is a percentile against their
+  own last twenty sessions, so it means nothing beside a history the reader
+  cannot see.
+- A friend's card carries **no PR badge**, even for a session that set one. The
+  feed row does not carry records, and inferring one is the card claiming
+  something the server never said.
+- The strip is time, sets and volume — the three things a feed row has always
+  carried — and volume reads in the READER's units, not the owner's.
+- The top-right label is "2h ago", not a date. Your own card records a day; a
+  feed is scanned for recency.
+- The card's foot shows the wordmark, not `@handle` — the attribution is the
+  strip above it, and printing the person twice per post is the bug this
+  prevents.
+- With VoiceOver the whole post is ONE stop, including the detail lines. The
+  card itself must contribute nothing: if it is not hidden from the reader,
+  every post is read twice.
+
+### Sharing the detail — `share_training_details`
+
+Two switches, and the second one only ever narrows what the first allows.
+
+- Default is **off** for every existing and new profile. Nobody's programme
+  becomes readable because they installed an update.
+- Friend has sharing ON and details OFF → their sessions appear with the
+  numbers and **no exercise or technique names**.
+- Turn details ON → the same rows gain up to five names. Turn it off again →
+  the names disappear from rows that were already visible, immediately. It is
+  read live; a stamped-at-finish implementation passes the first half and fails
+  this one.
+- With the master switch OFF, the detail switch changes nothing at all — no
+  rows, so nothing to add to. The settings toggle is **dimmed** in that state
+  rather than hidden, and says why.
+- **One friend's switch does not speak for another.** With two friends, one
+  opted into detail and one not, a single page must show names for exactly one
+  of them. A page-level read of the flag is the likely regression.
+- A BJJ row never shows a **`conceded`** outcome, however it was logged — and
+  it must not be counted into the "+N more" line either, which would publish
+  that something happened while declining to name it. Your own card still shows
+  it.
+- More than five exercises → five lines and "+N more", with N counting the rest.
+  The cap is applied server-side; a client that receives the whole list has
+  already been sent what it should not have.
+- The response's `detail` is an empty ARRAY when the owner opted out, never
+  absent and never null — "hidden" and "an empty session" must render
+  identically, or the UI advertises who has the switch off.
+
+### Auth and scope
+
+- Details never widen who can see a session. A stranger, a pending request and
+  an unfinished session are all still invisible regardless of either switch.
+- `PATCH /v1/profile` omitting `share_training_details` leaves it unchanged — an
+  older client cannot publish anything by omission.
 
 ## Sharing (`/v1/shares`, both clients' Share control + Sharing screens)
 
