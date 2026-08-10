@@ -176,7 +176,7 @@
             "technique_id": "americana-mount",
             "notes": "Holding the pin is not the end of the round — the arm they use to push is the arm you take.",
             "target_scored": 12,
-            "target_defended": 6,
+            "target_defended": 4,
             "target_sessions": 10,
             "min_hit_rate": 0.3
           }
@@ -216,7 +216,7 @@
             "technique_id": "kimura-side-control",
             "notes": "The far arm is an attack that starts from the pin you already hold.",
             "target_scored": 12,
-            "target_defended": 6,
+            "target_defended": 4,
             "target_sessions": 10,
             "min_hit_rate": 0.3
           }
@@ -367,7 +367,7 @@
             "technique_id": "rear-naked-choke",
             "notes": "The finish the whole hierarchy points at. Position first, seatbelt kept, and the choke arrives on its own.",
             "target_scored": 10,
-            "target_defended": 5,
+            "target_defended": 3,
             "target_sessions": 8,
             "min_hit_rate": 0.3
           }
@@ -399,7 +399,7 @@
             "technique_id": "double-leg-takedown",
             "notes": "When the round starts standing, you have a way in.",
             "target_scored": 8,
-            "target_defended": 5,
+            "target_defended": 3,
             "target_sessions": 6,
             "min_hit_rate": 0.2
           },
@@ -407,7 +407,7 @@
             "technique_id": "body-lock-outside-trip",
             "notes": "When the shot isn't there, chest to chest and a trip is.",
             "target_scored": 8,
-            "target_defended": 4,
+            "target_defended": 3,
             "target_sessions": 6,
             "min_hit_rate": 0.2
           },
