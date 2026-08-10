@@ -35,7 +35,31 @@ import {
  *  - The defaults are not arbitrary. 25 / 8 / 12 / 0.35 is roughly ten weeks
  *    per technique, and the defence figure is a third of the offence figure
  *    because you do not choose when a technique is attempted on you.
+ *
+ * **Phases and concepts (the 2026-08-10 redesign)** keep the flat list as the
+ * working surface, deliberately: items stay one reorderable list with a
+ * per-row phase select, rather than nested drag targets. Phases and items
+ * replace together on the wire — an item names its phase by index into the
+ * array it is sent with — so deleting or reordering a phase remaps every
+ * item's index here, where both halves of the invariant are in one place.
  */
+
+/** A phase as the builder holds it — with the same local key items carry,
+ *  because this list reorders too and an index key would carry focus and IME
+ *  state to whatever row lands at that index. Stripped before saving. */
+type PhaseDraft = { _key: string; title: string; description: string };
+
+/** An item as the builder holds it: the wire shape plus a stable local key,
+ *  because concept rows have no technique_id to key a reorderable list on —
+ *  and an index key would re-attach row state (the open criteria editor) to
+ *  whatever row lands at that index after a move. Stripped before saving. */
+type ItemDraft = CurriculumItemWrite & { _key: string };
+
+/** Random rather than a module counter: a counter resets on Fast Refresh
+ *  while preserved state keeps the old keys, and the next added row would
+ *  collide. Dev-only, but free to rule out. */
+const nextKey = () => crypto.randomUUID();
+
 export function CurriculumBuilder({ existing }: { existing?: Curriculum }) {
   const { getToken } = useAuth();
   const router = useRouter();
@@ -46,15 +70,28 @@ export function CurriculumBuilder({ existing }: { existing?: Curriculum }) {
   const [visibility, setVisibility] = useState<Visibility>(
     existing?.visibility ?? "private",
   );
-  const [items, setItems] = useState<CurriculumItemWrite[]>(
+  const [phases, setPhases] = useState<PhaseDraft[]>(
+    () =>
+      existing?.phases?.map((p) => ({
+        _key: nextKey(),
+        title: p.title,
+        description: p.description,
+      })) ?? [],
+  );
+  const [items, setItems] = useState<ItemDraft[]>(
     () =>
       existing?.items?.map((it) => ({
+        _key: nextKey(),
+        kind: it.kind,
         technique_id: it.technique_id,
+        title: it.title,
+        phase: it.phase,
         notes: it.notes,
         target_scored: it.criteria?.target_scored ?? null,
         target_defended: it.criteria?.target_defended ?? null,
         target_sessions: it.criteria?.target_sessions ?? null,
         min_hit_rate: it.criteria?.min_hit_rate ?? null,
+        target_drilled_sessions: it.criteria?.target_drilled_sessions ?? null,
       })) ?? [],
   );
 
@@ -80,7 +117,7 @@ export function CurriculumBuilder({ existing }: { existing?: Curriculum }) {
     [catalog],
   );
   const chosen = useMemo(
-    () => new Set(items.map((i) => i.technique_id)),
+    () => new Set(items.map((i) => i.technique_id).filter(Boolean)),
     [items],
   );
 
@@ -107,13 +144,69 @@ export function CurriculumBuilder({ existing }: { existing?: Curriculum }) {
         : // Added as READING, criteria off. Making every addition a roadmap
           // step would put four numbers in front of someone who wanted a list,
           // and the schema is explicit that a criterion is opt-in.
-          [...prev, { technique_id: id, notes: "" }],
+          [...prev, { _key: nextKey(), technique_id: id, notes: "" }],
     );
+  }, []);
+
+  const addConcept = useCallback(() => {
+    setItems((prev) => [
+      ...prev,
+      { _key: nextKey(), kind: "concept" as const, title: "", notes: "" },
+    ]);
   }, []);
 
   const removeAt = useCallback((idx: number) => {
     setItems((prev) => prev.filter((_, i) => i !== idx));
   }, []);
+
+  const addPhase = useCallback(() => {
+    setPhases((prev) => [...prev, { _key: nextKey(), title: "", description: "" }]);
+  }, []);
+
+  const patchPhase = useCallback((idx: number, patch: Partial<PhaseDraft>) => {
+    setPhases((prev) =>
+      prev.map((p, i) => (i === idx ? { ...p, ...patch } : p)),
+    );
+  }, []);
+
+  /** Removing a phase remaps every item: its members go unphased rather than
+   *  vanishing, and later phases shift down one — an item's `phase` is an
+   *  index into this array, so the two must move together or the save carries
+   *  items pointing at the wrong section. */
+  const removePhase = useCallback((idx: number) => {
+    setPhases((prev) => prev.filter((_, i) => i !== idx));
+    setItems((prev) =>
+      prev.map((it) => {
+        if (it.phase == null) return it;
+        if (it.phase === idx) return { ...it, phase: null };
+        return it.phase > idx ? { ...it, phase: it.phase - 1 } : it;
+      }),
+    );
+  }, []);
+
+  /** Swapping two phases swaps their members' indexes with them. Two separate
+   *  setState calls with the bounds check hoisted out — nesting one updater
+   *  inside the other would run the item swap twice under StrictMode's
+   *  double-invoke, and a double swap is a silent no-op. */
+  const movePhase = useCallback(
+    (idx: number, delta: number) => {
+      const to = idx + delta;
+      if (to < 0 || to >= phases.length) return;
+      setPhases((prev) => {
+        const next = [...prev];
+        [next[idx], next[to]] = [next[to], next[idx]];
+        return next;
+      });
+      setItems((its) =>
+        its.map((it) => {
+          if (it.phase === idx) return { ...it, phase: to };
+          if (it.phase === to) return { ...it, phase: idx };
+          return it;
+        }),
+      );
+    },
+    [phases.length],
+  );
 
   const move = useCallback((idx: number, delta: number) => {
     setItems((prev) => {
@@ -135,6 +228,16 @@ export function CurriculumBuilder({ existing }: { existing?: Curriculum }) {
   );
 
   const save = useCallback(async () => {
+    // Caught here so the failure names the actual problem — the server's
+    // whole-content 400 cannot say which row was the untitled concept.
+    if (items.some((i) => i.kind === "concept" && !i.title?.trim())) {
+      setError("Every concept needs a title — or remove the empty one.");
+      return;
+    }
+    if (phases.some((p) => !p.title.trim())) {
+      setError("Every phase needs a title — or remove the empty one.");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -146,7 +249,24 @@ export function CurriculumBuilder({ existing }: { existing?: Curriculum }) {
         // possible to un-tag a curriculum that was mislabelled.
         belt: belt === "" ? null : belt,
         visibility,
-        items,
+        // Phases only travel WITH items (the server refuses them alone), and
+        // an empty array is omitted: items without phases is the wire's
+        // spelling of "flat", which is also what deleting your last phase
+        // should mean.
+        ...(phases.length > 0
+          ? {
+              phases: phases.map((p) => ({
+                title: p.title.trim(),
+                description: p.description.trim(),
+              })),
+            }
+          : {}),
+        // The local row key is not the wire's business.
+        items: items.map((draft) => {
+          const { _key: omitted, ...it } = draft;
+          void omitted;
+          return { ...it, title: it.title?.trim() || undefined };
+        }),
       };
       const saved = existing
         ? await updateCurriculum(getToken, existing.id, payload)
@@ -156,10 +276,13 @@ export function CurriculumBuilder({ existing }: { existing?: Curriculum }) {
       setError(err instanceof Error ? err.message : String(err));
       setSaving(false);
     }
-  }, [belt, description, existing, getToken, items, name, router, visibility]);
+  }, [belt, description, existing, getToken, items, name, phases, router, visibility]);
 
   const countable = items.filter(
-    (i) => i.target_scored != null || i.target_defended != null,
+    (i) =>
+      i.target_scored != null ||
+      i.target_defended != null ||
+      i.target_drilled_sessions != null,
   ).length;
 
   return (
@@ -226,6 +349,84 @@ export function CurriculumBuilder({ existing }: { existing?: Curriculum }) {
         </p>
       )}
 
+      <section>
+        <h2 className="mb-2 flex items-baseline justify-between text-sm font-semibold uppercase tracking-wide text-neutral-500">
+          <span>Phases {phases.length > 0 && `(${phases.length})`}</span>
+          <button
+            type="button"
+            onClick={addPhase}
+            className="font-normal normal-case tracking-normal text-neutral-600 hover:underline dark:text-neutral-400"
+          >
+            + Add phase
+          </button>
+        </h2>
+        {phases.length === 0 ? (
+          <p className="text-sm text-neutral-500">
+            Optional. Phases split a long curriculum into named sections —
+            &ldquo;survive the bad places first&rdquo; — and each item below can
+            be assigned to one.
+          </p>
+        ) : (
+          <ul className="space-y-2">
+            {phases.map((p, idx) => (
+              <li
+                key={p._key}
+                className="rounded-xl border border-neutral-200 p-3 dark:border-neutral-800"
+              >
+                <div className="flex items-start gap-2">
+                  <div className="grow space-y-2">
+                    <input
+                      value={p.title}
+                      onChange={(e) => patchPhase(idx, { title: e.target.value })}
+                      placeholder={`Phase ${idx + 1} title`}
+                      aria-label={`Phase ${idx + 1} title`}
+                      className="w-full rounded-lg border border-neutral-300 px-3 py-1.5 text-sm font-medium dark:border-neutral-700 dark:bg-neutral-900"
+                    />
+                    <input
+                      value={p.description}
+                      onChange={(e) =>
+                        patchPhase(idx, { description: e.target.value })
+                      }
+                      placeholder="What this phase is for (optional)"
+                      aria-label={`Phase ${idx + 1} description`}
+                      className="w-full rounded-lg border border-neutral-300 px-3 py-1.5 text-sm dark:border-neutral-700 dark:bg-neutral-900"
+                    />
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => movePhase(idx, -1)}
+                      disabled={idx === 0}
+                      aria-label={`Move phase ${idx + 1} up`}
+                      className="rounded px-2 py-1 text-sm text-neutral-500 hover:bg-neutral-100 disabled:opacity-30 dark:hover:bg-neutral-900"
+                    >
+                      ↑
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => movePhase(idx, 1)}
+                      disabled={idx === phases.length - 1}
+                      aria-label={`Move phase ${idx + 1} down`}
+                      className="rounded px-2 py-1 text-sm text-neutral-500 hover:bg-neutral-100 disabled:opacity-30 dark:hover:bg-neutral-900"
+                    >
+                      ↓
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => removePhase(idx)}
+                      aria-label={`Remove phase ${idx + 1}`}
+                      className="rounded px-2 py-1 text-sm text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-900"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
       <div className="grid gap-6 lg:grid-cols-[20rem_1fr]">
         <section className="lg:sticky lg:top-4 lg:self-start">
           <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">
@@ -263,29 +464,42 @@ export function CurriculumBuilder({ existing }: { existing?: Curriculum }) {
         </section>
 
         <section>
-          <h2 className="mb-2 flex items-baseline justify-between text-sm font-semibold uppercase tracking-wide text-neutral-500">
+          <h2 className="mb-2 flex items-baseline justify-between gap-3 text-sm font-semibold uppercase tracking-wide text-neutral-500">
             <span>
               In this curriculum ({items.length})
             </span>
-            {/* States the progress rule while they build, so the denominator
-                is never a surprise later. */}
-            <span className="font-normal normal-case tracking-normal text-neutral-500">
-              {countable} with criteria
+            <span className="flex items-baseline gap-3">
+              <button
+                type="button"
+                onClick={addConcept}
+                className="font-normal normal-case tracking-normal text-neutral-600 hover:underline dark:text-neutral-400"
+              >
+                + Add a concept
+              </button>
+              {/* States the progress rule while they build, so the denominator
+                  is never a surprise later. */}
+              <span className="font-normal normal-case tracking-normal text-neutral-500">
+                {countable} with criteria
+              </span>
             </span>
           </h2>
 
           {items.length === 0 ? (
             <p className="rounded-xl border border-dashed border-neutral-300 px-4 py-8 text-center text-sm text-neutral-500 dark:border-neutral-700">
-              Pick techniques from the library. Add criteria to the ones you
-              want to be able to finish.
+              Pick techniques from the library, and add concepts for the ideas
+              between them. Add criteria to the ones you want to be able to
+              finish.
             </p>
           ) : (
             <ul className="space-y-2">
               {items.map((it, idx) => (
                 <BuilderRow
-                  key={it.technique_id}
+                  key={it._key}
                   item={it}
-                  technique={byID.get(it.technique_id)}
+                  technique={
+                    it.technique_id ? byID.get(it.technique_id) : undefined
+                  }
+                  phases={phases}
                   isFirst={idx === 0}
                   isLast={idx === items.length - 1}
                   onMove={(d) => move(idx, d)}
@@ -322,6 +536,7 @@ export function CurriculumBuilder({ existing }: { existing?: Curriculum }) {
 function BuilderRow({
   item,
   technique,
+  phases,
   isFirst,
   isLast,
   onMove,
@@ -330,6 +545,7 @@ function BuilderRow({
 }: {
   item: CurriculumItemWrite;
   technique: TechniqueSummary | undefined;
+  phases: PhaseDraft[];
   isFirst: boolean;
   isLast: boolean;
   onMove: (delta: number) => void;
@@ -337,6 +553,7 @@ function BuilderRow({
   onPatch: (patch: Partial<CurriculumItemWrite>) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const isConcept = item.kind === "concept";
   /*
    * AN EXPLICIT FLAG, not a derivation from the volume fields.
    *
@@ -347,25 +564,76 @@ function BuilderRow({
    * on an item with one anchor set, clearing that field to retype it unmounted
    * the editor under the cursor mid-keystroke.
    *
-   * Now only "Remove criteria" clears state, and it nulls all four.
+   * Now only "Remove criteria" clears state, and it nulls all five.
    */
   const hasCriteria =
     open ||
     item.target_scored != null ||
     item.target_defended != null ||
     item.target_sessions != null ||
-    item.min_hit_rate != null;
+    item.min_hit_rate != null ||
+    item.target_drilled_sessions != null;
 
   return (
     <li className="rounded-xl border border-neutral-200 p-3 dark:border-neutral-800">
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="font-medium">{technique?.name ?? item.technique_id}</p>
-          {technique && (
-            <p className="text-xs text-neutral-500">{technique.position}</p>
-          )}
-        </div>
+        {isConcept ? (
+          // A concept is authored text: its title and notes ARE the content,
+          // so both edit in place. No criteria affordance at all — no
+          // evidence stream could measure one, and offering the button just
+          // to 400 on save would be a trap.
+          <div className="grow space-y-2">
+            <input
+              value={item.title ?? ""}
+              onChange={(e) => onPatch({ title: e.target.value })}
+              placeholder="Concept title — an idea, not a technique"
+              // Named per row, like the remove buttons: forty rows of
+              // identical "Concept title" tells a screen-reader user nothing
+              // about which one they are editing.
+              aria-label={`Title of concept ${item.title || "(untitled)"}`}
+              className="w-full rounded-lg border border-neutral-300 px-3 py-1.5 text-sm font-medium dark:border-neutral-700 dark:bg-neutral-900"
+            />
+            <textarea
+              value={item.notes ?? ""}
+              onChange={(e) => onPatch({ notes: e.target.value })}
+              placeholder="The idea itself (optional)"
+              aria-label={`Body of concept ${item.title || "(untitled)"}`}
+              rows={2}
+              className="w-full rounded-lg border border-neutral-300 px-3 py-1.5 text-sm dark:border-neutral-700 dark:bg-neutral-900"
+            />
+          </div>
+        ) : (
+          <div>
+            <p className="font-medium">{technique?.name ?? item.technique_id}</p>
+            {technique && (
+              <p className="text-xs text-neutral-500">{technique.position}</p>
+            )}
+          </div>
+        )}
         <div className="flex shrink-0 items-center gap-1">
+          {phases.length > 0 && (
+            <select
+              value={item.phase ?? ""}
+              onChange={(e) =>
+                onPatch({
+                  phase: e.target.value === "" ? null : Number(e.target.value),
+                })
+              }
+              aria-label={`Phase for ${
+                isConcept
+                  ? item.title || "untitled concept"
+                  : technique?.name ?? item.technique_id
+              }`}
+              className="max-w-32 rounded-lg border border-neutral-300 px-2 py-1 text-xs dark:border-neutral-700 dark:bg-neutral-900"
+            >
+              <option value="">No phase</option>
+              {phases.map((p, i) => (
+                <option key={i} value={i}>
+                  {p.title || `Phase ${i + 1}`}
+                </option>
+              ))}
+            </select>
+          )}
           <button
             type="button"
             onClick={() => onMove(-1)}
@@ -387,7 +655,11 @@ function BuilderRow({
           <button
             type="button"
             onClick={onRemove}
-            aria-label={`Remove ${technique?.name ?? item.technique_id}`}
+            aria-label={`Remove ${
+              isConcept
+                ? item.title || "concept"
+                : technique?.name ?? item.technique_id
+            }`}
             className="rounded px-2 py-1 text-sm text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-900"
           >
             ✕
@@ -395,7 +667,7 @@ function BuilderRow({
         </div>
       </div>
 
-      {!hasCriteria ? (
+      {isConcept ? null : !hasCriteria ? (
         <button
           type="button"
           onClick={() => {
@@ -413,7 +685,7 @@ function BuilderRow({
         </button>
       ) : (
         <div className="mt-3 space-y-2">
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
             <Num
               label="Land it"
               value={item.target_scored}
@@ -437,6 +709,15 @@ function BuilderRow({
               label="Sessions"
               value={item.target_sessions}
               onChange={(v) => onPatch({ target_sessions: v })}
+            />
+            <Num
+              label="Classes drilled"
+              // The movement-fundamentals criterion: distinct classes this is
+              // DRILLED in, the one place practice counts. No default — most
+              // techniques should not carry it, and pre-filling it would put
+              // a drilled bar on every new roadmap step.
+              value={item.target_drilled_sessions}
+              onChange={(v) => onPatch({ target_drilled_sessions: v })}
             />
             <Num
               label="Hit rate %"
@@ -470,6 +751,7 @@ function BuilderRow({
                 target_defended: null,
                 target_sessions: null,
                 min_hit_rate: null,
+                target_drilled_sessions: null,
               });
             }}
             className="text-xs text-neutral-500 hover:underline"

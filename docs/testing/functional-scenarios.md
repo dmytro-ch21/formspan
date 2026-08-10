@@ -6223,6 +6223,44 @@ only fail in the browser.
 - **An empty belt select sends `null` and clears the belt**, distinct from
   leaving the field alone. This is the only path that exercises the API's
   explicit-null handling.
+
+Phases, concepts and tracks on the web client (2026-08-10):
+
+- **The detail page groups items by phase**, phase title and description
+  rendered above each group, unphased items FIRST — a mixed curriculum's
+  unassigned items are the ones the author forgot, and burying them at the
+  bottom is how they vanish from attention. A flat curriculum renders as one
+  ungrouped list with no phase chrome at all.
+- **An item pointing at a phase the response does not carry falls back to
+  unphased rather than disappearing** — the FK makes it impossible today, and
+  the guard is for the day a bug ships one. Covered by a unit test over
+  `groupByPhase`; the E2E assertion is just that every item in the response
+  appears somewhere on the page.
+- **A concept renders as text** — title and body, no position, no category, no
+  criteria block, no "something to study" footer — and never shows in the
+  focus panel's proposal. Unit-covered in `roadmapFocus.test.ts`; assert the
+  rendering here.
+- **The drilled criterion renders as "Classes drilled"** with the same bar
+  treatment as the live counters, reading `drilled_sessions` from progress.
+- **Deleting a phase in the builder un-assigns its items and renumbers the
+  rest** — build three phases with an item in each, delete the middle one,
+  save, reload: the first and third phases' items are still theirs, the middle
+  one's item is unphased. A stale index here silently files an item under the
+  wrong section, which no error will ever surface.
+- **Reordering phases carries their items with them** — swap two phases, save,
+  reload, and each item is still in the phase the author put it in.
+- **A concept with an empty title blocks the save client-side with a message
+  naming the problem** — the server's whole-content 400 cannot say which row
+  was the untitled concept.
+- **Saving a curriculum that has phases sends them WITH the items; deleting
+  the last phase saves a flat curriculum** (the wire's `items`-without-`phases`
+  spelling), not a 400.
+- **The Shared tab groups by track** — Belt roadmaps, then Foundations, then
+  other athletes' published lists — and a section with nothing in it does not
+  render its heading. The Mine tab stays flat: your own lists are yours to
+  recognise by name.
+- **Cards say "N items", not "N techniques"** — `item_count` counts concepts
+  too.
 - **Reordering and removing survive a save**, and order is the content of a
   syllabus rather than decoration.
 - **Deleting a curriculum other athletes are working shows the API's own 409

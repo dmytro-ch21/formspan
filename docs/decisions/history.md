@@ -18967,6 +18967,55 @@ Open questions:
   necessarily demonstrating one concrete game (K-guard). A future
   personal-game feature could make that real; today the concepts carry it.
 
+## 2026-08-10 — The web client learns phases, concepts, tracks and the drilled criterion
+
+The `/dashboard/curricula` surface catches up with what #218 put on the wire
+and the content PRs put in the seed. Web per the platform rule — building a
+phase-structured curriculum is desk work if anything is.
+
+- **Detail page**: items grouped by phase via a small pure `groupByPhase`
+  (`lib/curriculumPhases.ts`), with two properties unit-tested rather than
+  eyeballed — unphased items render FIRST (a mixed curriculum's unassigned
+  items are the ones the author forgot; burying them is how they vanish), and
+  a dangling phase index falls back to unphased rather than dropping the item
+  (impossible today via the FK, load-bearing the day a bug ships one).
+  Concepts render as text — title and body, no criteria chrome, no
+  "something to study" footer, which would misreport an idea as an unfinished
+  technique. The criteria grid gains "Classes drilled" reading
+  `drilled_sessions`.
+- **Builder**: phases are authored as a titled/described list above the
+  items, and the items stay ONE flat reorderable list with a per-row phase
+  select — deliberately not nested drag targets; the wholesale-replace wire
+  contract means phase index bookkeeping must be exact, and one flat list
+  keeps it in one place. Deleting a phase un-assigns its items and renumbers
+  the rest; reordering swaps its members' indexes with it — the swap is two
+  sibling setState calls with the bounds check hoisted out, because nesting
+  one updater inside the other runs the item swap twice under StrictMode and
+  a double swap is a silent no-op (caught while writing it, worth recording).
+  Concept rows edit title+notes in place and never show the criteria
+  affordance. Untitled concepts and phases block the save client-side with a
+  message naming the problem — the server's whole-content 400 cannot say
+  which row. Row keys are local uids, not technique ids, because concepts
+  have none and index keys would re-attach open-editor state across moves.
+- **List**: the Shared tab groups by `track` — Belt roadmaps, Foundations,
+  then other athletes' published lists — with empty sections unrendered. Mine
+  stays flat. Cards say "N items" now that concepts count, and the
+  belt-syllabuses-are-still-being-written empty-state copy is retired.
+- **`proposeFocus`** narrows to technique items before proposing, so a
+  concept can never be offered as a focus row; unit-covered alongside the
+  existing eviction rules.
+
+Open questions:
+
+- **Not browser-verified end-to-end.** The dashboard sits behind Clerk and
+  this session holds no credentials (and must not type any), so verification
+  is the unit suite, typecheck, lint and a production build; the scenarios
+  doc carries the E2E list for `tests/functional/`.
+- The builder offers no per-phase item grouping while editing — assignment is
+  a select on each row. Fine at 37 items; worth revisiting if authoring at
+  150 ever actually happens.
+- Mobile still renders none of this — the last PR of the plan.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

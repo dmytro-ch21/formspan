@@ -220,18 +220,82 @@ export default function CurriculaPage() {
         <EmptyState scope={scope} />
       )}
 
-      <ul className="grid gap-4 sm:grid-cols-2">
-        {shown.map((c) => (
-          <CurriculumCard
-            key={c.id}
-            curriculum={c}
-            busy={busy === c.id}
-            onToggleEnrollment={() => toggleEnrollment(c)}
-          />
-        ))}
-      </ul>
+      {scope === "mine" ? (
+        <ul className="grid gap-4 sm:grid-cols-2">
+          {shown.map((c) => (
+            <CurriculumCard
+              key={c.id}
+              curriculum={c}
+              busy={busy === c.id}
+              onToggleEnrollment={() => toggleEnrollment(c)}
+            />
+          ))}
+        </ul>
+      ) : (
+        /* The Shared tab is a browse surface, and `track` is its shape:
+           belt roadmaps first, then foundations, then anything another
+           athlete published. Grouped here rather than by the API — the
+           server calls track "a grouping hint" and deliberately leaves the
+           grouping to the client that knows the athlete. */
+        trackSections(shown).map(({ title, list }) => (
+          <section key={title}>
+            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-neutral-500">
+              {title}
+            </h2>
+            <ul className="grid gap-4 sm:grid-cols-2">
+              {list.map((c) => (
+                <CurriculumCard
+                  key={c.id}
+                  curriculum={c}
+                  busy={busy === c.id}
+                  onToggleEnrollment={() => toggleEnrollment(c)}
+                />
+              ))}
+            </ul>
+          </section>
+        ))
+      )}
     </div>
   );
+}
+
+/** The Shared tab's sections, in a fixed order: belts, foundations, any other
+ *  named track, then untracked (other athletes' published lists). Sections
+ *  with nothing in them do not render — an empty "Foundations" heading is a
+ *  promise, not a browse surface. */
+function trackSections(
+  list: Curriculum[],
+): { title: string; list: Curriculum[] }[] {
+  const titles: Record<string, string> = {
+    belt: "Belt roadmaps",
+    foundations: "Foundations",
+  };
+  // `!track`, not `=== null`: the column is unconstrained TEXT, so an empty
+  // string is reachable via a raw API write, and it must not render an empty
+  // heading sorted among the named sections.
+  const keyOf = (c: Curriculum) => (c.track ? c.track : null);
+  const order = (t: string | null) =>
+    t === "belt" ? 0 : t === "foundations" ? 1 : t !== null ? 2 : 3;
+  // Grouped on the track VALUE, not the display title — two tracks that
+  // happen to render the same title must not merge into one section under
+  // whichever arrived first's sort order.
+  const groups = new Map<string | null, Curriculum[]>();
+  for (const c of list) {
+    const key = keyOf(c);
+    (groups.get(key) ?? groups.set(key, []).get(key)!).push(c);
+  }
+  return [...groups.entries()]
+    .sort(
+      (a, b) =>
+        order(a[0]) - order(b[0]) || (a[0] ?? "").localeCompare(b[0] ?? ""),
+    )
+    .map(([track, l]) => ({
+      title:
+        track === null
+          ? "From other athletes"
+          : (titles[track] ?? track.charAt(0).toUpperCase() + track.slice(1)),
+      list: l,
+    }));
 }
 
 function EmptyState({ scope }: { scope: Scope }) {
@@ -248,12 +312,9 @@ function EmptyState({ scope }: { scope: Scope }) {
       ) : (
         <>
           <p className="text-sm font-medium">Nothing shared with you yet.</p>
-          {/* Honest about why, rather than implying the athlete has missed
-              something. The belt syllabuses genuinely do not exist yet: the
-              seed path for VOLA-authored curricula is unstarted work. */}
           <p className="mx-auto mt-1 max-w-md text-sm text-neutral-600 dark:text-neutral-400">
-            The belt-level fundamentals are still being written. Anything
-            another athlete publishes will show up here too.
+            The VOLA belt roadmaps and foundations live here, along with
+            anything another athlete publishes.
           </p>
         </>
       )}
@@ -332,7 +393,7 @@ function CurriculumCard({
           Progress lives on the detail screen, which has the numbers.
         */}
         <p className="text-sm text-neutral-600 dark:text-neutral-400">
-          {c.item_count} technique{c.item_count === 1 ? "" : "s"}
+          {c.item_count} item{c.item_count === 1 ? "" : "s"}
           {isRoadmap ? (
             <> · {c.countable_items} to master</>
           ) : (

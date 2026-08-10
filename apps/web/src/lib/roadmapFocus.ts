@@ -57,12 +57,19 @@ export function proposeFocus(
   current: BjjFocus[],
   max: number = MAX_BJJ_FOCUS,
 ): FocusProposal {
-  const inRoadmap = new Map(items.map((i) => [i.technique_id, i]));
+  // Concept items carry no technique_id — they are ideas, and an idea cannot
+  // be a focus row. Narrowed once here so everything below works with a
+  // guaranteed id.
+  const steps = items.filter(
+    (i): i is CurriculumItem & { technique_id: string } =>
+      typeof i.technique_id === "string" && i.technique_id !== "",
+  );
+  const inRoadmap = new Map(steps.map((i) => [i.technique_id, i]));
 
   // Rule 1 + 2. Only items that are actually roadmap STEPS — an item with no
   // criteria is reading, and putting something you are merely studying into a
   // list whose whole job is to capture live outcomes would be a category error.
-  const wanted = items.filter(
+  const wanted = steps.filter(
     (i) => i.criteria !== null && !(i.progress?.mastered ?? false),
   );
 
