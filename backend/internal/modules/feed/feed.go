@@ -31,6 +31,25 @@
 // Notes especially: they are free prose an athlete wrote for themselves, and
 // nothing in the app has ever suggested otherwise.
 //
+// # The one enlargement, and its own switch
+//
+// A row MAY carry `Detail` — up to five exercise or technique names with the
+// top set or the outcome beside each. That is the paragraph above being
+// overruled, so it was made a decision rather than a feature, exactly as that
+// paragraph demanded: it needs a SECOND opt-in, `share_training_details`, off
+// by default and separate from the one that puts you in the feed at all.
+//
+// Why two switches. The numbers say you trained hard; the detail says what you
+// are working on. Those are different disclosures — somebody who competes
+// against their training partners can reasonably want the first without the
+// second — and one switch could not express that.
+//
+// It stays inside the original limits. Still no sets, no notes, no RPE, no
+// ids: `Detail` carries a NAME and a figure, both of which the owner already
+// chose to publish by turning the switch on. And it is read live, so switching
+// it off strips the detail from every past row at once — the same property the
+// master switch has, and for the same reason.
+//
 // # No unread state, and therefore no badge
 //
 // The notification module counts what is WAITING on you, and its rule is that
@@ -96,7 +115,42 @@ type Item struct {
 	// against each other.
 	WorkingSets int     `json:"working_sets"`
 	TonnageKg   float64 `json:"tonnage_kg"`
+
+	// Detail is empty unless the OWNER has `share_training_details` on. Empty
+	// rather than null so a client can iterate it without a nil check, and so
+	// "opted out" and "an empty session" render identically — which they
+	// should, because the alternative advertises who has the switch off.
+	Detail []Detail `json:"detail"`
+	// More is how many names Detail left out, so a card can say "+4 more".
+	// Zero whenever Detail is, for the same reason.
+	More int `json:"more"`
 }
+
+// Detail is one line of what was done: an exercise, or a technique.
+//
+// **THE SAME WIRE SHAPE AS `sessioncard.Detail`, and deliberately a separate
+// Go type.** Modules in this codebase do not import each other — the feed
+// already inverts its one dependency into the `Friends` interface for that
+// reason — and importing another module for a struct would be the first
+// exception. The client renders both through one component, so the JSON must
+// match exactly; a test marshals both and compares the field sets rather than
+// trusting this comment, the same way `workingVolume` is pinned against
+// `session.Summarise`.
+type Detail struct {
+	Name string `json:"name"`
+	// Strength: the top working set, e.g. "140 kg × 5". Empty for BJJ.
+	Figure string `json:"figure,omitempty"`
+	// BJJ: "scored", "attempted", "drilled". Empty for strength.
+	Outcome string `json:"outcome,omitempty"`
+	// BJJ: how many times, when more than one.
+	Count int `json:"count,omitempty"`
+}
+
+// MaxDetail matches sessioncard.MaxDetail: five names plus a count is the
+// session, and a twelve-exercise list turns a card into a spreadsheet. Capped
+// server-side, so an opted-in athlete's whole programme never crosses the wire
+// to be trimmed on somebody else's phone.
+const MaxDetail = 5
 
 // Page is the offset+total shape the conventions prescribe for a browsed list.
 type Page struct {

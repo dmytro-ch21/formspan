@@ -448,6 +448,8 @@ components:
         - ended_at
         - working_sets
         - tonnage_kg
+        - detail
+        - more
       properties:
         id:
           type: string
@@ -482,6 +484,46 @@ components:
             volume rule the session endpoints report.
         tonnage_kg:
           type: number
+        detail:
+          type: array
+          description: >
+            What was actually done — up to five exercises or techniques. EMPTY
+            unless the OWNER has `share_training_details` on, and empty rather
+            than null so "opted out" and "an empty session" render identically;
+            distinguishing them would advertise who has the switch off.
+
+            Same wire shape as `SessionCardDetail` because one client component
+            renders both, with one deliberate difference: a feed row never
+            carries `conceded`. What was done TO you is the half of a roll worth
+            reviewing on your own card and is not published to friends.
+          items: { $ref: "#/components/schemas/FeedItemDetail" }
+        more:
+          type: integer
+          description: >
+            How many names `detail` left out, so a card can say "+4 more". Zero
+            whenever `detail` is empty.
+
+    FeedItemDetail:
+      type: object
+      description: >
+        One line of what was done. Structurally identical to
+        `SessionCardDetail`; separate because the two endpoints may not diverge
+        silently and a shared ref would hide it when they do. A backend test
+        marshals both and compares.
+      required: [name]
+      properties:
+        name: { type: string }
+        figure:
+          type: string
+          description: Strength only — the top working set, e.g. "140 kg × 5".
+        outcome:
+          type: string
+          description: >
+            BJJ only — `scored`, `attempted` or `drilled`. Never `conceded`:
+            see `detail` above.
+        count:
+          type: integer
+          description: BJJ only, present when more than one.
 
     SessionCard:
       type: object
@@ -639,6 +681,7 @@ components:
         - unit_system
         - track_effort
         - share_training_with_friends
+        - share_training_details
         - created_at
         - updated_at
       properties:
@@ -709,6 +752,14 @@ components:
             ATHLETE. Every other read of a session is scoped to its owner
             without exception; sharing moves copies on an explicit
             send-and-accept precisely so it never has to answer this.
+        share_training_details:
+          type: boolean
+          description: >
+            How MUCH of a shared session travels: the numbers alone, or the
+            exercise/technique list with them. Off by default and SUBORDINATE
+            to the switch above — it does nothing on its own. Two switches
+            because they disclose different things: the numbers say you trained
+            hard, the detail says what you are working on.
 
 
             Off by default, and no update may turn it on implicitly — a PATCH
@@ -803,6 +854,11 @@ components:
             client that does not know about this field can never change it,
             which is what keeps an older build from publishing somebody's
             training by omission.
+        share_training_details:
+          type: boolean
+          description: >
+            Opt in or out of publishing the exercise/technique list alongside
+            the numbers. Absent means "leave alone", for the same reason.
 
     Flag:
       type: object
@@ -3279,6 +3335,13 @@ paths:
         RPE, no exercise ids: it says THAT somebody trained and roughly how
         much, not what their programme is. Enlarging it is a privacy decision
         rather than a feature.
+
+
+        The one enlargement is `detail`, and it took a SECOND opt-in —
+        `share_training_details`, also off by default — because the numbers and
+        the programme are different disclosures. It stays inside the limits
+        above: names and figures the owner chose to publish, still no sets, no
+        notes, no RPE and no ids, and never a `conceded` outcome.
 
 
         There is deliberately no `GET /feed/{id}`. The row is the whole of what

@@ -119,6 +119,23 @@ func (r *PostgresRepository) calories(
 	ctx context.Context, callerID string, endedAt time.Time, blocks []energy.Block,
 ) (*Calories, error) {
 	var p energy.Profile
+	// THE DAY IS COMPUTED IN GO, IN UTC, and handed over as a string — never
+	// `$2::date` on the timestamp itself.
+	//
+	// That cast has two frames in it and neither is ours. pgx returns a
+	// timestamptz in the Go process's LOCAL zone and sends it back without
+	// qualifying it, and Postgres then resolves it in the SERVER's `TimeZone`.
+	// Measured here: a session ending 18:38 local (01:38 UTC the next day) cast
+	// to 2026-08-08 while the check-in sat on 2026-08-09, so the weight was
+	// never found and the card silently dropped its calorie estimate. It failed
+	// for the ~7 hours a day the two zones disagree and passed for the other
+	// 17 — on a CI runner in UTC and a laptop in PDT it would differ by
+	// machine, not by data.
+	//
+	// `measured_on` is a plain DATE the athlete recorded; there is no stored
+	// timezone to be right about, so the only defensible choice is a fixed
+	// frame. UTC is this app's frame everywhere else.
+	day := endedAt.UTC().Format("2006-01-02")
 	err := r.pool.QueryRow(ctx, `
 		SELECT p.height_cm,
 		       p.date_of_birth::text,
@@ -131,7 +148,7 @@ func (r *PostgresRepository) calories(
 		         LIMIT 1)
 		FROM profiles p
 		WHERE p.user_id = $1`,
-		callerID, endedAt).Scan(&p.HeightCM, &p.DateOfBirth, &p.Sex, &p.WeightKG)
+		callerID, day).Scan(&p.HeightCM, &p.DateOfBirth, &p.Sex, &p.WeightKG)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// No profile at all is a legitimate state — the estimate is simply
 		// absent, exactly as it is with no bodyweight.

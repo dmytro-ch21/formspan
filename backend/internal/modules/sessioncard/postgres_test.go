@@ -254,3 +254,62 @@ func TestCaloriesIgnoreWeighInsAfterTheSession(t *testing.T) {
 			"the weight is not being read as at the session", atEighty, atSixty)
 	}
 }
+
+// TestTheWeighInDayDoesNotMoveWithTheMachinesTimezone pins the frame the
+// bodyweight lookup resolves its day in.
+//
+// **THIS IS A TIME BOMB TEST, and it exists because it caught one.** The query
+// used to compare `measured_on` against `$2::date` — a cast applied to the
+// session's timestamp — which resolves through the Go process's local zone on
+// the way out and the Postgres server's `TimeZone` on the way back. A session
+// ending at 01:38 UTC cast back to the PREVIOUS day, the same-day weigh-in fell
+// outside the window, and the card dropped its calorie estimate entirely. It
+// failed for the roughly seven hours a day the two zones disagree and passed
+// for the other seventeen, so it would have shipped green from CI and broken on
+// a laptop, or the reverse.
+//
+// `time.Local` is forced to a negative offset here rather than trusting the
+// machine's, so the test is red on a UTC runner too. That is the whole point:
+// a zone bug that only reproduces in one timezone is not covered by a suite
+// that runs in another.
+func TestTheWeighInDayDoesNotMoveWithTheMachinesTimezone(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	repo := NewPostgresRepository(pool)
+
+	saved := time.Local
+	t.Cleanup(func() { time.Local = saved })
+	time.Local = time.FixedZone("PDT-ish", -7*60*60)
+
+	me := athlete(t, pool, "sc_tz")
+	// Early on a UTC day, which is still the PREVIOUS day anywhere west of
+	// Greenwich — the exact straddle that broke it.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO sessions (id, user_id, sport, name, started_at, ended_at)
+		VALUES ($1, $2, 'strength', 'Late session',
+		        (CURRENT_DATE - 1 + interval '1 hour 30 minutes') AT TIME ZONE 'UTC',
+		        (CURRENT_DATE - 1 + interval '2 hours 30 minutes') AT TIME ZONE 'UTC')`,
+		"sc_tz_1", me); err != nil {
+		t.Fatalf("seed straddling session: %v", err)
+	}
+	// The only weigh-in, dated on the session's UTC day. Under the old cast the
+	// session resolved to the day BEFORE this and the subquery found nothing.
+	if _, err := pool.Exec(ctx, `
+		DELETE FROM body_checkins WHERE user_id = $1`, me); err != nil {
+		t.Fatalf("clear seeded weight: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO body_checkins (user_id, measured_on, weight_kg)
+		VALUES ($1, CURRENT_DATE - 1, 80)`, me); err != nil {
+		t.Fatalf("seed weigh-in: %v", err)
+	}
+
+	card, err := repo.Card(ctx, me, "sc_tz_1")
+	if err != nil {
+		t.Fatalf("card: %v", err)
+	}
+	if card.Calories == nil {
+		t.Fatal("the weigh-in on the session's own UTC day was missed — the day is " +
+			"being resolved through a machine's local zone again")
+	}
+}
