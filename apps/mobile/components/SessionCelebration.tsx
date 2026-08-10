@@ -16,6 +16,8 @@ import {
 } from '@/lib/celebration';
 import { RECORD_LABEL } from '@/lib/records';
 import { cardFromSummary } from '@/lib/sessionCard';
+import { getSessionCard, type SessionCardNumbers } from '@/lib/sessionCardApi';
+import { useAuthToken } from '@/lib/useAuthToken';
 import { shareCard } from '@/lib/shareCard';
 import { SessionCard } from '@/components/SessionCard';
 import { playSound } from '@/lib/sounds';
@@ -126,6 +128,7 @@ export function SessionCelebration({
   testID?: string;
 }) {
   const accent = useAccent();
+  const getToken = useAuthToken();
   const badge = badgeFor(summary);
   const stats = statsFor(summary, formatTonnage);
   const felt = feltFor(summary);
@@ -134,8 +137,26 @@ export function SessionCelebration({
   const [sharing, setSharing] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
 
+  // The server's numbers, once they arrive. The card is COMPLETE without them
+  // — duration, volume and PRs all come from the local store — so this never
+  // blocks the celebration and a gym dead-spot costs the calorie figure rather
+  // than the moment.
+  const [numbers, setNumbers] = useState<SessionCardNumbers | null>(null);
+  useEffect(() => {
+    if (!sessionID) return;
+    const c = new AbortController();
+    getSessionCard(getToken, sessionID, c.signal)
+      .then((n) => {
+        if (!c.signal.aborted) setNumbers(n);
+      })
+      .catch(() => {
+        // Silent by design. See above: these decorate, they do not carry.
+      });
+    return () => c.abort();
+  }, [sessionID, getToken]);
+
   const card = sessionID
-    ? cardFromSummary({ id: sessionID, summary, stats, streak, handle })
+    ? cardFromSummary({ id: sessionID, summary, stats, streak, handle, numbers })
     : null;
 
   const onShare = useCallback(async () => {

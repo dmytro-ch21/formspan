@@ -111,6 +111,33 @@ export const SessionCard = forwardRef<RNView, { data: CardData; width: number }>
             ))}
           </RNView>
 
+          {/* What was actually done. Absent until the server's numbers arrive
+              and permanently absent offline — the card is complete without it,
+              so this is a resting state rather than a loading one and gets no
+              spinner. */}
+          {(data.detail?.length ?? 0) > 0 && (
+            <RNView style={s.detail}>
+              {data.detail!.slice(0, 3).map((d) => (
+                <RNView key={`${d.name}-${d.outcome ?? ''}`} style={s.detailRow}>
+                  <Text style={s.detailName} numberOfLines={1}>
+                    {d.name}
+                  </Text>
+                  <Text style={s.detailFigure}>
+                    {d.figure ??
+                      [d.outcome, d.count && d.count > 1 ? `×${d.count}` : null]
+                        .filter(Boolean)
+                        .join(' ')}
+                  </Text>
+                </RNView>
+              ))}
+              {(data.more ?? 0) + Math.max(0, (data.detail?.length ?? 0) - 3) > 0 && (
+                <Text style={s.detailMore}>
+                  {`+${(data.more ?? 0) + Math.max(0, (data.detail?.length ?? 0) - 3)} more`}
+                </Text>
+              )}
+            </RNView>
+          )}
+
           {/* Earned things only. Absent entirely when there are none — an
               empty badge rail would make an ordinary session look like it
               failed to win something. */}
@@ -218,6 +245,22 @@ const styles = (u: number) =>
       marginTop: 2 * u,
     },
     statUnit: { fontFamily: 'Barlow', fontSize: 10 * u, color: vola.textDim, marginTop: -1 * u },
+
+    detail: { marginTop: 11 * u, gap: 2 * u },
+    detailRow: { flexDirection: 'row', alignItems: 'baseline', gap: 10 * u },
+    detailName: {
+      flex: 1,
+      fontFamily: 'Barlow',
+      fontSize: 12 * u,
+      color: vola.text,
+    },
+    detailFigure: {
+      fontFamily: 'BarlowSemiBold',
+      fontSize: 11 * u,
+      color: vola.textMuted,
+      fontVariant: ['tabular-nums'],
+    },
+    detailMore: { fontFamily: 'Barlow', fontSize: 11 * u, color: vola.textDim, marginTop: 2 * u },
 
     badges: { flexDirection: 'row', gap: 6 * u, marginTop: 12 * u },
     badge: { borderRadius: 999, paddingHorizontal: 10 * u, paddingVertical: 4 * u, maxWidth: '62%' },

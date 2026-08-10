@@ -31,6 +31,14 @@ export type CardData = {
   handle?: string;
   /** Drives the headline. Absent when there is nothing notable to say. */
   highlight?: 'pr' | 'streak' | 'hardest';
+  /**
+   * The "what I did" band — exercises or techniques. Empty until the numbers
+   * arrive, and empty is a legitimate resting state rather than a loading one:
+   * the card is complete without it.
+   */
+  detail?: { name: string; figure?: string; outcome?: string; count?: number }[];
+  /** How many rows `detail` omitted, for a "+4 more" line. */
+  more?: number;
 };
 
 /**
@@ -87,6 +95,16 @@ export function cardFromSummary(input: {
   id: string;
   summary: { title: string; sport: string; records: readonly unknown[] };
   stats: { label: string; value: string }[];
+  /**
+   * The server-derived numbers, once they arrive. Absent is the normal first
+   * render and the permanent state offline.
+   */
+  numbers?: {
+    calories: { kcal: number } | null;
+    score: { value: number } | null;
+    detail: { name: string; figure?: string; outcome?: string; count?: number }[];
+    more: number;
+  } | null;
   /** `carried` means this session is what kept the streak alive. */
   streak?: { weeks: number; carried: boolean } | null;
   handle?: string;
@@ -106,6 +124,24 @@ export function cardFromSummary(input: {
     badges.push(`${streak.weeks} weeks unbroken`);
   }
 
+  // THE STAT STRIP IS FOUR WIDE AND THAT IS A HARD CEILING — a fifth column
+  // makes the digits too small to read at arm's length, which is the only
+  // distance this card is ever read from. So calories and the score do not
+  // add columns, they take them: the first two stats (time, and the sport's
+  // own headline measure) stay, and the rest move down to the detail band
+  // where the names are anyway.
+  const numbers = input.numbers;
+  let shown = stats.slice(0, 4).map((s) => ({ label: s.label, value: s.value }));
+  if (numbers?.calories || numbers?.score) {
+    shown = stats.slice(0, 2).map((s) => ({ label: s.label, value: s.value }));
+    if (numbers.calories) {
+      shown.push({ label: 'Calories', value: `≈${numbers.calories.kcal}` });
+    }
+    if (numbers.score) {
+      shown.push({ label: 'VOLA score', value: String(numbers.score.value) });
+    }
+  }
+
   return {
     id,
     sport: summary.sport,
@@ -114,7 +150,9 @@ export function cardFromSummary(input: {
     dateLabel: when
       .toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
       .toUpperCase(),
-    stats: stats.map((s) => ({ label: s.label, value: s.value })),
+    stats: shown,
+    detail: numbers?.detail ?? [],
+    more: numbers?.more ?? 0,
     badges,
     handle,
     highlight: prCount > 0 ? 'pr' : streak?.carried ? 'streak' : undefined,
