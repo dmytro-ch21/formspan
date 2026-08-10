@@ -218,14 +218,14 @@ it('drops a superseded load instead of overwriting the newer one', async () => {
   // It matters more since the transaction queue landed: `cacheWorkouts` can now
   // sit behind another screen's catalog write, so a load superseded by a scope
   // switch can resume long after the newer one has rendered. Without the check
-  // it then calls `setWorkouts` and the athlete watches the Shared tab flip
-  // back to their own templates.
+  // it then calls `setWorkouts` and the athlete watches the VOLA Workouts tab
+  // flip back to their own templates.
   let releaseWrite: () => void = () => {};
   const parked = new Promise<void>((resolve) => {
     releaseWrite = resolve;
   });
   mockListWorkouts.mockImplementation(async (...a: unknown[]) =>
-    a[1] === 'shared'
+    a[1] === 'public'
       ? [workout({ id: 's1', name: 'Someone Else Plan', owner_user_id: 'u2' })]
       : [workout({ id: 'w1', name: 'Legs' })],
   );
@@ -237,7 +237,7 @@ it('drops a superseded load instead of overwriting the newer one', async () => {
   await waitFor(() => expect(mockCacheWorkouts).toHaveBeenCalled());
 
   // Supersede it before it can finish.
-  fireEvent.press(screen.getByText('Shared'));
+  fireEvent.press(screen.getByText('VOLA Workouts'));
   expect(await screen.findByText('Someone Else Plan')).toBeTruthy();
 
   // Now let the stale load resume. Waited on as an INCREASE from a baseline,
