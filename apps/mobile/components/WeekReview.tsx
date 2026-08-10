@@ -136,12 +136,20 @@ export function WeekReview({
             // note says that moment is precisely when the screen is read. The
             // dash also has to reach the accessibility label, or the two
             // disagree about whether the number is known.
+            // The time branch is guarded the same way the totals tile above
+            // is, and for the same reason: `formatDuration(0)` returns "0m",
+            // so a sport whose only session this week is still UNFINISHED
+            // rendered "1× · 0m" — a fabricated zero, on a row whose own
+            // comments condemn exactly that. It reaches the spoken label too,
+            // which is why the dash is computed here rather than at render.
             const measure =
               leadMeasure(s) === 'volume'
                 ? unitsReady
                   ? formatVolume(s.volumeKg, units)
                   : '—'
-                : formatDuration(s.seconds);
+                : s.seconds > 0
+                  ? formatDuration(s.seconds)
+                  : '—';
             return (
               <RNView
                 key={s.sport}

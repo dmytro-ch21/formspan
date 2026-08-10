@@ -202,8 +202,22 @@ describe('reviewWeek — adherence', () => {
   });
 
   it('does not let last week’s session meet this week’s plan', () => {
-    // The reason `matchPlans` is handed `thisWeek` and not the whole list.
-    // Passing everything makes an untrained week read as fully adhered.
+    // The OUTCOME is what this pins: last week's session does not satisfy this
+    // week's plan. It deliberately does not claim which mechanism stops it,
+    // because measurement says it cannot tell.
+    //
+    // TWO independent guards prevent it, so removing either alone leaves this
+    // test green. Both mutations were run: key `matchPlans` on sport without
+    // the day and this stays green (three other tests catch it); hand
+    // `matchPlans` the whole list instead of `thisWeek` and the entire file
+    // stays green, which is the same result that made `weekReview.ts` retract
+    // its own claim and call that filter a cost saving rather than a
+    // correctness guard.
+    //
+    // The comment here used to assert that filter was load-bearing — the
+    // disproven reason. It was rewritten once to credit day-keying instead,
+    // which the first mutation immediately falsified. Hence stating the
+    // outcome and the measurement rather than a mechanism.
     const r = reviewWeek([session('2026-08-05', 'bjj')], [plan('2026-08-10', 'bjj')], NOW);
     expect(r.planned).toBe(1);
     expect(r.met).toBe(0);
