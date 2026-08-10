@@ -69,7 +69,12 @@ export function CurriculaStrip() {
   // because it is the entry point and finishes first; then belts in rank
   // order.
   const shown = curricula
-    .filter((c) => beltOf(c.belt) !== null || (c.track === 'foundations' && !c.editable))
+    // `!editable` on BOTH arms. The belt arm went unguarded for a long time,
+    // and `belt` is athlete-writable ("a hint, never a gate") — so an athlete
+    // setting belt on their own public curriculum put a dead-end card here
+    // wearing a belt photograph. The review that added foundations flushed
+    // the asymmetry out.
+    .filter((c) => (beltOf(c.belt) !== null || c.track === 'foundations') && !c.editable)
     .sort(
       (a, b) =>
         Number(b.enrolled) - Number(a.enrolled) ||
@@ -96,8 +101,8 @@ export function CurriculaStrip() {
                 // here and the counts are the useful part.
                 accessibilityLabel={
                   c.enrolled
-                    ? `${c.name}, working it, ${c.countable_items} to master`
-                    : `${c.name}, ${c.countable_items} to master`
+                    ? `${c.name}, working it, ${c.countable_items} items to master`
+                    : `${c.name}, ${c.countable_items} items to master`
                 }
                 testID={`curriculum-card-${c.id}`}
               >
