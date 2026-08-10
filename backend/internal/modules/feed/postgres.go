@@ -226,10 +226,10 @@ func (r *PostgresRepository) exerciseDetail(
 	rows, err := r.pool.Query(ctx, `
 		SELECT ss.session_id, e.name,
 		       MAX(ss.weight_kg),
-		       (ARRAY_AGG(ss.reps ORDER BY ss.weight_kg DESC NULLS LAST))[1]
+		       (ARRAY_AGG(ss.reps ORDER BY ss.weight_kg DESC NULLS LAST, ss.reps DESC))[1]
 		FROM session_sets ss
 		JOIN exercises e ON e.id = ss.exercise_id
-		WHERE ss.session_id = ANY($1) AND ss.set_type = 'working'
+		WHERE ss.session_id = ANY($1) AND ss.completed AND ss.set_type <> 'warmup'
 		GROUP BY ss.session_id, e.id, e.name
 		ORDER BY ss.session_id, MIN(ss.position)`, ids)
 	if err != nil {

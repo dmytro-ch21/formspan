@@ -313,3 +313,172 @@ func TestTheWeighInDayDoesNotMoveWithTheMachinesTimezone(t *testing.T) {
 			"being resolved through a machine's local zone again")
 	}
 }
+
+// setsOn writes sets straight to the table, so a test can express states the
+// domain helper does not — an uncompleted planned set, or an AMRAP top set.
+func setsOn(t *testing.T, pool *pgxpool.Pool, user, session string, sets []struct {
+	Exercise  string
+	SetType   string
+	Reps      int
+	WeightKG  float64
+	RPE       float64
+	Completed bool
+}) {
+	t.Helper()
+	ctx := context.Background()
+	for i, st := range sets {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO exercises (id, name, sport, movement_pattern, load_type, status)
+			VALUES ($1, $1, 'strength', 'squat', 'weight_reps', 'published')
+			ON CONFLICT (id) DO NOTHING`, st.Exercise); err != nil {
+			t.Fatalf("seed exercise: %v", err)
+		}
+		var rpe *float64
+		if st.RPE > 0 {
+			v := st.RPE
+			rpe = &v
+		}
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO session_sets
+			  (session_id, user_id, exercise_id, position, set_type, reps, weight_kg, rpe, completed)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+			session, user, st.Exercise, i+1, st.SetType, st.Reps, st.WeightKG, rpe, st.Completed); err != nil {
+			t.Fatalf("seed set %d: %v", i, err)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM session_sets WHERE session_id = $1`, session)
+		for _, st := range sets {
+			_, _ = pool.Exec(ctx, `DELETE FROM exercises WHERE id = $1`, st.Exercise)
+		}
+	})
+}
+
+// TestTheCardUsesTheOneDefinitionOfAWorkingSet is the regression for a rule
+// that was written two ways.
+//
+// `session.Summarise` — the domain, and what every other surface reports — says
+// a working set is `completed AND set_type <> 'warmup'`. These queries said
+// `set_type = 'working'`, which is wrong in BOTH directions at once and neither
+// is theoretical:
+//
+//   - A template opens with every set `completed = false`, so a PLANNED set the
+//     athlete skipped could come back as the top set. The card would print a
+//     lift nobody performed, on an image people post.
+//   - Back-off, drop, AMRAP and failure sets are all written by this app's own
+//     UI and were silently dropped, so a session that ended on an AMRAP lost its
+//     hardest set from the effort average and lost the exercise from the detail
+//     band — while `working_sets` and `tonnage_kg` on the same row still counted
+//     it.
+func TestTheCardUsesTheOneDefinitionOfAWorkingSet(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	repo := NewPostgresRepository(pool)
+	me := athlete(t, pool, "sc_defn")
+	id := finished(t, pool, me, "sc_defn_1", "strength", 60, 1)
+
+	setsOn(t, pool, me, id, []struct {
+		Exercise  string
+		SetType   string
+		Reps      int
+		WeightKG  float64
+		RPE       float64
+		Completed bool
+	}{
+		// Performed, ordinary. The real top set of what actually happened.
+		{Exercise: "sc_defn_squat", SetType: "working", Reps: 5, WeightKG: 120, RPE: 8, Completed: true},
+		// PLANNED AND SKIPPED, heavier than anything performed. Must not
+		// appear as the top set.
+		{Exercise: "sc_defn_squat", SetType: "working", Reps: 1, WeightKG: 200, RPE: 0, Completed: false},
+		// An AMRAP finisher on a second exercise — performed, not a warm-up,
+		// and therefore a working set by the only definition that counts.
+		{Exercise: "sc_defn_row", SetType: "amrap", Reps: 20, WeightKG: 60, RPE: 10, Completed: true},
+		// A warm-up, which is excluded under either rule — present so the test
+		// cannot pass by simply dropping every filter.
+		{Exercise: "sc_defn_row", SetType: "warmup", Reps: 10, WeightKG: 500, RPE: 1, Completed: true},
+	})
+
+	card, err := repo.Card(ctx, me, id)
+	if err != nil {
+		t.Fatalf("card: %v", err)
+	}
+
+	byName := map[string]string{}
+	for _, d := range card.Detail {
+		byName[d.Name] = d.Figure
+	}
+	if got := byName["sc_defn_squat"]; got != "120 kg × 5" {
+		t.Fatalf("top set is %q — a planned set that was never performed is being published", got)
+	}
+	if got, ok := byName["sc_defn_row"]; !ok {
+		t.Fatalf("an exercise trained on an AMRAP set vanished from the card: %+v", card.Detail)
+	} else if got != "60 kg × 20" {
+		t.Fatalf("AMRAP figure %q — the warm-up's 500 kg must not win", got)
+	}
+}
+
+// TestASessionIsNotRankedAgainstSilence pins the score's fallback.
+//
+// The history query used to fold the basis into SQL, so a prior session with no
+// recorded effort came back as load ZERO — and any real load beats a zero. An
+// athlete's first effort-tracked session, following eight untracked ones, scored
+// ~100 "of your last 8". A percentile that cannot disappoint you is the exact
+// thing this package refuses to be, and it broke hardest at the moment somebody
+// first switched effort tracking on.
+//
+// Sessions without effort are silent, not zero. Too few that spoke, and the
+// basis falls back to volume over the whole window — which the package doc
+// already promises for an athlete who does not track effort at all.
+func TestASessionIsNotRankedAgainstSilence(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	repo := NewPostgresRepository(pool)
+	me := athlete(t, pool, "sc_silent")
+
+	// Ten priors, all LONGER than today's session, none carrying effort.
+	for i := 0; i < 10; i++ {
+		id := finished(t, pool, me, fmt.Sprintf("sc_silent_%d", i), "strength", 120, i+2)
+		setsOn(t, pool, me, id, []struct {
+			Exercise  string
+			SetType   string
+			Reps      int
+			WeightKG  float64
+			RPE       float64
+			Completed bool
+		}{
+			{Exercise: "sc_silent_ex", SetType: "working", Reps: 5, WeightKG: 100, RPE: 0, Completed: true},
+		})
+	}
+	// Today: short, and the only one with an RPE on it.
+	today := finished(t, pool, me, "sc_silent_now", "strength", 30, 1)
+	setsOn(t, pool, me, today, []struct {
+		Exercise  string
+		SetType   string
+		Reps      int
+		WeightKG  float64
+		RPE       float64
+		Completed bool
+	}{
+		{Exercise: "sc_silent_ex2", SetType: "working", Reps: 5, WeightKG: 100, RPE: 9, Completed: true},
+	})
+
+	card, err := repo.Card(ctx, me, today)
+	if err != nil {
+		t.Fatalf("card: %v", err)
+	}
+	if card.Score == nil {
+		t.Fatal("no score at all — ten priors is plenty to rank a session against")
+	}
+	if card.Score.Basis != "volume" {
+		t.Fatalf("basis %q: with no prior recording effort there is nothing to rank cost against",
+			card.Score.Basis)
+	}
+	// The half that actually catches the bug. Thirty minutes against ten
+	// two-hour sessions is the SHORTEST session this athlete has done, so a
+	// correct percentile is 0. Ranked against zero-filled effort loads it would
+	// beat all ten and score 100.
+	if card.Score.Value > 10 {
+		t.Fatalf("scored %d for the shortest session in the window — it is being ranked "+
+			"against sessions that recorded nothing", card.Score.Value)
+	}
+}

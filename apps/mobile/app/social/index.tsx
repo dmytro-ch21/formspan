@@ -1,5 +1,5 @@
 import { Stack, useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useRef, useState } from 'react';
+import { memo, useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -86,7 +86,7 @@ import { useAuthToken } from '@/lib/useAuthToken';
  * documented at `cardFromFeedItem`. All three are derived from the owner's own
  * profile or history, and none of them may cross to a reader.
  */
-function FeedRow({
+const FeedRow = memo(function FeedRow({
   item,
   sportLabel,
   now,
@@ -155,7 +155,7 @@ function FeedRow({
       </RNView>
     </RNView>
   );
-}
+});
 
 export default function SocialScreen() {
   const getToken = useAuthToken();

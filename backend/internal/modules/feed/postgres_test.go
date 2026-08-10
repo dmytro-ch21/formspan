@@ -826,3 +826,61 @@ func TestDetailMatchesTheCardsWireShape(t *testing.T) {
 		t.Fatalf("detail caps diverged: feed %d, card %d", MaxDetail, sessioncard.MaxDetail)
 	}
 }
+
+func TestAFriendsDetailUsesTheOneDefinitionOfAWorkingSet(t *testing.T) {
+	// The same rule `workingVolume` uses two functions above, and the same one
+	// `session.Summarise` defines: `completed AND set_type <> 'warmup'`.
+	//
+	// The detail query said `set_type = 'working'` first, which was wrong in
+	// both directions. A template opens with every set `completed = false`, so
+	// a PLANNED set could be published as somebody's top lift — on the one
+	// surface where the reader has no way to know it never happened. And an
+	// exercise trained only on an AMRAP set vanished from the band while still
+	// counting in `working_sets` and `tonnage_kg` on the very same row.
+	h := newHarness(t)
+	ctx := context.Background()
+	alice := person(t, h.pool, "fd_wa", "fd_wa_h", true)
+	bob := person(t, h.pool, "fd_wb", "fd_wb_h", true)
+	befriend(t, h, alice, "fd_wa_h", bob, "fd_wb_h")
+	wantsDetail(t, h.pool, bob)
+
+	squat := seedExercise(t, h.pool, "fd_w_squat")
+	row := seedExercise(t, h.pool, "fd_w_row")
+	train(t, h, bob, "fd_w_s1", "Lower", true, []session.Set{
+		{ExerciseID: squat, Position: 1, SetType: session.SetTypeWorking,
+			Reps: iptr(5), WeightKg: fptr(120), Completed: true},
+		// Planned, heavier than anything performed, never done.
+		{ExerciseID: squat, Position: 2, SetType: session.SetTypeWorking,
+			Reps: iptr(1), WeightKg: fptr(200), Completed: false},
+		// An AMRAP finisher — performed, not a warm-up, so a working set.
+		{ExerciseID: row, Position: 3, SetType: session.SetTypeAMRAP,
+			Reps: iptr(20), WeightKg: fptr(60), Completed: true},
+	})
+
+	page, err := h.repo.List(ctx, alice, 30, 0)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("want one session, got %+v", ids(page))
+	}
+	figures := map[string]string{}
+	for _, d := range page.Items[0].Detail {
+		figures[d.Name] = d.Figure
+	}
+	if got := figures[squat]; got != "120 kg × 5" {
+		t.Fatalf("published %q — a planned set nobody performed reached a friend's feed", got)
+	}
+	if got, ok := figures[row]; !ok {
+		t.Fatalf("an exercise trained on an AMRAP set is missing: %+v", page.Items[0].Detail)
+	} else if got != "60 kg × 20" {
+		t.Fatalf("AMRAP figure %q", got)
+	}
+	// And the band agrees with the numbers beside it on the same row — the
+	// divergence this rule exists to prevent.
+	if page.Items[0].WorkingSets != len(page.Items[0].Detail) {
+		t.Fatalf("the row counts %d working sets but names %d exercises; one set per exercise "+
+			"was logged, so these must agree",
+			page.Items[0].WorkingSets, len(page.Items[0].Detail))
+	}
+}

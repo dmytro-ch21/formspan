@@ -9,16 +9,27 @@ import type { RefObject } from 'react';
  * ## The share sheet, not a direct Instagram hand-off
  *
  * `instagram-stories://share` would drop straight into Stories with the card
- * pre-loaded, which is one tap fewer — and it cannot work here. It needs a
- * Facebook App ID registered with Meta AND a custom dev client, because the
- * scheme has to be declared by the app; this project still runs on Expo Go,
- * which registers `exp://` and cannot own a custom scheme. That is the same
- * wall Google sign-in hit.
+ * pre-loaded, which is one tap fewer. It is NOT blocked any more, and this
+ * comment used to say it was: the Expo Go wall came down on 2026-08-09 when the
+ * app moved to a development build, so `vola://` is the app's own scheme now
+ * and a custom one can be declared. What remains is a Facebook App ID
+ * registered with Meta, which is an account decision rather than a technical
+ * one.
  *
- * The OS share sheet needs neither. Instagram, Messages and WhatsApp all
- * appear in it, the image arrives the same way, and it works on the build the
- * athlete is already carrying. When this app moves off Expo Go, the Stories
- * deep link drops in beside this without changing the capture.
+ * The share sheet stays the default regardless, because it needs neither and
+ * reaches further: Instagram, Messages and WhatsApp all appear in it and the
+ * image arrives the same way. The Stories deep link would drop in beside this
+ * without changing the capture — nobody has built it.
+ *
+ * ## The temp file is left behind, deliberately
+ *
+ * `result: 'tmpfile'` writes a ~1-2 MB PNG into the cache directory per share
+ * and nothing here removes it. Deleting it would need `expo-file-system` — a
+ * THIRD native dependency, on an app that now builds its own binary, where
+ * every native module added is a rebuild and a `dyld` version risk. That is a
+ * disproportionate price for tidying a directory the OS already purges under
+ * pressure and that a reinstall clears. Revisit if anything else in the app
+ * needs the filesystem anyway.
  *
  * ## Why PNG and not JPEG
  *
@@ -30,7 +41,18 @@ export const CARD_EXPORT_WIDTH = 1080;
 
 export type ShareResult =
   | { ok: true }
-  | { ok: false; reason: 'unavailable' | 'failed'; message: string };
+  | {
+      ok: false;
+      /**
+       * `unavailable` — the device cannot share at all.
+       * `capture` — the image was never produced. ALWAYS worth surfacing.
+       * `failed` — the share sheet itself threw, which on both platforms may
+       *   simply be the athlete dismissing it. Callers stay quiet about this
+       *   one; see `shareCard` for why the two are no longer the same reason.
+       */
+      reason: 'unavailable' | 'capture' | 'failed';
+      message: string;
+    };
 
 /**
  * Capture a mounted card and open the share sheet on it.
@@ -56,8 +78,16 @@ export async function shareCard(ref: RefObject<View | null>): Promise<ShareResul
     };
   }
 
+  // TWO try blocks, not one, because only ONE of these failures is ever the
+  // athlete's own doing. A dismissed share sheet may reject — the libraries
+  // disagree about whether it does — so a `shareAsync` throw has to stay quiet.
+  // `captureRef` throwing is never a dismissal; it means the image was not
+  // produced. Wrapped together, a real capture failure rendered as
+  // "Share → Preparing… → Share" with no sheet and no message, which is
+  // indistinguishable from the athlete changing their mind.
+  let uri: string;
   try {
-    const uri = await captureRef(ref, {
+    uri = await captureRef(ref, {
       format: 'png',
       quality: 1,
       // Explicit pixel size rather than a scale factor: a scale would make the
@@ -67,7 +97,15 @@ export async function shareCard(ref: RefObject<View | null>): Promise<ShareResul
       height: CARD_EXPORT_WIDTH,
       result: 'tmpfile',
     });
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'capture',
+      message: err instanceof Error ? err.message : String(err),
+    };
+  }
 
+  try {
     await Sharing.shareAsync(uri, {
       mimeType: 'image/png',
       // iOS uses this to pick which apps can receive it; without it the sheet
@@ -77,9 +115,6 @@ export async function shareCard(ref: RefObject<View | null>): Promise<ShareResul
     });
     return { ok: true };
   } catch (err) {
-    // A dismissed share sheet is not an error on either platform, but the
-    // libraries disagree about whether it rejects — so anything that throws
-    // here is reported as a failure the caller may choose to stay quiet about.
     return {
       ok: false,
       reason: 'failed',

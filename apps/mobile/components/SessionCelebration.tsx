@@ -104,7 +104,6 @@ export function SessionCelebration({
   streak = null,
   recordsSettled = false,
   sessionID,
-  handle,
   testID = 'session-celebration',
 }: {
   summary: SessionSummary;
@@ -116,15 +115,23 @@ export function SessionCelebration({
   /** Whether the records lookup has finished — see the chime below. */
   recordsSettled?: boolean;
   /**
-   * The session's id and the athlete's handle, which the shareable card needs.
+   * The session's id, which the shareable card needs.
    *
-   * Optional, and Share is hidden without the id rather than disabled: an
+   * Optional, and Share is hidden without it rather than disabled: an
    * affordance that is present but cannot work is worse than one that is not
    * there. It also keeps this component renderable by anything that has a
    * summary but no id.
+   *
+   * NO HANDLE. There was a `handle` prop here that no caller ever passed, so
+   * the card's foot always fell back to the wordmark anyway — but dropping it
+   * rather than threading it is a decision, not tidying. The exported PNG
+   * travels off-platform, and stamping `@handle` on it publishes the athlete's
+   * VOLA handle wherever the image lands, which they did not choose by tapping
+   * Share. The wordmark is the better mark on a poster and the more private
+   * one. The feed builds its cards without a handle for a different reason —
+   * the attribution is already above them — and both land in the same place.
    */
   sessionID?: string;
-  handle?: string;
   testID?: string;
 }) {
   const accent = useAccent();
@@ -156,7 +163,7 @@ export function SessionCelebration({
   }, [sessionID, getToken]);
 
   const card = sessionID
-    ? cardFromSummary({ id: sessionID, summary, stats, streak, handle, numbers })
+    ? cardFromSummary({ id: sessionID, summary, stats, streak, numbers })
     : null;
 
   const onShare = useCallback(async () => {
@@ -164,9 +171,11 @@ export function SessionCelebration({
     setSharing(true);
     setShareError(null);
     const result = await shareCard(cardRef);
-    // A dismissed share sheet is an ordinary outcome, not a failure worth
-    // shouting about — only a device that cannot share at all gets a message.
-    if (!result.ok && result.reason === 'unavailable') setShareError(result.message);
+    // A dismissed share sheet is an ordinary outcome and stays quiet; a device
+    // that cannot share at all, or an image that was never produced, both get a
+    // message. `capture` used to be folded in with the dismissal, so a genuine
+    // failure rendered as Share → "Preparing…" → Share and said nothing.
+    if (!result.ok && result.reason !== 'failed') setShareError(result.message);
     setSharing(false);
   }, [sharing]);
 
@@ -364,9 +373,22 @@ export function SessionCelebration({
           hand the athlete an empty image. Positioning it outside the visible
           bounds keeps it real while keeping it out of the way, and
           `pointerEvents="none"` stops it eating taps meant for Done.
+
+          HIDDEN FROM SCREEN READERS TOO, and that is not the same thing as
+          hidden from the eye. VoiceOver traverses off-screen elements, so
+          without the two props below a VoiceOver user swiping past Done walked
+          straight into an invisible duplicate card and heard the wordmark, the
+          date, the headline, every stat and — once the fetch lands — the
+          calorie figure and the score. The feed's posts hide their card the
+          same way, for the same reason.
         */}
         {card && (
-          <RNView style={styles.offscreen} pointerEvents="none">
+          <RNView
+            style={styles.offscreen}
+            pointerEvents="none"
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+          >
             <SessionCard ref={cardRef} data={card} width={360} />
           </RNView>
         )}

@@ -138,7 +138,7 @@ func (r *PostgresRepository) calories(
 	day := endedAt.UTC().Format("2006-01-02")
 	err := r.pool.QueryRow(ctx, `
 		SELECT p.height_cm,
-		       p.date_of_birth::text,
+		       to_char(p.date_of_birth, 'YYYY-MM-DD'),
 		       p.sex,
 		       (SELECT c.weight_kg FROM body_checkins c
 		         WHERE c.user_id = p.user_id
@@ -174,6 +174,12 @@ func (r *PostgresRepository) calories(
 // Warmups are excluded deliberately: including them drags every score down in
 // proportion to how carefully somebody warms up, which punishes the right
 // behaviour.
+//
+// `completed AND set_type <> 'warmup'` is `session.Summarise`'s rule, and the
+// only definition of "a working set" this codebase has. `set_type = 'working'`
+// was used here first, which both counted sets that were never performed and
+// silently dropped every back-off, drop, AMRAP and failure set — so the effort
+// average ignored the hardest set of a session that ended on an AMRAP.
 func (r *PostgresRepository) liftEffort(
 	ctx context.Context, callerID, id string,
 ) (effort float64, sets int, loaded, heavy bool, err error) {
@@ -187,7 +193,7 @@ func (r *PostgresRepository) liftEffort(
 		       COALESCE(MAX(ss.weight_kg) >= 100, false)
 		FROM session_sets ss
 		JOIN sessions s ON s.id = ss.session_id AND s.user_id = $2
-		WHERE ss.session_id = $1 AND ss.set_type = 'working'`,
+		WHERE ss.session_id = $1 AND ss.completed AND ss.set_type <> 'warmup'`,
 		id, callerID).Scan(&effort, &sets, &loaded, &heavy)
 	if err != nil {
 		return 0, 0, false, false, fmt.Errorf("sessioncard: lift effort: %w", err)
@@ -218,12 +224,12 @@ func (r *PostgresRepository) exercises(ctx context.Context, callerID, id string)
 	rows, err := r.pool.Query(ctx, `
 		SELECT e.name,
 		       MAX(ss.weight_kg),
-		       (ARRAY_AGG(ss.reps ORDER BY ss.weight_kg DESC NULLS LAST))[1],
+		       (ARRAY_AGG(ss.reps ORDER BY ss.weight_kg DESC NULLS LAST, ss.reps DESC))[1],
 		       MIN(ss.position)
 		FROM session_sets ss
 		JOIN sessions s  ON s.id = ss.session_id AND s.user_id = $2
 		JOIN exercises e ON e.id = ss.exercise_id
-		WHERE ss.session_id = $1 AND ss.set_type = 'working'
+		WHERE ss.session_id = $1 AND ss.completed AND ss.set_type <> 'warmup'
 		GROUP BY e.id, e.name
 		ORDER BY MIN(ss.position)`,
 		id, callerID)
@@ -318,6 +324,32 @@ func (r *PostgresRepository) techniques(ctx context.Context, callerID, id string
 // sessions, then compute each one's load — is the N+1 that would make this the
 // slowest endpoint in the app, and it would get worse exactly as somebody
 // trained more.
+//
+// # Effort and duration come back separately, and the basis is decided HERE
+//
+// The query used to fold the basis into SQL with a `CASE WHEN $4`, which meant
+// a history session with no recorded effort — a BJJ session with no detail row,
+// a strength session logged before effort tracking was switched on — arrived as
+// load ZERO. Any real session beats a zero, so an athlete whose first
+// effort-tracked session followed eight untracked ones scored ~100 "of your
+// last 8". That is exactly the flattery this package exists not to do, and it
+// hit hardest at the moment somebody first turned the setting on.
+//
+// So the rows carry effort and minutes, and this function decides:
+//
+//   - Effort basis needs MinHistory priors that ACTUALLY RECORDED effort. Rows
+//     without it are not zeroes, they are silent, and are dropped rather than
+//     counted.
+//   - If too few remain, fall back to the VOLUME basis over the full window
+//     rather than refusing — the package doc already promises that fallback for
+//     an athlete who does not track effort, and "you tracked effort once" is the
+//     same situation. `Basis` travels with the score, so the meaning is never
+//     silently different.
+//
+// The window is the last twenty SESSIONS, then filtered — not the last twenty
+// effort-tracked ones. Window is a recency claim ("roughly the last six
+// weeks"), and reaching further back to fill it would rank this month against
+// last year's fitness.
 func (r *PostgresRepository) score(
 	ctx context.Context, callerID string, s sessionRow, effort float64,
 ) (*Score, error) {
@@ -331,54 +363,77 @@ func (r *PostgresRepository) score(
 
 	var rows pgx.Rows
 	var err error
+	// ORDER BY ... , s.id — a TOTAL order. `ended_at` alone can tie, and the
+	// feed documents why that is real rather than theoretical: a client
+	// supplying its own `ended_at` on a sync retry. A tie at the LIMIT boundary
+	// makes window membership nondeterministic, so the same card could score
+	// differently on two consecutive opens.
 	if s.sport == "bjj" {
 		rows, err = r.pool.Query(ctx, `
-			SELECT CASE WHEN $4 THEN COALESCE(d.session_rpe, 0) ELSE 1 END
-			       * (EXTRACT(EPOCH FROM (s.ended_at - s.started_at)) / 60.0)
+			SELECT COALESCE(d.session_rpe, 0),
+			       EXTRACT(EPOCH FROM (s.ended_at - s.started_at)) / 60.0
 			FROM sessions s
 			LEFT JOIN bjj_session_details d ON d.session_id = s.id AND d.user_id = s.user_id
 			WHERE s.user_id = $1 AND s.sport = 'bjj'
 			  AND s.ended_at IS NOT NULL AND s.id <> $2
-			ORDER BY s.ended_at DESC
+			ORDER BY s.ended_at DESC, s.id
 			LIMIT $3`,
-			callerID, s.id, score.Window, basis == score.BasisEffort)
+			callerID, s.id, score.Window)
 	} else {
 		rows, err = r.pool.Query(ctx, `
-			SELECT CASE WHEN $4 THEN COALESCE(e.rpe, 0) ELSE 1 END
-			       * (EXTRACT(EPOCH FROM (s.ended_at - s.started_at)) / 60.0)
+			SELECT COALESCE(e.rpe, 0),
+			       EXTRACT(EPOCH FROM (s.ended_at - s.started_at)) / 60.0
 			FROM sessions s
 			LEFT JOIN LATERAL (
 				SELECT AVG(COALESCE(ss.rpe, 10 - ss.rir)) AS rpe
 				FROM session_sets ss
-				WHERE ss.session_id = s.id AND ss.set_type = 'working'
+				WHERE ss.session_id = s.id AND ss.completed AND ss.set_type <> 'warmup'
 			) e ON true
 			WHERE s.user_id = $1 AND s.sport <> 'bjj'
 			  AND s.ended_at IS NOT NULL AND s.id <> $2
-			ORDER BY s.ended_at DESC
+			ORDER BY s.ended_at DESC, s.id
 			LIMIT $3`,
-			callerID, s.id, score.Window, basis == score.BasisEffort)
+			callerID, s.id, score.Window)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("sessioncard: history: %w", err)
 	}
 	defer rows.Close()
 
-	history := make([]float64, 0, score.Window)
+	effortHistory := make([]float64, 0, score.Window)
+	volumeHistory := make([]float64, 0, score.Window)
 	for rows.Next() {
-		var load float64
-		if err := rows.Scan(&load); err != nil {
+		var rpe, minutes float64
+		if err := rows.Scan(&rpe, &minutes); err != nil {
 			return nil, fmt.Errorf("sessioncard: history scan: %w", err)
 		}
-		history = append(history, load)
+		if minutes < 0 {
+			// A session that ended before it started, same as the card's own
+			// guard. Unknown rather than negative.
+			minutes = 0
+		}
+		volumeHistory = append(volumeHistory, score.Load(1, minutes))
+		if rpe > 0 {
+			effortHistory = append(effortHistory, score.Load(rpe, minutes))
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("sessioncard: history rows: %w", err)
 	}
 
+	if basis == score.BasisEffort && len(effortHistory) < score.MinHistory {
+		// Not enough priors recorded effort to rank against. Measure size
+		// instead of cost, and say which happened.
+		basis = score.BasisVolume
+	}
+
+	history := effortHistory
 	load := score.Load(effort, s.minutes)
 	if basis == score.BasisVolume {
+		history = volumeHistory
 		load = score.Load(1, s.minutes)
 	}
+
 	sc, ok := score.Of(load, history, basis)
 	if !ok {
 		return nil, nil

@@ -29,11 +29,20 @@
 // (3 + 180) would outrank a brutal hour (9 + 60) nearly threefold, which is the
 // shape that actually lets junk volume farm a score.
 //
-// Effort tracking is a setting and plenty of people have it off. Then the basis
-// falls back to size (tonnage, or rolling minutes) and the score still works —
-// it just measures how big the session was rather than what it cost. Which one
-// happened is carried on the result, because a number whose meaning changed
-// silently is worse than no number.
+// Effort tracking is a setting and plenty of people have it off — and so is
+// every session logged before somebody switched it on. Then the basis falls
+// back to DURATION and the score still works; it just measures how long the
+// session was rather than what it cost. Which one happened is carried on the
+// result, because a number whose meaning changed silently is worse than no
+// number.
+//
+// Duration, not tonnage, and the doc said tonnage until a reviewer checked the
+// caller. Tonnage would be the better measure and cannot be the one used: it is
+// meaningless for BJJ, so a single basis has to be something both sports have.
+// The consequence is real and worth stating rather than hiding — under the
+// volume basis a sixty-minute session of thirty sets ties a sixty-minute
+// session of ten. That is the price of a number that works for an athlete who
+// does not record effort, and it is why the basis travels with the score.
 //
 // # Derived, never stored
 //
@@ -69,8 +78,8 @@ type Basis string
 const (
 	// BasisEffort — RPE × minutes. What the session cost.
 	BasisEffort Basis = "effort"
-	// BasisVolume — tonnage or rolling minutes, when effort is not tracked.
-	// How big the session was.
+	// BasisVolume — duration, when effort was not recorded. How long the
+	// session was, which is the only size measure BJJ and strength share.
 	BasisVolume Basis = "volume"
 )
 
@@ -145,6 +154,13 @@ func Of(load float64, history []float64, basis Basis) (Score, bool) {
 // Exposed because a bare percentile invites the wrong question — 62 sounds
 // precise and means little without knowing what 50 looks like — and because a
 // caller computing it separately would have to re-sort the same slice.
+//
+// NO PRODUCTION CALLER YET, which review flagged as dead surface. Kept
+// deliberately: the card's "about the same as usual" line is the intended
+// consumer, and in the meantime `TestAnEasySessionScoresLow` uses it to pin the
+// property this whole package exists for — that the median session scores near
+// 50. Reimplementing that inside the test would leave the two able to disagree,
+// which is the same argument the window cap here was added under.
 func Median(history []float64) (float64, bool) {
 	if len(history) == 0 {
 		return 0, false

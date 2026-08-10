@@ -51,7 +51,7 @@ export const SessionCard = forwardRef<RNView, { data: CardData; width: number }>
     // component serves a 358pt phone card and a 1080px export without a second
     // set of numbers to keep in sync.
     const u = width / 390;
-    const s = styles(u);
+    const s = stylesFor(u);
 
     return (
       <RNView ref={ref} style={[s.card, { width, height: width }]} collapsable={false}>
@@ -165,7 +165,27 @@ export const SessionCard = forwardRef<RNView, { data: CardData; width: number }>
   },
 );
 
-const styles = (u: number) =>
+/**
+ * Styles are built per scale factor and CACHED on it.
+ *
+ * `StyleSheet.create` of ~25 entries ran on every render of every card. On the
+ * completion screen that is invisible; in the feed it is once per post per
+ * re-render, and the screen re-renders on refresh, on paging and on the clock
+ * tick that recomputes "2h ago". Every card at a given width produces byte-for
+ * -byte identical styles, so there is nothing to recompute — and the key space
+ * is tiny in practice (one feed width, one export width, one modal width).
+ */
+const styleCache = new Map<number, ReturnType<typeof buildStyles>>();
+
+function stylesFor(u: number) {
+  const hit = styleCache.get(u);
+  if (hit) return hit;
+  const built = buildStyles(u);
+  styleCache.set(u, built);
+  return built;
+}
+
+const buildStyles = (u: number) =>
   StyleSheet.create({
     card: {
       backgroundColor: vola.bg,

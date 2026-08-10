@@ -752,14 +752,6 @@ components:
             ATHLETE. Every other read of a session is scoped to its owner
             without exception; sharing moves copies on an explicit
             send-and-accept precisely so it never has to answer this.
-        share_training_details:
-          type: boolean
-          description: >
-            How MUCH of a shared session travels: the numbers alone, or the
-            exercise/technique list with them. Off by default and SUBORDINATE
-            to the switch above — it does nothing on its own. Two switches
-            because they disclose different things: the numbers say you trained
-            hard, the detail says what you are working on.
 
 
             Off by default, and no update may turn it on implicitly — a PATCH
@@ -770,6 +762,23 @@ components:
             turning it off retracts everything at once. The consequence is that
             turning it ON is retroactive: accepted friends see finished
             sessions from before the switch. Clients must say so.
+        share_training_details:
+          type: boolean
+          description: >
+            How MUCH of a shared session travels once the switch above has let
+            it travel at all: the numbers alone, or the exercise/technique list
+            with them. Two switches because they disclose different things —
+            the numbers say you trained hard, the detail says what you are
+            working on.
+
+
+            Off by default, and SUBORDINATE: it does nothing while
+            share_training_with_friends is off, because the detail is only ever
+            attached to rows that switch already returned.
+
+
+            Read LIVE too, so turning it off strips the detail from every past
+            row immediately — and turning it ON is retroactive in the same way.
         created_at:
           type: string
           format: date-time

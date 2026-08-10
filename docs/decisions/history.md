@@ -18312,6 +18312,58 @@ JS package was a cosmetic warning. Under a development build it is a launch-time
 this branch needs `pnpm --dir apps/mobile run ios` rather than `start` — Metro
 cannot deliver a native module to a binary that does not contain it.
 
+### What review caught, and it was not the privacy machinery
+
+The two `[blocking]` findings were both in code the privacy work merely passed
+through, which is worth recording because the attention had been on the switches.
+
+**"Working set" had two definitions and the new one published lifts nobody
+performed.** `session.Summarise` — the domain, and what every other surface
+reports — says `completed AND set_type <> 'warmup'`. Four new queries said
+`set_type = 'working'`, which is wrong in both directions at once. A template
+opens with every set `completed = false`, so a PLANNED set the athlete skipped
+could come back as the top set: the regression test, run against the old code,
+publishes "200 kg × 1" for a session whose heaviest performed lift was 120. On a
+friend's feed the reader has no way to know it never happened. And back-off,
+drop, AMRAP and failure sets — all written by this app's own UI — were dropped
+entirely, so a session that ended on an AMRAP lost its hardest set from the
+effort average and lost the exercise from the detail band, while `working_sets`
+and `tonnage_kg` on the same row still counted it.
+
+Notably the existing tests could not have caught it: every fixture set was
+`Completed: true, SetTypeWorking`, which is the one combination where the two
+definitions agree.
+
+**The score flattered exactly the athlete it was most likely to mislead.** The
+history query folded the basis into SQL with a `CASE WHEN $4`, so a prior
+session that recorded no effort arrived as load ZERO — and any real load beats a
+zero. An athlete whose first effort-tracked session followed eight untracked
+ones scored ~100 "of your last 8". That is precisely the flattery this package
+was written not to do, and it struck at the moment somebody first switched
+effort tracking on. Effort and duration come back separately now and the basis
+is decided in Go: sessions without effort are SILENT, not zero, and if too few
+priors spoke, the basis falls back to volume over the full window — the fallback
+the package doc already promised for an athlete who does not track effort at
+all. `Basis` travels with the score, so the meaning is never silently different.
+
+Smaller things, each real: the contract edit had split
+`share_training_with_friends`'s description in half, orphaning its off-by-default
+and retroactivity paragraphs onto the NEW field — so the most security-sensitive
+field in the spec silently lost its documentation, and YAML validation cannot
+see that. The off-screen export card was hidden from the eye and from touch but
+not from VoiceOver, which traverses off-screen elements, so a VoiceOver user
+walked past Done into an invisible duplicate card reading out the calorie figure.
+A genuine capture failure was indistinguishable from a dismissed share sheet, so
+it rendered as Share → "Preparing…" → Share and said nothing. And `styles(u)`
+rebuilt ~25 `StyleSheet` entries per card per render, which is invisible on the
+completion screen and once per post per re-render in a feed.
+
+The score's doc claimed the volume basis was "tonnage, or rolling minutes"; the
+implementation is duration for both sports. The doc was wrong, not the code —
+tonnage is meaningless for BJJ, so a shared basis has to be something both have —
+but the consequence is now stated rather than hidden: under the volume basis a
+sixty-minute session of thirty sets ties one of ten.
+
 ### Gaps
 
 - **None of this is device-verified.** The feed of cards, the settings toggle and
@@ -18326,7 +18378,23 @@ cannot deliver a native module to a binary that does not contain it.
   but a third consumer would make a shared wire package the better answer.
 - **Instagram Stories still gets no direct hand-off.** The OS share sheet is the
   path, which the dev-client switch has now unblocked in principle (`vola://` is
-  registered) without anyone having built it.
+  registered) without anyone having built it. What remains is a Facebook App ID
+  registered with Meta — an account decision, not a technical one.
+- **The feed is an unvirtualized `ScrollView`.** That predates this branch, but
+  it now holds full cards (~25-35 native views each, 30 per page, growing by 30
+  per "Show older") rather than light metric rows. `React.memo` and a style cache
+  take the per-render cost out; the structural fix is `KeyboardAwareFlatList`,
+  which already exists in this codebase for exactly this reason, and is a change
+  to a screen nobody has run on a device yet.
+- **The athlete never sees the card at readable size before sharing it.** The
+  export mounts off-screen and the only preview is the share sheet's thumbnail,
+  so the calorie figure — an inference from body data — is posted sight-unseen.
+  It is the owner's own deliberate act, so this is not a leak; it still sits
+  awkwardly beside privacy-by-default, and a preview step is the answer.
+- **The share leaves its temp file behind**, ~1-2 MB per share in the cache
+  directory. Deleting it needs `expo-file-system`, a third native dependency on
+  an app that now compiles its own binary — judged a disproportionate price for
+  a directory the OS purges under pressure.
 
 ## Open items / known gaps as of this entry
 
