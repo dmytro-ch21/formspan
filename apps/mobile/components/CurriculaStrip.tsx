@@ -59,17 +59,28 @@ export function CurriculaStrip() {
 
   if (curricula === null || curricula.length === 0) return null;
 
-  // Belt syllabuses only. An athlete's own curriculum has no belt and belongs
-  // on the web list where it can be edited; showing it here without an edit
-  // path would be a dead end.
-  const belted = curricula
-    .filter((c) => beltOf(c.belt) !== null)
+  // VOLA content only — the belt syllabuses plus the foundations track
+  // (Novice Fundamentals has no belt, deliberately, and filtering on belt
+  // alone made it invisible on the one platform a novice actually holds). An
+  // athlete's own curriculum still belongs on the web list where it can be
+  // edited; showing it here without an edit path would be a dead end.
+  //
+  // Order: what you are working leads; then foundations before the belts,
+  // because it is the entry point and finishes first; then belts in rank
+  // order.
+  const shown = curricula
+    // `!editable` on BOTH arms. The belt arm went unguarded for a long time,
+    // and `belt` is athlete-writable ("a hint, never a gate") — so an athlete
+    // setting belt on their own public curriculum put a dead-end card here
+    // wearing a belt photograph. The review that added foundations flushed
+    // the asymmetry out.
+    .filter((c) => (beltOf(c.belt) !== null || c.track === 'foundations') && !c.editable)
     .sort(
       (a, b) =>
         Number(b.enrolled) - Number(a.enrolled) ||
-        BELTS.indexOf(beltOf(a.belt)!) - BELTS.indexOf(beltOf(b.belt)!),
+        rankOf(a) - rankOf(b),
     );
-  if (belted.length === 0) return null;
+  if (shown.length === 0) return null;
 
   return (
     <View style={styles.wrap}>
@@ -79,8 +90,8 @@ export function CurriculaStrip() {
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.row}
       >
-        {belted.map((c) => {
-          const belt = beltOf(c.belt)!;
+        {shown.map((c) => {
+          const belt = beltOf(c.belt);
           return (
             <Link key={c.id} href={`/curriculum/${c.id}`} asChild>
               <Pressable
@@ -90,8 +101,8 @@ export function CurriculaStrip() {
                 // here and the counts are the useful part.
                 accessibilityLabel={
                   c.enrolled
-                    ? `${c.name}, working it, ${c.countable_items} techniques to master`
-                    : `${c.name}, ${c.countable_items} techniques to master`
+                    ? `${c.name}, working it, ${c.countable_items} items to master`
+                    : `${c.name}, ${c.countable_items} items to master`
                 }
                 testID={`curriculum-card-${c.id}`}
               >
@@ -110,21 +121,40 @@ export function CurriculaStrip() {
                     exactly what a 3pt rule needs. The strap colour stays on
                     the wash below, where it sits behind a photograph of that
                     belt and is decorative. */}
-                <RNView style={[styles.rule, { backgroundColor: activeBeltAccent[belt] }]} />
+                <RNView
+                  style={[
+                    styles.rule,
+                    // A foundations card carries no belt and must not fake
+                    // one: a neutral rule, same weight.
+                    { backgroundColor: belt ? activeBeltAccent[belt] : vola.line },
+                  ]}
+                />
 
                 <RNView style={styles.inner}>
-                  <RNView style={[styles.cover, { backgroundColor: beltTint(belt) }]}>
-                    <BeltPhoto
-                      belt={belt}
-                      // No stripes and no degree. This is the syllabus FOR a
-                      // belt, not a statement about what the athlete has been
-                      // awarded — drawing four stripes on the blue card would
-                      // read as a claim about them.
-                      stripes={0}
-                      degree={0}
-                      width={104}
-                      label=""
-                    />
+                  <RNView
+                    style={[
+                      styles.cover,
+                      { backgroundColor: belt ? beltTint(belt) : vola.surfaceHover },
+                    ]}
+                  >
+                    {belt ? (
+                      <BeltPhoto
+                        belt={belt}
+                        // No stripes and no degree. This is the syllabus FOR a
+                        // belt, not a statement about what the athlete has been
+                        // awarded — drawing four stripes on the blue card would
+                        // read as a claim about them.
+                        stripes={0}
+                        degree={0}
+                        width={104}
+                        label=""
+                      />
+                    ) : (
+                      // Foundations: no belt exists to photograph, and using
+                      // the white belt's would claim one. The discipline glyph
+                      // says what it is without ranking anybody.
+                      <Icon name="bjj" size={30} color={vola.textMuted} />
+                    )}
                   </RNView>
 
                   {/* Only WORKING takes the accent. Inking both variants the
@@ -137,7 +167,7 @@ export function CurriculaStrip() {
                     style={[styles.eyebrow, c.enrolled ? { color: accent.ink } : styles.eyebrowIdle]}
                     numberOfLines={1}
                   >
-                    {c.enrolled ? 'WORKING' : `${belt.toUpperCase()} BELT`}
+                    {c.enrolled ? 'WORKING' : belt ? `${belt.toUpperCase()} BELT` : 'FOUNDATIONS'}
                   </Text>
                   <Text style={styles.name} numberOfLines={2}>
                     {c.name}
@@ -201,6 +231,13 @@ function beltOf(belt: string | null): Belt | null {
   if (belt === null) return null;
   const b = belt.toLowerCase() as Belt;
   return BELTS.includes(b) ? b : null;
+}
+
+/** Strip order within the un-enrolled: foundations first — the entry point,
+ *  and the one that finishes first — then belts in rank order. */
+function rankOf(c: Curriculum): number {
+  const belt = beltOf(c.belt);
+  return belt === null ? -1 : BELTS.indexOf(belt);
 }
 
 const styles = StyleSheet.create({

@@ -23,26 +23,22 @@ import type { CurriculumItem, Progress } from '@/lib/curriculum';
  * clears. `attempts` is `scored + attempted`, so it already covers landing it;
  * `defended` and `sessions` are their own axes.
  *
- * **Drilled-only training reads as untouched, and that is forced rather than
- * chosen.** The backend excludes `drilled` from every one of these counters on
- * purpose — `sessions` is `COUNT(DISTINCT …) FILTER (WHERE event IN
- * ('attempted','scored','defended'))`, so that a technique cannot clear its
- * spread requirement without being used on somebody who was resisting — and
- * `Progress` carries no drilled count at all. So the client has no signal to
- * read even if it wanted one.
- *
- * It is also defensible on its own terms: drilling moves none of the numbers
- * the chips display, and a "started" rule beside three `0/25` chips would claim
- * progress the criteria do not recognise. But it is a real limitation — an
- * athlete who has drilled a technique twenty times sees the same rule as one
- * who has never seen it — and closing it needs a `drilled` count on the
- * progress payload, not a client change.
+ * **Drilled training counts now.** An earlier version of this comment
+ * recorded drilled-only work reading as untouched, forced by the payload
+ * carrying no drilled count — an athlete twenty classes into a movement drew
+ * the same rule as one who had never seen it. The API sends
+ * `drilled_sessions` since the phases redesign, so practice finally moves
+ * this. Live criteria still exclude it; "started" is a weaker claim than any
+ * criterion and honestly includes having drilled.
  *
  * Null progress means not enrolled: no evidence is being counted, so there is
  * nothing to have started.
  */
 export function hasEvidence(p: Progress | null | undefined): boolean {
-  return p != null && (p.attempts > 0 || p.defended > 0 || p.sessions > 0);
+  return (
+    p != null &&
+    (p.attempts > 0 || p.defended > 0 || p.sessions > 0 || p.drilled_sessions > 0)
+  );
 }
 
 /** Turns one item's criteria into the chips the row draws. */
@@ -73,6 +69,8 @@ export function criteriaChips(item: CurriculumItem, enrolled: boolean): Criterio
   if (c.target_scored !== null) volume('goal', 'Landed', p?.scored, c.target_scored);
   if (c.target_defended !== null) volume('recovery', 'Stopped theirs', p?.defended, c.target_defended);
   if (c.target_sessions !== null) volume('calendar', 'Sessions', p?.sessions, c.target_sessions);
+  if (c.target_drilled_sessions !== null)
+    volume('progress', 'Classes drilled', p?.drilled_sessions, c.target_drilled_sessions);
 
   if (c.min_hit_rate !== null) {
     const need = Math.round(c.min_hit_rate * 100);

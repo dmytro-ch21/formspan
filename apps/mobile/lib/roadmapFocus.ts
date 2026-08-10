@@ -59,12 +59,18 @@ export function proposeFocus(
   current: Focus[],
   max: number = MAX_FOCUS,
 ): FocusProposal {
-  const inRoadmap = new Map(items.map((i) => [i.technique_id, i]));
+  // Concept items carry no technique_id — an idea cannot be a focus row.
+  // Narrowed once here so everything below works with a guaranteed id.
+  const steps = items.filter(
+    (i): i is CurriculumItem & { technique_id: string } =>
+      typeof i.technique_id === 'string' && i.technique_id !== '',
+  );
+  const inRoadmap = new Map(steps.map((i) => [i.technique_id, i]));
 
   // Rules 1 and 2. Only items that are roadmap STEPS — an item with no criteria
   // is reading, and a slot spent on something nothing can complete is a
   // category error on a list capped at five.
-  const wanted = items.filter(
+  const wanted = steps.filter(
     (i) => i.criteria !== null && !(i.progress?.mastered ?? false),
   );
 

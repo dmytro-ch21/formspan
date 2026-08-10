@@ -19016,6 +19016,55 @@ Open questions:
   150 ever actually happens.
 - Mobile still renders none of this — the last PR of the plan.
 
+## 2026-08-10 — The phone learns phases, concepts, foundations and the drilled criterion
+
+The last PR of the roadmap redesign plan. Mobile per the platform rule: this
+is the reading-and-working half — picking a roadmap, seeing progress, feeding
+focus — with building staying on web.
+
+- **The roadmap screen** groups items by phase (a `lib/curriculumPhases.ts`
+  mirror of web's, same unphased-first and dangling-index-fallback tests —
+  the fourth deliberate lib duplication, recorded in the module header).
+  Concepts render as text cards with no step disc and no criteria chrome.
+  **Step numbers count techniques continuously across groups and skip
+  concepts**: "step 9" keeps meaning the ninth thing to learn, and prose
+  cannot shift a milestone's number.
+- **`hasEvidence` finally sees drilling.** Its own comment recorded the
+  limitation as forced — the payload carried no drilled count, so an athlete
+  twenty classes into a breakfall drew the same untouched rule as one who
+  had never seen it. `drilled_sessions` ships since #218, the clause is in,
+  and the mutation table in `curriculumRow.test.ts` grew its row (drop the
+  clause → one red). The drilled criterion draws a "Classes drilled" chip
+  with the same enrolled/browsing split as the live counters.
+- **The Plan tab strip shows Foundations.** It filtered on `belt` alone, which
+  made Novice Fundamentals — built precisely for the athlete most likely to
+  be holding a phone and least likely to open the web app — invisible on the
+  one surface that matters to them. Foundations cards take a neutral rule,
+  a discipline glyph instead of a belt photograph (a belt cover would claim
+  a rank the curriculum never had), and sort before the belts: the entry
+  point, and the roadmap that finishes first. Athlete-authored curricula
+  stay off the strip — still no edit path on the phone.
+- **`proposeFocus` narrows to technique items**, same fix as web's copy: a
+  concept has no technique id and can never become a focus row.
+
+Verified: jest 1141 green (nine new — grouping, drilled chip, drilled
+evidence, concept exclusion), the drilled `hasEvidence` clause
+mutation-tested red then restored by hand, typecheck clean, and the lint
+ratchet holds at exactly 54/54 with zero new warnings. Not
+Simulator-verified in this session — the worktree build carries the
+`EXPO_PUBLIC_*` trap and the jest suite is this app's own stated first line;
+the scenarios doc carries the on-device list.
+
+Open questions:
+
+- The strip's foundations card is the first non-belt cover in the app;
+  if more tracks appear (leg-lock literacy et al.), the glyph-on-wash
+  treatment needs a per-track accent rather than one neutral.
+- Today/You surfaces (`RoadmapSummary`, `RoadmapLine`) still summarise by
+  countable items only — they could name the current PHASE ("Side control:
+  frames before everything"), which is the redesign's vocabulary. Left for a
+  design pass; the data is already on the wire.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
