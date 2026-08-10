@@ -18396,6 +18396,101 @@ sixty-minute session of thirty sets ties one of ten.
   an app that now compiles its own binary — judged a disproportionate price for
   a directory the OS purges under pressure.
 
+## 2026-08-09 — The one referential check on the curriculum seed path never ran in CI
+
+`TestEverySeededTechniqueExistsInTheLibrary` is the check that every
+`technique_id` in `curricula.json` actually exists in the technique library —
+ids are hand-authored against a 542-entry catalog and nothing else verifies
+them. It queried the `techniques` table and, finding it empty, called
+`t.Skip`. CI migrates `TEST_DATABASE_URL` and never runs `cmd/seed`, so the
+table is always empty there. Measured against a freshly migrated, unseeded
+database: **597 passed, 1 skipped, exit 0** — the suite reported success while
+the single assertion guarding the deploy path never executed.
+
+This is the failure mode this file already records twice ("a test that skips is
+indistinguishable from one that passes"; the 8-of-9 share tests that skipped on
+a CI-shaped database). Third time, so the pattern is worth naming: the skip was
+added for a *correct* reason — an empty catalog would make every id read as
+missing, which is a true statement about an unseeded database and tells you
+nothing about the syllabuses — and the mistake was the remedy, not the
+diagnosis. `t.Skip` converts "I cannot answer this" into "success".
+
+**The fix was neither of the two obvious ones.** Seeding the rows inside the
+test is the rule the rest of the repo settled on
+(`bjj/proficiency_postgres_test.go` and friends own their library rows), and
+adding `go run ./cmd/seed` to CI is one line. Both were wrong here, because
+**both sides of this comparison are content files**: `curriculum.SeedData()`
+reads embedded `curricula.json`, `technique.SeedData()` reads embedded
+`techniques.json`, and `cmd/seed` inserts techniques *then* curricula
+(`cmd/seed/main.go`, where the ordering is already commented as load-bearing).
+So the check needs no database at all — it is a pure comparison of two files
+compiled into the binary. `bjj`'s
+`TestTheShippedLibraryStaysUnderTheProficiencyCap` was rewritten from this
+exact mistake to read the embedded catalog; this is the same fix, and the
+precedent was already in the tree.
+
+Worth stating because it inverts the intuition: querying the live table was the
+**weaker** check. A hand-seeded local database also holds whatever the admin
+console authored (`source='admin'`), any of which satisfies the foreign key for
+an id that no fresh deploy would ever have. The database version could go green
+on a syllabus that breaks production.
+
+The empty-catalog guard survives as `t.Fatal` rather than `t.Skip`: the
+reasoning behind it was sound, and the embedded file cannot be empty for any
+environmental reason, so an empty one means somebody emptied `techniques.json`
+— a failure, not a condition.
+
+Verified the way the report asked. Scratch database created, migrated to 49,
+deliberately **not** seeded (`SELECT count(*) FROM techniques` = 0), full
+backend suite: **598 passed, 0 failed, 0 skipped, exit 0**, with the test
+reporting `pass`. Then the mutation, on that same pristine database — one item
+pointed at `this-technique-does-not-exist`:
+
+- old test: `--- SKIP` → `ok`. A syllabus pointing at nothing reports success.
+- new test: `--- FAIL`, naming the curriculum and the id.
+
+It also fails with `TEST_DATABASE_URL` unset entirely, which is the deeper
+point: the check no longer has an environment in which it declines to run.
+
+**A package-ordering accident is why this was invisible.** `technique`'s own
+test seeds the full 542-row catalog (`technique/postgres_test.go`), and
+`go test ./...` walks packages alphabetically — `curriculum` before
+`technique`. So the shared database ends a suite run *full*, which is why a
+second consecutive run on the same database would have shown this test passing,
+and why anyone checking by hand after a run saw a seeded library and no
+problem. Had the two package names sorted the other way, this test would have
+passed in CI for the wrong reason and the bug would have been even harder to
+see.
+
+### Gaps
+
+- **Nothing prevents the fourth recurrence.** A CI gate asserting zero skips
+  would, and this repo already likes that shape of ratchet (`--max-warnings` on
+  mobile lint). It was left out deliberately rather than overlooked: many tests
+  legitimately skip when `TEST_DATABASE_URL` is unset locally, so the invariant
+  is "zero skips *in CI*", and choosing where to enforce that is a decision
+  about every future test, not part of this fix.
+- **`activity/postgres_test.go` has the last conditional skip** — it skips when
+  the discipline registry holds no default-on/default-off pair to invert. Not
+  the same bug (it reads an in-process registry, not ambient database state) and
+  it does not fire today, but it is the same shape, and it would go quiet rather
+  than red if every discipline ever defaulted on.
+- **The seeder's technique-before-curriculum ordering is still asserted only by
+  a comment.** A fresh deploy would fail loudly via the foreign key and
+  `log.Fatalf`, so this is legible rather than silent — but no test covers it.
+- **"In the library" here means present, not published.** Review raised this and
+  it was deliberately left: both public technique reads filter
+  `status = 'published'` (`technique/postgres.go`), while the curriculum item
+  join does not — so a syllabus item pointing at a `draft` technique would seed
+  fine, satisfy the foreign key, pass this test, render in the syllabus, and
+  then 404 on the tap-through. Unreachable today (all 542 entries normalize to
+  published) and the database version of this test had the identical hole, so
+  it is not a regression — but the console and `cmd/exportcontent` make drafts
+  in `techniques.json` a plausible future state, at which point this becomes
+  reachable. Asserting published status on referenced ids is the fix; it is a
+  different property from referential existence, which is why it is recorded
+  here rather than bolted onto this test.
+
 ## 2026-08-09 — The position map, and a week that says how it went
 
 Two additions, one for BJJ and one for everything: **where the rounds actually
