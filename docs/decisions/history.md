@@ -18670,6 +18670,82 @@ written down where the code is, rather than silently dropped.
   Simulator hit on an intermittent race; and per this file's own rule, a
   worktree cannot build the mobile app anyway without copying `.env.local` in.
 
+## 2026-08-10 — `contests`: competing, as a history (schema only)
+
+A table for what you entered, in which division, and how it went. Migration
+`000050`, and **nothing reads or writes it yet** — no module, no handler, no
+route, no client. Merged schema-first deliberately; the reasoning and its one
+real cost are below.
+
+### The naming, which is the decision worth recording
+
+`competition` was unavailable and it is not a near miss: in this schema it
+already means **IBJJF rule legality**, carried on `techniques.ibjjf_ruleset_id`
+and surfaced in the Library as "Restricted in IBJJF competition". A
+`competitions` table would put two unrelated concepts behind one word and make
+`grep competition` useless the day it landed.
+
+`tournament` reads better for BJJ and is wrong in the model — this table has to
+hold a powerlifting meet and a 10k too. So the schema takes the neutral word and
+the sport's own word is chosen in the client through `labelFor`, which is the
+split `sessions` already uses.
+
+One row is one **entry**, not one event: two divisions at the same tournament
+are two rows.
+
+### The migration number, which nearly went wrong
+
+It was written as `000049` and sat uncommitted in a worktree while
+`000049_share_training_details` landed on main. Two branches at one number is
+not something golang-migrate resolves — it refuses to start, breaking CI, local
+dev and every deploy at once.
+
+**The collision is invisible in `git diff origin/main...HEAD`**, because a
+three-dot diff uses the merge base and this branch's base predated the other. It
+exists only in the merged tree. That is the trap `CLAUDE.md` describes, hit for
+the second time; the first cost a confusing debugging session. Renumbered to
+`000050` before committing, and the shared `vola_test` never had the bad version
+applied.
+
+### What review changed, and why schema-first survived it
+
+Three fixes, all free while the file was unmerged and each a whole migration
+afterwards:
+
+- **`placement` and `entrants` were `SMALLINT`.** The file's own scope is what
+  makes that wrong — SMALLINT stops at 32,767 and the Peachtree Road Race fields
+  around 60,000, so finishing 41,203rd would not fit. The failure mode is worse
+  than the ceiling: an overflow raises SQLSTATE 22003 rather than a constraint
+  violation, so a repository translating pgconn errors **by constraint name** —
+  this codebase's pattern — would surface it as an unmapped internal error
+  instead of invalid input. Both are `INTEGER` now, verified by storing
+  "41203 of 60000". `position` stays SMALLINT: it numbers matches inside one
+  entry.
+- **A duplicate index.** `contest_matches_contest_idx (contest_id, position)`
+  was byte-for-byte the btree the unique constraint already creates. Pure write
+  amplification; dropped.
+- **The unique constraint is `DEFERRABLE INITIALLY IMMEDIATE`**, which changes
+  nothing today and lets a future reorder swap positions inside one transaction
+  rather than forcing delete-and-reinsert.
+
+That list **is** the argument about schema-first. The hazard of landing a schema
+before a consumer is that it fossilises before any real query has tested it, and
+all three findings live exactly there. They were free to fix now and expensive
+later, so fixing them made schema-first the cheaper path rather than the riskier
+one. Ownership is already enforced at the database — the composite
+`(contest_id, user_id)` foreign key is the 000014 pattern verbatim — so the
+first handler inherits the guarantee rather than having to remember it.
+
+### Gaps
+
+- **No consumer.** The table is invisible to every client; nothing validates the
+  index shapes against real queries until a module exists.
+- **`contests` has no natural unique key**, so a double-submitted create writes
+  two identical entries. Left deliberately: entries are user-deletable, and the
+  client can supply the id the way `activities` does if it ever matters.
+- Nothing is device- or staging-verified; the migration was applied, exercised
+  and reversed on a scratch local database only.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
