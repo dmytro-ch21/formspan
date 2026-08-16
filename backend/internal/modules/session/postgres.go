@@ -392,10 +392,14 @@ func (r *PostgresRepository) attachSets(ctx context.Context, sessions []Session,
 	if len(ids) == 0 {
 		return nil
 	}
-	// LEFT JOIN, not JOIN. `session_sets.exercise_id` has no foreign key to
-	// `exercises` in older data, and an inner join would make a set whose
-	// exercise has been retired vanish from its own session — losing training
-	// history to fix an arithmetic detail.
+	// LEFT JOIN, not JOIN — defensive rather than required, and the difference
+	// is worth stating because this comment first claimed the opposite.
+	// `session_sets_exercise_id_fkey` DOES exist, so a dangling `exercise_id`
+	// cannot happen today and an inner join would behave identically. Left
+	// anyway: the constraint has no ON DELETE, so the day somebody adds one, an
+	// inner join would make a set whose exercise was retired vanish from its own
+	// session — losing training history to fix an arithmetic detail. Both sides
+	// read a missing exercise as factor 1, so the fallback is consistent.
 	//
 	// The factor is decided here, in SQL, rather than sent by the client:
 	// `per_side` says the number is one implement, and `is_unilateral` says

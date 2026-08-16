@@ -21,7 +21,7 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 
 const selectColumns = `
 	id, name, sport, movement_pattern, movement_pattern_detail, primary_muscles,
-	secondary_muscles, equipment, load_type, is_unilateral, instructions,
+	secondary_muscles, equipment, load_type, is_unilateral, load_mode, instructions,
 	created_at, updated_at`
 
 type scannable interface {
@@ -32,7 +32,7 @@ func scanExercise(row scannable) (*Exercise, error) {
 	var e Exercise
 	err := row.Scan(
 		&e.ID, &e.Name, &e.Sport, &e.MovementPattern, &e.MovementPatternDetail, &e.PrimaryMuscles,
-		&e.SecondaryMuscles, &e.Equipment, &e.LoadType, &e.IsUnilateral,
+		&e.SecondaryMuscles, &e.Equipment, &e.LoadType, &e.IsUnilateral, &e.LoadMode,
 		&e.Instructions, &e.CreatedAt, &e.UpdatedAt,
 	)
 	if err != nil {

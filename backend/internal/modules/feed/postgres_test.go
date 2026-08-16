@@ -99,12 +99,24 @@ func person(t *testing.T, pool *pgxpool.Pool, id, handle string, sharing bool) s
 // already (`exercise/content_postgres_test.go`, `bjj/proficiency_postgres_test.go`)
 // and the rule it settled on is: own the library rows you depend on.
 func seedExercise(t *testing.T, pool *pgxpool.Pool, id string) string {
+	return seedExerciseAs(t, pool, id, "total")
+}
+
+// seedExerciseAs seeds a catalog row with an explicit load_mode.
+//
+// It exists because `seedExercise` inserted without one, so every fixture in
+// this file took the column default of 'total' — and the feed's volume query
+// could have lost its per-side CASE entirely with the whole suite still green.
+// That is exactly the trap the session module's parity test names: both sides
+// agree trivially at a factor of one, and the comment claiming they were
+// compared kept being true while meaning nothing.
+func seedExerciseAs(t *testing.T, pool *pgxpool.Pool, id, loadMode string) string {
 	t.Helper()
 	ctx := context.Background()
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO exercises (id, name, sport, movement_pattern, load_type, status)
-		VALUES ($1, $1, 'strength', 'squat', 'weight_reps', 'published')
-		ON CONFLICT (id) DO NOTHING`, id); err != nil {
+		INSERT INTO exercises (id, name, sport, movement_pattern, load_type, status, load_mode)
+		VALUES ($1, $1, 'strength', 'squat', 'weight_reps', 'published', $2)
+		ON CONFLICT (id) DO UPDATE SET load_mode = EXCLUDED.load_mode`, id, loadMode); err != nil {
 		t.Fatalf("seed exercise %s: %v", id, err)
 	}
 	t.Cleanup(func() {
@@ -882,5 +894,55 @@ func TestAFriendsDetailUsesTheOneDefinitionOfAWorkingSet(t *testing.T) {
 		t.Fatalf("the row counts %d working sets but names %d exercises; one set per exercise "+
 			"was logged, so these must agree",
 			page.Items[0].WorkingSets, len(page.Items[0].Detail))
+	}
+}
+
+func TestAFriendsVolumeCountsBothDumbbells(t *testing.T) {
+	// The feed computes tonnage in its own SQL — a knowing duplication of
+	// `session.Summarise`, kept because the alternative is loading every set of
+	// every friend's session on the endpoint most likely to be polled.
+	//
+	// That duplication is only safe while something checks it, and until this
+	// existed nothing did for the load factor: every fixture here seeded an
+	// exercise at the default 'total', so the per-side CASE could have been
+	// deleted with the whole suite green. A friend's row would then have
+	// reported half the work of the session its owner was looking at.
+	h := newHarness(t)
+	ctx := context.Background()
+	alice := person(t, h.pool, "fd_lfa", "fd_lfa_h", true)
+	bob := person(t, h.pool, "fd_lfb", "fd_lfb_h", true)
+	befriend(t, h, alice, "fd_lfa_h", bob, "fd_lfb_h")
+
+	// A PAIR of dumbbells: 30 is one of them.
+	db := seedExerciseAs(t, h.pool, "fd_lf_db", "per_side")
+	// A barbell, so the test cannot pass by doubling everything.
+	bb := seedExerciseAs(t, h.pool, "fd_lf_bb", "total")
+	train(t, h, bob, "fd_lf_s1", "Push", true, []session.Set{
+		{ExerciseID: db, Position: 1, SetType: session.SetTypeWorking,
+			Reps: iptr(10), WeightKg: fptr(30), Completed: true},
+		{ExerciseID: bb, Position: 2, SetType: session.SetTypeWorking,
+			Reps: iptr(5), WeightKg: fptr(100), Completed: true},
+	})
+
+	page, err := h.repo.List(ctx, alice, 30, 0)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("want one session, got %+v", ids(page))
+	}
+	// 10 x 30 x 2 = 600, plus 5 x 100 = 500.
+	if got := page.Items[0].TonnageKg; got != 1100 {
+		t.Fatalf("tonnage %v, want 1100 — the dumbbell half must count both", got)
+	}
+
+	// And it agrees with the domain over the same session, which is the
+	// property the duplication actually needs.
+	full, err := h.sessions.Get(ctx, bob, "fd_lf_s1")
+	if err != nil {
+		t.Fatalf("read the session back: %v", err)
+	}
+	if want := session.Summarise(full.Sets).TonnageKg; page.Items[0].TonnageKg != want {
+		t.Fatalf("feed says %v, Summarise says %v", page.Items[0].TonnageKg, want)
 	}
 }

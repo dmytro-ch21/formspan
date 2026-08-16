@@ -78,8 +78,14 @@ WHERE load_mode = 'total'
   )
   -- Single implement, two hands. Matched on name because nothing in the schema
   -- records how many implements a movement uses, and adding a column for the
-  -- ~20 rows it would describe is worse than a list somebody can read and
-  -- correct from the admin console.
+  -- ~20 rows it would describe is worse than a list somebody can read.
+  --
+  -- NOTE, because an earlier draft of this comment claimed otherwise: the admin
+  -- console cannot yet correct a row's load_mode. `createWithin` does not write
+  -- the column (so console-authored exercises are always 'total') and no
+  -- endpoint updates it. Correcting a misclassification today means editing
+  -- exercises.json and deploying. That is a real gap and it is recorded in the
+  -- history entry rather than papered over here.
   AND name !~* '(goblet|halo|pullover|get-up|getup|windmill|around the world)'
   -- A swing, snatch, clean or high pull is one bell unless it says "double".
   AND NOT (

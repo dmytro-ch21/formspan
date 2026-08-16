@@ -19174,8 +19174,55 @@ Zero means one throughout, on both sides of the wire. Every set written before
 this has no factor, and reading zero as zero would turn an under-report on
 dumbbell work into the erasure of every session ever logged.
 
+### What review caught, and one of them was live
+
+**The classification was never served.** `load_mode` went into the contract and
+into the seed file, and no read path selected it — so every `GET /v1/exercises`
+returned `"load_mode": ""`, outside the enum the contract had just declared.
+That is not cosmetic: the share card's tonnage is computed ON THE PHONE, and an
+offline logger cannot double a dumbbell set unless the catalog tells it how to
+read the number. `load_factor` on a server session read never reaches a session
+still in progress.
+
+**And the omission had a second, worse consequence.** `cmd/exportcontent` writes
+`exercises.json` from those same rows, so a console-edited exercise exported as
+`"load_mode": ""` — and because this change had (correctly) added the column to
+the seeder's change-detection tuple, the next deploy ACTIVELY rewrote `per_side`
+back to `total`. The silent halving, reintroduced through the content pipeline,
+on exactly the rows somebody had cared enough to edit.
+
+**CI cannot see it.** The path needs a row with `source='admin'`; CI authors
+nothing, so the export reports "nothing authored in the console; files
+untouched" and a green run proves a round trip that never ran. Both review
+passes reproduced it only by forcing a row to admin ownership by hand — and it
+turned up uncommitted in the worktree mid-review, which is how it was noticed.
+There is now a test that does the forcing.
+
+Two smaller corrections worth keeping because both were confidently wrong:
+
+- The `attachSets` comment justified its LEFT JOIN with "no foreign key to
+  `exercises`". `session_sets_exercise_id_fkey` exists. The join is still the
+  right defensive call — the constraint has no ON DELETE — but the stated reason
+  was false.
+- The migration justified its name-based exclusion list with "a list somebody
+  can read and correct from the admin console". The console cannot set
+  `load_mode` at all: `createWithin` does not write it, and no endpoint updates
+  it. Correcting a misclassification today means editing the seed file and
+  deploying.
+
+Also learned, about a signal that looks informative and is not: `cmd/seed` prints
+`exercises: 761 upserted` on every run, because that number is `len(exercises)` —
+rows submitted, not rows changed. It is a constant and can never answer whether
+a re-seed rewrote anything. `max(updated_at)` can, and does: unchanged across a
+second run, and moving by exactly one row when a value is forced wrong.
+
 ### Gaps
 
+- **The console cannot correct a classification.** ~80 rows were classified by
+  equipment and name; the only way to fix one is an edit to `exercises.json` and
+  a deploy. `createWithin` also never writes the column, so every future
+  console-authored dumbbell exercise starts as `total` — the original bug, for
+  new content.
 - **The input affordance is not built.** A per_side exercise does not yet tell
   the athlete "enter one dumbbell" at the moment of logging, and a logged set
   does not render "30 x 2 = 60". The arithmetic is right everywhere; the screen
