@@ -20207,6 +20207,18 @@ cleanup is recorded as **L5** rather than closed off.
 - **`releaseCapture` is available and unused.** Two lines after `shareAsync`
   resolves would clear the cache file; whether every share target has finished
   reading by then is a question rather than an assumption, so it wants a device.
+- **If the web app ever grows a share, the size branch is the easy part.**
+  Checked while confirming the default: `RNViewShot.web.ts` sets
+  `resizedCanvas.width = options.width`, so web is pixels-final like Android and
+  the branch is already right for it — but `result: 'tmpfile'` is
+  *unimplemented* there (it warns and hands back a data-URI) and
+  `releaseCapture` is a no-op, so `shareCard`'s whole file-based flow would need
+  rethinking rather than porting.
+- **Windows is the one target nobody has read.** The `platform !== 'ios'`
+  default treats it as pixels, and a test asserts that — pinning the shape of
+  the rule rather than a list of known platforms, so an enumerated
+  `android || web` cannot creep in unnoticed. It is a stated default, not a
+  measurement.
 - **Non-integer Android scales land within a pixel**, by rounding inside the
   renderer. Nothing downstream can tell 1079 from 1080, but no device with such
   a scale has run this.

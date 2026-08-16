@@ -84,7 +84,19 @@ describe('cardCaptureSize elsewhere — pixels, already final', () => {
   it('treats any non-iOS platform as taking pixels', () => {
     // Written as "not ios" rather than "is android", so web and anything added
     // later follow the pixel reading rather than silently dividing.
+    //
+    // `web` is verified: the library's `RNViewShot.web.ts` sets
+    // `resizedCanvas.width = options.width` — backing-store pixels, with
+    // `devicePixelRatio` nowhere in the resize path.
     expect(cardCaptureSize(3, 'web')).toBe(CARD_EXPORT_WIDTH);
+
+    // `windows` is NOT verified — nobody has read the package's C#. It is here
+    // to pin the SHAPE rather than the set: an enumerated
+    // `platform === 'android' || platform === 'web'` passes every other case
+    // in this file while quietly inverting the default for any target not
+    // listed. If Windows ever turns out to be points-based, this line should
+    // fail and be rewritten — that is the point of it.
+    expect(cardCaptureSize(3, 'windows')).toBe(CARD_EXPORT_WIDTH);
   });
 });
 
