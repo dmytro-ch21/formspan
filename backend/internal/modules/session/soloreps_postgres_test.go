@@ -52,28 +52,27 @@ func TestTheSoloRuleReachesTheDatabase(t *testing.T) {
 	// such record is ever produced. It passed, and mutating the projection left
 	// it passing, because the loop body never ran. Hence `sawRepRecord`: an
 	// assertion inside a filter needs proof the filter matched something.
-	const pullUp = "archer-pull-up"
 	if _, err := repo.ReplaceSets(ctx, user, id, []Set{
 		{ExerciseID: exBench, SetType: SetTypeWorking, Reps: ptrInt(8), WeightKg: ptrF(102.5),
 			AssistedReps: ptrInt(3), Completed: true},
 		// Twelve with four assisted is EIGHT unaided...
-		{ExerciseID: pullUp, SetType: SetTypeWorking, Reps: ptrInt(12),
+		{ExerciseID: exPullUp, SetType: SetTypeWorking, Reps: ptrInt(12),
 			AssistedReps: ptrInt(4), Completed: true},
 		// ...so this clean nine beats it, even though twelve is the bigger
 		// number. Without a competing set the test could not tell a solo
 		// ranking from a full-reps one.
-		{ExerciseID: pullUp, SetType: SetTypeWorking, Reps: ptrInt(9), Completed: true},
+		{ExerciseID: exPullUp, SetType: SetTypeWorking, Reps: ptrInt(9), Completed: true},
 	}); err != nil {
 		t.Fatalf("replace sets with a bodyweight exercise: %v", err)
 	}
 
-	recs, err := repo.Records(ctx, user, []string{pullUp})
+	recs, err := repo.Records(ctx, user, []string{exPullUp})
 	if err != nil {
 		t.Fatalf("records: %v", err)
 	}
 	sawRepRecord := false
 	for _, er := range recs {
-		if er.ExerciseID != pullUp {
+		if er.ExerciseID != exPullUp {
 			continue
 		}
 		for _, rec := range er.Records {

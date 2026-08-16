@@ -41,6 +41,8 @@ const (
 	// removed the BJJ drills and running was the only non-strength discipline
 	// left with catalog rows. A fixture we write ourselves has no such problem.
 	exRun = "ses_fx_run"
+	// Bodyweight, so it is the only fixture that can carry a rep PR.
+	exPullUp = "ses_fx_pullup"
 	// PER_SIDE, and that is the whole reason it exists: the SQL-vs-domain
 	// parity test needs a load factor other than 1, or both sides agree
 	// trivially and a missing CASE in the SQL passes green. As a borrowed id
@@ -74,6 +76,12 @@ var fixtureExercises = []fixtureExercise{
 	{exOHP, "strength", "vertical_push", "weight_reps", "total", false},
 	{exRun, "running", "locomotion", "distance_time", "total", false},
 	{exDBBench, "strength", "horizontal_push", "weight_reps", "per_side", false},
+	// REPS-ONLY, and that is the whole reason it exists: `RecordMostReps` is
+	// produced for `load_type: 'reps'` and nothing else, so a rep-PR assertion
+	// against a weighted exercise never runs at all. It is also the honest
+	// shape for the case that motivates assisted reps — a band- or
+	// machine-assisted pull-up is bodyweight work.
+	{exPullUp, "strength", "vertical_pull", "reps", "total", false},
 }
 
 // requireUnsorted asserts that ids are NOT in ascending lexical order.
