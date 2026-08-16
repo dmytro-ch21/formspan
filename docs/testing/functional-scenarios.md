@@ -6765,3 +6765,59 @@ serialises them. These are the properties worth holding.
   arrives.
 - Nothing calls `db.withTransactionAsync` directly outside `lib/db.ts` — lint
   fails the build on it, since a comment alone did not hold the line before.
+
+## Per-side load (`exercises.load_mode`, `LoggedSet.load_factor`)
+
+`weight_kg` is what is stamped on the implement. For a pair of dumbbells that is
+one of the two, so the total doubles. These scenarios are mostly about the
+number NOT changing where it should not.
+
+### The arithmetic
+
+- Log 5 reps at 100 kg on **Barbell Bench Press** → tonnage 500.
+- Log 5 reps at 30 kg on **Dumbbell Bench Press** → tonnage **300**, not 150.
+- Log 10 reps at 40 kg on **One-Arm Dumbbell Row** → tonnage **400**, not 800.
+  Per-side, but only one dumbbell is moving; `is_unilateral` is what stops it
+  doubling.
+- Log 8 reps at 30 kg on **Goblet Squat** → tonnage **240**, not 480. One
+  implement, two hands — the number already is the whole load. Kettlebell Swing,
+  Pullover, Turkish Get-Up and Halo are the same shape and the ones most likely
+  to regress, because equipment alone classifies them wrongly.
+- A **warm-up** on a per-side exercise still contributes nothing.
+
+### Everywhere the number appears, it must agree
+
+The same session's tonnage has to read identically in all of these, and they are
+computed by five different pieces of code:
+
+- the session summary on the phone
+- the week review on Today, and the Today header
+- the training calendar
+- `GET /v1/sessions/history` totals
+- the friends' feed row, and the session share card
+
+A dumbbell session that reads 600 on your own screen and 300 in a friend's feed
+is the specific regression this guards.
+
+### The fresh-database trap
+
+- **Create a database, migrate it, seed it, and check `load_mode`.** The
+  migration only backfills rows that already exist; a new database gets its
+  catalog from the seeder. Query
+  `SELECT load_mode FROM exercises WHERE id = 'dumbbell-bench-press'` — it must
+  be `per_side`. This is how the bug came back once already, and it is invisible
+  on a developer machine whose database predates the migration.
+- Run `cmd/seed` twice: the second run must report no changes. If `load_mode` is
+  missing from the change-detection tuple, every deploy rewrites all 761 rows.
+- Run `cmd/exportcontent` and diff: `load_mode` must survive the round trip. If
+  the export drops it, the next content edit silently strips the whole catalog's
+  classification.
+
+### Backwards compatibility
+
+- A set logged **offline before sync** has no `load_factor`. Its volume must
+  read as `weight x 1`, never as zero — an erased session is far worse than an
+  under-reported one.
+- An older client that ignores `load_factor` still shows the server's totals
+  correctly, because the server does the multiplying for anything it computes.
+
