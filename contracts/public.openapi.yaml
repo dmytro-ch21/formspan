@@ -1551,9 +1551,54 @@ components:
         2 RIR). Both are stored because lifters are fluent in one or the
         other and rarely both, and asking for a conversion just after a hard
         set is the wrong moment for arithmetic.
+
+
+        DROP SETS. A drop is its own row with its own weight_kg and reps —
+        225x3 then 185x8 is two rows, the second with set_type=drop.
+
+
+        A set's drops are the CONSECUTIVE drop rows immediately following it,
+        all of the same exercise. Contiguity is the rule, not "the nearest
+        preceding non-drop row": given [bench working, squat drop, bench drop],
+        the squat drop breaks the run and the bench drop is orphaned rather than
+        attached. That state is a client bug either way, but clients implement
+        this from here, so two of them must not render it differently.
+
+
+        There is no parent id. The server replaces a session's sets wholesale on
+        every save, so row ids are regenerated and any stored parent reference
+        would dangle on the first edit. Order is the relationship, and position
+        is already total and unique per session.
       required: [exercise_id, position, set_type, notes]
       properties:
         exercise_id: { type: string, example: barbell-back-squat }
+        assisted_reps:
+          type: integer
+          nullable: true
+          minimum: 0
+          example: 3
+          description: >
+            How many of `reps` somebody else helped with — a spotter, a band, an
+            assisted-pull-up machine. Must be between 0 and `reps` inclusive,
+            and `reps` must be present.
+
+
+            `reps` still holds the FULL count, assisted included, so every
+            existing figure reads the same number it always did. The one worth
+            training against is `reps - assisted_reps`: "225 for 5 then 3 with a
+            spotter" is 8 reps of work and 5 of capability, and the athlete's
+            target is to need the help for one or two rather than three.
+
+
+            NULL is UNRECORDED and 0 is "none of them" — different claims, and
+            both legal. Nobody should have to type 0 on every set, and treating
+            absent as 0 would assert that every set logged before this field
+            existed was performed unaided. Absent reads as all-solo.
+
+
+            A spotted set is still ONE set. It is not split into an unassisted
+            row and an assisted one — one approach to the bar, one rest period,
+            one entry in the working-set count.
         load_factor:
           type: integer
           example: 2

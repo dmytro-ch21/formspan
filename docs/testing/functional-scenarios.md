@@ -6821,3 +6821,35 @@ is the specific regression this guards.
 - An older client that ignores `load_factor` still shows the server's totals
   correctly, because the server does the multiplying for anything it computes.
 
+## Assisted reps and drop sets (`session_sets.assisted_reps`, `set_type='drop'`)
+
+### Spotter reps
+
+- Log 8 reps at 102.5 kg with `assisted_reps: 3` → the set reads 8 reps, and the
+  solo figure is 5. **Tonnage counts all 8** — the weight moved either way.
+- It counts as **ONE working set**, not two. A spotted set is one approach to
+  the bar; if `working_sets` goes up by two, the split has been modelled wrongly.
+- **Edit the session and save again.** `ReplaceSets` deletes and reinserts every
+  row, so this is where a column missing from the INSERT or the SELECT loses the
+  data — silently, since nothing else about the set changes.
+- `assisted_reps: 0` and `assisted_reps` absent must stay distinguishable after
+  a round trip. Absent means unrecorded and reads as all-solo; 0 means the
+  athlete said none.
+- Rejected with a message naming the set: more assisted than performed
+  (`reps: 5, assisted_reps: 8`), assisted reps with no `reps`, negative values.
+  The database CHECK is the backstop; the handler should answer first, because
+  "a value is out of range" with no set number is unactionable.
+
+### Drop sets
+
+- 225 × 3 then 185 × 8 is **two rows** — a `working` set and a `drop` set, each
+  with its own weight and reps. There is no parent id and none is needed.
+- The drop belongs to the **preceding** set of the same exercise. Two drops in a
+  row both belong to the same parent.
+- A `drop` row following a DIFFERENT exercise is orphaned: it must be skipped,
+  never attached. Attaching it would put reps under a lift they were never
+  performed on.
+- Reorder the sets and save: because the relationship is order, moving a drop
+  away from its parent re-parents it. That is the known cost of adjacency —
+  verify the client cannot do it by accident.
+
