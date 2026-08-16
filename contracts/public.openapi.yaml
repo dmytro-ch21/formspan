@@ -1552,8 +1552,44 @@ components:
         other and rarely both, and asking for a conversion just after a hard
         set is the wrong moment for arithmetic.
       required: [exercise_id, position, set_type, notes]
+      externalDocs:
+        description: >
+          Drop sets. A drop is its own row with its own weight_kg and reps, and
+          it belongs to the nearest PRECEDING non-drop row of the same
+          exercise — 225x3 then 185x8 is two rows, the second with
+          set_type=drop. There is no parent id: the server replaces a session's
+          sets wholesale on every save, so row ids are regenerated and any
+          stored parent reference would dangle. Order is the relationship, and
+          position is already total and unique per session.
+        url: https://github.com/dmytro-ch21/formspan/blob/main/backend/migrations/000053_assisted_reps.up.sql
       properties:
         exercise_id: { type: string, example: barbell-back-squat }
+        assisted_reps:
+          type: integer
+          nullable: true
+          example: 3
+          description: >
+            How many of `reps` somebody else helped with — a spotter, a band, an
+            assisted-pull-up machine. Must be between 0 and `reps` inclusive,
+            and `reps` must be present.
+
+
+            `reps` still holds the FULL count, assisted included, so every
+            existing figure reads the same number it always did. The one worth
+            training against is `reps - assisted_reps`: "225 for 5 then 3 with a
+            spotter" is 8 reps of work and 5 of capability, and the athlete's
+            target is to need the help for one or two rather than three.
+
+
+            NULL is UNRECORDED and 0 is "none of them" — different claims, and
+            both legal. Nobody should have to type 0 on every set, and treating
+            absent as 0 would assert that every set logged before this field
+            existed was performed unaided. Absent reads as all-solo.
+
+
+            A spotted set is still ONE set. It is not split into an unassisted
+            row and an assisted one — one approach to the bar, one rest period,
+            one entry in the working-set count.
         load_factor:
           type: integer
           example: 2

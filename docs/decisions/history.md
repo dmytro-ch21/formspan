@@ -19236,6 +19236,75 @@ second run, and moving by exactly one row when a value is forced wrong.
   defensible and undocumented anywhere a client can see.
 - Nothing here is device-verified.
 
+## 2026-08-16 — Spotter reps, and which set a drop came off
+
+Two gaps in set logging, raised together and turning out to need very different
+answers. One needed a column; the other needed nothing but a documented rule,
+and finding that out is most of the value here.
+
+### Spotter reps needed a column
+
+"225 for 5, then 3 more with a spotter" had nowhere to go. Logged as 8 reps it
+overstates what the athlete did alone; logged as 5 it discards three real reps
+and the volume that came with them. `session_sets.assisted_reps` records the
+split.
+
+**`reps` still holds the full count.** Tonnage, rep totals and the working-set
+rule all keep reading the number they always did, and `SoloReps()` —
+`reps - assisted_reps` — is the only thing that has to know about the split. It
+is the number progression should aim at: "next time I need the spotter for one
+or two instead of three" is a comparable figure, where the same sentence in a
+notes field is not.
+
+**A spotted set stays ONE set.** The obvious alternative is two rows — five
+unassisted, three assisted — and it is wrong in a way that propagates: they are
+one approach to the bar, one rest period, one entry in `working_sets`. Splitting
+them would count the set twice everywhere sets are counted, and this codebase
+keeps exactly one definition of a working set that every surface agrees on.
+
+**NULL is unrecorded, 0 is "none of them".** Nobody should type 0 on every set,
+and treating absent as 0 would assert that every set logged before this existed
+was performed unaided — a claim nothing collected. Unrecorded reads as all-solo,
+which credits what `reps` already said instead of quietly revising an athlete's
+history downward.
+
+### Drop sets needed no column at all
+
+225 for 3, strip to 185, 8 more. `set_type='drop'` has existed since sets did,
+and a drop row already carries its own `weight_kg` and `reps` — so this was
+always two loggable rows, and how much was dropped was always derivable. What
+was missing is which set a drop came off.
+
+**That relationship is ADJACENCY, and it is forced rather than preferred.** The
+first design was `parent_set_id`, a self-referencing foreign key. It cannot
+work: `ReplaceSets` deletes every row of a session and reinserts them on each
+save, so `session_sets.id` is regenerated constantly and the reference would
+dangle on the first edit. Worth recording because it is the natural first
+answer and the reason it fails is not visible from the schema.
+
+A stable group key would survive that, but it introduces a second ordering
+concept for every client to keep consistent alongside `position` — which is
+already a total order, enforced by `UNIQUE (session_id, position)`. So a drop
+belongs to the nearest preceding non-drop row of the same exercise, and
+`DropsOf` reads the run. It stops at a different exercise, so an orphaned drop
+is skipped rather than attaching reps to somebody else's lift.
+
+### Gaps
+
+- **No client for either yet.** The backend round-trips both, and nothing on the
+  phone lets you say "3 of those were spotted" or renders a drop under its
+  parent. This branch is deliberately backend-only.
+- **Nothing consumes `SoloReps` yet.** The progression rule still reads `reps`,
+  so a heavily assisted set still reads as a strong one when deciding what to
+  load next time. Wiring that is the point of the column and is not done.
+- **Adjacency is unenforced.** Nothing stops a client writing a `drop` row first
+  in a session, or between two exercises. It is skipped rather than
+  misattributed, but the schema cannot express "must follow a working set" and
+  no validation tries.
+- **Assisted reps still count fully toward tonnage**, which is right — the
+  weight moved — but means two athletes with identical tonnage may have done
+  quite different work. Nothing surfaces that.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
