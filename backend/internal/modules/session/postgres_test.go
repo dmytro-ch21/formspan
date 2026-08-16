@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"os"
+	"sort"
 	"testing"
 	"time"
 
@@ -13,25 +14,152 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Postgres integration tests, gated on TEST_DATABASE_URL. The exercise
-// catalog must be seeded (`go run ./cmd/seed`).
+// Postgres integration tests, gated on TEST_DATABASE_URL. These fixtures OWN
+// the catalog rows they run on — nothing here needs `cmd/seed`.
 
+// The catalog ids these tests use. Namespaced, because they are this package's
+// rows and not the shipped catalog's.
+//
+// They used to be real ids — `bench-press`, `back-squat`, `run` — and the
+// package seeded none of them. That worked only by accident: `exercise`'s tests
+// call Seed(), loading the whole catalog and never removing it, and `exercise`
+// sorts before `session` under `-p 1`. Run this package alone against a freshly
+// migrated database and 22 tests failed with `unknown exercise "back-squat"`.
+// CI never seeds either, so its green depended on that side effect too.
+//
+// The rule the rest of the repo settled on is: own the library rows you depend
+// on. `exercise/content_postgres_test.go`, `bjj/proficiency_postgres_test.go`,
+// `feed/postgres_test.go` and `share/postgres_test.go` all do. This was the
+// last holdout.
 const (
-	exBench = "bench-press"
-	exSquat = "back-squat"
+	exBench = "ses_fx_bench"
+	exSquat = "ses_fx_squat"
+	exOHP   = "ses_fx_ohp"
 	// A non-strength exercise, for the sport-mismatch and cross-sport-filter
-	// tests. This was "bear-crawl-forward" until migration 000019 removed the
-	// 20 BJJ drills from the catalog: BJJ content is the technique library now,
-	// and techniques are not yet loggable as sets, so there is NO bjj exercise
-	// to pair with a bjj session. Running is the remaining non-strength sport
-	// with real catalog entries.
-	exRun = "run"
-	exOHP = "overhead-press"
-	// A PER_SIDE exercise, so the SQL-vs-domain parity test actually exercises
-	// the load factor. Without one in the fixtures both sides agree trivially
-	// at a factor of 1, and a missing CASE in the SQL passes green.
-	exDBBench = "dumbbell-bench-press"
+	// tests. Owning it also removes an old constraint the comment here used to
+	// record: with borrowed ids this had to be `run`, because migration 000019
+	// removed the BJJ drills and running was the only non-strength discipline
+	// left with catalog rows. A fixture we write ourselves has no such problem.
+	exRun = "ses_fx_run"
+	// PER_SIDE, and that is the whole reason it exists: the SQL-vs-domain
+	// parity test needs a load factor other than 1, or both sides agree
+	// trivially and a missing CASE in the SQL passes green. As a borrowed id
+	// this property was the catalog's to change — #224 reclassified ~80 rows —
+	// and the test would have gone quietly trivial. Now it is stated here.
+	exDBBench = "ses_fx_db_bench"
 )
+
+// fixtureExercise is a catalog row this package writes for itself. Every column
+// that any test depends on is set explicitly rather than taken from a default:
+// `feed` learned that the hard way, where an omitted load_mode let every
+// fixture default to 'total' and the per-side CASE could have been deleted with
+// the suite still green.
+type fixtureExercise struct {
+	id       string
+	sport    string
+	pattern  string
+	loadType string
+	loadMode string
+	// The load-factor CASE is `load_mode = 'per_side' AND NOT is_unilateral`,
+	// so the per-side property rests on TWO columns. Declared rather than left
+	// to the column default: a stale row with is_unilateral = true would make
+	// the parity test agree trivially at factor 1 again, which is the exact
+	// thing exDBBench exists to prevent.
+	unilateral bool
+}
+
+var fixtureExercises = []fixtureExercise{
+	{exBench, "strength", "horizontal_push", "weight_reps", "total", false},
+	{exSquat, "strength", "squat", "weight_reps", "total", false},
+	{exOHP, "strength", "vertical_push", "weight_reps", "total", false},
+	{exRun, "running", "locomotion", "distance_time", "total", false},
+	{exDBBench, "strength", "horizontal_push", "weight_reps", "per_side", false},
+}
+
+// requireUnsorted asserts that ids are NOT in ascending lexical order.
+//
+// Two tests here prove that a caller's chosen ORDER survives — Records keeping
+// the asked order, and pinned exercises keeping the athlete's. Neither can fail
+// unless the order it uses is one a stray `sort.Strings` (or an `ORDER BY` that
+// lost its position column) would CHANGE. That requirement lives entirely in
+// the relative spelling of two constants, which is invisible at the call site.
+//
+// Renaming the fixtures from `bench-press`/`back-squat` to `ses_fx_*` inverted
+// it and silently disarmed both tests: `back-squat` < `bench-press`, so
+// bench-first used to be the non-alphabetical case, while `ses_fx_bench` <
+// `ses_fx_squat` made that same call sorted. Both went green with the bug they
+// exist to catch. Caught in review, not by the suite — so the property is
+// asserted now rather than described in a comment that a rename cannot break.
+func requireUnsorted(t *testing.T, ids []string) {
+	t.Helper()
+	if sort.StringsAreSorted(ids) {
+		t.Fatalf("this test needs an order a sort would change, but %v is already "+
+			"in lexical order — it would pass with the bug it exists to catch. "+
+			"Reorder the ids, or rename the fixtures so they differ.", ids)
+	}
+}
+
+// seedFixtureExercises writes this package's catalog rows and removes them
+// again. Called from newTestRepo, so it runs before any test body and — since
+// t.Cleanup is LIFO — its cleanup runs after every cleanup the test registers
+// later. The rows therefore outlive the sessions referencing them, which is the
+// ordering `seedDraftExercise` below documents having to get right.
+//
+// The removal is deliberately order-INDEPENDENT rather than relying on that.
+// `session_sets.exercise_id` and `workout_items.exercise_id` are both NO
+// ACTION, so a bare `DELETE FROM exercises` fails the foreign key; discard that
+// error and the fixture survives into the database every other package shares.
+// `feed` and `share` both shipped exactly that leak — `share` at nine rows per
+// clean run. So whatever still references the row goes first, and a failure is
+// logged rather than swallowed.
+func seedFixtureExercises(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	ctx := context.Background()
+
+	ids := make([]string, 0, len(fixtureExercises))
+	for _, e := range fixtureExercises {
+		ids = append(ids, e.id)
+	}
+
+	t.Cleanup(func() {
+		// Parents first: both child tables cascade from their own parent
+		// (session_sets from sessions, workout_items from workouts), so
+		// removing the parent clears the reference.
+		if _, err := pool.Exec(ctx, `
+			DELETE FROM sessions WHERE id IN (
+				SELECT session_id FROM session_sets WHERE exercise_id = ANY($1))`, ids); err != nil {
+			t.Logf("cleanup sessions referencing fixture exercises: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `
+			DELETE FROM workouts WHERE id IN (
+				SELECT workout_id FROM workout_items WHERE exercise_id = ANY($1))`, ids); err != nil {
+			t.Logf("cleanup workouts referencing fixture exercises: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `DELETE FROM exercises WHERE id = ANY($1)`, ids); err != nil {
+			t.Logf("cleanup fixture exercises: %v", err)
+		}
+	})
+
+	for _, e := range fixtureExercises {
+		// Every column is reconciled on conflict, not just inserted. A row left
+		// behind by an interrupted run must be repaired rather than trusted —
+		// and a partial SET is how a stale value survives into a green suite.
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO exercises (id, name, sport, movement_pattern, load_type, status, load_mode, is_unilateral)
+			VALUES ($1, $1, $2, $3, $4, 'published', $5, $6)
+			ON CONFLICT (id) DO UPDATE SET
+				name = EXCLUDED.name,
+				sport = EXCLUDED.sport,
+				movement_pattern = EXCLUDED.movement_pattern,
+				load_type = EXCLUDED.load_type,
+				status = EXCLUDED.status,
+				load_mode = EXCLUDED.load_mode,
+				is_unilateral = EXCLUDED.is_unilateral`,
+			e.id, e.sport, e.pattern, e.loadType, e.loadMode, e.unilateral); err != nil {
+			t.Fatalf("seed fixture exercise %s: %v", e.id, err)
+		}
+	}
+}
 
 func newTestRepo(t *testing.T) (*PostgresRepository, *pgxpool.Pool) {
 	t.Helper()
@@ -45,6 +173,7 @@ func newTestRepo(t *testing.T) (*PostgresRepository, *pgxpool.Pool) {
 	}
 	// Registered first so it closes last under LIFO cleanup.
 	t.Cleanup(pool.Close)
+	seedFixtureExercises(t, pool)
 	return NewPostgresRepository(pool), pool
 }
 
@@ -1095,7 +1224,12 @@ func TestPinnedExercises_RoundTripAndOrder(t *testing.T) {
 		t.Fatalf("a new athlete should have no pins: %v %v", got, err)
 	}
 
-	want := []string{exBench, exSquat}
+	// The read is `ORDER BY position, exercise_id`, so the pinned order only
+	// proves anything if it differs from the alphabetical tiebreak — otherwise
+	// dropping `position` from that clause passes green.
+	want := []string{exSquat, exBench}
+	requireUnsorted(t, want)
+
 	if err := repo.SetPinnedExercises(ctx, user, want); err != nil {
 		t.Fatalf("set: %v", err)
 	}
@@ -1103,17 +1237,17 @@ func TestPinnedExercises_RoundTripAndOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	// Order is the athlete's choice, not alphabetical — bench was pinned first.
-	if len(got) != 2 || got[0] != exBench || got[1] != exSquat {
+	// Order is the athlete's choice, not alphabetical — squat was pinned first.
+	if len(got) != 2 || got[0] != exSquat || got[1] != exBench {
 		t.Errorf("pins came back as %v, want %v", got, want)
 	}
 
 	// Replace wholesale, including reordering.
-	if err := repo.SetPinnedExercises(ctx, user, []string{exSquat}); err != nil {
+	if err := repo.SetPinnedExercises(ctx, user, []string{exBench}); err != nil {
 		t.Fatalf("replace: %v", err)
 	}
 	got, _ = repo.PinnedExercises(ctx, user)
-	if len(got) != 1 || got[0] != exSquat {
+	if len(got) != 1 || got[0] != exBench {
 		t.Errorf("replace left %v", got)
 	}
 
@@ -1149,11 +1283,13 @@ func TestRecords_PreservesTheCallersOrder(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	// Must be an order a sort would *change*, or the test can't fail. The ids
-	// are "back-squat" and "bench-press", so asking bench-first is the
-	// non-alphabetical case; asking squat-first would pass either way and
-	// prove nothing.
-	asked := []string{exBench, exSquat}
+	// Must be an order a sort would *change*, or the test cannot fail —
+	// asserted rather than asserted-in-a-comment, because the last rename
+	// inverted it and nothing noticed. Squat-first is the non-alphabetical
+	// case for the current ids.
+	asked := []string{exSquat, exBench}
+	requireUnsorted(t, asked)
+
 	got, err := repo.Records(ctx, user, asked)
 	if err != nil {
 		t.Fatalf("records: %v", err)
@@ -1161,12 +1297,12 @@ func TestRecords_PreservesTheCallersOrder(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("expected both exercises, got %d", len(got))
 	}
-	if got[0].ExerciseID != exBench || got[1].ExerciseID != exSquat {
+	if got[0].ExerciseID != exSquat || got[1].ExerciseID != exBench {
 		t.Errorf("order was %s, %s — want %s, %s (sorted in place?)",
-			got[0].ExerciseID, got[1].ExerciseID, exBench, exSquat)
+			got[0].ExerciseID, got[1].ExerciseID, exSquat, exBench)
 	}
 	// And the caller's own slice must come back untouched.
-	if asked[0] != exBench || asked[1] != exSquat {
+	if asked[0] != exSquat || asked[1] != exBench {
 		t.Errorf("Records mutated the caller's slice: %v", asked)
 	}
 }

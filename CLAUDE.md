@@ -233,50 +233,36 @@ alone, and every future one would have to remember. If you add a test that seeds
 shared reference data, `-p 1` is what is keeping it from breaking somebody
 else's package.
 
-**Job two — ordering.** `internal/modules/session` cannot run on its own against
-a freshly migrated database. Measured 2026-08-16 on `main`: 54 pass, **22 FAIL**,
-every one of them `session: invalid input: unknown exercise "back-squat"` (or
-`"bench-press"`, or `"run"`). Its fixtures name real catalog ids and the package
-seeds none of them. It is green in a full run only because
-`internal/modules/exercise`'s tests call `Seed()` — the whole 762-row catalog,
-and unlike the per-test fixtures elsewhere in the suite those rows are never
-cleaned up — while `exercise` sorts before `session`, with `-p 1` forcing the
+**Job two — ordering.** Some packages' fixtures reference real catalog ids
+(`bench-press`, `back-squat`) that they never seed. Those packages pass only
+because `internal/modules/exercise`'s tests call `Seed()` — the whole 762-row
+catalog, and unlike the per-test fixtures elsewhere in the suite those rows are
+never cleaned up — while `exercise` sorts fifth, with `-p 1` forcing the
 packages to run in that order.
 
-**CI leans on that side effect too**, which is the part worth knowing. The
-`Backend (Go)` job brings up a fresh Postgres service container, runs
-`go run ./cmd/migrate up`, and never runs `cmd/seed` — so CI's database is the
-unseeded case on *every* run, and `session` is green there purely because a
-package nine positions earlier in the alphabet left rows behind. Two
-harmless-looking changes would break 22 tests in a module nobody touched:
-renaming `exercise` to anything sorting after `session`, or — worse, because it
-is the discipline this repo enforces everywhere else — giving that `Seed()` test
-the `t.Cleanup` its own neighbours all have.
+**CI leans on that side effect too.** The `Backend (Go)` job brings up a fresh
+Postgres service container, runs `go run ./cmd/migrate up`, and never runs
+`cmd/seed` — so CI's database is the unseeded case on *every* run, and those
+packages are green there purely because a package earlier in the alphabet left
+rows behind. Two harmless-looking changes break them: renaming `exercise` to
+something sorting later, or — worse, because it is the discipline this repo
+enforces everywhere else — giving that `Seed()` test the `t.Cleanup` its
+neighbours all have.
 
-So **a single-package run failing on unknown exercise ids is not your change**,
-and the obvious thing to do while iterating (`go test ./internal/modules/session/`)
-is exactly what triggers it. `session` now has a `TestMain`
-(`internal/modules/session/main_test.go`) that says so: it checks the five
-borrowed ids up front and, if they have no published row, fails the package with
-one message instead of 22 `unknown exercise` errors. It counts the catalog to
-say *which* problem it found — an empty table (never seeded, `cmd/seed` fixes
-it) versus a populated one whose ids have drifted (a rename, or an admin-owned
-row the seeder's `WHERE source = 'seed'` skips, neither of which seeding
-repairs). It deliberately does **not** seed: those rows belong to `cmd/seed`,
-and a package writing 762 rows it does not own into the shared database is the
-bug, not the remedy. The fix it points at, in the common case:
+The rule this violates is **own the library rows you depend on**.
+`exercise/content_postgres_test.go`, `bjj/proficiency_postgres_test.go`,
+`feed/postgres_test.go`, `share/postgres_test.go` and now
+`session/postgres_test.go` all seed their own catalog rows for exactly this
+reason. `session` was converted on 2026-08-16 and is the worked example to copy:
+namespaced ids (`ses_fx_*`), every load-bearing column set explicitly rather
+than defaulted, and FK-ordered cleanup wired into `newTestRepo` so it runs after
+each test's own cleanups under LIFO. See that history entry before doing another.
 
-```bash
-cd backend && DATABASE_URL="$TEST_DATABASE_URL" go run ./cmd/seed
-```
-
-**One deliberate trade to know about:** `TestMain` cannot see `-run`, so on an
-unseeded database this also blocks the package's *pure-logic* tests (`onerm`,
-`basis`, `summarise_load`), which need no catalog. Seeding the database once
-clears it permanently.
-
-For any *other* package that starts failing this way — the guard only covers
-`session` — the same question answered by hand:
+**Two holdouts remain**, measured 2026-08-16 by running each package against its
+own pristine migrated database: **`workout` (14 failures)** and **`profile`
+(1)**, both `unknown exercise "bench-press"`. Every other module package passes
+standalone. So a single-package run failing on unknown exercise ids in one of
+those two is not your change:
 
 ```bash
 docker compose exec -T postgres psql -U vola -d vola_test -tc 'SELECT count(*) FROM exercises;'
@@ -284,18 +270,16 @@ docker compose exec -T postgres psql -U vola -d vola_test -tc 'SELECT count(*) F
 
 `0` means the catalog was never seeded into that database — the normal state of
 a per-branch database created by the recipe below, since that recipe migrates
-and stops. Hundreds of rows means the catalog is there and the failure is real.
-(Substitute your own database name if you are not on the shared `vola_test` —
-and note that `vola_test` has usually been seeded by some earlier full run,
-which is why this trap hides until you make a fresh one.)
+and stops. Seeding it once unblocks you:
 
-The standing rule this violates is **own the library rows you depend on** —
-`exercise/content_postgres_test.go`, `bjj/proficiency_postgres_test.go`,
-`feed/postgres_test.go` and `share/postgres_test.go` all seed their own catalog
-rows for exactly this reason, and `feed` was moved off borrowed ids after
-reproducing this same failure. `session` predates the rule and has not been
-converted; see the 2026-08-16 history entry for why that is queued rather than
-done, and for the FK-ordered cleanup any conversion has to get right.
+```bash
+cd backend && DATABASE_URL="$TEST_DATABASE_URL" go run ./cmd/seed
+```
+
+Hundreds of rows means the catalog is there and the failure is real. (Substitute
+your own database name if you are not on the shared `vola_test` — and note that
+`vola_test` has usually been seeded by some earlier full run, which is why this
+trap hides until you make a fresh one.)
 
 The backend integration tests need `TEST_DATABASE_URL` and **skip silently without it** — for a long stretch that meant a green local `go test ./...` proved nothing and they only genuinely ran in CI. Point it at a separate database from `DATABASE_URL`:
 
