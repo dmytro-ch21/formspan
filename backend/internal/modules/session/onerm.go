@@ -72,10 +72,13 @@ func EstimateOneRM(reps int, weightKg float64, rir *int, rpe *float64) (float64,
 // backwards.
 //
 // **Solo reps, not total.** A 1RM estimate is a capability claim, so a set of
-// eight where a spotter took three is a set of five for this purpose. Estimated
-// off eight it reads ~127 kg where the honest figure is ~115 — about 10% high,
-// and surfaced as a *record*, which the Records doc calls the one failure the
-// feature cannot afford.
+// eight where a spotter took three is a set of five for this purpose. At 102.5
+// kg that is 127.24 estimated off eight against 115.31 off five — and the
+// overstatement is exactly 32/29, or 10.34%, INDEPENDENT OF THE WEIGHT: it
+// falls out of (36/29)/(36/32), so the load cancels. Any set of eight with
+// three assisted is overstated by the same tenth, and it was surfaced as a
+// *record*, which the Records doc calls the one failure the feature cannot
+// afford.
 //
 // **And the recorded effort must be DISCARDED, not reused.** An RIR or RPE on
 // an assisted set describes the whole set, help included — "2 in reserve" means

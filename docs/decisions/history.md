@@ -20240,8 +20240,10 @@ silently kept the old behaviour.
 ### What the estimate now does, and the half that is easy to reverse
 
 `EstimateSetOneRM` estimates from SOLO reps: eight at 102.5 with a spotter on
-three is five reps of demonstrated capability, about 115 kg rather than about
-127 — roughly 10%, and it was surfaced as a *record*.
+three is five reps of demonstrated capability: 115.31 kg rather than 127.24 at
+that load. The overstatement is exactly 32/29 — 10.34% — and INDEPENDENT of the
+weight, because (36/29)/(36/32) cancels it. Every set of eight with three
+assisted was overstated by the same tenth, and it was surfaced as a *record*.
 
 **And it discards the recorded effort rather than reusing it.** An RIR on an
 assisted set describes the whole set, help included: "2 in reserve" means two
