@@ -19831,9 +19831,156 @@ migrated database, full `go test -p 1 ./...` — still passes, 627 tests across
 - The separate `curriculum` skip (`TestEverySeededTechniqueExistsInTheLibrary`)
   is a different problem with its own task and was not touched here.
 
+## 2026-08-16 — `session`'s fixtures own their catalog rows, and the guard that stood in for it is gone
+
+The entry above measured the problem and deferred the fix. This is the fix.
+
+`internal/modules/session`'s test fixtures referenced real catalog ids —
+`bench-press`, `back-squat`, `overhead-press`, `run`, `dumbbell-bench-press` —
+and the package seeded none of them. They now point at rows the package writes
+for itself (`ses_fx_bench`, `ses_fx_squat`, `ses_fx_ohp`, `ses_fx_run`,
+`ses_fx_db_bench`), which is the rule `exercise`, `bjj`, `feed` and `share`
+already follow.
+
+**The diff is much smaller than "22 tests" suggested**, and that is worth
+recording because it is why the estimate was wrong. Every test referenced the
+*constants*, never the literals, so converting meant changing what five
+constants point at plus adding one fixture helper — not editing 22 test bodies.
+The 22 was a count of tests that *failed*, which is not the same as a count of
+tests that needed changing. Worth checking before quoting the size of the next
+one of these.
+
+### What the fixture had to get right
+
+- **Properties, not just existence.** Two of the borrowed ids were chosen for
+  what they *are*, and the synthetic rows have to say so explicitly.
+  `ses_fx_db_bench` is `load_mode = 'per_side'` — without it the SQL-vs-domain
+  parity test compares two sides that agree trivially at a factor of 1, and a
+  missing `CASE` in the SQL passes green. `ses_fx_run` is `sport = 'running'`,
+  which is what makes the sport-mismatch test a test. `feed` shipped the
+  opposite mistake: an omitted `load_mode` let every fixture default to
+  `'total'`, so the per-side path could have been deleted with the suite green.
+  Both properties were mutation-tested here rather than assumed — flip
+  `per_side` to `total` and the history/summarise parity test fails on tonnage
+  (1300 against 1600, exactly the doubled dumbbells); flip `running` to
+  `strength` and two tests fail in opposite directions.
+- **Cleanup that is order-independent.** `session_sets.exercise_id` and
+  `workout_items.exercise_id` are both `NO ACTION`, so a bare
+  `DELETE FROM exercises` fails the foreign key; discard that error and the row
+  survives into the shared database. `share` measured nine leaked rows per clean
+  run from exactly this. The helper deletes the parent `sessions` and `workouts`
+  first (both children cascade from their own parent), then the exercises, and
+  logs rather than swallows.
+- **Where it is called.** From `newTestRepo`, not from each test. `t.Cleanup` is
+  LIFO and `newTestRepo` runs first, so the fixture rows are removed *after*
+  every cleanup a test registers later — the ordering `seedDraftExercise` in the
+  same file already documented having to get right.
+
+### The rename silently disarmed two tests, and mutation-testing the obvious properties did not catch it
+
+The failure this PR set out to prevent is a test that goes quietly trivial. It
+committed that failure on the way, in a form neither the author nor the checks
+saw — review caught it.
+
+Two tests prove that a caller's chosen **order** survives: `Records` keeping the
+order it was asked in, and pinned exercises keeping the order the athlete pinned
+them in. Both can only fail if the order they use is one a stray `sort.Strings`
+— or an `ORDER BY` that lost its `position` column — would *change*. That
+requirement lived entirely in the relative spelling of two constants:
+`back-squat` < `bench-press`, so asking bench-first was the non-alphabetical
+case, and the comment said as much.
+
+Renaming to `ses_fx_bench` and `ses_fx_squat` inverted it. The same call became
+sorted, so both tests passed with the exact bug they exist to catch — a bug that
+has shipped here before, and "made the reorder UI do nothing". The comment
+explaining the requirement was still sitting there, now stating the opposite of
+the truth and pointing a future fixer at the wrong order.
+
+Worth being precise about why the verification missed it. `load_mode` and
+`sport` were mutation-tested and both went red — but those were the properties
+*already written down in a comment*. The lexical relationship was a property of
+the fixture data that no comment named, so it was never on the list of things to
+mutate. Mutation testing only covers the properties you have thought of; it is
+not a search.
+
+Both are fixed by asking squat-first, and the requirement is now **asserted
+rather than described**: `requireUnsorted` fails the test if the ids it was
+given are already in lexical order, with a message saying why. Verified in all
+three directions — reintroduce the in-place `sort.Strings` and the Records test
+fails; drop `position` from the pinned `ORDER BY` and that test fails; flip the
+ids back to alphabetical and `requireUnsorted` itself fires. A comment cannot
+survive a rename. An assertion can.
+
+Review also found a third, smaller version of the same thing: the load-factor
+CASE is `load_mode = 'per_side' AND NOT is_unilateral`, so the per-side property
+rests on **two** columns and the fixture declared one, leaving the other to a
+column default — in a struct whose own comment claims every depended-on column
+is explicit. Now declared, and the `ON CONFLICT DO UPDATE` reconciles every
+column rather than a subset, so a row left behind by an interrupted run is
+repaired instead of trusted.
+
+### The `TestMain` guard is deleted
+
+It was explicitly an interim for this. It also could not survive the change: it
+ran before any test, so once the rows are seeded by `newTestRepo` rather than by
+`cmd/seed`, the guard would have failed the package unconditionally. One PR's
+scaffolding removed by the next, which is the intended lifecycle rather than a
+loose end.
+
+### Verified
+
+- `go test ./internal/modules/session/` against a **freshly migrated, unseeded**
+  database: `ok`. That is the thing that was impossible before.
+- Zero leaks: `exercises`, `sessions`, `session_sets`, `workouts` and
+  `pinned_exercises` all back to 0 rows afterwards.
+- Green against a *seeded* catalog too, which is the state most local
+  `vola_test` databases are in — the namespaced ids cannot collide with the real
+  catalog.
+- Full `go test -p 1 ./...` on a fresh migrated database: 28 packages ok.
+
+### The trap is not gone repo-wide
+
+Running **every** module package against its own pristine migrated database (a
+template database, so each really is untouched — sharing one database hides the
+effect, because `exercise` seeds for everything alphabetically after it) gives a
+clean measurement for the first time:
+
+- `session` — passes, 0 skips. Fixed here.
+- **`workout` — 16 pass, 14 FAIL**, `unknown exercise "bench-press"`.
+- **`profile` — 13 pass, 1 FAIL**, `unknown exercise` (its exercise-unit prefs).
+- `curriculum` — passes, but with **1 skip**: the known
+  `TestEverySeededTechniqueExistsInTheLibrary`, which needs the technique
+  library, sorts before `technique` which seeds it, and therefore skips on every
+  CI run while the package still prints `ok`.
+- Every other module package passes standalone.
+
+So `-p 1`'s ordering job is still load-bearing, just for two packages instead of
+three. `workout` is the same shape as `session` and the conversion above is the
+worked example; `profile`'s is a single test. Neither is done here — one
+conversion per PR was the point.
+
+### Gaps
+
+- **`workout` and `profile` still borrow catalog rows.** Same failure, same fix,
+  not attempted here. `workout` is the bigger of the two and has its own
+  `seedDraftExercise` already, so it has the pattern in-file.
+- **Nothing prevents the next package from borrowing.** The rule is documented
+  in five test files and CLAUDE.md and is still enforced only by review. A
+  package that adds a fixture referencing `bench-press` tomorrow gets a green CI
+  run and reintroduces the dependency silently.
+- **`requireUnsorted` covers the two ordering tests that were found disarmed,
+  and nothing else.** Any other test whose fixtures carry an unstated property —
+  a length, a shared prefix, a numeric relationship — is exposed to the same
+  class of silent break on the next rename, and there is no general way to find
+  those short of reading each fixture and asking what it quietly relies on.
+- **The `curriculum` skip is untouched and is the worse failure mode** — it
+  degrades to a silent skip rather than a loud failure, so the package reports
+  `ok` while a test that never ran was supposed to be checking that every seeded
+  technique exists in the library. It has its own task.
+
 ## Open items / known gaps as of this entry
 
-- **`internal/modules/session`'s fixtures still borrow real catalog ids, and CI's green depends on it.** Decided (2026-08-16, entry above) that they should own their rows like `exercise`/`bjj`/`feed`/`share` do, and deliberately deferred to its own PR — 22 tests, plus FK-ordered cleanup (`session_sets.exercise_id` has no `ON DELETE`) and two fixtures whose real ids were chosen for `load_mode='per_side'` and a non-strength `sport`. Until then the suite is held together by `-p 1` running `exercise` first and by that package's `Seed()` never cleaning up its 762 rows; a rename or a well-intentioned `t.Cleanup` there turns 22 session tests red. A `TestMain` guard shipped with that entry, so the failure now explains itself — but it is a diagnostic, not a fix: the dependency is unchanged.
+- **`workout` and `profile` still borrow catalog rows they never seed, and CI's green depends on `-p 1` running `exercise` first.** Measured 2026-08-16 against pristine per-package databases: `workout` 14 failures, `profile` 1, both `unknown exercise "bench-press"`. `session` was converted (entry above) and is the worked example — namespaced ids, load-bearing columns set explicitly, FK-ordered cleanup in `newTestRepo`. Until both are done, renaming `exercise` to sort later, or giving its uncleaned `Seed()` test the `t.Cleanup` its neighbours have, turns those packages red.
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
 - **Two position taxonomies now sit on one Library screen.** The filter chips are nine coarse families; the glossary is eleven curated entries. Since the guard split they disagree in a visible way: a beginner can read the Closed Guard card, learn the distinction, and then find no chip that filters to those 37 techniques. Adding North-South, and later Leg Entanglement, closed the cheap half each time (a position the glossary advertised that no chip could reach) — but doing it twice by hand is the evidence that hand-maintenance is the actual bug: the vocabulary is copied across four client files and one backend map, and the taxonomy PR updated one of the four until review caught it. Keying the chips on the glossary's ids, or a shared constant with a test asserting it matches positions.json, is the real answer and is design work, not a patch.
 
