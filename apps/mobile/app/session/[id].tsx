@@ -101,6 +101,7 @@ import {
   type Suggestion,
   type SuggestionCode,
   type Volume,
+  totalWeightKg,
 } from '@/lib/sessions';
 import { getWorkout } from '@/lib/workouts';
 
@@ -1832,7 +1833,13 @@ function localVolume(sets: LoggedSet[]): Volume {
     if (s.rpe != null && s.rpe > v.hardest_rpe) v.hardest_rpe = s.rpe;
     if (s.reps != null) {
       v.total_reps += s.reps;
-      if (s.weight_kg != null) v.tonnage_kg += s.reps * s.weight_kg;
+      // `totalWeightKg`, not the raw number: for a PAIR of dumbbells
+      // `weight_kg` is one of the two. The comment above promises this matches
+      // the server's rule, and for a while it silently did not — this tile and
+      // the finish-card sat next to a Today header and a calendar that had all
+      // been converted, so one session read half on one screen and double on
+      // another. Same phone, same session.
+      if (s.weight_kg != null) v.tonnage_kg += s.reps * totalWeightKg(s);
     }
   }
   return v;

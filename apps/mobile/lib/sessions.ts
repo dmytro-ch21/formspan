@@ -41,8 +41,13 @@ export type LoggedSet = {
    * How many implements of `weight_kg` were moved: 1 for a barbell, a machine
    * or one kettlebell in two hands; 2 for a PAIR of dumbbells.
    *
-   * SERVER-SENT AND READ-ONLY — derived from the exercise's `load_mode`, which
-   * is a property of the movement. Never send it; the API ignores it on write.
+   * SERVER-SENT — derived from the exercise's `load_mode`, which is a property
+   * of the movement, so nothing here may invent one. It IS round-tripped on a
+   * write (`replaceSets` PUTs stored sets verbatim) and the API ignores it:
+   * `insertSets` has a fixed column list, and every write responds from a fresh
+   * read. So the value a client holds is always catalog-derived — but that
+   * rests on the server continuing to ignore it, which is why the contract
+   * marks it response-only rather than leaving it to this comment.
    * Absent (older responses, or a set logged offline before sync) means 1, so
    * `totalWeightKg` treats undefined as 1 rather than as zero.
    */
@@ -332,6 +337,13 @@ export function swapExercise(
       : {
           ...s,
           exercise_id: to.id,
+          // CLEARED, always — a factor describes the exercise, so it cannot
+          // survive becoming a different one. Swapping dumbbells for a barbell
+          // kept the ×2 and counted the barbell double; and because the pull
+          // skips dirty rows, that fabricated number survives a whole offline
+          // session, one tab from the Today header. Undefined reads as 1 until
+          // the server answers, which is the safe direction.
+          load_factor: undefined,
           reps: sameShape ? s.reps : null,
           weight_kg: sameShape ? s.weight_kg : null,
           seconds: sameShape ? s.seconds : null,

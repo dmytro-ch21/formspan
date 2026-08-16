@@ -1,4 +1,5 @@
-import { totalWeightKg } from '../sessions';
+import type { Exercise } from '../exercises';
+import { swapExercise, totalWeightKg, type LoggedSet } from '../sessions';
 
 /**
  * `weight_kg` is what is stamped on the implement, because that is what an
@@ -28,5 +29,48 @@ describe('what was actually moved', () => {
   it('is zero when there is no weight at all', () => {
     // A bodyweight or timed set. Zero here is the truth, not a fallback.
     expect(totalWeightKg({ weight_kg: null, load_factor: 2 })).toBe(0);
+  });
+});
+
+const set = (over: Partial<LoggedSet> = {}): LoggedSet => ({
+  exercise_id: 'dumbbell-bench-press',
+  position: 1,
+  set_type: 'working',
+  reps: 10,
+  weight_kg: 30,
+  seconds: null,
+  distance_m: null,
+  rir: null,
+  rpe: null,
+  notes: '',
+  completed: true,
+  load_factor: 2,
+  ...over,
+});
+
+const barbell = { id: 'bench-press', load_type: 'weight_reps' } as Exercise;
+
+describe('swapping an exercise', () => {
+  it('does not carry the old exercise’s factor onto the new one', () => {
+    // A factor describes the MOVEMENT, so it cannot survive becoming a
+    // different one. Swapping a pair of dumbbells for a barbell kept the ×2
+    // and counted the barbell double — a number this feature invents, not one
+    // it fails to correct.
+    //
+    // It does not self-heal offline either: the pull skips dirty rows, so the
+    // doubled figure survives the whole session, one tab from the Today header.
+    const [swapped] = swapExercise([set()], 'dumbbell-bench-press', barbell, 'weight_reps');
+    expect(swapped.exercise_id).toBe('bench-press');
+    expect(swapped.load_factor).toBeUndefined();
+    // And the number that actually reaches a volume sum is the honest one.
+    expect(totalWeightKg(swapped)).toBe(30);
+  });
+
+  it('keeps the weight when the shape matches, which is why the factor had to go', () => {
+    // The carry-over exists because a same-shape swap deliberately preserves
+    // `weight_kg`. That is the right behaviour and is what made the stale
+    // factor reachable — so this pins both halves together.
+    const [swapped] = swapExercise([set()], 'dumbbell-bench-press', barbell, 'weight_reps');
+    expect(swapped.weight_kg).toBe(30);
   });
 });
