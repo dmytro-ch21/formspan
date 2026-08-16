@@ -1,4 +1,4 @@
-import { dropsOf, emptyDropSet, soloReps, type LoggedSet } from '../sessions';
+import { dropsOf, emptyDropSet, setOrdinals, soloReps, type LoggedSet } from '../sessions';
 
 const set = (over: Partial<LoggedSet> = {}): LoggedSet => ({
   exercise_id: 'bench-press',
@@ -92,5 +92,35 @@ describe('which set a drop came off', () => {
   it('is safe at the edges', () => {
     for (const i of [-1, 99]) expect(dropsOf(sets, i)).toEqual([]);
     expect(dropsOf([], 0)).toEqual([]);
+  });
+});
+
+describe('set numbering', () => {
+  const t = (...types: string[]) =>
+    setOrdinals(types.map((set_type) => ({ set_type: set_type as LoggedSet['set_type'] })));
+
+  it('does not spend a set number on a drop', () => {
+    // 225x3 then 185x8 is ONE set with a drop off it. Numbering them 3 and 4
+    // tells the athlete they did four sets when they did three — and that is
+    // the count they carry around and compare to last week.
+    expect(t('working', 'drop', 'working')).toEqual([1, 1, 2]);
+  });
+
+  it('gives every drop in a run its parent’s number', () => {
+    expect(t('working', 'drop', 'drop', 'working')).toEqual([1, 1, 1, 2]);
+  });
+
+  it('numbers ordinary sets consecutively', () => {
+    expect(t('warmup', 'working', 'working')).toEqual([1, 2, 3]);
+  });
+
+  it('does not show a zero for a leading drop', () => {
+    // A drop with nothing above it is a client bug. It still has to render,
+    // and "set 0" is the one thing it must not say.
+    expect(t('drop', 'working')).toEqual([1, 1]);
+  });
+
+  it('is empty for no sets', () => {
+    expect(t()).toEqual([]);
   });
 });

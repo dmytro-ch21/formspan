@@ -88,6 +88,8 @@ import {
   describeSet,
   emptyDropSet,
   emptySet,
+  setOrdinals,
+  soloReps,
   fetchSuggestions,
   fillForward,
   measuresFor,
@@ -1345,7 +1347,15 @@ export default function SessionScreen() {
                   </Pressable>
                 )}
               </View>
-              {g.indices.map((i, n) => (
+              {/* A drop does not get a set number. "225x3 then 185x8" is ONE
+                  set with a drop off it — numbering them 3 and 4 tells the
+                  athlete they did four sets when they did three, and that
+                  number is the one they count. So the ordinal only advances on
+                  a non-drop row, and a drop carries its parent's. */}
+              {g.indices.map((i, n) => {
+                const isDrop = sets[i].set_type === 'drop';
+                const ordinal = setOrdinals(g.indices.map((j) => sets[j]))[n];
+                return (
                 <SwipeToDelete
                   key={i}
                   // A finished session is a record, not a workspace — the
@@ -1367,7 +1377,8 @@ export default function SessionScreen() {
                 >
                   <SetRow
                     index={i}
-                    ordinal={n + 1}
+                    ordinal={ordinal}
+                    isDrop={isDrop}
                     set={sets[i]}
                     exercise={exercise}
                     editable={!finished}
@@ -1393,7 +1404,8 @@ export default function SessionScreen() {
                     duration={durationUnit}
                   />
                 </SwipeToDelete>
-              ))}
+                );
+              })}
               {(() => {
                 const hint = suggestions.get(g.exerciseID);
                 if (!hint || hint.code === 'not_applicable') return null;
@@ -1895,6 +1907,7 @@ function localVolume(sets: LoggedSet[]): Volume {
 function SetRow({
   index,
   ordinal,
+  isDrop = false,
   set,
   exercise,
   editable,
@@ -1908,6 +1921,13 @@ function SetRow({
 }: {
   index: number;
   ordinal: number;
+  /**
+   * A drop off the set above — rendered as part of it rather than as a set of
+   * its own. The relationship is adjacency (there is no parent id and there
+   * cannot be one while the server reinserts every row on save), so this comes
+   * from the list rather than from the set.
+   */
+  isDrop?: boolean;
   set: LoggedSet;
   exercise: Exercise | undefined;
   editable: boolean;
@@ -1945,17 +1965,27 @@ function SetRow({
   };
 
   return (
-    <View style={[styles.setRow, set.completed && styles.setRowDone]}>
+    <View
+      style={[styles.setRow, set.completed && styles.setRowDone, isDrop && styles.setRowDrop]}
+    >
       <Pressable
         style={styles.setHead}
         onPress={() => editable && setOpen((v) => !v)}
         accessibilityRole={editable ? 'button' : undefined}
-        accessibilityLabel={`Set ${ordinal}. ${describeSet(set, units, duration)}`}
+        accessibilityLabel={
+          isDrop
+            ? `Drop off set ${ordinal}. ${describeSet(set, units, duration)}`
+            : `Set ${ordinal}. ${describeSet(set, units, duration)}`
+        }
         accessibilityState={{ expanded: open }}
         testID={`set-${index}`}
       >
+        {/* A drop shows a continuation mark, not a number. It is part of the
+            set above — numbering it would tell the athlete they did one more
+            set than they did, and that count is the one they carry around. The
+            `D` badge still says what it is. */}
         <Text style={[styles.setOrdinal, set.completed && styles.setOrdinalDone]}>
-          {ordinal}
+          {isDrop ? '↳' : ordinal}
           {typeShort ? <Text style={styles.setBadge}> {typeShort}</Text> : null}
         </Text>
         <Text style={styles.setSummary}>{describeSet(set, units, duration)}</Text>
@@ -2064,6 +2094,53 @@ function SetRow({
               );
             })}
           </View>
+
+          {/* Who did the work. Offered only where there ARE reps, because
+              "3 of them were assisted" is meaningless on a plank or a run —
+              and the database refuses assisted reps without a rep count, so an
+              always-present field would be a control that can produce a 400.
+
+              Its own row rather than beside the measures: it is a claim ABOUT
+              the reps in the field above, and putting it in the same row reads
+              as another measure of the set. */}
+          {set.reps != null && (
+            <View style={styles.fieldRow}>
+              <Field
+                label="Assisted"
+                value={set.assisted_reps ?? null}
+                onChangeText={(text) => {
+                  const t = text.trim();
+                  if (t === '') {
+                    // Cleared means UNRECORDED, not zero. Sending 0 would
+                    // assert the set was unaided, which is a different claim
+                    // and one nobody made by deleting a number.
+                    onChange({ ...set, assisted_reps: null });
+                    return;
+                  }
+                  const raw = Number(t.replace(',', '.'));
+                  if (!Number.isFinite(raw)) {
+                    onChange({ ...set, assisted_reps: null });
+                    return;
+                  }
+                  // Clamped to the reps performed rather than rejected: the
+                  // server and the CHECK both refuse more help than reps, and
+                  // a typo mid-set should not cost a failed save. Clamping at
+                  // the edit is the only place it can be fixed silently and
+                  // still be true.
+                  const capped = Math.max(0, Math.min(Math.round(raw), set.reps ?? 0));
+                  onChange({ ...set, assisted_reps: capped });
+                }}
+                hint={
+                  set.assisted_reps != null && set.assisted_reps > 0
+                    ? `${soloReps(set)} on your own`
+                    : 'Reps with help'
+                }
+                integer
+                accessibilityLabel={`Reps completed with help on set ${ordinal} of ${exerciseName}`}
+                testID={`set-${index}-assisted`}
+              />
+            </View>
+          )}
 
           {/* Effort, side by side. Two views of the same thing — record
               whichever you think in rather than converting mid-session.
@@ -2467,6 +2544,16 @@ const styles = StyleSheet.create({
   },
   hintApplyText: { color: vola.navy, fontWeight: '700', fontSize: 14 },
   addRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  // Indented and rule-marked, so a drop reads as hanging off the row above
+  // rather than sitting beside it. The accent is deliberately NOT used: a drop
+  // is not an achievement, and this app reserves the accent for what was
+  // earned.
+  setRowDrop: {
+    marginLeft: 22,
+    borderLeftWidth: 2,
+    borderLeftColor: vola.line,
+    paddingLeft: 8,
+  },
   addSet: {
     borderWidth: 1,
     borderStyle: 'dashed',

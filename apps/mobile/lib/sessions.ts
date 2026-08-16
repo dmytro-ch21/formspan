@@ -797,6 +797,31 @@ export function soloReps(set: { reps: number | null; assisted_reps?: number | nu
 }
 
 /**
+ * Set numbers for one exercise's rows, where a drop does not get one.
+ *
+ * "225x3 then 185x8" is ONE set with a drop off it. Numbering them 3 and 4
+ * tells the athlete they did four sets when they did three — and that count is
+ * the one they carry around and compare to last week, so it has to be the
+ * number of efforts, not the number of rows.
+ *
+ * A drop carries its parent's number, which is what lets the row read as
+ * "the drop off set 3" rather than as a set with no identity.
+ *
+ * Extracted from the session screen for the reason `ClampLimit` and
+ * `ScopeFilter` were on the server: the rule is small, easy to get subtly
+ * wrong, and untestable where it was.
+ */
+export function setOrdinals(setsInGroup: Pick<LoggedSet, 'set_type'>[]): number[] {
+  let n = 0;
+  return setsInGroup.map((s) => {
+    if (s.set_type !== 'drop') n++;
+    // A leading drop has no parent to borrow from. It is a client bug either
+    // way, and 1 keeps it readable instead of showing a zero.
+    return Math.max(1, n);
+  });
+}
+
+/**
  * A drop set to hang off `from` — the next rung down in a drop.
  *
  * Weight carries forward UNCHANGED rather than at some percentage. A drop is
