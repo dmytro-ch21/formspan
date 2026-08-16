@@ -1,5 +1,5 @@
 import * as Haptics from 'expo-haptics';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Modal, Pressable, StyleSheet, View as RNView } from 'react-native';
 
 import { Medal } from '@/components/ui/Medal';
@@ -15,21 +15,20 @@ import {
   type SessionSummary,
 } from '@/lib/celebration';
 import { RECORD_LABEL } from '@/lib/records';
-import { cardFromSummary } from '@/lib/sessionCard';
-import { getSessionCard, type SessionCardNumbers } from '@/lib/sessionCardApi';
-import { useAuthToken } from '@/lib/useAuthToken';
-import { shareCard } from '@/lib/shareCard';
-import { SessionCard } from '@/components/SessionCard';
+import { ShareCardHost, ShareSessionButton, useSessionShare } from '@/components/SessionShare';
 import { playSound } from '@/lib/sounds';
 
 /**
  * The card a finished session ends on.
  *
  * Everything it draws comes from one plain `SessionSummary`, and that is a
- * constraint rather than a convenience: this is meant to become a shareable
- * image later, and a component that reaches into the session screen for its
- * numbers can only ever be rendered by the session screen. Sharing is
- * deliberately NOT built here — but nothing here makes it a rewrite either.
+ * constraint rather than a convenience: the same summary feeds the shareable
+ * image, and a component that reaches into the session screen for its numbers
+ * could only ever be rendered by the session screen.
+ *
+ * Sharing itself is NOT built here any more — it lives in `SessionShare`, so
+ * that a session read back tomorrow can offer the same card this modal does.
+ * This is now one of three callers rather than the only one.
  *
  * ## The flares must never be in the way
  *
@@ -135,49 +134,15 @@ export function SessionCelebration({
   testID?: string;
 }) {
   const accent = useAccent();
-  const getToken = useAuthToken();
   const badge = badgeFor(summary);
   const stats = statsFor(summary, formatTonnage);
   const felt = feltFor(summary);
 
-  const cardRef = useRef<RNView>(null);
-  const [sharing, setSharing] = useState(false);
-  const [shareError, setShareError] = useState<string | null>(null);
-
-  // The server's numbers, once they arrive. The card is COMPLETE without them
-  // — duration, volume and PRs all come from the local store — so this never
-  // blocks the celebration and a gym dead-spot costs the calorie figure rather
-  // than the moment.
-  const [numbers, setNumbers] = useState<SessionCardNumbers | null>(null);
-  useEffect(() => {
-    if (!sessionID) return;
-    const c = new AbortController();
-    getSessionCard(getToken, sessionID, c.signal)
-      .then((n) => {
-        if (!c.signal.aborted) setNumbers(n);
-      })
-      .catch(() => {
-        // Silent by design. See above: these decorate, they do not carry.
-      });
-    return () => c.abort();
-  }, [sessionID, getToken]);
-
-  const card = sessionID
-    ? cardFromSummary({ id: sessionID, summary, stats, streak, numbers })
-    : null;
-
-  const onShare = useCallback(async () => {
-    if (sharing) return;
-    setSharing(true);
-    setShareError(null);
-    const result = await shareCard(cardRef);
-    // A dismissed share sheet is an ordinary outcome and stays quiet; a device
-    // that cannot share at all, or an image that was never produced, both get a
-    // message. `capture` used to be folded in with the dismissal, so a genuine
-    // failure rendered as Share → "Preparing…" → Share and said nothing.
-    if (!result.ok && result.reason !== 'failed') setShareError(result.message);
-    setSharing(false);
-  }, [sharing]);
+  // The capture, the server's decorating numbers and the error copy all live
+  // in `useSessionShare` now, because the same three are needed by every
+  // screen that reads a finished session back. See that file for why the card
+  // it mounts has to sit at the screen root.
+  const share = useSessionShare({ sessionID, summary, formatTonnage, streak });
 
   useEffect(() => {
     // The haptic is the part that lands even face-down in a bag; the sound
@@ -333,28 +298,34 @@ export function SessionCelebration({
             </RNView>
           )}
 
-          {shareError && (
+          {share.error && (
             <Text style={styles.shareError} accessibilityLiveRegion="polite">
-              {shareError}
+              {share.error}
             </Text>
           )}
 
+          {/*
+            One row, two buttons, and they have to LINE UP.
+
+            They did not: Done carried `marginTop: 18` and its own vertical
+            padding while Share carried a `minHeight`, so side by side the two
+            sat at different heights and different depths — the margin pushed
+            Done down 18pt inside a row that had already positioned it. The
+            spacing belongs to the row (which needs it whether or not Share is
+            there) and the sizing belongs to both buttons equally, so
+            `alignItems: 'stretch'` settles the height rather than two separate
+            guesses at it.
+          */}
           <RNView style={styles.actions}>
-            {card && (
-              <Pressable
-                onPress={onShare}
-                disabled={sharing}
-                style={styles.share}
-                accessibilityRole="button"
-                accessibilityLabel="Share this session"
-                testID="celebration-share"
-              >
-                <Text style={styles.shareText}>{sharing ? 'Preparing…' : 'Share'}</Text>
-              </Pressable>
-            )}
+            <ShareSessionButton
+              share={share}
+              style={styles.share}
+              textStyle={styles.shareText}
+              testID="celebration-share"
+            />
             <Pressable
               onPress={onDismiss}
-              style={[styles.done, { backgroundColor: accent.accent }, card && styles.doneShrunk]}
+              style={[styles.done, { backgroundColor: accent.accent }]}
               accessibilityRole="button"
               testID="celebration-done"
             >
@@ -363,57 +334,25 @@ export function SessionCelebration({
           </RNView>
         </View>
 
-        {/*
-          The card the export captures, mounted OFF TO THE SIDE rather than
-          hidden.
-
-          `captureRef` reads the native view tree, so the card has to be
-          genuinely laid out — `display: none` captures nothing and `opacity: 0`
-          captures blank on some iOS versions, both of which fail silently and
-          hand the athlete an empty image. Positioning it outside the visible
-          bounds keeps it real while keeping it out of the way, and
-          `pointerEvents="none"` stops it eating taps meant for Done.
-
-          HIDDEN FROM SCREEN READERS TOO, and that is not the same thing as
-          hidden from the eye. VoiceOver traverses off-screen elements, so
-          without the two props below a VoiceOver user swiping past Done walked
-          straight into an invisible duplicate card and heard the wordmark, the
-          date, the headline, every stat and — once the fetch lands — the
-          calorie figure and the score. The feed's posts hide their card the
-          same way, for the same reason.
-        */}
-        {card && (
-          <RNView
-            style={styles.offscreen}
-            pointerEvents="none"
-            accessibilityElementsHidden
-            importantForAccessibility="no-hide-descendants"
-          >
-            <SessionCard ref={cardRef} data={card} width={360} />
-          </RNView>
-        )}
+        <ShareCardHost share={share} />
       </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  actions: { flexDirection: 'row', gap: 10, alignItems: 'center' },
-  share: {
-    flex: 1,
-    minHeight: 48,
-    borderRadius: 14,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: vola.line,
-    alignItems: 'center',
-    justifyContent: 'center',
+  // `stretch` on both axes: across, so a lone Done still spans the card; down,
+  // so Share and Done end up the same height without either declaring one.
+  actions: {
+    flexDirection: 'row',
+    alignSelf: 'stretch',
+    alignItems: 'stretch',
+    gap: 10,
+    marginTop: 18,
   },
-  shareText: { fontSize: 15, fontWeight: '700', color: vola.text },
-  doneShrunk: { flex: 1 },
+  share: { flex: 1 },
+  shareText: { fontSize: 16, fontWeight: '800' },
   shareError: { fontSize: 12, color: vola.textMuted, textAlign: 'center', marginBottom: 8 },
-  // Far enough left that no phone shows it, still laid out so it can be
-  // captured. See the comment at the mount site.
-  offscreen: { position: 'absolute', left: -10000, top: 0 },
   scrim: {
     flex: 1,
     backgroundColor: 'rgba(8,11,18,0.86)',
@@ -492,12 +431,15 @@ const styles = StyleSheet.create({
   recordRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   recordName: { flex: 1, fontSize: 13, fontWeight: '600', textTransform: 'capitalize' },
   recordKind: { fontSize: 11, color: vola.textDim },
+  // No margin and no vertical padding of its own — the row owns the spacing
+  // and `alignItems: 'stretch'` owns the height. Both used to live here, which
+  // is what put Done 18pt lower than the Share button beside it.
   done: {
-    marginTop: 18,
-    alignSelf: 'stretch',
+    flex: 1,
+    minHeight: 50,
     borderRadius: 14,
-    paddingVertical: 15,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   doneText: { fontWeight: '800', fontSize: 16 },
 });

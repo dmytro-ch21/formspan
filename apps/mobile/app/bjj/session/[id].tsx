@@ -6,6 +6,7 @@ import { ActivityIndicator, Alert, Pressable, StyleSheet, View as RNView } from 
 import { HoldToConfirm } from '@/components/HoldToConfirm';
 import { SelectAllTextInput } from '@/components/SelectAllTextInput';
 import { SessionCelebration } from '@/components/SessionCelebration';
+import { ShareCardHost, ShareSessionButton, useSessionShare } from '@/components/SessionShare';
 import { worthCelebrating, type SessionSummary } from '@/lib/celebration';
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { Text, View } from '@/components/Themed';
@@ -57,6 +58,46 @@ function minutesBetween(startedAt: string, endedAt: string | null): number {
   if (!endedAt) return 0;
   const ms = new Date(endedAt).getTime() - new Date(startedAt).getTime();
   return ms > 0 ? Math.round(ms / 60_000) : 0;
+}
+
+/**
+ * A class, in the shape the completion card and the share card both take.
+ *
+ * ONE function, called from two places that used to be one: finishing built
+ * this inline, so the card existed only in the seconds after the hold, and a
+ * class opened from Today afterwards had no way to produce it. Extracting it
+ * is what makes "share a class you logged last Tuesday" the same card rather
+ * than a second, drifting description of it.
+ *
+ * BJJ has no records and no tonnage, and those stay zero/empty rather than
+ * being invented: `lib/records.ts` is strength-only, and a "you showed up"
+ * medal to fill the gap is precisely the wallpaper that devalues real ones.
+ */
+function bjjSummaryFor(session: LocalSession, detail: SessionDetail | null): SessionSummary {
+  return {
+    title: session.name || 'Session',
+    sport: 'bjj',
+    durationSeconds: session.started_at
+      ? Math.max(
+          0,
+          (new Date(session.ended_at ?? Date.now()).getTime() -
+            new Date(session.started_at).getTime()) /
+            1000,
+        )
+      : 0,
+    exercises: 0,
+    sets: 0,
+    reps: 0,
+    tonnageKg: 0,
+    rounds: detail?.rounds ?? undefined,
+    matMinutes:
+      detail?.rounds && detail?.round_minutes ? detail.rounds * detail.round_minutes : undefined,
+    // `session_rpe` is the athlete's own rating of the session, so it belongs
+    // in the card's "How it felt" block rather than beside the measurements.
+    hardestRpe: detail?.session_rpe ?? null,
+    records: [],
+    recordExerciseIDs: [],
+  };
 }
 
 export default function BjjSessionScreen() {
@@ -223,33 +264,9 @@ export default function BjjSessionScreen() {
         right. Correct by accident is not correct.
       */
       const finished = await readLocalSession(userId, id);
-      const bjjSummary: SessionSummary = {
-        title: finished?.name ?? session?.name ?? 'Session',
-        sport: 'bjj',
-        durationSeconds: finished?.started_at
-          ? Math.max(
-              0,
-              (new Date(finished.ended_at ?? Date.now()).getTime() -
-                new Date(finished.started_at).getTime()) /
-                1000,
-            )
-          : 0,
-        exercises: 0,
-        sets: 0,
-        reps: 0,
-        tonnageKg: 0,
-        rounds: detail?.rounds ?? undefined,
-        matMinutes:
-          detail?.rounds && detail?.round_minutes
-            ? detail.rounds * detail.round_minutes
-            : undefined,
-        // `session_rpe` is the athlete's own rating of the session, so it
-        // belongs in the card's "How it felt" block rather than beside the
-        // measurements.
-        hardestRpe: detail?.session_rpe ?? null,
-        records: [],
-        recordExerciseIDs: [],
-      };
+      const base = finished ?? session;
+      if (!base) return;
+      const bjjSummary = bjjSummaryFor(base, detail);
       if (worthCelebrating(bjjSummary)) {
         setCelebrationStreak(null);
         setCelebrating(bjjSummary);
@@ -291,6 +308,30 @@ export default function BjjSessionScreen() {
     }
     return ids;
   }, [detail?.tags]);
+
+  /*
+    The class as a shareable card — and, like the memo above, a HOOK, so it
+    belongs above the early returns and must stay there.
+
+    A BJJ class could only be shared in the seconds the completion modal was
+    open. That is the wrong window for a card built out of rounds, rolling
+    minutes and how the session felt: those are the parts of a class worth
+    posting, and they are the parts you look at again later. The summary is
+    the same one finishing builds, so the two cards cannot drift.
+
+    No streak is passed. "Carried the streak" is a claim about the week the
+    class happened in, and recomputing it against the current week would put a
+    badge on a class that did not earn it — or drop one that did.
+  */
+  const share = useSessionShare({
+    sessionID: session?.ended_at ? id : undefined,
+    summary: session?.ended_at ? bjjSummaryFor(session, detail) : null,
+    // BJJ never shows a tonnage tile, so this is never called — passed because
+    // the card takes one formatter, not one per sport.
+    formatTonnage: (v) => `${Math.round(v)}`,
+    // The night of the class, not the night you got round to sharing it.
+    date: session?.ended_at ? new Date(session.ended_at) : undefined,
+  });
 
   if (loading) {
     return (
@@ -347,6 +388,7 @@ export default function BjjSessionScreen() {
     detail?.gi != null;
 
   return (
+    <>
     <KeyboardAwareScrollView style={styles.container} contentContainerStyle={styles.body} testID="bjj-session-screen">
       <Stack.Screen options={{ title: 'Session' }} />
 
@@ -552,6 +594,27 @@ export default function BjjSessionScreen() {
         />
       )}
 
+      {/*
+        Share, for a class that is over.
+
+        Above Delete and below Finish, which is the order these read in: the
+        one thing left to do with a finished class is show somebody, and the
+        destructive action stays last. Absent while the session is still open
+        — there is no card to make of a class that has not ended.
+      */}
+      {!!share.error && (
+        <Text style={styles.footnote} accessibilityLiveRegion="polite">
+          {share.error}
+        </Text>
+      )}
+      <ShareSessionButton
+        share={share}
+        label="Share this class"
+        accessibilityLabel="Share this class"
+        style={styles.share}
+        testID="bjj-session-share"
+      />
+
       <Pressable
         onPress={confirmDelete}
         style={styles.destructive}
@@ -590,6 +653,13 @@ export default function BjjSessionScreen() {
         />
       )}
     </KeyboardAwareScrollView>
+
+    {/* OUTSIDE the scroll view, deliberately — a `ScrollView` clips its
+        content, and the capture reads the real native view, so a host parked
+        in there can hand the athlete a blank PNG. See
+        `components/SessionShare.tsx`. */}
+    <ShareCardHost share={share} />
+    </>
   );
 }
 
@@ -703,6 +773,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   ctaText: { fontSize: 16, fontWeight: '700' },
+  // `marginTop` matched to `cta`'s, because on a finished class Share is the
+  // button that stands where Finish stood.
+  share: { marginTop: 28 },
   destructive: {
     marginTop: 12,
     paddingVertical: 16,

@@ -1,4 +1,4 @@
-import { Stack, useFocusEffect } from 'expo-router';
+import { Stack, useFocusEffect, useRouter, type Href } from 'expo-router';
 import { useAuth } from '@clerk/clerk-expo';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet } from 'react-native';
@@ -30,11 +30,19 @@ import { useAuthToken } from '@/lib/useAuthToken';
  * **Empty is the good state and says so plainly.** An empty repair screen is
  * reassuring rather than broken, which is worth wording carefully — this is a
  * screen people reach when they are already worried about their training.
+ *
+ * **Every row opens the thing it is about.** It did not, and that made the
+ * screen a dead end: it would say `set 10: weight must be greater than 0`,
+ * offer Try again — which replays the same doomed request — and give no route
+ * to set 10. "Try again" is the right answer only for a row whose obstacle has
+ * moved on its own; anything the athlete has to change needs the screen that
+ * can change it.
  */
 export default function SyncScreen() {
   const accent = useAccent();
   const { userId } = useAuth();
   const getToken = useAuthToken();
+  const router = useRouter();
   const state = useSyncState();
   const [rows, setRows] = useState<BlockedRow[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -125,18 +133,37 @@ export default function SyncScreen() {
                     person can act on, so paraphrasing would lose the only
                     part that says what to do. */}
                 <Text style={styles.rowError}>{row.lastError}</Text>
-                <Pressable
-                  onPress={() => void retry(row)}
-                  disabled={busy === row.id}
-                  style={styles.retry}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Retry ${row.name}`}
-                  testID={`retry-${row.id}`}
-                >
-                  <Text style={[styles.retryText, { color: accent.ink }]}>
-                    {busy === row.id ? 'Trying…' : 'Try again'}
-                  </Text>
-                </Pressable>
+                <View style={styles.rowActions}>
+                  {/* First, and worded as the destination rather than as
+                      "Open": the message above has just named a set, and the
+                      next thing an athlete wants is to be standing in front of
+                      it. Try again keeps its place for the rows whose obstacle
+                      really has cleared on its own. */}
+                  <Pressable
+                    onPress={() => router.push(destinationOf(row))}
+                    style={styles.rowAction}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open ${row.name || 'this item'} to fix it`}
+                    testID={`open-${row.id}`}
+                  >
+                    <Text style={[styles.retryText, { color: accent.ink }]}>
+                      {row.kind === 'workout' ? 'Open the plan' : 'Open the session'}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => void retry(row)}
+                    disabled={busy === row.id}
+                    style={styles.rowAction}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Retry ${row.name}`}
+                    accessibilityState={{ busy: busy === row.id, disabled: busy === row.id }}
+                    testID={`retry-${row.id}`}
+                  >
+                    <Text style={styles.retryMuted}>
+                      {busy === row.id ? 'Trying…' : 'Try again'}
+                    </Text>
+                  </Pressable>
+                </View>
               </View>
             ))}
           </View>
@@ -144,6 +171,19 @@ export default function SyncScreen() {
       </ScrollView>
     </View>
   );
+}
+
+/**
+ * Where a blocked row lives.
+ *
+ * A BJJ session and a strength session are separate screens — `/session/[id]`
+ * knows only about sets, and sending a class there is the bug that made a
+ * logged class open to "Sets 0 · Reps 0 · Volume —". So the sport rides along
+ * on the row rather than being guessed here.
+ */
+function destinationOf(row: BlockedRow): Href {
+  if (row.kind === 'workout') return `/workout/${row.id}`;
+  return row.sport === 'bjj' ? `/bjj/session/${row.id}` : `/session/${row.id}`;
 }
 
 const styles = StyleSheet.create({
@@ -169,6 +209,11 @@ const styles = StyleSheet.create({
   rowName: { fontSize: 15, fontWeight: '700' },
   rowKind: { fontSize: 12, color: vola.textMuted, textTransform: 'capitalize' },
   rowError: { fontSize: 13, color: vola.danger, lineHeight: 18 },
-  retry: { paddingVertical: 8 },
+  rowActions: { flexDirection: 'row', alignItems: 'center', gap: 18 },
+  rowAction: { paddingVertical: 8, minHeight: 44, justifyContent: 'center' },
   retryText: { fontSize: 14, fontWeight: '600' },
+  // Deliberately quieter than the accent-coloured Open beside it. Replaying a
+  // request the server has already refused is the second-best answer here, and
+  // two equally loud buttons would make it look like a coin toss.
+  retryMuted: { fontSize: 14, fontWeight: '600', color: vola.textMuted },
 });

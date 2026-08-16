@@ -2,7 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react-native';
 
 import BjjSessionScreen from '../bjj/session/[id]';
 import type { SessionDetail } from '@/lib/bjjSession';
-import type { LocalSession } from '@/lib/sessionStore';
+import { readLocalSession, type LocalSession } from '@/lib/sessionStore';
 
 /**
  * Opening a BJJ session from Today crashed.
@@ -171,4 +171,48 @@ it('shows the session it loaded, not an empty shell', async () => {
   // The technique row comes from the hoisted useMemo specifically. If that memo
   // were dropped rather than moved, this is what would go missing.
   expect(screen.getByText('Knee Cut Pass')).toBeTruthy();
+});
+
+/*
+ * Sharing a class you logged, rather than only one you just finished.
+ *
+ * The card used to exist for exactly as long as the completion modal did —
+ * dismiss it and a class became unshareable forever, which is most of a class's
+ * life. That is invisible from the logging side and only shows up when somebody
+ * opens Tuesday's session wanting to post it.
+ *
+ * The two assertions are a PAIR and neither is worth much alone: presence alone
+ * passes against a button rendered unconditionally (which would offer to share a
+ * class still in progress, with no `ended_at` to date the card from), and absence
+ * alone passes against a button that was never built. Both are keyed on the same
+ * `session.ended_at` the screen gates on.
+ */
+it('offers the share card on a class that has finished', async () => {
+  render(<BjjSessionScreen />);
+
+  await waitFor(() => {
+    expect(screen.getByTestId('bjj-session-share')).toBeTruthy();
+  });
+});
+
+it('offers no share card while the class is still open', async () => {
+  (readLocalSession as jest.Mock).mockImplementation(() =>
+    deferred({ ...mockSession, ended_at: null }),
+  );
+
+  render(<BjjSessionScreen />);
+
+  await waitFor(() => {
+    expect(screen.getByText('Gi class')).toBeTruthy();
+  });
+  // Present on the same screen, so this is not asserting against an unrendered
+  // one: the finish control is what stands where Share stands afterwards.
+  expect(screen.getByTestId('bjj-session-finish')).toBeTruthy();
+  expect(screen.queryByTestId('bjj-session-share')).toBeNull();
+});
+
+afterEach(() => {
+  // Restored rather than left mutated — jest.mock's factory closes over
+  // `mockSession` once, so an override leaks into every test after it.
+  (readLocalSession as jest.Mock).mockImplementation(() => deferred(mockSession));
 });

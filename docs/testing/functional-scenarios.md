@@ -6885,3 +6885,106 @@ is the specific regression this guards.
   follows. That is the known cost of expressing the relationship as order;
   verify the UI does not make it easy to do by accident.
 
+
+## Sharing a session's card (mobile — `components/SessionShare.tsx`)
+
+The card an athlete posts. Previously reachable only from the completion modal;
+now offered on any finished session, strength or BJJ. `apps/web` has no
+equivalent — the capture is native.
+
+### Happy path
+
+- **Finish a strength session, dismiss the celebration, share from the screen
+  underneath.** The button is below "Finished — this session is read-only." The
+  resulting image must be the SAME card the modal offered: same title, same
+  stats, same headline.
+- **Open a session finished on a previous day and share it.** This is the
+  case the feature exists for and the one nothing covered before.
+- **Same, for a BJJ class** (`bjj-session-share`, above Delete). The card
+  carries rounds and rolling minutes, never a tonnage tile.
+- A session still in progress offers **no** share button — on either screen.
+  There is no card to make of a workout that has not ended.
+
+### The two silent-wrongness cases
+
+- **The date on the card is the SESSION'S date, not today's.** Share a class
+  from last week and read the date stamp on the exported PNG. `cardFromSummary`
+  defaults to `new Date()`, so a regression here reads as "today" and looks
+  entirely plausible.
+- **A session that set a PR keeps its medal and its "NEW BEST." headline when
+  shared later.** Compare the modal's card against the same session shared the
+  next day — they must match. Then beat that PR in a later session and share the
+  old one again: the medal must now be GONE, because it is no longer a record.
+- No streak badge on a re-shared card, by design — check one shared from the
+  modal (which may show "N weeks unbroken") against the same session read back.
+
+### The capture itself
+
+- **The exported PNG is not blank.** The card is mounted off-screen and a
+  `ScrollView` clips its content, so a host that drifts inside one still renders,
+  still passes typecheck, and produces an empty image. Open the share sheet and
+  look at the preview thumbnail — that is the cheapest check.
+- Airplane mode: the card still shares. Calories and the VOLA score are absent
+  (they need `/sessions/{id}/card`); duration, volume and PRs are not.
+- **Dismissing the share sheet must say nothing.** An error line after a
+  deliberate cancel is the bug. A device that cannot share at all, and a capture
+  that failed, must both speak up.
+
+### Layout
+
+- **Share and Done line up in the completion modal** — same height, same
+  baseline, same top edge. Check with a session that HAS a card (both buttons)
+  and one that does not (`sessionID` absent — Done alone must still span the
+  card).
+
+### Accessibility
+
+- VoiceOver on the completion modal must not reach the off-screen card. Swipe
+  past Done: the next stop is outside the modal, never the wordmark, the date
+  and every stat read a second time. Same on both session screens.
+
+## The sync repair screen (mobile — `app/sync.tsx`, `blockedRows`)
+
+The screen an athlete reaches when they are already worried about their
+training. Everything here is about it telling the truth.
+
+### A measure the server cannot store
+
+- **Log a set, type `0` into weight, finish the session, sync.** It must sync.
+  Before the repair, that one keystroke stranded the whole session permanently:
+  the API refuses any measure that is present and not greater than zero, a 400
+  is a PERMANENT rejection, and the row was retried identically forever.
+- Same for `0` reps, `0` seconds, `0` metres, and for an RPE of `0` or `11`.
+- **`0` RIR must survive.** It is a real answer — nothing left in the tank — and
+  the server accepts 0–20. A repair that nulls it is deleting data.
+- **Typing `0.5` into weight must be possible.** This is the regression guard
+  for repairing in the wrong place: null-on-input wipes the field the moment the
+  leading `0` is typed.
+- **An already-stuck session heals.** Put one on the device (a set with weight
+  0), then open the app and sync: it must leave, without the athlete editing
+  anything. Rows logged before the fix are the whole point.
+- After it syncs, the set reads `—` rather than `0kg`, on the phone and the web.
+
+### The list must not lie
+
+- **Press Try again on a row the server still refuses.** The row must STAY, with
+  the server's message on it. It used to vanish — the retry cleared the stored
+  error and never wrote the refusal back — and then reappear at the next
+  background sync. Sync, and check it did not silently move to "Nothing is
+  stuck" in between.
+- **Press Try again on a row whose obstacle has cleared.** It must go, and the
+  stored message must be cleared too (not merely hidden by the `dirty` filter).
+- **Press Try again on a session whose workout has not synced yet.** Nothing is
+  sent — the push defers — so the row must keep its message. Resolving without
+  having done anything is not success.
+- Retry while offline: the row keeps its existing message. A dead spot is not a
+  new diagnosis.
+
+### Getting to the problem
+
+- **Every row opens what it is about.** A strength session → `/session/[id]`, a
+  BJJ class → `/bjj/session/[id]`, a plan → `/workout/[id]`. Sending a class to
+  the strength screen is the old bug that rendered it as "Sets 0 · Reps 0 ·
+  Volume —".
+- The row still offers Try again alongside, and it reads as the quieter of the
+  two.

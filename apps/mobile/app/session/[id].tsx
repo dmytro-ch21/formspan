@@ -11,6 +11,7 @@ import { useCountdown } from '@/components/Countdown';
 import { TIMER_BAR_SPACE, TimerSurface } from '@/components/Timer';
 import { HoldToConfirm } from '@/components/HoldToConfirm';
 import { SessionCelebration } from '@/components/SessionCelebration';
+import { ShareCardHost, ShareSessionButton, useSessionShare } from '@/components/SessionShare';
 import {
   recordsFromSession,
   summariseSession,
@@ -308,6 +309,66 @@ export default function SessionScreen() {
       live = false;
     };
   }, [celebrating, getToken]);
+
+  /*
+    Sharing a session that finished at some point in the past — which, after
+    the celebration modal is dismissed, is every session.
+
+    The card was reachable for exactly as long as that modal was open: close
+    it and the session could never be shared again. So a finished session now
+    carries the same card permanently, built from the same `summariseSession`
+    the celebration uses, so the two can never disagree about one workout.
+
+    Everything here is above the early returns because these are hooks, and
+    that is why `useSessionShare` takes a nullable summary: a live session has
+    nothing to share, but it must still make the call.
+  */
+  const readBackSummary =
+    session?.ended_at && volume ? summariseSession(session, volume, showEffort) : null;
+
+  /*
+    The PRs this session set, fetched again for the read-back card.
+
+    Without them a session shared the day after it happened loses its medal
+    and its headline drops from "NEW BEST." to a generic line — the same
+    session, told two different ways depending on when you tapped Share.
+
+    Keyed on a STRING, never the id array: `summariseSession` builds a fresh
+    array every render, so an array dependency here would re-fetch forever.
+    That exact loop already shipped once on the celebration's own records
+    effect — see `celebrationRecords` above.
+
+    Note this stays honest over time rather than freezing a claim: a PR that
+    has since been beaten is no longer returned for this session, so the medal
+    correctly disappears.
+  */
+  const [readBackRecords, setReadBackRecords] = useState<SessionRecord[]>([]);
+  const readBackExerciseKey = readBackSummary?.recordExerciseIDs.join(',') ?? '';
+  useEffect(() => {
+    if (!id || !readBackExerciseKey) return;
+    let live = true;
+    fetchRecords(getToken, readBackExerciseKey.split(','))
+      .then((all) => {
+        if (live) setReadBackRecords(recordsFromSession(all, id));
+      })
+      .catch(() => {
+        // Offline, a shared card simply carries no medal. Silence is the
+        // honest answer — a guessed one would be a claim.
+      });
+    return () => {
+      live = false;
+    };
+  }, [id, getToken, readBackExerciseKey]);
+
+  const sessionShare = useSessionShare({
+    // Undefined while the session is live, which is what hides the button.
+    sessionID: readBackSummary ? id : undefined,
+    summary: readBackSummary ? { ...readBackSummary, records: readBackRecords } : null,
+    formatTonnage: (v) => formatVolume(v, units),
+    // The session's own date, not today's. Without this, a workout shared a
+    // week later posts stamped with the day it was shared.
+    date: session?.ended_at ? new Date(session.ended_at) : undefined,
+  });
 
   const [autoRest, setAutoRest] = useState(false);
   useEffect(() => {
@@ -1680,7 +1741,31 @@ export default function SessionScreen() {
             }}
           />
         ) : (
-          <Text style={styles.muted}>Finished — this session is read-only.</Text>
+          <>
+            <Text style={styles.muted}>Finished — this session is read-only.</Text>
+            {/*
+              Read-only is not the same as finished with. The card that opened
+              the moment this session ended is still the card it deserves, and
+              until now dismissing that modal was the end of it.
+
+              NOT gated on `worthCelebrating`. That gate exists to stop the app
+              congratulating someone for opening and closing a session — praise
+              nobody asked for. Sharing is the opposite: the athlete asked, and
+              refusing to hand them a thin card would be the app overruling
+              them about their own training.
+            */}
+            {sessionShare.error && (
+              <Text style={styles.muted} accessibilityLiveRegion="polite">
+                {sessionShare.error}
+              </Text>
+            )}
+            <ShareSessionButton
+              share={sessionShare}
+              label="Share this session"
+              style={styles.share}
+              testID="session-share"
+            />
+          </>
         )}
 
         {/* The `Alert` this replaces said only "This can't be undone." — which
@@ -1714,6 +1799,11 @@ export default function SessionScreen() {
           }}
         />
       </KeyboardAwareScrollView>
+
+      {/* OUTSIDE the scroll view, deliberately — a `ScrollView` clips its
+          content, and the capture reads the real native view. See
+          `components/SessionShare.tsx`. */}
+      <ShareCardHost share={sessionShare} />
 
       {celebrating && (
         <SessionCelebration
@@ -2596,6 +2686,7 @@ const styles = StyleSheet.create({
   empty: { alignItems: 'center', gap: 6, paddingVertical: 24 },
   emptyTitle: { fontSize: 16, fontWeight: '600' },
   muted: { color: vola.textMuted, fontSize: 13, textAlign: 'center' },
+  share: { marginTop: 12 },
   error: { color: vola.danger, fontSize: 14 },
   deleteButton: { alignItems: 'center', paddingVertical: 16, marginTop: 8 },
   deleteText: { color: vola.danger, fontWeight: '600' },

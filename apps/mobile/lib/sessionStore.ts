@@ -19,6 +19,7 @@ import {
   listSessions as pullSessions,
   replaceSets as pushSets,
   renameSession as pushRename,
+  repairSet,
   startSession as pushCreate,
   type LoggedSet,
   type Session,
@@ -99,7 +100,18 @@ function parseBjjDetail(json: string): BjjDetail | null {
   }
 }
 
-/** Parsed sets, or `null` if the blob is unreadable. */
+/**
+ * Parsed sets, or `null` if the blob is unreadable.
+ *
+ * **THE ONE GATE, and that is why the repair lives here.** Every read of a
+ * stored session goes through this — `toSession` for the screen, `pushRow` for
+ * the wire — so a measure the server would refuse is corrected once, for both,
+ * and a session already stranded on the device heals the next time anything
+ * touches it. Repairing at the push alone would leave the screen showing `0kg`
+ * for a set the server holds as unrecorded; repairing in the editor alone would
+ * do nothing for the rows that are already stuck, which is the actual
+ * complaint. See `repairSet` for why zero is not data.
+ */
 function parseSets(json: string): LoggedSet[] | null {
   try {
     // `completed` post-dates some cached rows. Defaulting it to true mirrors
@@ -107,10 +119,9 @@ function parseSets(json: string): LoggedSet[] | null {
     // the upgrade reads as entirely unperformed, and if it happens to be
     // dirty the next push writes those false flags straight over the
     // server's backfilled ones.
-    return (JSON.parse(json) as LoggedSet[]).map((s) => ({
-      ...s,
-      completed: s.completed ?? true,
-    }));
+    return (JSON.parse(json) as LoggedSet[]).map((s) =>
+      repairSet({ ...s, completed: s.completed ?? true }),
+    );
   } catch {
     return null;
   }
@@ -782,6 +793,17 @@ export type BlockedRow = {
   id: string;
   name: string;
   lastError: string;
+  /**
+   * Which screen owns this row, so the repair list can open it.
+   *
+   * Carried rather than derived at the call site, because a BJJ session and a
+   * strength session are different SCREENS and the repair list is the one place
+   * that holds both. Empty for a workout, which has only one destination.
+   *
+   * Without it the list was a dead end: it named the session and the server's
+   * complaint about set 10 and gave no way to reach set 10.
+   */
+  sport: string;
 };
 
 /**
@@ -793,8 +815,13 @@ export type BlockedRow = {
  */
 export async function blockedRows(userID: string): Promise<BlockedRow[]> {
   const db = await getDb();
-  const sessions = await db.getAllAsync<{ id: string; name: string; last_error: string }>(
-    `SELECT id, name, last_error FROM local_sessions
+  const sessions = await db.getAllAsync<{
+    id: string;
+    name: string;
+    last_error: string;
+    sport: string;
+  }>(
+    `SELECT id, name, last_error, sport FROM local_sessions
       WHERE user_id = ? AND last_error IS NOT NULL AND dirty = 1
       ORDER BY started_at DESC`,
     userID,
@@ -807,10 +834,14 @@ export async function blockedRows(userID: string): Promise<BlockedRow[]> {
   );
   return [
     ...sessions.map((r) => ({
-      kind: 'session' as const, id: r.id, name: r.name, lastError: r.last_error,
+      kind: 'session' as const,
+      id: r.id,
+      name: r.name,
+      lastError: r.last_error,
+      sport: r.sport,
     })),
     ...workouts.map((r) => ({
-      kind: 'workout' as const, id: r.id, name: r.name, lastError: r.last_error,
+      kind: 'workout' as const, id: r.id, name: r.name, lastError: r.last_error, sport: '',
     })),
   ];
 }
@@ -818,9 +849,19 @@ export async function blockedRows(userID: string): Promise<BlockedRow[]> {
 /**
  * Try one blocked row again.
  *
- * Clears the recorded error FIRST. Otherwise a row that now succeeds would
- * keep its old message until a full sync happened to touch it, and the repair
- * screen would report a fixed row as still broken.
+ * **The message is now cleared only when the row actually goes clean.** It used
+ * to be cleared FIRST, before the push, so that a row which now succeeds would
+ * not keep a stale message — and clearing was the whole of it. A still-doomed
+ * row was therefore cleared, pushed, refused, and nobody wrote the refusal
+ * back: unlike `syncSessions`'s loop, this path had no `noteRowError(err)` on
+ * the way out. The repair screen reloaded, found no message, and announced
+ * **"Nothing is stuck"** about a row that was still stuck and still dirty. The
+ * next background sync pushed it, failed, recorded the message again, and the
+ * row reappeared.
+ *
+ * That is the reported *"I press it, it disappears, and then it comes back"* —
+ * not a display glitch, but one code path telling the screen the truth and
+ * another telling it a blank.
  */
 export async function retryBlockedRow(
   userID: string,
@@ -829,17 +870,44 @@ export async function retryBlockedRow(
 ): Promise<void> {
   const db = await getDb();
   const table = row.kind === 'session' ? 'local_sessions' : 'workout_cache';
-  await noteRowError(db, table, row.id, userID, null);
-  if (row.kind === 'session') {
-    await pushSession(userID, row.id, getToken);
-    return;
+
+  try {
+    if (row.kind === 'session') {
+      await pushSession(userID, row.id, getToken);
+    } else {
+      const w = await db.getFirstAsync<WorkoutRow>(
+        `SELECT * FROM workout_cache WHERE id = ? AND user_id = ?`,
+        row.id,
+        userID,
+      );
+      if (w) await pushWorkoutRow(db, w, userID, getToken);
+    }
+  } catch (err) {
+    // Only a PERMANENT refusal is written — `noteRowError` enforces that, and
+    // the silence is right: a retry that died in a dead spot leaves the row
+    // waiting rather than broken, and its existing message still describes why
+    // it is on this list.
+    await noteRowError(db, table, row.id, userID, err);
+    throw err;
   }
-  const w = await db.getFirstAsync<WorkoutRow>(
-    `SELECT * FROM workout_cache WHERE id = ? AND user_id = ?`,
+
+  // Success is the row going CLEAN, not the push resolving. Two paths resolve
+  // without having sent anything — `pushSession` returns early when the
+  // session's workout has not synced yet, and `pushRow`'s compare-and-swap
+  // declines to clear `dirty` if the row moved mid-push — and clearing the
+  // message on either is what made the screen announce a fix that had not
+  // happened. `blockedRows` filters on this same flag, so agreeing with it is
+  // the point.
+  const after = await db.getFirstAsync<{ dirty: number }>(
+    // Interpolated from this function's own literal union, exactly as
+    // `noteRowError` does; no user input reaches it.
+    `SELECT dirty FROM ${table} WHERE id = ? AND user_id = ?`,
     row.id,
     userID,
   );
-  if (w) await pushWorkoutRow(db, w, userID, getToken);
+  if (after && after.dirty === 0) {
+    await noteRowError(db, table, row.id, userID, null);
+  }
 }
 
 /**
