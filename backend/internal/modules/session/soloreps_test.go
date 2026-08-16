@@ -108,3 +108,50 @@ func TestRepProgressionMeasuresWhatYouDidAlone(t *testing.T) {
 		t.Fatalf("max solo reps %d, want 10", max)
 	}
 }
+
+// A spotter must not walk you onto a heavier bar.
+//
+// This is the finding that showed the change was half-applied: `repSpread` had
+// migrated to solo reps while the EFFORT gates still trusted the RIR recorded on
+// the same sets. Three sets of ten with two assisted at RIR 2 then read as
+// "every set hit the top of the range with something left" — and the plan said
+// add weight, on a session a spotter carried.
+//
+// Reserve on an assisted set is zero by construction: if help was needed, there
+// was nothing left at the rep before. That also makes a spotted session read as
+// taken to failure, which is right rather than incidental — needing a spotter IS
+// training at the limit.
+func TestASpotterDoesNotEarnALoadIncrease(t *testing.T) {
+	w := 100.0
+	rir := 2
+	spotted := []Set{
+		{Reps: ap(10), WeightKg: &w, AssistedReps: ap(2), RIR: &rir},
+		{Reps: ap(10), WeightKg: &w, AssistedReps: ap(2), RIR: &rir},
+	}
+	if allSetsHadReserve(spotted, 1) {
+		t.Fatal("an assisted set reported reserve — the recorded RIR describes the set WITH help")
+	}
+	if !tookToFailure(spotted) {
+		t.Fatal("a set that needed a spotter is not being read as taken to the limit")
+	}
+
+	// The same sets without assistance keep their recorded reserve, so nothing
+	// about ordinary training changes.
+	clean := []Set{
+		{Reps: ap(10), WeightKg: &w, RIR: &rir},
+		{Reps: ap(10), WeightKg: &w, RIR: &rir},
+	}
+	if !allSetsHadReserve(clean, 1) {
+		t.Fatal("an unassisted set at RIR 2 lost its reserve")
+	}
+	if tookToFailure(clean) {
+		t.Fatal("an unassisted set at RIR 2 was read as failure")
+	}
+
+	// An explicit zero is "nobody helped", not "assisted", so it must behave
+	// like the clean case.
+	zeroed := []Set{{Reps: ap(10), WeightKg: &w, AssistedReps: ap(0), RIR: &rir}}
+	if !allSetsHadReserve(zeroed, 1) {
+		t.Fatal("assisted_reps = 0 was treated as assistance")
+	}
+}

@@ -1087,17 +1087,18 @@ func (r *PostgresRepository) Records(
 	// would flip between requests.
 	rows, err := r.pool.Query(ctx, `
 		WITH scoped AS (
-			-- assisted_reps is subtracted from reps in the projection, not
-			-- carried alongside it. A rep PR is a capability claim — "most reps
-			-- at this weight" — so a set of eight where a spotter took three is
-			-- a five for this purpose, and every comparison downstream should
-			-- see the honest number without having to remember to ask.
+			-- reps is the FULL count and assisted_reps rides alongside, so a
+			-- record's evidence matches what the athlete logged and a client can
+			-- render "8 (5 alone)". Subtracting it in the projection was tried
+			-- first and gave one response two meanings: the 1RM record carries
+			-- full reps (it comes from bestOneRMSets), so heaviest said "× 5"
+			-- while the 1RM beside it said "× 8" for the same set.
 			--
-			-- COALESCE, so the overwhelming majority of rows (no assistance
-			-- recorded, including every row logged before the column existed)
-			-- pass through untouched rather than becoming NULL.
+			-- The SOLO number is applied where it belongs — the rep-PR RANKING
+			-- below — so a PR is still what was earned unaided without the
+			-- displayed evidence having to lie about it.
 			SELECT ss.id, ss.exercise_id,
-			       ss.reps - COALESCE(ss.assisted_reps, 0) AS reps, ss.weight_kg, ss.seconds,
+			       ss.reps, ss.assisted_reps, ss.weight_kg, ss.seconds,
 			       ss.distance_m, ss.rir, ss.rpe, ss.session_id, s.started_at
 			FROM session_sets ss
 			JOIN sessions s ON s.id = ss.session_id
@@ -1111,12 +1112,18 @@ func (r *PostgresRepository) Records(
 			SELECT *,
 			  ROW_NUMBER() OVER (PARTITION BY exercise_id ORDER BY (CASE WHEN reps IS NULL THEN NULL ELSE weight_kg END)
 			                    DESC NULLS LAST, started_at, id) AS rn_weight,
-			  ROW_NUMBER() OVER (PARTITION BY exercise_id ORDER BY reps       DESC NULLS LAST, started_at, id) AS rn_reps,
+			  -- Ranked on SOLO reps: a rep PR is a capability claim, so twelve
+			  -- with four assisted loses to a clean nine. NULLS LAST still keys
+			  -- on the raw column, because a set with no reps has no rep PR.
+			  ROW_NUMBER() OVER (PARTITION BY exercise_id ORDER BY
+			                    (CASE WHEN reps IS NULL THEN NULL
+			                          ELSE reps - COALESCE(assisted_reps, 0) END)
+			                    DESC NULLS LAST, started_at, id) AS rn_reps,
 			  ROW_NUMBER() OVER (PARTITION BY exercise_id ORDER BY seconds    DESC NULLS LAST, started_at, id) AS rn_seconds,
 			  ROW_NUMBER() OVER (PARTITION BY exercise_id ORDER BY distance_m DESC NULLS LAST, started_at, id) AS rn_distance
 			FROM scoped
 		)
-		SELECT exercise_id, reps, weight_kg, seconds, distance_m, rir, rpe,
+		SELECT exercise_id, reps, assisted_reps, weight_kg, seconds, distance_m, rir, rpe,
 		       session_id, started_at,
 		       rn_weight = 1, rn_reps = 1, rn_seconds = 1, rn_distance = 1
 		FROM ranked
@@ -1135,7 +1142,7 @@ func (r *PostgresRepository) Records(
 	for rows.Next() {
 		var id string
 		var c candidate
-		if err := rows.Scan(&id, &c.rec.Reps, &c.rec.WeightKg, &c.rec.Seconds,
+		if err := rows.Scan(&id, &c.rec.Reps, &c.rec.AssistedReps, &c.rec.WeightKg, &c.rec.Seconds,
 			&c.rec.DistanceM, &c.rec.RIR, &c.rec.RPE, &c.rec.SessionID,
 			&c.rec.AchievedAt, &c.bestW, &c.bestR, &c.bestS, &c.bestD); err != nil {
 			return nil, fmt.Errorf("session: records scan: %w", err)
@@ -1256,7 +1263,14 @@ func (r *PostgresRepository) bestOneRMSets(
 		JOIN sessions s ON s.id = ss.session_id
 		WHERE ss.user_id = $1 AND ss.exercise_id = ANY($2) AND `+workingSet+`
 		  AND ss.reps IS NOT NULL AND ss.weight_kg IS NOT NULL
-		  AND ss.reps <= $3`, userID, ids, maxEstimableReps)
+		  -- SOLO reps, mirroring BestOneRMs' pool. Filtering on the full count
+		  -- here while the pool filters on solo means an assisted set with, say,
+		  -- 12 reps and 2 forced wins the estimate and is then never fetched to
+		  -- prove it: the equality recompute matches nothing, and the
+		  -- estimated_1rm record vanishes while Suggestions still reports the
+		  -- number. Two surfaces disagreeing in front of the athlete — the
+		  -- failure the comment below names, arriving through the fourth query.
+		  AND (ss.reps - COALESCE(ss.assisted_reps, 0)) <= $3`, userID, ids, maxEstimableReps)
 	if err != nil {
 		return nil, fmt.Errorf("session: 1rm evidence: %w", err)
 	}

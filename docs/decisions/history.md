@@ -20294,6 +20294,34 @@ is why the rep-PR check now carries a `sawRepRecord` flag. Both are the same
 failure the project has recorded before under "a test that skips is
 indistinguishable from one that passes".
 
+### What review caught: the change was half-applied
+
+Three blocking findings, and the first is the one that mattered.
+
+**The effort gates still trusted the RIR on assisted sets.** `repSpread` had
+migrated to solo reps; `allSetsHadReserve` and `tookToFailure` had not. Three
+sets of ten-with-two-assisted at RIR 2 therefore read as "every set hit the top
+of the range with something left" and the plan said **add weight** — a spotter
+walking the athlete onto a heavier bar, which is verbatim what `repSpread`'s own
+new comment says the change exists to prevent. The headline was true of the reps
+and false of the reserve. `reserveOf` now returns zero for any assisted set, so
+both gates inherit one rule; a spotted session consequently reads as taken to
+failure, which is correct rather than incidental.
+
+**`bestOneRMSets` still filtered on full reps** while `BestOneRMs` filtered on
+solo. An assisted set with twelve total and two forced wins the estimate and is
+then never fetched to prove it: the equality recompute matches nothing and the
+`estimated_1rm` record vanishes while the suggestion still reports the number.
+That is the "record silently loses its evidence" failure the same file's comment
+already warned about, arriving through the fourth query.
+
+**And `reps` on a record meant two things at once.** Subtracting assistance in
+the projection gave heaviest-weight "102.5 × 5" while the 1RM record beside it —
+sourced from a different query — said "× 8" for the same set. `reps` is the full
+count everywhere now, with `assisted_reps` alongside; the solo number moved to
+where it belongs, the rep-PR RANKING, so a PR is still earned unaided without
+the evidence having to misreport it.
+
 ### Gaps
 
 - **The client shows neither number.** `last_assisted_reps` is on the wire and

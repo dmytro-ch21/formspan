@@ -56,8 +56,13 @@ func TestTheSoloRuleReachesTheDatabase(t *testing.T) {
 	if _, err := repo.ReplaceSets(ctx, user, id, []Set{
 		{ExerciseID: exBench, SetType: SetTypeWorking, Reps: ptrInt(8), WeightKg: ptrF(102.5),
 			AssistedReps: ptrInt(3), Completed: true},
+		// Twelve with four assisted is EIGHT unaided...
 		{ExerciseID: pullUp, SetType: SetTypeWorking, Reps: ptrInt(12),
 			AssistedReps: ptrInt(4), Completed: true},
+		// ...so this clean nine beats it, even though twelve is the bigger
+		// number. Without a competing set the test could not tell a solo
+		// ranking from a full-reps one.
+		{ExerciseID: pullUp, SetType: SetTypeWorking, Reps: ptrInt(9), Completed: true},
 	}); err != nil {
 		t.Fatalf("replace sets with a bodyweight exercise: %v", err)
 	}
@@ -76,9 +81,17 @@ func TestTheSoloRuleReachesTheDatabase(t *testing.T) {
 				continue
 			}
 			sawRepRecord = true
-			if rec.Reps == nil || *rec.Reps != 8 {
-				t.Fatalf("rep record is %v, want 8 — twelve reps with four assisted is a PR "+
-					"of eight, because a PR is a claim about what you did unaided", rec.Reps)
+			// The clean nine wins: eight unaided loses to nine unaided, even
+			// though the assisted set logged the larger number.
+			if rec.Reps == nil || *rec.Reps != 9 {
+				t.Fatalf("rep record is %v, want 9 — twelve reps with four assisted is eight "+
+					"unaided, so a clean nine beats it", rec.Reps)
+			}
+			// And the evidence is what was logged, not a derived figure. `reps`
+			// is the full count with the assistance alongside, so one response
+			// never carries two meanings for the same field.
+			if rec.AssistedReps != nil {
+				t.Fatalf("the winning set had no assistance, yet reported %v", *rec.AssistedReps)
 			}
 		}
 	}

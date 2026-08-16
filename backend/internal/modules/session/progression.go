@@ -471,6 +471,27 @@ func anyEffortRecorded(sets []Set) bool {
 // reserveOf converts whatever effort was logged into reps in reserve.
 // RIR wins over RPE: it's the observed quantity, RPE is a conversion.
 func reserveOf(s Set) (float64, bool) {
+	// ASSISTED SETS HAVE NO RESERVE, and that overrides whatever was logged.
+	//
+	// This is the same doctrine `EstimateSetOneRM` applies, arriving at the
+	// other consumer of effort. A recorded RIR on an assisted set describes the
+	// set WITH help — "2 in reserve" means two more with the spotter — so
+	// pairing it with the solo rep count double-counts the help. If somebody
+	// needed a spotter, they had nothing left at the rep before.
+	//
+	// Without this, `repSpread` reads solo reps while these gates read
+	// whole-set reserve, and three sets of ten-with-two-assisted at RIR 2 come
+	// out as "every set hit the top of the range with something left — add
+	// weight". A spotter walks the athlete onto a heavier bar, which is exactly
+	// what repSpread's own comment says this change exists to prevent. Found in
+	// review: the reps half had migrated and the reserve half had not.
+	//
+	// It follows that a spotted session reads as taken to failure, and that is
+	// correct rather than a side effect: needing a spotter IS training at the
+	// limit, so the plan repeats the weight instead of advancing.
+	if s.AssistedReps != nil && *s.AssistedReps > 0 {
+		return 0, true
+	}
 	if s.RIR != nil {
 		return float64(*s.RIR), true
 	}

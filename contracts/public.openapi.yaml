@@ -1981,10 +1981,14 @@ components:
           type: integer
           nullable: true
           description: >
-            Carried so the 1RM evidence row can be re-estimated by the rule that
-            chose it. Note `reps` on a record is what was done UNAIDED — a rep PR
-            is a capability claim, so twelve reps with four assisted is a PR of
-            eight.
+            How many of `reps` had help. `reps` is the FULL count on every record
+            kind, so a record's evidence matches what the athlete logged — render
+            "12 (8 alone)" rather than making the client infer either number.
+
+
+            The rep PR is nevertheless RANKED on the unaided count: twelve reps
+            with four assisted loses to a clean nine, because a PR is a claim
+            about what you did yourself.
         achieved_at: { type: string, format: date-time }
         session_id: { type: string }
         is_recent:
