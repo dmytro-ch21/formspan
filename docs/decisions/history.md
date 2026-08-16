@@ -20333,9 +20333,113 @@ the evidence having to misreport it.
 - Whether a heaviest-weight record should show solo or logged reps as evidence is
   unexamined; it currently shows solo, for consistency with the estimate.
 
+## 2026-08-16 — `profile` owns its rows, and `-p 1`'s second job is retired
+
+Last of the three. `internal/modules/profile` had one test borrowing
+`bench-press` and `back-squat`; they are now `pf_fx_*` rows the package writes
+for itself. Small change, so the interesting part is what it closes.
+
+**Every module package now passes alone against its own pristine migrated
+database.** That was not true of any measurement taken before this week: nine
+days of `-p 1` were silently holding `session` (22 failures), `workout` (14) and
+`profile` (1) upright by running `exercise` first and letting its uncleaned
+762-row `Seed()` stand in for fixtures those packages should have owned. CI
+leaned on it hardest, since it migrates and never seeds, so every CI run was the
+unseeded case.
+
+So `-p 1` is back to doing the one job it was documented as doing — isolating
+the global-count assertions. Its second, undocumented job is gone. Note what
+that does *not* mean: `-p 1` is still required, and nothing enforces the rule
+that replaced the dependency.
+
+### The measurement method is the part worth keeping
+
+Running the packages against **one** shared database says everything is fine,
+because `exercise` sorts fifth and seeds for everything after it. The first
+sweep in this series did exactly that and produced a clean bill of health that
+was wrong. The honest method is a **template database per package** —
+`createdb -T` off a migrated, unseeded template, so each package genuinely
+starts from nothing. That is what produced the 22/14/1 split, and what confirms
+it is now 0/0/0.
+
+### What `profile` needed, and what it deliberately did not
+
+Two rows and a cleanup. Worth recording are the two things checked and found
+*not* to apply, because the previous two conversions made both of them look
+mandatory:
+
+- **No `requireUnsorted`.** `ListExerciseUnits` returns a `map[string]string`
+  and its query has no `ORDER BY`, so no test here observes an order and the
+  lexical-inversion trap that disarmed two `session` tests cannot bite. The
+  prefix-preserving naming convention is followed anyway, so the next reader
+  need not re-derive that breaking it was safe. What the scope test *does* need
+  is that the two ids differ — and that fails loudly if they ever stop differing,
+  since the other user's override then really is in this user's map.
+- **No parent-first cleanup.** `exercise_unit_prefs` is the only table
+  referencing `exercises` here and it is `ON DELETE CASCADE`, so the plain
+  delete suffices. The comment says so, and says what to copy from `session` if
+  a test in this package ever writes a `session_sets` or `workout_items` row.
+
+### An adjacent leak, found by looking rather than by failing
+
+Checking what the package left behind turned up a stale `profiles` row for
+`user_modules_test` sitting in the shared database permanently.
+`cleanupProfile` deleted the row *before* the test and never after — a
+clean-BEFORE, not a cleanup — so each run overwrote the previous one's litter
+instead of removing it. Harmless in isolation (same id every time, so it never
+accumulated) but it is a fixture the package does not own left where every other
+package reads, which is the exact habit this series has been unpicking. It now
+registers a `t.Cleanup` as well, and the package leaves nothing at all behind:
+`exercises`, `exercise_unit_prefs`, `profiles` and `profile_modules` all at 0
+afterwards.
+
+Nothing failed because of it, and no test would have. It was found by asking
+what was left, which is a different question from whether the suite is green.
+
+**Review then found the sharper version of the same bug.**
+`TestUsernameClaimAndRename` and `TestGetByUsername` registered their profile
+cleanup *after* `Create` succeeded — so a row left by an interrupted run makes
+`Create` fail with `ErrAlreadyExists`, the `Fatalf` stops the function, the
+cleanup that would have removed the row is never registered, and every
+subsequent run repeats it. Not flaky: **permanently red**, and reproduced twice
+in review. Both now call `cleanupProfile` *before* the Create, which clears the
+residue and registers the removal in one go; the exercise-unit test gained the
+same clean-before for `exercise_unit_prefs` (that one self-healed after a single
+red run rather than sticking).
+
+The pattern worth carrying out of this: **a cleanup registered after the thing
+that can fail is not a cleanup.** Register it first, or clear before and after.
+
+### Verified
+
+- `go test ./internal/modules/profile/` on a freshly migrated, unseeded
+  database: `ok`, 14 tests, 0 skips. It was 13 pass / 1 fail.
+- Zero rows left behind in all three affected tables.
+- Mutation: make the two fixture ids identical and the cross-user leak assertion
+  fires, so the scope test is armed rather than passing by construction.
+- Full `go test -p 1 ./...` on a fresh database: 28 packages ok.
+- Per-package sweep on pristine template copies: no failures anywhere.
+
+### Gaps
+
+- **Nothing enforces the rule.** It is documented in seven test files and
+  CLAUDE.md and held by review alone. A package that adds a fixture referencing
+  `bench-press` tomorrow gets a green CI run and restores the whole dependency
+  invisibly, because `exercise` is still seeding for it. A cheap tripwire would
+  be a test asserting no `exercises` row survives a package run, but that has to
+  live somewhere that runs last, and nothing does.
+- **`curriculum` still skips one test on every CI run** —
+  `TestEverySeededTechniqueExistsInTheLibrary`, which needs the *technique*
+  library and sorts before the `technique` package that seeds it. Ordering never
+  saved that one, which is why it degrades to a silent skip rather than a
+  failure — the worse of the two. It has its own PR and was not touched here.
+- **`-p 1` is still required** for the global-count assertions. Removing it is a
+  separate piece of work: seven assertions in one file alone would have to be
+  scoped, which was tried and abandoned once already.
+
 ## Open items / known gaps as of this entry
 
-- **`profile` still borrows a catalog row it never seeds.** One failure (`TestExerciseUnits_SetClearAndScope`, `unknown exercise "bench-press"`) against a pristine migrated database; `session` and `workout` are both converted (entries above), and `workout` is the pattern to copy — prefix-preserving ids, `requireUnsorted` where order matters, FK-ordered cleanup in `newTestRepo`. Until it is done, renaming `exercise` to sort later, or giving its uncleaned `Seed()` test the `t.Cleanup` its neighbours have, turns that package red.
+- **Nothing stops a package borrowing catalog rows again.** All three holdouts are converted (`session` #231, `workout` #234, `profile`) and every module package now passes alone against its own pristine database — but the rule is documented in seven test files and CLAUDE.md and held by review alone. A fixture referencing `bench-press` added tomorrow gets a green CI run and silently restores the whole dependency, because `exercise` still seeds the catalog first and never cleans up. A tripwire would need to run last, and nothing does.
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
 - **Two position taxonomies now sit on one Library screen.** The filter chips are nine coarse families; the glossary is eleven curated entries. Since the guard split they disagree in a visible way: a beginner can read the Closed Guard card, learn the distinction, and then find no chip that filters to those 37 techniques. Adding North-South, and later Leg Entanglement, closed the cheap half each time (a position the glossary advertised that no chip could reach) — but doing it twice by hand is the evidence that hand-maintenance is the actual bug: the vocabulary is copied across four client files and one backend map, and the taxonomy PR updated one of the four until review caught it. Keying the chips on the glossary's ids, or a shared constant with a test asserting it matches positions.json, is the real answer and is design work, not a patch.
 

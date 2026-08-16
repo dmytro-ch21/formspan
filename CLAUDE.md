@@ -220,41 +220,43 @@ pnpm run dev:mobile                          # Metro on :8081 for the developmen
 pnpm run dev:admin                          # :3001 (or next available port — runs alongside apps/web)
 ```
 
-**Backend tests run with `-p 1`** (`test:api` and CI both), and it is doing
-**two** jobs. Only the first was ever written down, and the second is the one
-that is easier to break.
+**Backend tests run with `-p 1`** (`test:api` and CI both), for **isolation**.
+`go test ./...` runs packages in PARALLEL against ONE shared database, and
+several tests assert global counts — `SELECT count(*) FROM techniques` and
+friends. The moment a second package's fixtures seed library rows, those counts
+include them: measured 3 failures in 6 concurrent runs. Scoping each assertion
+was tried and abandoned — there are seven in one file alone, and every future
+one would have to remember. If you add a test that seeds shared reference data,
+`-p 1` is what is keeping it from breaking somebody else's package.
 
-**Job one — isolation.** `go test ./...` runs packages in PARALLEL against ONE
-shared database, and several tests assert global counts — `SELECT count(*) FROM
-techniques` and friends. The moment a second package's fixtures seed library
-rows, those counts include them: measured 3 failures in 6 concurrent runs.
-Scoping each assertion was tried and abandoned — there are seven in one file
-alone, and every future one would have to remember. If you add a test that seeds
-shared reference data, `-p 1` is what is keeping it from breaking somebody
-else's package.
+**It used to be doing a second, undocumented job — ordering — and that one is
+retired as of 2026-08-16.** It is recorded here because the shape recurs, and
+because the fix is a rule you can break by accident.
 
-**Job two — ordering.** Some packages' fixtures reference real catalog ids
-(`bench-press`, `back-squat`) that they never seed. Those packages pass only
-because `internal/modules/exercise`'s tests call `Seed()` — the whole 762-row
-catalog, and unlike the per-test fixtures elsewhere in the suite those rows are
-never cleaned up — while `exercise` sorts fifth, with `-p 1` forcing the
-packages to run in that order.
+`session`, `workout` and `profile` had fixtures referencing real catalog ids
+(`bench-press`, `back-squat`) that they never seeded. They passed only because
+`internal/modules/exercise`'s tests call `Seed()` — the whole 762-row catalog,
+and unlike the per-test fixtures elsewhere in the suite those rows are never
+cleaned up — while `exercise` sorts fifth, with `-p 1` forcing the packages to
+run in that order. CI leaned on it hardest: the `Backend (Go)` job migrates a
+throwaway Postgres and never runs `cmd/seed`, so CI is the unseeded case on
+*every* run and those packages were green purely because a package earlier in
+the alphabet left rows behind. Renaming `exercise` to sort later — or giving
+that `Seed()` test the `t.Cleanup` its neighbours all have — would have turned
+37 tests red in three modules nobody touched.
 
-**CI leans on that side effect too.** The `Backend (Go)` job brings up a fresh
-Postgres service container, runs `go run ./cmd/migrate up`, and never runs
-`cmd/seed` — so CI's database is the unseeded case on *every* run, and those
-packages are green there purely because a package earlier in the alphabet left
-rows behind. Two harmless-looking changes break them: renaming `exercise` to
-something sorting later, or — worse, because it is the discipline this repo
-enforces everywhere else — giving that `Seed()` test the `t.Cleanup` its
-neighbours all have.
+All three are converted. **Measured 2026-08-16, every module package now passes
+alone against its own pristine migrated database** (a template database per
+package — sharing one hides the effect, since `exercise` seeds for everything
+after it). If you are checking this claim, that is the method; a single shared
+database will tell you everything is fine when it is not.
 
-The rule this violates is **own the library rows you depend on**.
+The rule that keeps it that way is **own the library rows you depend on**.
 `exercise/content_postgres_test.go`, `bjj/proficiency_postgres_test.go`,
-`feed/postgres_test.go`, `share/postgres_test.go` and now
-`session/postgres_test.go` and `workout/postgres_test.go` all seed their own
-catalog rows for exactly this reason. Both conversions landed 2026-08-16;
-`workout` is the one to copy, because it learned from `session`'s mistake:
+`feed/postgres_test.go`, `share/postgres_test.go`, `session/postgres_test.go`,
+`workout/postgres_test.go` and `profile/postgres_test.go` all seed their own
+catalog rows for exactly this reason. **`workout` is the one to copy**, because
+it learned from `session`'s mistake:
 
 - **Namespaced ids that KEEP the original name as the suffix** — `wk_fx_bench_press`,
   not `wk_fx_bench`. Some tests depend on the ids' relative LEXICAL ORDER (a
@@ -286,28 +288,37 @@ seeds exactly the rows those plans name from `exercise.SeedData()`, using
 inserted** — on an already-seeded database it inserts nothing and deletes
 nothing, so it can never take a real catalog row out from under another package.
 
-**One holdout remains**, measured 2026-08-16 by running each package against its
-own pristine migrated database: **`profile`**, one failure
-(`TestExerciseUnits_SetClearAndScope`), `unknown exercise "bench-press"`. Every
-other module package passes standalone. So a single-package run failing on
-unknown exercise ids there is not your change:
+**Nothing enforces the rule** — it is documented in seven test files and here,
+and held by review alone. A package that adds a fixture referencing
+`bench-press` tomorrow gets a green CI run and puts the whole dependency back,
+invisibly, because `exercise` will still be seeding for it.
+
+**One related thing is NOT fixed**, and it is the worse failure mode:
+`curriculum`'s `TestEverySeededTechniqueExistsInTheLibrary` needs the *technique*
+library, and `curriculum` sorts before `technique`, which is what seeds it. So
+ordering never saved that one — it **skips on every CI run** while the package
+still prints `ok`. Being green and being run are different things, and only
+`-v` tells them apart. It has its own PR.
+
+If a package does start failing on unknown exercise ids, the first question is
+whether the catalog is there at all:
 
 ```bash
 docker compose exec -T postgres psql -U vola -d vola_test -tc 'SELECT count(*) FROM exercises;'
 ```
 
-`0` means the catalog was never seeded into that database — the normal state of
-a per-branch database created by the recipe below, since that recipe migrates
-and stops. Seeding it once unblocks you:
+`0` means it was never seeded into that database — the normal state of a
+per-branch database created by the recipe below, since that recipe migrates and
+stops. That should no longer break any package, so a failure there means
+somebody has reintroduced a borrowed id; seeding unblocks you in the moment:
 
 ```bash
 cd backend && DATABASE_URL="$TEST_DATABASE_URL" go run ./cmd/seed
 ```
 
-Hundreds of rows means the catalog is there and the failure is real. (Substitute
-your own database name if you are not on the shared `vola_test` — and note that
-`vola_test` has usually been seeded by some earlier full run, which is why this
-trap hides until you make a fresh one.)
+(Substitute your own database name if you are not on the shared `vola_test` —
+and note that `vola_test` has usually been seeded by some earlier full run,
+which is why this class of trap hides until you make a fresh one.)
 
 The backend integration tests need `TEST_DATABASE_URL` and **skip silently without it** — for a long stretch that meant a green local `go test ./...` proved nothing and they only genuinely ran in CI. Point it at a separate database from `DATABASE_URL`:
 
