@@ -10353,6 +10353,25 @@
     "media": []
   },
   {
+    "id": "medicine-ball-crunch",
+    "name": "Medicine Ball Crunch",
+    "sport": "strength",
+    "movement_pattern": "core",
+    "movement_pattern_detail": "Spinal Flexion",
+    "primary_muscles": [
+      "abdominals"
+    ],
+    "secondary_muscles": [],
+    "equipment": [
+      "medicine-ball"
+    ],
+    "load_type": "weight_reps",
+    "is_unilateral": false,
+    "load_mode": "total",
+    "instructions": "",
+    "media": []
+  },
+  {
     "id": "medicine-ball-lunge-with-rotation",
     "name": "Medicine Ball Lunge With Rotation",
     "sport": "strength",
