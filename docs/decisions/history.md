@@ -19657,8 +19657,183 @@ or fails for reasons unrelated to the code under test.
   Simulator build could not be signed into, so none of this has been seen
   working — including the one screen the report came from.
 
+## 2026-08-16 — `-p 1` was load-bearing for a second reason nobody had written down
+
+CLAUDE.md justified `-p 1` on the backend suite with one reason: packages run in
+parallel against one shared database and several tests assert global counts.
+True, and not the whole of it. `-p 1` is also the only thing making
+`internal/modules/session` pass at all.
+
+Measured on `main`: against a freshly migrated, unseeded database,
+`go test ./internal/modules/session/` gives **54 pass, 22 FAIL**. Every failure
+is the same error — `session: invalid input: unknown exercise "back-squat"`,
+`"bench-press"` or `"run"`. The package's fixtures name real catalog ids
+(`exBench`, `exSquat`, `exOHP`, `exRun`, `exDBBench`) and nothing in the package
+puts those rows in the database. It is green in a full run because
+`internal/modules/exercise`'s tests call `Seed()`, loading all 762 rows and —
+alone among the fixtures in this suite — never removing them, while `exercise`
+sorts fifth and `session` fourteenth under the sequential order `-p 1` imposes.
+
+**The part that makes this more than a local nuisance: CI is the unseeded case,
+every run.** The `Backend (Go)` job starts a throwaway `postgres:16-alpine`
+service container, runs `go run ./cmd/migrate up`, and never runs `cmd/seed`. So
+CI has no catalog either, and 22 session tests are green there entirely because
+of an undeclared side effect from a package nine alphabetical positions away.
+Two ordinary changes would break them, in a module whose diff nobody touched:
+renaming `exercise` to anything sorting after `session`, or giving that `Seed()`
+test the `t.Cleanup` that this repo's own fixture discipline says it should have
+had all along. The second is the sharp one — following the documented rule in
+one module breaks another.
+
+The requirement was not entirely unrecorded: `session/postgres_test.go` opens
+with "The exercise catalog must be seeded (`go run ./cmd/seed`)". But that lives
+in the file, and the person who needs it is at a terminal reading 22 failures
+that look like a broken checkout. It is in CLAUDE.md's "Local dev setup" now,
+with the diagnostic (`SELECT count(*) FROM exercises` — `0` versus hundreds) and
+the fix (`DATABASE_URL="$TEST_DATABASE_URL" go run ./cmd/seed`).
+
+The trap hides behind the shared `vola_test`, which some earlier full run has
+almost always seeded already. It surfaces on a *fresh* database — which is
+precisely what CLAUDE.md tells you to create when your branch carries an
+unmerged migration. The existing advice walks you into it.
+
+### The decision: `session`'s fixtures should own their catalog rows — as its own PR, not this one
+
+The repo already settled this rule and documents it in four places.
+`exercise/content_postgres_test.go` and `bjj/proficiency_postgres_test.go` both
+record tests that borrowed real ids, passed locally where somebody had run
+`cmd/seed` by hand, and failed in CI which only migrates. `feed/postgres_test.go`
+was moved off `back-squat` after reproducing this exact failure, and states the
+rule outright: own the library rows you depend on. `share/postgres_test.go`
+carries the cleanup half. `session` predates all of it and is the last holdout.
+
+So the answer is yes, it should be converted — the argument is not tidiness, it
+is that a module's CI result currently depends on another module's uncleaned
+test residue and on alphabetical ordering, neither of which anything asserts.
+It is deliberately **not** done here: it touches 22 tests, it is orthogonal to
+any feature branch (it was found while running the pre-merge checker for
+`feat/assisted-and-drop-sets`, and 22 of the 23 failures that branch sees
+predate it), and the conversion has two ways to go wrong that are worth doing
+carefully rather than in passing:
+
+- **Cleanup has to be FK-ordered, not registration-ordered.**
+  `session_sets.exercise_id` has no `ON DELETE`, so a bare
+  `DELETE FROM exercises` fails the foreign key, and a discarded error leaves the
+  fixture in the shared database. `feed` and `share` both shipped that leak —
+  `share` at nine rows left behind per clean run — and both now delete the
+  referencing sessions first and log rather than swallow. The package already
+  contains a correct model of the fixture it needs: `seedDraftExercise` in
+  `session/postgres_test.go`, including the note that it must be called before
+  `cleanup` because `t.Cleanup` is LIFO and the exercise has to outlive the
+  session referencing it.
+- **Two of the real ids were chosen for properties, not names.** `exDBBench` is
+  `dumbbell-bench-press` specifically because it is `per_side`, so the
+  SQL-vs-domain parity test exercises a load factor other than 1 — with a
+  factor of 1 both sides agree trivially and a missing `CASE` in the SQL passes
+  green. `exRun` is `run` because migration 000019 removed the BJJ drills, and
+  running is the remaining non-strength sport with real catalog rows, which the
+  sport-mismatch test needs. Synthetic fixtures must set `load_mode` and `sport`
+  explicitly. `feed` learned this the second way round: its first `seedExercise`
+  omitted `load_mode`, every fixture took the `'total'` default, and the feed's
+  volume query could have lost its per-side `CASE` with the suite still green.
+
+A conversion also buys something beyond robustness: it decouples these tests
+from catalog content. As things stand a seed-file edit can silently change what
+a session test exercises — #224 changed `load_mode` semantics across ~80 rows,
+and `TestBestOneRM_GoAndSQLAgree` reads its meaning off one of them. What is
+lost is a weak incidental check that `back-squat` and friends exist in the
+shipped catalog; if that is worth asserting it belongs in `exercise`, where the
+catalog is the subject.
+
+Until it is done, `-p 1` plus an uncleaned `Seed()` is the load-bearing
+arrangement, and it is now documented as such in CLAUDE.md rather than being
+folk knowledge.
+
+### What did land: a `TestMain` that names the problem
+
+The full conversion is deferred; the confusing failure is not. `session` now has
+a `TestMain` (`internal/modules/session/main_test.go`) that checks the five
+borrowed ids against the same predicate `assertSportsMatch` uses
+(`status = 'published'`, so a draft row counts as missing exactly as it does
+there) and, when they are absent, fails the package with one message naming the
+missing ids and what to do — instead of 22 `unknown exercise` errors that read
+like a broken checkout.
+
+**It distinguishes two states, because only one of them is a seeding problem.**
+Review caught the first draft claiming "the catalog is not seeded" while proving
+only "these five ids have no published row" — which misdiagnoses a *populated*
+catalog whose ids have drifted (a seed-file rename, say), and sends the reader
+to `cmd/seed` for a round of nothing. It now counts the table: empty means never
+seeded, non-empty means these particular ids are absent or unpublished.
+
+That second message then had to be corrected too, and the correction is the
+useful part. It first said re-seeding would not help — false, and measured so:
+`upsertSQL` rewrites `status = EXCLUDED.status`, so `cmd/seed` *does* restore a
+seed-owned row that was unpublished. What it cannot restore is a row the
+`WHERE exercises.source = 'seed'` guard skips, i.e. an admin-owned one, or an id
+that is simply gone from the seed data. Both halves verified by forcing each
+state by hand: unpublish a seed-owned row and re-seeding fixes it; flip the same
+row to `source='admin'` and re-seeding leaves it draft, exactly as the message
+now says.
+
+Three properties it was built to have, each verified by running it:
+
+- **It does not seed.** Seeding from here would fix the symptom by committing
+  the original sin: 762 rows written into the shared database by a package that
+  does not own them. It is a diagnostic only.
+- **It only speaks when it can prove the claim.** A database it cannot reach
+  returns no diagnostic, because "unreachable" is not "unseeded" — otherwise a
+  stale `TEST_DATABASE_URL` would stop the package's pure-logic tests from
+  running, which today they do. Checked against a closed port: the individual
+  tests report the real connection error, as before.
+- **It leaves the unset case alone.** With no `TEST_DATABASE_URL` the package
+  still runs its pure-logic tests green, preserving the suite-wide
+  skip-silently-without-it contract.
+
+Verified by forcing every state: empty catalog (the seed message, exit 1),
+populated-but-drifted (the reconcile message, naming only the missing id),
+healthy (`ok`), no `TEST_DATABASE_URL` (pure-logic tests pass), unreachable
+(real connect error, no false claim). And the CI path itself — a freshly
+migrated database, full `go test -p 1 ./...` — still passes, 627 tests across
+28 packages, since `exercise` seeds before `session` reaches its own guard.
+
+### Gaps
+
+- **The guard covers `session` only, and detection is not enforcement.** Nothing
+  asserts that the catalog is present before `session` runs — the guard makes
+  the diagnosis immediate, it does not remove the dependency. If the ordering
+  breaks, CI still goes red in a module whose diff nobody touched; it will just
+  say why now.
+- **`TestMain` cannot see `-run`, so the guard over-blocks.** Against a
+  reachable-but-unseeded database it also stops this package's pure-logic tests
+  (`onerm_test.go`, `basis_test.go`, `summarise_load_test.go`), which need no
+  catalog and passed before. Iterating on 1RM maths with a fresh branch database
+  now costs one `cmd/seed`. The alternative considered and rejected was a
+  `sync.Once` check inside `newTestRepo`: it has the mirror flaw (it fires for
+  tests that take the helper but never insert a set, e.g.
+  `registry_sports_test.go`) and repeats the message once per test rather than
+  once per package. One clear failure beat both, for a guard whose replacement
+  is queued — but it is a real regression in a narrow case, chosen rather than
+  overlooked.
+- **The same ordering class exists one package over, and there it is silent.**
+  `curriculum`'s `TestEverySeededTechniqueExistsInTheLibrary` needs the
+  technique library, `curriculum` sorts before `technique` which seeds it, and
+  CI never seeds — so it **skips on every CI run** while `curriculum` still
+  prints `ok`, and only executes locally when an earlier run left 542 rows
+  behind. Measured here, recorded here because it is the same shape; it has its
+  own task and was deliberately not touched. Note it degrades to a silent skip
+  rather than a loud failure, which is the worse of the two behaviours.
+- **`load_mode` drift is still invisible.** The guard checks the fixture ids
+  exist, not that `dumbbell-bench-press` is still `per_side` — so a catalog
+  reclassification can still quietly neuter the SQL-vs-domain parity test by
+  taking its load factor back to 1. That assertion belongs in the parity test
+  itself and was not added here.
+- The separate `curriculum` skip (`TestEverySeededTechniqueExistsInTheLibrary`)
+  is a different problem with its own task and was not touched here.
+
 ## Open items / known gaps as of this entry
 
+- **`internal/modules/session`'s fixtures still borrow real catalog ids, and CI's green depends on it.** Decided (2026-08-16, entry above) that they should own their rows like `exercise`/`bjj`/`feed`/`share` do, and deliberately deferred to its own PR — 22 tests, plus FK-ordered cleanup (`session_sets.exercise_id` has no `ON DELETE`) and two fixtures whose real ids were chosen for `load_mode='per_side'` and a non-strength `sport`. Until then the suite is held together by `-p 1` running `exercise` first and by that package's `Seed()` never cleaning up its 762 rows; a rename or a well-intentioned `t.Cleanup` there turns 22 session tests red. A `TestMain` guard shipped with that entry, so the failure now explains itself — but it is a diagnostic, not a fix: the dependency is unchanged.
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
 - **Two position taxonomies now sit on one Library screen.** The filter chips are nine coarse families; the glossary is eleven curated entries. Since the guard split they disagree in a visible way: a beginner can read the Closed Guard card, learn the distinction, and then find no chip that filters to those 37 techniques. Adding North-South, and later Leg Entanglement, closed the cheap half each time (a position the glossary advertised that no chip could reach) — but doing it twice by hand is the evidence that hand-maintenance is the actual bug: the vocabulary is copied across four client files and one backend map, and the taxonomy PR updated one of the four until review caught it. Keying the chips on the glossary's ids, or a shared constant with a test asserting it matches positions.json, is the real answer and is design work, not a patch.
 
