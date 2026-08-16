@@ -2,9 +2,13 @@ package workout
 
 import (
 	"context"
+	"errors"
 	"os"
+	"sort"
 	"testing"
 
+	"github.com/dmytro-ch21/vola/backend/internal/modules/exercise"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -29,7 +33,176 @@ func seedPool(t *testing.T) *pgxpool.Pool {
 	// LIFO and strictly after every defer, so a `defer pool.Close()` here would
 	// close it out from under the cleanups below.
 	t.Cleanup(pool.Close)
+	seedReferencedExercises(t, pool)
 	return pool
+}
+
+// seedReferencedExercises writes the catalog rows the SEEDED PLANS name, so
+// these two tests can run against a freshly migrated database.
+//
+// This is a different dependency from the rest of the package, and it is not
+// one that namespaced fixtures can replace. The tests above exercise the real
+// deploy path: `Seed` writes the 17 shipped plans, whose 84 items are foreign
+// keys into the catalog by design. Substituting invented ids would test a
+// different thing. So the rows come from `exercise.SeedData()` — the same file
+// `cmd/seed` reads, and the same one `TestSeedWorkoutsNameRealExercises`
+// already checks these ids against — restricted to exactly the ids the plans
+// reference. Owning what you depend on, where what you depend on is real
+// content.
+//
+// **It removes only the rows it actually created.** The insert is
+// `ON CONFLICT DO NOTHING RETURNING id`, which returns a row only when one was
+// really inserted, and the cleanup deletes that set and nothing else. On an
+// already-seeded database — the usual state of the shared `vola_test` — it
+// inserts nothing and therefore deletes nothing, so it can never take a real
+// catalog row out from under another package. Getting this wrong in the other
+// direction is not hypothetical: this package's own `seedDraftExercise` records
+// having leaked fixtures that had to be cleared by hand.
+//
+// The workout half of the cleanup needs the same care and did not have it at
+// first — see the note on `preexisting` below.
+func seedReferencedExercises(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	ctx := context.Background()
+
+	plans, err := SeedData()
+	if err != nil {
+		t.Fatalf("parse seeded plans: %v", err)
+	}
+	catalog, err := exercise.SeedData()
+	if err != nil {
+		t.Fatalf("parse exercise catalog: %v", err)
+	}
+	known := make(map[string]exercise.Exercise, len(catalog))
+	for _, e := range catalog {
+		known[e.ID] = e
+	}
+
+	// Distinct, and in a stable order so a failure names the same row twice.
+	seen := map[string]bool{}
+	wanted := []string{}
+	for _, p := range plans {
+		for _, it := range p.Items {
+			if !seen[it.ExerciseID] {
+				seen[it.ExerciseID] = true
+				wanted = append(wanted, it.ExerciseID)
+			}
+		}
+	}
+	sort.Strings(wanted)
+
+	// Workouts that already existed. The cleanup must not remove these even
+	// when they reference a row it created, which is a real case rather than a
+	// hypothetical one: on a catalog that is seeded but STALE — the shared
+	// `vola_test` the first time a content edit adds a plan-referenced exercise
+	// — `created` is the delta, the `Seed` below rewrites plan items to
+	// reference it, and a delete keyed only on `created` then takes out
+	// pre-existing seeded plans. Measured at 17 plans becoming 16, with the
+	// tests still green: a quiet mutation of shared state, which is worse than
+	// the loud foreign-key failure this replaced.
+	preexisting := map[string]bool{}
+	rows, err := pool.Query(ctx, `SELECT id FROM workouts`)
+	if err != nil {
+		t.Fatalf("read existing workouts: %v", err)
+	}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			t.Fatalf("scan existing workout: %v", err)
+		}
+		preexisting[id] = true
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read existing workouts: %v", err)
+	}
+
+	var created []string
+	t.Cleanup(func() {
+		if len(created) == 0 {
+			return
+		}
+		// Three steps, and all three are needed. `workout_items` is NO ACTION,
+		// so the references have to go before the exercises — but only the ones
+		// this run introduced.
+		//
+		// 1. Workouts this run created: removed whole, items cascading with
+		//    them. Workouts that were here before are left alone.
+		var orphans []string
+		wr, err := pool.Query(ctx, `
+			SELECT DISTINCT workout_id FROM workout_items WHERE exercise_id = ANY($1)`, created)
+		if err != nil {
+			t.Logf("find workouts referencing seeded-plan exercises: %v", err)
+		} else {
+			for wr.Next() {
+				var id string
+				if err := wr.Scan(&id); err != nil {
+					t.Logf("scan workout id: %v", err)
+					break
+				}
+				if !preexisting[id] {
+					orphans = append(orphans, id)
+				}
+			}
+			wr.Close()
+		}
+		if len(orphans) > 0 {
+			if _, err := pool.Exec(ctx,
+				`DELETE FROM workouts WHERE id = ANY($1)`, orphans); err != nil {
+				t.Logf("cleanup workouts referencing seeded-plan exercises: %v", err)
+			}
+		}
+		// 2. Items left inside PRE-EXISTING workouts that point at a row this
+		//    run created. Those items are necessarily new too — the foreign key
+		//    would have refused them while the exercise did not exist — so
+		//    removing them restores the pre-run state exactly rather than
+		//    editing somebody's plan. Skipping this step does not delete
+		//    anything, it LEAKS: the exercise delete below fails the foreign key
+		//    and a real-content row survives into the shared database. Measured
+		//    on a stale catalog: 761 rows became 762.
+		if _, err := pool.Exec(ctx,
+			`DELETE FROM workout_items WHERE exercise_id = ANY($1)`, created); err != nil {
+			t.Logf("cleanup workout items referencing seeded-plan exercises: %v", err)
+		}
+		// 3. And now the exercises themselves.
+		if _, err := pool.Exec(ctx, `DELETE FROM exercises WHERE id = ANY($1)`, created); err != nil {
+			t.Logf("cleanup seeded-plan exercises: %v", err)
+		}
+	})
+
+	for _, id := range wanted {
+		e, ok := known[id]
+		if !ok {
+			// TestSeedWorkoutsNameRealExercises covers this properly, without a
+			// database. Failing here too would just be a worse copy of it.
+			t.Fatalf("seeded plan names %q, which is not in the exercise catalog", id)
+		}
+		// The deploy path's own normalizers, not hand-rolled equivalents. A
+		// hand-rolled `"" -> "total"` agrees with NormalizeLoadMode on the empty
+		// string and diverges on an unrecognized one, which `validate()` does
+		// not reject — so a typo'd load_mode would deploy fine and fail here on
+		// a raw CHECK violation blaming the wrong package. Status likewise: a
+		// legitimately-draft catalog entry should be seeded draft, as the real
+		// seeder would, rather than silently promoted.
+		var inserted string
+		err := pool.QueryRow(ctx, `
+			INSERT INTO exercises (id, name, sport, movement_pattern, load_type, status, load_mode, is_unilateral)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			ON CONFLICT (id) DO NOTHING
+			RETURNING id`,
+			e.ID, e.Name, e.Sport, e.MovementPattern, string(e.LoadType),
+			exercise.NormalizeStatus(e.Status), exercise.NormalizeLoadMode(e.LoadMode), e.IsUnilateral,
+		).Scan(&inserted)
+		switch {
+		case err == nil:
+			created = append(created, inserted)
+		case errors.Is(err, pgx.ErrNoRows):
+			// Already present — a real catalog row. Leave it entirely alone.
+		default:
+			t.Fatalf("seed referenced exercise %s: %v", id, err)
+		}
+	}
 }
 
 func TestSeedIsIdempotent(t *testing.T) {

@@ -19978,9 +19978,124 @@ conversion per PR was the point.
   `ok` while a test that never ran was supposed to be checking that every seeded
   technique exists in the library. It has its own task.
 
+## 2026-08-16 — `workout` owns its catalog rows too, and the id scheme learned from `session`'s mistake
+
+Second of the three holdouts. `internal/modules/workout` failed 14 tests against
+a freshly migrated database; it now passes all 30, with no skips.
+
+The 14 split into two genuinely different dependencies, which is the interesting
+part — the first conversion did not have this.
+
+### Twelve were the same conversion as `session`
+
+`postgres_test.go`'s fixtures named `bench-press`, `overhead-press`,
+`back-squat` and `run` and seeded none of them. They are now `wk_fx_*` rows the
+package writes for itself, with FK-ordered cleanup wired into `newTestRepo`.
+
+**The id scheme is deliberately different from `session`'s, and that is the
+lesson carried forward.** `session` renamed `back-squat`/`bench-press` to
+`ses_fx_squat`/`ses_fx_bench` — which inverted their lexical order and silently
+disarmed two tests whose whole point was that a caller's ORDER survives, since
+such a test can only fail if the order it uses is one a sort would change.
+Review caught that; the suite did not.
+
+So here the suffix keeps the original name: `wk_fx_bench_press`, not
+`wk_fx_bench`. Every pairwise relationship is then identical by construction —
+`back-squat` < `bench-press` < `overhead-press` < `run`, and the same for the
+prefixed forms — so no ordering can be inverted by the rename at all.
+`TestReplaceItems_Reorders` was verified to stay armed by mutating the item read
+to `ORDER BY exercise_id`, which fails it. Belt and braces: where a test depends
+on the order it now also says so, via the same `requireUnsorted` assertion
+`session` gained.
+
+That is the general rule worth keeping: **when renaming fixture ids, prefix
+rather than re-word.** A prefix is order-preserving; a rewrite is not, and what
+it breaks is invisible.
+
+### Two were a different problem: a seeder test needs real content
+
+`seed_postgres_test.go` exercises the deploy path — `Seed` writing the 17
+shipped plans, whose 84 items are foreign keys into the catalog *by design*.
+Invented ids would test a different thing, so namespaced fixtures are the wrong
+tool. It now seeds exactly the rows those plans name, taken from
+`exercise.SeedData()` — the same file `cmd/seed` reads, and the same one
+`TestSeedWorkoutsNameRealExercises` already validates these ids against.
+
+**The safety property here is the one that mattered.** These are *real* catalog
+ids, so a careless cleanup would delete real rows out of the shared `vola_test`
+that every other package depends on — a far worse failure than the leak this
+work started from. The insert is `ON CONFLICT DO NOTHING RETURNING id`, which
+yields a row only when one was actually inserted, and the cleanup removes that
+set and nothing else.
+
+**It took three tries to get right, and both intermediate versions passed their
+tests.** That is worth recording, because "the tests are green" was true at
+every step and the shared database was being quietly damaged at two of them.
+
+- *First version.* Cleanup deleted every workout referencing a created
+  exercise. Fine on a pristine database and fine on a fully current one. On a
+  **stale** catalog — the shared `vola_test` the first time a content edit adds
+  a plan-referenced exercise — `created` is the delta, the test's own `Seed`
+  rewrites plan items to reference it, and the delete then removed
+  *pre-existing seeded plans*: 17 became 16, tests green. Found by review, not
+  by this branch.
+- *Second version.* Scoped that delete to workouts the run introduced, sparing
+  the pre-existing ones. Now the plan survived — and the exercise delete failed
+  the foreign key instead, because the spared workout still held an item
+  pointing at the row. 761 exercises became **762**: a real-content row leaked
+  into the shared database, logged and not failed. One shared-state bug traded
+  for another.
+- *Third version.* Three steps, all needed: delete workouts this run created
+  (items cascade); then delete items left inside *pre-existing* workouts that
+  point at a created row — those items are necessarily new too, since the
+  foreign key would have refused them while the exercise did not exist, so
+  removing them restores the pre-run state rather than editing somebody's plan;
+  then delete the exercises.
+
+Verified in four states, and the two easy ones prove the least. Pristine: 0
+exercises, 0 workouts, 0 workout_items left. Fully seeded: 762/17/84 unchanged,
+and not merely by count — an md5 over every column of all 762 rows is identical
+either side. Partially seeded: plant one referenced id by hand and it comes back
+byte-identical while the 44 rows the test did insert are cleaned back to exactly
+1. Stale: 761/17/83 identical. The last two are the discriminating cases; the
+first two would hold by accident under either broken version above.
+
+### Verified
+
+- `go test ./internal/modules/workout/` against a freshly migrated, unseeded
+  database: `ok`, 30 tests, 0 skips. It was 16 pass / 14 fail.
+- Zero leaks on a pristine database; a seeded database provably untouched.
+- Three mutations, each going red: item order by `exercise_id` instead of
+  `position`; the fixture ids flipped to alphabetical (`requireUnsorted` fires);
+  `wk_fx_run`'s sport changed to strength (the mismatch test fails).
+- Full `go test -p 1 ./...` on a fresh database: 28 packages ok.
+
+### One holdout left
+
+Re-running every module package against its own pristine database:
+
+- `workout`, `session` — pass, no skips.
+- **`profile` — 1 FAIL**, `TestExerciseUnits_SetClearAndScope`, borrowing
+  `bench-press` at `profile/postgres_test.go:126`. The smallest of the three.
+- `curriculum` — passes with **1 skip**, still: the technique-library test that
+  skips on every CI run while the package prints `ok`. Its own task.
+
+### Gaps
+
+- **`profile` still borrows.** One test, the same fix. Not done here.
+- **`TestCreateAndGet`'s item-order assertion is weak and always was.** It sends
+  `[bench, overhead]`, which is alphabetical under both the old and new ids, so
+  a read that sorted by `exercise_id` would satisfy it. `TestReplaceItems_Reorders`
+  covers the property properly, so this is redundancy rather than a hole — but
+  the rename neither caused nor fixed it, and it is not asserted by
+  `requireUnsorted` because the test is about positions being assigned from
+  array order, not about ordering surviving.
+- **Nothing prevents the next package from borrowing** — unchanged. The rule is
+  documented in seven test files and CLAUDE.md and enforced only by review.
+
 ## Open items / known gaps as of this entry
 
-- **`workout` and `profile` still borrow catalog rows they never seed, and CI's green depends on `-p 1` running `exercise` first.** Measured 2026-08-16 against pristine per-package databases: `workout` 14 failures, `profile` 1, both `unknown exercise "bench-press"`. `session` was converted (entry above) and is the worked example — namespaced ids, load-bearing columns set explicitly, FK-ordered cleanup in `newTestRepo`. Until both are done, renaming `exercise` to sort later, or giving its uncleaned `Seed()` test the `t.Cleanup` its neighbours have, turns those packages red.
+- **`profile` still borrows a catalog row it never seeds.** One failure (`TestExerciseUnits_SetClearAndScope`, `unknown exercise "bench-press"`) against a pristine migrated database; `session` and `workout` are both converted (entries above), and `workout` is the pattern to copy — prefix-preserving ids, `requireUnsorted` where order matters, FK-ordered cleanup in `newTestRepo`. Until it is done, renaming `exercise` to sort later, or giving its uncleaned `Seed()` test the `t.Cleanup` its neighbours have, turns that package red.
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
 - **Two position taxonomies now sit on one Library screen.** The filter chips are nine coarse families; the glossary is eleven curated entries. Since the guard split they disagree in a visible way: a beginner can read the Closed Guard card, learn the distinction, and then find no chip that filters to those 37 techniques. Adding North-South, and later Leg Entanglement, closed the cheap half each time (a position the glossary advertised that no chip could reach) — but doing it twice by hand is the evidence that hand-maintenance is the actual bug: the vocabulary is copied across four client files and one backend map, and the taxonomy PR updated one of the four until review caught it. Keying the chips on the glossary's ids, or a shared constant with a test asserting it matches positions.json, is the real answer and is design work, not a patch.
 

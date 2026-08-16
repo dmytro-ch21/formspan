@@ -252,17 +252,45 @@ neighbours all have.
 The rule this violates is **own the library rows you depend on**.
 `exercise/content_postgres_test.go`, `bjj/proficiency_postgres_test.go`,
 `feed/postgres_test.go`, `share/postgres_test.go` and now
-`session/postgres_test.go` all seed their own catalog rows for exactly this
-reason. `session` was converted on 2026-08-16 and is the worked example to copy:
-namespaced ids (`ses_fx_*`), every load-bearing column set explicitly rather
-than defaulted, and FK-ordered cleanup wired into `newTestRepo` so it runs after
-each test's own cleanups under LIFO. See that history entry before doing another.
+`session/postgres_test.go` and `workout/postgres_test.go` all seed their own
+catalog rows for exactly this reason. Both conversions landed 2026-08-16;
+`workout` is the one to copy, because it learned from `session`'s mistake:
 
-**Two holdouts remain**, measured 2026-08-16 by running each package against its
-own pristine migrated database: **`workout` (14 failures)** and **`profile`
-(1)**, both `unknown exercise "bench-press"`. Every other module package passes
-standalone. So a single-package run failing on unknown exercise ids in one of
-those two is not your change:
+- **Namespaced ids that KEEP the original name as the suffix** — `wk_fx_bench_press`,
+  not `wk_fx_bench`. Some tests depend on the ids' relative LEXICAL ORDER (a
+  test proving a caller's order survives can only fail if that order is one a
+  sort would change), and that dependency is invisible at the call site.
+  `session`'s rename inverted such a pair and silently disarmed two tests —
+  review caught it, the suite did not.
+  **A prefix alone is not enough, and this is easy to get wrong:** the ordering
+  is preserved only if the suffix is otherwise *verbatim*. Respelling separators
+  is not order-preserving in general, because `-` (0x2D) < `0` (0x30) < `_`
+  (0x5F) — so `bench-press` < `bench0press` but `bench_press` > `bench0press`,
+  and the catalog really does contain digit-leading ids (`45-degree-leg-press`,
+  `90-90-hip-switch`). `workout`'s ids swap `-` for `_` and were checked pair by
+  pair; do not assume that generalizes.
+- **Where a test depends on the order, assert it** — `requireUnsorted`, so a
+  future rename fails loudly instead of going quiet. This is the guarantee that
+  actually holds; the naming convention above only makes it less likely to fire.
+- **Every column any test reads set explicitly**, never defaulted, and the
+  `ON CONFLICT DO UPDATE` reconciling all of them so an interrupted run's
+  leftover row is repaired rather than trusted.
+- **FK-ordered cleanup wired into `newTestRepo`**, so under LIFO it runs after
+  each test's own cleanups.
+
+A package testing a **seeder** is the exception: `workout/seed_postgres_test.go`
+exercises the real deploy path, whose 17 plans carry 84 items referencing 45
+distinct catalog ids by design, so invented ids would test something else. It
+seeds exactly the rows those plans name from `exercise.SeedData()`, using
+`ON CONFLICT DO NOTHING RETURNING id` and removing **only what it actually
+inserted** — on an already-seeded database it inserts nothing and deletes
+nothing, so it can never take a real catalog row out from under another package.
+
+**One holdout remains**, measured 2026-08-16 by running each package against its
+own pristine migrated database: **`profile`**, one failure
+(`TestExerciseUnits_SetClearAndScope`), `unknown exercise "bench-press"`. Every
+other module package passes standalone. So a single-package run failing on
+unknown exercise ids there is not your change:
 
 ```bash
 docker compose exec -T postgres psql -U vola -d vola_test -tc 'SELECT count(*) FROM exercises;'

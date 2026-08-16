@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"testing"
 
@@ -14,7 +15,8 @@ import (
 
 // Postgres integration tests. They need TEST_DATABASE_URL (see
 // docker-compose.yml or backend/.env.example) and skip gracefully without it.
-// The exercise catalog must be seeded — `go run ./cmd/seed`.
+// These fixtures OWN the catalog rows they run on — nothing here needs
+// `cmd/seed`.
 
 func newTestRepo(t *testing.T) (*PostgresRepository, *pgxpool.Pool) {
 	t.Helper()
@@ -32,6 +34,7 @@ func newTestRepo(t *testing.T) (*PostgresRepository, *pgxpool.Pool) {
 	// Registered before any cleanup that still needs the pool — t.Cleanup is
 	// LIFO, so this closes last.
 	t.Cleanup(pool.Close)
+	seedFixtureExercises(t, pool)
 
 	return NewPostgresRepository(pool), pool
 }
@@ -48,17 +51,138 @@ func cleanupWorkout(t *testing.T, pool *pgxpool.Pool, id string) {
 	})
 }
 
-// Catalog IDs used as fixtures. Named rather than inlined because the
-// exercise catalog is generated from a spreadsheet now, so a content edit
-// can rename one — and the failure then shows up in five tests at once.
+// The catalog ids these tests use. Namespaced, because they are this package's
+// rows and not the shipped catalog's.
+//
+// They used to be real ids — `bench-press`, `overhead-press`, `back-squat`,
+// `run` — that the package never seeded, so 12 tests here failed against a
+// freshly migrated database and passed in a full run only because
+// `internal/modules/exercise` seeds the whole catalog and sorts first under
+// `-p 1`. Same conversion `session` had; see that history entry.
+//
+// **The suffixes deliberately keep the original names**, because the ids' own
+// LEXICAL ORDER is load-bearing and invisible. `TestReplaceItems_Reorders`
+// proves a caller's order survives, which it can only do if that order is one a
+// sort would CHANGE — and that requirement lives in the relative spelling of
+// two constants. The session conversion renamed `back-squat`/`bench-press` to
+// `ses_fx_squat`/`ses_fx_bench`, inverted their order, and silently disarmed two
+// tests; review caught it, the suite did not. Prefixing rather than re-wording
+// keeps every such relationship identical by construction:
+// back-squat < bench-press < overhead-press < run, and the same for the
+// `wk_fx_` forms. Where a test depends on the order it now says so as well —
+// see requireUnsorted.
 const (
-	exBench    = "bench-press"
-	exOverhead = "overhead-press"
-	exSquat    = "back-squat"
-	// A non-strength entry, for the mismatch test. Was "bear-crawl-forward"
-	// until migration 000019 removed the BJJ drills from the catalog.
-	exRun = "run"
+	exBench    = "wk_fx_bench_press"
+	exOverhead = "wk_fx_overhead_press"
+	exSquat    = "wk_fx_back_squat"
+	// A non-strength entry, for the mismatch test. Owning it also retires an
+	// old constraint the comment here recorded: with borrowed ids this had to
+	// be `run`, because migration 000019 removed the BJJ drills and running was
+	// the only non-strength discipline left with catalog rows.
+	exRun = "wk_fx_run"
 )
+
+// fixtureExercise is a catalog row this package writes for itself. `sport` is
+// the only column any test here depends on — the sport-mismatch check — and the
+// repository reads only `id` and `sport` under `status='published'`, all three
+// of which are set here.
+//
+// The remaining columns DO take schema defaults (`load_mode`, `is_unilateral`,
+// muscles, equipment, instructions, `source`). That is fine while nothing reads
+// them, and a trap the moment something does: `feed` shipped exactly that, where
+// an omitted `load_mode` let every fixture default to 'total' and the per-side
+// path could have been deleted with the suite still green. If this package
+// starts reading one, declare it here rather than trusting the default.
+type fixtureExercise struct {
+	id       string
+	sport    string
+	pattern  string
+	loadType string
+}
+
+var fixtureExercises = []fixtureExercise{
+	{exBench, "strength", "horizontal_push", "weight_reps"},
+	{exOverhead, "strength", "vertical_push", "weight_reps"},
+	{exSquat, "strength", "squat", "weight_reps"},
+	{exRun, "running", "locomotion", "distance_time"},
+}
+
+// requireUnsorted asserts that ids are NOT in ascending lexical order.
+//
+// A test proving a caller's chosen ORDER survives can only fail if the order it
+// uses is one a stray sort would change. That requirement lives in the relative
+// spelling of two constants and is invisible at the call site — the session
+// conversion inverted exactly such a pair and left two tests passing with the
+// bug they exist to catch. Asserted here rather than described, because a
+// comment cannot fail.
+func requireUnsorted(t *testing.T, ids ...string) {
+	t.Helper()
+	if sort.StringsAreSorted(ids) {
+		t.Fatalf("this test needs an order a sort would change, but %v is already "+
+			"in lexical order — it would pass with the bug it exists to catch. "+
+			"Reorder the ids, or rename the fixtures so they differ.", ids)
+	}
+}
+
+// seedFixtureExercises writes this package's catalog rows and removes them
+// again. Called from newTestRepo, so it runs before any test body and — since
+// t.Cleanup is LIFO — its cleanup runs after every cleanup a test registers
+// later. The rows therefore outlive the workouts referencing them, which is the
+// ordering seedDraftExercise below documents having had to learn the hard way.
+//
+// The removal is deliberately order-INDEPENDENT rather than relying on that.
+// `workout_items.exercise_id` and `session_sets.exercise_id` are both NO ACTION,
+// so a bare `DELETE FROM exercises` fails the foreign key; discard that error
+// and the fixture survives into the database every other package shares. This
+// package has leaked exactly that way before, and the rows had to be cleared by
+// hand. So whatever still references the row goes first, and a failure is
+// logged rather than swallowed.
+func seedFixtureExercises(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	ctx := context.Background()
+
+	ids := make([]string, 0, len(fixtureExercises))
+	for _, e := range fixtureExercises {
+		ids = append(ids, e.id)
+	}
+
+	t.Cleanup(func() {
+		// Parents first: both child tables cascade from their own parent
+		// (workout_items from workouts, session_sets from sessions), so
+		// removing the parent clears the reference.
+		if _, err := pool.Exec(ctx, `
+			DELETE FROM workouts WHERE id IN (
+				SELECT workout_id FROM workout_items WHERE exercise_id = ANY($1))`, ids); err != nil {
+			t.Logf("cleanup workouts referencing fixture exercises: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `
+			DELETE FROM sessions WHERE id IN (
+				SELECT session_id FROM session_sets WHERE exercise_id = ANY($1))`, ids); err != nil {
+			t.Logf("cleanup sessions referencing fixture exercises: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `DELETE FROM exercises WHERE id = ANY($1)`, ids); err != nil {
+			t.Logf("cleanup fixture exercises: %v", err)
+		}
+	})
+
+	for _, e := range fixtureExercises {
+		// Every column is reconciled on conflict, not just inserted. A row left
+		// behind by an interrupted run must be repaired rather than trusted —
+		// a partial SET is how a stale value survives into a green suite.
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO exercises (id, name, sport, movement_pattern, load_type, status)
+			VALUES ($1, $1, $2, $3, $4, 'published')
+			ON CONFLICT (id) DO UPDATE SET
+				name = EXCLUDED.name,
+				sport = EXCLUDED.sport,
+				movement_pattern = EXCLUDED.movement_pattern,
+				load_type = EXCLUDED.load_type,
+				status = EXCLUDED.status`,
+			e.id, e.sport, e.pattern, e.loadType); err != nil {
+			t.Fatalf("seed fixture exercise %s: %v", e.id, err)
+		}
+	}
+}
 
 func strengthWorkout(id, owner string, vis Visibility) NewWorkout {
 	goal := GoalHypertrophy
@@ -251,6 +375,10 @@ func TestReplaceItems_Reorders(t *testing.T) {
 
 	// Reordering must not trip the (workout_id, position) unique constraint —
 	// the reason items are replaced wholesale rather than diffed.
+	//
+	// Overhead-then-bench is deliberately the order a sort would change; asking
+	// the other way round would pass whether or not the stored order is honoured.
+	requireUnsorted(t, exOverhead, exBench)
 	got, err := repo.ReplaceItems(ctx, "user_a", "wk-reorder-1", []Item{
 		{ExerciseID: exOverhead},
 		{ExerciseID: exBench},
