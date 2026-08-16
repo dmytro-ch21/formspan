@@ -19406,6 +19406,257 @@ achievement, and this app reserves the accent for what was earned.
   same shape as assistance, not a catalog row. Recorded here so the catalog does
   not get multiplied by four before that argument is had.
 
+## 2026-08-16 — The share card outlived the modal it was trapped in
+
+Three reports, one root cause and one unrelated layout bug.
+
+**The card had the wrong lifetime.** Everything about sharing a session —
+the `captureRef` host, the `/sessions/{id}/card` fetch, the error copy — lived
+inside `SessionCelebration`, the modal that opens the instant a session
+finishes. So a session was shareable for as long as that modal stayed up and
+never again: dismiss it, and the workout you might actually want to post is a
+read-only screen with no affordance on it. That is backwards. The moment you
+want to share a session is rarely the moment you racked the bar; it is on the
+bus home, or the next morning, or when a training partner asks.
+
+So the machinery moved out to `components/SessionShare.tsx` and the modal
+became one of three callers. Three exports rather than one component, because
+**the button and the off-screen card cannot live in the same place**:
+`captureRef` reads the native view tree, a `ScrollView` clips its content, and
+a capture host parked at `left: -10000` inside one can hand the athlete a blank
+PNG without a word of complaint. The button goes in the flow; the host goes at
+the screen root. That split is the whole reason `useSessionShare` /
+`ShareSessionButton` / `ShareCardHost` are separate rather than one tidy
+component, and it is written on the file so the next person does not "simplify"
+it back.
+
+**A finished strength session now offers Share** beside its "read-only" line,
+built from the same `summariseSession` the celebration uses so the two cards
+cannot describe one workout differently. Deliberately **not** gated on
+`worthCelebrating`: that gate exists to stop the app congratulating someone for
+opening and closing a session, and refusing a share the athlete explicitly
+asked for is the app overruling them about their own training.
+
+**A finished BJJ class offers it too**, which was the loudest of the three
+reports — rounds, rolling minutes and how it felt are exactly the parts of a
+class worth posting, and they were reachable for about ten seconds each. The
+summary that finishing built inline is now `bjjSummaryFor`, called from both
+places for the same reason.
+
+Two details that would have shipped as quiet wrongness:
+
+- **The date.** `cardFromSummary` defaults to `new Date()`, which is right for
+  a session that just ended and wrong for every one read back later — sharing
+  last Tuesday's class would have posted it stamped today. Both screens pass
+  the session's own `ended_at`.
+- **The medal.** `summariseSession` returns `records: []`, so a re-shared card
+  would have lost its PR and dropped from "NEW BEST." to a generic headline —
+  the same session told two ways depending on when you tapped. The strength
+  screen re-fetches them. Keyed on a **string**, never the id array, because
+  `summariseSession` builds a fresh array every render and an array dependency
+  there is the exact infinite-refetch loop that already shipped once on the
+  celebration's own records effect.
+
+**No streak on a re-share, on purpose.** "Carried the streak" is a claim about
+the week the session happened in. Recomputing it against the current week would
+either put a badge on a class that did not earn one or deny one that did, and
+neither beats leaving it off.
+
+**The unrelated bug: Share and Done were not aligned.** In the celebration's
+action row, Done carried `marginTop: 18` and its own `paddingVertical` while
+Share carried a `minHeight` — so side by side the two sat at different heights
+*and* different depths, the margin pushing Done 18pt down inside a row that had
+already positioned it. It only looked right when Share was absent, which is why
+it survived: the no-`sessionID` path is the one most screenshots showed. The
+spacing now belongs to the row (which needs it either way) and the height to
+`alignItems: 'stretch'`, so neither button is guessing at the other's size.
+
+Coverage is the pair of screen tests on the BJJ session: a finished class
+renders the button, an open one renders the finish control instead and no
+button. Neither is worth much alone — presence alone passes against a button
+rendered unconditionally, absence alone passes against a button that was never
+built. Mutation-checked by removing the `ended_at` gate; the second goes red.
+
+### Open questions this leaves
+
+- **`getSessionCard` now fires on merely opening a finished session**, not only
+  on finishing one — one extra request per view, for numbers only the share
+  card uses. It is the heavier query on that endpoint (the VOLA score reads the
+  last twenty sessions of the same sport). Deferring it until the button is
+  pressed would mean re-rendering the host and capturing a frame later, which
+  is fragile in a different way; this was the cheaper trade, not obviously the
+  right one forever.
+- **The strength screen fires a second one, `fetchRecords`**, on the same
+  event. Same reasoning, same reservation.
+- **In the seconds the completion modal is up, the strength screen makes FOUR
+  requests where one session needs two** — the screen holds its own
+  `useSessionShare` and the modal builds another, so it is 2× `/card` *and* 2×
+  records, not the two this entry originally claimed (review caught the
+  undercount). Two hosts mount with them. Handing the screen's share object
+  down as a prop would collapse it, at the cost of a self-contained celebration
+  and of reconciling the streak — which the modal wants and the read-back
+  deliberately omits. Left duplicated on purpose; all four are decorative and
+  fail silently. Worth revisiting if a third caller appears.
+- **The card's server numbers are keyed by session id** rather than reset when
+  the id changes. Resetting inside the effect is the obvious fix and is a
+  `set-state-in-effect` warning — which, with the mobile lint ratchet sitting at
+  exactly its cap, failed the build. Carrying the id says the same thing with no
+  extra render, and closes the half `AbortController` cannot: a response that
+  resolves after the id moved on can no longer be read as this session's.
+- **No share on the web app**, which is where reading history back is supposed
+  to live. The card component and its capture are React Native; nothing about
+  the design is, and a web export would need a different mechanism entirely.
+- **The two screens' share summaries are still built separately** — `bjjSummaryFor`
+  on one, `summariseSession` on the other. That is correct today (the sports
+  genuinely differ) but means a third sport adds a third builder.
+- **NOT visually verified anywhere.** A development build was made and installed
+  on the Simulator for this branch, and it stops at Clerk's sign-in — reaching a
+  finished session needs an account, so nothing here has been seen rendering.
+  The alignment fix in particular is a claim about layout that only a screenshot
+  settles.
+
+## 2026-08-16 — One typed zero stranded a whole session, and the repair screen lied about it
+
+Reported from a phone, with two screenshots taken seconds apart. Same screen,
+same "1 item waiting to sync", and in one of them:
+
+> **Workout 1 - Legs/Shoulders/Core** · Session
+> `set 10: weight must be greater than 0` · Try again
+
+and in the other, **"Nothing is stuck."** Three complaints came with it: *I
+cannot go directly to that workout and change it*, *why is that an issue*, and
+*when I click sync it disappears and then sync again and it comes back*. They
+turned out to be three separate bugs stacked on one keystroke.
+
+### Why it is an issue: zero is not a number the system can hold
+
+`validateSets` refuses any measure that is present and not greater than zero,
+naming the set — and the table's CHECK says the same. There is no reading under
+which a set was performed with 0 kg, for 0 seconds, or over 0 metres.
+
+Nothing on the phone stopped one being written. The set editor parses whatever
+is typed and stores it, so a `0` in the weight field is stored as `0`. A 400
+classifies as a PERMANENT rejection, so from that keystroke on the session was
+dirty forever, listed forever, and retried identically forever. **One digit,
+one session that can never leave the device.**
+
+The repair is `repairSet`, and it runs at `parseSets` — the single gate every
+read of a stored session passes through, the screen's and the wire's both. That
+placement is the decision:
+
+- **At the push only**, the screen would keep showing `0kg` for a set the server
+  holds as unrecorded.
+- **In the editor only**, nothing would happen to the sessions already stuck,
+  which is the actual complaint.
+- **In the editor at all** is worse than it sounds: nulling a non-positive value
+  as it is typed wipes the field the instant someone types the `0` of `0.5`,
+  making a decimal weight impossible to enter. The repair belongs at the read.
+
+`rir` is exempt — 0 RIR is a real answer and the server takes 0–20. `rpe` is
+not, because its range starts at 1, so a 0 there is the same unstorable
+non-answer as a 0 kg. Out-of-range effort is nulled for the same reason a zero
+is: the alternative to dropping the value is not keeping it, it is keeping the
+whole session off the server.
+
+**`assisted_reps` is repaired too, and this app cannot even author it.** Review
+found the gap and it is the same stranding class one step removed: the field
+arrives from the server, a pulled set is stored verbatim, the spreads preserve
+fields the type does not name, and `replaceSets` sends them back — so it
+round-trips through a client that does not know it exists. Edit a pulled
+spotted set's reps to 0 and `reps` goes null while `assisted_reps` survives;
+the server then refuses with `assisted reps need a rep count to be part of`,
+permanently, on a field no screen can show and no editor can clear. It is
+removed rather than nulled when it cannot stand, so a set that never carried
+the key does not gain one — sending `assisted_reps: null` on every set would
+start claiming "none were assisted" about sets nobody recorded that for.
+Unreachable today; it stops being unreachable the moment mobile grows a writer,
+which PR #226 already made likely.
+
+### Why it disappeared and came back
+
+`retryBlockedRow` cleared the row's stored message **before** pushing, so that a
+row which now succeeds would not keep a stale error — and clearing was all it
+did. Unlike `syncSessions`'s push loop, it had no `noteRowError(err)` on the way
+out. So a still-doomed row was cleared, pushed, refused, and the refusal went
+unrecorded; the screen reloaded, found nothing, and announced **"Nothing is
+stuck"** about a row that was still stuck and still dirty. The next background
+sync pushed it, failed, wrote the message again, and it reappeared. Two code
+paths, one telling the screen the truth and the other a blank.
+
+Now the message is cleared only when the row actually goes **clean**, which is
+not the same as the push resolving — `pushSession` returns early when the
+session's workout has not synced yet, and `pushRow`'s compare-and-swap declines
+to clear `dirty` if the row moved mid-push. Both resolve having sent nothing;
+both used to read as success. `blockedRows` filters on that same flag, so
+agreeing with it is the point.
+
+### Why you could not get to the workout
+
+The repair list named the session, quoted the server's complaint about set 10,
+and offered **Try again** — which replays the identical doomed request. It gave
+no route to set 10. Every row now opens the thing it is about, and `BlockedRow`
+carries `sport` to do it: a BJJ class and a strength session are different
+screens, and sending a class to `/session/[id]` is the bug that once made a
+logged class open to "Sets 0 · Reps 0 · Volume —". Try again keeps its place,
+quieter, for the rows whose obstacle really has cleared on its own.
+
+### Coverage
+
+All in `lib/__tests__/blockedRows.test.ts`, against the real SQLite fixture, and
+each mutation-checked: the retry pair goes red when `retryBlockedRow` is
+restored to clear-and-forget, and the measure test goes red when `repairSet` is
+lifted out of `parseSets`. The measure test asserts on **what goes out**, not on
+the stored blob — the stored blob is not what the server refused.
+
+Plus `lib/__tests__/sessions.test.ts` for `repairSet` itself — the exemptions
+are the part worth pinning, so if `validateSets` ever changes, this is what
+should go red — and `app/__tests__/syncDestination.test.ts` for the sport →
+screen routing, which is a mapping this project has already got wrong once.
+
+One thing the fixture tests needed first: their `jest.mock('../sessions')`
+factories replaced the module wholesale, so `repairSet` was `undefined` inside
+`sessionStore`. They passed anyway, because every fixture stores `'[]'` and the
+map body never ran. **Four files had it** — review found the three beyond the
+one that prompted the fix (`bjjPush`, `workoutPush`, `tombstonePush`) — and all
+four now spread `requireActual` first. A mock that reads as complete and is
+missing a pure helper is exactly the shape that passes until the first test
+that matters.
+
+`app/__tests__/bjjSessionScreen.test.tsx` also now stubs `sessionCardApi`. Not
+for isolation — the hook already swallows the failure — but because mounting
+the finished-class test fired a real `fetch` at `/v1/sessions/s1/card`, and on
+the machines this repo is developed on there is usually an API listening on
+:8080. A component test quietly talking to whatever is running locally passes
+or fails for reasons unrelated to the code under test.
+
+### Open questions this leaves
+
+- **The repair is silent.** A set that read `0kg` reads `—` afterwards, with
+  nothing saying so. That is the right value, but an athlete who typed a zero on
+  purpose gets no notice. A note on the session screen would need somewhere to
+  live and a rule for when it stops being shown.
+- **A finished session is read-only, so "Open the session" may promise more than
+  it delivers.** If the athlete lands there and the offending set cannot be
+  edited, the repair now happens under them automatically — which is why this
+  shipped anyway — but the button's wording is ahead of the destination.
+- **Nothing validates a set at the point of entry.** The editor will still
+  accept an RPE of 11 or a negative weight and store it; the repair catches
+  those on the way out rather than the field refusing them. Field-level
+  validation is the better answer and is separate design work.
+- **The same class of bug may exist in the other outboxes.** Plans and sequences
+  have their own push paths and their own server-side validation; neither was
+  audited here.
+- **A workout refused on its NAME alone is invisible on the repair screen.** A
+  rename-only failure sets `name_dirty = 1` and not `dirty`, and `blockedRows`
+  filters on `dirty = 1` — so the row gets a `last_error` it can never show.
+  Pre-existing, found by review while checking this change's `dirty` re-read,
+  and deliberately not fixed here: it is a different bug in a different table
+  and widening the filter needs its own thought about what a
+  name-only-owed row should say.
+- **Unverified on a device**, for the same reason as the entry above: the
+  Simulator build could not be signed into, so none of this has been seen
+  working — including the one screen the report came from.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

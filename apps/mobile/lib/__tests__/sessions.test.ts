@@ -1,4 +1,4 @@
-import { fillForward, reorderGroups, type LoggedSet, type Measure } from '../sessions';
+import { fillForward, repairSet, reorderGroups, type LoggedSet, type Measure } from '../sessions';
 
 /**
  * The pure set transforms behind in-session editing.
@@ -113,5 +113,67 @@ describe('reorderGroups', () => {
   it('refuses to move off either end', () => {
     expect(reorderGroups(sets, order, 0, -1)).toBeNull();
     expect(reorderGroups(sets, order, 1, 1)).toBeNull();
+  });
+});
+
+/*
+ * `repairSet` — the rules the API enforces, restated where a set is read.
+ *
+ * Every measure is "absent, or greater than zero" server-side, and a violation
+ * is a 400: a PERMANENT rejection that strands the whole session on the phone.
+ * These cases are the ones `validateSets` actually refuses, so if that function
+ * changes, this is what should go red.
+ */
+describe('repairSet', () => {
+  it('drops a measure the server cannot store, and keeps the ones it can', () => {
+    const out = repairSet(
+      set('squat', { reps: 5, weight_kg: 0, seconds: 0, distance_m: 0 }),
+    );
+    expect(out).toMatchObject({ reps: 5, weight_kg: null, seconds: null, distance_m: null });
+  });
+
+  it('keeps 0 RIR, which is a real answer', () => {
+    // Nothing left in the tank. The server takes 0-20, so nulling this would be
+    // deleting data to fix a different bug.
+    expect(repairSet(set('squat', { rir: 0 })).rir).toBe(0);
+    expect(repairSet(set('squat', { rir: 21 })).rir).toBeNull();
+  });
+
+  it('drops an RPE outside 1-10, including 0', () => {
+    // Unlike RIR, this scale starts at 1 — so a 0 is the same unstorable
+    // non-answer as a 0kg lift.
+    expect(repairSet(set('squat', { rpe: 0 })).rpe).toBeNull();
+    expect(repairSet(set('squat', { rpe: 11 })).rpe).toBeNull();
+    expect(repairSet(set('squat', { rpe: 8 })).rpe).toBe(8);
+  });
+
+  /*
+   * `assisted_reps` is clamped by `withSetChange` while a set is being edited.
+   * This is the other end: rows written before that clamp existed, and rows
+   * pulled from the server and stored verbatim, neither of which any editor
+   * ever passes over.
+   */
+  it('drops assisted reps that can no longer stand', () => {
+    const spotted = { ...set('bench', { reps: 8 }), assisted_reps: 3 };
+
+    // The reachable one: edit the reps to 0 and the rep count the assisted
+    // figure is "part of" disappears underneath it.
+    expect(repairSet({ ...spotted, reps: 0 })).toMatchObject({
+      reps: null,
+      assisted_reps: null,
+    });
+    // More assisted than performed, and negative — both refused by name.
+    expect(repairSet({ ...spotted, reps: 2 }).assisted_reps).toBeNull();
+    expect(repairSet({ ...spotted, assisted_reps: -1 }).assisted_reps).toBeNull();
+    // Legal, and left alone. 0 means "none of them were assisted", which is a
+    // different answer from not recording it.
+    expect(repairSet(spotted).assisted_reps).toBe(3);
+    expect(repairSet({ ...spotted, assisted_reps: 0 }).assisted_reps).toBe(0);
+  });
+
+  it('does not give a set an assisted_reps key it never had', () => {
+    // Sent on every push, so inventing the field would start claiming "none
+    // were assisted" about sets nobody recorded that for.
+    expect('assisted_reps' in repairSet(set('squat', { reps: 0 }))).toBe(false);
   });
 });

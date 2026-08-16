@@ -908,3 +908,86 @@ export function dropsOf(sets: LoggedSet[], i: number): LoggedSet[] {
   }
   return out;
 }
+
+/**
+ * Drop every measure the server will refuse, turning it back into "not
+ * recorded".
+ *
+ * **This is the fix for a session that can never sync.** The API validates each
+ * measure as "absent, or greater than zero" (`validateSets` in the session
+ * handler, backed by the table's own CHECK), and returns a 400 naming the set:
+ * `set 10: weight must be greater than 0`. A 400 classifies as a PERMANENT
+ * rejection, so the row stays dirty forever, the repair screen lists it forever,
+ * and no amount of retrying helps — the phone is asking the server to store
+ * something the schema cannot hold.
+ *
+ * Nothing stopped the phone writing one. The set editor parses whatever is
+ * typed, so a `0` in the weight field is stored as `0` rather than as nothing,
+ * and one keystroke in a gym strands a whole session. That is what happened.
+ *
+ * **Zero is not data here, and that is why this is a repair rather than a
+ * deletion.** There is no reading under which a set was performed with 0 kg,
+ * for 0 seconds or over 0 metres; the athlete either did not record it or typed
+ * a digit they did not mean. `null` is what the app already renders as "—" and
+ * what every consumer already handles, so this restores the meaning the value
+ * was always going to have — the alternative is not "keep the zero", it is
+ * "keep the session off the server".
+ *
+ * `rir` is deliberately EXEMPT from the rule. 0 RIR is a real answer — nothing
+ * left in the tank — and the server accepts 0-20. `rpe` is not exempt: its
+ * range starts at 1, so a 0 there is the same unstorable non-answer.
+ *
+ * Applied where the row is READ rather than where it is typed, and that is
+ * deliberate: nulling on input would wipe the field the instant someone typed
+ * the `0` of `0.5`, making a decimal weight impossible to enter.
+ */
+export function repairSet<T extends LoggedSet>(set: T): T {
+  const measure = (v: number | null): number | null =>
+    v != null && Number.isFinite(v) && v > 0 ? v : null;
+  const reps = measure(set.reps);
+
+  /*
+    `assisted_reps`, which `withSetChange` already clamps — and this still has
+    to check.
+
+    The two are not the same guard. `withSetChange` is the EDITOR's rule and
+    holds the invariant while a set is being typed; its own comment explains
+    why the clamp has to sit on both edits. This is the READ, and it covers
+    what an editor cannot reach: rows already written before that clamp existed,
+    and rows that arrive from the server. A pulled set is stored verbatim, so
+    whatever the server holds is what the next push replays.
+
+    Left unchecked, the failure is the one this whole function exists to
+    prevent — `assisted reps need a rep count to be part of`, a permanent 400,
+    on a field an athlete has no way to connect to anything they did.
+
+    REMOVED rather than nulled when it cannot stand, so a set that never carried
+    the key does not gain one: every set is sent on every push, and an invented
+    `assisted_reps: null` would start claiming "none were assisted" about sets
+    nobody recorded that for.
+  */
+  const assisted = set.assisted_reps;
+  const assistedStands =
+    assisted != null &&
+    Number.isFinite(assisted) &&
+    assisted >= 0 &&
+    reps != null &&
+    assisted <= reps;
+
+  return {
+    ...set,
+    ...(assisted != null && !assistedStands ? { assisted_reps: null } : {}),
+    reps,
+    weight_kg: measure(set.weight_kg),
+    seconds: measure(set.seconds),
+    distance_m: measure(set.distance_m),
+    // Range-checked rather than sign-checked, because both ends are refused
+    // and an out-of-range effort is as unstorable as a zero one.
+    rir: set.rir != null && Number.isFinite(set.rir) && set.rir >= 0 && set.rir <= 20
+      ? set.rir
+      : null,
+    rpe: set.rpe != null && Number.isFinite(set.rpe) && set.rpe >= 1 && set.rpe <= 10
+      ? set.rpe
+      : null,
+  };
+}
