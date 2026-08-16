@@ -5,14 +5,12 @@ import (
 	"testing"
 )
 
-func ip(v int) *int { return &v }
-
 // The split exists so progression has something to aim at. "225 for 5, then 3
 // with a spotter" is 8 reps of work and 5 reps of capability, and the athlete's
 // own goal — need the spotter for one or two instead of three — is only
 // expressible if both numbers survive.
 func TestSoloRepsSeparatesWhatYouDidAloneFromTheHelp(t *testing.T) {
-	s := Set{Reps: ip(8), AssistedReps: ip(3)}
+	s := Set{Reps: ptrInt(8), AssistedReps: ptrInt(3)}
 	if got := s.SoloReps(); got != 5 {
 		t.Fatalf("solo reps %d, want 5", got)
 	}
@@ -27,10 +25,10 @@ func TestSoloRepsSeparatesWhatYouDidAloneFromTheHelp(t *testing.T) {
 // Every set logged before this column existed is the first case, and reading it
 // as "0 solo" would silently revise an athlete's whole history downward.
 func TestUnrecordedAssistanceMeansAllOfThemWereSolo(t *testing.T) {
-	if got := (Set{Reps: ip(8)}).SoloReps(); got != 8 {
+	if got := (Set{Reps: ptrInt(8)}).SoloReps(); got != 8 {
 		t.Fatalf("a set with no assistance recorded reported %d solo reps, want 8", got)
 	}
-	if got := (Set{Reps: ip(8), AssistedReps: ip(0)}).SoloReps(); got != 8 {
+	if got := (Set{Reps: ptrInt(8), AssistedReps: ptrInt(0)}).SoloReps(); got != 8 {
 		t.Fatalf("an explicit zero reported %d, want 8", got)
 	}
 }
@@ -38,7 +36,7 @@ func TestUnrecordedAssistanceMeansAllOfThemWereSolo(t *testing.T) {
 func TestSoloRepsNeverGoesNegative(t *testing.T) {
 	// The database CHECK forbids assisted > reps, so this is a client's
 	// in-memory row mid-edit. A negative rep count must never reach a chart.
-	if got := (Set{Reps: ip(3), AssistedReps: ip(5)}).SoloReps(); got != 0 {
+	if got := (Set{Reps: ptrInt(3), AssistedReps: ptrInt(5)}).SoloReps(); got != 0 {
 		t.Fatalf("got %d, want 0", got)
 	}
 	if got := (Set{}).SoloReps(); got != 0 {
@@ -51,10 +49,10 @@ func TestSoloRepsNeverGoesNegative(t *testing.T) {
 // `ReplaceSets` regenerating every row id on save.
 func TestDropsAttachToTheSetTheyCameOff(t *testing.T) {
 	sets := []Set{
-		{ExerciseID: "bench", SetType: SetTypeWorking, Reps: ip(3), WeightKg: fp(102.5)},
-		{ExerciseID: "bench", SetType: SetTypeDrop, Reps: ip(8), WeightKg: fp(84)},
-		{ExerciseID: "bench", SetType: SetTypeDrop, Reps: ip(6), WeightKg: fp(60)},
-		{ExerciseID: "bench", SetType: SetTypeWorking, Reps: ip(3), WeightKg: fp(102.5)},
+		{ExerciseID: "bench", SetType: SetTypeWorking, Reps: ptrInt(3), WeightKg: ptrF(102.5)},
+		{ExerciseID: "bench", SetType: SetTypeDrop, Reps: ptrInt(8), WeightKg: ptrF(84)},
+		{ExerciseID: "bench", SetType: SetTypeDrop, Reps: ptrInt(6), WeightKg: ptrF(60)},
+		{ExerciseID: "bench", SetType: SetTypeWorking, Reps: ptrInt(3), WeightKg: ptrF(102.5)},
 	}
 	drops := DropsOf(sets, 0)
 	if len(drops) != 2 {
@@ -78,8 +76,8 @@ func TestDropsAttachToTheSetTheyCameOff(t *testing.T) {
 // it would put reps under an exercise they were never performed on.
 func TestADropNeverAttachesToADifferentExercise(t *testing.T) {
 	sets := []Set{
-		{ExerciseID: "squat", SetType: SetTypeWorking, Reps: ip(5)},
-		{ExerciseID: "bench", SetType: SetTypeDrop, Reps: ip(8)},
+		{ExerciseID: "squat", SetType: SetTypeWorking, Reps: ptrInt(5)},
+		{ExerciseID: "bench", SetType: SetTypeDrop, Reps: ptrInt(8)},
 	}
 	if got := DropsOf(sets, 0); got != nil {
 		t.Fatalf("a bench drop attached to a squat: %+v", got)
@@ -97,5 +95,3 @@ func TestDropsOfIsSafeAtTheEdges(t *testing.T) {
 		t.Fatalf("nil sets returned %+v", got)
 	}
 }
-
-func fp(v float64) *float64 { return &v }

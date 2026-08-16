@@ -1551,22 +1551,31 @@ components:
         2 RIR). Both are stored because lifters are fluent in one or the
         other and rarely both, and asking for a conversion just after a hard
         set is the wrong moment for arithmetic.
+
+
+        DROP SETS. A drop is its own row with its own weight_kg and reps —
+        225x3 then 185x8 is two rows, the second with set_type=drop.
+
+
+        A set's drops are the CONSECUTIVE drop rows immediately following it,
+        all of the same exercise. Contiguity is the rule, not "the nearest
+        preceding non-drop row": given [bench working, squat drop, bench drop],
+        the squat drop breaks the run and the bench drop is orphaned rather than
+        attached. That state is a client bug either way, but clients implement
+        this from here, so two of them must not render it differently.
+
+
+        There is no parent id. The server replaces a session's sets wholesale on
+        every save, so row ids are regenerated and any stored parent reference
+        would dangle on the first edit. Order is the relationship, and position
+        is already total and unique per session.
       required: [exercise_id, position, set_type, notes]
-      externalDocs:
-        description: >
-          Drop sets. A drop is its own row with its own weight_kg and reps, and
-          it belongs to the nearest PRECEDING non-drop row of the same
-          exercise — 225x3 then 185x8 is two rows, the second with
-          set_type=drop. There is no parent id: the server replaces a session's
-          sets wholesale on every save, so row ids are regenerated and any
-          stored parent reference would dangle. Order is the relationship, and
-          position is already total and unique per session.
-        url: https://github.com/dmytro-ch21/formspan/blob/main/backend/migrations/000053_assisted_reps.up.sql
       properties:
         exercise_id: { type: string, example: barbell-back-squat }
         assisted_reps:
           type: integer
           nullable: true
+          minimum: 0
           example: 3
           description: >
             How many of `reps` somebody else helped with — a spotter, a band, an

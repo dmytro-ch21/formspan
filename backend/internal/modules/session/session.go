@@ -179,6 +179,15 @@ func (s Set) TotalWeightKg() float64 {
 // set logged before this column existed needs, and it is the safe direction —
 // it credits the athlete with what `Reps` already claimed rather than silently
 // revising their history downward.
+//
+// **THAT FALLBACK HAS A TRAP, AND IT IS AIMED AT THE NEXT PERSON TO USE THIS.**
+// `RecentEfforts`, `BestOneRMs`, `bestOneRMSets` and `Records` build `Set`
+// values from queries that DO NOT SELECT `assisted_reps`, so every set they
+// hydrate has it permanently nil. Wiring progression to `SoloReps` therefore
+// compiles, passes unit fixtures built by hand, and silently reads full reps
+// from the database path — because "column not selected" and "athlete never
+// recorded it" are the same value here. Add `ss.assisted_reps` to those
+// SELECTs first, in the same change.
 func (s Set) SoloReps() int {
 	if s.Reps == nil {
 		return 0

@@ -19294,9 +19294,32 @@ is skipped rather than attaching reps to somebody else's lift.
 - **No client for either yet.** The backend round-trips both, and nothing on the
   phone lets you say "3 of those were spotted" or renders a drop under its
   parent. This branch is deliberately backend-only.
-- **Nothing consumes `SoloReps` yet.** The progression rule still reads `reps`,
-  so a heavily assisted set still reads as a strong one when deciding what to
-  load next time. Wiring that is the point of the column and is not done.
+- **Nothing consumes `SoloReps` yet, and one figure is actively misleading
+  rather than merely incomplete.** The estimated 1RM is a CAPABILITY claim, not
+  a work tally: a spotted 8 at 102.5 kg estimates about 127 kg through Brzycki,
+  where the honest solo-5 figure is about 115 kg — roughly 10% high, surfaced as
+  `best_one_rm_kg` in suggestions and as the 1RM record. `RecordMostReps` now
+  sets rep PRs the athlete did not complete unaided. The `Records` doc comment
+  calls "staring at a lift they never did" the one failure the feature cannot
+  afford, and this is that. Mitigating it: the data was already inflated before
+  this column, because a spotted set was logged as full reps with no way to say
+  otherwise — the difference is that the athlete can now tell us and these
+  figures ignore it. Progression, `BestOneRMs` and `Records` all still read
+  `reps`.
+- **Wiring `SoloReps` has a trap, and it is worth reading before starting.**
+  `RecentEfforts`, `BestOneRMs`, `bestOneRMSets` and `Records` build `Set`
+  values from queries that do not SELECT `assisted_reps`, so those sets have it
+  permanently nil. Because unrecorded reads as all-solo, a change that touches
+  only the progression logic will compile, pass hand-built unit fixtures, and
+  silently read full reps from the database path. Add the column to those
+  SELECTs in the same change. The doc comment on `SoloReps` says so too.
+- **Mobile will null the column on its first edit.** `replaceSets` sends the
+  phone's own `LoggedSet` shape, which does not know `assisted_reps`, and the
+  server replaces a session's sets wholesale — so editing a session that carries
+  the field drops it, silently, one layer above where the round-trip test can
+  see. Nothing is at risk today because no client can author it. The sequencing
+  consequence is firm: **pass-through support in mobile has to land before any
+  authoring surface anywhere.**
 - **Adjacency is unenforced.** Nothing stops a client writing a `drop` row first
   in a session, or between two exercises. It is skipped rather than
   misattributed, but the schema cannot express "must follow a working set" and
