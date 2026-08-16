@@ -450,7 +450,7 @@ Sparse ON PURPOSE (170 of 542). Test the invariants, not the coverage.
 
 ## Exercise catalog (`/v1/exercises`)
 
-Domain: the global, operator-authored exercise catalog — 504 entries in `exercises.json`, hand-authored in the repo (imported from a spreadsheet until that was retired in 2026-08) — reference content shared by every user, with no owner. Read-only over HTTP; seeded from version-controlled JSON via `cmd/seed`.
+Domain: the global, operator-authored exercise catalog — 762 entries in `exercises.json`, hand-authored in the repo (imported from a spreadsheet until that was retired in 2026-08) — reference content shared by every user, with no owner. Read-only over HTTP; seeded from version-controlled JSON via `cmd/seed`.
 
 **Happy path**
 - `GET /v1/exercises` with a valid token returns the whole catalog, ordered by sport then name.
