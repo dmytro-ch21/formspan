@@ -376,12 +376,23 @@ func (r *PostgresRepository) attachSets(ctx context.Context, sessions []Session,
 	if len(ids) == 0 {
 		return nil
 	}
+	// LEFT JOIN, not JOIN. `session_sets.exercise_id` has no foreign key to
+	// `exercises` in older data, and an inner join would make a set whose
+	// exercise has been retired vanish from its own session — losing training
+	// history to fix an arithmetic detail.
+	//
+	// The factor is decided here, in SQL, rather than sent by the client:
+	// `per_side` says the number is one implement, and `is_unilateral` says
+	// whether one or two are moving. A missing exercise falls back to 1, which
+	// `TotalWeightKg` also treats as 1 — the same reading from both ends.
 	rows, err := r.pool.Query(ctx, `
-		SELECT session_id, exercise_id, position, set_type, reps, weight_kg,
-		       seconds, distance_m, rir, rpe, notes, completed
-		FROM session_sets
-		WHERE session_id = ANY($1)
-		ORDER BY session_id, position`, ids)
+		SELECT ss.session_id, ss.exercise_id, ss.position, ss.set_type, ss.reps, ss.weight_kg,
+		       ss.seconds, ss.distance_m, ss.rir, ss.rpe, ss.notes, ss.completed,
+		       CASE WHEN e.load_mode = 'per_side' AND NOT e.is_unilateral THEN 2 ELSE 1 END
+		FROM session_sets ss
+		LEFT JOIN exercises e ON e.id = ss.exercise_id
+		WHERE ss.session_id = ANY($1)
+		ORDER BY ss.session_id, ss.position`, ids)
 	if err != nil {
 		return fmt.Errorf("session: list sets: %w", err)
 	}
@@ -395,7 +406,7 @@ func (r *PostgresRepository) attachSets(ctx context.Context, sessions []Session,
 		)
 		if err := rows.Scan(&sessionID, &st.ExerciseID, &st.Position, &st.SetType,
 			&st.Reps, &st.WeightKg, &st.Seconds, &st.DistanceM,
-			&st.RIR, &st.RPE, &st.Notes, &st.Completed); err != nil {
+			&st.RIR, &st.RPE, &st.Notes, &st.Completed, &st.LoadFactor); err != nil {
 			return fmt.Errorf("session: scan set: %w", err)
 		}
 		bySession[sessionID] = append(bySession[sessionID], st)
