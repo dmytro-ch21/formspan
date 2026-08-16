@@ -19328,6 +19328,71 @@ is skipped rather than attaching reps to somebody else's lift.
   weight moved — but means two athletes with identical tonnage may have done
   quite different work. Nothing surfaces that.
 
+## 2026-08-16 — The phone half: recording who did the reps, and showing a drop as part of its set
+
+The client for the two columns the backend landed earlier today. Three decisions
+in it are worth keeping, because each is a place the obvious version is wrong.
+
+### The pass-through had to land first, and did
+
+`replaceSets` sends the phone's own set shape and the server replaces a
+session's sets wholesale — so until `LoggedSet` knew about `assisted_reps`, the
+first mobile edit of a session carrying it would have wiped the column, silently,
+one layer above where the server's round-trip test can see. Nothing could author
+it yet, which was the only reason that was safe. Sequencing it first is why
+there was never a window where the feature ate its own data.
+
+### Clearing the field means UNRECORDED, not zero
+
+Sending 0 asserts the set was unaided. That is a different claim, and it is not
+one an athlete makes by deleting a number. The distinction runs the whole way
+down — nullable column, nullable pointer, nullable field, `?? null` on the wire
+— because the moment any layer collapses it, every set logged before the column
+existed starts claiming it was performed without help.
+
+### Typing more help than reps CLAMPS rather than errors
+
+The server and the CHECK both refuse it. But a typo mid-set should not cost a
+failed save, and clamping at the edit is the only place it can be corrected
+silently and still be true. The alternative — a validation error under the
+keyboard, twenty seconds into a rest period — is a control that punishes the
+athlete for the app's precision.
+
+### A drop is part of the set it came off
+
+Numbering "225x3 then 185x8" as sets 3 and 4 tells the athlete they did four
+sets when they did three, and that count is the one they carry around and
+compare to last week. So `setOrdinals` advances only on a non-drop row and a
+drop borrows its parent's number, rendering as `↳` with the type badge. The
+screen-reader label says "drop off set 3": a row that reads as a set to the eye
+and as a set to VoiceOver is wrong twice, not once.
+
+`setOrdinals` was extracted from the screen rather than left inline, for the
+reason `ClampLimit` and `ScopeFilter` were extracted on the server — three
+lines, easy to get subtly wrong, and untestable where it was. Mutating it to
+count every row fails three tests.
+
+The indent uses `vola.line` rather than the accent. A drop is not an
+achievement, and this app reserves the accent for what was earned.
+
+### Gaps
+
+- **Nothing consumes `soloReps` yet, on either side.** A spotted set still
+  inflates the estimated 1RM by roughly 10% and can set a rep PR the athlete did
+  not complete unaided. Wiring it has a trap recorded in the backend entry:
+  `RecentEfforts`, `BestOneRMs` and `Records` do not SELECT the column, so a
+  change touching only the progression logic compiles, passes its fixtures, and
+  silently reads full reps.
+- **Not device-verified.** The indent, the `↳`, and the field's placement in the
+  editor are visual judgements no test makes.
+- **A drop can still be reordered away from its parent**, which re-parents it —
+  the inherent cost of adjacency. `+ Drop` inserts one in the right place, and
+  nothing stops a later drag from moving it.
+- **Grip is not modelled.** Regular, neutral, reversed and angled are the next
+  request, and they are a property of the EFFORT rather than the movement — the
+  same shape as assistance, not a catalog row. Recorded here so the catalog does
+  not get multiplied by four before that argument is had.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
