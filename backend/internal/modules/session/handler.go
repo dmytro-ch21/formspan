@@ -76,6 +76,20 @@ func validateSets(sets []Set) error {
 		if s.DistanceM != nil && *s.DistanceM <= 0 {
 			return errors.New(at + "distance must be greater than 0")
 		}
+		// Checked here as well as by the CHECK, for the reason stated above:
+		// the database's message names no set. Zero is legal — "none of them
+		// were assisted" is a real answer, distinct from not recording it.
+		if s.AssistedReps != nil {
+			if *s.AssistedReps < 0 {
+				return errors.New(at + "assisted reps cannot be negative")
+			}
+			if s.Reps == nil {
+				return errors.New(at + "assisted reps need a rep count to be part of")
+			}
+			if *s.AssistedReps > *s.Reps {
+				return errors.New(at + "assisted reps cannot exceed the reps performed")
+			}
+		}
 	}
 	return nil
 }

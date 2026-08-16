@@ -79,6 +79,20 @@ type Set struct {
 
 	Notes string `json:"notes"`
 
+	// AssistedReps is how many of `Reps` somebody else helped with — a spotter,
+	// a band, an assisted-pull-up machine.
+	//
+	// NULL is UNRECORDED and 0 is "none of them", and the difference is the
+	// whole reason this is a pointer: nobody should have to type 0 on every
+	// set, and a zero default would claim every historical set was performed
+	// unaided when nothing asked.
+	//
+	// `Reps` always holds the FULL count, assisted included. That keeps every
+	// existing figure — tonnage, rep totals, the volume rule — reading the same
+	// number it always did, and makes `SoloReps` the only thing that has to
+	// know about the split.
+	AssistedReps *int `json:"assisted_reps"`
+
 	// LoadFactor is how many implements of `WeightKg` the athlete moved: 1 for
 	// a barbell, a machine, or a single kettlebell held in two hands; 2 for a
 	// pair of dumbbells.
@@ -151,6 +165,67 @@ func (s Set) TotalWeightKg() float64 {
 		return *s.WeightKg
 	}
 	return *s.WeightKg * float64(s.LoadFactor)
+}
+
+// SoloReps is what the athlete did unaided, and the number worth training
+// against.
+//
+// "225 for 5, then 3 more with a spotter" is 8 reps of work and 5 reps of
+// capability. Progression cares about the second: the athlete's own target is
+// to need the spotter for one or two rather than three, and that is only
+// expressible if the split is recorded rather than folded into a note.
+//
+// Unrecorded assistance means all of them were solo. That is the reading every
+// set logged before this column existed needs, and it is the safe direction —
+// it credits the athlete with what `Reps` already claimed rather than silently
+// revising their history downward.
+func (s Set) SoloReps() int {
+	if s.Reps == nil {
+		return 0
+	}
+	if s.AssistedReps == nil {
+		return *s.Reps
+	}
+	solo := *s.Reps - *s.AssistedReps
+	if solo < 0 {
+		// The database CHECK forbids this, so it means a set that never went
+		// through Postgres — a client's in-memory row mid-edit. Clamp rather
+		// than return a negative rep count into somebody's chart.
+		return 0
+	}
+	return solo
+}
+
+// DropsOf returns the drop sets hanging off the set at `i`, which are the rows
+// immediately following it.
+//
+// **THE RELATIONSHIP IS ADJACENCY, NOT A FOREIGN KEY**, and that is forced
+// rather than chosen. `ReplaceSets` deletes every row of a session and
+// reinserts them on each save, so `session_sets.id` is regenerated constantly
+// and a `parent_set_id` would dangle on the first edit. Position is already a
+// total order — `UNIQUE (session_id, position)` — so a run of `drop` rows after
+// a non-drop row is unambiguous without a second ordering concept for clients
+// to keep consistent.
+//
+// A drop belongs to the preceding set of the SAME exercise. A `drop` row that
+// follows a different exercise is orphaned, which is a client bug rather than a
+// state worth modelling: it is skipped, so it can never attach itself to
+// somebody else's lift.
+func DropsOf(sets []Set, i int) []Set {
+	if i < 0 || i >= len(sets) || sets[i].SetType == SetTypeDrop {
+		return nil
+	}
+	var out []Set
+	for j := i + 1; j < len(sets); j++ {
+		if sets[j].SetType != SetTypeDrop {
+			break
+		}
+		if sets[j].ExerciseID != sets[i].ExerciseID {
+			break
+		}
+		out = append(out, sets[j])
+	}
+	return out
 }
 
 // Summarise computes working volume for a session. Kept in the domain rather
