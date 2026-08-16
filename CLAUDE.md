@@ -134,6 +134,28 @@ Then: `git push -u origin <branch>`, `gh pr create`, watch CI with `gh run watch
 
 **Never merge a PR without the user's explicit go-ahead, even if CI is green.** This has been the rule for every PR in this project — don't treat a passing CI run as implicit merge permission.
 
+## The open list (hard rule)
+
+[docs/TASKS.md](docs/TASKS.md) is the shared task list — every known gap, fix and
+queued feature, one line each with a stable id. **Read it before starting work**
+and **tick your line when you finish**, in the same PR.
+
+Two rules make it survive several agents at once:
+
+- **One line per task, marked in place.** `- [ ]` becomes `- [x]` with a PR
+  number appended; the line is never deleted, because a finished task is the
+  record that it was considered. One line also means a concurrent edit conflicts
+  over one line rather than a paragraph.
+- **Ids are never reused**, so "closes W2" in a commit message still means
+  something a year later.
+
+Detail belongs in `docs/decisions/history.md`. TASKS.md is an index, and it stops
+being useful the moment it becomes prose.
+
+**The `T` section is load-bearing.** Those are traps: changes that compile, pass
+their tests, and are wrong. If your work touches one, read it first — every entry
+there was found by review after the check suite went green.
+
 ## Keep the history log current (hard rule)
 
 [docs/decisions/history.md](docs/decisions/history.md) is a living document, not a one-time snapshot. Whenever a PR lands (or right before merging one) that represents a material decision or a notable chunk of work — a new module, a new convention, an infrastructure change, a bug found and fixed, a provider/tooling choice — **append a dated entry** to it in the same style as the existing entries: what was decided/built, why, and any open questions or gaps it leaves behind. Do this as part of finishing the work, not as an afterthought someone has to remember to ask for.
@@ -353,3 +375,4 @@ The backend's CORS (`withCORS` in `cmd/api/main.go`) allows multiple comma-separ
 - [docs/architecture/api-conventions.md](docs/architecture/api-conventions.md) — full REST/OpenAPI conventions
 - [contracts/public.openapi.yaml](contracts/public.openapi.yaml) — the wire contract
 - [docs/testing/functional-scenarios.md](docs/testing/functional-scenarios.md) — recommended functional test scenarios per feature
+- [docs/TASKS.md](docs/TASKS.md) — the open list: every known gap, fix and queued feature
