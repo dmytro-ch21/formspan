@@ -53,16 +53,21 @@ const visibleFrom = `
 // one endpoint most likely to be polled.
 //
 // The rule it has to match: uncompleted sets contribute nothing, warm-ups
-// contribute nothing, and tonnage needs both reps and weight. A test asserts
-// this against `session.Summarise` over the same fixture rather than trusting
-// the comment.
+// contribute nothing, and tonnage needs both reps and weight — and the weight
+// is DOUBLED for a pair of dumbbells, because `weight_kg` holds one of them.
+// Miss that last part and a friend's row reports half the work of the session
+// its owner is looking at. A test asserts all of it against `session.Summarise`
+// over the same fixture rather than trusting the comment.
 const workingVolume = `
 	COALESCE((
 		SELECT count(*) FROM session_sets ss
 		WHERE ss.session_id = s.id AND ss.completed AND ss.set_type <> 'warmup'
 	), 0) AS working_sets,
 	COALESCE((
-		SELECT sum(ss.reps * ss.weight_kg) FROM session_sets ss
+		SELECT sum(ss.reps * ss.weight_kg *
+		           CASE WHEN e.load_mode = 'per_side' AND NOT e.is_unilateral THEN 2 ELSE 1 END)
+		FROM session_sets ss
+		LEFT JOIN exercises e ON e.id = ss.exercise_id
 		WHERE ss.session_id = s.id AND ss.completed AND ss.set_type <> 'warmup'
 		  AND ss.reps IS NOT NULL AND ss.weight_kg IS NOT NULL
 	), 0) AS tonnage_kg`

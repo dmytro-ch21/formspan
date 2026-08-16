@@ -18,6 +18,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -39,6 +40,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -60,6 +62,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -81,6 +84,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -102,6 +106,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -122,6 +127,7 @@
     ],
     "load_type": "distance_time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -142,6 +148,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -163,6 +170,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -185,6 +193,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -206,6 +215,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -227,6 +237,7 @@
     ],
     "load_type": "distance_time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -248,6 +259,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -269,6 +281,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -290,6 +303,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -312,6 +326,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -334,6 +349,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -355,6 +371,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -377,6 +394,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -398,6 +416,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -420,6 +439,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": [
       {
@@ -458,6 +478,7 @@
     ],
     "load_type": "distance",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -479,6 +500,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -500,6 +522,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -520,6 +543,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -541,6 +565,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -561,6 +586,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -581,6 +607,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -602,6 +629,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -622,6 +650,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -642,6 +671,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -662,6 +692,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -683,6 +714,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -704,6 +736,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -724,6 +757,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -744,6 +778,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -764,6 +799,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -784,6 +820,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -804,6 +841,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -822,6 +860,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -840,6 +879,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -861,6 +901,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -879,6 +920,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -900,6 +942,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -921,6 +964,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -942,6 +986,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -963,6 +1008,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -983,6 +1029,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -1004,6 +1051,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -1022,6 +1070,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -1042,6 +1091,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -1061,6 +1111,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -1082,6 +1133,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -1103,6 +1155,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -1124,6 +1177,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -1145,6 +1199,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -1164,6 +1219,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -1185,6 +1241,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -1206,6 +1263,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -1226,6 +1284,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -1247,6 +1306,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -1268,6 +1328,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -1287,6 +1348,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -1308,6 +1370,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -1327,6 +1390,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -1345,6 +1409,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -1365,6 +1430,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -1384,6 +1450,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -1402,6 +1469,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -1423,6 +1491,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -1445,6 +1514,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -1463,6 +1533,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -1483,6 +1554,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -1503,6 +1575,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -1523,6 +1596,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -1544,6 +1618,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -1565,6 +1640,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -1587,6 +1663,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -1605,6 +1682,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -1626,6 +1704,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -1647,6 +1726,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -1669,6 +1749,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -1690,6 +1771,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -1710,6 +1792,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -1732,6 +1815,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -1754,6 +1838,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -1772,6 +1857,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -1794,6 +1880,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -1815,6 +1902,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -1837,6 +1925,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -1859,6 +1948,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -1879,6 +1969,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -1899,6 +1990,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -1921,6 +2013,7 @@
     ],
     "load_type": "distance_time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -1941,6 +2034,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -1961,6 +2055,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -1982,6 +2077,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2003,6 +2099,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -2025,6 +2122,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2044,6 +2142,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2065,6 +2164,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2086,6 +2186,7 @@
     ],
     "load_type": "time",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2107,6 +2208,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2128,6 +2230,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2149,6 +2252,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2170,6 +2274,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2191,6 +2296,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2212,6 +2318,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2233,6 +2340,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2254,6 +2362,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2274,6 +2383,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2295,6 +2405,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -2317,6 +2428,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2338,6 +2450,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2359,6 +2472,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2381,6 +2495,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -2403,6 +2518,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2425,6 +2541,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -2446,6 +2563,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2467,6 +2585,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2488,6 +2607,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2506,6 +2626,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2527,6 +2648,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2547,6 +2669,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2568,6 +2691,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2589,6 +2713,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2611,6 +2736,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -2632,6 +2758,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2654,6 +2781,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -2675,6 +2803,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -2697,6 +2826,7 @@
     ],
     "load_type": "distance",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2718,6 +2848,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2736,6 +2867,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2755,6 +2887,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2776,6 +2909,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2798,6 +2932,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2818,6 +2953,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2836,6 +2972,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2856,6 +2993,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2876,6 +3014,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2897,6 +3036,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2917,6 +3057,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2937,6 +3078,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2958,6 +3100,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2978,6 +3121,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -2999,6 +3143,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3017,6 +3162,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3037,6 +3183,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3055,6 +3202,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3075,6 +3223,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3093,6 +3242,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3114,6 +3264,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3134,6 +3285,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3152,6 +3304,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3172,6 +3325,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3193,6 +3347,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3214,6 +3369,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3234,6 +3390,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3254,6 +3411,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3275,6 +3433,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3296,6 +3455,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3316,6 +3476,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3334,6 +3495,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3355,6 +3517,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3376,6 +3539,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3397,6 +3561,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3418,6 +3583,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3439,6 +3605,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3458,6 +3625,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3479,6 +3647,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3499,6 +3668,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3521,6 +3691,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3542,6 +3713,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3563,6 +3735,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3584,6 +3757,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3606,6 +3780,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -3626,6 +3801,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -3648,6 +3824,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -3668,6 +3845,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -3691,6 +3869,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3713,6 +3892,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3735,6 +3915,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3753,6 +3934,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3774,6 +3956,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3794,6 +3977,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3815,6 +3999,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3838,6 +4023,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3856,6 +4042,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3874,6 +4061,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3897,6 +4085,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3918,6 +4107,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -3939,6 +4129,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -3960,6 +4151,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -3981,6 +4173,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -4002,6 +4195,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -4023,6 +4217,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -4043,6 +4238,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -4064,6 +4260,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -4084,6 +4281,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -4105,6 +4303,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -4127,6 +4326,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -4147,6 +4347,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -4168,6 +4369,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -4188,6 +4390,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -4212,6 +4415,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -4234,6 +4438,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -4256,6 +4461,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -4277,6 +4483,7 @@
     ],
     "load_type": "distance_time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -4297,6 +4504,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -4318,6 +4526,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -4339,6 +4548,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -4357,6 +4567,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -4378,6 +4589,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -4398,6 +4610,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -4419,6 +4632,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -4439,6 +4653,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -4459,6 +4674,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -4479,6 +4695,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -4499,6 +4716,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -4520,6 +4738,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -4541,6 +4760,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -4562,6 +4782,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -4584,6 +4805,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -4606,6 +4828,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -4627,6 +4850,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -4648,6 +4872,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -4668,6 +4893,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -4686,6 +4912,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -4707,6 +4934,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -4729,6 +4957,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -4751,6 +4980,7 @@
     ],
     "load_type": "distance",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -4772,6 +5002,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -4794,6 +5025,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -4817,6 +5049,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -4840,6 +5073,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -4863,6 +5097,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -4885,6 +5120,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -4906,6 +5142,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -4928,6 +5165,7 @@
     ],
     "load_type": "distance",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -4949,6 +5187,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -4970,6 +5209,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -4991,6 +5231,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5013,6 +5254,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5034,6 +5276,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5057,6 +5300,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5079,6 +5323,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -5099,6 +5344,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -5120,6 +5366,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -5141,6 +5388,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5163,6 +5411,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5183,6 +5432,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5205,6 +5455,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5223,6 +5474,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5244,6 +5496,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5266,6 +5519,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5287,6 +5541,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5309,6 +5564,7 @@
     ],
     "load_type": "distance",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5330,6 +5586,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5350,6 +5607,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5372,6 +5630,7 @@
     ],
     "load_type": "distance",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5393,6 +5652,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5413,6 +5673,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5433,6 +5694,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5451,6 +5713,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5473,6 +5736,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5494,6 +5758,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5514,6 +5779,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5535,6 +5801,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5557,6 +5824,7 @@
     ],
     "load_type": "distance",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5575,6 +5843,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5596,6 +5865,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5616,6 +5886,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5638,6 +5909,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -5659,6 +5931,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5680,6 +5953,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5701,6 +5975,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5722,6 +5997,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5740,6 +6016,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5761,6 +6038,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5781,6 +6059,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5801,6 +6080,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5819,6 +6099,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5842,6 +6123,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -5863,6 +6145,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5884,6 +6167,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5905,6 +6189,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5927,6 +6212,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5948,6 +6234,7 @@
     ],
     "load_type": "distance",
     "is_unilateral": true,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5970,6 +6257,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -5991,6 +6279,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -6012,6 +6301,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -6032,6 +6322,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -6053,6 +6344,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -6075,6 +6367,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "per_side",
     "instructions": "",
     "media": [
       {
@@ -6112,6 +6405,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -6130,6 +6424,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -6151,6 +6446,7 @@
     ],
     "load_type": "distance_time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -6172,6 +6468,7 @@
     ],
     "load_type": "distance_time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -6192,6 +6489,7 @@
     ],
     "load_type": "distance_time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -6213,6 +6511,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -6234,6 +6533,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -6254,6 +6554,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -6272,6 +6573,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -6290,6 +6592,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -6311,6 +6614,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -6332,6 +6636,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -6354,6 +6659,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -6375,6 +6681,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -6395,6 +6702,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -6416,6 +6724,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -6437,6 +6746,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -6458,6 +6768,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -6480,6 +6791,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -6503,6 +6815,7 @@
     ],
     "load_type": "distance",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -6525,6 +6838,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -6547,6 +6861,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -6569,6 +6884,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -6590,6 +6906,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -6611,6 +6928,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -6632,6 +6950,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -6652,6 +6971,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -6673,6 +6993,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -6694,6 +7015,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -6715,6 +7037,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -6735,6 +7058,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -6757,6 +7081,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -6777,6 +7102,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -6798,6 +7124,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -6818,6 +7145,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -6839,6 +7167,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -6861,6 +7190,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -6881,6 +7211,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -6899,6 +7230,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -6921,6 +7253,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -6943,6 +7276,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -6964,6 +7298,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -6985,6 +7320,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -7006,6 +7342,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7027,6 +7364,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7049,6 +7387,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7071,6 +7410,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7093,6 +7433,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7115,6 +7456,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7136,6 +7478,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7157,6 +7500,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7177,6 +7521,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7198,6 +7543,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7218,6 +7564,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7240,6 +7587,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7262,6 +7610,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -7282,6 +7631,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7303,6 +7653,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7325,6 +7676,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7345,6 +7697,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7366,6 +7719,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7386,6 +7740,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7406,6 +7761,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7427,6 +7783,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7446,6 +7803,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7468,6 +7826,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7489,6 +7848,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7509,6 +7869,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7529,6 +7890,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7549,6 +7911,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7571,6 +7934,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7592,6 +7956,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7613,6 +7978,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -7634,6 +8000,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -7654,6 +8021,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -7674,6 +8042,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -7695,6 +8064,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -7716,6 +8086,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7737,6 +8108,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7759,6 +8131,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7779,6 +8152,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7801,6 +8175,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7824,6 +8199,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7844,6 +8220,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7863,6 +8240,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7884,6 +8262,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -7904,6 +8283,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7925,6 +8305,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7946,6 +8327,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7967,6 +8349,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -7987,6 +8370,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -8008,6 +8392,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -8030,6 +8415,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -8051,6 +8437,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -8072,6 +8459,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -8094,6 +8482,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -8116,6 +8505,7 @@
     ],
     "load_type": "distance",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -8137,6 +8527,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -8158,6 +8549,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -8179,6 +8571,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -8200,6 +8593,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -8221,6 +8615,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -8243,6 +8638,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -8263,6 +8659,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -8285,6 +8682,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -8306,6 +8704,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -8327,6 +8726,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -8348,6 +8748,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -8370,6 +8771,7 @@
     ],
     "load_type": "distance",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -8388,6 +8790,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -8409,6 +8812,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -8430,6 +8834,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -8451,6 +8856,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -8473,6 +8879,7 @@
     ],
     "load_type": "distance",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -8494,6 +8901,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -8514,6 +8922,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -8535,6 +8944,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -8556,6 +8966,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -8578,6 +8989,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -8598,6 +9010,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -8618,6 +9031,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -8636,6 +9050,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -8658,6 +9073,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -8679,6 +9095,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -8700,6 +9117,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -8721,6 +9139,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -8743,6 +9162,7 @@
     ],
     "load_type": "distance",
     "is_unilateral": true,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -8765,6 +9185,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -8786,6 +9207,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -8808,6 +9230,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -8831,6 +9254,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -8853,6 +9277,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -8875,6 +9300,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -8896,6 +9322,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -8916,6 +9343,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -8937,6 +9365,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -8957,6 +9386,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -8977,6 +9407,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -8999,6 +9430,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9020,6 +9452,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9041,6 +9474,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9063,6 +9497,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9085,6 +9520,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9106,6 +9542,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9127,6 +9564,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9149,6 +9587,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9170,6 +9609,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9191,6 +9631,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9212,6 +9653,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9234,6 +9676,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9255,6 +9698,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9277,6 +9721,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9298,6 +9743,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9319,6 +9765,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9340,6 +9787,7 @@
     ],
     "load_type": "distance",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9360,6 +9808,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -9379,6 +9828,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9401,6 +9851,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9420,6 +9871,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9441,6 +9893,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9461,6 +9914,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9483,6 +9937,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -9503,6 +9958,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9523,6 +9979,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9544,6 +10001,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9562,6 +10020,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -9581,6 +10040,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9601,6 +10061,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9622,6 +10083,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9644,6 +10106,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9665,6 +10128,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9686,6 +10150,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9707,6 +10172,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9729,6 +10195,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9749,6 +10216,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9772,6 +10240,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9793,6 +10262,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9814,6 +10284,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9833,6 +10304,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9854,6 +10326,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -9875,6 +10348,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9896,6 +10370,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9917,6 +10392,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9937,6 +10413,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9958,6 +10435,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9979,6 +10457,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -10001,6 +10480,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -10023,6 +10503,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -10043,6 +10524,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -10064,6 +10546,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -10086,6 +10569,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -10108,6 +10592,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -10129,6 +10614,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -10148,6 +10634,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -10167,6 +10654,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -10188,6 +10676,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -10207,6 +10696,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -10226,6 +10716,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -10247,6 +10738,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -10268,6 +10760,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -10289,6 +10782,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -10309,6 +10803,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -10329,6 +10824,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -10350,6 +10846,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -10371,6 +10868,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -10392,6 +10890,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -10414,6 +10913,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -10435,6 +10935,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -10456,6 +10957,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -10477,6 +10979,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -10498,6 +11001,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -10519,6 +11023,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -10541,6 +11046,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -10562,6 +11068,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -10580,6 +11087,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -10601,6 +11109,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -10623,6 +11132,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -10641,6 +11151,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -10662,6 +11173,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": [
       {
@@ -10701,6 +11213,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -10722,6 +11235,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -10743,6 +11257,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -10764,6 +11279,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -10785,6 +11301,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -10806,6 +11323,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -10827,6 +11345,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -10849,6 +11368,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -10870,6 +11390,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -10891,6 +11412,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -10912,6 +11434,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -10933,6 +11456,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -10954,6 +11478,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -10975,6 +11500,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -10997,6 +11523,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -11019,6 +11546,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -11041,6 +11569,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -11061,6 +11590,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -11083,6 +11613,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -11105,6 +11636,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -11126,6 +11658,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": [
       {
@@ -11165,6 +11698,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -11183,6 +11717,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -11206,6 +11741,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -11228,6 +11764,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -11249,6 +11786,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -11268,6 +11806,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -11288,6 +11827,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -11309,6 +11849,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -11330,6 +11871,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -11351,6 +11893,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -11374,6 +11917,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -11396,6 +11940,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -11419,6 +11964,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -11439,6 +11985,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -11460,6 +12007,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -11481,6 +12029,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -11503,6 +12052,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -11525,6 +12075,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -11546,6 +12097,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -11568,6 +12120,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -11589,6 +12142,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -11611,6 +12165,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -11633,6 +12188,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -11654,6 +12210,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -11676,6 +12233,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -11697,6 +12255,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -11717,6 +12276,7 @@
     ],
     "load_type": "distance_time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -11739,6 +12299,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -11761,6 +12322,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -11782,6 +12344,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -11800,6 +12363,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -11820,6 +12384,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -11842,6 +12407,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -11863,6 +12429,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -11881,6 +12448,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -11902,6 +12470,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -11920,6 +12489,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -11942,6 +12512,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -11963,6 +12534,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -11983,6 +12555,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12004,6 +12577,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12025,6 +12599,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12046,6 +12621,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12067,6 +12643,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12088,6 +12665,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12110,6 +12688,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12131,6 +12710,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12153,6 +12733,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -12175,6 +12756,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12196,6 +12778,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12214,6 +12797,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12235,6 +12819,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12256,6 +12841,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12278,6 +12864,7 @@
     ],
     "load_type": "distance_time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12298,6 +12885,7 @@
     ],
     "load_type": "distance_time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12319,6 +12907,7 @@
     "equipment": [],
     "load_type": "distance_time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Any continuous outdoor run. Distance and elapsed time together give pace, so pace is derived rather than entered.",
     "media": []
   },
@@ -12339,6 +12928,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12361,6 +12951,7 @@
     ],
     "load_type": "distance",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12383,6 +12974,7 @@
     ],
     "load_type": "distance",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12404,6 +12996,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12426,6 +13019,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12446,6 +13040,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12467,6 +13062,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12489,6 +13085,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12510,6 +13107,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12531,6 +13129,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -12551,6 +13150,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -12569,6 +13169,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -12590,6 +13191,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12610,6 +13212,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -12629,6 +13232,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12650,6 +13254,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12671,6 +13276,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12693,6 +13299,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12714,6 +13321,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12733,6 +13341,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12751,6 +13360,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12771,6 +13381,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12792,6 +13403,7 @@
     ],
     "load_type": "time",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12812,6 +13424,7 @@
     ],
     "load_type": "time",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12833,6 +13446,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12853,6 +13467,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12875,6 +13490,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -12896,6 +13512,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -12914,6 +13531,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -12936,6 +13554,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12958,6 +13577,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -12979,6 +13599,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13000,6 +13621,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13020,6 +13642,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13041,6 +13664,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13059,6 +13683,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13080,6 +13705,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -13098,6 +13724,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13119,6 +13746,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -13138,6 +13766,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13158,6 +13787,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13179,6 +13809,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -13200,6 +13831,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13222,6 +13854,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13240,6 +13873,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13260,6 +13894,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13282,6 +13917,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13304,6 +13940,7 @@
     ],
     "load_type": "distance_time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13326,6 +13963,7 @@
     ],
     "load_type": "distance",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13348,6 +13986,7 @@
     ],
     "load_type": "distance",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13370,6 +14009,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13390,6 +14030,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13411,6 +14052,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13432,6 +14074,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13454,6 +14097,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13475,6 +14119,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13493,6 +14138,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13514,6 +14160,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13535,6 +14182,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13556,6 +14204,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13576,6 +14225,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13597,6 +14247,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13619,6 +14270,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13640,6 +14292,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13661,6 +14314,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13681,6 +14335,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13701,6 +14356,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13722,6 +14378,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13743,6 +14400,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13766,6 +14424,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13788,6 +14447,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -13811,6 +14471,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13831,6 +14492,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -13852,6 +14514,7 @@
     ],
     "load_type": "distance_time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13874,6 +14537,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13895,6 +14559,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13916,6 +14581,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -13937,6 +14603,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13958,6 +14625,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13979,6 +14647,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14001,6 +14670,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14023,6 +14693,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14045,6 +14716,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14067,6 +14739,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14087,6 +14760,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -14108,6 +14782,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14128,6 +14803,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14147,6 +14823,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14168,6 +14845,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14189,6 +14867,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   },
@@ -14210,6 +14889,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14231,6 +14911,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14252,6 +14933,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14271,6 +14953,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14292,6 +14975,7 @@
     ],
     "load_type": "distance_time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14314,6 +14998,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14336,6 +15021,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14357,6 +15043,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -14378,6 +15065,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14399,6 +15087,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14420,6 +15109,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14443,6 +15133,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -14464,6 +15155,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14485,6 +15177,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14506,6 +15199,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14527,6 +15221,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14548,6 +15243,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14569,6 +15265,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14590,6 +15287,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14611,6 +15309,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14632,6 +15331,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14653,6 +15353,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14674,6 +15375,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14695,6 +15397,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14716,6 +15419,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14737,6 +15441,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14758,6 +15463,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14779,6 +15485,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14800,6 +15507,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14821,6 +15529,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14843,6 +15552,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14863,6 +15573,7 @@
     ],
     "load_type": "time",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14884,6 +15595,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14905,6 +15617,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14926,6 +15639,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14946,6 +15660,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14967,6 +15682,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -14988,6 +15704,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -15010,6 +15727,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -15031,6 +15749,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -15052,6 +15771,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -15073,6 +15793,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -15095,6 +15816,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -15115,6 +15837,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -15136,6 +15859,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -15158,6 +15882,7 @@
     ],
     "load_type": "distance_time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -15178,6 +15903,7 @@
     ],
     "load_type": "distance_time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -15198,6 +15924,7 @@
     ],
     "load_type": "distance_time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -15220,6 +15947,7 @@
     ],
     "load_type": "distance_time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -15241,6 +15969,7 @@
     ],
     "load_type": "distance_time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -15259,6 +15988,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -15281,6 +16011,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -15302,6 +16033,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -15322,6 +16054,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -15343,6 +16076,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -15364,6 +16098,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -15385,6 +16120,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -15407,6 +16143,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -15427,6 +16164,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -15449,6 +16187,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": true,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -15470,6 +16209,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -15491,6 +16231,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -15511,6 +16252,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -15533,6 +16275,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -15555,6 +16298,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -15577,6 +16321,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -15598,6 +16343,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -15619,6 +16365,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -15640,6 +16387,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -15661,6 +16409,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -15682,6 +16431,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -15703,6 +16453,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -15724,6 +16475,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -15744,6 +16496,7 @@
     ],
     "load_type": "reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -15766,6 +16519,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -15785,6 +16539,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -15804,6 +16559,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -15823,6 +16579,7 @@
     ],
     "load_type": "time",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -15844,6 +16601,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -15865,6 +16623,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -15887,6 +16646,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "total",
     "instructions": "Use collars and safeties where appropriate.",
     "media": []
   },
@@ -15908,6 +16668,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
+    "load_mode": "per_side",
     "instructions": "",
     "media": []
   }

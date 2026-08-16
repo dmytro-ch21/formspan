@@ -2,6 +2,7 @@ import { addDays, dayString, startOfWeek } from './calendar';
 import { matchPlans } from './adherence';
 import type { PlannedSession } from './plan';
 import type { LoggedSet, Session } from './sessions';
+import { totalWeightKg } from './sessions';
 
 /**
  * The week, summed up — what actually happened, against what was meant to.
@@ -88,7 +89,7 @@ function accumulate(sessions: Session[]): { totals: WeekTotals; bySport: SportTo
     let sessionVolume = 0;
     for (const set of s.sets) {
       if (isWorkingSet(set) && set.weight_kg != null && set.reps != null) {
-        sessionVolume += set.weight_kg * set.reps;
+        sessionVolume += totalWeightKg(set) * set.reps;
       }
     }
     seconds += sessionSeconds;

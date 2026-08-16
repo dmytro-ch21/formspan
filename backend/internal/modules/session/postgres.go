@@ -197,6 +197,20 @@ func (r *PostgresRepository) List(ctx context.Context, userID string, f Filter) 
 // runs both over the same data and fails if they ever disagree.
 const workingSet = `ss.completed AND ss.set_type <> 'warmup'`
 
+// tonnageOf is `Set.TotalWeightKg` expressed once for SQL, for the same reason
+// and under the same guard as `workingSet` above.
+//
+// The number in `weight_kg` is what is stamped on the implement. For a pair of
+// dumbbells that is one of the two, so the total doubles — and every query that
+// sums tonnage has to agree about that, or an athlete's own session disagrees
+// with their history, their week, and the card their friends see.
+//
+// Requires `exercises e` to be LEFT JOINed as `e`. Left, so a set whose
+// exercise was retired keeps counting at face value instead of dropping to
+// NULL and silently leaving the sum.
+const tonnageOf = `ss.reps * ss.weight_kg *
+	CASE WHEN e.load_mode = 'per_side' AND NOT e.is_unilateral THEN 2 ELSE 1 END`
+
 // History rolls a date range up per calendar day, plus totals for the period
 // and for the window immediately before it.
 func (r *PostgresRepository) History(ctx context.Context, userID string, f HistoryFilter) (*History, error) {
@@ -266,9 +280,10 @@ func (r *PostgresRepository) historyDays(ctx context.Context, userID string, f H
 			       COALESCE(EXTRACT(EPOCH FROM (sc.ended_at - sc.started_at)), 0)::bigint AS duration,
 			       COUNT(*) FILTER (WHERE `+workingSet+`) AS working_sets,
 			       COALESCE(SUM(ss.reps) FILTER (WHERE `+workingSet+`), 0) AS total_reps,
-			       COALESCE(SUM(ss.reps * ss.weight_kg) FILTER (WHERE `+workingSet+`), 0) AS tonnage
+			       COALESCE(SUM(`+tonnageOf+`) FILTER (WHERE `+workingSet+`), 0) AS tonnage
 			FROM scoped sc
 			LEFT JOIN session_sets ss ON ss.session_id = sc.id
+			LEFT JOIN exercises e ON e.id = ss.exercise_id
 			GROUP BY sc.id, sc.day, sc.sport, sc.ended_at, sc.started_at
 		)
 		-- Explicit casts throughout: SUM() over bigint yields numeric, which
@@ -333,9 +348,10 @@ func (r *PostgresRepository) historyTotals(
 			(SELECT COUNT(DISTINCT (started_at AT TIME ZONE $4)::date) FROM scoped)::int,
 			COUNT(*) FILTER (WHERE `+workingSet+`)::int,
 			COALESCE(SUM(ss.reps) FILTER (WHERE `+workingSet+`), 0)::int,
-			COALESCE(SUM(ss.reps * ss.weight_kg) FILTER (WHERE `+workingSet+`), 0)::float8,
+			COALESCE(SUM(`+tonnageOf+`) FILTER (WHERE `+workingSet+`), 0)::float8,
 			COUNT(DISTINCT ss.exercise_id)::int
 		FROM session_sets ss
+		LEFT JOIN exercises e ON e.id = ss.exercise_id
 		WHERE ss.session_id IN (SELECT id FROM scoped)`, args...).
 		Scan(&t.Sessions, &t.DurationSeconds, &t.ActiveDays, &t.WorkingSets,
 			&t.TotalReps, &t.TonnageKg, &t.Exercises)

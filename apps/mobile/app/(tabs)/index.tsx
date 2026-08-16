@@ -68,6 +68,7 @@ import { listCheckins, listPhases, type Checkin, type Phase } from '@/lib/body';
 import { accentGlow } from '@/lib/palette';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
+import { totalWeightKg } from '@/lib/sessions';
 
 /**
  * Room under the scroll so the floating New Log never covers the last row.
@@ -106,7 +107,7 @@ function sessionVolume(s: Session): number {
   let kg = 0;
   for (const set of s.sets) {
     if (isWorkingSet(set) && set.weight_kg != null && set.reps != null) {
-      kg += set.weight_kg * set.reps;
+      kg += totalWeightKg(set) * set.reps;
     }
   }
   return kg;

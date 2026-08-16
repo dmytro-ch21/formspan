@@ -16,6 +16,7 @@ import { type PlannedSession } from '@/lib/plan';
 import type { Session } from '@/lib/sessions';
 import { listLocalSessions } from '@/lib/sessionStore';
 import { formatVolume, type UnitSystem } from '@/lib/units';
+import { totalWeightKg } from '@/lib/sessions';
 
 /**
  * The training calendar: a week you can open, and a month behind it.
@@ -58,7 +59,7 @@ function sessionVolume(s: Session): number {
   let kg = 0;
   for (const set of s.sets) {
     if (set.completed && set.set_type !== 'warmup' && set.weight_kg != null && set.reps != null) {
-      kg += set.weight_kg * set.reps;
+      kg += totalWeightKg(set) * set.reps;
     }
   }
   return kg;

@@ -27,6 +27,10 @@ const (
 	// with real catalog entries.
 	exRun = "run"
 	exOHP = "overhead-press"
+	// A PER_SIDE exercise, so the SQL-vs-domain parity test actually exercises
+	// the load factor. Without one in the fixtures both sides agree trivially
+	// at a factor of 1, and a missing CASE in the SQL passes green.
+	exDBBench = "dumbbell-bench-press"
 )
 
 func newTestRepo(t *testing.T) (*PostgresRepository, *pgxpool.Pool) {
@@ -579,6 +583,10 @@ func TestHistoryAgreesWithSummarise(t *testing.T) {
 		histAt("ses-hist-b", user, "strength", base.AddDate(0, 0, 2), 90*time.Minute, []Set{
 			{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(3), WeightKg: ptrF(120), Completed: true},
 			{ExerciseID: exSquat, SetType: SetTypeFailure, Reps: ptrInt(1), WeightKg: ptrF(140), Completed: true},
+			// A PAIR of dumbbells: 30 is one of them, so this contributes
+			// 10 x 30 x 2 = 600, not 300. Both sides of the comparison have to
+			// agree about that, which is the only reason it is in this fixture.
+			{ExerciseID: exDBBench, SetType: SetTypeWorking, Reps: ptrInt(10), WeightKg: ptrF(30), Completed: true},
 			// Third exercise, warm-up only. Summarise counts it in ExerciseIDs
 			// (they're collected before the completed/warm-up guards), so the
 			// SQL's COUNT(DISTINCT exercise_id) must stay unfiltered. Without a
@@ -639,13 +647,23 @@ func TestHistoryAgreesWithSummarise(t *testing.T) {
 	}
 
 	// And the fixtures' own arithmetic, so a bug that broke both identically
-	// still gets caught: 5×100 + 8 reps unweighted + 3×120 + 1×140 = 1000.
-	if wantSets != 4 || wantReps != 17 || !closeEnough(wantTonnage, 1000) {
+	// still gets caught:
+	//   5×100 (barbell)          =  500
+	//   8 reps unweighted        =    0
+	//   3×120 + 1×140 (barbell)  =  500
+	//   10×30 PER HAND, doubled  =  600
+	//                              -----
+	//                              1600
+	//
+	// The dumbbell line is why this number moved. Written literally rather than
+	// computed, because a computed expectation would apply whatever factor the
+	// code applies and agree with a bug.
+	if wantSets != 5 || wantReps != 27 || !closeEnough(wantTonnage, 1600) {
 		t.Fatalf("fixture expectations drifted: sets=%d reps=%d tonnage=%v", wantSets, wantReps, wantTonnage)
 	}
-	// Two sessions, two days, three distinct exercises — the third only
+	// Two sessions, two days, four distinct exercises — one of them only
 	// ever warmed up, which still counts as "what did I train".
-	if got.Totals.Sessions != 2 || got.Totals.ActiveDays != 2 || got.Totals.Exercises != 3 {
+	if got.Totals.Sessions != 2 || got.Totals.ActiveDays != 2 || got.Totals.Exercises != 4 {
 		t.Errorf("totals: %+v", got.Totals)
 	}
 	// 60m + 90m.
