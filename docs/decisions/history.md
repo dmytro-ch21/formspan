@@ -20093,6 +20093,141 @@ Re-running every module package against its own pristine database:
 - **Nothing prevents the next package from borrowing** — unchanged. The rule is
   documented in seven test files and CLAUDE.md and enforced only by review.
 
+## 2026-08-16 — The card exported at 3× the size it promised, in the units nobody checked
+
+`shareCard.ts` asked `captureRef` for `width: 1080` and carried a comment
+explaining why:
+
+> Explicit pixel size rather than a scale factor: a scale would make the
+> exported image depend on the phone's screen density, so the same session
+> would post at 780px from an SE and 1170px from a Pro Max.
+
+The argument is right. The value did not carry it out. **`width` and `height`
+are POINTS**, and `react-native-view-shot` builds its renderer with
+`rendererFormat.scale = 0` — "use device scale" — then hands it the requested
+size, so the bitmap comes back at `size × scale`. Measured on a 3× phone by
+pulling the file off the container rather than trusting the share sheet's
+thumbnail:
+
+```
+PNG image data, 3240 x 3240, 8-bit/color RGBA
+10M
+```
+
+3240 is 1080 × 3. A 2× device would have exported 2160. So the constant was not
+neutral about density — it was **multiplied by it**, which is the exact failure
+its own comment claims it prevents. `cardCaptureSize()` divides first: 360 pt ×
+3 and 540 pt × 2 both land on 1080 px.
+
+Measured again on the same simulator, same flow, after the fix:
+
+```
+PNG image data, 1080 x 1080, 8-bit/color RGBA
+1.6M
+```
+
+The card renders identically — same framing, same stats, no crop and no
+resampling artefacts. **10.5 MB → 1.6 MB, for a card nobody can tell apart.**
+
+**This was found while verifying the share work on a device build, not by
+reading the code.** Nothing about it is visible in the source — the comment
+reads as a considered decision, and it was; the unit mismatch is one layer
+below where the argument was being had. It took `file` on the actual export to
+see it.
+
+### What else the number was holding up
+
+The "leave the temp file behind" decision two paragraphs up in the same doc
+comment was priced explicitly at "~1-2 MB per share", against the cost of a
+third native dependency to clean it up. At 10.5 MB that trade was being made on
+a figure five times off. The conclusion survives — 1.6 MB is inside the bracket
+that made it acceptable — but it was resting on an unchecked measurement, and
+`TASKS.md` **L5** repeats the same "~1–2 MB". Both are true again rather than
+newly true, which is a distinction worth keeping: nobody re-measured, the
+number simply stopped being wrong.
+
+There is a second, quieter improvement. The card is laid out at 360 pt and was
+being drawn into a 1080 pt canvas — `drawViewHierarchyInRect` scales to fill,
+so it was a 3× upscale in points *and then* ×3 for density. It now renders 1:1
+into a 360 pt canvas at 3×. Same output size, one less resampling step.
+
+### Coverage
+
+`lib/__tests__/shareCard.test.ts`, and the assertions are on **pixels** —
+`points × scale` — not on the argument passed. Asserting the argument alone
+pins whatever the code happens to send and goes green against the bug: 1080
+points is a plausible-looking number, and it *was* the bug. Mutation-checked
+twice: reverting to the constant turns four of five red, and a
+`Math.round`-based implementation is caught by the non-integer-scale case
+(2.625, 3.5) that the integer scales cannot distinguish.
+
+### The first version of this fix inverted the bug on Android
+
+Review was asked to challenge the points-vs-pixels reading rather than confirm
+it, and that is what found this. **The same two options mean different units on
+the two platforms**, which nothing in the JS API hints at:
+
+- **iOS** — points, multiplied by device scale (`rendererFormat.scale = 0`,
+  `initWithSize:`). Output = `size × scale`.
+- **Android** — pixels, already final. `RNViewShotModule.java` reads them with
+  `getInt`, and `ViewShot.java` ends with
+  `Bitmap.createScaledBitmap(bitmap, width, height, true)`. Density appears
+  nowhere.
+
+So **the original constant was correct on Android**, and dividing by the scale
+would have exported a **360 px** card from a 3× Android phone — the same bug,
+inverted, and shrinking rather than bloating. `cardCaptureSize` now branches on
+`Platform.OS`.
+
+What made it worth blocking on rather than deferring is not the runtime impact
+— the app is iOS-only today, so nothing shipped would have broken. It is that
+the first version shipped a **comment, a test name and a functional-scenario
+line that all asserted the iOS model as Android fact**. The test was literally
+called "lands within a pixel on non-integer Android scales" while exercising
+iOS multiplication. That is the `T`-section shape exactly: compiles, passes,
+and would argue the next person out of noticing. The tests are split by
+platform now, and `platform` is a parameter precisely because jest-expo reports
+`ios` and the Android branch would otherwise be untestable as well as
+unobservable.
+
+Two things the same review corrected in the paragraph above it, both of which
+had been load-bearing for a decision: `react-native-view-shot` **already
+exports `releaseCapture(uri)`**, native on both platforms, so "deleting the
+temp file needs a third native dependency" was never true — and the "~1-2 MB"
+it was weighed against was really 10.5 MB. The conclusion (leave the file) is
+kept, but it now rests on a stated argument rather than two false ones, and the
+cleanup is recorded as **L5** rather than closed off.
+
+### Open questions this leaves
+
+- **Only measured at 3× on iOS.** The 2× row is derived from the library
+  source, not observed, and no Android capture has ever been taken — the
+  Android branch is read from its source and pinned by a unit test, which is
+  weaker than the `file` measurement backing the iOS half.
+- **`releaseCapture` is available and unused.** Two lines after `shareAsync`
+  resolves would clear the cache file; whether every share target has finished
+  reading by then is a question rather than an assumption, so it wants a device.
+- **If the web app ever grows a share, the size branch is the easy part.**
+  Checked while confirming the default: `RNViewShot.web.ts` sets
+  `resizedCanvas.width = options.width`, so web is pixels-final like Android and
+  the branch is already right for it — but `result: 'tmpfile'` is
+  *unimplemented* there (it warns and hands back a data-URI) and
+  `releaseCapture` is a no-op, so `shareCard`'s whole file-based flow would need
+  rethinking rather than porting.
+- **Windows is the one target nobody has read.** The `platform !== 'ios'`
+  default treats it as pixels, and a test asserts that — pinning the shape of
+  the rule rather than a list of known platforms, so an enumerated
+  `android || web` cannot creep in unnoticed. It is a stated default, not a
+  measurement.
+- **Non-integer Android scales land within a pixel**, by rounding inside the
+  renderer. Nothing downstream can tell 1079 from 1080, but no device with such
+  a scale has run this.
+- **Nothing in CI asserts the exported file's real dimensions.** The test pins
+  the arithmetic; the 1080 × 1080 above came from running the app and reading
+  the file off the simulator container by hand. That step is what caught the
+  bug in the first place and there is no automated equivalent — a capture needs
+  a device.
+
 ## Open items / known gaps as of this entry
 
 - **`profile` still borrows a catalog row it never seeds.** One failure (`TestExerciseUnits_SetClearAndScope`, `unknown exercise "bench-press"`) against a pristine migrated database; `session` and `workout` are both converted (entries above), and `workout` is the pattern to copy — prefix-preserving ids, `requireUnsorted` where order matters, FK-ordered cleanup in `newTestRepo`. Until it is done, renaming `exercise` to sort later, or giving its uncleaned `Seed()` test the `t.Cleanup` its neighbours have, turns that package red.

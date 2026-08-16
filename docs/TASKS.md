@@ -39,6 +39,7 @@ Each compiles, passes its tests, and is wrong. Read before starting the related 
 - [ ] **F1** — Virtualise the social feed. Plain `ScrollView` holding full cards (~25–35 native views each, 30/page, +30 per "Show older"). `KeyboardAwareFlatList` already exists in the codebase. (#210)
 - [ ] **F2** — Show the card at readable size before sharing. Only preview today is a share-sheet thumbnail, so the calorie figure — an inference from body data — is posted sight-unseen. (#210)
 - [ ] **F3** — Review the 80 per-side classifications end to end. Classified by equipment + a hand-written single-implement exclusion list; spot-checks passed, nobody read the list. (#224)
+- [x] **F4** — Share card exported at 3× its intended size. `captureRef`'s `width` is POINTS and the renderer multiplies by device scale, so 1080 became 3240px/10.5 MB on a 3× phone — the density dependence its own comment claimed to prevent. Measured 1080px/1.6 MB after. (#232) — done
 
 ## N — New work
 
@@ -56,7 +57,7 @@ Each compiles, passes its tests, and is wrong. Read before starting the related 
 - [ ] **L2** — A drop dragged away from its parent re-parents. Inherent cost of expressing the relationship as order, since row ids are regenerated every save. (#227)
 - [ ] **L3** — `dropsOf` has no consumer. Mirrors the server for whatever reads a drop group next; dead code until then. (#227)
 - [ ] **L4** — 1RM and tonnage read `weight_kg` differently. Deliberate (a per-hand 1RM is what lifters quote) but nothing tells a client. (#224)
-- [ ] **L5** — Share leaves a ~1–2 MB temp file per share. Deleting it needs a third native dependency; judged not worth it. (#210)
+- [ ] **L5** — Share leaves a ~1.6 MB temp file per share. **Both halves of the old reason were wrong**: it said "needs a third native dependency" (`react-native-view-shot` already exports `releaseCapture(uri)`, native on both platforms) and priced it at ~1–2 MB when the capture was actually exporting 10.5 MB. Size fixed in #232; cleanup still not done, because calling `releaseCapture` after `shareAsync` resolves needs device verification that every share target has finished reading by then. (#210 #232)
 - [ ] **L6** — Instagram Stories direct hand-off. No longer blocked (`vola://` is ours now); what remains is a Facebook App ID, an account decision. (#210)
 - [ ] **L7** — Adjacency is unenforced: nothing stops a client writing a stray `drop` row. It's skipped rather than misattributed. (#226)
 
@@ -65,6 +66,7 @@ Each compiles, passes its tests, and is wrong. Read before starting the related 
 - [ ] **H1** — `TestEverySeededTechniqueExistsInTheLibrary` skips in CI (CI never seeds), so the suite reports success while the assertion never runs. *In progress — spun off.*
 - [ ] **H2** — Document that `-p 1` also enforces cross-package test ordering, not just global counts: `session` alone against an unseeded database fails 23 tests. *In progress — spun off.*
 - [ ] **H3** — Drop stale local databases: `vola_merge`, `vola_mig`, and the `vola_test_*` set from merged branches. They drift from main's schema and read as a broken checkout.
+- [ ] **H4** — `sharedScreen.test.tsx` "drops the accepted row locally" failed once in 3 full-suite runs during #235, exhausting its 10s `asyncUtilTimeout`. **Not reproduced since: 0 failures in 92 runs**, including under 8-way CPU saturation and alongside the web/admin builds, with headroom measured at 2.4–4.0s of the 10s budget. That puts the rate near or under 3% rather than the 1-in-3 the first sample suggested. Cause never diagnosed and the original failure was real, so this stays open — but treat the rate as low, not as a coin flip. (#232 #235)
 
 ---
 
