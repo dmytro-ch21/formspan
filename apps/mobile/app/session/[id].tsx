@@ -1353,10 +1353,16 @@ export default function SessionScreen() {
                   athlete they did four sets when they did three, and that
                   number is the one they count. So the ordinal only advances on
                   a non-drop row, and a drop carries its parent's. */}
-              {g.indices.map((i, n) => {
-                const isDrop = sets[i].set_type === 'drop';
-                const ordinal = setOrdinals(g.indices.map((j) => sets[j]))[n];
-                return (
+              {/* Once per group, not once per row: `setOrdinals` walks the
+                  whole group, so calling it inside the map made rendering a
+                  group quadratic in its own size — inside the render of the
+                  app's most complex screen. Harmless at real set counts and
+                  still not worth doing. */}
+              {((ordinals) =>
+                g.indices.map((i, n) => {
+                  const isDrop = sets[i].set_type === 'drop';
+                  const ordinal = ordinals[n];
+                  return (
                 <SwipeToDelete
                   key={i}
                   // A finished session is a record, not a workspace — the
@@ -1373,7 +1379,11 @@ export default function SessionScreen() {
                   // key, so a count would survive by luck — which is not a
                   // thing to depend on.)
                   closeOn={`${sets[i].exercise_id}:${sets[i].set_type}:${sets.length}`}
-                  accessibilityLabel={`set ${n + 1}`}
+                  // The ORDINAL, not the row index. This announced "set 4"
+                  // on a drop whose own row announced "drop off set 3" — the
+                  // exact miscount the ordinal exists to prevent, surviving one
+                  // level up because the container was never told.
+                  accessibilityLabel={isDrop ? `drop off set ${ordinal}` : `set ${ordinal}`}
                   testID={`set-${i}-swipe`}
                 >
                   <SetRow
@@ -1405,8 +1415,8 @@ export default function SessionScreen() {
                     duration={durationUnit}
                   />
                 </SwipeToDelete>
-                );
-              })}
+                  );
+                }))(setOrdinals(g.indices.map((j) => sets[j])))}
               {(() => {
                 const hint = suggestions.get(g.exerciseID);
                 if (!hint || hint.code === 'not_applicable') return null;
