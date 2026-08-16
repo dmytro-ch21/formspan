@@ -68,6 +68,10 @@ type Record struct {
 	DistanceM *int     `json:"distance_m"`
 	RIR       *int     `json:"rir"`
 	RPE       *float64 `json:"rpe"`
+	// AssistedReps is carried so the 1RM evidence row can be re-estimated by
+	// the same rule that chose it. Without it the recomputation disagrees with
+	// the winning number, no row matches, and the record loses its evidence.
+	AssistedReps *int `json:"assisted_reps"`
 
 	AchievedAt time.Time `json:"achieved_at"`
 	SessionID  string    `json:"session_id"`

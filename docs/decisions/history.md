@@ -20228,6 +20228,111 @@ cleanup is recorded as **L5** rather than closed off.
   bug in the first place and there is no automated equivalent — a capture needs
   a device.
 
+## 2026-08-16 — Progression stops counting reps somebody else did
+
+`assisted_reps` has been recorded since this morning and nothing read it, so a
+spotted set still claimed full capability. Closing that (**W1**) had to carry its
+own trap with it (**T1**), because the two are one change: four queries never
+selected the column, and a nil `AssistedReps` reads as all-solo, so a
+progression-only edit would have compiled, passed every hand-built fixture, and
+silently kept the old behaviour.
+
+### What the estimate now does, and the half that is easy to reverse
+
+`EstimateSetOneRM` estimates from SOLO reps: eight at 102.5 with a spotter on
+three is five reps of demonstrated capability: 115.31 kg rather than 127.24 at
+that load. The overstatement is exactly 32/29 — 10.34% — and INDEPENDENT of the
+weight, because (36/29)/(36/32) cancels it. Every set of eight with three
+assisted was overstated by the same tenth, and it was surfaced as a *record*.
+
+**And it discards the recorded effort rather than reusing it.** An RIR on an
+assisted set describes the whole set, help included: "2 in reserve" means two
+more *with the spotter*. Passing solo reps alongside that RIR adds them and
+quietly re-inflates the number — worse than the bug it replaces, because it
+looks corrected. If help was needed on rep six there was nothing left at rep
+five, so the solo count IS the limit and reserve is zero by construction. A
+mutation that reuses the RIR reports 120 where the honest figure is 112.5.
+
+A set where every rep was assisted has no estimate at all — nothing was
+demonstrated unaided. Absent rather than zero, the same refusal the calorie
+model makes without a bodyweight.
+
+### Double progression reads solo reps too
+
+The rule advances reps inside a range until every working set reaches the top,
+then moves the load. Counting spotted reps toward that lets a spotter walk an
+athlete up to a weight they cannot hold — a deterministic rule recommending a
+load the evidence does not support, which is the one thing it must not do.
+
+Rep PRs likewise: `RecordMostReps` exists only for `load_type: 'reps'`, which is
+bodyweight work — assisted pull-ups exactly. Twelve reps with four assisted is a
+PR of eight.
+
+`LastReps` still reports the full count so history matches what was logged;
+`LastAssistedReps` rides alongside, so a client can render "8 (5 alone)" without
+inferring either.
+
+### Three edits that looked applied and were not
+
+Worth recording as a set, because they are the same mistake in three costumes and
+all three passed a build:
+
+1. Two SQL comments broke their own Go **raw string literal** by quoting an
+   identifier in backticks. Caught by the compiler — the cheap one.
+2. A `replace` matched the wrong query, adding `assisted_reps` twice to one CTE
+   and never to the one that needed it. Caught by the test suite: eleven field
+   descriptions against twelve destinations.
+3. **A test edit silently no-op'd**, because the anchor no longer matched and the
+   replace was unasserted. The rep-PR assertion was never in the file, so the
+   mutation that should have killed it stayed green **three times** while I
+   re-ran it looking for a bug in the query. Only printing the record showed the
+   query was fine and the assertion absent.
+
+The third is the one to take seriously. An unasserted string replace is a silent
+no-op, and a test asserting inside a filter needs proof the filter matched — which
+is why the rep-PR check now carries a `sawRepRecord` flag. Both are the same
+failure the project has recorded before under "a test that skips is
+indistinguishable from one that passes".
+
+### What review caught: the change was half-applied
+
+Three blocking findings, and the first is the one that mattered.
+
+**The effort gates still trusted the RIR on assisted sets.** `repSpread` had
+migrated to solo reps; `allSetsHadReserve` and `tookToFailure` had not. Three
+sets of ten-with-two-assisted at RIR 2 therefore read as "every set hit the top
+of the range with something left" and the plan said **add weight** — a spotter
+walking the athlete onto a heavier bar, which is verbatim what `repSpread`'s own
+new comment says the change exists to prevent. The headline was true of the reps
+and false of the reserve. `reserveOf` now returns zero for any assisted set, so
+both gates inherit one rule; a spotted session consequently reads as taken to
+failure, which is correct rather than incidental.
+
+**`bestOneRMSets` still filtered on full reps** while `BestOneRMs` filtered on
+solo. An assisted set with twelve total and two forced wins the estimate and is
+then never fetched to prove it: the equality recompute matches nothing and the
+`estimated_1rm` record vanishes while the suggestion still reports the number.
+That is the "record silently loses its evidence" failure the same file's comment
+already warned about, arriving through the fourth query.
+
+**And `reps` on a record meant two things at once.** Subtracting assistance in
+the projection gave heaviest-weight "102.5 × 5" while the 1RM record beside it —
+sourced from a different query — said "× 8" for the same set. `reps` is the full
+count everywhere now, with `assisted_reps` alongside; the solo number moved to
+where it belongs, the rep-PR RANKING, so a PR is still earned unaided without
+the evidence having to misreport it.
+
+### Gaps
+
+- **The client shows neither number.** `last_assisted_reps` is on the wire and
+  nothing renders "8 (5 alone)", so the corrected figures appear without
+  explanation — the same shape as the per-side load fix before its affordance.
+- **Historical records move.** Any set already logged with assistance now scores
+  lower. Only sets recorded since this morning can carry it, so the blast radius
+  is a day, but a record that quietly drops is worth a word in the UI.
+- Whether a heaviest-weight record should show solo or logged reps as evidence is
+  unexamined; it currently shows solo, for consistency with the estimate.
+
 ## Open items / known gaps as of this entry
 
 - **`profile` still borrows a catalog row it never seeds.** One failure (`TestExerciseUnits_SetClearAndScope`, `unknown exercise "bench-press"`) against a pristine migrated database; `session` and `workout` are both converted (entries above), and `workout` is the pattern to copy — prefix-preserving ids, `requireUnsorted` where order matters, FK-ordered cleanup in `newTestRepo`. Until it is done, renaming `exercise` to sort later, or giving its uncleaned `Seed()` test the `t.Cleanup` its neighbours have, turns that package red.

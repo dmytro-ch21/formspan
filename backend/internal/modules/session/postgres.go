@@ -471,7 +471,7 @@ func (r *PostgresRepository) RecentEfforts(
 	rows, err := r.pool.Query(ctx, `
 		WITH ranked AS (
 			SELECT ss.exercise_id, ss.session_id, s.started_at, ss.position,
-			       ss.set_type, ss.reps, ss.weight_kg, ss.rir, ss.rpe,
+			       ss.set_type, ss.reps, ss.weight_kg, ss.rir, ss.rpe, ss.assisted_reps,
 			       DENSE_RANK() OVER (
 			           PARTITION BY ss.exercise_id
 			           ORDER BY s.started_at DESC, ss.session_id
@@ -506,7 +506,7 @@ func (r *PostgresRepository) RecentEfforts(
 		-- traffic for values that never vary.
 		SELECT ex.id, e.movement_pattern, e.load_type,
 		       r.session_id, r.started_at, r.position, r.set_type,
-		       r.reps, r.weight_kg, r.rir, r.rpe
+		       r.reps, r.weight_kg, r.rir, r.rpe, r.assisted_reps
 		FROM unnest($2::text[]) AS ex(id)
 		JOIN exercises e ON e.id = ex.id
 		LEFT JOIN ranked r ON r.exercise_id = ex.id AND r.session_rank <= $3
@@ -531,7 +531,7 @@ func (r *PostgresRepository) RecentEfforts(
 		)
 		if err := rows.Scan(&exerciseID, &pattern, &loadType,
 			&sessionID, &startedAt, &position, &setType,
-			&s.Reps, &s.WeightKg, &s.RIR, &s.RPE); err != nil {
+			&s.Reps, &s.WeightKg, &s.RIR, &s.RPE, &s.AssistedReps); err != nil {
 			return nil, fmt.Errorf("session: scan recent effort: %w", err)
 		}
 
@@ -935,7 +935,7 @@ func (r *PostgresRepository) BestOneRMs(
 	// 1x140 (140). This filter cannot.
 	rows, err := r.pool.Query(ctx, `
 		WITH candidate AS (
-			SELECT ss.exercise_id, ss.reps, ss.weight_kg, ss.rir, ss.rpe,
+			SELECT ss.exercise_id, ss.reps, ss.weight_kg, ss.rir, ss.rpe, ss.assisted_reps,
 			       MAX(ss.weight_kg) OVER (PARTITION BY ss.exercise_id) AS heaviest
 			-- No join: the owner is on the row, so this seeks straight into
 			-- session_sets_user_exercise_idx instead of scanning either every
@@ -970,13 +970,33 @@ func (r *PostgresRepository) BestOneRMs(
 			  -- than to NULL. It stays because the expression is then correct
 			  -- under ordinary NULL propagation too — don't "simplify" this
 			  -- into a CASE without re-checking the no-effort row.
-			  AND ss.reps + COALESCE(
-			        ss.rir::numeric,
-			        GREATEST(0, 10 - LEAST(ss.rpe, 10)),
-			        0
-			      ) <= $3
+			  --
+			  -- ASSISTED SETS TAKE THE OTHER ARM, and both halves of that
+			  -- matter. EstimateSetOneRM estimates an assisted set from the
+			  -- SOLO reps and discards the recorded effort — if a spotter was
+			  -- needed on rep six, there was nothing left at rep five, so the
+			  -- solo count IS the limit and adding an RIR on top would
+			  -- re-inflate exactly what this is correcting. The filter has to
+			  -- mirror that or the pool disagrees with the estimate.
+			  AND (CASE
+			         WHEN COALESCE(ss.assisted_reps, 0) > 0
+			           THEN (ss.reps - ss.assisted_reps)::numeric
+			         ELSE ss.reps + COALESCE(
+			                ss.rir::numeric,
+			                GREATEST(0, 10 - LEAST(ss.rpe, 10)),
+			                0
+			              )
+			       END) <= $3
+			  -- A set where EVERY rep was assisted demonstrates no unaided
+			  -- capability, so EstimateSetOneRM refuses it — and an excluded
+			  -- row must not stay in this pool, because heaviest is a MAX
+			  -- over candidates. It would set the bar at its own weight,
+			  -- contribute no estimate, and prune every lighter set that could
+			  -- have scored. That is the precise failure the paragraph above
+			  -- records, arriving by a new route.
+			  AND (ss.assisted_reps IS NULL OR ss.assisted_reps < ss.reps)
 		)
-		SELECT exercise_id, reps, weight_kg, rir, rpe
+		SELECT exercise_id, reps, weight_kg, rir, rpe, assisted_reps
 		FROM candidate
 		WHERE weight_kg * $4 >= heaviest`,
 		userID, exerciseIDs, maxEstimableReps, maxOneRMMultiplier)
@@ -988,7 +1008,8 @@ func (r *PostgresRepository) BestOneRMs(
 	for rows.Next() {
 		var id string
 		var set Set
-		if err := rows.Scan(&id, &set.Reps, &set.WeightKg, &set.RIR, &set.RPE); err != nil {
+		if err := rows.Scan(&id, &set.Reps, &set.WeightKg, &set.RIR, &set.RPE,
+			&set.AssistedReps); err != nil {
 			return nil, fmt.Errorf("session: best 1rm scan: %w", err)
 		}
 		if set.Reps == nil || set.WeightKg == nil {
@@ -996,7 +1017,7 @@ func (r *PostgresRepository) BestOneRMs(
 			// turn a filter change into a panic.
 			continue
 		}
-		est, ok := EstimateOneRM(*set.Reps, *set.WeightKg, set.RIR, set.RPE)
+		est, ok := EstimateSetOneRM(set)
 		if ok && est > out[id] {
 			out[id] = est
 		}
@@ -1066,7 +1087,18 @@ func (r *PostgresRepository) Records(
 	// would flip between requests.
 	rows, err := r.pool.Query(ctx, `
 		WITH scoped AS (
-			SELECT ss.id, ss.exercise_id, ss.reps, ss.weight_kg, ss.seconds,
+			-- reps is the FULL count and assisted_reps rides alongside, so a
+			-- record's evidence matches what the athlete logged and a client can
+			-- render "8 (5 alone)". Subtracting it in the projection was tried
+			-- first and gave one response two meanings: the 1RM record carries
+			-- full reps (it comes from bestOneRMSets), so heaviest said "× 5"
+			-- while the 1RM beside it said "× 8" for the same set.
+			--
+			-- The SOLO number is applied where it belongs — the rep-PR RANKING
+			-- below — so a PR is still what was earned unaided without the
+			-- displayed evidence having to lie about it.
+			SELECT ss.id, ss.exercise_id,
+			       ss.reps, ss.assisted_reps, ss.weight_kg, ss.seconds,
 			       ss.distance_m, ss.rir, ss.rpe, ss.session_id, s.started_at
 			FROM session_sets ss
 			JOIN sessions s ON s.id = ss.session_id
@@ -1080,12 +1112,18 @@ func (r *PostgresRepository) Records(
 			SELECT *,
 			  ROW_NUMBER() OVER (PARTITION BY exercise_id ORDER BY (CASE WHEN reps IS NULL THEN NULL ELSE weight_kg END)
 			                    DESC NULLS LAST, started_at, id) AS rn_weight,
-			  ROW_NUMBER() OVER (PARTITION BY exercise_id ORDER BY reps       DESC NULLS LAST, started_at, id) AS rn_reps,
+			  -- Ranked on SOLO reps: a rep PR is a capability claim, so twelve
+			  -- with four assisted loses to a clean nine. NULLS LAST still keys
+			  -- on the raw column, because a set with no reps has no rep PR.
+			  ROW_NUMBER() OVER (PARTITION BY exercise_id ORDER BY
+			                    (CASE WHEN reps IS NULL THEN NULL
+			                          ELSE reps - COALESCE(assisted_reps, 0) END)
+			                    DESC NULLS LAST, started_at, id) AS rn_reps,
 			  ROW_NUMBER() OVER (PARTITION BY exercise_id ORDER BY seconds    DESC NULLS LAST, started_at, id) AS rn_seconds,
 			  ROW_NUMBER() OVER (PARTITION BY exercise_id ORDER BY distance_m DESC NULLS LAST, started_at, id) AS rn_distance
 			FROM scoped
 		)
-		SELECT exercise_id, reps, weight_kg, seconds, distance_m, rir, rpe,
+		SELECT exercise_id, reps, assisted_reps, weight_kg, seconds, distance_m, rir, rpe,
 		       session_id, started_at,
 		       rn_weight = 1, rn_reps = 1, rn_seconds = 1, rn_distance = 1
 		FROM ranked
@@ -1104,7 +1142,7 @@ func (r *PostgresRepository) Records(
 	for rows.Next() {
 		var id string
 		var c candidate
-		if err := rows.Scan(&id, &c.rec.Reps, &c.rec.WeightKg, &c.rec.Seconds,
+		if err := rows.Scan(&id, &c.rec.Reps, &c.rec.AssistedReps, &c.rec.WeightKg, &c.rec.Seconds,
 			&c.rec.DistanceM, &c.rec.RIR, &c.rec.RPE, &c.rec.SessionID,
 			&c.rec.AchievedAt, &c.bestW, &c.bestR, &c.bestS, &c.bestD); err != nil {
 			return nil, fmt.Errorf("session: records scan: %w", err)
@@ -1219,13 +1257,20 @@ func (r *PostgresRepository) bestOneRMSets(
 		return out, nil
 	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT ss.exercise_id, ss.reps, ss.weight_kg, ss.rir, ss.rpe,
+		SELECT ss.exercise_id, ss.reps, ss.weight_kg, ss.rir, ss.rpe, ss.assisted_reps,
 		       ss.session_id, s.started_at
 		FROM session_sets ss
 		JOIN sessions s ON s.id = ss.session_id
 		WHERE ss.user_id = $1 AND ss.exercise_id = ANY($2) AND `+workingSet+`
 		  AND ss.reps IS NOT NULL AND ss.weight_kg IS NOT NULL
-		  AND ss.reps <= $3`, userID, ids, maxEstimableReps)
+		  -- SOLO reps, mirroring BestOneRMs' pool. Filtering on the full count
+		  -- here while the pool filters on solo means an assisted set with, say,
+		  -- 12 reps and 2 forced wins the estimate and is then never fetched to
+		  -- prove it: the equality recompute matches nothing, and the
+		  -- estimated_1rm record vanishes while Suggestions still reports the
+		  -- number. Two surfaces disagreeing in front of the athlete — the
+		  -- failure the comment below names, arriving through the fourth query.
+		  AND (ss.reps - COALESCE(ss.assisted_reps, 0)) <= $3`, userID, ids, maxEstimableReps)
 	if err != nil {
 		return nil, fmt.Errorf("session: 1rm evidence: %w", err)
 	}
@@ -1234,10 +1279,17 @@ func (r *PostgresRepository) bestOneRMSets(
 		var id string
 		var rec Record
 		if err := rows.Scan(&id, &rec.Reps, &rec.WeightKg, &rec.RIR, &rec.RPE,
-			&rec.SessionID, &rec.AchievedAt); err != nil {
+			&rec.AssistedReps, &rec.SessionID, &rec.AchievedAt); err != nil {
 			return nil, fmt.Errorf("session: 1rm evidence scan: %w", err)
 		}
-		est, ok := EstimateOneRM(*rec.Reps, *rec.WeightKg, rec.RIR, rec.RPE)
+		// The SAME rule BestOneRMs applied. This finds the set that produced
+		// the winning number by recomputing it and comparing for equality — so
+		// if the two ever estimate differently, no row matches and the record
+		// silently loses its evidence.
+		est, ok := EstimateSetOneRM(Set{
+			Reps: rec.Reps, WeightKg: rec.WeightKg,
+			RIR: rec.RIR, RPE: rec.RPE, AssistedReps: rec.AssistedReps,
+		})
 		// Float equality is safe here: both sides come from the identical
 		// function over the identical row, so this is identity rather than
 		// approximation.

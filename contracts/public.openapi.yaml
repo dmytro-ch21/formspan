@@ -1775,7 +1775,30 @@ components:
           nullable: true
           description: When the most recent session containing it started.
         last_weight_kg: { type: number, nullable: true, description: The top set's load. }
-        last_reps: { type: integer, nullable: true, description: The top set's own reps. }
+        last_reps:
+          type: integer
+          nullable: true
+          description: >
+            The top set's own reps — the FULL count, assisted included, so it
+            matches what the athlete logged and sees in their history.
+        last_assisted_reps:
+          type: integer
+          nullable: true
+          description: >
+            How many of `last_reps` had help. Absent means none recorded.
+
+
+            `last_reps - last_assisted_reps` is what was done unaided, and it is
+            what the rep-range progression is measured against — counting
+            spotted reps toward a range would let a spotter walk the athlete up
+            to a load the evidence does not support. The estimated 1RM uses the
+            same number, and DISCARDS `last_rir`/`last_rpe` when there is
+            assistance: an effort rating on an assisted set describes the whole
+            set, so adding it to the solo reps would re-inflate the estimate.
+
+
+            Both numbers are sent so a client can render "8 (5 alone)" without
+            inferring either.
         last_rir: { type: integer, nullable: true, description: The top set's reserve. }
         last_rpe: { type: number, nullable: true, description: The top set's RPE. }
         last_min_reps:
@@ -1954,6 +1977,18 @@ components:
         distance_m: { type: integer, nullable: true }
         rir: { type: integer, nullable: true }
         rpe: { type: number, nullable: true }
+        assisted_reps:
+          type: integer
+          nullable: true
+          description: >
+            How many of `reps` had help. `reps` is the FULL count on every record
+            kind, so a record's evidence matches what the athlete logged — render
+            "12 (8 alone)" rather than making the client infer either number.
+
+
+            The rep PR is nevertheless RANKED on the unaided count: twelve reps
+            with four assisted loses to a clean nine, because a PR is a claim
+            about what you did yourself.
         achieved_at: { type: string, format: date-time }
         session_id: { type: string }
         is_recent:
