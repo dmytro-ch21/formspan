@@ -3,9 +3,12 @@ import {
   emptyDropSet,
   setOrdinals,
   soloReps,
+  swapExercise,
   withSetChange,
   type LoggedSet,
 } from '../sessions';
+import type { Exercise } from '../exercises';
+import { withSetMode } from '../setMode';
 
 const set = (over: Partial<LoggedSet> = {}): LoggedSet => ({
   exercise_id: 'bench-press',
@@ -162,5 +165,44 @@ describe('editing reps after assistance was recorded', () => {
     const changed = withSetChange(set({ reps: 8, assisted_reps: 3 }), { weight_kg: 60 });
     expect(changed.weight_kg).toBe(60);
     expect(changed.assisted_reps).toBe(3);
+  });
+});
+
+describe('assistance never outlives the reps it describes', () => {
+  // Both of these produce `{ reps: null, assisted_reps: 3 }` if the field is
+  // forgotten — a row the database CHECK refuses. The push then 400s, and
+  // because the Assisted input unmounts when there are no reps, the value is
+  // invisible AND un-clearable: the session stays dirty and re-fails every
+  // sync until the set is deleted. That is worse than a wrong number.
+
+  it('survives neither a shape-changing swap', () => {
+    const timed = { id: 'plank', load_type: 'time' } as Exercise;
+    const [swapped] = swapExercise(
+      [set({ reps: 8, assisted_reps: 3 })],
+      'bench-press',
+      timed,
+      'weight_reps',
+    );
+    expect(swapped.reps).toBeNull();
+    expect(swapped.assisted_reps ?? null).toBeNull();
+  });
+
+  it('nor a same-shape swap, because it is a judgement about one movement', () => {
+    const other = { id: 'incline-bench-press', load_type: 'weight_reps' } as Exercise;
+    const [swapped] = swapExercise(
+      [set({ reps: 8, assisted_reps: 3 })],
+      'bench-press',
+      other,
+      'weight_reps',
+    );
+    expect(swapped.assisted_reps ?? null).toBeNull();
+  });
+
+  it('nor a flip to time mode', () => {
+    // Assisted pull-ups are `load_type: 'reps'` — dual-mode, and the flagship
+    // case for the whole field. This sequence is ordinary, not contrived.
+    const timed = withSetMode(set({ reps: 8, assisted_reps: 3, weight_kg: null }), 'reps', 'time');
+    expect(timed.reps).toBeNull();
+    expect(timed.assisted_reps ?? null).toBeNull();
   });
 });

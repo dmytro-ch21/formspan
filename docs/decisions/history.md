@@ -19388,6 +19388,19 @@ achievement, and this app reserves the accent for what was earned.
 - **A drop can still be reordered away from its parent**, which re-parents it —
   the inherent cost of adjacency. `+ Drop` inserts one in the right place, and
   nothing stops a later drag from moving it.
+- **The header still counts a drop as a set, so one screen gives two answers.**
+  The rows now number "225x3 then a drop" as one set, and the Sets tile above
+  them says 2 — because `working_sets` is `completed AND set_type <> 'warmup'`
+  on the server, mirrored exactly in `localVolume`, and a completed drop
+  satisfies it. Raised in review, and deliberately NOT patched here: the mirror
+  must match the server exactly (its own comment says so), so changing it is a
+  cross-stack decision about whether a drop is a set for volume purposes —
+  which is a real judgement, not an oversight. It also feeds Today and the
+  calendar. Right now the ordinals and the tile disagree in front of the
+  athlete, and that is the thing to fix next.
+- **`dropsOf` has no consumer.** The rendering uses `setOrdinals` and the row's
+  own `set_type`; `dropsOf` exists to mirror the server for whatever reads a
+  drop group next. Staged deliberately, but it is dead code until then.
 - **Grip is not modelled.** Regular, neutral, reversed and angled are the next
   request, and they are a property of the EFFORT rather than the movement — the
   same shape as assistance, not a catalog row. Recorded here so the catalog does

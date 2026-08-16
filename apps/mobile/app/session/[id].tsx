@@ -1962,6 +1962,11 @@ function SetRow({
   // Named in every field's label, so VoiceOver reads "Reps for set 2 of Back
   // Squat" rather than a column of identical "Reps".
   const exerciseName = exercise?.name ?? set.exercise_id;
+  // What every control in this row calls itself. A drop borrows its parent's
+  // NUMBER, so without this its tick, its remove and its fields all announce
+  // exactly what the parent's do — two distinct controls, one label, and a
+  // VoiceOver user cannot tell which they are about to press.
+  const setName = isDrop ? `the drop off set ${ordinal}` : `set ${ordinal}`;
 
   const num = (key: keyof LoggedSet, whole = false) => (text: string) => {
     const raw = text.trim() === '' ? null : Number(text.replace(',', '.'));
@@ -2033,7 +2038,7 @@ function SetRow({
             style={[styles.tick, set.completed && styles.tickDone]}
             accessibilityRole="checkbox"
             accessibilityState={{ checked: set.completed }}
-            accessibilityLabel={`Set ${ordinal} done`}
+            accessibilityLabel={`${setName} done`}
             testID={`done-${index}`}
           >
             <Text style={[styles.tickMark, set.completed && styles.tickMarkDone]}>✓</Text>
@@ -2099,7 +2104,7 @@ function SetRow({
                   // there would make the unit useless for exactly the durations
                   // it exists for.
                   integer={m !== 'weight' && !(m === 'seconds' && duration === 'minutes')}
-                  accessibilityLabel={`${label} for set ${ordinal} of ${exerciseName}`}
+                  accessibilityLabel={`${label} for ${setName} of ${exerciseName}`}
                   testID={`set-${index}-${m}`}
                 />
               );
@@ -2147,7 +2152,7 @@ function SetRow({
                     : 'Reps with help'
                 }
                 integer
-                accessibilityLabel={`Reps completed with help on set ${ordinal} of ${exerciseName}`}
+                accessibilityLabel={`Reps completed with help on ${setName} of ${exerciseName}`}
                 testID={`set-${index}-assisted`}
               />
             </View>
@@ -2166,7 +2171,7 @@ function SetRow({
               onChangeText={num('rir', true)}
               hint="Reps left"
               integer
-              accessibilityLabel={`Reps in reserve for set ${ordinal} of ${exerciseName}`}
+              accessibilityLabel={`Reps in reserve for ${setName} of ${exerciseName}`}
               testID={`set-${index}-rir`}
             />
             <Field

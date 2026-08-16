@@ -356,6 +356,19 @@ export function swapExercise(
       : {
           ...s,
           exercise_id: to.id,
+          // Cleared ALWAYS, not just when the shape changes — for the reason
+          // rir and rpe are cleared two lines down, and for a harder one.
+          //
+          // The soft reason: assistance is a judgement about one set on one
+          // movement, and it does not transfer to a different movement.
+          //
+          // The one that wedges sync: a shape-changing swap nulls `reps`, and a
+          // surviving `assisted_reps` then describes a set with no rep count.
+          // The database CHECK refuses that row, so the next push 400s — and the
+          // Assisted field unmounts when there are no reps, so the value is
+          // invisible AND un-clearable. The session stays dirty and re-fails
+          // every sync until the set is deleted.
+          assisted_reps: null,
           // CLEARED, always — a factor describes the exercise, so it cannot
           // survive becoming a different one. Swapping dumbbells for a barbell
           // kept the ×2 and counted the barbell double; and because the pull
