@@ -39,6 +39,7 @@ Each compiles, passes its tests, and is wrong. Read before starting the related 
 - [ ] **F1** — Virtualise the social feed. Plain `ScrollView` holding full cards (~25–35 native views each, 30/page, +30 per "Show older"). `KeyboardAwareFlatList` already exists in the codebase. (#210)
 - [ ] **F2** — Show the card at readable size before sharing. Only preview today is a share-sheet thumbnail, so the calorie figure — an inference from body data — is posted sight-unseen. (#210)
 - [ ] **F3** — Review the 80 per-side classifications end to end. Classified by equipment + a hand-written single-implement exclusion list; spot-checks passed, nobody read the list. (#224)
+- [x] **F4** — Share card exported at 3× its intended size. `captureRef`'s `width` is POINTS and the renderer multiplies by device scale, so 1080 became 3240px/10.5 MB on a 3× phone — the density dependence its own comment claimed to prevent. Measured 1080px/1.6 MB after. (#232) — done
 
 ## N — New work
 
@@ -65,6 +66,7 @@ Each compiles, passes its tests, and is wrong. Read before starting the related 
 - [ ] **H1** — `TestEverySeededTechniqueExistsInTheLibrary` skips in CI (CI never seeds), so the suite reports success while the assertion never runs. *In progress — spun off.*
 - [ ] **H2** — Document that `-p 1` also enforces cross-package test ordering, not just global counts: `session` alone against an unseeded database fails 23 tests. *In progress — spun off.*
 - [ ] **H3** — Drop stale local databases: `vola_merge`, `vola_mig`, and the `vola_test_*` set from merged branches. They drift from main's schema and read as a broken checkout.
+- [ ] **H4** — `sharedScreen.test.tsx` "drops the accepted row locally" is load-sensitive: it exhausts its 10s `asyncUtilTimeout` and fails ~1 run in 3 once the suite count reaches 83. Measured: main 0/4, this branch minus one unrelated new test file 0/4, with it 1/3 — so any 83rd suite trips it, not that file's content. The stable-`getToken` cause is ruled out (the suite uses jest.setup's). Root cause unknown. (#232)
 
 ---
 

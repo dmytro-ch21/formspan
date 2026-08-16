@@ -1,6 +1,6 @@
 import * as Sharing from 'expo-sharing';
 import { captureRef } from 'react-native-view-shot';
-import type { View } from 'react-native';
+import { PixelRatio, type View } from 'react-native';
 import type { RefObject } from 'react';
 
 /**
@@ -23,13 +23,20 @@ import type { RefObject } from 'react';
  *
  * ## The temp file is left behind, deliberately
  *
- * `result: 'tmpfile'` writes a ~1-2 MB PNG into the cache directory per share
- * and nothing here removes it. Deleting it would need `expo-file-system` — a
- * THIRD native dependency, on an app that now builds its own binary, where
- * every native module added is a rebuild and a `dyld` version risk. That is a
+ * `result: 'tmpfile'` writes a PNG into the cache directory per share and
+ * nothing here removes it. Deleting it would need `expo-file-system` — a THIRD
+ * native dependency, on an app that now builds its own binary, where every
+ * native module added is a rebuild and a `dyld` version risk. That is a
  * disproportionate price for tidying a directory the OS already purges under
  * pressure and that a reinstall clears. Revisit if anything else in the app
  * needs the filesystem anyway.
+ *
+ * **That trade was priced at "~1-2 MB", and it was measured at 10.5 MB** — the
+ * capture was exporting at 3× the intended size, so each share left a file five
+ * times larger than this paragraph assumed. The size bug is fixed below; the
+ * conclusion survives it, because the real figure is now back inside the
+ * bracket that made leaving it acceptable. Worth re-checking rather than
+ * trusting, if the card ever grows.
  *
  * ## Why PNG and not JPEG
  *
@@ -37,7 +44,38 @@ import type { RefObject } from 'react';
  * badly around 1px rules on dark grounds, which is most of this design.
  */
 
+/** How wide the exported image is, in PIXELS. */
 export const CARD_EXPORT_WIDTH = 1080;
+
+/**
+ * The same square, in the unit `captureRef` actually takes: POINTS.
+ *
+ * **`width` and `height` are points, not pixels, and the renderer multiplies
+ * them by the device scale.** From `react-native-view-shot`'s
+ * `ios/RNViewShot.mm`, the format is built with `rendererFormat.scale = 0`
+ * ("use device scale") and handed the requested size — so the bitmap comes back
+ * at `size × scale`. Passing 1080 therefore exported **3240 × 3240 at 10.5 MB**
+ * on a 3× phone and would have exported 2160 on a 2× one.
+ *
+ * Which is precisely the failure the constant was introduced to prevent. The
+ * comment here used to read "explicit pixel size rather than a scale factor: a
+ * scale would make the exported image depend on the phone's screen density" —
+ * a correct argument attached to a value that did not carry it out. The number
+ * was not neutral about density; it was multiplied by it.
+ *
+ * Dividing first is what makes the promise true: 360 pt × 3 and 540 pt × 2 both
+ * land on 1080 px, so the same session posts at the same size from every phone.
+ *
+ * Non-integer Android scales (2.625, 3.5) can land a pixel either side after
+ * rounding. That is a rounding error, not a density dependence, and nothing
+ * downstream can tell 1079 from 1080.
+ */
+export function cardCaptureSize(scale = PixelRatio.get()): number {
+  // A zero or nonsense scale would divide the card into something huge or
+  // infinite. Falling back to 1 exports at 1080 pt, which is wrong by the same
+  // factor the old code was — bounded and recognisable beats unbounded.
+  return CARD_EXPORT_WIDTH / (Number.isFinite(scale) && scale > 0 ? scale : 1);
+}
 
 export type ShareResult =
   | { ok: true }
@@ -87,14 +125,15 @@ export async function shareCard(ref: RefObject<View | null>): Promise<ShareResul
   // indistinguishable from the athlete changing their mind.
   let uri: string;
   try {
+    // Points, converted from the pixel size we actually want — see
+    // `cardCaptureSize` for why passing the pixel figure straight in exported
+    // a 3240px, 10.5 MB card from a 3× phone.
+    const side = cardCaptureSize();
     uri = await captureRef(ref, {
       format: 'png',
       quality: 1,
-      // Explicit pixel size rather than a scale factor: a scale would make the
-      // exported image depend on the phone's screen density, so the same
-      // session would post at 780px from an SE and 1170px from a Pro Max.
-      width: CARD_EXPORT_WIDTH,
-      height: CARD_EXPORT_WIDTH,
+      width: side,
+      height: side,
       result: 'tmpfile',
     });
   } catch (err) {

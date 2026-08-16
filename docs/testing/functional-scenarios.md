@@ -6920,6 +6920,12 @@ equivalent — the capture is native.
 
 ### The capture itself
 
+- **The exported PNG is 1080 x 1080, on every phone.** `captureRef`'s `width` is
+  in POINTS and the renderer multiplies by device scale, so passing the pixel
+  figure exported 3240px / 10.5 MB from a 3x device. Check with `file` on the
+  capture, not the share sheet's thumbnail — the thumbnail looks identical at
+  either size. Worth repeating on a 2x device (SE), which is the half never
+  observed.
 - **The exported PNG is not blank.** The card is mounted off-screen and a
   `ScrollView` clips its content, so a host that drifts inside one still renders,
   still passes typecheck, and produces an empty image. Open the share sheet and
