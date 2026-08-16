@@ -66,7 +66,7 @@ Each compiles, passes its tests, and is wrong. Read before starting the related 
 - [ ] **H1** — `TestEverySeededTechniqueExistsInTheLibrary` skips in CI (CI never seeds), so the suite reports success while the assertion never runs. *In progress — spun off.*
 - [ ] **H2** — Document that `-p 1` also enforces cross-package test ordering, not just global counts: `session` alone against an unseeded database fails 23 tests. *In progress — spun off.*
 - [ ] **H3** — Drop stale local databases: `vola_merge`, `vola_mig`, and the `vola_test_*` set from merged branches. They drift from main's schema and read as a broken checkout.
-- [ ] **H4** — `sharedScreen.test.tsx` "drops the accepted row locally" is load-sensitive: it exhausts its 10s `asyncUtilTimeout` and fails ~1 run in 3 once the suite count reaches 83. Measured: main 0/4, this branch minus one unrelated new test file 0/4, with it 1/3 — so any 83rd suite trips it, not that file's content. The stable-`getToken` cause is ruled out (the suite uses jest.setup's). Root cause unknown. (#232)
+- [ ] **H4** — `sharedScreen.test.tsx` "drops the accepted row locally" failed once in 3 full-suite runs during #235, exhausting its 10s `asyncUtilTimeout`. **Not reproduced since: 0 failures in 92 runs**, including under 8-way CPU saturation and alongside the web/admin builds, with headroom measured at 2.4–4.0s of the 10s budget. That puts the rate near or under 3% rather than the 1-in-3 the first sample suggested. Cause never diagnosed and the original failure was real, so this stays open — but treat the rate as low, not as a coin flip. (#232 #235)
 
 ---
 
