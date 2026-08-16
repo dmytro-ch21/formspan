@@ -6853,3 +6853,35 @@ is the specific regression this guards.
   away from its parent re-parents it. That is the known cost of adjacency —
   verify the client cannot do it by accident.
 
+## Logging assistance and drops on the phone (mobile session screen)
+
+### Assisted reps
+
+- The **Assisted** field appears only on a set that has reps. On a plank or a
+  run it must be absent — the API rejects assisted reps without a rep count, so
+  a visible field there is a control that can only produce an error.
+- Enter 3 on a set of 8 → the hint reads "5 on your own".
+- **Clear the field → the value is unrecorded, NOT 0.** Reopen the set: it is
+  empty, not zero. This is the distinction the whole feature rests on; a UI that
+  writes 0 on clear asserts the set was unaided.
+- Type 12 on a set of 8 → **clamps to 8**, no error, no failed save.
+- Finish the session offline, then sync: the value survives. Then EDIT the
+  session and save again — `replaceSets` replaces every row, so this is where a
+  client shape that forgot the field would silently drop it.
+
+### Drop sets
+
+- **+ Drop** appears beside **+ Set** only when the last set has a weight.
+- It inserts directly under its parent, carrying the weight forward and leaving
+  reps EMPTY — the reps are the one field certainly different at a lower weight.
+- Effort and assistance are not carried onto the drop.
+- The drop shows **`↳`**, not a set number, and is indented with a rule. Add a
+  drop to set 3 and the next ordinary set is still **4**, not 5 — the athlete
+  did four sets, not five.
+- Two drops in a row both hang off the same parent and both show `↳`.
+- With VoiceOver the drop announces as **"drop off set 3"**, never as a set of
+  its own.
+- **Reorder a drop away from its parent** — it re-parents to whatever it now
+  follows. That is the known cost of expressing the relationship as order;
+  verify the UI does not make it easy to do by accident.
+

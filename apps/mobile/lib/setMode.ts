@@ -107,7 +107,15 @@ export function withSetMode(
   if (!isDualMode(loadType)) return set;
   if (setModeOf(set, loadType) === mode) return set;
   return mode === 'time'
-    ? { ...set, seconds: Math.max(1, Math.round(seconds)), reps: null }
+    ? // `assisted_reps` goes with the reps, and this is the path where
+      // forgetting it wedges a session rather than merely looking wrong.
+      // Assisted pull-ups are `load_type: 'reps'` — a dual-mode exercise and
+      // the flagship case for recording assistance — so "3 of them were
+      // spotted, now switch this to time" is an ordinary sequence, not a
+      // contrived one. Left behind, the value describes a set with no rep
+      // count: the database CHECK refuses the row, the push 400s, and the
+      // Assisted field has already unmounted, so it cannot be seen or cleared.
+      { ...set, seconds: Math.max(1, Math.round(seconds)), reps: null, assisted_reps: null }
     : { ...set, seconds: null };
 }
 
