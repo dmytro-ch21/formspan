@@ -32,6 +32,25 @@ export type LoggedSet = {
   weight_kg: number | null;
   seconds: number | null;
   distance_m: number | null;
+  /**
+   * How many of `reps` somebody else helped with — a spotter, a band, an
+   * assisted-pull-up machine.
+   *
+   * `reps` holds the FULL count, assisted included, so every volume figure
+   * reads what it always did. `soloReps(set)` is the number worth progressing
+   * against: "225 for 5 then 3 with a spotter" is 8 reps of work and 5 of
+   * capability.
+   *
+   * **null is UNRECORDED and 0 is "none of them"**, and they must stay
+   * distinguishable all the way to the server — nobody should have to answer
+   * this on every set, and treating absent as 0 would claim every set logged
+   * before the field existed was unaided.
+   *
+   * Optional on the type so older cached rows parse. It IS sent on writes, and
+   * has to be: the server replaces a session's sets wholesale, so a shape that
+   * omits it wipes the column on the first edit.
+   */
+  assisted_reps?: number | null;
   /** Reps in reserve. 0 is meaningful — nothing left in the tank. */
   rir: number | null;
   /** 1–10, half steps. RPE 8 is roughly 2 RIR; record whichever you think in. */
@@ -762,4 +781,66 @@ export function totalWeightKg(set: {
   if (set.weight_kg == null) return 0;
   const factor = set.load_factor && set.load_factor > 1 ? set.load_factor : 1;
   return set.weight_kg * factor;
+}
+
+/**
+ * What the athlete did unaided — the number worth training against.
+ *
+ * Mirrors the server's `SoloReps`. Unrecorded assistance means all of them were
+ * solo: that is what every set logged before the field existed needs, and it
+ * credits what `reps` already claimed rather than revising history downward.
+ */
+export function soloReps(set: { reps: number | null; assisted_reps?: number | null }): number {
+  if (set.reps == null) return 0;
+  if (set.assisted_reps == null) return set.reps;
+  return Math.max(0, set.reps - set.assisted_reps);
+}
+
+/**
+ * A drop set to hang off `from` — the next rung down in a drop.
+ *
+ * Weight carries forward UNCHANGED rather than at some percentage. A drop is
+ * lighter by definition, so an invented 80% looks helpful and is a guess about
+ * somebody's training: they would have to clear it and retype, which is worse
+ * than editing down from the number they just lifted.
+ *
+ * Reps are cleared, and that is the difference from an ordinary added set. The
+ * whole point of a drop is that you get a different number at the lower weight;
+ * carrying the parent's reps forward would prefill the one field that is
+ * certainly wrong.
+ *
+ * `assisted_reps` is not carried either, for the same reason effort is not: it
+ * is a judgement about one set, and prefilling it would record something nobody
+ * assessed.
+ */
+export function emptyDropSet(from: LoggedSet, position: number): LoggedSet {
+  return {
+    ...emptySet(from.exercise_id, position, from),
+    set_type: 'drop',
+    reps: null,
+    rir: null,
+    rpe: null,
+  };
+}
+
+/**
+ * The drop sets hanging off the set at `i` — the consecutive `drop` rows
+ * immediately following it, of the same exercise.
+ *
+ * Mirrors the server's `DropsOf`, including the contiguity rule rather than
+ * "nearest preceding": a drop after a DIFFERENT exercise breaks the run and is
+ * orphaned, so a stray row can never attach reps to somebody else's lift. The
+ * two implementations have to agree, because the relationship exists only as
+ * order — there is no id linking a drop to its parent, and there cannot be one
+ * while the server replaces every row on save.
+ */
+export function dropsOf(sets: LoggedSet[], i: number): LoggedSet[] {
+  if (i < 0 || i >= sets.length || sets[i].set_type === 'drop') return [];
+  const out: LoggedSet[] = [];
+  for (let j = i + 1; j < sets.length; j++) {
+    if (sets[j].set_type !== 'drop') break;
+    if (sets[j].exercise_id !== sets[i].exercise_id) break;
+    out.push(sets[j]);
+  }
+  return out;
 }

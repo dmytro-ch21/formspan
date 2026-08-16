@@ -86,6 +86,7 @@ import * as Haptics from 'expo-haptics';
 import { report } from '@/lib/report';
 import {
   describeSet,
+  emptyDropSet,
   emptySet,
   fetchSuggestions,
   fillForward,
@@ -648,6 +649,33 @@ export default function SessionScreen() {
       [
         ...sets.slice(0, afterIndex + 1),
         emptySet(exerciseID, afterIndex + 1, sets[afterIndex]),
+        ...sets.slice(afterIndex + 1),
+      ].map((s, i) => ({ ...s, position: i })),
+    );
+  }
+
+  /**
+   * A drop off the LAST set of this exercise — strip the weight, keep going.
+   *
+   * Inserted immediately after its parent, because that adjacency IS the
+   * relationship: there is no id linking a drop to the set it came off, and
+   * there cannot be one while the server replaces every row on save. Anything
+   * that moves this row away from its parent re-parents it, which is why the
+   * only way to make one is here, attached to a specific set.
+   *
+   * Same structural change as `addSet` — every later index shifts — so it stops
+   * a running timer for the same reason.
+   *
+   * Takes only the index: the exercise comes from the parent set, because a
+   * drop is defined by the set it hangs off rather than by an exercise chosen
+   * separately. Passing both would let the two disagree.
+   */
+  function addDropSet(afterIndex: number) {
+    stopTimerForStructureChange();
+    commit(
+      [
+        ...sets.slice(0, afterIndex + 1),
+        emptyDropSet(sets[afterIndex], afterIndex + 1),
         ...sets.slice(afterIndex + 1),
       ].map((s, i) => ({ ...s, position: i })),
     );
@@ -1523,15 +1551,34 @@ export default function SessionScreen() {
               })()}
 
               {!finished && (
-                <Pressable
-                  style={styles.addSet}
-                  onPress={() => addSet(g.exerciseID, g.indices[g.indices.length - 1])}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Add another set of ${exercise?.name ?? 'this exercise'}`}
-                  testID={`add-set-${g.exerciseID}`}
-                >
-                  <Text style={[styles.addSetText, { color: accent.ink }]}>+ Set</Text>
-                </Pressable>
+                <View style={styles.addRow}>
+                  <Pressable
+                    style={styles.addSet}
+                    onPress={() => addSet(g.exerciseID, g.indices[g.indices.length - 1])}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Add another set of ${exercise?.name ?? 'this exercise'}`}
+                    testID={`add-set-${g.exerciseID}`}
+                  >
+                    <Text style={[styles.addSetText, { color: accent.ink }]}>+ Set</Text>
+                  </Pressable>
+                  {/* Only where a drop means anything. A drop set is "same
+                      movement, less weight", so it is offered on a set that HAS
+                      a weight — offering it on a plank or a run would be a
+                      control that cannot do anything. */}
+                  {sets[g.indices[g.indices.length - 1]]?.weight_kg != null && (
+                    <Pressable
+                      style={styles.addSet}
+                      onPress={() => addDropSet(g.indices[g.indices.length - 1])}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Add a drop set of ${
+                        exercise?.name ?? 'this exercise'
+                      } — same movement at a lower weight`}
+                      testID={`add-drop-${g.exerciseID}`}
+                    >
+                      <Text style={[styles.addSetText, { color: accent.ink }]}>+ Drop</Text>
+                    </Pressable>
+                  )}
+                </View>
               )}
             </View>
           );
@@ -2419,6 +2466,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   hintApplyText: { color: vola.navy, fontWeight: '700', fontSize: 14 },
+  addRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   addSet: {
     borderWidth: 1,
     borderStyle: 'dashed',
