@@ -1554,6 +1554,23 @@ components:
       required: [exercise_id, position, set_type, notes]
       properties:
         exercise_id: { type: string, example: barbell-back-squat }
+        load_factor:
+          type: integer
+          example: 2
+          description: >
+            How many implements of `weight_kg` were moved: 1 for a barbell, a
+            machine, or a single kettlebell held in two hands; 2 for a PAIR of
+            dumbbells. Total load is `weight_kg x load_factor`.
+
+
+            RESPONSE ONLY — assigned from the exercise's `load_mode`, which is a
+            property of the movement. A client sending it is asserting something
+            about a catalog row it does not own, so writes ignore it.
+
+
+            Absent means 1. Older clients and sets logged before this existed
+            carry no factor, and reading that as zero would erase their volume
+            rather than under-reporting the dumbbell ones.
         position:
           type: integer
           description: Assigned from array order on write, never trusted from the client.
@@ -2144,7 +2161,23 @@ components:
         is_unilateral:
           type: boolean
           description: >
-            Affects volume maths — 8 reps per side is not 8 reps.
+            Affects volume maths — 8 reps per side is not 8 reps. Together with
+            `load_mode` it decides a logged set's `load_factor`: a per_side
+            exercise doubles unless it is unilateral, because then only one
+            implement is moving.
+        load_mode:
+          type: string
+          enum: [total, per_side]
+          description: >
+            How to read a logged `weight_kg` for this movement. `total` — the
+            number is the whole load: a barbell, a machine, or ONE implement
+            held in two hands (a goblet squat, a two-handed swing). `per_side` —
+            it is one of a pair, so the total doubles.
+
+
+            A property of the movement, never of a single set, which is why it
+            lives here. Absent reads as `total`, the safe side: it
+            under-reports rather than inventing weight nobody lifted.
         instructions:
           type: string
         media:

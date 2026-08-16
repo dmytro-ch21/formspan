@@ -19101,6 +19101,141 @@ real calendar, and it expires.** Any test whose subject computes off `new
 Date()` needs the clock pinned, not expectations that happen to hold this
 week.
 
+## 2026-08-16 — A dumbbell press is two dumbbells, and tonnage never knew
+
+`session_sets.weight_kg` has always been a bare number with nothing recording
+whether it describes one hand or the whole load. For a barbell those are the
+same thing, which is why it survived this long. For a pair of dumbbells they
+differ by a factor of two — and the athlete types what is stamped on the
+dumbbell, 30, while every figure built on that number read it as the total.
+
+Everything downstream inherited it: session tonnage, the week's volume, the
+share card and the friends' feed that shipped a week ago, the estimated 1RM, and
+the progression rule that decides what to load next time. None of them were
+wrong *about* the data. They were wrong about what it meant.
+
+Found by asking what "if we do dumbbell then we add the weight for each
+dumbbell" implied, while scoping an unrelated request about exercise variations.
+
+### The model
+
+`exercises.load_mode` — `total` or `per_side` — records the interpretation, and
+`Set.LoadFactor` carries it to the places that multiply. Total load is
+`weight x factor`, where the factor is 2 for a per_side exercise that is not
+unilateral, and 1 otherwise.
+
+**`is_unilateral` cannot decide the classification**, though it decides the
+factor afterwards. A dumbbell bench press is bilateral AND per-hand; a
+single-arm cable row is unilateral AND total. Keying on it is the obvious
+shortcut and is wrong in both directions.
+
+**Equipment alone over-classifies by about a fifth.** The first pass marked 94
+of 504 rows `per_side` and got Goblet Squat and Kettlebell Swing wrong — a
+single implement held in two hands, where the number already IS the total, so
+doubling invents weight nobody lifted. Pullovers, halos, Turkish get-ups and
+windmills are the same shape. With those excluded it is 80, checked row by row
+against the real catalog rather than reasoned about.
+
+### The hole a migration could not close
+
+The migration backfills EXISTING rows. A freshly created database has none: the
+seeder inserts the whole catalog, and every row took the column default. So the
+classification worked on a developer's machine and silently did not exist in
+CI, on a new deploy, or for anybody who reset their local database — and the
+symptom would have been dumbbell tonnage quietly halving again.
+
+Caught by looking rather than by a test — a freshly seeded database reported
+`dumbbell-bench-press` as `total`. `exercises.json` carries `load_mode` now,
+like every other catalog fact, threaded through the seeder's upsert and its
+change-detection tuple, and back out through `cmd/exportcontent` so the next
+export does not strip it.
+
+### Five places computed tonnage, and they all had to move
+
+The session's two aggregates, the feed's, and three separate sums on the phone
+(the week review, the Today header, the calendar). The SQL sites share one
+`tonnageOf` expression for the same reason `workingSet` is shared, and the
+existing SQL-versus-domain parity test is what keeps them honest — **once its
+fixture contained a real pair of dumbbells.** It did not before, so both sides
+agreed trivially at a factor of one and a missing CASE passed green. Its literal
+expectation moved 1000 to 1600, written out rather than computed, because a
+computed expectation applies whatever factor the code applies and agrees with a
+bug.
+
+### The backfill changes historical numbers, on purpose
+
+Dumbbell tonnage roughly doubles for every session already logged. That is a
+correction, not a rewrite — the athlete lifted two and the app counted one — and
+no stored number moves: `weight_kg` still holds exactly what was typed. A volume
+chart that steps up on deploy day is this, and the migration says so where
+somebody debugging it will look.
+
+Zero means one throughout, on both sides of the wire. Every set written before
+this has no factor, and reading zero as zero would turn an under-report on
+dumbbell work into the erasure of every session ever logged.
+
+### What review caught, and one of them was live
+
+**The classification was never served.** `load_mode` went into the contract and
+into the seed file, and no read path selected it — so every `GET /v1/exercises`
+returned `"load_mode": ""`, outside the enum the contract had just declared.
+That is not cosmetic: the share card's tonnage is computed ON THE PHONE, and an
+offline logger cannot double a dumbbell set unless the catalog tells it how to
+read the number. `load_factor` on a server session read never reaches a session
+still in progress.
+
+**And the omission had a second, worse consequence.** `cmd/exportcontent` writes
+`exercises.json` from those same rows, so a console-edited exercise exported as
+`"load_mode": ""` — and because this change had (correctly) added the column to
+the seeder's change-detection tuple, the next deploy ACTIVELY rewrote `per_side`
+back to `total`. The silent halving, reintroduced through the content pipeline,
+on exactly the rows somebody had cared enough to edit.
+
+**CI cannot see it.** The path needs a row with `source='admin'`; CI authors
+nothing, so the export reports "nothing authored in the console; files
+untouched" and a green run proves a round trip that never ran. Both review
+passes reproduced it only by forcing a row to admin ownership by hand — and it
+turned up uncommitted in the worktree mid-review, which is how it was noticed.
+There is now a test that does the forcing.
+
+Two smaller corrections worth keeping because both were confidently wrong:
+
+- The `attachSets` comment justified its LEFT JOIN with "no foreign key to
+  `exercises`". `session_sets_exercise_id_fkey` exists. The join is still the
+  right defensive call — the constraint has no ON DELETE — but the stated reason
+  was false.
+- The migration justified its name-based exclusion list with "a list somebody
+  can read and correct from the admin console". The console cannot set
+  `load_mode` at all: `createWithin` does not write it, and no endpoint updates
+  it. Correcting a misclassification today means editing the seed file and
+  deploying.
+
+Also learned, about a signal that looks informative and is not: `cmd/seed` prints
+`exercises: 761 upserted` on every run, because that number is `len(exercises)` —
+rows submitted, not rows changed. It is a constant and can never answer whether
+a re-seed rewrote anything. `max(updated_at)` can, and does: unchanged across a
+second run, and moving by exactly one row when a value is forced wrong.
+
+### Gaps
+
+- **The console cannot correct a classification.** ~80 rows were classified by
+  equipment and name; the only way to fix one is an edit to `exercises.json` and
+  a deploy. `createWithin` also never writes the column, so every future
+  console-authored dumbbell exercise starts as `total` — the original bug, for
+  new content.
+- **The input affordance is not built.** A per_side exercise does not yet tell
+  the athlete "enter one dumbbell" at the moment of logging, and a logged set
+  does not render "30 x 2 = 60". The arithmetic is right everywhere; the screen
+  does not explain itself yet.
+- **The classification is a starting position, not a verdict.** ~80 rows were
+  classified by equipment and name. The admin console can correct any of them,
+  and nobody has reviewed the list end to end.
+- **Estimated 1RM was left alone deliberately.** A per-hand 1RM is what lifters
+  quote for dumbbell work, so doubling it would produce a number nobody uses —
+  but that means 1RM and tonnage now read `weight_kg` differently, which is
+  defensible and undocumented anywhere a client can see.
+- Nothing here is device-verified.
+
 ## Open items / known gaps as of this entry
 
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

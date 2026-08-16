@@ -78,6 +78,20 @@ type Set struct {
 	Completed bool `json:"completed"`
 
 	Notes string `json:"notes"`
+
+	// LoadFactor is how many implements of `WeightKg` the athlete moved: 1 for
+	// a barbell, a machine, or a single kettlebell held in two hands; 2 for a
+	// pair of dumbbells.
+	//
+	// **SERVER-POPULATED ON READ, AND IGNORED ON WRITE.** It is derived from
+	// the exercise's `load_mode` and `is_unilateral`, which are properties of
+	// the movement — so a client sending one would be asserting something it
+	// cannot know, and about a row it does not own. The repository fills it
+	// from the catalog join; `ReplaceSets` never reads it.
+	//
+	// `json:"load_factor"` is emitted so a client can render "30 kg × 2 = 60"
+	// without a second lookup. Zero means one — see TotalWeightKg.
+	LoadFactor int `json:"load_factor"`
 }
 
 type Session struct {
@@ -117,6 +131,28 @@ type Volume struct {
 	ExerciseIDs []string `json:"exercise_ids"`
 }
 
+// TotalWeightKg is what the athlete actually moved, which is not always the
+// number they typed.
+//
+// `WeightKg` holds what is written on the implement. For a barbell or a machine
+// that is the whole load. For a PAIR of dumbbells it is one of them, and the
+// total is double — which is what `LoadFactor` carries.
+//
+// A zero factor means one, deliberately. Every set written before this existed
+// has no factor, and treating zero as zero would erase the tonnage of every
+// historical session rather than merely under-reporting the dumbbell ones. It
+// also keeps every caller that builds a `Set` by hand — the tests, the sync
+// path — reporting the number they did before.
+func (s Set) TotalWeightKg() float64 {
+	if s.WeightKg == nil {
+		return 0
+	}
+	if s.LoadFactor < 1 {
+		return *s.WeightKg
+	}
+	return *s.WeightKg * float64(s.LoadFactor)
+}
+
 // Summarise computes working volume for a session. Kept in the domain rather
 // than in SQL or a client so both platforms report identical numbers.
 func Summarise(sets []Set) Volume {
@@ -146,7 +182,7 @@ func Summarise(sets []Set) Volume {
 		if s.Reps != nil {
 			v.TotalReps += *s.Reps
 			if s.WeightKg != nil {
-				v.TonnageKg += float64(*s.Reps) * *s.WeightKg
+				v.TonnageKg += float64(*s.Reps) * s.TotalWeightKg()
 			}
 		}
 	}

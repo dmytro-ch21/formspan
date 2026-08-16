@@ -38,6 +38,21 @@ export type LoggedSet = {
   rpe: number | null;
   notes: string;
   /**
+   * How many implements of `weight_kg` were moved: 1 for a barbell, a machine
+   * or one kettlebell in two hands; 2 for a PAIR of dumbbells.
+   *
+   * SERVER-SENT — derived from the exercise's `load_mode`, which is a property
+   * of the movement, so nothing here may invent one. It IS round-tripped on a
+   * write (`replaceSets` PUTs stored sets verbatim) and the API ignores it:
+   * `insertSets` has a fixed column list, and every write responds from a fresh
+   * read. So the value a client holds is always catalog-derived — but that
+   * rests on the server continuing to ignore it, which is why the contract
+   * marks it response-only rather than leaving it to this comment.
+   * Absent (older responses, or a set logged offline before sync) means 1, so
+   * `totalWeightKg` treats undefined as 1 rather than as zero.
+   */
+  load_factor?: number;
+  /**
    * Done. The trigger for progressive volume — the summary counts what's
    * been performed, not what's been planned, so the header climbs as you
    * work rather than starting at the plan's total.
@@ -322,6 +337,13 @@ export function swapExercise(
       : {
           ...s,
           exercise_id: to.id,
+          // CLEARED, always — a factor describes the exercise, so it cannot
+          // survive becoming a different one. Swapping dumbbells for a barbell
+          // kept the ×2 and counted the barbell double; and because the pull
+          // skips dirty rows, that fabricated number survives a whole offline
+          // session, one tab from the Today header. Undefined reads as 1 until
+          // the server answers, which is the safe direction.
+          load_factor: undefined,
           reps: sameShape ? s.reps : null,
           weight_kg: sameShape ? s.weight_kg : null,
           seconds: sameShape ? s.seconds : null,
@@ -719,4 +741,25 @@ export function reorderGroups(
   const moved = order.map((g) => g.slice());
   [moved[groupIndex], moved[target]] = [moved[target], moved[groupIndex]];
   return moved.flat().map((i, position) => ({ ...sets[i], position }));
+}
+
+/**
+ * What was actually moved, which is not always the number that was typed.
+ *
+ * `weight_kg` holds what is stamped on the implement, because that is what an
+ * athlete reads. For a pair of dumbbells it is ONE of the two, so the total is
+ * double — and every local volume sum has to agree with the server about that,
+ * or the week on your phone disagrees with the history behind it.
+ *
+ * Undefined and zero both mean one. Every set logged before the server started
+ * sending a factor has none, and reading that as zero would erase their volume
+ * rather than merely under-reporting the dumbbell ones.
+ */
+export function totalWeightKg(set: {
+  weight_kg: number | null;
+  load_factor?: number;
+}): number {
+  if (set.weight_kg == null) return 0;
+  const factor = set.load_factor && set.load_factor > 1 ? set.load_factor : 1;
+  return set.weight_kg * factor;
 }

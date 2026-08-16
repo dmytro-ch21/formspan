@@ -163,8 +163,15 @@ type Exercise struct {
 	Equipment             []string `json:"equipment"`
 	LoadType              LoadType `json:"load_type"`
 	IsUnilateral          bool     `json:"is_unilateral"`
-	Instructions          string   `json:"instructions"`
-	Media                 []Media  `json:"media"`
+	// LoadMode says how to read a logged weight for this movement: "total"
+	// (a barbell, a machine, or one implement in two hands) or "per_side"
+	// (one of a pair of dumbbells). It decides whether tonnage doubles, so it
+	// lives in the seed catalog rather than only in a migration backfill —
+	// otherwise a freshly seeded database takes the column default and every
+	// dumbbell session under-reports again. Empty means "total".
+	LoadMode     string  `json:"load_mode"`
+	Instructions string  `json:"instructions"`
+	Media        []Media `json:"media"`
 
 	// Source is "seed" (the embedded JSON owns it, and a deploy rewrites it) or
 	// "admin" (authored in the console, the database owns it). Read-only on the
@@ -205,3 +212,24 @@ type Repository interface {
 	// write can be a single transaction.
 	UpsertAll(ctx context.Context, exercises []Exercise) error
 }
+
+// NormalizeLoadMode maps an absent or unrecognised value to "total".
+//
+// Failing CLOSED on the safe side, deliberately: "total" is what the column
+// already defaults to and what every pre-existing row means, so an unknown
+// value under-reports a dumbbell session rather than inventing weight nobody
+// lifted. The database CHECK would reject anything else anyway; this is what
+// keeps a seed file with a typo from failing the whole deploy.
+func NormalizeLoadMode(v string) string {
+	if v == LoadModePerSide {
+		return LoadModePerSide
+	}
+	return LoadModeTotal
+}
+
+const (
+	// LoadModeTotal — the logged weight is the whole load.
+	LoadModeTotal = "total"
+	// LoadModePerSide — it is one implement of a pair.
+	LoadModePerSide = "per_side"
+)

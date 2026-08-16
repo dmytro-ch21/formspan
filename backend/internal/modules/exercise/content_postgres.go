@@ -20,10 +20,19 @@ import (
 //
 // Media is absent on purpose — it lives in `exercise_media` and no write on
 // this path touches it. See ContentRepository.
+//
+// `load_mode` IS here, and its absence was a live data-loss bug rather than a
+// tidiness issue: `cmd/exportcontent` writes `exercises.json` from these rows,
+// so an unselected column came back as "" and overwrote the file's real value.
+// `NormalizeLoadMode` then reads "" as 'total', and because the seeder's
+// change-detection tuple now includes the column, the next deploy ACTIVELY
+// rewrites `per_side` back to `total` — reinstating the exact silent halving
+// this whole change exists to kill. Anything the export writes has to be
+// selected here.
 const contentReturning = `
 	id, name, sport, movement_pattern, movement_pattern_detail,
 	primary_muscles, secondary_muscles, equipment, load_type,
-	is_unilateral, instructions, source, status, created_at, updated_at`
+	is_unilateral, load_mode, instructions, source, status, created_at, updated_at`
 
 type contentScannable interface {
 	Scan(dest ...any) error
@@ -33,7 +42,7 @@ func scanContent(s contentScannable) (Exercise, error) {
 	var e Exercise
 	err := s.Scan(&e.ID, &e.Name, &e.Sport, &e.MovementPattern,
 		&e.MovementPatternDetail, &e.PrimaryMuscles, &e.SecondaryMuscles,
-		&e.Equipment, &e.LoadType, &e.IsUnilateral, &e.Instructions,
+		&e.Equipment, &e.LoadType, &e.IsUnilateral, &e.LoadMode, &e.Instructions,
 		&e.Source, &e.Status, &e.CreatedAt, &e.UpdatedAt)
 	if err != nil {
 		return Exercise{}, err

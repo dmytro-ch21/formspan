@@ -568,7 +568,7 @@ func techniqueEntryOf(t technique.Technique) entry {
 var exerciseKeyOrder = []string{
 	"id", "name", "sport", "movement_pattern", "movement_pattern_detail",
 	"primary_muscles", "secondary_muscles", "equipment", "load_type",
-	"is_unilateral", "instructions", "media",
+	"is_unilateral", "load_mode", "instructions", "media",
 }
 
 // exercisePreserve names the keys the FILE owns rather than the database.
@@ -605,6 +605,7 @@ func exerciseEntryOf(e exercise.Exercise) entry {
 		"equipment":               orEmpty(e.Equipment),
 		"load_type":               string(e.LoadType),
 		"is_unilateral":           e.IsUnilateral,
+		"load_mode":               e.LoadMode,
 		"instructions":            e.Instructions,
 		"media":                   []any{},
 	}
