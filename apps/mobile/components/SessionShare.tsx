@@ -100,19 +100,32 @@ export function useSessionShare(opts: {
   // — duration, volume and PRs all come from the local store — so this never
   // blocks anything, and a gym dead-spot costs the calorie figure rather than
   // the share.
-  const [numbers, setNumbers] = useState<SessionCardNumbers | null>(null);
+  // STORED WITH THE ID THEY BELONG TO, and matched at render rather than
+  // cleared in the effect.
+  //
+  // These numbers describe ONE session. A screen instance that moves between
+  // sessions — a `router.replace` onto the same route — would otherwise
+  // decorate the new card with the previous one's calories and score until the
+  // new fetch lands, or permanently if it never does. Resetting to null at the
+  // top of the effect fixes that and costs a second render for every mount, and
+  // `react-hooks/set-state-in-effect` says so; carrying the id says the same
+  // thing with no extra render and no extra state transition. It also closes
+  // the half `AbortController` cannot: a response that resolves after the id
+  // moved on can no longer be read as this session's.
+  const [numbers, setNumbers] = useState<{ id: string; value: SessionCardNumbers } | null>(null);
   useEffect(() => {
     if (!sessionID) return;
     const c = new AbortController();
     getSessionCard(getToken, sessionID, c.signal)
       .then((n) => {
-        if (!c.signal.aborted) setNumbers(n);
+        if (!c.signal.aborted) setNumbers({ id: sessionID, value: n });
       })
       .catch(() => {
         // Silent by design. See above: these decorate, they do not carry.
       });
     return () => c.abort();
   }, [sessionID, getToken]);
+  const forThisSession = numbers && numbers.id === sessionID ? numbers.value : null;
 
   const card =
     sessionID && summary
@@ -121,7 +134,7 @@ export function useSessionShare(opts: {
           summary,
           stats: statsFor(summary, formatTonnage),
           streak,
-          numbers,
+          numbers: forThisSession,
           now: date,
         })
       : null;

@@ -19488,13 +19488,21 @@ built. Mutation-checked by removing the `ended_at` gate; the second goes red.
   right one forever.
 - **The strength screen fires a second one, `fetchRecords`**, on the same
   event. Same reasoning, same reservation.
-- **In the seconds the completion modal is up, both fetches happen twice** —
-  the screen holds its own `useSessionShare` and the modal builds another, so
-  two hosts are mounted and two `/card` requests go out. Handing the screen's
-  share object down as a prop would collapse them, at the cost of a
-  self-contained celebration and of reconciling the streak (which the modal
-  wants and the read-back deliberately omits). Left duplicated on purpose;
-  worth revisiting if a third caller appears.
+- **In the seconds the completion modal is up, the strength screen makes FOUR
+  requests where one session needs two** — the screen holds its own
+  `useSessionShare` and the modal builds another, so it is 2× `/card` *and* 2×
+  records, not the two this entry originally claimed (review caught the
+  undercount). Two hosts mount with them. Handing the screen's share object
+  down as a prop would collapse it, at the cost of a self-contained celebration
+  and of reconciling the streak — which the modal wants and the read-back
+  deliberately omits. Left duplicated on purpose; all four are decorative and
+  fail silently. Worth revisiting if a third caller appears.
+- **The card's server numbers are keyed by session id** rather than reset when
+  the id changes. Resetting inside the effect is the obvious fix and is a
+  `set-state-in-effect` warning — which, with the mobile lint ratchet sitting at
+  exactly its cap, failed the build. Carrying the id says the same thing with no
+  extra render, and closes the half `AbortController` cannot: a response that
+  resolves after the id moved on can no longer be read as this session's.
 - **No share on the web app**, which is where reading history back is supposed
   to live. The card component and its capture are React Native; nothing about
   the design is, and a web export would need a different mechanism entirely.
@@ -19550,6 +19558,20 @@ non-answer as a 0 kg. Out-of-range effort is nulled for the same reason a zero
 is: the alternative to dropping the value is not keeping it, it is keeping the
 whole session off the server.
 
+**`assisted_reps` is repaired too, and this app cannot even author it.** Review
+found the gap and it is the same stranding class one step removed: the field
+arrives from the server, a pulled set is stored verbatim, the spreads preserve
+fields the type does not name, and `replaceSets` sends them back — so it
+round-trips through a client that does not know it exists. Edit a pulled
+spotted set's reps to 0 and `reps` goes null while `assisted_reps` survives;
+the server then refuses with `assisted reps need a rep count to be part of`,
+permanently, on a field no screen can show and no editor can clear. It is
+removed rather than nulled when it cannot stand, so a set that never carried
+the key does not gain one — sending `assisted_reps: null` on every set would
+start claiming "none were assisted" about sets nobody recorded that for.
+Unreachable today; it stops being unreachable the moment mobile grows a writer,
+which PR #226 already made likely.
+
 ### Why it disappeared and came back
 
 `retryBlockedRow` cleared the row's stored message **before** pushing, so that a
@@ -19586,12 +19608,26 @@ restored to clear-and-forget, and the measure test goes red when `repairSet` is
 lifted out of `parseSets`. The measure test asserts on **what goes out**, not on
 the stored blob — the stored blob is not what the server refused.
 
-One thing that test file needed first: its `jest.mock('../sessions')` factory
-replaced the module wholesale, so `repairSet` was `undefined` inside
-`sessionStore`. The suite passed anyway, because every fixture there stores
-`'[]'` and the map body never ran. The factory now spreads `requireActual`
-first. A mock that looks complete and is missing a pure helper is exactly the
-shape that passes until the first test that matters.
+Plus `lib/__tests__/sessions.test.ts` for `repairSet` itself — the exemptions
+are the part worth pinning, so if `validateSets` ever changes, this is what
+should go red — and `app/__tests__/syncDestination.test.ts` for the sport →
+screen routing, which is a mapping this project has already got wrong once.
+
+One thing the fixture tests needed first: their `jest.mock('../sessions')`
+factories replaced the module wholesale, so `repairSet` was `undefined` inside
+`sessionStore`. They passed anyway, because every fixture stores `'[]'` and the
+map body never ran. **Four files had it** — review found the three beyond the
+one that prompted the fix (`bjjPush`, `workoutPush`, `tombstonePush`) — and all
+four now spread `requireActual` first. A mock that reads as complete and is
+missing a pure helper is exactly the shape that passes until the first test
+that matters.
+
+`app/__tests__/bjjSessionScreen.test.tsx` also now stubs `sessionCardApi`. Not
+for isolation — the hook already swallows the failure — but because mounting
+the finished-class test fired a real `fetch` at `/v1/sessions/s1/card`, and on
+the machines this repo is developed on there is usually an API listening on
+:8080. A component test quietly talking to whatever is running locally passes
+or fails for reasons unrelated to the code under test.
 
 ### Open questions this leaves
 
@@ -19610,6 +19646,13 @@ shape that passes until the first test that matters.
 - **The same class of bug may exist in the other outboxes.** Plans and sequences
   have their own push paths and their own server-side validation; neither was
   audited here.
+- **A workout refused on its NAME alone is invisible on the repair screen.** A
+  rename-only failure sets `name_dirty = 1` and not `dirty`, and `blockedRows`
+  filters on `dirty = 1` — so the row gets a `last_error` it can never show.
+  Pre-existing, found by review while checking this change's `dirty` re-read,
+  and deliberately not fixed here: it is a different bug in a different table
+  and widening the filter needs its own thought about what a
+  name-only-owed row should say.
 - **Unverified on a device**, for the same reason as the entry above: the
   Simulator build could not be signed into, so none of this has been seen
   working — including the one screen the report came from.

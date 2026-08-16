@@ -1,3 +1,801 @@
+import { randomUUID } from 'expo-crypto';
+import { netFetch } from './authedFetch';
+import type { TokenGetter } from './useAuthToken';
+
+import { ApiError } from './apiError';
+import { formatDuration, type DurationUnit } from './duration';
+import type { Exercise } from './exercises';
+import { isDualMode, setModeOf } from './setMode';
+import { newTraceId, traceparent } from './trace';
+import { formatDistance, formatWeight, type UnitSystem } from './units';
+import type { WorkoutItem } from './workouts';
+
+const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
+const API_BASE = `${API_URL}/v1`;
+
+export type SetType = 'warmup' | 'working' | 'backoff' | 'drop' | 'amrap' | 'failure';
+
+export const SET_TYPES: { key: SetType; label: string; short: string }[] = [
+  { key: 'warmup', label: 'Warm-up', short: 'W' },
+  { key: 'working', label: 'Working', short: '' },
+  { key: 'backoff', label: 'Back-off', short: 'B' },
+  { key: 'drop', label: 'Drop', short: 'D' },
+  { key: 'amrap', label: 'AMRAP', short: 'A' },
+  { key: 'failure', label: 'To failure', short: 'F' },
+];
+
+export type LoggedSet = {
+  exercise_id: string;
+  position: number;
+  set_type: SetType;
+  reps: number | null;
+  weight_kg: number | null;
+  seconds: number | null;
+  distance_m: number | null;
+  /**
+   * How many of `reps` somebody else helped with — a spotter, a band, an
+   * assisted-pull-up machine.
+   *
+   * `reps` holds the FULL count, assisted included, so every volume figure
+   * reads what it always did. `soloReps(set)` is the number worth progressing
+   * against: "225 for 5 then 3 with a spotter" is 8 reps of work and 5 of
+   * capability.
+   *
+   * **null is UNRECORDED and 0 is "none of them"**, and they must stay
+   * distinguishable all the way to the server — nobody should have to answer
+   * this on every set, and treating absent as 0 would claim every set logged
+   * before the field existed was unaided.
+   *
+   * Optional on the type so older cached rows parse. It IS sent on writes, and
+   * has to be: the server replaces a session's sets wholesale, so a shape that
+   * omits it wipes the column on the first edit.
+   */
+  assisted_reps?: number | null;
+  /** Reps in reserve. 0 is meaningful — nothing left in the tank. */
+  rir: number | null;
+  /** 1–10, half steps. RPE 8 is roughly 2 RIR; record whichever you think in. */
+  rpe: number | null;
+  notes: string;
+  /**
+   * How many implements of `weight_kg` were moved: 1 for a barbell, a machine
+   * or one kettlebell in two hands; 2 for a PAIR of dumbbells.
+   *
+   * SERVER-SENT — derived from the exercise's `load_mode`, which is a property
+   * of the movement, so nothing here may invent one. It IS round-tripped on a
+   * write (`replaceSets` PUTs stored sets verbatim) and the API ignores it:
+   * `insertSets` has a fixed column list, and every write responds from a fresh
+   * read. So the value a client holds is always catalog-derived — but that
+   * rests on the server continuing to ignore it, which is why the contract
+   * marks it response-only rather than leaving it to this comment.
+   * Absent (older responses, or a set logged offline before sync) means 1, so
+   * `totalWeightKg` treats undefined as 1 rather than as zero.
+   */
+  load_factor?: number;
+  /**
+   * Done. The trigger for progressive volume — the summary counts what's
+   * been performed, not what's been planned, so the header climbs as you
+   * work rather than starting at the plan's total.
+   */
+  completed: boolean;
+};
+
+export type Session = {
+  id: string;
+  user_id: string;
+  workout_id: string | null;
+  sport: string;
+  name: string;
+  started_at: string;
+  ended_at: string | null;
+  notes: string;
+  sets: LoggedSet[];
+  created_at: string;
+  updated_at: string;
+};
+
+
+/**
+ * The outcomes of the progression rule.
+ *
+ * The first four are the double-progression cycle proper; the rest are the
+ * cases where the rule declines to advance and says why. Branch on these —
+ * never pattern-match `reason`, which is prose and may change.
+ *
+ * Kept identical to apps/web's copy on purpose: the rule itself lives only on
+ * the server, and these are the names it emits.
+ */
+export type SuggestionCode =
+  /** Same load, one more rep — the first half of double progression. */
+  | 'add_reps'
+  /** Top of the rep range hit on every set: load moves, reps reset. */
+  | 'add_load'
+  /** Stalled three sessions at one load: back off ~10% and re-approach. */
+  | 'deload'
+  /** The range isn't finished at this load yet. Repeat it. */
+  | 'hold'
+  | 'no_history'
+  | 'not_applicable'
+  | 'repeat_hard'
+  | 'repeat_unknown_effort'
+  | 'repeat_stale';
+
+/** The rep window a lift progresses inside before load moves. */
+export type RepRange = { low: number; high: number };
+
+/**
+ * What to load today and for how many reps, derived from what you actually
+ * did last time.
+ *
+ * The evidence travels with the recommendation on purpose — `last_*` is
+ * always populated when there is history, even when the answer is "repeat
+ * it". A number you can check beats a number you have to trust, and it is
+ * the difference between a recommendation and an oracle.
+ *
+ * `last_weight_kg`, `last_reps`, `last_rir` and `last_rpe` all describe the
+ * same single top set and are only meaningful together. `last_min_reps` /
+ * `last_max_reps` are the spread across every working set.
+ */
+export type Suggestion = {
+  exercise_id: string;
+  code: SuggestionCode;
+  reason: string;
+
+  /** The prescription. Null when the exercise isn't loaded in weight. */
+  target_weight_kg: number | null;
+  target_reps: number | null;
+  rep_range: RepRange;
+
+  last_performed_at: string | null;
+  last_weight_kg: number | null;
+  last_reps: number | null;
+  last_rir: number | null;
+  last_rpe: number | null;
+  last_min_reps: number | null;
+  last_max_reps: number | null;
+  working_sets: number;
+  /** Consecutive recent sessions at this same load — the stall signal. */
+  sessions_at_load: number;
+  /** Every working set finished at or above the target reserve. */
+  hit_target_effort: boolean;
+
+  /** What the last top set implies you could lift once, effort included. */
+  estimated_1rm_kg: number | null;
+  /** The highest estimate anywhere in your history for this exercise. */
+  best_1rm_kg: number | null;
+};
+
+export type Volume = {
+  working_sets: number;
+  total_reps: number;
+  tonnage_kg: number;
+  hardest_rpe: number;
+  exercise_ids: string[];
+};
+
+/**
+ * Which measures a set of this exercise records. Same rule as the workout
+ * template — driven by the catalog's `load_type`, so the logging form never
+ * needs to know about specific exercises.
+ */
+export type Measure = 'reps' | 'weight' | 'seconds' | 'distance';
+
+/** Which LoggedSet field each measure writes. */
+const MEASURE_FIELD: Record<Measure, 'reps' | 'weight_kg' | 'seconds' | 'distance_m'> = {
+  reps: 'reps',
+  weight: 'weight_kg',
+  seconds: 'seconds',
+  distance: 'distance_m',
+};
+
+export function measuresFor(loadType: Exercise['load_type']): Measure[] {
+  switch (loadType) {
+    case 'weight_reps':
+      return ['reps', 'weight'];
+    case 'reps':
+      return ['reps'];
+    case 'time':
+      return ['seconds'];
+    case 'distance':
+      return ['distance'];
+    case 'distance_time':
+      return ['distance', 'seconds'];
+    default:
+      // A server can ship a load_type before the app that renders it does —
+      // the house rule for every lookup here. Without this the switch returns
+      // undefined and `measures.map` throws inside fillForward, which turns
+      // the done tick, the most-used control in the app, into a crash.
+      return ['reps'];
+  }
+}
+
+/**
+ * How long to run a work timer for this set, or null if it cannot be timed.
+ *
+ * **The duration is already on the set, which is why this is a lookup and not a
+ * prescription.** `setsFromWorkout` copies a template's `target_seconds` onto
+ * every set it creates, and `emptySet` carries the previous set's numbers
+ * forward — so "3 sets of 1 minute" arrives here as three rows already holding
+ * 60, and a set added by hand inherits whatever the last one was. Reading the
+ * field covers the template, the repeat and the correction with one rule.
+ *
+ * The two nulls are the interesting part:
+ *
+ *  - **An exercise that does not measure seconds cannot be timed.** A countdown
+ *    over a set of squats is a stopwatch pointed at nothing; the affordance
+ *    should not appear at all rather than appear and do something meaningless.
+ *  - **`distance_time` with no duration gets nothing either.** There the
+ *    prescription is the DISTANCE — row 500m, run 400m — and how long it takes
+ *    is the result, not the target. Defaulting those to 60 seconds would invent
+ *    a goal the athlete never set and quietly turn a measurement into a target.
+ *
+ * A pure `time` exercise with nothing prescribed does get a default, because a
+ * plank with no number is still a plank you want to time.
+ *
+ * **A dual-mode exercise is timed only while it is in time mode**, which is the
+ * same question read the same way — see `lib/setMode.ts`. Burpees in reps mode
+ * carry no duration and get no timer button; the same burpees switched to time
+ * carry one and do. Deriving both answers from `seconds` is what stops the
+ * toggle and the play button from ever disagreeing.
+ */
+export const DEFAULT_WORK_SECONDS = 60;
+
+export function workSecondsFor(
+  set: Pick<LoggedSet, 'seconds'>,
+  loadType: Exercise['load_type'] | undefined,
+): number | null {
+  if (loadType === undefined) return null;
+  if (!measuresFor(loadType).includes('seconds') && !isDualMode(loadType)) return null;
+  // A stored 0 is not a duration to count down from, and neither is a
+  // negative one: a timer over before it starts fires its completion the
+  // instant it begins and logs a zero-second set. Both fall through to the
+  // same answer the field-absent case gets — the default for `time`, nothing
+  // for `distance_time`.
+  if (set.seconds != null && set.seconds > 0) return set.seconds;
+  return loadType === 'time' ? DEFAULT_WORK_SECONDS : null;
+}
+
+/**
+ * Is the row a countdown was started against still the row at that index?
+ *
+ * **A work countdown identifies its set by POSITION, and positions move.**
+ * `LoggedSet` carries no stable id, so the only handle is where the row sat
+ * when the timer started. Delete a set above it, reorder the exercises, or
+ * swap one out, and that index now names a different set — at which point a
+ * finishing countdown writes `seconds` onto, and ticks, somebody else's squat.
+ *
+ * The session screen also cancels the countdown on every structural change,
+ * which is the fix; this is the backstop that does not depend on a future
+ * mutator remembering to. A mutator that forgets loses the elapsed seconds,
+ * which is a shame. Writing them to the wrong exercise is a lie, and it is
+ * SILENT — which is why this is a named, tested function rather than an inline
+ * `?.` comparison nobody would notice going missing.
+ */
+export function timedSetStillAt(
+  sets: Pick<LoggedSet, 'exercise_id'>[],
+  index: number,
+  exerciseID: string,
+): boolean {
+  return sets[index]?.exercise_id === exerciseID;
+}
+
+export function emptySet(exerciseID: string, position: number, from?: LoggedSet): LoggedSet {
+  // Carrying the previous set's numbers forward is the single biggest
+  // reduction in taps: sets in a session are usually the same weight and
+  // reps, so the common case becomes "confirm", not "type".
+  return {
+    exercise_id: exerciseID,
+    position,
+    set_type: from?.set_type ?? 'working',
+    reps: from?.reps ?? null,
+    weight_kg: from?.weight_kg ?? null,
+    seconds: from?.seconds ?? null,
+    distance_m: from?.distance_m ?? null,
+    // Effort is per-set and never carried: the third set at the same weight
+    // is not the same effort as the first, and prefilling it would invite
+    // recording a number nobody actually judged.
+    rir: null,
+    rpe: null,
+    notes: '',
+    completed: false,
+  };
+}
+
+/**
+ * Turns a template into the sets to start from: one row per prescribed set,
+ * pre-filled with the prescribed numbers.
+ *
+ * Pre-filling is the point. Starting a planned session from an empty list
+ * means retyping the plan you already wrote, and the gap between prescribed
+ * and actual — the whole reason sessions and workouts are separate — only
+ * exists if the prescription is what you start from and then change.
+ */
+export function setsFromWorkout(items: WorkoutItem[]): LoggedSet[] {
+  const out: LoggedSet[] = [];
+  for (const item of items) {
+    // A template with no set count still means "do this exercise" — one row.
+    const count = Math.min(Math.max(item.target_sets ?? 1, 1), 20);
+    for (let i = 0; i < count; i++) {
+      out.push({
+        exercise_id: item.exercise_id,
+        position: out.length,
+        set_type: 'working',
+        reps: item.target_reps,
+        weight_kg: item.target_weight_kg,
+        seconds: item.target_seconds,
+        distance_m: item.target_distance_m,
+        rir: null,
+        rpe: null,
+        notes: '',
+        completed: false,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Swaps every set of one exercise for another, in place.
+ *
+ * The measures carry over only when the two exercises are measured the same
+ * way — swapping a barbell squat for a goblet squat keeps your reps, but
+ * swapping a plank for a run cannot keep anything, and inventing a number
+ * there would be worse than an empty field. Effort is always cleared: the
+ * replacement is a different movement, so a judgement about the old one
+ * doesn't transfer.
+ */
+export function swapExercise(
+  sets: LoggedSet[],
+  fromID: string,
+  to: Exercise,
+  fromLoadType: Exercise['load_type'] | undefined,
+): LoggedSet[] {
+  const sameShape = fromLoadType === to.load_type;
+  return sets.map((s) =>
+    s.exercise_id !== fromID
+      ? s
+      : {
+          ...s,
+          exercise_id: to.id,
+          // Cleared ALWAYS, not just when the shape changes — for the reason
+          // rir and rpe are cleared two lines down, and for a harder one.
+          //
+          // The soft reason: assistance is a judgement about one set on one
+          // movement, and it does not transfer to a different movement.
+          //
+          // The one that wedges sync: a shape-changing swap nulls `reps`, and a
+          // surviving `assisted_reps` then describes a set with no rep count.
+          // The database CHECK refuses that row, so the next push 400s — and the
+          // Assisted field unmounts when there are no reps, so the value is
+          // invisible AND un-clearable. The session stays dirty and re-fails
+          // every sync until the set is deleted.
+          assisted_reps: null,
+          // CLEARED, always — a factor describes the exercise, so it cannot
+          // survive becoming a different one. Swapping dumbbells for a barbell
+          // kept the ×2 and counted the barbell double; and because the pull
+          // skips dirty rows, that fabricated number survives a whole offline
+          // session, one tab from the Today header. Undefined reads as 1 until
+          // the server answers, which is the safe direction.
+          load_factor: undefined,
+          reps: sameShape ? s.reps : null,
+          weight_kg: sameShape ? s.weight_kg : null,
+          seconds: sameShape ? s.seconds : null,
+          distance_m: sameShape ? s.distance_m : null,
+          rir: null,
+          rpe: null,
+          completed: false,
+        },
+  );
+}
+
+/**
+ * Suggestions for replacing `base`, in two labelled tiers.
+ *
+ * **Muscle first, and that reordering is the whole point.** The previous rule
+ * scored only `movement_pattern` and `load_type` and never looked at
+ * `primary_muscles` at all — so swapping a barbell bench press offered other
+ * horizontal presses, which is usually right by accident, while swapping a
+ * leg press could suggest anything sharing the `squat` pattern regardless of
+ * what it trained. The question an athlete is actually asking is "the rack is
+ * taken, what else trains this?", and the answer starts with the muscle.
+ *
+ * Matched on the muscle GROUP rather than the raw `primary_muscles` string,
+ * because the catalog carries 58 distinct values across 761 exercises and
+ * nobody swaps a lift looking for another one that hits `teres-minor`. The
+ * groups are the same ones the Library filters on, so the app has one
+ * vocabulary for "what does this train" rather than two.
+ *
+ * Deterministic and explainable, like every other recommendation here: within
+ * a tier, candidates that also share the movement pattern come first, then
+ * those whose numbers carry over, then alphabetically.
+ *
+ * **Equipment is deliberately not scored.** The old rule treated shared
+ * equipment as a point in favour, which is backwards for the case the swap
+ * screen exists for — if the barbell is occupied, another barbell movement is
+ * the one suggestion that cannot help. But the opposite rule would be a guess
+ * too: people also swap for a niggle, or because they prefer a machine. So the
+ * ranking stays out of it and the row shows the equipment instead, which is
+ * the one thing that lets the athlete decide in a second.
+ */
+export type SwapSuggestions = {
+  /** Trains the same muscle group. The answer to "what else hits this?". */
+  muscle: Exercise[];
+  /** Same movement shape, a different muscle group. */
+  movement: Exercise[];
+};
+
+/**
+ * Per tier, not overall.
+ *
+ * The old cap was 8 across everything, which with muscle-first ranking would
+ * have let a well-covered muscle crowd the movement tier off the screen
+ * entirely. These render in a list header rather than the virtualised list, so
+ * the number is about how much someone will read, not about performance.
+ */
+export const MAX_SWAP_SUGGESTIONS = 10;
+
+export function swapSuggestions(
+  base: Exercise,
+  all: Exercise[],
+  /**
+   * Injected rather than imported, so this module keeps knowing nothing about
+   * the facet vocabulary — and so a test can pin the tiering without also
+   * pinning the muscle taxonomy.
+   */
+  sharesMuscleGroup: (a: Exercise, b: Exercise) => boolean,
+): SwapSuggestions {
+  const rank = (e: Exercise): number => {
+    const pattern = e.movement_pattern === base.movement_pattern;
+    // "Carries" means the logged numbers still mean something in the same
+    // row — the same test `swapExercise` uses to decide whether to keep them.
+    const carries = e.load_type === base.load_type;
+    if (pattern && carries) return 3;
+    if (pattern) return 2;
+    if (carries) return 1;
+    return 0;
+  };
+  const order = (a: Exercise, b: Exercise) => rank(b) - rank(a) || a.name.localeCompare(b.name);
+
+  const muscle: Exercise[] = [];
+  const movement: Exercise[] = [];
+  for (const e of all) {
+    if (e.id === base.id) continue;
+    if (sharesMuscleGroup(base, e)) muscle.push(e);
+    else if (e.movement_pattern === base.movement_pattern) movement.push(e);
+  }
+
+  return {
+    muscle: muscle.sort(order).slice(0, MAX_SWAP_SUGGESTIONS),
+    movement: movement.sort(order).slice(0, MAX_SWAP_SUGGESTIONS),
+  };
+}
+
+/**
+ * `duration` is how this exercise's seconds are written — see `lib/duration.ts`.
+ * Defaulted rather than required so the several read-only surfaces that
+ * summarise a set (history, the celebration card, VoiceOver) keep working
+ * unchanged; only the logging screen, which knows the per-exercise choice, needs
+ * to pass it.
+ */
+export function describeSet(
+  s: LoggedSet,
+  units: UnitSystem = 'metric',
+  duration: DurationUnit = 'seconds',
+): string {
+  const parts: string[] = [];
+  const w = formatWeight(s.weight_kg, units);
+  if (s.reps != null && s.weight_kg != null) parts.push(`${s.reps} × ${w}`);
+  else if (s.reps != null) parts.push(`${s.reps} reps`);
+  else if (s.weight_kg != null) parts.push(w);
+  if (s.seconds != null) parts.push(formatDuration(s.seconds, duration));
+  if (s.distance_m != null) parts.push(formatDistance(s.distance_m, units));
+  if (s.rpe != null) parts.push(`RPE ${s.rpe}`);
+  else if (s.rir != null) parts.push(`${s.rir} RIR`);
+  return parts.join(' · ') || 'Not recorded';
+}
+
+async function request<T>(
+  getToken: TokenGetter,
+  path: string,
+  init: RequestInit = {},
+  signal?: AbortSignal,
+): Promise<T> {
+  const token = await getToken();
+  const res = await netFetch(`${API_BASE}${path}`, {
+    ...init,
+    signal,
+    headers: {
+      ...init.headers,
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      traceparent: traceparent(newTraceId()),
+    },
+  });
+  if (res.status === 204) return undefined as T;
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new ApiError(
+      body?.error?.message ?? `Request failed (${res.status}).`,
+      body?.error?.code ?? 'unknown',
+      res.status,
+    );
+  }
+  return body as T;
+}
+
+/**
+ * `goal` picks the rep range the rule progresses inside — the same squat is a
+ * 3-rep lift in a strength block and a 10-rep lift in a hypertrophy one. Pass
+ * the goal of the workout being performed; omitting it falls back to a general
+ * 5-8 range rather than failing.
+ */
+export async function fetchSuggestions(
+  getToken: TokenGetter,
+  exerciseIDs: string[],
+  goal?: string | null,
+  signal?: AbortSignal,
+): Promise<Map<string, Suggestion>> {
+  const unique = [...new Set(exerciseIDs)].filter(Boolean);
+  if (unique.length === 0) return new Map();
+  const q = new URLSearchParams({ exercise_ids: unique.join(',') });
+  if (goal) q.set('goal', goal);
+  const b = await request<{ suggestions: Suggestion[] }>(
+    getToken,
+    `/sessions/suggestions?${q}`,
+    {},
+    signal,
+  );
+  return new Map((b.suggestions ?? []).map((s) => [s.exercise_id, s]));
+}
+
+/**
+ * Fills in the weight and reps for sets that don't already carry them.
+ *
+ * A template's own prescription always wins — it's an instruction, not a
+ * guess. Where it's silent, the recommendation goes in, so a planned session
+ * opens at numbers that mean something rather than empty boxes.
+ *
+ * Reps are filled now where they deliberately weren't before. The old rule
+ * only ever moved load, so inventing reps would have overwritten the
+ * programme; under double progression the rep target *is* half the
+ * recommendation, and leaving it blank drops the half that moves most often.
+ */
+export function applySuggestions(
+  sets: LoggedSet[],
+  suggestions: Map<string, Suggestion>,
+  /**
+   * The catalog, so a dual-mode set in time mode is left alone.
+   *
+   * Optional, because most callers have no catalog to hand and the rule only
+   * bites on `reps` exercises. Without it a burpee set switched to 40 seconds
+   * would silently acquire a rep target too — and a row holding both numbers is
+   * the one thing `lib/setMode.ts` derives its mode from, so the set would flip
+   * itself back to reps with a duration still attached.
+   */
+  loadTypeOf?: (exerciseID: string) => Exercise['load_type'] | undefined,
+): LoggedSet[] {
+  return sets.map((s) => {
+    const hit = suggestions.get(s.exercise_id);
+    if (!hit) return s;
+    let next = s;
+    if (next.weight_kg == null && hit.target_weight_kg != null) {
+      next = { ...next, weight_kg: hit.target_weight_kg };
+    }
+    const timed = setModeOf(next, loadTypeOf?.(next.exercise_id)) === 'time';
+    if (!timed && next.reps == null && hit.target_reps != null) {
+      next = { ...next, reps: hit.target_reps };
+    }
+    return next;
+  });
+}
+
+export async function listSessions(
+  getToken: TokenGetter,
+  opts: { limit?: number } = {},
+  signal?: AbortSignal,
+): Promise<Session[]> {
+  // Every session carries all of its sets, so a screen showing five recent
+  // ones must not pull the API's default fifty.
+  const qs = opts.limit ? `?limit=${opts.limit}` : '';
+  const b = await request<{ sessions: Session[] }>(getToken, `/sessions${qs}`, {}, signal);
+  return b.sessions ?? [];
+}
+
+export async function getSession(
+  getToken: TokenGetter,
+  id: string,
+  signal?: AbortSignal,
+): Promise<{ session: Session; volume: Volume }> {
+  return request(getToken, `/sessions/${encodeURIComponent(id)}`, {}, signal);
+}
+
+export async function startSession(
+  getToken: TokenGetter,
+  input: {
+    sport: string;
+    name: string;
+    workout_id?: string | null;
+    sets?: LoggedSet[];
+    /** Supplied when pushing a session that was started offline. */
+    id?: string;
+    started_at?: string;
+    /**
+     * Sent when the session was already over before it was ever pushed — a
+     * reflection log rather than a live one.
+     *
+     * Carried on the CREATE rather than left to the follow-up finish call,
+     * because a session's duration must not depend on a later request
+     * succeeding. Training history derives every duration from
+     * `ended_at - started_at`, so a create that omits it produces a session
+     * worth nothing until the finish lands — and anything that can fail
+     * between the two (a refused reflection, a dropped connection) would
+     * take the session's mat time with it.
+     */
+    ended_at?: string | null;
+  },
+): Promise<{ session: Session; volume: Volume }> {
+  // Client-generated ID, so starting a session is idempotent on retry — the
+  // same contract offline activity logging relies on, and what lets the
+  // offline store push a session it created hours earlier.
+  return request(getToken, '/sessions', {
+    method: 'POST',
+    body: JSON.stringify({
+      id: input.id ?? randomUUID(),
+      started_at: input.started_at ?? new Date().toISOString(),
+      ...input,
+    }),
+  });
+}
+
+export async function replaceSets(
+  getToken: TokenGetter,
+  id: string,
+  sets: LoggedSet[],
+): Promise<{ session: Session; volume: Volume }> {
+  return request(getToken, `/sessions/${encodeURIComponent(id)}/sets`, {
+    method: 'PUT',
+    body: JSON.stringify({ sets }),
+  });
+}
+
+export async function finishSession(
+  getToken: TokenGetter,
+  id: string,
+  /** Supplied when pushing a session finished offline — the real end time,
+   *  not the time the sync happened to run. */
+  endedAt?: string,
+): Promise<{ session: Session; volume: Volume }> {
+  return request(getToken, `/sessions/${encodeURIComponent(id)}/finish`, {
+    method: 'POST',
+    body: JSON.stringify({ ended_at: endedAt ?? new Date().toISOString() }),
+  });
+}
+
+/**
+ * Change a session's name, and nothing else.
+ *
+ * PATCH rather than a full update: the name is the only field a client may
+ * change after the fact. Everything else either decides which screen renders
+ * the session (sport), is what history counts (the timestamps), or has its own
+ * replace endpoint (sets).
+ */
+export async function renameSession(
+  getToken: TokenGetter,
+  id: string,
+  name: string,
+): Promise<{ session: Session; volume: Volume }> {
+  return request(getToken, `/sessions/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function deleteSession(
+  getToken: TokenGetter,
+  id: string,
+): Promise<void> {
+  await request<void>(getToken, `/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+/**
+ * Fill the *planned* sets below `index` with what was just entered.
+ *
+ * "+ Set" has always carried the previous set's numbers forward, but sets that
+ * came from a template arrive already existing and empty — so a 3×5 plan meant
+ * typing the same weight three times. The request was exactly that: enter it
+ * once, adjust the rest as you go.
+ *
+ * The rules that keep it from being destructive:
+ *
+ *  - **Only later sets of the same exercise**, stopping at the next one.
+ *    Groups are adjacency-based, same as the display.
+ *  - **Only measures still blank.** A number already typed is never
+ *    overwritten — a top set followed by back-offs is a real plan, and
+ *    flattening it silently would be worse than the typing this saves.
+ *  - **Never a completed set.** That is a record of something that happened.
+ *  - **Never effort.** Same reason `emptySet` won't carry it: the third set at
+ *    one weight is not the third set's effort, and prefilling invites
+ *    recording a number nobody judged.
+ *
+ * Returns the same array identity when nothing changed, so callers can skip a
+ * write.
+ */
+export function fillForward(
+  sets: LoggedSet[],
+  index: number,
+  measures: Measure[],
+): LoggedSet[] {
+  const source = sets[index];
+  if (!source) return sets;
+  const keys = measures.map((m) => MEASURE_FIELD[m]);
+
+  // Where this group ends. Adjacency defines a group, so the FIRST row of a
+  // different exercise is the boundary — not "every row with a different id".
+  // Filtering on the id alone reaches a *later* block of the same exercise:
+  // squat / bench / squat would fill the second squat block from the first,
+  // which is a different piece of work with different numbers. Caught by a
+  // test; the original code contradicted this function's own doc comment.
+  let end = index + 1;
+  while (end < sets.length && sets[end].exercise_id === source.exercise_id) end++;
+
+  let changed = false;
+  const next = sets.map((s, i) => {
+    if (i <= index || i >= end || s.completed) return s;
+    const patch: Partial<LoggedSet> = {};
+    for (const k of keys) {
+      if (s[k] == null && source[k] != null) patch[k] = source[k] as never;
+    }
+    if (Object.keys(patch).length === 0) return s;
+    changed = true;
+    return { ...s, ...patch };
+  });
+  return changed ? next : sets;
+}
+
+/**
+ * Move a whole exercise up or down, taking its sets with it.
+ *
+ * `order` is the current grouping as arrays of indices into `sets` — passed in
+ * rather than recomputed so this can't disagree with what is on screen.
+ *
+ * Positions are renumbered because the server orders by them; leaving them
+ * stale makes a reorder that looks right locally and reverts on next load.
+ * Returns null when the move would go off either end, so the caller writes
+ * nothing.
+ */
+export function reorderGroups(
+  sets: LoggedSet[],
+  order: number[][],
+  groupIndex: number,
+  delta: -1 | 1,
+): LoggedSet[] | null {
+  const target = groupIndex + delta;
+  if (target < 0 || target >= order.length) return null;
+  const moved = order.map((g) => g.slice());
+  [moved[groupIndex], moved[target]] = [moved[target], moved[groupIndex]];
+  return moved.flat().map((i, position) => ({ ...sets[i], position }));
+}
+
+/**
+ * What was actually moved, which is not always the number that was typed.
+ *
+ * `weight_kg` holds what is stamped on the implement, because that is what an
+ * athlete reads. For a pair of dumbbells it is ONE of the two, so the total is
+ * double — and every local volume sum has to agree with the server about that,
+ * or the week on your phone disagrees with the history behind it.
+ *
+ * Undefined and zero both mean one. Every set logged before the server started
+ * sending a factor has none, and reading that as zero would erase their volume
+ * rather than merely under-reporting the dumbbell ones.
+ */
+export function totalWeightKg(set: {
+  weight_kg: number | null;
+  load_factor?: number;
+}): number {
+  if (set.weight_kg == null) return 0;
+  const factor = set.load_factor && set.load_factor > 1 ? set.load_factor : 1;
+  return set.weight_kg * factor;
+}
+
 /**
  * What the athlete did unaided — the number worth training against.
  *
@@ -146,9 +944,40 @@ export function dropsOf(sets: LoggedSet[], i: number): LoggedSet[] {
 export function repairSet<T extends LoggedSet>(set: T): T {
   const measure = (v: number | null): number | null =>
     v != null && Number.isFinite(v) && v > 0 ? v : null;
+  const reps = measure(set.reps);
+
+  /*
+    `assisted_reps`, which `withSetChange` already clamps — and this still has
+    to check.
+
+    The two are not the same guard. `withSetChange` is the EDITOR's rule and
+    holds the invariant while a set is being typed; its own comment explains
+    why the clamp has to sit on both edits. This is the READ, and it covers
+    what an editor cannot reach: rows already written before that clamp existed,
+    and rows that arrive from the server. A pulled set is stored verbatim, so
+    whatever the server holds is what the next push replays.
+
+    Left unchecked, the failure is the one this whole function exists to
+    prevent — `assisted reps need a rep count to be part of`, a permanent 400,
+    on a field an athlete has no way to connect to anything they did.
+
+    REMOVED rather than nulled when it cannot stand, so a set that never carried
+    the key does not gain one: every set is sent on every push, and an invented
+    `assisted_reps: null` would start claiming "none were assisted" about sets
+    nobody recorded that for.
+  */
+  const assisted = set.assisted_reps;
+  const assistedStands =
+    assisted != null &&
+    Number.isFinite(assisted) &&
+    assisted >= 0 &&
+    reps != null &&
+    assisted <= reps;
+
   return {
     ...set,
-    reps: measure(set.reps),
+    ...(assisted != null && !assistedStands ? { assisted_reps: null } : {}),
+    reps,
     weight_kg: measure(set.weight_kg),
     seconds: measure(set.seconds),
     distance_m: measure(set.distance_m),

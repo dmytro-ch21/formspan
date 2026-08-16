@@ -20,6 +20,13 @@ import { pushSession, syncSessions } from '../sessionStore';
 const mockDel = jest.fn();
 const mockPull = jest.fn();
 jest.mock('../sessions', () => ({
+  // `requireActual` FIRST. This factory replaces `../sessions` wholesale, and
+  // `sessionStore` imports pure helpers from it as well as the API calls --
+  // `repairSet`, which every parsed set passes through. Listing only the calls
+  // leaves those undefined, and the suite still passes for as long as every
+  // fixture here stores `'[]'`: the map body never runs. The first set-bearing
+  // fixture would crash on a mock that reads as complete.
+  ...jest.requireActual('../sessions'),
   renameSession: jest.fn(),
   deleteSession: (...a: unknown[]) => mockDel(...a),
   listSessions: (...a: unknown[]) => mockPull(...a),

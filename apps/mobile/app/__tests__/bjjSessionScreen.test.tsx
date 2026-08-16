@@ -99,6 +99,21 @@ jest.mock('@/lib/bjjSession', () => ({
   getDetail: jest.fn(() => deferred(mockDetail)),
 }));
 
+/*
+ * The share card's server-side numbers, stubbed.
+ *
+ * Not for isolation — the hook already swallows a failure, because calories and
+ * the VOLA score decorate a card that is complete without them. For
+ * DETERMINISM: unmocked, mounting the finished-class test fires a real `fetch`
+ * at `/v1/sessions/s1/card`, and on the machines this repo is developed on
+ * there is usually an API listening on :8080. A component test that quietly
+ * talks to whatever is running locally passes or fails for reasons that have
+ * nothing to do with the code under test.
+ */
+jest.mock('@/lib/sessionCardApi', () => ({
+  getSessionCard: jest.fn(() => new Promise(() => {})),
+}));
+
 jest.mock('@/lib/techniques', () => ({
   fetchTechniques: jest.fn(() =>
     deferred([

@@ -181,7 +181,7 @@ export default function SyncScreen() {
  * logged class open to "Sets 0 · Reps 0 · Volume —". So the sport rides along
  * on the row rather than being guessed here.
  */
-function destinationOf(row: BlockedRow): Href {
+export function destinationOf(row: BlockedRow): Href {
   if (row.kind === 'workout') return `/workout/${row.id}`;
   return row.sport === 'bjj' ? `/bjj/session/${row.id}` : `/session/${row.id}`;
 }
