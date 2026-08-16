@@ -797,6 +797,32 @@ export function soloReps(set: { reps: number | null; assisted_reps?: number | nu
 }
 
 /**
+ * Apply a change to a set, keeping `assisted_reps` inside `reps`.
+ *
+ * **The clamp has to live on BOTH edits, not just the assisted one.** Set 10
+ * reps with 8 assisted, then correct the reps down to 5, and the set now claims
+ * more help than work — which the server and the database CHECK both refuse,
+ * so the next save fails with a 400 naming a field the athlete did not touch.
+ * Clamping only where assistance is typed catches the obvious direction and
+ * misses this one entirely.
+ *
+ * Clearing the reps clears the assistance with them: "3 of them were assisted"
+ * is a claim about a rep count, and a claim about nothing is not a smaller
+ * claim, it is an invalid row.
+ */
+export function withSetChange(set: LoggedSet, patch: Partial<LoggedSet>): LoggedSet {
+  const next = { ...set, ...patch };
+  if (next.reps == null) {
+    // Nothing to be assisted with.
+    return next.assisted_reps == null ? next : { ...next, assisted_reps: null };
+  }
+  if (next.assisted_reps != null && next.assisted_reps > next.reps) {
+    return { ...next, assisted_reps: next.reps };
+  }
+  return next;
+}
+
+/**
  * Set numbers for one exercise's rows, where a drop does not get one.
  *
  * "225x3 then 185x8" is ONE set with a drop off it. Numbering them 3 and 4

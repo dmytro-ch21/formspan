@@ -90,6 +90,7 @@ import {
   emptySet,
   setOrdinals,
   soloReps,
+  withSetChange,
   fetchSuggestions,
   fillForward,
   measuresFor,
@@ -2070,7 +2071,7 @@ function SetRow({
                   onChangeText={(text) => {
                     const raw = text.trim() === '' ? null : Number(text.replace(',', '.'));
                     if (raw === null || !Number.isFinite(raw)) {
-                      onChange({ ...set, [MEASURE_KEY[m]]: null });
+                      onChange(withSetChange(set, { [MEASURE_KEY[m]]: null }));
                       return;
                     }
                     const canonical =
@@ -2081,7 +2082,7 @@ function SetRow({
                           : m === 'seconds'
                             ? fromDisplayDuration(raw, duration)
                             : Math.round(raw);
-                    onChange({ ...set, [MEASURE_KEY[m]]: canonical });
+                    onChange(withSetChange(set, { [MEASURE_KEY[m]]: canonical }));
                   }}
                   // A duration in minutes is the second field that takes a
                   // decimal — 1.5 min is 90 seconds, and forcing a whole number

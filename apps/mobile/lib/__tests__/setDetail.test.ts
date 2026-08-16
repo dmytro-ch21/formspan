@@ -1,4 +1,11 @@
-import { dropsOf, emptyDropSet, setOrdinals, soloReps, type LoggedSet } from '../sessions';
+import {
+  dropsOf,
+  emptyDropSet,
+  setOrdinals,
+  soloReps,
+  withSetChange,
+  type LoggedSet,
+} from '../sessions';
 
 const set = (over: Partial<LoggedSet> = {}): LoggedSet => ({
   exercise_id: 'bench-press',
@@ -122,5 +129,38 @@ describe('set numbering', () => {
 
   it('is empty for no sets', () => {
     expect(t()).toEqual([]);
+  });
+});
+
+describe('editing reps after assistance was recorded', () => {
+  it('clamps the help down when the reps are corrected down', () => {
+    // The gap the assisted-input clamp misses entirely: 10 reps with 8
+    // assisted, then the athlete fixes the count to 5. Left alone the set
+    // claims more help than work, the CHECK refuses it, and the next save
+    // fails with a 400 naming a field they never touched.
+    const before = set({ reps: 10, assisted_reps: 8 });
+    expect(withSetChange(before, { reps: 5 }).assisted_reps).toBe(5);
+  });
+
+  it('leaves a still-valid value alone', () => {
+    const before = set({ reps: 10, assisted_reps: 3 });
+    expect(withSetChange(before, { reps: 8 }).assisted_reps).toBe(3);
+  });
+
+  it('clears the help when the reps are cleared', () => {
+    // "3 of them were assisted" is a claim about a rep count. A claim about
+    // nothing is not a smaller claim — it is a row the database rejects.
+    expect(withSetChange(set({ reps: 8, assisted_reps: 3 }), { reps: null }).assisted_reps).toBeNull();
+  });
+
+  it('does not invent a value on a set that never had one', () => {
+    const changed = withSetChange(set({ reps: 8, assisted_reps: undefined }), { reps: 5 });
+    expect(changed.assisted_reps ?? null).toBeNull();
+  });
+
+  it('passes other measures through untouched', () => {
+    const changed = withSetChange(set({ reps: 8, assisted_reps: 3 }), { weight_kg: 60 });
+    expect(changed.weight_kg).toBe(60);
+    expect(changed.assisted_reps).toBe(3);
   });
 });
