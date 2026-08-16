@@ -57,7 +57,7 @@ Each compiles, passes its tests, and is wrong. Read before starting the related 
 - [ ] **L2** — A drop dragged away from its parent re-parents. Inherent cost of expressing the relationship as order, since row ids are regenerated every save. (#227)
 - [ ] **L3** — `dropsOf` has no consumer. Mirrors the server for whatever reads a drop group next; dead code until then. (#227)
 - [ ] **L4** — 1RM and tonnage read `weight_kg` differently. Deliberate (a per-hand 1RM is what lifters quote) but nothing tells a client. (#224)
-- [ ] **L5** — Share leaves a ~1–2 MB temp file per share. Deleting it needs a third native dependency; judged not worth it. (#210)
+- [ ] **L5** — Share leaves a ~1.6 MB temp file per share. **Both halves of the old reason were wrong**: it said "needs a third native dependency" (`react-native-view-shot` already exports `releaseCapture(uri)`, native on both platforms) and priced it at ~1–2 MB when the capture was actually exporting 10.5 MB. Size fixed in #232; cleanup still not done, because calling `releaseCapture` after `shareAsync` resolves needs device verification that every share target has finished reading by then. (#210 #232)
 - [ ] **L6** — Instagram Stories direct hand-off. No longer blocked (`vola://` is ours now); what remains is a Facebook App ID, an account decision. (#210)
 - [ ] **L7** — Adjacency is unenforced: nothing stops a client writing a stray `drop` row. It's skipped rather than misattributed. (#226)
 

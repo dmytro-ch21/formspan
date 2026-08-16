@@ -20161,10 +20161,52 @@ twice: reverting to the constant turns four of five red, and a
 `Math.round`-based implementation is caught by the non-integer-scale case
 (2.625, 3.5) that the integer scales cannot distinguish.
 
+### The first version of this fix inverted the bug on Android
+
+Review was asked to challenge the points-vs-pixels reading rather than confirm
+it, and that is what found this. **The same two options mean different units on
+the two platforms**, which nothing in the JS API hints at:
+
+- **iOS** — points, multiplied by device scale (`rendererFormat.scale = 0`,
+  `initWithSize:`). Output = `size × scale`.
+- **Android** — pixels, already final. `RNViewShotModule.java` reads them with
+  `getInt`, and `ViewShot.java` ends with
+  `Bitmap.createScaledBitmap(bitmap, width, height, true)`. Density appears
+  nowhere.
+
+So **the original constant was correct on Android**, and dividing by the scale
+would have exported a **360 px** card from a 3× Android phone — the same bug,
+inverted, and shrinking rather than bloating. `cardCaptureSize` now branches on
+`Platform.OS`.
+
+What made it worth blocking on rather than deferring is not the runtime impact
+— the app is iOS-only today, so nothing shipped would have broken. It is that
+the first version shipped a **comment, a test name and a functional-scenario
+line that all asserted the iOS model as Android fact**. The test was literally
+called "lands within a pixel on non-integer Android scales" while exercising
+iOS multiplication. That is the `T`-section shape exactly: compiles, passes,
+and would argue the next person out of noticing. The tests are split by
+platform now, and `platform` is a parameter precisely because jest-expo reports
+`ios` and the Android branch would otherwise be untestable as well as
+unobservable.
+
+Two things the same review corrected in the paragraph above it, both of which
+had been load-bearing for a decision: `react-native-view-shot` **already
+exports `releaseCapture(uri)`**, native on both platforms, so "deleting the
+temp file needs a third native dependency" was never true — and the "~1-2 MB"
+it was weighed against was really 10.5 MB. The conclusion (leave the file) is
+kept, but it now rests on a stated argument rather than two false ones, and the
+cleanup is recorded as **L5** rather than closed off.
+
 ### Open questions this leaves
 
-- **Only measured at 3×.** The 2× row is derived from the library source, not
-  observed, and Android's implementation was not read at all.
+- **Only measured at 3× on iOS.** The 2× row is derived from the library
+  source, not observed, and no Android capture has ever been taken — the
+  Android branch is read from its source and pinned by a unit test, which is
+  weaker than the `file` measurement backing the iOS half.
+- **`releaseCapture` is available and unused.** Two lines after `shareAsync`
+  resolves would clear the cache file; whether every share target has finished
+  reading by then is a question rather than an assumption, so it wants a device.
 - **Non-integer Android scales land within a pixel**, by rounding inside the
   renderer. Nothing downstream can tell 1079 from 1080, but no device with such
   a scale has run this.

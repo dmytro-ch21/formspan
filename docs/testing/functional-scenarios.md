@@ -6920,12 +6920,15 @@ equivalent — the capture is native.
 
 ### The capture itself
 
-- **The exported PNG is 1080 x 1080, on every phone.** `captureRef`'s `width` is
-  in POINTS and the renderer multiplies by device scale, so passing the pixel
-  figure exported 3240px / 10.5 MB from a 3x device. Check with `file` on the
-  capture, not the share sheet's thumbnail — the thumbnail looks identical at
-  either size. Worth repeating on a 2x device (SE), which is the half never
-  observed.
+- **The exported PNG is 1080 x 1080 — and the reason differs by platform.** On
+  **iOS** `captureRef`'s `width` is in POINTS and the renderer multiplies by
+  device scale, so passing the pixel figure exported 3240px / 10.5 MB from a 3x
+  device; the app divides by the scale first. On **Android** the same option is
+  already the final pixel size (`createScaledBitmap`), so nothing is divided.
+  Check with `file` on the capture, never the share sheet's thumbnail — it looks
+  identical at either size. Two devices are worth the trip because each pins a
+  different branch: a **2x iOS** device (SE), and **any Android** phone, where a
+  wrongly-shared formula shows up as a ~360px card rather than a huge one.
 - **The exported PNG is not blank.** The card is mounted off-screen and a
   `ScrollView` clips its content, so a host that drifts inside one still renders,
   still passes typecheck, and produces an empty image. Open the share sheet and
