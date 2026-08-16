@@ -22,7 +22,7 @@ Sections: **W** wrong now · **T** traps · **F** worth fixing · **N** new · *
 
 These contradict each other or overstate what the athlete did. Visible without looking.
 
-- [ ] **W1** — 1RM estimate counts spotted reps. Nothing reads `soloReps`, so a spotted 8×102.5 estimates ~127 kg where honest solo-5 is ~115; also sets rep PRs not completed unaided. Do **T1** first. (#226)
+- [x] **W1** — 1RM estimate counts spotted reps. Nothing reads `soloReps`, so a spotted 8×102.5 estimates ~127 kg where honest solo-5 is ~115; also sets rep PRs not completed unaided. Done together with T1 — #231. (#226)
 - [ ] **W2** — A drop counts as a set in the Sets tile but not in the row numbers, so one screen shows both answers. Cross-stack: `localVolume` must match the server, and the same figure feeds Today and the calendar. (#227)
 - [ ] **W3** — Per-side load is right everywhere but unexplained: no "enter one dumbbell" hint, no `30 kg × 2 = 60` on a logged set. The athlete can do that maths and conclude the app is wrong. (#224)
 
@@ -30,7 +30,7 @@ These contradict each other or overstate what the athlete did. Visible without l
 
 Each compiles, passes its tests, and is wrong. Read before starting the related work.
 
-- [ ] **T1** — Add `assisted_reps` to `RecentEfforts`, `BestOneRMs`, `bestOneRMSets` and `Records` SELECTs **before** wiring progression to `soloReps`. They don't select it, unrecorded reads as all-solo, so a progression-only change silently reads full reps. (#226)
+- [x] **T1** — Add `assisted_reps` to `RecentEfforts`, `BestOneRMs`, `bestOneRMSets` and `Records` SELECTs **before** wiring progression to `soloReps`. They don't select it, unrecorded reads as all-solo, so a progression-only change silently reads full reps. — done #231 (#226)
 - [ ] **T2** — `createWithin` never writes `load_mode`, so every console-authored dumbbell exercise starts `total` — the halving bug, for new content. No endpoint can correct a row today. (#224)
 - [ ] **T3** — Any new `session_sets` column needs mobile pass-through **before** an authoring surface. The server replaces sets wholesale, so a phone shape that doesn't know a column wipes it on first edit. Applies to grip (**N1**). (#226)
 
@@ -65,6 +65,7 @@ Each compiles, passes its tests, and is wrong. Read before starting the related 
 
 - [ ] **H1** — `TestEverySeededTechniqueExistsInTheLibrary` skips in CI (CI never seeds), so the suite reports success while the assertion never runs. *In progress — spun off.*
 - [ ] **H2** — Document that `-p 1` also enforces cross-package test ordering, not just global counts: `session` alone against an unseeded database fails 23 tests. *In progress — spun off.*
+- [ ] **H4** — Three mobile tests are flaky under load: "keeps the LOCAL copy on screen when the local row is dirty", "drops the accepted row locally", "a preference changed while Today sat mounted". Measured on `main` and on a branch touching zero `apps/` files — 1 failure in 3 runs each way, different tests each time. They fail under concurrent test runs, so CI may be masking it.
 - [ ] **H3** — Drop stale local databases: `vola_merge`, `vola_mig`, and the `vola_test_*` set from merged branches. They drift from main's schema and read as a broken checkout.
 - [ ] **H4** — `sharedScreen.test.tsx` "drops the accepted row locally" failed once in 3 full-suite runs during #235, exhausting its 10s `asyncUtilTimeout`. **Not reproduced since: 0 failures in 92 runs**, including under 8-way CPU saturation and alongside the web/admin builds, with headroom measured at 2.4–4.0s of the 10s budget. That puts the rate near or under 3% rather than the 1-in-3 the first sample suggested. Cause never diagnosed and the original failure was real, so this stays open — but treat the rate as low, not as a coin flip. (#232 #235)
 

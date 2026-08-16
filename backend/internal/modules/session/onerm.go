@@ -65,6 +65,46 @@ func EstimateOneRM(reps int, weightKg float64, rir *int, rpe *float64) (float64,
 	return weightKg * 36 / (37 - effective), true
 }
 
+// EstimateSetOneRM estimates from a set, using the reps the athlete actually
+// did UNAIDED and treating them as a true limit.
+//
+// Two corrections in one, and the second is the one that is easy to get
+// backwards.
+//
+// **Solo reps, not total.** A 1RM estimate is a capability claim, so a set of
+// eight where a spotter took three is a set of five for this purpose. Estimated
+// off eight it reads ~127 kg where the honest figure is ~115 — about 10% high,
+// and surfaced as a *record*, which the Records doc calls the one failure the
+// feature cannot afford.
+//
+// **And the recorded effort must be DISCARDED, not reused.** An RIR or RPE on
+// an assisted set describes the whole set, help included — "2 in reserve" means
+// two more *with the spotter*. Passing solo reps alongside that RIR adds them
+// together and quietly re-inflates the estimate, which is worse than the bug it
+// replaces because it looks corrected. If somebody needed help on rep six, they
+// had nothing left at rep five: the solo reps ARE the limit, so effort is zero
+// reserve by construction.
+//
+// A set with no assistance recorded is unchanged, which is every set logged
+// before the column existed.
+func EstimateSetOneRM(s Set) (float64, bool) {
+	if s.Reps == nil || s.WeightKg == nil {
+		return 0, false
+	}
+	if s.AssistedReps == nil || *s.AssistedReps <= 0 {
+		return EstimateOneRM(*s.Reps, *s.WeightKg, s.RIR, s.RPE)
+	}
+	solo := s.SoloReps()
+	if solo <= 0 {
+		// Every rep was assisted. Nothing was demonstrated unaided, so there is
+		// no capability to estimate from — absent rather than zero, the same
+		// refusal the calorie model makes without a bodyweight.
+		return 0, false
+	}
+	zero := 0
+	return EstimateOneRM(solo, *s.WeightKg, &zero, nil)
+}
+
 // BestOneRM returns the highest estimate over a set of performed sets, and
 // which set produced it.
 //
@@ -90,7 +130,7 @@ func BestOneRM(sets []Set) (float64, *Set, bool) {
 		if s.Reps == nil || s.WeightKg == nil {
 			continue
 		}
-		est, ok := EstimateOneRM(*s.Reps, *s.WeightKg, s.RIR, s.RPE)
+		est, ok := EstimateSetOneRM(*s)
 		if !ok || est <= best {
 			continue
 		}

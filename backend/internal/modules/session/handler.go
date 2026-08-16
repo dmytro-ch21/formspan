@@ -362,7 +362,14 @@ func (h *Handler) Suggestions(w http.ResponseWriter, r *http.Request) {
 		// Estimated off the same top set the plan reasons from, so the two
 		// always agree about which set they're describing.
 		if s.LastWeightKg != nil && s.LastReps != nil {
-			if est, ok := EstimateOneRM(*s.LastReps, *s.LastWeightKg, s.LastRIR, s.LastRPE); ok {
+			// Through the set-aware estimator, so a spotted top set is measured
+			// by what it demonstrated unaided. Estimating off the full count
+			// overstates by roughly 10% on a set where a spotter took three,
+			// and this figure is shown next to a record.
+			if est, ok := EstimateSetOneRM(Set{
+				Reps: s.LastReps, WeightKg: s.LastWeightKg,
+				RIR: s.LastRIR, RPE: s.LastRPE, AssistedReps: s.LastAssistedReps,
+			}); ok {
 				s.EstimatedOneRMKg = &est
 			}
 		}

@@ -218,8 +218,12 @@ type Plan struct {
 	// would be inflated by exactly that fiction.
 	LastWeightKg *float64 `json:"last_weight_kg"`
 	LastReps     *int     `json:"last_reps"`
-	LastRIR      *int     `json:"last_rir"`
-	LastRPE      *float64 `json:"last_rpe"`
+	// LastAssistedReps is how many of LastReps had help. Absent means none
+	// recorded. `last_reps - last_assisted_reps` is what the athlete did alone,
+	// and it is what the rep-range progression above is measured against.
+	LastAssistedReps *int     `json:"last_assisted_reps"`
+	LastRIR          *int     `json:"last_rir"`
+	LastRPE          *float64 `json:"last_rpe"`
 	// LastMinReps and LastMaxReps are the spread across every working set,
 	// belonging to the session rather than to any one set. The minimum is what
 	// gates progression.
@@ -304,7 +308,12 @@ func Progress(in ProgressionInput, now time.Time) Plan {
 	// shows beside "last time" is the one the heaviest set carried — not an
 	// average that belongs to no set that happened.
 	p.LastRIR, p.LastRPE = top.RIR, top.RPE
+	// The full count, so "last time: 8" still matches what the athlete logged
+	// and sees in their history. What they managed UNAIDED rides alongside it
+	// rather than replacing it — the progression rule reads the solo number,
+	// the client shows both, and neither has to infer the other.
 	p.LastReps = top.Reps
+	p.LastAssistedReps = top.AssistedReps
 	p.WorkingSets = len(sets)
 	p.TargetWeightKg = &weight
 
@@ -426,14 +435,25 @@ func topSet(sets []Set) Set {
 // *minimum* is what gates progression — a first set of 8 and a last of 4 is
 // not "8 reps at this weight", and treating it as such is how the naive rule
 // pushes load onto a session that was already falling apart.
+// repSpread reads SOLO reps, and that is what makes double progression honest.
+//
+// The rule advances reps inside a range until every working set reaches the top
+// of it, and only then moves the load. Counting spotted reps toward that means a
+// spotter walks the athlete up to a weight increase they cannot yet handle
+// alone — the rule recommending a load the evidence does not support, which is
+// the one thing a deterministic progression must not do.
+//
+// A set with no assistance recorded is unchanged, which is every set logged
+// before the column existed.
 func repSpread(sets []Set) (min, max int) {
-	min, max = *sets[0].Reps, *sets[0].Reps
+	min, max = sets[0].SoloReps(), sets[0].SoloReps()
 	for _, s := range sets[1:] {
-		if *s.Reps < min {
-			min = *s.Reps
+		r := s.SoloReps()
+		if r < min {
+			min = r
 		}
-		if *s.Reps > max {
-			max = *s.Reps
+		if r > max {
+			max = r
 		}
 	}
 	return min, max
