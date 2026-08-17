@@ -24,8 +24,8 @@ These contradict each other or overstate what the athlete did. Visible without l
 
 - [x] **W1** — 1RM estimate counts spotted reps. Nothing reads `soloReps`, so a spotted 8×102.5 estimates ~127 kg where honest solo-5 is ~115; also sets rep PRs not completed unaided. Done together with T1 — #231. (#226)
 - [x] **W2** — A drop counts as a set in the Sets tile but not in the row numbers, so one screen shows both answers. Cross-stack: `localVolume` must match the server, and the same figure feeds Today and the calendar. — done #238, a drop no longer counts as a set but still contributes volume (#227)
-- [x] **W3** — Per-side load is right everywhere but unexplained: no "enter one dumbbell" hint, no `30 kg × 2 = 60` on a logged set. The athlete can do that maths and conclude the app is wrong. — done #PR, the weight field says "per hand" and the row shows "(60kg total)". (#224)
-- [x] **W4** — The web sessions list shows two "Working sets" figures on one page under two different rules. The totals strip reads the server's `working_sets` (drops excluded, #238); each `SessionRow` recomputes `s.completed && s.set_type !== 'warmup'` client-side (drops included). Same label, same screen, two answers — W2 exactly, still alive on web because #238 consolidated the MOBILE clients only. — done #PR, together with a THIRD bug on the same reduce (it also dropped `load_factor`, halving every dumbbell session). All of it now lives in `sessionVolume()` in `lib/api.ts` with nine tests, because a figure compared across screens must not live in a screen. (#238)
+- [x] **W3** — Per-side load is right everywhere but unexplained: no "enter one dumbbell" hint, no `30 kg × 2 = 60` on a logged set. The athlete can do that maths and conclude the app is wrong. — done #241, the weight field says "per hand" and the row shows "(60kg total)". (#224)
+- [x] **W4** — The web sessions list shows two "Working sets" figures on one page under two different rules. The totals strip reads the server's `working_sets` (drops excluded, #238); each `SessionRow` recomputes `s.completed && s.set_type !== 'warmup'` client-side (drops included). Same label, same screen, two answers — W2 exactly, still alive on web because #238 consolidated the MOBILE clients only. — done #241, together with a THIRD bug on the same reduce (it also dropped `load_factor`, halving every dumbbell session). All of it now lives in `sessionVolume()` in `lib/api.ts` with nine tests, because a figure compared across screens must not live in a screen. (#238)
 
 ## T — Traps set for the next change
 
@@ -39,7 +39,7 @@ Each compiles, passes its tests, and is wrong. Read before starting the related 
 
 - [ ] **F1** — Virtualise the social feed. Plain `ScrollView` holding full cards (~25–35 native views each, 30/page, +30 per "Show older"). `KeyboardAwareFlatList` already exists in the codebase. (#210)
 - [ ] **F2** — Show the card at readable size before sharing. Only preview today is a share-sheet thumbnail, so the calorie figure — an inference from body data — is posted sight-unseen. (#210)
-- [ ] **F3** — Review the per-side classifications end to end: **142** are `per_side`, **108** of which double (34 are also `is_unilateral`, so factor 1). Classified by equipment + a hand-written single-implement exclusion list; spot-checks passed, nobody read the list. Known-suspect: `double-dumbbell-kickstand-deadlift` counts ×1 despite the name, and the `alternating-dumbbell-*` rows count ×2. (#224 #PR)
+- [ ] **F3** — Review the per-side classifications end to end: **142** are `per_side`, **108** of which double (34 are also `is_unilateral`, so factor 1). Classified by equipment + a hand-written single-implement exclusion list; spot-checks passed, nobody read the list. Known-suspect: `double-dumbbell-kickstand-deadlift` counts ×1 despite the name, and the `alternating-dumbbell-*` rows count ×2. (#224 #241)
 - [x] **F4** — Share card exported at 3× its intended size. `captureRef`'s `width` is POINTS and the renderer multiplies by device scale, so 1080 became 3240px/10.5 MB on a 3× phone — the density dependence its own comment claimed to prevent. Measured 1080px/1.6 MB after. (#232) — done
 
 ## N — New work
@@ -62,7 +62,7 @@ Each compiles, passes its tests, and is wrong. Read before starting the related 
 - [ ] **L5** — Share leaves a ~1.6 MB temp file per share. **Both halves of the old reason were wrong**: it said "needs a third native dependency" (`react-native-view-shot` already exports `releaseCapture(uri)`, native on both platforms) and priced it at ~1–2 MB when the capture was actually exporting 10.5 MB. Size fixed in #232; cleanup still not done, because calling `releaseCapture` after `shareAsync` resolves needs device verification that every share target has finished reading by then. (#210 #232)
 - [ ] **L6** — Instagram Stories direct hand-off. No longer blocked (`vola://` is ours now); what remains is a Facebook App ID, an account decision. (#210)
 - [ ] **L7** — Adjacency is unenforced: nothing stops a client writing a stray `drop` row. It's skipped rather than misattributed. (#226)
-- [ ] **L8** — `apps/web`'s `describeSet` has **zero callers** and formats raw `${weight}kg`, ignoring the athlete's unit preference. Dead and wrong at once; delete it, or give it units and a caller. (#PR)
+- [ ] **L8** — `apps/web`'s `describeSet` has **zero callers** and formats raw `${weight}kg`, ignoring the athlete's unit preference. Dead and wrong at once; delete it, or give it units and a caller. (#241)
 
 ## H — Housekeeping
 
