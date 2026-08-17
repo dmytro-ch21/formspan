@@ -12,7 +12,8 @@ import {
   type Run,
   type RunContext,
 } from '../intervalRun';
-import type { LoggedSet } from '../sessions';
+import type { Exercise } from '../exercises';
+import { workSecondsFor, type LoggedSet } from '../sessions';
 
 const set = (exercise: string, over: Partial<LoggedSet> = {}): LoggedSet => ({
   exercise_id: exercise,
@@ -50,6 +51,33 @@ describe('what can be run', () => {
     // without saying so.
     const mixed = [set('burpee', { seconds: 40 }), set('squat', { reps: 5 })];
     expect(canRun(mixed, [0, 1], ctx())).toBe(false);
+  });
+
+  it('lets a weighted set join a circuit once it carries a duration — N4', () => {
+    // The claim in TASKS.md was "circuits fall out of it", and this is the
+    // only place that can prove it, because `canRun` consults nothing but
+    // `workSeconds`. So this test wires the REAL `workSecondsFor` in rather
+    // than the stub above — with the stub it would pass identically before
+    // and after N4 and prove nothing about the app.
+    const loadTypes: Record<string, Exercise['load_type']> = {
+      squat: 'weight_reps',
+      burpee: 'reps',
+    };
+    const real = ctx({
+      workSeconds: (s) => workSecondsFor(s, loadTypes[s.exercise_id]),
+    });
+
+    // Before N4 this was false: a weight×reps set was refused a timer whatever
+    // duration it carried, so one squat in a circuit disqualified the whole
+    // run.
+    const circuit = [set('burpee', { seconds: 40 }), set('squat', { reps: 15, seconds: 40 })];
+    expect(canRun(circuit, [0, 1], real)).toBe(true);
+
+    // And the half that must NOT change: a squat with no duration is still
+    // untimed, so the all-or-nothing gate still refuses the run. If this ever
+    // goes true, `workSecondsFor` has started inventing durations.
+    const untimed = [set('burpee', { seconds: 40 }), set('squat', { reps: 15 })];
+    expect(canRun(untimed, [0, 1], real)).toBe(false);
   });
 
   it('ignores sets that are already done', () => {

@@ -22391,6 +22391,137 @@ the day that foreign key is weakened.
   "total with implements = 1" (a barbell) identical to the tonnage rule and
   different to the athlete. That is correct, and it means a future reader will
   wonder why both columns exist — hence this entry.
+## 2026-08-17 — A timer belongs to the set, not to the exercise
+
+**N4.** The session screen could time a plank and refused to time a squat, and
+the rule behind that was one line:
+
+```ts
+if (!measuresFor(loadType).includes('seconds') && !isDualMode(loadType)) return null;
+```
+
+The comment defending it was good, which is why it lasted: *"a countdown over a
+set of squats is a stopwatch pointed at nothing; the affordance should not
+appear at all rather than appear and do something meaningless."* That is right
+about an **invented** duration and wrong as a general rule. Forty seconds of
+squats is not meaningless — it is what a circuit is made of.
+
+So the gate moved rather than being deleted. It now guards only the DEFAULT,
+which is the only place inventing could happen:
+
+- the athlete put a duration on this set → time it, whatever it measures
+- nobody did → invent nothing
+
+Both nulls it used to protect still hold, and one of them is sharper than
+before: `distance_time` MEASURES seconds, so the old load-type gate let it
+through and the refusal came from elsewhere. Rowing 500m has a distance
+prescription and no time one, and defaulting it would turn a measurement into a
+target.
+
+### A duration is a target, not a measure
+
+`measuresForSet` is deliberately untouched. It answers "what does this exercise
+record", and a squat with 40s on it is still a weight×reps set: same tonnage,
+same records, same fields offered.
+
+Its collapsed summary DOES gain the duration — `describeSet` appends any
+non-null `seconds` unconditionally, so the row reads "10 × 100 kg · 40s". A
+first draft of this entry claimed the opposite, in four places, and review
+checked the code. That behaviour is kept, because a target you cannot see
+without expanding the row is a target you will forget you set; the claim is what
+was wrong, not the display. What N4 adds is a separate optional field, below the
+measures rather than among them, whose value is a timer target.
+
+Keeping those two questions apart is the whole design. Folding `seconds` into
+`measuresForSet` would have been fewer lines and would have quietly turned a
+timed squat into a timed exercise: fill-forward reads that list, and so does the
+mode toggle for dual-mode exercises.
+
+### Circuits did fall out, and the test had to be written carefully to show it
+
+TASKS.md claimed "circuits fall out of it". They do — `canRun` consults nothing
+but `workSeconds` — but proving it was the interesting part. The interval-run
+suite injects its own `workSeconds` stub, so a circuit test written there would
+have passed identically before and after this change and proved nothing about
+the app. The new test wires the **real** `workSecondsFor` in instead, and
+asserts both directions: a squat with a duration joins a circuit, a squat
+without one still disqualifies the whole run.
+
+Same shape as the mistake this repo keeps finding — a mock that supplies the
+behaviour under test. Both new guards were mutation-checked by restoring the old
+line order; each goes red.
+
+### The first version of this shipped the bug it was avoiding
+
+The field was gated on the row's own measures — `!measures.includes('seconds')`
+— which reads as obviously right and is wrong for one load type.
+
+`reps` is DUAL-MODE. `measuresForSet` returns `['reps']` for a burpee set logged
+in reps, so the gate said "does not measure seconds, offer the field". But
+`setModeOf` derives a dual-mode set's mode FROM `seconds` — so typing a duration
+there flips the row to time mode: the reps field disappears and the row keeps a
+now-invisible rep count.
+
+That is exactly the row `toggleSetMode` exists to prevent, and its own comment
+says why: *"a set holding both 12 reps and 40 seconds is a row that two
+different readers describe two different ways — and one of them is the volume
+rollup."* The new field would have been a second, undeclared route to it,
+competing with the mode toggle that already does this properly by clearing the
+measure being left.
+
+The gate is now `offersTimerTarget(loadType)`, a named function beside
+`workSecondsFor` with the same two-exclusion shape, and a test that names
+dual-mode as the case it is really about. Mutation-checked: dropping
+`!isDualMode(loadType)` turns it red.
+
+Worth noting how it was found — by writing the design intent down for review and
+listing dual-mode as a property to attack. The question surfaced while composing
+the prompt, before the reviewer had answered.
+
+### What else review found
+
+Two more, neither of which the check suite could see:
+
+**The completion path overwrote the target with the clock.** `recordTimedSet`
+writes elapsed into `seconds` — correct for a plank, where that is the whole
+documented contract, and destructive for a squat, where `seconds` is now the
+prescription. Racking a 40s target at 25 rewrote it to 25; worse,
+`bankRunningWork` fires whenever any OTHER timer starts, so a stray tap ten
+seconds in did it too. `elapsedBelongsInSeconds` is the rule now, and it is the
+exact inverse of `offersTimerTarget` — a test asserts that inversion across
+every load type, so the two cannot drift apart.
+
+**A banked zero is an unsyncable row.** `elapsedOf` rounds, so banking within
+half a second of starting wrote `seconds: 0`, which the server's
+`seconds IS NULL OR seconds > 0` CHECK rejects — failing that set's whole
+session write. Pre-existing, and only ever reachable where `seconds` is the
+measure. Fixed here because it is two lines and the alternative is a 400 nobody
+can explain.
+
+### One consequence that was nearly missed
+
+The seconds/minutes chip was gated on the exercise measuring time, with its own
+comment saying it would otherwise be "a control for a field that is not there".
+That stopped being true the moment the field was there: a squat would have got a
+duration field with no way to say whether the number meant seconds or minutes.
+The chip now also appears when any set in the group carries a target.
+
+### Open questions this leaves
+
+- **The collapsed summary does not distinguish a target from a measurement.**
+  It shows "· 40s" identically whether that 40s is a plank's recorded hold or a
+  squat's prescription. Nothing currently reads wrong — but the two are
+  different claims and the row says them the same way, which is the seam a
+  stopwatch feature would have to open up.
+- **Not seen on a device.** Built, typechecked, tested; the field, the play
+  button on a squat and the unit chip have never been looked at on a phone.
+  Folded into **L1**, which already tracks exactly this debt.
+- **The stopwatch is still not a thing, and now it is explicitly refused.**
+  N4 lets you say how long a set should take; on a targeted set the elapsed time
+  is deliberately not kept anywhere, because the only field available is the
+  target and overwriting it is the bug review found.
+  That is a different feature and a bigger one — it needs somewhere to put the
+  elapsed value that is not the target field.
 
 ## Open items / known gaps as of this entry
 

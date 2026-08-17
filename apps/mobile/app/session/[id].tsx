@@ -98,6 +98,8 @@ import {
   measuresFor,
   reorderGroups,
   timedSetStillAt,
+  elapsedBelongsInSeconds,
+  offersTimerTarget,
   workSecondsFor,
   GRIPS,
   gripApplies,
@@ -818,7 +820,17 @@ export default function SessionScreen() {
     const t = timerState.timer;
     if (t?.kind !== 'work' || t.setIndex == null || !t.exerciseID) return;
     if (timerState.remaining <= 0) return;
-    recordTimedSet(t.setIndex, t.exerciseID, elapsedOf(t, timerState.remaining), false);
+    const elapsed = elapsedOf(t, timerState.remaining);
+    // A banked ZERO is not a shorter set, it is an invalid row. `elapsedOf`
+    // rounds, so starting a timer and tapping another one within half a second
+    // banks 0 — and the server's CHECK is `seconds IS NULL OR seconds > 0`, so
+    // that set fails to sync and takes its whole session's write with it. The
+    // honest reading of "no time passed" is that there is nothing to bank.
+    // (Pre-existing, found by review of N4; it only ever bit exercises where
+    // `seconds` is the measure, since a targeted set no longer takes the
+    // clock's value at all.)
+    if (elapsed <= 0) return;
+    recordTimedSet(t.setIndex, t.exerciseID, elapsed, false);
   }
 
   async function startRest(exerciseID: string) {
@@ -970,7 +982,18 @@ export default function SessionScreen() {
       seconds, which is a shame; writing them to the wrong exercise is a lie.
     */
     if (!timedSetStillAt(sets, index, exerciseID)) return;
-    const written = sets.map((s, i) => (i === index ? { ...s, seconds, completed: tick || s.completed } : s));
+    // Whether the clock may write into `seconds` at all — see
+    // `elapsedBelongsInSeconds`. On a plank it is the measure and elapsed is
+    // the honest record; on a squat carrying a 40s target it is the
+    // prescription, and letting the clock overwrite it means racking at 25
+    // silently rewrites the target to 25. The tick still happens either way;
+    // only the number is withheld.
+    const keepsElapsed = elapsedBelongsInSeconds(loadTypeOf(exerciseID));
+    const written = sets.map((s, i) =>
+      i === index
+        ? { ...s, ...(keepsElapsed ? { seconds } : {}), completed: tick || s.completed }
+        : s,
+    );
     const next = tick
       ? fillForward(written, index, measuresForSet(written[index], loadTypeOf(exerciseID), measuresFor))
       : written;
@@ -1248,7 +1271,14 @@ export default function SessionScreen() {
           const groupSeconds = g.indices.map((i) => sets[i]?.seconds).find((s) => s != null) ?? null;
           const durationUnit = durationFor(g.exerciseID, groupSeconds);
           const measures = measuresFor(exercise?.load_type ?? 'reps');
-          const timed = mode === 'time' || measures.includes('seconds');
+          // `groupSeconds != null` is the N4 half: an exercise that does not
+          // MEASURE time can now still carry a timer target on one of its sets,
+          // and that target is typed in these units. Without this the athlete
+          // gets a duration field for squats and no way to say whether the
+          // number means seconds or minutes — the unit chip's own comment
+          // ("a control for a field that is not there") stops being true the
+          // moment the field is there.
+          const timed = mode === 'time' || measures.includes('seconds') || groupSeconds != null;
           // The kg/lb chip now appears only where there IS a weight. It used to
           // sit on every header, including planks and jump rope, offering to
           // switch the units of a field those rows do not have — harmless until
@@ -2187,6 +2217,63 @@ function SetRow({
               );
             })}
           </View>
+
+          {/* N4 — a duration on a set that does not measure one.
+
+              Its own row, below the measures and not among them, because it is
+              not a measure: a squat with 40s on it is still a weight×reps set
+              for tonnage, records and the fields it offers. `measuresForSet` is
+              deliberately untouched. What this writes is a TIMER TARGET, which
+              is why the label says so rather than saying "Time" — the field
+              above it on a plank means the number being recorded, and these two
+              must not look like the same thing.
+
+              `offersTimerTarget` is the gate, and it excludes dual-mode
+              exercises as well as ones that already measure seconds — see its
+              note. Gating on the row's measures alone put this field on a
+              burpee set in reps mode, where writing a duration silently flips
+              the row to time mode.
+
+              Setting it is what makes the play button appear (`workSecondsFor`)
+              and what lets the set join a hands-free run (`canRun`) — the
+              circuits N4 says fall out of this. Clearing it back to empty takes
+              both away again, which is the intended undo. */}
+          {offersTimerTarget(exercise?.load_type) && (
+            <View style={styles.fieldRow}>
+              <Field
+                label={`Timer (${durationInputUnit(duration)})`}
+                value={set.seconds == null ? null : toDisplayDuration(set.seconds, duration)}
+                onChangeText={(text) => {
+                  const t = text.trim();
+                  if (t === '') {
+                    onChange(withSetChange(set, { seconds: null }));
+                    return;
+                  }
+                  const raw = Number(t.replace(',', '.'));
+                  if (!Number.isFinite(raw)) {
+                    onChange(withSetChange(set, { seconds: null }));
+                    return;
+                  }
+                  const canonical = fromDisplayDuration(raw, duration);
+                  // A zero or negative duration is refused rather than stored:
+                  // the server rejects `seconds <= 0` outright, so keeping it
+                  // would be a row that syncs 400 and a timer that fires the
+                  // instant it starts. Null is the honest reading of "no".
+                  onChange(withSetChange(set, { seconds: canonical > 0 ? canonical : null }));
+                }}
+                hint="optional"
+                integer={duration !== 'minutes'}
+                // Built from the unit-bearing label, exactly as the measure
+                // fields above are. Without the unit a VoiceOver user in
+                // minutes mode hears "Timer" and has no way to know that 1.5
+                // means ninety seconds.
+                accessibilityLabel={`Timer in ${
+                  duration === 'minutes' ? 'minutes' : 'seconds'
+                } for ${setName} of ${exerciseName}, optional`}
+                testID={`set-${index}-timer`}
+              />
+            </View>
+          )}
 
           {/* Who did the work. Offered only where there ARE reps, because
               "3 of them were assisted" is meaningless on a plank or a run —
