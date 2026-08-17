@@ -22908,6 +22908,50 @@ should see it.
   An admin-authored row with the same defect would NOT converge, and nothing
   sweeps those.
 
+## 2026-08-17 — Looking at it found the one bug nothing else could
+
+**W8**, and the reason it is worth an entry of its own is what found it.
+
+N4 and N5 both shipped with the same caveat: built, typechecked, tested,
+mutation-checked, reviewed twice — and never looked at. **L1** has been carrying
+that debt for a while. Running both on the Simulator took about twenty minutes
+and turned up a defect the entire apparatus is structurally blind to.
+
+The weight chart's range switcher paints the selected pill with the accent
+colour and its label with `accent.ink`. `AccentProvider`'s own doc says what
+those mean: *"`accent` fills, `ink` is the same idea as text on a dark ground,
+and `on` is what may be written on the fill."* The pill IS the fill, so the
+label was drawn in the accent colour on the accent colour. **The selected range
+had no visible text at all** — the two unselected pills read normally, so the
+control looked like a bug in the selection rather than in a colour.
+
+Nothing in the check suite can see this. A colour is not a type, not a lint
+rule, and not an assertion; `--max-warnings=54` and 1265 green tests are
+entirely compatible with an invisible label.
+
+### What else the session confirmed
+
+- **N4's timer field renders where it should** — "Timer (s) *optional*" in its
+  own row under Reps and Weight on a `weight_reps` exercise, which is the whole
+  claim of that PR.
+- **N5's entry point works**: the Trend pill sits beside "Check in" without
+  competing with it, and the screen's empty state reads well on a real device.
+- **The trend LINE is still unverified.** The test account has no weight
+  history, so only the empty state was exercised. The line, the gap breaks and
+  the delta have their unit tests and nothing more.
+- **Nothing could be typed.** The Simulator's hardware-keyboard latch was
+  active — caret and AutoFill bar, no soft keyboard — and confirmed device-wide
+  by reproducing it in Safari, per the recipe in CLAUDE.md. Only the ⌘⇧K menu
+  item clears it, which needs a human at the machine. So entering a duration and
+  watching the play button appear was not tested on device either.
+
+### The rule this suggests
+
+L1 is not a nice-to-have queued behind the feature work. It is the only check in
+this project that can see colour, layout, contrast or whether a thing reads at
+arm's length — and it caught something on its first outing after being deferred
+across two PRs. A screen should be looked at in the PR that ships it.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
