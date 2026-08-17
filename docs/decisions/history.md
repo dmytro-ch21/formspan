@@ -21026,9 +21026,91 @@ anything on a per-side exercise would revert it. That is checked, not assumed.
   Press" left at `total` is almost certainly a mistake. A name/equipment
   heuristic in the form is the obvious follow-up and is not done here.
 
+## 2026-08-16 — The technique library gets the same tripwire, and a CASCADE turns out to be worse than a RESTRICT
+
+H5. `technique`'s tests seeded 542 library rows into the shared database and
+never removed them — the same arrangement that let three packages borrow
+exercise ids for months, one library over. They now call
+`removeLibraryAfterTest`, the sibling of `exercise`'s `removeCatalogAfterTest`.
+
+Two things made this harder than copying the previous one, and both are the
+kind of thing that passes review by looking finished.
+
+### Five seeding sites, not two, and only a row count found the other three
+
+Grepping for `Seed(ctx` found two tests. The library is *also* loaded wholesale
+by `repo.UpsertAll(ctx, SeedData())` — a different idiom, in three more tests
+(the two reseed-backfill tests and the graph-edge summary test). Guarding the
+two the grep found produced a suite that passed, on both pristine and seeded
+databases, with **542 rows still sitting in the database afterwards**.
+
+Nothing failed. The only thing that surfaced it was checking the row count after
+the run rather than trusting the call sites — the same discipline that caught
+the previous entry's blocking bug, applied one step earlier. The rule worth
+carrying: **verify the state, not the search.** A grep answers "where did I look",
+not "what happened".
+
+### The FK shape inverts the danger, and the safer-looking constraint is the trap
+
+`exercise`'s first version aborted on a NO ACTION foreign key. That was loud —
+three red tests, immediately, which is how the bug was found at all.
+
+Every foreign key into `techniques` is CASCADE or SET NULL. So a bare
+`DELETE FROM techniques` does not abort. It succeeds, and quietly takes the
+seeded syllabuses' contents with it: measured on a seeded database, **136
+`curriculum_items` became 38** while the suite reported 28 packages ok. Five
+named curricula, emptied, green. The pre-merge review of the previous PR
+predicted this precisely, which is why the cleanup removes the seeded curricula
+first — scoped to `source = 'seed'`, which
+`curricula_source_matches_owner` ties to `owner_user_id IS NULL`, so an
+athlete's syllabus is unreachable by constraint rather than convention.
+
+The general lesson is worth more than the fix: **a CASCADE is more dangerous
+than a RESTRICT here.** The constraint that blocks you is the one that tells you
+something is wrong. The one that quietly does what you asked is the one that
+loses data.
+
+### What it actually changes
+
+`technique` sorts seventeenth of nineteen, so within a single run only `theme`
+and `workout` could have leaned on the residue. The real exposure was *across*
+runs: the 542 rows survived, so a second run on the same database saw a library
+nobody had seeded in it.
+
+That is exactly the shape of H1's symptom, and this fixes the confusing half of
+it. `TestEverySeededTechniqueExistsInTheLibrary` used to **skip on a fresh
+database and pass on a reused one** — silently passing on residue, which reads
+as coverage. It now skips consistently: measured 569 pass / 1 skip / 0 fail on
+two consecutive runs against the same database, with 0 techniques left after
+each. Still skipping is still wrong, and still H1's to fix — but it now behaves
+the same locally as in CI, instead of depending on how fresh your database is.
+
+### Verified
+
+- Full `go test -p 1 ./...` on a **pristine** database: 28 packages ok, and 0
+  techniques / 0 curricula / 0 items / 0 exercises left afterwards.
+- Same on a **seeded** database (542 / 5 / 136 / 762 before): 28 ok, same zeroes
+  after.
+- Mutation, curricula step removed: suite still green, 136 items → 38. The step
+  is load-bearing and its absence is silent.
+- Two consecutive runs on one database: identical results, no residue.
+
+### Gaps
+
+- **`positions` (11 rows) are still left behind**, deliberately. Nothing borrows
+  position ids the way packages borrowed catalog and library ids, and no foreign
+  key ties them to either delete — but they are the same class of residue and
+  the choice was made rather than overlooked.
+- **H1 is unchanged.** The curriculum test still skips; #216 fixes it properly by
+  reading the embedded catalog instead of the database, which also makes it
+  independent of everything above.
+- **The five-sites problem could recur.** Nothing enforces that a new
+  full-library write in `technique` calls the helper — the same standing weakness
+  `exercise` has, and the reason both helpers' comments say so at the call site.
+
 ## Open items / known gaps as of this entry
 
-- **The technique library is still left behind by `technique`'s tests**, exactly as the exercise catalog was until the tripwire entry above. Smaller exposure — `technique` sorts seventeenth of nineteen, so only `theme` and `workout` run after it — but the same shape: a package borrowing a technique id would pass on that residue. The same fix applies (`removeCatalogAfterTest`'s shape, scoped to the ids `SeedData()` names); deferred because H1 is already in flight against that library.
+- **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
 - **Two position taxonomies now sit on one Library screen.** The filter chips are nine coarse families; the glossary is eleven curated entries. Since the guard split they disagree in a visible way: a beginner can read the Closed Guard card, learn the distinction, and then find no chip that filters to those 37 techniques. Adding North-South, and later Leg Entanglement, closed the cheap half each time (a position the glossary advertised that no chip could reach) — but doing it twice by hand is the evidence that hand-maintenance is the actual bug: the vocabulary is copied across four client files and one backend map, and the taxonomy PR updated one of the four until review caught it. Keying the chips on the glossary's ids, or a shared constant with a test asserting it matches positions.json, is the real answer and is design work, not a patch.
 
