@@ -132,12 +132,33 @@ describe('what a mode change must NOT throw away', () => {
 });
 
 describe('a grip the server would refuse', () => {
-  it('is dropped rather than left to strand the session', () => {
-    // A value outside the CHECK constraint 400s on every push, and the session
-    // stays dirty forever — there is no screen that can edit an unknown value
-    // back into legality. Same reasoning as the assisted clamp beside it.
-    const repaired = repairSet(set({ grip: 'banana' as LoggedSet['grip'] }));
-    expect(repaired.grip).toBeNull();
+  it('is KEPT locally, because only the server owns the vocabulary (T4)', () => {
+    // This assertion used to be the opposite, and the reversal is the fix.
+    //
+    // `repairSet` runs on every read and knows four grips; the server decides
+    // how many exist. Nulling anything outside the local list is right for
+    // garbage and WRONG for a value a newer server legitimately added — an
+    // older phone reads a valid `mixed`, nulls it, and the wholesale PUT writes
+    // that null back over data the athlete recorded, silently and with no error
+    // anywhere. The picker can only ever write a value from GRIPS, so an
+    // unrecognised grip arrived FROM the server, which means the server takes
+    // it.
+    //
+    // The protection this used to give has not been dropped, it has moved to
+    // where the answer actually lives: the push catches the server's
+    // `invalid_grip` code, drops the grip and retries. Both places it can be
+    // refused — the create and the sets push — settle it, and `gripPush.test.ts`
+    // is what holds that, including the case where the retry must NOT happen
+    // because the athlete edited the session mid-push.
+    expect(repairSet(set({ grip: 'banana' as LoggedSet['grip'] })).grip).toBe('banana');
+    expect(repairSet(set({ grip: 'mixed' as LoggedSet['grip'] })).grip).toBe('mixed');
+  });
+
+  it('still drops something that could not be a grip at all', () => {
+    // Shape is decidable locally; vocabulary is not. An empty string is not a
+    // value on any server, and the API rejects it explicitly rather than
+    // reading it as "clear it".
+    expect(repairSet(set({ grip: '' as LoggedSet['grip'] })).grip).toBeNull();
   });
 
   it('leaves a legal grip alone', () => {

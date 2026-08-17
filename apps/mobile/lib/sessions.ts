@@ -1144,14 +1144,43 @@ export function repairSet<T extends LoggedSet>(set: T): T {
     reps != null &&
     assisted <= reps;
 
-  const gripStands = set.grip == null || GRIPS.some((g) => g.key === set.grip);
+  /*
+    Grip is checked for SHAPE, never for vocabulary, and that distinction is
+    the whole point.
+
+    Every other repair in this function is decidable here and now: a weight of
+    zero, an RIR of 25, more assisted reps than reps. Those are illegal on any
+    server, forever, and nulling them is safe.
+
+    A grip is not like that. This build knows four values; the server decides
+    how many there are. Checking `set.grip` against `GRIPS` therefore answers
+    "do I recognise this?" while pretending to answer "would the server take
+    it?" — and the moment a fifth value ships, every phone still on this build
+    reads a legitimate `mixed`, nulls it, and the wholesale PUT writes that null
+    back over real data. Silent, on rows the athlete did record, with no error
+    anywhere.
+
+    Note where an unknown value can come FROM. The picker only ever writes
+    `g.key` for `g` in `GRIPS`, so nothing local can produce one; a grip this
+    build does not recognise arrived from the server, which means the server
+    accepts it. Erasing it is not a conservative choice, it is the wrong one.
+
+    So: null only what could not be a value at all — a non-string, or an empty
+    one — and let the server adjudicate its own vocabulary. Display already
+    tolerates the unknown case (`GRIPS.find(...)?.label ?? s.grip` above), and
+    the 400-driven repair screen is still the backstop if genuinely corrupt text
+    ever reaches the wire. That trade is deliberate: a stranded session is loud,
+    visible and rare, while erased data is silent and permanent.
+  */
+  const gripStands =
+    set.grip == null || (typeof set.grip === 'string' && set.grip.length > 0);
 
   return {
     ...set,
     ...(assisted != null && !assistedStands ? { assisted_reps: null } : {}),
-    // A grip the server's CHECK would refuse strands the whole session: every
-    // push 400s and the row cannot be edited back into legality from any
-    // screen. Dropped to null here, like the assisted clamp above.
+    // Only when it cannot be a value at all — see the shape-versus-vocabulary
+    // note above. An unrecognised-but-plausible grip is preserved and sent, so
+    // a server that has grown its enum keeps the value it gave us.
     ...(gripStands ? {} : { grip: null }),
     reps,
     weight_kg: measure(set.weight_kg),

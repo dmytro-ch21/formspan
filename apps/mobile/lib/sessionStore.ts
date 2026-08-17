@@ -2,7 +2,7 @@ import { randomUUID } from 'expo-crypto';
 import type { TokenGetter } from './useAuthToken';
 import type * as SQLite from 'expo-sqlite';
 
-import { ApiError, isNotFound, isOffline, isPermanentRejection } from './apiError';
+import { ApiError, isNotFound, isUnknownGrip, isOffline, isPermanentRejection } from './apiError';
 import { getDb, withTransaction } from './db';
 import type { Exercise } from './exercises';
 import type { Workout, WorkoutItem } from './workouts';
@@ -576,8 +576,12 @@ async function pushRow(
   // Not `toSession`, which papers over a corrupt blob with an empty list.
   // `pushSets` *replaces* the server's list, so pushing that empty array
   // would turn a local read failure into permanent remote deletion.
-  const sets = parseSets(row.sets_json);
-  if (sets === null) throw new Error('This session is corrupted on this device and was not synced.');
+  const parsed = parseSets(row.sets_json);
+  if (parsed === null) throw new Error('This session is corrupted on this device and was not synced.');
+  // Reassigned by `dropRefusedGrips` below, so a repair reaches everything
+  // downstream of it — the create's retry AND the sets push — rather than only
+  // the one call that happened to be refused.
+  let sets = parsed;
 
   const s = toSession(row);
   let remote = row.remote === 1;
@@ -586,29 +590,95 @@ async function pushRow(
   // one path that is already two.
   const wasRemote = remote;
 
+  /**
+   * Settle a grip the server refused: drop every grip, persist that, and say
+   * whether the retry may go ahead.
+   *
+   * The compare-and-swap is the load-bearing half, and it guards a race this
+   * file treats as ordinary elsewhere. `saveLocalSets` bumps `updated_at` on
+   * every edit and a live session pushes on every debounced save, so an athlete
+   * ticking a set mid-push is the normal state, not an exotic one. Without
+   * `AND updated_at = ?` this writes the list read at the top of `pushRow` back
+   * over that newer edit — the athlete's last reps deleted locally, silently,
+   * to settle a disagreement about a different field. Declining instead costs a
+   * sync cycle and nothing else: the row stays dirty, and the next push re-reads
+   * the fresh sets and repairs those. Same reasoning, and the same clause, as
+   * the `dirty = 0` swap at the end of this function.
+   *
+   * Deliberately does NOT mark the row dirty or bump `updated_at` — this is the
+   * push settling with the server, not the athlete editing. Bumping it would
+   * also defeat that terminal swap and cost a second wasted cycle.
+   */
+  const dropRefusedGrips = async (): Promise<boolean> => {
+    const withoutGrip = sets.map((set) => ({ ...set, grip: null }));
+    const { changes } = await db.runAsync(
+      `UPDATE local_sessions SET sets_json = ? WHERE id = ? AND user_id = ? AND updated_at = ?`,
+      JSON.stringify(withoutGrip),
+      s.id,
+      userID,
+      row.updated_at,
+    );
+    if (changes === 0) return false;
+    sets = withoutGrip;
+    return true;
+  };
+
+  /**
+   * The session was deleted on another device. Forget that it's remote so the
+   * next attempt recreates it — the device actively logging holds the live copy,
+   * and dropping the sets to honour a delete made elsewhere would lose work that
+   * only exists here.
+   */
+  const forgetRemoteOn404 = async (err: unknown): Promise<void> => {
+    if (err instanceof ApiError && err.status === 404) {
+      await db.runAsync(
+        `UPDATE local_sessions SET remote = 0 WHERE id = ? AND user_id = ?`,
+        s.id,
+        userID,
+      );
+    }
+  };
+
   // Only until the server has acknowledged it. The create is idempotent, so
   // repeating it was harmless — but it doubled the cost of every keystroke
   // and made the server re-validate the workout template each time.
   if (!remote) {
-    await pushCreate(getToken, {
-      id: s.id,
-      sport: s.sport,
-      name: s.name,
-      workout_id: s.workout_id,
-      started_at: s.started_at,
-      // Sent on the create, not left to the finish call below.
-      //
-      // A session that was already over when it was first pushed — every BJJ
-      // reflection log — must land complete in one request. Relying on the
-      // follow-up finish meant anything that could fail in between took the
-      // session's duration with it, and since history derives all duration
-      // from `ended_at - started_at`, "no duration" means the session counts
-      // for nothing. The optional reflection could therefore cost the
-      // mandatory floor its mat time, which inverts the whole point of the
-      // floor being independent.
-      ended_at: s.ended_at,
-      sets,
-    });
+    const create = () =>
+      pushCreate(getToken, {
+        id: s.id,
+        sport: s.sport,
+        name: s.name,
+        workout_id: s.workout_id,
+        started_at: s.started_at,
+        // Sent on the create, not left to the finish call below.
+        //
+        // A session that was already over when it was first pushed — every BJJ
+        // reflection log — must land complete in one request. Relying on the
+        // follow-up finish meant anything that could fail in between took the
+        // session's duration with it, and since history derives all duration
+        // from `ended_at - started_at`, "no duration" means the session counts
+        // for nothing. The optional reflection could therefore cost the
+        // mandatory floor its mat time, which inverts the whole point of the
+        // floor being independent.
+        ended_at: s.ended_at,
+        sets,
+      });
+    try {
+      await create();
+    } catch (err) {
+      // The create refuses a grip exactly as the sets push below does — it
+      // runs the same `validateSets` BEFORE it touches the repository, so even
+      // an idempotent replay is validated. And this is the path that matters
+      // most: `remote = 0` is every session logged offline, the case the whole
+      // store exists for. Repaired only below, an unknown grip on a
+      // never-acknowledged session threw from here, outside that catch —
+      // permanently refused, dirty forever, and unreachable by any screen,
+      // since no editor can turn a value it does not recognise back into a
+      // legal one.
+      if (!isUnknownGrip(err) || !(await dropRefusedGrips())) throw err;
+      // `create` reads `sets`, which the repair has just replaced.
+      await create();
+    }
     remote = true;
     await db.runAsync(`UPDATE local_sessions SET remote = 1 WHERE id = ? AND user_id = ?`, s.id, userID);
   }
@@ -618,14 +688,38 @@ async function pushRow(
     // sets in the body on a replay, so they need their own call regardless.
     await pushSets(getToken, s.id, sets);
   } catch (err) {
-    // The session was deleted on another device. Forget that it's remote so
-    // the next attempt recreates it — the device actively logging holds the
-    // live copy, and dropping the sets to honour a delete made elsewhere
-    // would lose work that only exists here.
-    if (err instanceof ApiError && err.status === 404) {
-      await db.runAsync(`UPDATE local_sessions SET remote = 0 WHERE id = ? AND user_id = ?`, s.id, userID);
+    // A grip THIS BUILD sent that the server does not know. The only rejection
+    // the phone can settle by itself, and the reason it is worth settling: a
+    // 4xx classifies as permanent, so without this the session stays dirty
+    // forever, sits on the repair screen forever, and no screen can edit an
+    // unrecognised value back into legality.
+    //
+    // Repaired HERE rather than in `repairSet` deliberately, and that is the
+    // whole of T4. `repairSet` runs on every read and cannot know the server's
+    // vocabulary — it knows four grips, the server decides how many exist. It
+    // used to null anything outside its own list, which is right for garbage
+    // and WRONG for a value a newer server legitimately added: an older phone
+    // would read a valid `mixed`, null it, and this very PUT would write that
+    // null back over real data, silently. So the client now sends what it holds
+    // and only drops a grip the server has actually refused, by code.
+    if (!isUnknownGrip(err) || !(await dropRefusedGrips())) {
+      await forgetRemoteOn404(err);
+      throw err;
     }
-    throw err;
+    try {
+      await pushSets(getToken, s.id, sets);
+    } catch (retryErr) {
+      // The retry can 404 for the same reason the first call can, and reaching
+      // it is not exotic: the server validates sets before it checks the
+      // session exists, so "deleted on another device AND holding a grip this
+      // server refuses" answers `invalid_grip` first and 404 only now.
+      await forgetRemoteOn404(retryErr);
+      throw retryErr;
+    }
+    // Falls through rather than returning, so `ended_at` and the BJJ detail
+    // below stay on their normal path. Returning here would let an unknown
+    // grip cost the session its duration — the "optional half costing the
+    // mandatory one" failure the comment under this block exists to prevent.
   }
 
   // Before the reflection, deliberately. The finish is what the session's

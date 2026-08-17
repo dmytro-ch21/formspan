@@ -2099,6 +2099,55 @@ screen.
 - A signed-out app does not report "0 pending" as if everything were safely on
   the server — that state is unknown, not clean.
 
+## A grip the server refuses (`invalid_grip`, backend + mobile, T4)
+
+The client stopped nulling grips it does not recognise — only the server owns
+that vocabulary — so the safety net moved to the push, which drops a grip
+**after** the server refuses it by code. Everything below needs a fifth grip to
+exist server-side (see N9) or a stubbed response; none of it is reachable today,
+which is exactly why it is written down.
+
+### API
+
+- `POST /v1/sessions` and `PUT /v1/sessions/{id}/sets` with a set naming an
+  unknown grip both answer **400 with code `invalid_grip`**, never
+  `invalid_input`. The code is the contract; the message is not.
+- Every other validation failure on those endpoints still answers
+  `invalid_input` — an out-of-range RPE must not be reported as a grip problem,
+  or a client will drop grips trying to fix it and be refused identically.
+- The message names the offending set ("set 2"), because the repair screen shows
+  it to a person.
+- The four grips the enum defines are accepted, and an unrecorded grip (`null`)
+  stays legal.
+- Sets are validated **before** the session is looked up, so a request that is
+  both unknown-gripped and aimed at a deleted session answers 400, not 404.
+
+### Sync
+
+- A session logged **offline** and first pushed with a refused grip still lands:
+  the create is retried without grips. This is the primary case — `remote = 0`
+  is every offline session — and the repair covering only the sets push left it
+  stranded permanently.
+- A session the server already holds, edited to carry a refused grip, repairs on
+  the sets push and still reaches `finish`: an unknown grip must never cost the
+  session its `ended_at`, or it counts for nothing in history.
+- The repair is **persisted locally**, so the next push cannot resend the value.
+- Only grips are dropped — `ended_at`, reps and weights survive the retry.
+- **Editing the session while it is pushing must not lose the edit.** If a save
+  lands between the push reading the sets and the repair writing them back, the
+  repair is declined and the row stays dirty; the next sync repairs the newer
+  sets instead. Verifiable by saving during a slow push.
+- A non-grip 400 changes nothing locally and still surfaces on the repair
+  screen.
+- A 404 on the **retry** still marks the session non-remote, so the next sync
+  recreates it.
+
+### Deploy order
+
+- A client sending a grip a **stale** server has not deployed yet gets
+  `invalid_input`, not `invalid_grip`, and strands. The server must be live
+  everywhere before any client offers a new grip value.
+
 ## Offline deletes (mobile, offline-first PR3)
 
 ### The loop that has to work

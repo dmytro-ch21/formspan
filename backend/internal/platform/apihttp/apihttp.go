@@ -27,6 +27,15 @@ const (
 	// is closed and part of the contract, so adding one is a deliberate
 	// contract change rather than an implementation detail.
 	CodeRateLimited = "rate_limited"
+
+	// CodeInvalidGrip accompanies 400 when a set names a grip the server does
+	// not know. It is a SEPARATE code rather than another `invalid_input`
+	// because a client cannot act on the difference otherwise: an unknown grip
+	// is the one rejection a phone can repair by itself (drop the value, retry),
+	// and the alternative is matching on the message — which the conventions in
+	// docs/architecture/api-conventions.md forbid, precisely so a reworded
+	// string cannot break a client.
+	CodeInvalidGrip = "invalid_grip"
 )
 
 type errorBody struct {

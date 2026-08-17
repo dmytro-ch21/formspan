@@ -34,6 +34,10 @@ func writeErr(w http.ResponseWriter, r *http.Request, err error) {
 		apihttp.WriteError(w, http.StatusNotFound, apihttp.CodeNotFound, "session not found")
 	case errors.Is(err, ErrAlreadyExists):
 		apihttp.WriteError(w, http.StatusConflict, apihttp.CodeAlreadyExists, "session id already in use")
+	case errors.Is(err, ErrInvalidGrip):
+		// BEFORE the ErrInvalidInput case below, which it also satisfies —
+		// order is what keeps this code reachable at all.
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidGrip, err.Error())
 	case errors.Is(err, ErrSportMismatch), errors.Is(err, ErrInvalidInput):
 		// Safe to surface: these name an exercise or a value the caller sent,
 		// never anything internal.
@@ -42,6 +46,21 @@ func writeErr(w http.ResponseWriter, r *http.Request, err error) {
 		apihttp.WriteInternal(w, r, "session", err)
 	}
 }
+
+// gripError is the one validateSets failure carrying its own wire code, so it
+// needs both the sentinel chain and a message shaped like its siblings.
+//
+// A `%w` of ErrInvalidGrip cannot give both: wrapping necessarily concatenates
+// that sentinel's own text, so the repair screen showed an athlete
+// "session: invalid input: unknown grip (set 2)" on a list where every other
+// line reads "set 2: RPE must be between 1 and 10". `Unwrap` keeps
+// `errors.Is(err, ErrInvalidGrip)` — and through it `ErrInvalidInput` — working
+// exactly as the wrapped form did, so `writeErr`'s ordering still decides the
+// code; only the sentence changes.
+type gripError struct{ set int }
+
+func (e gripError) Error() string { return "set " + strconv.Itoa(e.set) + ": unknown grip" }
+func (e gripError) Unwrap() error { return ErrInvalidGrip }
 
 // validateSets checks what the database's CHECK constraints would catch
 // anyway, but with a message naming the offending set — a 400 saying "set 3:
@@ -63,7 +82,7 @@ func validateSets(sets []Set) error {
 		// maps 23514 to ErrInvalidInput — but a vague one, with no set number
 		// and no mention of grip. What this buys is the message, not the status.
 		if s.Grip != nil && !ValidGrip(*s.Grip) {
-			return errors.New(at + "unknown grip")
+			return gripError{set: i + 1}
 		}
 		if s.RPE != nil && (*s.RPE < 1 || *s.RPE > 10) {
 			return errors.New(at + "RPE must be between 1 and 10")
@@ -440,6 +459,12 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := validateSets(req.Sets); err != nil {
+		// A grip rejection routes through writeErr so it keeps its own code;
+		// everything else keeps the message it already had, unwrapped.
+		if errors.Is(err, ErrInvalidGrip) {
+			writeErr(w, r, err)
+			return
+		}
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, err.Error())
 		return
 	}
@@ -488,6 +513,12 @@ func (h *Handler) ReplaceSets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := validateSets(req.Sets); err != nil {
+		// A grip rejection routes through writeErr so it keeps its own code;
+		// everything else keeps the message it already had, unwrapped.
+		if errors.Is(err, ErrInvalidGrip) {
+			writeErr(w, r, err)
+			return
+		}
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, err.Error())
 		return
 	}
