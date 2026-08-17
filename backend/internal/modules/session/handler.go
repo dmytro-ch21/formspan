@@ -55,6 +55,16 @@ func validateSets(sets []Set) error {
 		if s.SetType != "" && !ValidSetType(s.SetType) {
 			return errors.New(at + "unknown set type")
 		}
+		// nil is legal and means unrecorded; a PRESENT value has to be one of
+		// the four. An empty string is rejected rather than read as "clear it",
+		// because the client that wants no grip omits the field or sends null.
+		//
+		// Reaching the CHECK instead would still be a 400 — `translatePgError`
+		// maps 23514 to ErrInvalidInput — but a vague one, with no set number
+		// and no mention of grip. What this buys is the message, not the status.
+		if s.Grip != nil && !ValidGrip(*s.Grip) {
+			return errors.New(at + "unknown grip")
+		}
 		if s.RPE != nil && (*s.RPE < 1 || *s.RPE > 10) {
 			return errors.New(at + "RPE must be between 1 and 10")
 		}

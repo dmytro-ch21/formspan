@@ -99,6 +99,8 @@ import {
   reorderGroups,
   timedSetStillAt,
   workSecondsFor,
+  GRIPS,
+  gripApplies,
   SET_TYPES,
   type LoggedSet,
   type Measure,
@@ -2279,6 +2281,44 @@ function SetRow({
               </Pressable>
             ))}
           </View>
+
+          {/* How the bar was held.
+              Offered only where the four values ARE the vocabulary — pushes,
+              pulls, isolation. Not squats (meaningless) and not hinges, whose
+              real answer is `mixed`, which this enum does not have: a picker
+              there would collect confident wrong answers rather than none.
+
+              Tapping the selected chip clears it, which is the only way back to
+              "unrecorded" once something is chosen. Without that, a mis-tap is
+              permanent — and unrecorded is a real state here, not an absence. */}
+          {gripApplies(exercise?.movement_pattern) && (
+            <View style={styles.chips}>
+              {GRIPS.map((g) => {
+                const on = set.grip === g.key;
+                return (
+                  <Pressable
+                    key={g.key}
+                    onPress={() => onChange({ ...set, grip: on ? null : g.key })}
+                    style={[
+                      styles.chip,
+                      on && [
+                        styles.chipActive,
+                        { backgroundColor: accent.accent, borderColor: accent.accent },
+                      ],
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: on }}
+                    accessibilityLabel={`${g.label} grip for ${setName} of ${exerciseName}`}
+                    accessibilityHint={on ? 'Tap again to clear the grip' : undefined}
+                    hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                    testID={`set-${index}-grip-${g.key}`}
+                  >
+                    <Text style={[styles.chipText, on && styles.chipTextActive]}>{g.label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
 
           <Pressable
             onPress={onRemove}

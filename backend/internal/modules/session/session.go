@@ -29,6 +29,74 @@ const (
 	SetTypeFailure SetType = "failure"
 )
 
+// Grip is how the implement was held for one set.
+//
+// A property of the SET, not of the exercise. A catalog row per grip would
+// multiply the 762-row catalog into something near 3,000 and still not express the
+// thing athletes actually do — switch on the last set because the first three
+// hurt — while splitting one exercise's history in two, so the progression
+// rule and the personal records each see half the sets.
+//
+// `mixed` and `hook` are deliberately absent: they are how a heavy deadlift is
+// held and they are not variations of these four. Offering these four on a
+// hinge would let a deadlifter record `regular` for a mixed pull, which is a
+// false entry rather than a missing one. See `GripApplies`.
+type Grip string
+
+const (
+	// GripRegular — overhand, pronated. The default way almost everything is
+	// held, which is exactly why it must be CHOSEN rather than assumed: see
+	// the nil case on Set.Grip.
+	GripRegular Grip = "regular"
+	// GripNeutral — palms facing each other. Dumbbells, a football bar, a
+	// multi-grip handle.
+	GripNeutral Grip = "neutral"
+	// GripReverse — underhand, supinated. A reverse-grip press, a supinated row.
+	GripReverse Grip = "reverse"
+	// GripAngled — the canted position an EZ-bar or an angled handle forces,
+	// which is neither fully pronated nor neutral.
+	GripAngled Grip = "angled"
+)
+
+func ValidGrip(g Grip) bool {
+	switch g {
+	case GripRegular, GripNeutral, GripReverse, GripAngled:
+		return true
+	}
+	return false
+}
+
+// GripApplies says whether a grip is worth asking about for a movement.
+//
+// Derived from the catalog's existing `movement_pattern` vocabulary rather than
+// from a new column, deliberately: a `grips_vary` flag would be 762 more rows
+// of hand-classification to maintain and get wrong, and the per-side review
+// (F3) is the standing evidence of what that costs.
+//
+// The five patterns here are the ones where this enum IS the vocabulary an
+// athlete would use: 403 of the catalog's 762 exercises. Squats, lunges, jumps
+// and conditioning are out because the question is meaningless; hinges and
+// carries are out because their answer is `mixed` or `hook`, which this enum
+// does not have, so asking there would collect confident WRONG answers rather
+// than none.
+//
+// `isolation` is in, and it is the debatable one: 210 rows, the catalog's
+// "honest bucket for the single-joint long tail", so it carries calf raises
+// (grip is meaningless) alongside hammer and reverse curls — which are the
+// purest grip variations in the whole catalog. Excluding it would halve the
+// gate to 193 and cut exactly the exercises this feature is clearest for.
+//
+// The asymmetry decides it: a false positive is an optional control somebody
+// ignores on a calf raise, and a false negative is the feature not existing
+// for reverse curls. Cheap wrong beats expensive wrong.
+func GripApplies(movementPattern string) bool {
+	switch movementPattern {
+	case "horizontal_push", "horizontal_pull", "vertical_push", "vertical_pull", "isolation":
+		return true
+	}
+	return false
+}
+
 func ValidSetType(s SetType) bool {
 	switch s {
 	case SetTypeWarmup, SetTypeWorking, SetTypeBackoff, SetTypeDrop, SetTypeAMRAP, SetTypeFailure:
@@ -92,6 +160,20 @@ type Set struct {
 	// number it always did, and makes `SoloReps` the only thing that has to
 	// know about the split.
 	AssistedReps *int `json:"assisted_reps"`
+
+	// Grip is how the implement was held for this set.
+	//
+	// A POINTER because nil is UNRECORDED and that is not `regular`. Every set
+	// logged before this column existed chose no grip, and defaulting them to
+	// overhand would have the app assert training that never happened — which
+	// is worse than silence, because a later "you press better neutral" would
+	// then be computed over invented data.
+	//
+	// Nothing is derived from it. It is recorded and shown, never summed, which
+	// is why it appears in exactly two queries — the insert and the read that
+	// returns a session's sets — rather than in the ten that `AssistedReps`
+	// touches.
+	Grip *Grip `json:"grip"`
 
 	// LoadFactor is how many implements of `WeightKg` the athlete moved: 1 for
 	// a barbell, a machine, or a single kettlebell held in two hands; 2 for a

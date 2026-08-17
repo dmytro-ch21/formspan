@@ -56,6 +56,8 @@ func translatePgError(err error) error {
 			return fmt.Errorf("%w: RIR must be between 0 and 20", ErrInvalidInput)
 		case strings.Contains(pgErr.ConstraintName, "set_type"):
 			return fmt.Errorf("%w: unknown set type", ErrInvalidInput)
+		case strings.Contains(pgErr.ConstraintName, "grip"):
+			return fmt.Errorf("%w: unknown grip", ErrInvalidInput)
 		case strings.Contains(pgErr.ConstraintName, "ends_after_start"):
 			return fmt.Errorf("%w: a session can't end before it started", ErrInvalidInput)
 		}
@@ -436,6 +438,7 @@ func (r *PostgresRepository) attachSets(ctx context.Context, sessions []Session,
 	rows, err := r.pool.Query(ctx, `
 		SELECT ss.session_id, ss.exercise_id, ss.position, ss.set_type, ss.reps, ss.weight_kg,
 		       ss.seconds, ss.distance_m, ss.rir, ss.rpe, ss.notes, ss.completed, ss.assisted_reps,
+		       ss.grip,
 		       CASE WHEN e.load_mode = 'per_side' AND NOT e.is_unilateral THEN 2 ELSE 1 END
 		FROM session_sets ss
 		LEFT JOIN exercises e ON e.id = ss.exercise_id
@@ -454,7 +457,8 @@ func (r *PostgresRepository) attachSets(ctx context.Context, sessions []Session,
 		)
 		if err := rows.Scan(&sessionID, &st.ExerciseID, &st.Position, &st.SetType,
 			&st.Reps, &st.WeightKg, &st.Seconds, &st.DistanceM,
-			&st.RIR, &st.RPE, &st.Notes, &st.Completed, &st.AssistedReps, &st.LoadFactor); err != nil {
+			&st.RIR, &st.RPE, &st.Notes, &st.Completed, &st.AssistedReps, &st.Grip,
+			&st.LoadFactor); err != nil {
 			return fmt.Errorf("session: scan set: %w", err)
 		}
 		bySession[sessionID] = append(bySession[sessionID], st)
@@ -716,10 +720,10 @@ func insertSets(ctx context.Context, tx pgx.Tx, sessionID, userID string, sets [
 		batch.Queue(`
 			INSERT INTO session_sets (
 				session_id, user_id, exercise_id, position, set_type, reps, weight_kg,
-				seconds, distance_m, rir, rpe, notes, completed, assisted_reps
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+				seconds, distance_m, rir, rpe, notes, completed, assisted_reps, grip
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
 			sessionID, userID, s.ExerciseID, i, st, s.Reps, s.WeightKg,
-			s.Seconds, s.DistanceM, s.RIR, s.RPE, s.Notes, s.Completed, s.AssistedReps)
+			s.Seconds, s.DistanceM, s.RIR, s.RPE, s.Notes, s.Completed, s.AssistedReps, s.Grip)
 	}
 	results := tx.SendBatch(ctx, batch)
 	for i := range sets {

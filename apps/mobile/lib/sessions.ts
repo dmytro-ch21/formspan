@@ -13,6 +13,47 @@ import type { WorkoutItem } from './workouts';
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
 const API_BASE = `${API_URL}/v1`;
 
+/**
+ * How the implement was held for one set.
+ *
+ * A property of the SET, not of the exercise — you might press neutral today
+ * and regular next week, or switch on the last set because the first three
+ * hurt. A catalog row per grip could express neither — it would multiply the
+ * 762-row catalog toward 3,000 — and would split one exercise's history in two.
+ *
+ * `mixed` and `hook` are deliberately absent: they are how a heavy deadlift is
+ * held, and they are not variations of these four. The picker is not offered on
+ * hinges, so nobody is asked a question this list cannot answer.
+ */
+export type Grip = 'regular' | 'neutral' | 'reverse' | 'angled';
+
+/** Ordered by how often they are used, so the common answer is the first tap. */
+export const GRIPS: { key: Grip; label: string }[] = [
+  { key: 'regular', label: 'Regular' },
+  { key: 'neutral', label: 'Neutral' },
+  { key: 'reverse', label: 'Reverse' },
+  { key: 'angled', label: 'Angled' },
+];
+
+/**
+ * Whether a grip is worth asking about for a movement — mirrors the server's
+ * `GripApplies`. Pushes, pulls and isolation work; not squats, hinges or
+ * conditioning. See the Go function for why `isolation` is in despite carrying
+ * calf raises, and why hinges are out despite grip mattering there most.
+ */
+export function gripApplies(movementPattern: string | undefined): boolean {
+  switch (movementPattern) {
+    case 'horizontal_push':
+    case 'horizontal_pull':
+    case 'vertical_push':
+    case 'vertical_pull':
+    case 'isolation':
+      return true;
+    default:
+      return false;
+  }
+}
+
 export type SetType = 'warmup' | 'working' | 'backoff' | 'drop' | 'amrap' | 'failure';
 
 export const SET_TYPES: { key: SetType; label: string; short: string }[] = [
@@ -71,6 +112,18 @@ export type LoggedSet = {
    * `totalWeightKg` treats undefined as 1 rather than as zero.
    */
   load_factor?: number;
+
+  /**
+   * How the implement was held. `undefined`/null is UNRECORDED, and that is
+   * NOT `regular` — every set logged before this field existed chose no grip,
+   * and showing them as overhand would assert training that never happened.
+   *
+   * Sent on writes, and has to be: the server replaces a session's sets
+   * wholesale, so a shape that omits it wipes the column on the first edit.
+   * Optional on the type so rows cached by an older build still parse.
+   */
+  grip?: Grip | null;
+
   /**
    * Done. The trigger for progressive volume — the summary counts what's
    * been performed, not what's been planned, so the header climbs as you
@@ -295,6 +348,12 @@ export function emptySet(exerciseID: string, position: number, from?: LoggedSet)
     // recording a number nobody actually judged.
     rir: null,
     rpe: null,
+    // Carried, unlike effort: you do not change your grip between sets of the
+    // same exercise unless you mean to, so prefilling it records what actually
+    // happened rather than inviting a guess. `undefined` stays undefined — a
+    // set carried forward from an unrecorded one is still unrecorded, and must
+    // not gain a `regular` nobody chose.
+    grip: from?.grip,
     notes: '',
     completed: false,
   };
@@ -369,6 +428,13 @@ export function swapExercise(
           // invisible AND un-clearable. The session stays dirty and re-fails
           // every sync until the set is deleted.
           assisted_reps: null,
+          // Cleared for the soft reason above and a structural one: the picker
+          // is gated on the exercise's movement pattern, so swapping a pull-up
+          // for a leg press leaves a grip that is still on the row, still sent
+          // on every write, and has no control anywhere that can clear it.
+          // Invisible and unclearable is the same shape as the sync wedge
+          // above, minus the 400 that would at least announce it.
+          grip: null,
           // CLEARED, always — a factor describes the exercise, so it cannot
           // survive becoming a different one. Swapping dumbbells for a barbell
           // kept the ×2 and counted the barbell double; and because the pull
@@ -504,6 +570,9 @@ export function describeSet(
   if (s.distance_m != null) parts.push(formatDistance(s.distance_m, units));
   if (s.rpe != null) parts.push(`RPE ${s.rpe}`);
   else if (s.rir != null) parts.push(`${s.rir} RIR`);
+  // Only when recorded — an unrecorded grip shows nothing at all rather than
+  // "regular", which would be the app answering a question nobody asked.
+  if (s.grip) parts.push(GRIPS.find((g) => g.key === s.grip)?.label ?? s.grip);
   return parts.join(' · ') || 'Not recorded';
 }
 
@@ -988,9 +1057,15 @@ export function repairSet<T extends LoggedSet>(set: T): T {
     reps != null &&
     assisted <= reps;
 
+  const gripStands = set.grip == null || GRIPS.some((g) => g.key === set.grip);
+
   return {
     ...set,
     ...(assisted != null && !assistedStands ? { assisted_reps: null } : {}),
+    // A grip the server's CHECK would refuse strands the whole session: every
+    // push 400s and the row cannot be edited back into legality from any
+    // screen. Dropped to null here, like the assisted clamp above.
+    ...(gripStands ? {} : { grip: null }),
     reps,
     weight_kg: measure(set.weight_kg),
     seconds: measure(set.seconds),
