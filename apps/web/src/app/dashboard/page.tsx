@@ -9,6 +9,7 @@ import {
   labelForModule,
   listSessionsPage,
   listWorkouts,
+  sessionVolume,
   type History,
   type Session,
   type Workout,
@@ -206,7 +207,18 @@ export default function TodayPage() {
                       </span>
                       <span className="block truncate text-sm text-text-dim">
                         {labelForModule(modules, s.sport)} ·{" "}
-                        {s.sets.length === 1 ? "1 set" : `${s.sets.length} sets`}
+                        {/* `sessionVolume`, not `sets.length`. The raw length
+                            counts warm-ups, drops and sets that were only
+                            planned — so a session read "6 sets" here and
+                            "Working sets 3" one click later, about the same
+                            session. Softer than the list's version of this
+                            (the labels differ, so it does not read as a flat
+                            contradiction) but the same disagreement, and the
+                            rule already exists one import away. */}
+                        {(() => {
+                          const n = sessionVolume(s.sets).working_sets;
+                          return n === 1 ? "1 set" : `${n} sets`;
+                        })()}
                         {s.ended_at ? "" : " · in progress"}
                       </span>
                     </span>

@@ -20831,6 +20831,68 @@ the real one; it was only *reading* that advertised an illegal value.
   raw kilograms regardless of unit preference. Not touched — annotating a dead
   function is waste. Recorded as `L8`.
 
+## 2026-08-16 — Three set types nothing tested, and a count that included everything
+
+Two findings from a review that outlived the branch it was reviewing. W4 had
+already been fixed on `main` by #241 while a second session was most of the way
+through the same work — the second such duplication in an afternoon — so the
+branch was discarded. Its review had found things the merged version also has.
+
+### The tests passed an allowlist that deletes half the set types
+
+`sessionVolume`'s rule is "everything except a warm-up". Its fixtures used
+three of the six set types — `working`, `warmup`, `drop` — so a refactor to an
+allowlist, `set_type === "working" || set_type === "drop"`, **passed all nine
+tests** while silently zeroing every `backoff`, `amrap` and `failure` set out of
+the count *and* the tonnage. Measured, not theorised: the mutant was run against
+the suite on `main`.
+
+Those three are not exotic. A back-off is the second half of most strength
+templates, and an AMRAP or a to-failure set is usually the hardest thing in the
+session — precisely the work an athlete would notice going missing. One case
+covering all three now fails that mutant.
+
+This is the shape the repo's own testing rule is about: every assertion should
+fail when the code it covers is wrong. A fixture that exercises the types
+somebody happened to think of tests the example rather than the rule.
+
+### Home counted every row
+
+`/dashboard` rendered `{s.sets.length} sets` on its recent-session rows — warm-
+ups, drops and sets that were only planned, all included. A session read "6
+sets" there and "Working sets 3" one click later.
+
+Softer than **W4**, which is why it survived it: the labels differ ("sets" vs
+"Working sets"), so it does not read as a flat contradiction on one screen. It
+is the same disagreement one notch quieter, and the rule was already one import
+away.
+
+### On the duplication
+
+Two full rounds of work were lost this afternoon to two sessions independently
+picking the same top item from `TASKS.md` — W2, then W4. Both times the checks
+were genuinely run (the list, `gh pr list`, other worktrees) and both times the
+other session simply had not published anything yet. **A check cannot see work
+that has not been pushed.**
+
+The mitigation used here, and worth making standard: **open a draft PR before
+writing any code.** This branch's first commit is empty and exists only to make
+the claim visible on the one channel every session can see. It costs one
+command. `TASKS.md` is ordered by priority and has no claim field, so agents
+reading it independently will keep converging on the same line.
+
+### Open questions this leaves
+
+- **Nothing tests the home page's number.** It is a JSX expression in a page
+  component, so pinning it needs either a component test — which this app has
+  none of — or extracting the row. The rule it now calls is tested; its use here
+  is not.
+- **`sessionVolume`'s fixtures still only construct one exercise.** Nothing
+  exercises the distinct-exercise count that sits beside these figures.
+- **Not seen in a browser**, same gap as the entry above: the arithmetic is
+  typechecked and unit-tested, and no dev server was run against a session
+  containing back-offs.
+
 ## Open items / known gaps as of this entry
 
 - **The technique library is still left behind by `technique`'s tests**, exactly as the exercise catalog was until the tripwire entry above. Smaller exposure — `technique` sorts seventeenth of nineteen, so only `theme` and `workout` run after it — but the same shape: a package borrowing a technique id would pass on that residue. The same fix applies (`removeCatalogAfterTest`'s shape, scoped to the ids `SeedData()` names); deferred because H1 is already in flight against that library.
