@@ -78,6 +78,15 @@ func TestTheDatabaseRefusesAGripNobodyDefined(t *testing.T) {
 		t.Fatalf("error %v does not wrap ErrInvalidInput, so this is a 500 and a leaked "+
 			"driver message rather than a 400", err)
 	}
+	// And the narrower sentinel, which is what `writeErr` turns into the
+	// `invalid_grip` code the phone repairs on. Asserting only the broad one —
+	// as this test did until the code existed — passes for a repository that has
+	// forgotten grips are special, because `ErrInvalidGrip` wraps `ErrInvalidInput`
+	// and every weaker answer satisfies the check above.
+	if !errors.Is(err, ErrInvalidGrip) {
+		t.Fatalf("error %v does not wrap ErrInvalidGrip, so this refusal reaches the "+
+			"client as a generic invalid_input and no client can act on it", err)
+	}
 }
 
 // GripApplies has no backend caller — the clients gate their pickers on their

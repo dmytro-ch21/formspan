@@ -145,9 +145,11 @@ describe('a grip the server would refuse', () => {
     // it.
     //
     // The protection this used to give has not been dropped, it has moved to
-    // where the answer actually lives: the push now catches the server's
-    // `invalid_grip` code, drops the grip and retries, so a genuinely illegal
-    // value still cannot strand the session. See `pushRow` in sessionStore.
+    // where the answer actually lives: the push catches the server's
+    // `invalid_grip` code, drops the grip and retries. Both places it can be
+    // refused — the create and the sets push — settle it, and `gripPush.test.ts`
+    // is what holds that, including the case where the retry must NOT happen
+    // because the athlete edited the session mid-push.
     expect(repairSet(set({ grip: 'banana' as LoggedSet['grip'] })).grip).toBe('banana');
     expect(repairSet(set({ grip: 'mixed' as LoggedSet['grip'] })).grip).toBe('mixed');
   });

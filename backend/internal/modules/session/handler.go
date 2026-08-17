@@ -1,11 +1,11 @@
 package session
 
 import (
-	"fmt"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/discipline"
 
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -68,7 +68,9 @@ func validateSets(sets []Set) error {
 		// maps 23514 to ErrInvalidInput — but a vague one, with no set number
 		// and no mention of grip. What this buys is the message, not the status.
 		if s.Grip != nil && !ValidGrip(*s.Grip) {
-			return fmt.Errorf("%w (%s)", ErrInvalidGrip, at[:len(at)-2])
+			// Formatted from `i` rather than by trimming `at`'s ": ", which is a
+			// slice that silently depends on that suffix never changing.
+			return fmt.Errorf("%w (set %d)", ErrInvalidGrip, i+1)
 		}
 		if s.RPE != nil && (*s.RPE < 1 || *s.RPE > 10) {
 			return errors.New(at + "RPE must be between 1 and 10")

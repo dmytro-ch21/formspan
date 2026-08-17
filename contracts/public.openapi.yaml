@@ -5763,6 +5763,12 @@ paths:
             error: workout IDs are client-generated and often guessable, so
             distinguishing them would let a caller enumerate other people's
             private templates.
+
+            A set naming a grip this server does not know is refused with the
+            narrower code `invalid_grip`, not `invalid_input`. The sets in the
+            body are validated here as well as on `PUT .../sets`, so a client
+            that only handles that code on the replace endpoint strands every
+            session it created offline.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -6243,7 +6249,15 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/SessionWithVolume" }
         "400":
-          description: Invalid input, including a sport mismatch or an out-of-range RIR/RPE.
+          description: >
+            Invalid input, including a sport mismatch or an out-of-range
+            RIR/RPE. A set naming a grip this server does not know is refused
+            with the narrower code `invalid_grip` — the one refusal a client is
+            expected to settle itself, by dropping the grip and resending.
+
+            Note the sets are validated before the session is looked up, so a
+            request that is BOTH unknown-gripped and aimed at a deleted session
+            answers 400 here rather than 404.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }

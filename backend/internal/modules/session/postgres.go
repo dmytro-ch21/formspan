@@ -57,6 +57,12 @@ func translatePgError(err error) error {
 		case strings.Contains(pgErr.ConstraintName, "set_type"):
 			return fmt.Errorf("%w: unknown set type", ErrInvalidInput)
 		case strings.Contains(pgErr.ConstraintName, "grip"):
+			// This substring match now decides more than a message. It picks the
+			// wire code `invalid_grip`, which is the phone's signal that it may
+			// drop the grip and retry — so renaming the CHECK constraint to
+			// something without "grip" in it silently downgrades that to
+			// `invalid_input`, and the client stops repairing. Any migration that
+			// touches the constraint's NAME has to keep this matching.
 			return ErrInvalidGrip
 		case strings.Contains(pgErr.ConstraintName, "ends_after_start"):
 			return fmt.Errorf("%w: a session can't end before it started", ErrInvalidInput)

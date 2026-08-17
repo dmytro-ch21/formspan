@@ -22454,12 +22454,64 @@ Two details in that retry that were wrong first time and are worth stating:
   the "optional half costing the mandatory one" failure the comment directly
   beneath that block exists to prevent.
 
+### What review found, and it was the whole point of the change
+
+The retry is the part of this with no screen behind it — nobody watches it
+happen — and it shipped for review with two holes and no test. Both are fixed
+here; recording them because the second is the failure mode this project keeps
+producing.
+
+**The repair did not cover the create.** `POST /v1/sessions` runs the same
+`validateSets` on the sets in its body, *before* the repository, so it refuses a
+grip exactly as the sets push does. The catch wrapped only `pushSets`. That
+leaves `remote = 0` — **every session logged offline, the case the whole store
+exists for** — throwing from outside the only code that could settle it:
+permanently refused, dirty forever, and unreachable by any screen, since no
+editor can turn a value it does not recognise back into a legal one. The fix is
+one repair shared by both calls, replacing the list every later call reads, so a
+create repaired at 09:00 does not have the next request re-send the same grip.
+
+**The repair could delete an athlete's edit.** It wrote the sets read at the
+*start* of the push, with no compare-and-swap, while `saveLocalSets` bumps
+`updated_at` on every edit and a live session pushes on every debounced save —
+so a save landing mid-push is the ordinary state, not an exotic one. Sequence:
+push reads A, athlete ticks a set (B), server refuses a grip, repair writes
+A-with-grips-nulled **over B**. The terminal CAS then correctly declines to mark
+the row clean, so the *sync* was safe — and B was already gone locally. Silent
+local data loss through the sync cycle, which is precisely the shape of the
+`completed` flag bug this project's reviewers caught before. The write now
+carries the same `AND updated_at = ?` the dirty-clear does, and declines rather
+than retries; the row stays dirty and the next push repairs the newer sets. The
+cost of declining is one cycle.
+
+**And there was no backend test of the mapping at all.** The existing
+`grip_postgres_test.go` asserted `ErrInvalidInput`, which the *old* code
+satisfied too — so it would have stayed green through a complete revert of this
+behaviour. `handler_test.go` now asserts the wire code from both endpoints, and
+that every other refusal still reports `invalid_input`; `gripPush.test.ts` drives
+a real `invalid_grip` response through `pushRow`. Both were mutation-checked
+against the guards they cover — reverse `writeErr`'s case order, drop either
+endpoint's routing, delete the CAS, un-share the repair, and the matching test
+goes red.
+
 ### Gaps
 
-- **The repair is not exercised end to end.** The client half is unit-tested and
-  the server half has its own tests, but nothing drives a real `invalid_grip`
-  response through `pushRow` — that needs a fifth value to exist, or a fake, and
-  the honest statement today is that the two halves are verified separately.
+- **Still not exercised against a real server.** The halves are now tested
+  properly — the backend's mapping at the handler, the client's retry against a
+  stubbed refusal — but nothing drives a genuine `invalid_grip` from Postgres to
+  phone, which needs a fifth value to exist. What has been retired is the earlier
+  claim in this entry that "the two halves are verified separately": the mobile
+  half was, the backend half was not tested at all.
+- **Deploy order becomes load-bearing when N9 ships.** A client sending a new
+  grip to a server that has not deployed it gets `invalid_input` and strands —
+  the exact bug this entry is about, mirrored. The server must be live
+  everywhere before a client offers a fifth value.
+- **The repair drops every grip, not just the refused one.** The server names the
+  set but not which value it objected to, so the innocent sets' legal grips are
+  collateral. A narrower first attempt (null only what fails the *local* check,
+  then fall back to all) is possible and was not done — the local list is a fine
+  repair *hint*, it is only a bad read-time authority. Acceptable for a path this
+  rare, but it is deleting real data and the athlete is never told.
 - **`invalid_grip` is the first per-field code**, and the shape does not obviously
   generalise: `invalid_rir`, `invalid_weight` and friends would be a poor
   vocabulary. It earns its place because it is the only rejection a client can
