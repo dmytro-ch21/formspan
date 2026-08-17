@@ -23129,19 +23129,33 @@ re-measures.
 `AND deleted_at IS NULL` — but only when `planSession` and `unplanSession` land
 in the **same millisecond**. Otherwise `unplanSession`'s newer `updated_at`
 makes the first clause decline and the second is never reached, so the mutation
-survives. Measured with the clause removed:
+survives. That is the mechanism, established rather than inferred: review held
+mocks, ordering and module state constant and varied only the timestamp, which
+flipped the outcome both ways, and instrumented runs held
+`dirty cleared` ⇔ `timestamps equal` **30 of 30**.
 
-| | catches it |
-|---|---|
-| that file alone | **5 of 6** |
-| the full suite | **0 of 1** |
+**The rate, though, is not a property of the code — and getting that wrong is
+the second mistake in this entry.** Measured with the clause removed:
 
-The full suite is slower, so the two timestamps separate — which means the
-regime where it *never* catches the bug is the regime CI runs in. Both of the
-original measurements were correct; they were measuring different clocks, and
-reconciling them is what produced this entry. The first read (a full-suite run)
-is what put "held by nothing" in the T5 line; the second (a single-file run)
-contradicted it an hour later.
+| | this session | review, an hour later |
+|---|---|---|
+| that file alone | 5 of 6 | 11 of 12 |
+| the full suite | 0 of 1 | 4 of 4 |
+
+From the left column this entry originally concluded "the full suite is slower,
+so the regime where it *never* catches the bug is the regime CI runs in". The
+right column refutes that: **it was a generalisation from a single observation.**
+The defensible claim is weaker and enough on its own — the verdict tracks
+machine load in every regime, varies by machine and by hour, and nothing
+declares or pins it. CI's own regime was never measured by anyone here.
+
+That the coin lands differently on different days is not a weakening of the
+finding, it is the finding.
+
+Both of the original 1280/1280 measurements were correct; they were measuring
+different clocks, and reconciling them is what produced this entry. The first
+read (a full-suite run) is what put "held by nothing" in the T5 line; the second
+(a single-file run) contradicted it an hour later.
 
 ### What landed
 

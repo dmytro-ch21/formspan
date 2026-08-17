@@ -276,11 +276,18 @@ describe('deleting', () => {
  * clock race.** `deleting DURING an in-flight create` above does catch that
  * deletion — but only when `planSession` and `unplanSession` land in the SAME
  * millisecond, because otherwise the `updated_at` clause declines first and the
- * tombstone clause is never reached. Measured with the clause removed: **5 of 6
- * runs of this file alone, and 0 of 1 under the full suite**, where everything
- * is slower and the timestamps separate. So it reads as covered, goes green in
- * CI on the run that matters, and the coverage is a coin toss nobody declared.
- * The test below forces the collision instead of hoping for it: 8 of 8.
+ * tombstone clause is never reached. Confirmed as the mechanism rather than
+ * inferred: holding mocks, ordering and module state constant and varying only
+ * the timestamp flips the outcome, and instrumented runs held
+ * `dirty cleared` ⇔ `timestamps equal` 30/30.
+ *
+ * **The rate is not a property of the code, which is the point.** With the
+ * clause removed it was caught 5 of 6 runs of this file alone and 0 of 1 under
+ * the full suite on one machine, then 11 of 12 and 4 of 4 on another an hour
+ * later. Do not read a regime into those numbers — the honest statement is that
+ * the verdict tracks machine load, in every regime, and nothing declares it. A
+ * guard whose coverage is a coin toss reads as covered, so nobody re-measures
+ * it. The test below forces the collision instead of hoping for it: 12 of 12.
  *
  * What it costs when it goes: the row is marked clean, the change exists on this
  * phone and nowhere else, and `countPendingPlans` reads zero — so nothing ever
@@ -351,9 +358,15 @@ describe('an edit or a delete that lands mid-push', () => {
     //
     // Two `Date.now()` calls cannot be forced into one millisecond on demand,
     // so the tombstone is written by the real `unplanSession` and only the
-    // clock is then closed by hand. That is the difference between 5-of-6 and
-    // 8-of-8: the guard under test is untouched, the race is no longer left to
-    // how busy the machine is.
+    // clock is then closed by hand. The guard under test is untouched, and the
+    // race is no longer left to how busy the machine is.
+    //
+    // The state that produces is `deleted_at = now, updated_at = snapshot`,
+    // where a true collision gives `deleted_at = updated_at = snapshot`. The
+    // clause reads `deleted_at IS NULL` and never its value, so the difference
+    // is invisible to it — and the state is reachable anyway without a
+    // sub-millisecond write pair, since `new Date()` is wall clock and an NTP
+    // step backwards between the edit and the delete produces the same thing.
     const p = await planSession(USER, '2026-08-05', 'strength', null);
     await syncPlans(USER, getToken);
     await pushableAt(p.id, 'edited');
