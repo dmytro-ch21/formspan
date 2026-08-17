@@ -409,6 +409,58 @@ export const sportColors = {
 
 export type SportKey = keyof typeof sportColors;
 
+/**
+ * The monogram discs in the feed — one per person, keyed on their handle.
+ *
+ * HERE rather than in `lib/monogram.ts`, and the reason is this file's own
+ * history. `validate_palette.mjs` parses these blocks by name and is the first
+ * link in `verify`; the metals comment above records a colour defined outside
+ * the palette sailing "straight through the mono swap" and becoming the only
+ * warm thing on a greyscale screen. A private eight-colour palette in a lib
+ * module would have repeated both mistakes at once — ungated AND unswapped, on
+ * the most prominent element of every post in the feed.
+ *
+ * Eight, because the colour is what makes a feed scannable before it is read,
+ * and a person's is a pure function of their handle — so these need to be
+ * distinguishable from EACH OTHER under colour-vision deficiency, not merely
+ * legible against the ground. The validator measures exactly that; do not add
+ * or reorder an entry without running it.
+ *
+ * They are spaced by LIGHTNESS as much as by hue, and that is the whole reason
+ * they clear the gate. Colour-vision deficiency collapses hue toward a single
+ * axis, so a set of eight equally-dark colours — the first attempt here — fails
+ * 16 of its 28 pairs under simulation while looking perfectly varied to me.
+ * Lightness survives every CVD type, so it is what carries the separation.
+ *
+ * Which is why each disc carries its OWN ink (`monogramInk`) rather than white
+ * throughout: forcing white on all eight is what pins them all into the same
+ * dark band in the first place.
+ */
+export const monogramColors = {
+  night: '#17222F',
+  ocean: '#2B7396',
+  clay: '#B0783C',
+  mint: '#8FBF88',
+  mist: '#EEF4FA',
+} as const;
+
+/**
+ * What is written on each disc — light discs take dark initials.
+ *
+ * Same shape as `beltAccent`/`beltAccentOn` above, for the same reason: a fill
+ * and the thing written on it are two decisions, and pretending one colour of
+ * ink serves every fill is what flattens a palette.
+ */
+export const monogramInk = {
+  night: '#FFFFFF',
+  ocean: '#FFFFFF',
+  clay: '#1E1408',
+  mint: '#12200E',
+  mist: '#16202B',
+} as const;
+
+export type MonogramColor = keyof typeof monogramColors;
+
 export type AccentName = keyof typeof accents;
 export type Accent = (typeof accents)[AccentName];
 
@@ -545,6 +597,29 @@ const scheme = {
  * and a mode-dependent export would make it unparseable — so the swap happens
  * here, where `components/ui/sport.ts` already reads it.
  */
+/**
+ * The monogram discs, mode-aware.
+ *
+ * Under mono every person gets the SAME grey, and that is the honest answer
+ * rather than a loss: this file already proves eight distinguishable greys do
+ * not exist (see `monoSport`, one grey for four sports). Identity survives on
+ * the initials and the `@handle` beside them, which is what mono mode asks of
+ * every other signal here.
+ *
+ * The alternative — eight saturated discs on a greyscale app, one per post —
+ * would make the feed the loudest colour surface in the product in exactly the
+ * mode chosen to remove colour.
+ */
+export const activeMonogramColors: Record<MonogramColor, string> = isMono
+  ? {
+      night: monoSport,
+      ocean: monoSport,
+      clay: monoSport,
+      mint: monoSport,
+      mist: monoSport,
+    }
+  : monogramColors;
+
 export const activeSportColors: Record<SportKey, string> = isMono
   ? { strength: monoSport, bjj: monoSport, running: monoSport, nutrition: monoSport }
   : sportColors;

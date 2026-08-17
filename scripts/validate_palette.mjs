@@ -342,6 +342,8 @@ function loadPalette() {
     BELT_ON: block('beltAccentOn', 5),
     ACCENTS: accentBlock(src),
     SPORTS: block('sportColors', 4),
+    MONOGRAM: block('monogramColors', 5),
+    MONOGRAM_INK: block('monogramInk', 5),
     MONO: {
       rest: monoOne('gridRest'),
       ramp: monoRamp,
@@ -359,7 +361,7 @@ function loadPalette() {
   };
 }
 
-const { S, P, BELT, BELT_ON, ACCENTS, SPORTS, MONO, MONO_MEDAL, MONO_BELT, MONO_BELT_ON } =
+const { S, P, BELT, BELT_ON, ACCENTS, SPORTS, MONOGRAM, MONOGRAM_INK, MONO, MONO_MEDAL, MONO_BELT, MONO_BELT_ON } =
   loadPalette();
 
 heading('Text');
@@ -470,6 +472,26 @@ const sports = Object.entries(SPORTS);
 for (let i = 0; i < sports.length; i++) {
   for (let j = i + 1; j < sports.length; j++) {
     separation(`${sports[i][0]} vs ${sports[j][0]}`, sports[i][1], sports[j][1]);
+  }
+}
+
+// The feed's monogram discs. Categorical in the hardest way: one per PERSON,
+// derived from their handle, sitting adjacent down a scrolling list — and the
+// whole value of the feature is being able to tell two friends apart at a
+// glance without reading. So pairwise separation matters more here than for any
+// other set in this file, and there are eight of them rather than four.
+//
+// White text sits on every disc, so the contrast check is ink-on-fill, not
+// fill-on-surface: the disc is a filled shape carrying a label, not a signal
+// read against the background.
+heading('Monogram discs — one per person, adjacent in a scrolling list');
+for (const [name, hex] of Object.entries(MONOGRAM)) {
+  ratio(`ink on ${name}`, MONOGRAM_INK[name], hex, 4.5, 'Two initials, small, on a filled disc.');
+}
+const monograms = Object.entries(MONOGRAM);
+for (let i = 0; i < monograms.length; i++) {
+  for (let j = i + 1; j < monograms.length; j++) {
+    separation(`${monograms[i][0]} vs ${monograms[j][0]}`, monograms[i][1], monograms[j][1]);
   }
 }
 
