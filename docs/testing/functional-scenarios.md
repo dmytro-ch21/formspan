@@ -640,6 +640,31 @@ Domain: a training session that **actually happened**, and the sets in it — re
 
 ---
 
+### Timing any set (N4)
+
+- **A duration makes a squat timeable.** Open a `weight_reps` set, type a
+  duration into the Timer field, collapse the row: the play button appears.
+  Clear the field: it goes away again. This is the whole feature — the timer
+  follows the number, not the exercise.
+- **Nothing is invented.** A `weight_reps` set with no duration gets no play
+  button, and neither does a `distance_time` row with a distance and no time.
+  A plank with nothing prescribed still defaults to 60s. The regression to
+  watch for is a default leaking onto untimed sets.
+- **A timed squat is still a weight×reps set.** Its summary, its tonnage and
+  its records must be unchanged by putting 40s on it — the duration is a timer
+  target, not a measure. Check the row summary and the session volume.
+- **The circuit follows.** An exercise mixing a timed burpee set and a squat
+  set with a duration should offer "run all"; remove the squat's duration and
+  the offer must disappear, since the run is all-or-nothing.
+- **Units.** The seconds/minutes chip should appear on an exercise that carries
+  a timer target but does not measure time, otherwise the field has no unit
+  control. Switching it must reinterpret the displayed number, not the stored
+  one.
+- **The server accepts it.** `seconds` on a `weight_reps` set is valid on the
+  wire (the API only enforces `> 0`), so this must round-trip through sync
+  rather than being repaired away on the client. Worth an explicit sync test:
+  log a timed squat offline, sync, reload.
+
 ## Progression rules — double progression (`GET /v1/sessions/suggestions`, both clients)
 
 Domain: what to load today and for how many reps, computed from the caller's own last few sessions. The thing in the product that advises rather than records, so it follows the standing rule — deterministic, and it always states its evidence.

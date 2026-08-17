@@ -13,7 +13,12 @@ import {
   toggledPause,
   type Countdown,
 } from '../countdown';
-import { DEFAULT_WORK_SECONDS, timedSetStillAt, workSecondsFor } from '../sessions';
+import {
+  DEFAULT_WORK_SECONDS,
+  offersTimerTarget,
+  timedSetStillAt,
+  workSecondsFor,
+} from '../sessions';
 
 /**
  * The countdown arithmetic, which had no coverage at all until the rest timer
@@ -348,14 +353,28 @@ describe('which sets can be timed, and for how long', () => {
     expect(workSecondsFor({ seconds: 60 }, 'time')).toBe(60);
   });
 
-  it('refuses a set that is not measured in seconds', () => {
-    // A countdown over a set of squats is a stopwatch pointed at nothing. The
-    // null is what keeps the play button off those rows entirely.
+  it('refuses to INVENT a duration for a set that is not measured in seconds', () => {
+    // Still null, and for the reason that survived N4: nothing has said how
+    // long. The old rule refused the exercise; this one refuses the guess.
     expect(workSecondsFor({ seconds: null }, 'weight_reps')).toBeNull();
-    expect(workSecondsFor({ seconds: 30 }, 'distance')).toBeNull();
-    // Even a weighted set that somehow carries a duration: `weight_reps` is
-    // never dual-mode, so the number is stray data rather than a prescription.
-    expect(workSecondsFor({ seconds: 30 }, 'weight_reps')).toBeNull();
+    expect(workSecondsFor({ seconds: null }, 'distance')).toBeNull();
+    // `distance_time` is the sharp case — it MEASURES seconds, so the old
+    // load-type gate let it through, and the null here comes from the default
+    // instead: rowing 500m has a distance prescription and no time one, and a
+    // default would turn a measurement into a target.
+    expect(workSecondsFor({ seconds: null }, 'distance_time')).toBeNull();
+  });
+
+  it('times any set the athlete gave a duration, whatever the exercise measures', () => {
+    // N4. Forty seconds of squats is a real prescription and the thing a
+    // circuit is made of, so an explicit duration outranks the load type.
+    // Before this, both of these were null and the play button never appeared.
+    expect(workSecondsFor({ seconds: 40 }, 'weight_reps')).toBe(40);
+    expect(workSecondsFor({ seconds: 30 }, 'distance')).toBe(30);
+    // The zero/negative guard still applies to them — an explicit duration has
+    // to be a duration, or it falls through to the same "invent nothing" path.
+    expect(workSecondsFor({ seconds: 0 }, 'weight_reps')).toBeNull();
+    expect(workSecondsFor({ seconds: -30 }, 'weight_reps')).toBeNull();
   });
 
   it('times a dual-mode exercise only while it is in time mode', () => {
@@ -367,6 +386,25 @@ describe('which sets can be timed, and for how long', () => {
     expect(workSecondsFor({ seconds: 40 }, 'reps')).toBe(40);
     // And a stored zero is still not a duration.
     expect(workSecondsFor({ seconds: 0 }, 'reps')).toBeNull();
+  });
+
+  it('offers the timer field only where it cannot do damage', () => {
+    // Where the whole point of N4 is: a squat can be given a duration.
+    expect(offersTimerTarget('weight_reps')).toBe(true);
+    expect(offersTimerTarget('distance')).toBe(true);
+
+    // Already measures seconds — the measure field IS the control.
+    expect(offersTimerTarget('time')).toBe(false);
+    expect(offersTimerTarget('distance_time')).toBe(false);
+
+    // DUAL-MODE, and this is the one review caught. `measuresForSet` returns
+    // ['reps'] for a burpee set logged in reps, so a gate on the measures
+    // alone offered the field there — and writing a duration onto it flips
+    // the row to time mode via `setModeOf`, stranding the rep count in a row
+    // that the volume rollup and the screen then describe differently.
+    expect(offersTimerTarget('reps')).toBe(false);
+
+    expect(offersTimerTarget(undefined)).toBe(false);
   });
 
   it('defaults a plank with nothing prescribed', () => {
