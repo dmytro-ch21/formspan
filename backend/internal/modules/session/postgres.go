@@ -1581,6 +1581,15 @@ func (r *PostgresRepository) LoadHistory(
 			e, rr, ww := est, *reps, *weightKg
 			p.BestOneRMKg, p.BestOneRMReps, p.BestOneRMWeightKg = &e, &rr, &ww
 			p.BestOneRMAssistedReps = assistedReps
+			// Effort is what the estimate used, so it travels with it — but
+			// only when it was actually used. `EstimateSetOneRM` discards
+			// RIR/RPE for an assisted set (it substitutes a zero), so carrying
+			// them there would show working the number did not do.
+			if assistedReps == nil || *assistedReps <= 0 {
+				p.BestOneRMRIR, p.BestOneRMRPE = rir, rpe
+			} else {
+				p.BestOneRMRIR, p.BestOneRMRPE = nil, nil
+			}
 		}
 	}
 	if err := rows.Err(); err != nil {

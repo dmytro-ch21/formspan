@@ -68,6 +68,14 @@ type LoadPoint struct {
 	BestOneRMReps         *int     `json:"best_1rm_reps"`
 	BestOneRMWeightKg     *float64 `json:"best_1rm_weight_kg"`
 	BestOneRMAssistedReps *int     `json:"best_1rm_assisted_reps"`
+	// Effort, for the same reason `Record` carries it: without it the evidence
+	// cannot be re-estimated by the rule that chose it. 5 × 100 at RIR 2
+	// publishes 120.0, and evidence reading "5 × 100" alone recomputes to
+	// 112.5 — so the number looks wrong to anyone who checks it. Assisted sets
+	// discard effort by construction, so these are null there and that is not
+	// a gap.
+	BestOneRMRIR *int     `json:"best_1rm_rir"`
+	BestOneRMRPE *float64 `json:"best_1rm_rpe"`
 
 	// TonnageKg is this exercise's contribution to the session, under the one
 	// tonnage rule (`SQLTonnage`) — implements included, drops included,

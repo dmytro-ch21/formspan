@@ -466,3 +466,140 @@ func TestLoadHistory_ASingleBoundStillScopes(t *testing.T) {
 		t.Fatalf("to-only should keep the 1st alone, got %+v", got.Points)
 	}
 }
+
+// Two sets in one session tying on the estimate must return the SAME evidence
+// every time, and it must be the earlier one.
+//
+// This is the property `position` was added to the ORDER BY for, and review
+// pointed out that nothing enforced it: with no tie in any fixture, both
+// deleting `sc.position` and relaxing the Go tie-break to `>=` passed. The
+// numbers are chosen to tie EXACTLY in binary — 5 × 100 and 1 × 112.5 both
+// estimate 112.5 — because a near-tie would prove nothing.
+func TestLoadHistory_ATiedEstimateKeepsTheEarlierSet(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const user = "user_lh_tie"
+
+	a, aok := EstimateOneRM(5, 100, nil, nil)
+	b, bok := EstimateOneRM(1, 112.5, nil, nil)
+	if !aok || !bok || a != b {
+		t.Fatalf("the fixture must TIE to test a tie-break: 5x100 = %v, 1x112.5 = %v", a, b)
+	}
+
+	f := histAt("ses-lh-tie", user, "strength", time.Date(2025, 2, 1, 12, 0, 0, 0, time.UTC), time.Hour, []Set{
+		// Position 0: the set that must win, because it came first.
+		{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(5), WeightKg: ptrF(100), Completed: true},
+		{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(1), WeightKg: ptrF(112.5), Completed: true},
+	})
+	cleanup(t, pool, f.ID)
+	if _, err := repo.Create(ctx, f); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// Repeated, because the failure this guards against is non-determinism:
+	// one call agreeing proves nothing about the next.
+	for i := 0; i < 4; i++ {
+		got, err := repo.LoadHistory(ctx, user, exSquat, LoadHistoryFilter{})
+		if err != nil {
+			t.Fatalf("load history: %v", err)
+		}
+		p := got.Points[0]
+		if p.BestOneRMReps == nil || *p.BestOneRMReps != 5 {
+			t.Fatalf("call %d: evidence reps = %v, want the FIRST tying set (5 x 100). "+
+				"Without position in the ORDER BY this flips between requests.",
+				i, p.BestOneRMReps)
+		}
+	}
+}
+
+// Every rep assisted means nothing was demonstrated unaided, so there is no
+// estimate at all — the refusal the contract now promises explicitly. The
+// session is still real: it has tonnage, a set, and a top weight.
+func TestLoadHistory_AFullyAssistedSetSupportsNoEstimate(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const user = "user_lh_allassist"
+
+	f := histAt("ses-lh-allassist", user, "strength", time.Date(2025, 3, 1, 12, 0, 0, 0, time.UTC), time.Hour, []Set{
+		{
+			ExerciseID: exSquat, SetType: SetTypeWorking,
+			Reps: ptrInt(5), AssistedReps: ptrInt(5), WeightKg: ptrF(100),
+			Completed: true,
+		},
+	})
+	cleanup(t, pool, f.ID)
+	if _, err := repo.Create(ctx, f); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	got, err := repo.LoadHistory(ctx, user, exSquat, LoadHistoryFilter{})
+	if err != nil {
+		t.Fatalf("load history: %v", err)
+	}
+	if len(got.Points) != 1 {
+		t.Fatalf("want 1 point, got %d", len(got.Points))
+	}
+	p := got.Points[0]
+
+	if p.BestOneRMKg != nil {
+		t.Errorf("best 1RM = %v — every rep was assisted, so nothing was "+
+			"demonstrated unaided and there is nothing to estimate from", *p.BestOneRMKg)
+	}
+	// ALL of the evidence, not just the reps — an evidence field surviving
+	// without the estimate it belongs to is the shape that makes a modelled
+	// number unrecheckable.
+	if p.BestOneRMReps != nil || p.BestOneRMWeightKg != nil ||
+		p.BestOneRMAssistedReps != nil || p.BestOneRMRIR != nil || p.BestOneRMRPE != nil {
+		t.Errorf("evidence survived without an estimate: reps=%v weight=%v assisted=%v rir=%v rpe=%v",
+			p.BestOneRMReps, p.BestOneRMWeightKg, p.BestOneRMAssistedReps,
+			p.BestOneRMRIR, p.BestOneRMRPE)
+	}
+
+	// Deliberate, not inherited: the set still happened. It counts as a set,
+	// its volume was still moved, and the bar still held that weight.
+	if p.Sets != 1 || p.Reps != 5 || p.TonnageKg != 500 {
+		t.Errorf("sets=%d reps=%d tonnage=%v, want 1/5/500 — a fully assisted set "+
+			"is still a set that was performed", p.Sets, p.Reps, p.TonnageKg)
+	}
+	if p.TopWeightKg == nil || *p.TopWeightKg != 100 {
+		t.Errorf("top weight = %v, want 100", p.TopWeightKg)
+	}
+}
+
+// Effort travels with the estimate, so the evidence can be recomputed by the
+// rule that chose it. Without RIR, "5 x 100" under a 120.0 estimate recomputes
+// to 112.5 and looks wrong to anybody who checks.
+func TestLoadHistory_EffortTravelsWithTheEstimate(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const user = "user_lh_effort"
+
+	f := histAt("ses-lh-effort", user, "strength", time.Date(2025, 4, 1, 12, 0, 0, 0, time.UTC), time.Hour, []Set{
+		{
+			ExerciseID: exSquat, SetType: SetTypeWorking,
+			Reps: ptrInt(5), WeightKg: ptrF(100), RIR: ptrInt(2), Completed: true,
+		},
+	})
+	cleanup(t, pool, f.ID)
+	if _, err := repo.Create(ctx, f); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	got, err := repo.LoadHistory(ctx, user, exSquat, LoadHistoryFilter{})
+	if err != nil {
+		t.Fatalf("load history: %v", err)
+	}
+	p := got.Points[0]
+
+	if p.BestOneRMRIR == nil || *p.BestOneRMRIR != 2 {
+		t.Fatalf("evidence RIR = %v, want 2 — without it the estimate cannot be "+
+			"recomputed from the evidence beside it", p.BestOneRMRIR)
+	}
+	// The whole point: the evidence, fed back through the rule, reproduces the
+	// published number. Asserted rather than described.
+	again, ok := EstimateOneRM(*p.BestOneRMReps, *p.BestOneRMWeightKg, p.BestOneRMRIR, p.BestOneRMRPE)
+	if !ok || p.BestOneRMKg == nil || again != *p.BestOneRMKg {
+		t.Errorf("recomputing the evidence gives %v but the published estimate is %v",
+			again, p.BestOneRMKg)
+	}
+}
