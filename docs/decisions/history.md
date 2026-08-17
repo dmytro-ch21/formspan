@@ -21110,10 +21110,10 @@ the same locally as in CI, instead of depending on how fresh your database is.
 
 ## 2026-08-16 — One rule, shared where sharing is possible, and named where it is not
 
-Closes **N8**. The working-set rule had four restatements; `feed` alone carried
-**four inline copies** of three session-module constants — the count predicate,
-the tonnage predicate, and the per-side doubling — plus a fifth in its
-detail-exercises query.
+Closes **N8**. `feed` carried **four inline restatements** of three
+session-module constants — the count predicate, the tonnage predicate and the
+per-side doubling in its `workingVolume` block, plus the working-set predicate
+again in its detail-exercises query.
 
 `SQLWorkingSet`, `SQLCountsAsSet` and `SQLTonnage` are exported now, and `feed`
 interpolates them. That is the copy N8 named as the remaining risk, and it is
@@ -21148,30 +21148,50 @@ query while a drifted copy fails silently for months.
 
 ### The new guard, and exactly what it does not do
 
-`TestTheRuleIsSharedNotCopied` asserts the feed's SQL still contains the session
-module's rule text. I mutation-tested four scenarios rather than assuming:
+`TestTheRuleIsSharedNotCopied` **counts occurrences rather than testing
+containment**, and that distinction is the whole design — arrived at only
+because review broke the first version.
 
-| Change | Result |
-|---|---|
-| feed references the constants | passes — by construction |
-| feed inlines an **identical** copy | passes — indistinguishable by string |
-| the session rule changes under feed | passes — both sides move together |
-| **feed carries a different rule** | **FAILS** — the one that matters |
+`SQLWorkingSet` is a literal PREFIX of `SQLCountsAsSet`. So
+`strings.Contains(workingVolume, SQLWorkingSet)` is satisfied by the count
+subquery alone, and the tonnage filter could say anything at all. Review
+demonstrated it by swapping the tonnage predicate for `SQLCountsAsSet` — the
+precise "collapse deletes a drop's tonnage" failure this module is meant to be
+protected from — and the test stayed green.
 
-That last row is #238's bug restored, and it fires immediately. The first draft
-of this test's comment claimed it caught a verbatim re-inline; it does not, and
-measuring said so. Catching that needs the AST — a lot of machinery for a
-rewrite that is harmless until it drifts, at which point this fires anyway. The
-comment now says which of the four it catches.
+Counting fixes it. On correct code `SQLWorkingSet` appears twice (once as the
+tonnage filter, once nested inside `SQLCountsAsSet`) and `SQLCountsAsSet` once:
+
+| Change | Counts | Result |
+|---|---|---|
+| correct | 2 / 1 | passes |
+| tonnage filter collapsed to the narrow rule | 2 / 2 | **fails** |
+| tonnage filter restated as anything else | 1 / 1 | **fails** |
+| count predicate restated | 1 / 0 | **fails** |
+| a **verbatim** re-inline of either | 2 / 1 | passes — see below |
+
+The last row is the honest limit: a hand-typed copy identical to the constant is
+indistinguishable from the constant by any string test. That needs the AST,
+which is a lot of machinery for a rewrite that is harmless right up until it
+drifts — at which point the counts move and this fires.
+
+Twice now on this branch a test of mine claimed more than it did, and both times
+measuring rather than reasoning is what showed it.
 
 ### Open questions this leaves
 
-- **`sessioncard` and `MostTrainedExercises` still restate `workingSet`
-  inline**, both deliberately (they want the wider rule) and both now
-  documented as such. They could reference `session.SQLWorkingSet` for the same
-  drift protection; they were left alone because touching a query to change
-  nothing about it is how the sessioncard comment came to be wrong in the first
-  place.
+- **`sessioncard` still restates the wider rule at three sites**, deliberately
+  — it wants drops counted, because its figures feed an energy model and an
+  effort average rather than a displayed count. Only one of the three carried
+  that explanation; the other two are now annotated, which is the cheap half of
+  the fix. They could reference `session.SQLWorkingSet` outright for the same
+  drift protection this entry is about, and were not, on the reasoning that
+  these are independent decisions which happen to agree today rather than the
+  shared rule. That is a judgement, not an obvious right answer.
+
+  (An earlier draft of this entry also named `MostTrainedExercises` as a
+  restatement. It is not one — it referenced the constant already, and says in
+  its own comment why it takes the wider rule. Review caught the claim.)
 - **The TS side is untouched**, and is where the next drift will happen: two
   apps, two copies, no shared package.
 - **Nothing checks the alias contract.** A consumer aliasing `session_sets` as

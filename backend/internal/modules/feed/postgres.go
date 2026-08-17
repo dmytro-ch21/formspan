@@ -53,8 +53,8 @@ const visibleFrom = `
 // session to sum two fields in Go — an N+1 over other people's training on the
 // one endpoint most likely to be polled.
 //
-// The rule is IMPORTED now rather than restated, which is why this is a `var`:
-// `session.SQLCountsAsSet`, `session.SQLWorkingSet` and `session.SQLTonnage`
+// The rule is IMPORTED now rather than restated: `session.SQLCountsAsSet`,
+// `session.SQLWorkingSet` and `session.SQLTonnage`
 // are the same strings the session module's own queries run, so a friend's row
 // cannot drift from what the session's owner sees.
 //
@@ -76,7 +76,7 @@ const visibleFrom = `
 // The test against `session.Summarise` stays. Sharing the string removes the
 // drift; it does not remove the need to check that the SQL and the Go agree
 // about what the string means.
-var workingVolume = `
+const workingVolume = `
 	COALESCE((
 		SELECT count(*) FROM session_sets ss
 		WHERE ss.session_id = s.id AND ` + session.SQLCountsAsSet + `

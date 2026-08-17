@@ -963,49 +963,54 @@ func TestAFriendsVolumeCountsBothDumbbells(t *testing.T) {
 // something a year from now.
 //
 // The pinning test above compares this module's NUMBERS against
-// `session.Summarise` over a fixture. That is necessary and it is not
-// sufficient: it passed for months while this file's count included drops and
-// the session module's did not, because the fixture had no drop in it. A
-// fixture can only catch a divergence it happens to contain an example of.
+// `session.Summarise` over a fixture. That is necessary and not sufficient: it
+// passed for months while this file's count included drops and the session
+// module's did not, because the fixture had no drop in it. A fixture only
+// catches a divergence it happens to contain an example of. It is also
+// `TEST_DATABASE_URL`-gated; this one runs everywhere.
 //
-// What it actually asserts, stated precisely because the obvious readings are
-// wrong and I checked all four:
+// **It counts occurrences rather than testing containment, and that is the
+// whole design.** `SQLWorkingSet` is a literal PREFIX of `SQLCountsAsSet`, so
+// `strings.Contains(workingVolume, SQLWorkingSet)` is satisfied by the count
+// subquery alone — the tonnage filter could say anything at all and a
+// containment check would still pass. The first version of this test did
+// exactly that, and review demonstrated it by swapping the tonnage predicate
+// for `SQLCountsAsSet`: the precise "collapse deletes a drop's tonnage" failure
+// this module is supposed to be protected against, and the test stayed green.
 //
-//	feed references the constants          passes — by construction
-//	feed inlines an IDENTICAL copy          passes — indistinguishable by string
-//	the session rule changes under feed     passes — both sides move together
-//	feed carries a DIFFERENT rule           FAILS  <- the one that matters
+// The arithmetic, on correct code: `SQLWorkingSet` appears twice — once standalone
+// as the tonnage filter, once inside `SQLCountsAsSet` — and `SQLCountsAsSet` once.
 //
-// That last row is #238's bug exactly: this file kept `<> 'warmup'` alone after
-// the session module added `AND <> 'drop'`, so a friend's card counted drops
-// and the owner's screen did not. Restore that state and this test fires
-// immediately, where the numeric pinning test above stayed green for months
-// because its fixture had no drop in it.
+//	correct                                 2 / 1
+//	tonnage filter collapsed to countsAsSet  2 / 2  -> fails
+//	tonnage filter restated as anything else 1 / 1  -> fails
+//	count predicate restated                 1 / 0  -> fails
 //
-// So this is a guard against RESTATEMENT, not against copying. A verbatim
-// re-inline slips through and cannot be caught from a string — that needs the
-// AST, which is a lot of machinery to catch a rewrite that is harmless right
-// up until it drifts, at which point this fires. Said plainly so nobody reads
-// more safety into it than it has.
+// What it still cannot catch is a VERBATIM re-inline — a hand-typed copy
+// identical to the constant is indistinguishable from the constant by any
+// string test. That needs the AST, which is a lot of machinery for a rewrite
+// that is harmless right up until it drifts, at which point the counts move and
+// this fires. Said plainly so nobody reads more safety into it than it has.
 func TestTheRuleIsSharedNotCopied(t *testing.T) {
-	for _, c := range []struct {
-		name string
-		rule string
-	}{
-		{"the set count", session.SQLCountsAsSet},
-		{"the tonnage filter", session.SQLWorkingSet},
-		{"the per-side doubling", session.SQLTonnage},
-	} {
-		if !strings.Contains(workingVolume, c.rule) {
-			t.Errorf("%s is no longer the session module's own SQL — it has been "+
-				"restated. Expected `workingVolume` to contain:\n%s", c.name, c.rule)
-		}
+	// Two: the tonnage filter, plus the copy nested inside SQLCountsAsSet.
+	if got := strings.Count(workingVolume, session.SQLWorkingSet); got != 2 {
+		t.Errorf("expected `session.SQLWorkingSet` twice in workingVolume, found %d — "+
+			"the tonnage filter or the count predicate has been restated, or the "+
+			"two have collapsed into one rule", got)
 	}
-
-	// And the asymmetry survives: the count must NOT use the wider rule.
-	// Written as "the count clause differs from the tonnage clause" because
-	// asserting the narrow string alone would pass if both became narrow —
-	// which silently deletes every drop's tonnage.
+	// One: the count predicate, and only the count predicate. Two would mean the
+	// tonnage filter had become the narrow rule, silently deleting every drop's
+	// weight from the feed.
+	if got := strings.Count(workingVolume, session.SQLCountsAsSet); got != 1 {
+		t.Errorf("expected `session.SQLCountsAsSet` exactly once in workingVolume, "+
+			"found %d — a drop is not a set, but its weight was still moved", got)
+	}
+	// The per-side doubling, which has no prefix relationship to worry about.
+	if !strings.Contains(workingVolume, session.SQLTonnage) {
+		t.Error("the per-side doubling is no longer the session module's own SQL — " +
+			"a friend's card will report half the work for every dumbbell session")
+	}
+	// And the asymmetry itself, at the source.
 	if session.SQLCountsAsSet == session.SQLWorkingSet {
 		t.Fatal("the count and the tonnage rules have become identical; a drop " +
 			"is not a set, but its weight was still moved")
