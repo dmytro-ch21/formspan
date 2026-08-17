@@ -1,16 +1,14 @@
 package curriculum
 
 import (
-	"context"
-	"os"
 	"testing"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/dmytro-ch21/vola/backend/internal/modules/technique"
 )
 
 // The syllabuses are content, so most of what can go wrong is a typo. These run
-// without a database wherever possible, because a check that needs
-// TEST_DATABASE_URL is a check that skipped silently for months.
+// without a database at all — a check that needs TEST_DATABASE_URL is a check
+// that skipped silently for months.
 
 // allItems walks a curriculum the way the seeder does: flat items first, then
 // each phase's, so every shape check below covers both formats.
@@ -138,37 +136,58 @@ func TestEverySeededCriterionIsLegal(t *testing.T) {
 	}
 }
 
-// THE ONE THAT NEEDS A DATABASE: every technique_id has to exist in the library.
+// THE REFERENTIAL ONE: every technique_id has to exist in the library.
 //
 // A syllabus pointing at nothing is the failure most likely to ship — ids are
 // hand-authored, the catalog is 542 entries, and nothing else checks. Seeding
 // would fail loudly on deploy, which is late.
+//
+// Reads the EMBEDDED catalog, not the database, so it runs everywhere —
+// including CI, which only migrates and never seeds. It used to query
+// `techniques` and skip when that table was empty, which meant it skipped in
+// exactly the place it most needed to run: measured against a freshly migrated,
+// unseeded database, 597 passed / 1 skipped / exit 0, so the suite reported
+// success while this assertion never executed once on the deploy path. Same
+// fix and same reasoning as bjj's TestTheShippedLibraryStaysUnderTheProficiencyCap,
+// which was written from this identical mistake.
+//
+// Both sides of the comparison are content files, and that is what makes the
+// database unnecessary rather than merely inconvenient: `cmd/seed` inserts
+// techniques from techniques.json and *then* curricula from curricula.json, so
+// an id missing from that catalog is precisely and only what breaks the deploy.
+// Querying a live table is in fact the WEAKER check — a hand-seeded local
+// database also holds whatever the admin console authored (source='admin'), any
+// of which would satisfy the foreign key for an id that no fresh deploy has.
 func TestEverySeededTechniqueExistsInTheLibrary(t *testing.T) {
-	url := os.Getenv("TEST_DATABASE_URL")
-	if url == "" {
-		t.Skip("TEST_DATABASE_URL not set")
-	}
-	pool, err := pgxpool.New(context.Background(), url)
+	catalog, err := technique.SeedData()
 	if err != nil {
-		t.Fatalf("connect: %v", err)
+		t.Fatalf("read embedded catalog: %v", err)
 	}
-	t.Cleanup(pool.Close)
-
-	var libraryCount int
-	if err := pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM techniques`).Scan(&libraryCount); err != nil {
-		t.Fatalf("count techniques: %v", err)
+	// Not a skip. An empty catalog would make every id below "missing", which
+	// tells you nothing about the syllabuses — but it is unreachable by
+	// environment here (the file is compiled in), so it can only mean somebody
+	// emptied techniques.json, and that is a failure rather than a condition.
+	if len(catalog) == 0 {
+		t.Fatal("the embedded technique catalog is empty")
 	}
-	if libraryCount == 0 {
-		// Not a pass. An empty catalog would make every id below "missing",
-		// which is a true statement about a database nobody seeded and tells
-		// you nothing about the syllabuses.
-		t.Skip("technique library is empty in the test database — run cmd/seed against it first")
+	inLibrary := make(map[string]bool, len(catalog))
+	for _, tech := range catalog {
+		inLibrary[tech.ID] = true
 	}
 
 	data, err := SeedData()
 	if err != nil {
 		t.Fatalf("parse: %v", err)
+	}
+	// The same guard on the other side, for the same reason. An empty
+	// curricula.json makes the loop below iterate nothing and report success —
+	// and while TestTheSeedFileParsesAndIsShaped would also fail on that, it
+	// does not run under a `-run` filter naming only this test, which is
+	// exactly how this test gets invoked when somebody is investigating it.
+	// A test whose whole point is that it never passes vacuously should not
+	// depend on a sibling for that.
+	if len(data) == 0 {
+		t.Fatal("no syllabuses — the embedded file is empty")
 	}
 	for _, c := range data {
 		for _, it := range allItems(c) {
@@ -176,10 +195,7 @@ func TestEverySeededTechniqueExistsInTheLibrary(t *testing.T) {
 				// A concept points at nothing, so there is nothing to check.
 				continue
 			}
-			var exists bool
-			err := pool.QueryRow(context.Background(),
-				`SELECT true FROM techniques WHERE id = $1`, it.TechniqueID).Scan(&exists)
-			if err != nil {
+			if !inLibrary[it.TechniqueID] {
 				t.Errorf("%s: technique %q is not in the library", c.ID, it.TechniqueID)
 			}
 		}
