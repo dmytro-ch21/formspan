@@ -179,9 +179,11 @@ type Set struct {
 	// a barbell, a machine, or a single kettlebell held in two hands; 2 for a
 	// pair of dumbbells.
 	//
-	// **SERVER-POPULATED ON READ, AND IGNORED ON WRITE.** It is derived from
-	// the exercise's `load_mode` and `is_unilateral`, which are properties of
-	// the movement — so a client sending one would be asserting something it
+	// **SERVER-POPULATED ON READ, AND IGNORED ON WRITE.** It is the exercise's
+	// `implements` — a property of the movement. It was derived from
+	// `load_mode` and `is_unilateral` together until migration 000057, a rule
+	// that read "one LIMB" as "one IMPLEMENT" and so could not express a
+	// dumbbell walking lunge. These are properties of the movement — so a client sending one would be asserting something it
 	// cannot know, and about a row it does not own. The repository fills it
 	// from the catalog join; `ReplaceSets` never reads it.
 	//

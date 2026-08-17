@@ -60,6 +60,17 @@ function bodyFrom(form: FormData): ExerciseWrite {
     // merge instead would make the console the one caller whose behaviour
     // depends on a field being absent.
     load_mode: text(form.get("load_mode")),
+    // The RAW number, deliberately not coerced to 1.
+    //
+    // `=== 2 ? 2 : 1` reads identically from the rendered form, and fails OPEN
+    // everywhere else: a malformed submission fabricates a valid 1 that the API
+    // accepts and WRITES, silently halving a stored pair. This action is its own
+    // POST endpoint, so that is reachable without the form.
+    //
+    // NaN serialises as null, which the API reads as absent — preserving the
+    // stored value on a PATCH and defaulting to 1 on a create. Failing to
+    // "leave it alone" beats failing to "set it to 1".
+    implements: Number(form.get("implements")),
     // `has`, not `=== "on"`. An unchecked box sends nothing, so presence IS the
     // value — and comparing to the browser's default string breaks silently the
     // moment someone adds a `value` attribute for styling, writing false for

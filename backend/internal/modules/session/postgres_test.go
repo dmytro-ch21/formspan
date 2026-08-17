@@ -62,26 +62,37 @@ type fixtureExercise struct {
 	pattern  string
 	loadType string
 	loadMode string
-	// The load-factor CASE is `load_mode = 'per_side' AND NOT is_unilateral`,
-	// so the per-side property rests on TWO columns. Declared rather than left
-	// to the column default: a stale row with is_unilateral = true would make
-	// the parity test agree trivially at factor 1 again, which is the exact
-	// thing exDBBench exists to prevent.
+	// How many implements of the logged weight move. THIS is the tonnage
+	// factor now (migration 000057); it used to be derived from `load_mode`
+	// and `is_unilateral` together, a rule that could not express a movement
+	// with two implements and one limb.
+	//
+	// Declared rather than defaulted, for the reason this whole struct exists:
+	// left to the column default of 1, `exDBBench` stops doubling and the
+	// parity test agrees trivially — the exact failure `feed` shipped with an
+	// omitted `load_mode`.
+	implements int
+	// Whether one LIMB works at a time. No longer part of the tonnage rule —
+	// it drives the "8 reps here means 8 each side" hint only — but still
+	// declared, because a test that reads it must not read a default.
 	unilateral bool
 }
 
 var fixtureExercises = []fixtureExercise{
-	{exBench, "strength", "horizontal_push", "weight_reps", "total", false},
-	{exSquat, "strength", "squat", "weight_reps", "total", false},
-	{exOHP, "strength", "vertical_push", "weight_reps", "total", false},
-	{exRun, "running", "locomotion", "distance_time", "total", false},
-	{exDBBench, "strength", "horizontal_push", "weight_reps", "per_side", false},
+	{exBench, "strength", "horizontal_push", "weight_reps", "total", 1, false},
+	{exSquat, "strength", "squat", "weight_reps", "total", 1, false},
+	{exOHP, "strength", "vertical_push", "weight_reps", "total", 1, false},
+	{exRun, "running", "locomotion", "distance_time", "total", 1, false},
+	// A PAIR of dumbbells — the one fixture whose tonnage doubles, and the
+	// reason every parity test in this package can fail rather than agree at
+	// factor 1.
+	{exDBBench, "strength", "horizontal_push", "weight_reps", "per_side", 2, false},
 	// REPS-ONLY, and that is the whole reason it exists: `RecordMostReps` is
 	// produced for `load_type: 'reps'` and nothing else, so a rep-PR assertion
 	// against a weighted exercise never runs at all. It is also the honest
 	// shape for the case that motivates assisted reps — a band- or
 	// machine-assisted pull-up is bodyweight work.
-	{exPullUp, "strength", "vertical_pull", "reps", "total", false},
+	{exPullUp, "strength", "vertical_pull", "reps", "total", 1, false},
 }
 
 // requireUnsorted asserts that ids are NOT in ascending lexical order.
@@ -153,8 +164,8 @@ func seedFixtureExercises(t *testing.T, pool *pgxpool.Pool) {
 		// behind by an interrupted run must be repaired rather than trusted —
 		// and a partial SET is how a stale value survives into a green suite.
 		if _, err := pool.Exec(ctx, `
-			INSERT INTO exercises (id, name, sport, movement_pattern, load_type, status, load_mode, is_unilateral)
-			VALUES ($1, $1, $2, $3, $4, 'published', $5, $6)
+			INSERT INTO exercises (id, name, sport, movement_pattern, load_type, status, load_mode, implements, is_unilateral)
+			VALUES ($1, $1, $2, $3, $4, 'published', $5, $6, $7)
 			ON CONFLICT (id) DO UPDATE SET
 				name = EXCLUDED.name,
 				sport = EXCLUDED.sport,
@@ -162,8 +173,9 @@ func seedFixtureExercises(t *testing.T, pool *pgxpool.Pool) {
 				load_type = EXCLUDED.load_type,
 				status = EXCLUDED.status,
 				load_mode = EXCLUDED.load_mode,
+				implements = EXCLUDED.implements,
 				is_unilateral = EXCLUDED.is_unilateral`,
-			e.id, e.sport, e.pattern, e.loadType, e.loadMode, e.unilateral); err != nil {
+			e.id, e.sport, e.pattern, e.loadType, e.loadMode, e.implements, e.unilateral); err != nil {
 			t.Fatalf("seed fixture exercise %s: %v", e.id, err)
 		}
 	}

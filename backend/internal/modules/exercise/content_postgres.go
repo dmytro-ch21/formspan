@@ -31,7 +31,7 @@ import (
 const contentReturning = `
 	id, name, sport, movement_pattern, movement_pattern_detail,
 	primary_muscles, secondary_muscles, equipment, load_type,
-	is_unilateral, load_mode, instructions, source, status, created_at, updated_at`
+	is_unilateral, load_mode, implements, instructions, source, status, created_at, updated_at`
 
 type contentScannable interface {
 	Scan(dest ...any) error
@@ -41,7 +41,7 @@ func scanContent(s contentScannable) (Exercise, error) {
 	var e Exercise
 	err := s.Scan(&e.ID, &e.Name, &e.Sport, &e.MovementPattern,
 		&e.MovementPatternDetail, &e.PrimaryMuscles, &e.SecondaryMuscles,
-		&e.Equipment, &e.LoadType, &e.IsUnilateral, &e.LoadMode, &e.Instructions,
+		&e.Equipment, &e.LoadType, &e.IsUnilateral, &e.LoadMode, &e.Implements, &e.Instructions,
 		&e.Source, &e.Status, &e.CreatedAt, &e.UpdatedAt)
 	if err != nil {
 		return Exercise{}, err
@@ -83,12 +83,13 @@ func createWithin(ctx context.Context, tx pgx.Tx, e Exercise) (Exercise, error) 
 		INSERT INTO exercises (
 			id, name, sport, movement_pattern, movement_pattern_detail,
 			primary_muscles, secondary_muscles, equipment, load_type,
-			is_unilateral, load_mode, instructions, source, status
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'admin','draft')
+			is_unilateral, load_mode, implements, instructions, source, status
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'admin','draft')
 		RETURNING `+contentReturning,
 		e.ID, e.Name, e.Sport, e.MovementPattern, e.MovementPatternDetail,
 		nonNil(e.PrimaryMuscles), nonNil(e.SecondaryMuscles), nonNil(e.Equipment),
-		e.LoadType, e.IsUnilateral, NormalizeLoadMode(e.LoadMode), e.Instructions)
+		e.LoadType, e.IsUnilateral, NormalizeLoadMode(e.LoadMode),
+		NormalizeImplements(e.Implements), e.Instructions)
 
 	out, err := scanContent(row)
 	if err != nil {
@@ -138,13 +139,14 @@ func updateWithin(ctx context.Context, tx pgx.Tx, e Exercise) (Exercise, error) 
 			name = $2, sport = $3, movement_pattern = $4,
 			movement_pattern_detail = $5, primary_muscles = $6,
 			secondary_muscles = $7, equipment = $8, load_type = $9,
-			is_unilateral = $10, load_mode = $11, instructions = $12,
+			is_unilateral = $10, load_mode = $11, implements = $12, instructions = $13,
 			source = 'admin', updated_at = now()
 		WHERE id = $1
 		RETURNING `+contentReturning,
 		e.ID, e.Name, e.Sport, e.MovementPattern, e.MovementPatternDetail,
 		nonNil(e.PrimaryMuscles), nonNil(e.SecondaryMuscles), nonNil(e.Equipment),
-		e.LoadType, e.IsUnilateral, NormalizeLoadMode(e.LoadMode), e.Instructions)
+		e.LoadType, e.IsUnilateral, NormalizeLoadMode(e.LoadMode),
+		NormalizeImplements(e.Implements), e.Instructions)
 
 	out, err := scanContent(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -331,6 +333,10 @@ func (r *PostgresRepository) Revisions(ctx context.Context, id string) ([]Revisi
 		// LOOK like `total` in the console's history, and if the restore rule
 		// were dropped, clicking it would make it BE `total`.
 		rev.Payload.LoadMode = NormalizeLoadMode(rev.Payload.LoadMode)
+		// Same for the implement count: a pre-000057 snapshot has no key, and
+		// `"implements": 0` violates the contract's `enum: [1, 2]` on a field
+		// this change made required.
+		rev.Payload.Implements = NormalizeImplements(rev.Payload.Implements)
 		out = append(out, rev)
 	}
 	return out, rows.Err()
@@ -379,11 +385,30 @@ func (r *PostgresRepository) Restore(ctx context.Context, id string, revision in
 		// Absent ONLY — a revision that does carry a value is restored as it
 		// stands, which is what "copies that revision's content back" has
 		// always claimed and did not previously do for this column.
-		if want.LoadMode == "" {
+		//
+		// `implements` has the SAME rule and for the same reason — it is the
+		// tonnage factor since 000057, every revision in existence predates
+		// that column, and an absent key unmarshals to 0, which
+		// `NormalizeImplements` reads as 1. Restoring a description edit would
+		// halve a pair of dumbbells.
+		//
+		// One SELECT for both: they are read together, and two round trips to
+		// answer one question about one row is the kind of thing that gets
+		// "optimised" later by someone who does not notice the guards are
+		// separate for no reason.
+		if want.LoadMode == "" || want.Implements == 0 {
+			var mode string
+			var implements int
 			if err := tx.QueryRow(ctx,
-				`SELECT load_mode FROM exercises WHERE id = $1`, id,
-			).Scan(&want.LoadMode); err != nil {
-				return Exercise{}, fmt.Errorf("exercise: read load_mode for restore: %w", err)
+				`SELECT load_mode, implements FROM exercises WHERE id = $1`, id,
+			).Scan(&mode, &implements); err != nil {
+				return Exercise{}, fmt.Errorf("exercise: read load_mode/implements for restore: %w", err)
+			}
+			if want.LoadMode == "" {
+				want.LoadMode = mode
+			}
+			if want.Implements == 0 {
+				want.Implements = implements
 			}
 		}
 		return updateWithin(ctx, tx, want)

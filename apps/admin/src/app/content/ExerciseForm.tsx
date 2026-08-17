@@ -315,6 +315,28 @@ export function ExerciseForm({
           </select>
         </Field>
 
+        <Field
+          label="Implements"
+          htmlFor="implements"
+          hint="How many of the logged weight move in one rep. Two for a pair of dumbbells; one for a barbell, a machine, or anything held in a single hand. This is what multiplies logged weight into tonnage."
+        >
+          <select
+            key={`implements-${String(shown.implements ?? "")}`}
+            id="implements"
+            name="implements"
+            aria-describedby="implements-hint three-fields-note"
+            required
+            defaultValue={shown.implements ? String(shown.implements) : ""}
+            className={inputClass}
+          >
+            <option value="" disabled>
+              Pick one…
+            </option>
+            <option value="1">1 — a bar, a machine, or one implement</option>
+            <option value="2">2 — a pair, one in each hand</option>
+          </select>
+        </Field>
+
         <div className="flex items-center gap-2">
           <input
             key={`is_unilateral-${String(shown.is_unilateral ?? false)}`}
@@ -325,24 +347,50 @@ export function ExerciseForm({
             // The note below explains how this differs from load_mode, and a
             // screen-reader user on this checkbox would otherwise never reach
             // it — it is a bare paragraph two elements away.
-            aria-describedby="load-mode-vs-unilateral"
+            aria-describedby="three-fields-note"
             className="size-4 rounded border-border-strong"
           />
           <label htmlFor="is_unilateral" className="text-[13px]">
             Unilateral — one limb at a time
           </label>
         </div>
-        {/* Two different questions, and the console is where they get confused.
-            `load_mode` says which number is typed; `is_unilateral` says whether
-            one limb works at a time. 34 catalog rows are BOTH — a one-arm
-            dumbbell row is entered per hand and does not double — so neither
-            implies the other and the tonnage rule reads them together:
-            per_side AND NOT unilateral is the only combination that doubles. */}
-        <p id="load-mode-vs-unilateral" className="text-[12px] text-text-secondary">
-          These two are independent. A one-arm dumbbell row is <em>per_side</em> (you enter one
-          dumbbell) <em>and</em> unilateral (only that hand works), so its load does not double —
-          only per_side movements that are <em>not</em> unilateral do.
-        </p>
+        {/* THREE questions, and this screen is where they get confused.
+            Replaces a note that taught the retired rule ("only per_side
+            movements that are not unilateral double"), which since migration
+            000057 is false — and worse than false here, because an author who
+            believed it would untick unilateral to buy a doubling, recreating
+            the exact forced error that migration exists to end.
+
+            One note rather than two overlapping narratives: the choosing-time
+            guidance lives in each field's own hint, and this is the table that
+            says why there are three fields at all. */}
+        <div id="three-fields-note" className="text-[12px] text-text-secondary">
+          <p className="mb-1">
+            <strong>These three are independent.</strong> Each answers a different question, and
+            nothing implies anything else:
+          </p>
+          <ul className="ml-4 list-disc space-y-0.5">
+            <li>
+              <strong>Load mode</strong> — which number you type. Per hand means one implement&apos;s
+              weight.
+            </li>
+            <li>
+              <strong>Implements</strong> — how many of that number moved. This is what multiplies
+              into tonnage.
+            </li>
+            <li>
+              <strong>Unilateral</strong> — how many limbs work. This drives &ldquo;8 reps here means
+              8 each side&rdquo; and nothing else.
+            </li>
+          </ul>
+          <p className="mt-1">
+            A dumbbell walking lunge is all three at once: per hand, <em>two</em> implements,{" "}
+            <em>one</em> leg. A one-arm dumbbell row is per hand, <em>one</em> implement, one limb.
+            The catalog used to derive the tonnage factor from the unilateral flag, could not say
+            the first of those, and counted the dumbbell version of a lunge at half the kettlebell
+            version of the same movement.
+          </p>
+        </div>
       </Section>
 
       <Section title="Anatomy and equipment">

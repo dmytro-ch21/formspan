@@ -103,7 +103,8 @@ func seedExercise(t *testing.T, pool *pgxpool.Pool, id string) string {
 	return seedExerciseAs(t, pool, id, "total")
 }
 
-// seedExerciseAs seeds a catalog row with an explicit load_mode.
+// seedExerciseAs seeds a catalog row with an explicit load_mode, and the
+// implement count that goes with it.
 //
 // It exists because `seedExercise` inserted without one, so every fixture in
 // this file took the column default of 'total' — and the feed's volume query
@@ -111,13 +112,25 @@ func seedExercise(t *testing.T, pool *pgxpool.Pool, id string) string {
 // That is exactly the trap the session module's parity test names: both sides
 // agree trivially at a factor of one, and the comment claiming they were
 // compared kept being true while meaning nothing.
+//
+// `implements` is derived here rather than passed, because it is the tonnage
+// factor since migration 000057 and every caller of this helper wants the
+// ordinary reading: a per-side row is a PAIR. A caller needing the one-armed
+// case would set it explicitly — and would be the first, which is why it is
+// not a parameter yet.
 func seedExerciseAs(t *testing.T, pool *pgxpool.Pool, id, loadMode string) string {
 	t.Helper()
 	ctx := context.Background()
+	implements := 1
+	if loadMode == "per_side" {
+		implements = 2
+	}
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO exercises (id, name, sport, movement_pattern, load_type, status, load_mode)
-		VALUES ($1, $1, 'strength', 'squat', 'weight_reps', 'published', $2)
-		ON CONFLICT (id) DO UPDATE SET load_mode = EXCLUDED.load_mode`, id, loadMode); err != nil {
+		INSERT INTO exercises (id, name, sport, movement_pattern, load_type, status, load_mode, implements)
+		VALUES ($1, $1, 'strength', 'squat', 'weight_reps', 'published', $2, $3)
+		ON CONFLICT (id) DO UPDATE SET
+			load_mode = EXCLUDED.load_mode,
+			implements = EXCLUDED.implements`, id, loadMode, implements); err != nil {
 		t.Fatalf("seed exercise %s: %v", id, err)
 	}
 	t.Cleanup(func() {

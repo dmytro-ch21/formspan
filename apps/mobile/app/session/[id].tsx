@@ -2129,9 +2129,12 @@ function SetRow({
               // Which number to type, at the moment of typing it. Keyed on the
               // EXERCISE's `load_mode`, not on the set's `load_factor`: a
               // one-arm dumbbell row is entered per hand exactly like a
-              // dumbbell bench press, and only the bench press doubles. The
-              // factor drives the total on the row summary instead, so the two
-              // never have to answer each other's question.
+              // dumbbell bench press, and only the bench press doubles.
+              //
+              // The factor is the exercise's `implements` (migration 000057),
+              // which the server applies before this screen sees it — so the
+              // total on the row summary answers "how much moved" while this
+              // answers "what do I type", and neither has to know the other.
               const hint =
                 m === 'weight' && exercise?.load_mode === 'per_side' ? 'per hand' : undefined;
               // Converted for display, converted back on input — the stored

@@ -169,7 +169,19 @@ type Exercise struct {
 	// lives in the seed catalog rather than only in a migration backfill —
 	// otherwise a freshly seeded database takes the column default and every
 	// dumbbell session under-reports again. Empty means "total".
-	LoadMode     string  `json:"load_mode"`
+	LoadMode string `json:"load_mode"`
+	// Implements is how many of the logged weight move in one rep: 1 for a
+	// barbell, a machine, or a single dumbbell; 2 for a PAIR.
+	//
+	// It multiplies logged weight to give tonnage, a job that used to be done
+	// by deriving `load_mode = 'per_side' AND NOT is_unilateral`. That
+	// derivation read `is_unilateral` — one LIMB at a time — as though it meant
+	// one IMPLEMENT, and could not express a dumbbell walking lunge: two
+	// implements, one leg. See migration 000057.
+	//
+	// Zero means "not recorded" and reads as 1, so a row written by code that
+	// predates the column under-reports rather than inventing weight.
+	Implements   int     `json:"implements"`
 	Instructions string  `json:"instructions"`
 	Media        []Media `json:"media"`
 
@@ -220,6 +232,18 @@ type Repository interface {
 // value under-reports a dumbbell session rather than inventing weight nobody
 // lifted. The database CHECK would reject anything else anyway; this is what
 // keeps a seed file with a typo from failing the whole deploy.
+// NormalizeImplements maps an absent or impossible count to 1.
+//
+// Same failing-closed reasoning as NormalizeLoadMode: 1 is what the column
+// defaults to and what every pre-existing row means, so an unknown value
+// under-reports a pair rather than doubling something held in one hand.
+func NormalizeImplements(n int) int {
+	if n == 2 {
+		return 2
+	}
+	return 1
+}
+
 func NormalizeLoadMode(v string) string {
 	if v == LoadModePerSide {
 		return LoadModePerSide

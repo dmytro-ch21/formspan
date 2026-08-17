@@ -384,3 +384,67 @@ func TestRestoringAModernRevisionAppliesItsLoadMode(t *testing.T) {
 			"'never change this column'", restored.LoadMode, LoadModePerSide)
 	}
 }
+
+// TestTheConsoleCanAuthorAndCorrectImplements is T2's lesson applied to the
+// column that replaced the derived factor.
+//
+// `load_mode` was unwritable by the console for a while, so every dumbbell
+// exercise authored there was born counting single. `implements` IS the
+// tonnage factor now, so the same omission would be the same bug — and
+// `updateWithin` not writing it would make a wrong count permanent, which is
+// the other half T2 recorded.
+func TestTheConsoleCanAuthorAndCorrectImplements(t *testing.T) {
+	repo, ctx, id := contentFixture(t)
+
+	pair := authored(id)
+	pair.LoadMode = LoadModePerSide
+	pair.Implements = 2
+	created, err := repo.CreateExercise(ctx, pair, testActor)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if created.Implements != 2 {
+		t.Fatalf("created with implements=%d, want 2 — a console-authored pair that "+
+			"counts single halves its own tonnage from the moment it exists",
+			created.Implements)
+	}
+
+	// Read the column back rather than trusting the RETURNING: the bug being
+	// guarded against is the column never being written at all.
+	var stored int
+	if err := repo.pool.QueryRow(ctx,
+		`SELECT implements FROM exercises WHERE id = $1`, id).Scan(&stored); err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if stored != 2 {
+		t.Fatalf("the column holds %d, want 2", stored)
+	}
+
+	// An edit that says nothing about it must not reset it — the handler merges
+	// onto the stored row, which is what replaces the old guarantee that a
+	// column the UPDATE never wrote could not be cleared.
+	current, err := repo.GetExercise(ctx, id)
+	if err != nil {
+		t.Fatalf("get for write: %v", err)
+	}
+	renamed := exerciseRequest{Name: ptr("Renamed Pair")}.applyTo(current)
+	updated, err := repo.UpdateExercise(ctx, renamed, testActor)
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if updated.Implements != 2 {
+		t.Fatalf("a rename reset implements to %d", updated.Implements)
+	}
+
+	// And a wrong count is correctable, which the derived rule never allowed:
+	// the only way to change the factor used to be flipping `is_unilateral`,
+	// which silently changed the reps hint too.
+	fix := exerciseRequest{Implements: ptr(1)}.applyTo(updated)
+	fixed, err := repo.UpdateExercise(ctx, fix, testActor)
+	if err != nil {
+		t.Fatalf("update to 1: %v", err)
+	}
+	if fixed.Implements != 1 {
+		t.Fatalf("implements is %d after correcting it to 1", fixed.Implements)
+	}
+}

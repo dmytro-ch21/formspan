@@ -39,12 +39,9 @@ export type Exercise = {
    * one dumbbell, one kettlebell, one farmer handle — because that is what is
    * stamped on it and what an athlete reads off it.
    *
-   * NOT the same question as whether the load doubles. All 134 `per_side`
-   * exercises are entered per hand, but 35 of them are also `is_unilateral`
-   * (a one-arm row), where only one implement moves and the factor stays 1.
-   * So this drives the INPUT hint; the set's own `load_factor` drives the
-   * total shown back. Keying both off one flag says the wrong thing on a
-   * quarter of them.
+   * Drives the INPUT hint and nothing else. What the weight is multiplied by
+   * is the exercise's `implements`, which the server applies before any client
+   * sees a number — see the set's `load_factor`.
    *
    * Optional because a session cached by an app older than this field has no
    * `load_mode` in its stored exercise payload; absent reads as "say nothing"

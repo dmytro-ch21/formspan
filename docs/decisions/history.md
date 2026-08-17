@@ -22262,6 +22262,136 @@ and this repo has shipped that one before.
   by an alarm. There is no slow-query log, no plan regression check in CI, and
   the next index-shaped bug will be found the same way.
 
+## 2026-08-17 — Two implements, one leg: the tonnage rule could not say it
+
+`W5` reported that the lunge family disagreed with itself about implement
+count — every kettlebell lunge doubling, every dumbbell lunge but one not, and
+`kettlebell-split-squat` at ×2 against `kettlebell-bulgarian-split-squat` at ×1.
+It read as careless classification. It was not.
+
+### The rule asked one question and read the answer to another
+
+    CASE WHEN load_mode = 'per_side' AND NOT is_unilateral THEN 2 ELSE 1
+
+`is_unilateral` means **one limb at a time** — it is what drives "8 reps here
+means 8 each side". The tonnage rule read it as **one implement moves**. For
+most movements those coincide; for a dumbbell walking lunge they do not. You
+hold two dumbbells and work one leg, and the model had no way to say so.
+
+So whoever classified this family had to choose which error to ship:
+
+| flag | reps hint | tonnage |
+|---|---|---|
+| `is_unilateral = true` | correct | **halved** |
+| `is_unilateral = false` | wrong | correct |
+
+The dumbbell rows chose the first and the kettlebell rows chose the second.
+`W5`'s "at least one side of every pair is wrong" is understated — **both sides
+were wrong, in different ways**, and the split by equipment is two people making
+opposite forced choices.
+
+### Three facts, three columns
+
+    load_mode      which number to type    -> the "per hand" input hint
+    implements     how many of it moved    -> the tonnage factor   (NEW)
+    is_unilateral  how many limbs work     -> the "8 each side" reps hint
+
+Independent, so none has to lie for another to be right. The tonnage rule gets
+*simpler* as well as correct — `ss.reps * ss.weight_kg * COALESCE(e.implements, 1)`,
+no CASE at all, because the factor is now a stored fact rather than a derivation
+over two flags that mean other things.
+
+Eight rows change: the seven dumbbell lunges/split squats/step-ups, plus
+`kettlebell-bulgarian-split-squat`. Their tonnage doubles, and eight more get
+their reps hint back without their factor moving. `load_factor` is derived on
+read and never stored, so this **retroactively corrects every past session**
+using them — agreed as the right behaviour, since the old figures were wrong.
+
+### The seeder hole, walked into again
+
+The migration backfilled and the verification showed zero rows corrected: the
+UPDATEs had run against an empty table, and `cmd/seed` then inserted 762 rows
+taking the column default. Exactly what `load_mode` hit in #224 — *a migration
+backfills existing rows; a fresh database takes the default*. Caught in the same
+minute only because the migration's effect was checked rather than assumed.
+
+`implements` is threaded through `exercises.json`, the seeder's upsert and its
+change-detection tuple, and `cmd/exportcontent` — the same four places
+`load_mode` needed.
+
+### And the admin write path, which is T2 verbatim
+
+`implements` IS the tonnage factor, so a console that cannot write it authors
+exercises that count wrong from birth, and an UPDATE that omits it makes a wrong
+count permanent. Both halves are wired, with a test that mirrors T2's.
+
+### What the fixtures taught
+
+Two suites went red for the right reason. `session`'s fixture struct sets every
+column any test reads — deliberately, after `feed` shipped a green suite whose
+per-side CASE could have been deleted entirely — so an unset `implements`
+defaulted to 1 and `TestHistoryAgreesWithSummarise` caught the halving
+immediately. `feed`'s `seedExerciseAs` had the same gap. Both now set it.
+
+### What review found
+
+**`Restore` halved it again** — the same bug the grip work shipped, on the
+column that had just replaced the derived factor. `Restore` feeds a revision's
+JSON to `updateWithin`, and this change put `implements` in that SET clause;
+every revision predates the column, so every snapshot unmarshals to 0 and
+`NormalizeImplements` reads that as 1. Restoring a description edit halved a
+pair of dumbbells. The `load_mode` guard sits directly above it and its own
+comment says the two must stay in step; they did not, for one commit. Both
+share one SELECT now, absent-key only, with three tests.
+
+**Two screens still taught the retired rule.** Web's session hint keyed "Volume
+counts both" on `!is_unilateral`, so a dumbbell walking lunge — now per_side AND
+unilateral AND doubling — rendered "enter what the working hand holds" beside a
+total that visibly doubled. The console's note said "only per_side movements that
+are not unilateral double", which on an authoring screen is worse than false: an
+author who believed it would untick unilateral to buy the doubling, recreating
+the forced error this migration exists to end. The contract said it too, three
+lines above the new field contradicting it.
+
+**Migration step 3 is unguarded, and that is now recorded rather than assumed.**
+Deleting the `LIKE '%lunge%'` UPDATE turns nothing red: the Go tests read
+`SeedData()`, and no test can re-run a migration against pre-migration rows. Two
+things compensate — the deploy runs `seed` straight after `migrate`, and the
+upsert's change-detection tuple now includes `implements`, so every
+`source='seed'` row converges regardless. **The residual exposure is
+admin-authored rows**, for which step 3 is the only corrector, since the seeder
+skips them by design. Verified instead by replicating the migration over the
+762-row catalog and diffing against the corrected `exercises.json`: zero
+mismatches, so a migrated database and a freshly seeded one agree exactly.
+
+**The `COALESCE` is armed, not load-bearing.** `session_sets_exercise_id_fkey`
+is NO ACTION, so an exercise with sets cannot be deleted and the LEFT JOIN can
+never miss — removing the COALESCE passes the whole suite, and no test can be
+written through the public surface. Left in place with a comment saying so, for
+the day that foreign key is weakened.
+
+### Gaps
+
+- **Two rows are a judgment call nobody has confirmed.**
+  `kettlebell-lunge-press` and `kettlebell-rotational-lunge` keep `implements =
+  2`, unchanged by this work, but both are commonly single-bell movements. The
+  catalog's structure supports the paired reading — the single-bell analogues
+  exist separately as `total` rows — and if it is wrong it predates this
+  change. Worth a human eye.
+- **Only the lunge family was swept.** `implements` was backfilled from the old
+  derived rule, so every other row inherits whatever that rule said — including
+  any other movement held with two implements while working one limb. The lunge
+  family was found by internal contradiction; nothing has looked for the rest.
+  `W6`.
+- **Nothing has been seen on a device or in the console.** The new select, the
+  copy distinguishing implements from unilateral, and the corrected tonnage are
+  all judged from source and from SQL.
+- **`load_mode` is now only an input hint.** It no longer participates in any
+  arithmetic, which makes "per_side with implements = 1" (a one-arm row) and
+  "total with implements = 1" (a barbell) identical to the tonnage rule and
+  different to the athlete. That is correct, and it means a future reader will
+  wonder why both columns exist — hence this entry.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
