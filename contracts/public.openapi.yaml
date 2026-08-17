@@ -6317,8 +6317,11 @@ paths:
         has authored — unbounded, and exactly what `cmd/exportcontent` reads.
 
 
-        With `q`: the WHOLE catalog, seeded rows included, matched on name or id
-        and ordered by name. **Capped at 100**, with no total in the response,
+        With `q`: the WHOLE catalog, seeded rows included, matched on NAME by
+        the same search the athletes' app uses — every typed word must appear,
+        in any order, with lifting synonyms and simple plurals handled — and
+        ordered by closeness to the query, then by name. **Capped at 100**,
+        with no total in the response,
         so treat a result set of exactly 100 as "first 100".
 
 
@@ -6331,14 +6334,24 @@ paths:
           in: query
           required: false
           description: >
-            Search the whole catalog by name or id. Omit for the admin-authored
+            Search the whole catalog by name, exactly as the athletes' app
+            searches it — an operator answering "I cannot find X" has to be
+            able to type what the athlete typed.
+
+
+            **No longer matched against `id`.** An id is a slug derived from
+            the name, so it carries no word the name does not and pasting one
+            still finds its row through the name. The exception is a RENAMED
+            exercise, whose id keeps the old words: that row is now reachable
+            by its current name only. Omit for the admin-authored
             set. Whitespace-only is treated as omitted.
           schema: { type: string }
       responses:
         "200":
           description: >
             Without `q`, the authored exercises ordered by id; with `q`, the
-            matching exercises ordered by name. `[]` when nothing has been
+            matching exercises ordered by closeness to the query, then by
+            name. `[]` when nothing has been
             authored yet — an empty array, never null. `media` is always empty
             on this response; it is not part of the write path.
           content:

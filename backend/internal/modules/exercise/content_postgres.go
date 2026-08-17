@@ -390,8 +390,11 @@ func (r *PostgresRepository) Restore(ctx context.Context, id string, revision in
 	})
 }
 
-// SearchAll finds any exercise by name or id, seeded ones included, so the
-// console can reach the whole catalog rather than only what it wrote.
+// SearchAll finds any exercise by NAME, seeded ones included, so the console
+// can reach the whole catalog rather than only what it wrote.
+//
+// By name only since the search was rewritten — see the note at the call to
+// `SearchClause` below for why the id was dropped.
 //
 // Capped for the same reason the technique search is: this reads the WHOLE
 // catalog and 504 full rows is payload the console renders none of.

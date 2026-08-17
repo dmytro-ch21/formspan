@@ -22017,8 +22017,45 @@ and asserts `%`, `_` and `\` match nothing. The fix is that `SearchClause` now
 returns `false` rather than `""` for an unmatchable query: **a clause that always
 means something is one no caller can misread.**
 
+### What review found
+
+**The index documentation was backwards, including the `COMMENT ON INDEX` baked
+into the database.** GIN has no ordered scans — only GiST supports KNN ordering
+via `<->` — so the trigram index cannot serve `ORDER BY similarity()`, which is
+the one job the migration said it was for. What it CAN serve is the `ILIKE`
+predicates in the WHERE, which is what the migration said it did not. Measured
+either way, it is unused at this size: 762 rows seq-scans in 0.5 ms, and 7,620
+rows still seq-scans, in 3.9 ms. Kept as headroom on a table written only by the
+seeder and the console, with comments that now say the true thing.
+
+**The `/admin/exercises` contract still promised the old behaviour** — "matched
+on name or id and ordered by name" — because the public entry was updated and
+this one was not. Two contracts for one search is the kind of drift the spec
+exists to prevent.
+
+**`N15` was filed and closed in the same change.** The plan was to record that
+nothing checks the synonym list; review pointed out the check is one test and no
+database. It immediately found three dead entries — `front -> front` (a
+self-synonym expanding to nothing), `pulldown -> pull-down` (the catalog spells
+it as one word), and `ez -> ezbar` (written that same hour, in the fix for a
+different dead entry). A hand-maintained list that looks like coverage and
+reaches nothing is worse than no list.
+
+Also: `"crunches"` tokenized to `"crunche"` and matched none of the catalog's
+eight `… Crunch` rows, so `-es` plurals are an additional ALTERNATIVE rather
+than a replacement — substitutive, the same rule would turn "hors" into "hor".
+And the admin search had no length cap while the public one caps at 100: harmless
+before, when the whole string was one bound parameter, and worth fixing now that
+each word binds its own and Postgres refuses a statement over 65,535 of them.
+
 ### Gaps
 
+- **Misspellings still find nothing.** `"dumbell press"` returns zero rows,
+  because trigrams participate only in the ranking and `dumbell` is not a
+  substring of `Dumbbell`. Matching on `name % $1` would fix it and would
+  destroy the AND-across-words precision that makes the rest work; a
+  similarity fallback for the zero-result case is the coherent next step and
+  does not belong here.
 - **The console and the athlete list now share one search.** That is deliberate —
   an operator answering "I cannot find X" has to be able to type what the athlete
   typed — but the console's id matching was dropped in the process. The id is a

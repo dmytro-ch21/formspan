@@ -2,6 +2,7 @@ package exercise
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -117,5 +118,53 @@ func countOf(s, sub string) int {
 		}
 		n++
 		i += j + len(sub)
+	}
+}
+
+// Every synonym must be able to reach something.
+//
+// This was going to be a filed task (`N15`) — the synonym list is
+// hand-maintained and nothing checked it — until review pointed out the check
+// costs one test and no database. It immediately earned itself: `pulldown ->
+// pull-down` pointed at a spelling the catalog does not use (it says
+// "Pulldown"), and `front -> front` was a self-synonym that expanded to
+// nothing. Both were dead weight that looked like coverage.
+//
+// The rule is one-directional: a synonym has to match some real name, because
+// its whole job is to reach rows the typed word cannot. A KEY that matches
+// nothing is fine and expected — `db`, `rdl` and `ezbar` are things people type
+// and the catalog never says, which is exactly why they need synonyms.
+func TestEverySynonymCanReachAnExercise(t *testing.T) {
+	catalog, err := SeedData()
+	if err != nil {
+		t.Fatalf("read seed catalog: %v", err)
+	}
+	if len(catalog) == 0 {
+		t.Fatal("the seed catalog is empty, so this test would pass vacuously")
+	}
+	names := make([]string, len(catalog))
+	for i, e := range catalog {
+		names[i] = strings.ToLower(e.Name)
+	}
+
+	for key, alts := range synonyms {
+		for _, alt := range alts {
+			if alt == key {
+				t.Errorf("synonym %q -> %q is a self-reference: it expands to nothing "+
+					"and duplicates a predicate", key, alt)
+				continue
+			}
+			var found bool
+			for _, n := range names {
+				if strings.Contains(n, strings.ToLower(alt)) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("synonym %q -> %q matches no exercise name in the catalog, so "+
+					"it can never widen a search — remove it or fix the spelling", key, alt)
+			}
+		}
 	}
 }

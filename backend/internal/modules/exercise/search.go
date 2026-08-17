@@ -53,25 +53,25 @@ var synonyms = map[string][]string{
 	"shoulder": {"overhead"},
 	// Both spellings of the bar are in circulation, and one of them is what a
 	// person types.
-	"ez": {"ez-bar", "ezbar"},
+	"ez":    {"ez-bar", "ez bar"},
+	"ezbar": {"ez-bar", "ez bar"},
 	// Said far more often than "biceps curl", and the catalog says neither.
 	"bicep":   {"biceps"},
 	"biceps":  {"bicep"},
 	"tricep":  {"triceps"},
 	"triceps": {"tricep"},
-	// "Lat pulldown" and "pull-down"; "chin-up" and "chinup".
-	"pulldown": {"pull-down"},
-	"pullup":   {"pull-up"},
-	"chinup":   {"chin-up"},
-	"situp":    {"sit-up"},
+	// The catalog hyphenates these and people usually do not. "Pulldown" is
+	// NOT here: the catalog spells it as one word, so the typed token already
+	// matches and a synonym would be dead weight.
+	"pullup": {"pull-up"},
+	"chinup": {"chin-up"},
+	"situp":  {"sit-up"},
 	// A "db" is a dumbbell on every whiteboard in every gym.
 	"db": {"dumbbell"},
 	"kb": {"kettlebell"},
 	"bb": {"barbell"},
 	// Romanian deadlift, said as three letters far more often than as words.
 	"rdl": {"romanian deadlift"},
-	// The two words for the same rack position.
-	"front": {"front"},
 }
 
 // searchTokens splits a query into the words to match on.
@@ -139,6 +139,13 @@ func SearchClause(query string, startAt int) (string, []any) {
 		// The token itself first, so the most literal reading is always in the
 		// set even when a synonym is wrong for this particular query.
 		alts := append([]string{tok}, synonyms[tok]...)
+		// "crunches" loses its "s" above and becomes "crunche", which matches
+		// none of the catalog's 8 `... Crunch` rows. Added as an ALTERNATIVE
+		// rather than by replacing the token, so this can only ever widen: the
+		// same rule would turn "hors" into "hor" if it were substitutive.
+		if strings.HasSuffix(tok, "e") && len(tok) > 4 {
+			alts = append(alts, strings.TrimSuffix(tok, "e"))
+		}
 		ors := make([]string, 0, len(alts))
 		for _, alt := range alts {
 			args = append(args, database.LikeTerm(alt))
@@ -159,7 +166,9 @@ func SearchClause(query string, startAt int) (string, []any) {
 // which is the one the athlete meant.
 //
 // Uses `pg_trgm`'s `similarity`, installed since migration 000017 for the
-// technique library and indexed on `exercises.name` by this change.
+// technique library. Note the trigram index added alongside this does NOT serve
+// this ordering — GIN has no ordered scans, so similarity is computed per row
+// and sorted. It serves the ILIKE predicates in the WHERE.
 func SearchRank(query string, n int) (string, any) {
 	return fmt.Sprintf("similarity(name, $%d) DESC", n), expandedQuery(query)
 }

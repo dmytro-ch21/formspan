@@ -152,6 +152,20 @@ func (h *ContentHandler) List(w http.ResponseWriter, r *http.Request) {
 		err      error
 	)
 	if q := strings.TrimSpace(r.URL.Query().Get("q")); q != "" {
+		// Bounded like the public search, and it matters MORE here now.
+		//
+		// The old search bound the whole string as one parameter, so length
+		// was merely wasteful. The new one binds at least one parameter per
+		// word, so input length amplifies into parameter count — and Postgres
+		// refuses a statement over 65,535 of them, which a few hundred KB of
+		// query string reaches. Behind RequireAdmin, so this is tidiness
+		// rather than a hole; the asymmetry with the public handler was an
+		// oversight, not a decision.
+		if len(q) > maxQueryLen {
+			apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+				"search term is too long")
+			return
+		}
 		authored, err = h.repo.SearchAll(r.Context(), q)
 	} else {
 		authored, err = h.repo.AdminAuthored(r.Context())

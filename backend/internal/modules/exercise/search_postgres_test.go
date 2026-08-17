@@ -133,7 +133,11 @@ func searchFixture(t *testing.T) (*PostgresRepository, context.Context) {
 		for _, r := range rows {
 			if _, err := repo.pool.Exec(context.Background(),
 				`DELETE FROM exercises WHERE id = $1`, r.id); err != nil {
-				t.Logf("cleanup %s: %v", r.id, err)
+				// Errorf, not Logf: these are `published`, `source='seed'` rows
+				// in a database every worktree shares, so a cleanup that fails
+				// quietly leaves five fake exercises in the catalog for
+				// everybody else.
+				t.Errorf("cleanup %s: %v", r.id, err)
 			}
 		}
 	})
