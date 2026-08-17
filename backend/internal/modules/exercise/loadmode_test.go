@@ -115,8 +115,17 @@ func TestNoMovementDoublesAWeightItDoesNotHold(t *testing.T) {
 	// Words meaning "the athlete holds ONE of these". `offset` and `suitcase`
 	// are a load carried on one side; `svend` is a plate or bell squeezed
 	// between the palms; `goblet` and `halo` are one bell in two hands.
+	// NOTE these mean ONE IMPLEMENT, never one limb — and `single-` used to be
+	// in this list, which is how `single-leg-dumbbell-romanian-deadlift` was
+	// pinned at x1. That movement is two dumbbells and one leg; the guard was
+	// reading "single" as being about the hands when the name is about the
+	// legs. The same conflation migration 000057 removed from the tonnage rule,
+	// surviving one level up in the test meant to protect it.
+	//
+	// `single-arm` is listed explicitly instead, so the word only counts when
+	// it is actually about the arms.
 	single := []string{
-		"single-", "one-arm", "suitcase", "offset", "goblet",
+		"single-arm", "one-arm", "suitcase", "offset", "goblet",
 		"svend", "halo", "russian-twist", "hip-thrust", "glute-bridge",
 		// `alternating` was MISSING from the first version of this list, and
 		// review found it by mutation: reverting the two alternating
@@ -151,10 +160,16 @@ func TestNoMovementDoublesAWeightItDoesNotHold(t *testing.T) {
 	}
 
 	for _, e := range all {
-		factor := 1
-		if e.LoadMode == LoadModePerSide && !e.IsUnilateral {
-			factor = 2
-		}
+		// `implements` IS the factor since migration 000057. This block used to
+		// derive it as `LoadMode == per_side && !IsUnilateral`, and kept doing
+		// so after that migration replaced the rule — so it was asserting about
+		// a value nothing computes any more.
+		//
+		// Demonstrated rather than assumed: giving `one-arm-dumbbell-row`
+		// implements=2 — the exact bug this guard exists to catch — left the
+		// whole suite green. A test that survives its own subject being
+		// replaced is not a weaker test, it is a different one.
+		factor := NormalizeImplements(e.Implements)
 		for _, w := range single {
 			if strings.Contains(e.ID, w) && factor != 1 {
 				t.Errorf("%s: the name says %q — one implement — but it counts x2, "+
@@ -162,9 +177,12 @@ func TestNoMovementDoublesAWeightItDoesNotHold(t *testing.T) {
 			}
 		}
 		for _, w := range pair {
-			// `single-` wins where both appear, so those rows are skipped here
-			// rather than being contradicted by the block above.
-			if strings.Contains(e.ID, "single-") || !holdsAnImplement(e) {
+			// A single-IMPLEMENT word wins where both appear, so those rows are
+			// skipped here rather than being contradicted by the block above.
+			// Deliberately not `single-`: that also matches `single-leg`, which
+			// says nothing about how many implements are held.
+			if strings.Contains(e.ID, "single-arm") || strings.Contains(e.ID, "one-arm") ||
+				!holdsAnImplement(e) {
 				continue
 			}
 			if strings.Contains(e.ID, w) && factor != 2 {

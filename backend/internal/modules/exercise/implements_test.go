@@ -172,3 +172,58 @@ func TestACreateWithoutImplementsDefaultsToOne(t *testing.T) {
 		t.Fatalf("stored implements=%d, want 1", repo.lastWritten.Implements)
 	}
 }
+
+// The catalog's naming convention, turned into a check.
+//
+// A bare movement name means TWO implements; a `one-arm-`/`single-arm-` prefix
+// states one explicitly. That is not an opinion — it is what five of the six
+// such pairs in the catalog already do (`kettlebell-row` x2 beside
+// `one-arm-kettlebell-row` x1, and four more).
+//
+// So the sixth was a contradiction rather than a judgment call:
+// `single-leg-dumbbell-romanian-deadlift` claimed ONE implement, identical to
+// its own `one-arm-single-leg-...` twin — whose name is pointless unless the
+// bare one is two-armed. Two dumbbells, one leg: the exact shape migration
+// 000057 made expressible, hiding outside the lunge family that was swept.
+//
+// This is a STRUCTURAL rule rather than a word list, which is why it found a
+// row the word list could not: it compares the catalog against itself instead
+// of against somebody's vocabulary.
+func TestABareMovementHoldsMoreThanItsOneArmedTwin(t *testing.T) {
+	all, err := SeedData()
+	if err != nil {
+		t.Fatalf("seed data: %v", err)
+	}
+	by := make(map[string]Exercise, len(all))
+	for _, e := range all {
+		by[e.ID] = e
+	}
+
+	var pairs int
+	for _, e := range all {
+		if e.LoadMode != LoadModePerSide {
+			continue
+		}
+		for _, prefix := range []string{"one-arm-", "single-arm-"} {
+			twin, ok := by[prefix+e.ID]
+			if !ok {
+				continue
+			}
+			pairs++
+			if NormalizeImplements(twin.Implements) != 1 {
+				t.Errorf("%s names one arm but holds %d implements",
+					twin.ID, NormalizeImplements(twin.Implements))
+			}
+			if NormalizeImplements(e.Implements) != 2 {
+				t.Errorf("%s holds %d implements, the same as its explicit twin %s — "+
+					"the twin's name says nothing unless the bare movement is two-armed, "+
+					"so one of the pair is wrong",
+					e.ID, NormalizeImplements(e.Implements), twin.ID)
+			}
+		}
+	}
+	if pairs == 0 {
+		t.Fatal("no bare/one-armed pairs found — the convention this checks has " +
+			"disappeared from the catalog, so this test now proves nothing")
+	}
+}
