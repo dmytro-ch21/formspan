@@ -23104,6 +23104,70 @@ judgement was confirmed rather than assumed: migration 000014's
   layout question this branch cannot see rendered, and guessing at it blind is
   how the last two runtime-only defects shipped.
 
+## 2026-08-17 — A guard held by a clock race, which is worse than a guard held by nothing
+
+**T5.** `plan.ts`'s `pushRow` ends by clearing `dirty` under two clauses —
+`AND updated_at = ?` and `AND deleted_at IS NULL` — and both guard the same
+instant: the window between the snapshot `runSync` took and the UPDATE that says
+"sent". A plan screen writes through on every change, so something landing in
+that window is ordinary. Cleared wrongly, the change exists on that phone and
+nowhere else, `countPendingPlans` reads zero, and nothing ever retries.
+
+T5 was filed after #256, from a measurement: delete either clause **with its
+binding** — the clause alone is a parameter-arity error, which measures the
+harness rather than the guard — and the whole mobile suite stayed green,
+1280/1280. Two sibling swaps in `sessionStore` were pinned; this was the last
+unheld one.
+
+### The correction, which is the actual finding
+
+**The tombstone half was not held by nothing. It was held by a coin toss**, and
+that is the worse state, because a guard that looks covered is one nobody
+re-measures.
+
+`deleting DURING an in-flight create` does catch the deletion of
+`AND deleted_at IS NULL` — but only when `planSession` and `unplanSession` land
+in the **same millisecond**. Otherwise `unplanSession`'s newer `updated_at`
+makes the first clause decline and the second is never reached, so the mutation
+survives. Measured with the clause removed:
+
+| | catches it |
+|---|---|
+| that file alone | **5 of 6** |
+| the full suite | **0 of 1** |
+
+The full suite is slower, so the two timestamps separate — which means the
+regime where it *never* catches the bug is the regime CI runs in. Both of the
+original measurements were correct; they were measuring different clocks, and
+reconciling them is what produced this entry. The first read (a full-suite run)
+is what put "held by nothing" in the T5 line; the second (a single-file run)
+contradicted it an hour later.
+
+### What landed
+
+Three cases in `planSync.test.ts`, all deterministic:
+
+- an **edit** landing mid-push, which forces a newer `updated_at`;
+- a **delete** landing mid-push, which writes the tombstone with the real
+  `unplanSession` and then closes the millisecond by hand. Two `Date.now()`
+  calls cannot be forced to collide on demand, so the clock is normalised and
+  the guard under test is left alone. **8 of 8** with the clause removed, and it
+  fails under the full suite too;
+- a clean push that **does** go clean, because "never clear `dirty`" would
+  otherwise satisfy both of the above.
+
+### Gaps
+
+- **The timing lesson is not generalised.** Nothing stops the next test from
+  depending on two `Date.now()` calls colliding, and the tell is invisible: it
+  passes. The only reason this was caught is that a mutation was run twice, in
+  two regimes, and disagreed. That is not a practice anything enforces.
+- **`updated_at` equality is still the reconciliation primitive**, at
+  millisecond ISO text resolution, in all three sync paths. The tombstone clause
+  exists precisely because that resolution is too coarse; the same coarseness
+  applies to any two writes in one millisecond, and only the delete case has a
+  second clause behind it.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.

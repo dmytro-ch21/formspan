@@ -3771,6 +3771,26 @@ Covers `lib/plan.ts`'s outbox and `lib/plansApi.ts`. Schema v15.
 - A plan referencing a template that has not synced yet is **deferred**, not
   failed — the pending count includes it, no error banner appears, and it goes
   out once the template lands.
+
+**Editing or deleting while a push is in flight (T5)**
+
+The window between the sync reading a plan and writing "sent" back. The Plan
+screen writes through on every change, so landing in it is ordinary. Easiest to
+reproduce against a deliberately slow or throttled network.
+
+- Edit a plan while its push is in flight → the newer edit is **still pending**
+  afterwards and reaches the server on the next sync. It must not be marked as
+  already sent; the pending count must not drop to zero with the edit only on
+  the phone.
+- Delete a plan while its push is in flight → the tombstone survives, the
+  pending count still shows it, and the server is told on the next sync. The
+  plan must not end up gone locally and alive on the server, which is the state
+  nothing ever retries out of.
+- The same delete done fast enough to share a millisecond with the push's own
+  snapshot behaves identically — that collision is the case `updated_at` alone
+  cannot catch.
+- A push with nothing landing underneath it still clears to zero pending, so the
+  guards above are not just "never mark anything sent".
 - Deleting a plan whose template has not synced is **not** deferred.
 - A create whose response is lost retries and reconciles via 409 — it must not
   create a second plan, and must not be reported as permanently failed.
