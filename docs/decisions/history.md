@@ -21955,6 +21955,73 @@ of opening the PR.
   successful invocations. `gh api -X PATCH repos/<owner>/<repo>/pulls/<n>` works.
   Found by hitting it on this very PR, which is a small argument for writing
   conventions by following them rather than by describing them.
+## 2026-08-17 — Somebody read the list, and ten rows were wrong
+
+Closes **F3**. 142 exercises were `per_side`; 108 doubled. They had been
+classified by equipment plus a hand-written exclusion list, spot-checked, and
+never read end to end. Reading them found **ten wrong — and wrong in both
+directions**, which is why spot-checking missed them: a sample that happens to
+land on correct rows says nothing about a systematic split.
+
+### The field was answering two questions
+
+`is_unilateral` answers *"is one limb working"*. `load_mode` answers *"is the
+recorded number one implement"*. Only their product decides tonnage — so a row
+can be **honest about both fields and still report half the work**.
+
+`double-dumbbell-kickstand-deadlift` is the clean case. A kickstand deadlift is
+staggered-stance, one leg doing most of the work, so `is_unilateral: true` is a
+true statement about the movement. It also holds *two dumbbells*. The row was
+counting ×1 and under-reporting every set by half.
+
+### The other nine were an inconsistency inside the data, not a judgement call
+
+Seven single-implement movements — `svend-press`, `hip-thrust`,
+`russian-twist`, `offset-reverse-lunge-and-press` — were marked `per_side` and
+doubling. Their identical peers were already right: `kettlebell-goblet-squat`,
+`kettlebell-halo` and `kettlebell-pullover` are all `total`. One bell, weight
+recorded whole. So each correction points at a peer rather than at an opinion.
+They are now `total` too, which is the semantically accurate fix — the recorded
+number *is* the whole load, and forcing `is_unilateral` to get the factor right
+would have made the row lie about the movement.
+
+The two `alternating-dumbbell-*` rows keep `per_side` (the number really is one
+dumbbell) and gain `is_unilateral` — you hold two and move one per rep. That one
+was a genuine product judgement rather than a data error, and it was put to the
+user: the app counts total reps with no per-arm concept, so each rep moves one
+implement. Confirmed ×1.
+
+### The guard, and why it is a heuristic on purpose
+
+Correcting ten rows without one repeats the defect — the list was already
+"checked" once. `TestNoMovementDoublesAWeightItDoesNotHold` asserts what the
+names already say, both ways: nothing calling itself `single`, `goblet`,
+`svend`, `offset` or `suitcase` may double, and nothing calling itself `double`
+or `farmer` may halve. All ten failed it before the fix; reintroducing any of
+them fails it again.
+
+It cannot know what a movement *is*, and its first version proved that by
+failing on `jump-rope-double-under` — a "double under" is the rope passing twice
+per jump, holding nothing. The pair check is now scoped to rows that actually
+carry a hand implement. A guard that cannot tell a skipping term from a pair of
+dumbbells is one the first person it annoys will delete.
+
+### Open questions this leaves
+
+- **Every past session using these ten now reports different tonnage** — nine
+  of them halved. That is the correct figure and it is also a number moving
+  under somebody with no explanation, the same trade W2 made. Nothing in the UI
+  says so.
+- **The remaining 132 were read but not individually justified.** Nothing
+  records *why* each is classified as it is, so the next audit starts from the
+  same place this one did. Per-row rationale in the seed file would fix that and
+  is a much larger change.
+- **`load_mode` is still equipment-derived at authoring time.** `createWithin`
+  never writes it (**T2**, now closed separately), and nothing prompts an author
+  to think about implement count when adding a dumbbell exercise.
+- **Existing databases need a re-seed** to pick this up: the seeder updates
+  `WHERE source = 'seed'`, so a deploy applies it, but a developer database that
+  is not re-seeded keeps the old factors.
 
 ## Open items / known gaps as of this entry
 

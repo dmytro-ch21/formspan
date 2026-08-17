@@ -147,7 +147,7 @@
       "dumbbells"
     ],
     "load_type": "weight_reps",
-    "is_unilateral": false,
+    "is_unilateral": true,
     "load_mode": "per_side",
     "instructions": "",
     "media": []
@@ -169,7 +169,7 @@
       "dumbbells"
     ],
     "load_type": "weight_reps",
-    "is_unilateral": false,
+    "is_unilateral": true,
     "load_mode": "per_side",
     "instructions": "",
     "media": []
@@ -4956,7 +4956,7 @@
       "dumbbells"
     ],
     "load_type": "weight_reps",
-    "is_unilateral": true,
+    "is_unilateral": false,
     "load_mode": "per_side",
     "instructions": "",
     "media": []
@@ -5694,7 +5694,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
-    "load_mode": "per_side",
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -6301,7 +6301,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
-    "load_mode": "per_side",
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -8659,7 +8659,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
-    "load_mode": "per_side",
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -8748,7 +8748,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
-    "load_mode": "per_side",
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9010,7 +9010,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
-    "load_mode": "per_side",
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -9207,7 +9207,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
-    "load_mode": "per_side",
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
@@ -13724,7 +13724,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
-    "load_mode": "per_side",
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },
