@@ -5673,7 +5673,7 @@
     ],
     "load_type": "weight_reps",
     "is_unilateral": false,
-    "load_mode": "per_side",
+    "load_mode": "total",
     "instructions": "",
     "media": []
   },

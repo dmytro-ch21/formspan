@@ -21955,9 +21955,9 @@ of opening the PR.
   successful invocations. `gh api -X PATCH repos/<owner>/<repo>/pulls/<n>` works.
   Found by hitting it on this very PR, which is a small argument for writing
   conventions by following them rather than by describing them.
-## 2026-08-17 — Somebody read the list, and ten rows were wrong
+## 2026-08-17 — Eleven rows were wrong, and the guard that found them missed two
 
-Closes **F3**. 142 exercises were `per_side`; 108 doubled. They had been
+Advances **F3**, which stays open. 142 exercises were `per_side`; 108 doubled. They had been
 classified by equipment plus a hand-written exclusion list, spot-checked, and
 never read end to end. Reading them found **ten wrong — and wrong in both
 directions**, which is why spot-checking missed them: a sample that happens to
@@ -21993,12 +21993,28 @@ implement. Confirmed ×1.
 
 ### The guard, and why it is a heuristic on purpose
 
-Correcting ten rows without one repeats the defect — the list was already
-"checked" once. `TestNoMovementDoublesAWeightItDoesNotHold` asserts what the
-names already say, both ways: nothing calling itself `single`, `goblet`,
-`svend`, `offset` or `suitcase` may double, and nothing calling itself `double`
-or `farmer` may halve. All ten failed it before the fix; reintroducing any of
-them fails it again.
+Correcting rows without one repeats the defect — the list was already "checked"
+once. `TestNoMovementDoublesAWeightItDoesNotHold` asserts what the names already
+say, both ways: nothing calling itself `single`, `goblet`, `svend`, `offset` or
+`suitcase` may double, and nothing calling itself `double` or `farmer` may
+halve.
+
+**Its first version caught eight of its own ten examples, and its comment
+claimed all ten.** Review disproved that by mutation — reverting the two
+`alternating-*` corrections left the test green, because no word in the list
+matched them. My own mutation check had reverted four corrections and all four
+happened to be among the covered eight. A sample that agrees with you is not a
+check, which is the same lesson this file has now recorded three times in two
+days.
+
+Every correction is now reverted individually rather than sampled: **11 of 11
+caught.** `dumbbell-glute-bridge` was the eleventh, and it was found the same
+way — as a missed twin of a row this branch had just fixed.
+
+`renegade` was deliberately dropped from the "two implements" list. A renegade
+row holds two and rows one per rep, which is the alternating case, and the
+confirmed ruling there is ×1 — so asserting ×2 would have locked a contradiction
+into a test.
 
 It cannot know what a movement *is*, and its first version proved that by
 failing on `jump-rope-double-under` — a "double under" is the rope passing twice
@@ -22006,9 +22022,32 @@ per jump, holding nothing. The pair check is now scoped to rows that actually
 carry a hand implement. A guard that cannot tell a skipping term from a pair of
 dumbbells is one the first person it annoys will delete.
 
+### F3 is NOT closed, and the closure claim was the second overstatement
+
+The entry first said "somebody read the list" and ticked F3. Review found
+`dumbbell-glute-bridge` — the exact peer of a row fixed in the same commit,
+a hip thrust without the bench — still doubling, and a whole family that
+contradicts itself:
+
+| | |
+|---|---|
+| every **kettlebell** lunge, split squat, step-up | ×2 |
+| every **dumbbell** one except `dumbbell-lunge` | ×1 |
+| `kettlebell-split-squat` vs `kettlebell-bulgarian-split-squat` | ×2 vs ×1 |
+
+Same movement, opposite factor depending on which implement the row names — and
+inconsistent *within* kettlebell. At least one side of every pair is wrong,
+provable from the data alone with no exercise-science opinion required. It is
+the same stance-versus-implement conflation the kickstand fix diagnoses, at
+family scale.
+
+Which side is right is a product judgement — is a dumbbell lunge one dumbbell or
+two? — and it moves ~14 rows of somebody's tonnage, so it is filed as **W5**
+rather than guessed at. F3 stays open.
+
 ### Open questions this leaves
 
-- **Every past session using these ten now reports different tonnage** — nine
+- **Every past session using these eleven now reports different tonnage** — nine
   of them halved. That is the correct figure and it is also a number moving
   under somebody with no explanation, the same trade W2 made. Nothing in the UI
   says so.

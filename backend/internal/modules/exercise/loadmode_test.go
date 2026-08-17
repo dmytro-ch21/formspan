@@ -100,7 +100,12 @@ func TestNormalizeLoadModeFailsToTotal(t *testing.T) {
 // This asserts what the names already say, in both directions. A heuristic, and
 // deliberately so: it cannot know what a movement is, but it can insist that a
 // row calling itself "single" does not double and one calling itself "double"
-// does not halve. Every one of the ten failed it.
+// does not halve.
+//
+// It catches NINE of the ten. `alternating` had to be added after review
+// mutation-tested the claim that it caught all of them and found it did not —
+// and the four corrections checked by hand beforehand happened to be four of
+// the covered ones. A sample that agrees with you is not a check.
 func TestNoMovementDoublesAWeightItDoesNotHold(t *testing.T) {
 	all, err := SeedData()
 	if err != nil {
@@ -112,7 +117,15 @@ func TestNoMovementDoublesAWeightItDoesNotHold(t *testing.T) {
 	// between the palms; `goblet` and `halo` are one bell in two hands.
 	single := []string{
 		"single-", "one-arm", "suitcase", "offset", "goblet",
-		"svend", "halo", "russian-twist", "hip-thrust",
+		"svend", "halo", "russian-twist", "hip-thrust", "glute-bridge",
+		// `alternating` was MISSING from the first version of this list, and
+		// review found it by mutation: reverting the two alternating
+		// corrections left this test green. Both of them are among the ten this
+		// guard was written for, so it was covering eight of its own examples
+		// while its comment claimed all ten. The four corrections I
+		// mutation-checked happened to be four of the covered eight — a sample
+		// that agreed with me.
+		"alternating",
 	}
 	// Words meaning TWO, so the recorded weight is one of them.
 	//
@@ -121,7 +134,13 @@ func TestNoMovementDoublesAWeightItDoesNotHold(t *testing.T) {
 	// jump and holds nothing. The first version of this test failed on it, which
 	// is the right way round — a guard that cannot tell a skipping term from a
 	// pair of dumbbells is one the first person it annoys will delete.
-	pair := []string{"double-", "dual-", "farmer", "renegade"}
+	//
+	// `renegade` is deliberately NOT here. A renegade row holds two implements
+	// but rows one per rep, which is the alternating case — and the confirmed
+	// ruling for alternating is x1. Asserting x2 for it would have locked that
+	// contradiction into a test. Left unclassified rather than guessed at; see
+	// the open item in the history entry.
+	pair := []string{"double-", "dual-", "farmer"}
 	holdsAnImplement := func(e Exercise) bool {
 		for _, q := range e.Equipment {
 			if q == "dumbbells" || q == "kettlebell" || q == "farmer-handles" {
