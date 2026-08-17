@@ -21832,6 +21832,60 @@ their mind is worse than saying nothing.
 - **No zoom.** The card is shown at up to 420pt wide; the exported PNG is 1080px.
   Fine for reading the stats, not for inspecting the type.
 
+## 2026-08-17 — Eleven local databases down to two, and the diagnosis that nearly went wrong
+
+H3, the tidiest task on the list, and the only interesting part is how close the
+diagnosis came to doing damage.
+
+Eleven databases had accumulated on the local Postgres, 139 MB between them.
+Nine were disposable: `vola_merge` (schema version 33), `vola_mig` and
+`vola_test_contests` (no `schema_migrations` row at all — shells from runs that
+never finished), and `vola_test_{body,energy,library,load,pr207,setdetail}`,
+sitting between 39 and 53 while main was at 54. All had **zero connections**,
+and none matched any worktree in flight. Kept: `vola`, the local dev database,
+and `vola_test`, the shared one every branch uses.
+
+### The near-miss
+
+The first pass compared each database against "main's highest migration" read
+from `ls backend/migrations/` in the primary checkout, and reported this:
+
+> `vola_test` version **54**, main tops out at **000053**
+
+Which is, almost exactly, the hazard this file devotes a section to: an unmerged
+migration escaping a worktree into the shared database, after which every other
+branch fails with `no migration found for version 54` and it reads like a broken
+checkout. The documented response includes a hand-rolled rollback of the shared
+database.
+
+It was wrong, and running that rollback would have damaged a perfectly healthy
+database. **`000054_set_grip` is on main** — it landed in #248. The primary
+checkout was three commits stale, so the *baseline* was wrong, not the database.
+
+CLAUDE.md already names this exact discriminator, and calls it "the common case
+and the one most likely to be misread": if the version exists on `origin/main`,
+your checkout is stale — pull, and touch nothing else. What the near-miss adds
+is *where the wrong number comes from*. The stale thing need not be the branch
+under test; here it was the primary checkout being read for the baseline, by a
+session working entirely in worktrees and therefore never pulling it. Read the
+baseline from `git ls-tree origin/main backend/migrations/`, not from whatever
+files happen to be on disk.
+
+A second, smaller version of the same class: the first comparison also flagged
+`vola_test` as drifted because it compared the string `54` against `000054`.
+Zero-padding, not drift.
+
+### Gaps
+
+- **Nothing stops this accumulating again.** Per-branch databases are created by
+  hand, per CLAUDE.md's own advice for branches carrying an unmerged migration,
+  and nothing removes them when the branch merges. Eleven is simply what a few
+  weeks of that looks like; the same will be true in a few more.
+- **`vola`, the dev database, is at version 34 against main's 54** and was left
+  alone deliberately — it is not test scratch, it holds whatever local dev data
+  its owner has. Worth knowing that "run the API locally" against it will not
+  match the current schema until somebody migrates it.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
