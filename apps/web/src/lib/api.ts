@@ -46,12 +46,20 @@ export type Exercise = {
    * Which number goes in the weight field. `per_side` means ONE implement —
    * one dumbbell, one kettlebell — because that is what is stamped on it.
    *
-   * Not the same question as whether the load doubles: all 142 `per_side`
-   * exercises are entered per hand, but 34 are also `is_unilateral`, where one
-   * implement moves and the factor stays 1. So this drives what the athlete is
-   * told to type; the set's `load_factor` is what says the total.
+   * This drives what the athlete is told to TYPE, and nothing else. What the
+   * weight is multiplied by is `implements`.
    */
   load_mode?: "total" | "per_side";
+  /**
+   * How many implements of the typed weight move in one rep — the tonnage
+   * factor. 1 for a barbell or a single dumbbell, 2 for a pair.
+   *
+   * Distinct from `is_unilateral`, which is how many LIMBS work, and the
+   * distinction is why this column exists: a dumbbell walking lunge is two
+   * implements and one leg. The factor used to be derived from those two
+   * flags together, which could not express that — see migration 000056.
+   */
+  implements?: number;
   is_unilateral: boolean;
   instructions: string;
   media: Media[];

@@ -333,6 +333,10 @@ func (r *PostgresRepository) Revisions(ctx context.Context, id string) ([]Revisi
 		// LOOK like `total` in the console's history, and if the restore rule
 		// were dropped, clicking it would make it BE `total`.
 		rev.Payload.LoadMode = NormalizeLoadMode(rev.Payload.LoadMode)
+		// Same for the implement count: a pre-000056 snapshot has no key, and
+		// `"implements": 0` violates the contract's `enum: [1, 2]` on a field
+		// this change made required.
+		rev.Payload.Implements = NormalizeImplements(rev.Payload.Implements)
 		out = append(out, rev)
 	}
 	return out, rows.Err()
@@ -381,11 +385,30 @@ func (r *PostgresRepository) Restore(ctx context.Context, id string, revision in
 		// Absent ONLY — a revision that does carry a value is restored as it
 		// stands, which is what "copies that revision's content back" has
 		// always claimed and did not previously do for this column.
-		if want.LoadMode == "" {
+		//
+		// `implements` has the SAME rule and for the same reason — it is the
+		// tonnage factor since 000056, every revision in existence predates
+		// that column, and an absent key unmarshals to 0, which
+		// `NormalizeImplements` reads as 1. Restoring a description edit would
+		// halve a pair of dumbbells.
+		//
+		// One SELECT for both: they are read together, and two round trips to
+		// answer one question about one row is the kind of thing that gets
+		// "optimised" later by someone who does not notice the guards are
+		// separate for no reason.
+		if want.LoadMode == "" || want.Implements == 0 {
+			var mode string
+			var implements int
 			if err := tx.QueryRow(ctx,
-				`SELECT load_mode FROM exercises WHERE id = $1`, id,
-			).Scan(&want.LoadMode); err != nil {
-				return Exercise{}, fmt.Errorf("exercise: read load_mode for restore: %w", err)
+				`SELECT load_mode, implements FROM exercises WHERE id = $1`, id,
+			).Scan(&mode, &implements); err != nil {
+				return Exercise{}, fmt.Errorf("exercise: read load_mode/implements for restore: %w", err)
+			}
+			if want.LoadMode == "" {
+				want.LoadMode = mode
+			}
+			if want.Implements == 0 {
+				want.Implements = implements
 			}
 		}
 		return updateWithin(ctx, tx, want)

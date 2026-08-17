@@ -765,8 +765,11 @@ function ExerciseBlock({
               covering both would have to say "per side" about two different
               quantities that do not agree.
 
-              Only the non-unilateral half doubles, so only it claims a total.
-              Saying "counts both" on a one-arm row would be a straight lie.
+              The doubling claim keys on `implements`, NOT on `is_unilateral`.
+              It used to key on the flag, which was the retired derivation — and
+              since migration 000056 a dumbbell walking lunge is per_side AND
+              unilateral AND counts both, so the old test rendered "the working
+              hand" beside a total that visibly doubled.
 
               Implement-neutral on purpose: 57 of the 142 per-side exercises
               are kettlebell and one is farmer-handles, so naming the dumbbell
@@ -775,9 +778,9 @@ function ExerciseBlock({
               thing to say. "What one hand holds" is true of all three. */}
           {exercise?.load_mode === "per_side" && (
             <p className="text-xs text-text-dim">
-              {exercise.is_unilateral
-                ? "Weight is per hand — enter what the working hand holds."
-                : "Weight is per hand — enter what one hand holds, not the pair. Volume counts both."}
+              {exercise.implements === 2
+                ? "Weight is per hand — enter what one hand holds, not the pair. Volume counts both."
+                : "Weight is per hand — enter the one implement you lift."}
             </p>
           )}
         </div>
