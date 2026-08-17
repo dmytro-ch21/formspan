@@ -14394,7 +14394,7 @@
     "load_type": "weight_reps",
     "is_unilateral": true,
     "load_mode": "per_side",
-    "implements": 1,
+    "implements": 2,
     "instructions": "",
     "media": []
   },

@@ -172,3 +172,134 @@ func TestACreateWithoutImplementsDefaultsToOne(t *testing.T) {
 		t.Fatalf("stored implements=%d, want 1", repo.lastWritten.Implements)
 	}
 }
+
+// The catalog's naming convention, turned into a check.
+//
+// A bare movement name means TWO implements; a `one-arm-`/`single-arm-` prefix
+// states one explicitly. That is not an opinion — it is what five of the six
+// such pairs in the catalog already do (`kettlebell-row` x2 beside
+// `one-arm-kettlebell-row` x1, and four more).
+//
+// So the sixth was a contradiction rather than a judgment call:
+// `single-leg-dumbbell-romanian-deadlift` claimed ONE implement, identical to
+// its own `one-arm-single-leg-...` twin — whose name is pointless unless the
+// bare one is two-armed. Two dumbbells, one leg: the exact shape migration
+// 000057 made expressible, hiding outside the lunge family that was swept.
+//
+// This is a STRUCTURAL rule rather than a word list, which is why it found a
+// row the word list could not: it compares the catalog against itself instead
+// of against somebody's vocabulary.
+func TestABareMovementHoldsMoreThanItsOneArmedTwin(t *testing.T) {
+	all, err := SeedData()
+	if err != nil {
+		t.Fatalf("seed data: %v", err)
+	}
+	by := make(map[string]Exercise, len(all))
+	for _, e := range all {
+		by[e.ID] = e
+	}
+
+	var pairs int
+	for _, e := range all {
+		if e.LoadMode != LoadModePerSide {
+			continue
+		}
+		for _, prefix := range []string{"one-arm-", "single-arm-"} {
+			twin, ok := by[prefix+e.ID]
+			if !ok {
+				continue
+			}
+			pairs++
+			// RAW, not normalised. `NormalizeImplements` turns a 0 into a 1,
+			// and `SeedData` does not validate the column — so normalising here
+			// would make a twin written as `implements: 0` pass this test
+			// silently, leaving one invariant test as the only thing standing
+			// between the file and a meaningless value.
+			if twin.Implements != 1 {
+				t.Errorf("%s names one arm but holds %d implements",
+					twin.ID, twin.Implements)
+			}
+			if e.Implements != 2 {
+				t.Errorf("%s holds %d implements, the same as its explicit twin %s — "+
+					"the twin's name says nothing unless the bare movement is two-armed, "+
+					"so one of the pair is wrong",
+					e.ID, e.Implements, twin.ID)
+			}
+		}
+	}
+	if pairs == 0 {
+		t.Fatal("no bare/one-armed pairs found — the convention this checks has " +
+			"disappeared from the catalog, so this test now proves nothing")
+	}
+}
+
+// TestNamedCatalogRowsCarryTheirImplementCount pins specific ids to specific
+// counts, and exists because every OTHER guard in these two files derives its
+// expectation from the row's own name or load_mode.
+//
+// That shared weakness is not theoretical. Review measured three mutations that
+// the name-derived guards all missed:
+//
+//   - Flipping `single-leg-dumbbell-romanian-deadlift` to `load_mode: "total"`
+//     AND `implements: 1` together. The per_side filter then drops the pair from
+//     the twin test, `total`+1 satisfies the invariant test, and no word list
+//     matches — so the coordinated flip silently undoes this file's entire
+//     reason for existing.
+//   - Deleting `one-arm-single-leg-dumbbell-romanian-deadlift` outright. One
+//     vanished pair is invisible to a `pairs == 0` floor.
+//   - Reverting the name guard's factor back to the derivation migration 000057
+//     retired. No catalog row distinguishes the two sources today, so that line
+//     — the fix this file was written around — was itself revertible with
+//     nothing going red.
+//
+// A name can be edited to match a wrong number. An id cannot: changing one here
+// means changing this test, deliberately, which is the whole point.
+func TestNamedCatalogRowsCarryTheirImplementCount(t *testing.T) {
+	// Each id is here because a specific mutation reached it, not for coverage.
+	want := map[string]int{
+		// The row this sweep corrected, and its twin. The pair IS the
+		// convention: the twin's "one-arm-" says nothing unless the bare
+		// movement is two-armed.
+		"single-leg-dumbbell-romanian-deadlift":         2,
+		"one-arm-single-leg-dumbbell-romanian-deadlift": 1,
+		// The mutation that left the whole suite green before this sweep:
+		// doubling a row whose name says one arm.
+		"one-arm-dumbbell-row": 1,
+		// The mirror: halving a row whose name says two.
+		"double-kettlebell-front-squat": 2,
+	}
+
+	all, err := SeedData()
+	if err != nil {
+		t.Fatalf("seed data: %v", err)
+	}
+	byID := make(map[string]Exercise, len(all))
+	for _, e := range all {
+		byID[e.ID] = e
+	}
+
+	for id, implements := range want {
+		e, ok := byID[id]
+		if !ok {
+			// Deleting a row is a mutation too — and the one a floor check
+			// cannot see.
+			t.Errorf("%s is missing from the catalog; it is named here because a "+
+				"guard depends on it existing", id)
+			continue
+		}
+		// RAW, for the reason the twin test reads raw: SeedData does not
+		// validate the column, so normalising would let a 0 pass as a 1.
+		if e.Implements != implements {
+			t.Errorf("%s holds %d implements, want %d", id, e.Implements, implements)
+		}
+		// The coordinated flip: the count above is only meaningful while the
+		// row is still per_side, since `total` exempts it from every other
+		// guard in this file.
+		if NormalizeLoadMode(e.LoadMode) != LoadModePerSide {
+			t.Errorf("%s is %q, want per_side — flipping the load_mode exempts "+
+				"this row from every name-derived guard, so the count above "+
+				"stops being checked by anything else",
+				id, NormalizeLoadMode(e.LoadMode))
+		}
+	}
+}

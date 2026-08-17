@@ -22808,6 +22808,105 @@ growing a second opinion about what a mean is.
   the same three conditions on its own, and it is closer to analysis than
   bodyweight is — "did my squat go up" is a question you ask at a desk, planning
   next block.
+## 2026-08-17 — The sweep found one row, and a guard that had stopped guarding
+
+`F3` and `W6` were the same remaining question after W5 separated `implements`
+from `is_unilateral`: is every OTHER row's implement count right, now that it is
+a stored fact rather than a derivation?
+
+### The catalog is internally consistent — and that is checkable
+
+Grouping every per-side row by movement and looking for disagreement turned up
+seven candidate groups, and all seven were false positives of the grouping:
+`double-kettlebell-row` beside `one-arm-kettlebell-row` disagree because their
+NAMES disagree, which is the catalog working correctly.
+
+That is itself the finding. **The convention is: a bare movement name means two
+implements; a `one-arm-`/`single-arm-` prefix states one explicitly.** Five of
+the six such pairs already obey it.
+
+The sixth did not. `single-leg-dumbbell-romanian-deadlift` claimed ONE
+implement — identical to its own `one-arm-single-leg-…` twin, whose name is
+pointless unless the bare one is two-armed. Two dumbbells, one leg: the exact
+shape 000057 made expressible, sitting outside the family that migration swept.
+Corrected, and the convention is now a structural test rather than an
+observation.
+
+### Why nobody found it: the same conflation, one level up
+
+`TestNoMovementDoublesAWeightItDoesNotHold` lists words meaning "one implement",
+and `single-` was one of them. It matches `single-leg`. So the guard was
+actively asserting that a two-dumbbell movement must count single — **the same
+limb/implement conflation migration 000057 removed from the tonnage rule,
+surviving in the test written to protect against it.** It now lists
+`single-arm` explicitly, so the word only counts when it is about the arms.
+
+### And the guard had stopped checking anything real
+
+Worse, and only found by mutating it: the guard still computed
+
+```go
+factor := 1
+if e.LoadMode == LoadModePerSide && !e.IsUnilateral { factor = 2 }
+```
+
+— the rule W5 retired. Production reads `implements`; this read a derivation
+nothing computes any more. **Giving `one-arm-dumbbell-row` `implements = 2` — the
+precise bug the guard exists to catch — left the entire suite green.**
+
+A test that survives its own subject being replaced has not weakened, it has
+become a different test, and nothing announces the change. This is the second
+time in two days that a guard here passed for the wrong reason after the thing
+underneath it moved; the first was the parity fixture that agreed trivially at
+factor 1.
+
+### What review added
+
+Two mutations I had not run, both now armed: the twin test's `pairs == 0` guard
+fires if the convention ever disappears from the catalog, and a twin written as
+`implements: 0` was passing every guard silently — `SeedData` does not validate
+the column, so the twin test reads the RAW value now rather than the normalised
+one, and no longer leans on a single invariant test to catch a meaningless
+number.
+
+A second pass, after those fixes and two rebases, found something better: the
+guards were all **name-derived**, and shared one weakness because of it. Three
+mutations survived. Flipping the corrected row to `total` AND `1` together
+exempts it from every other check in the file. Deleting its twin is invisible to
+a `pairs == 0` floor. And — the one worth the whole pass — **reverting the name
+guard's factor to the retired derivation was itself green**, because no catalog
+row distinguishes the two sources today. That is this entry's own fix being
+silently revertible: the regression class described above, one level up.
+
+`TestNamedCatalogRowsCarryTheirImplementCount` pins four ids to four numbers and
+to `per_side`, the load_mode being what exempts a row from every other guard. A
+name can be edited to match a wrong number; an id cannot. All three mutations
+are red.
+
+It also found the last survivor of the retired rule: a comment in
+`session/postgres.go` still describing the factor as derived from `load_mode`
+and `is_unilateral`, sitting directly above SQL that reads `implements`. Its
+sibling was updated by #257 and this one was missed — the exact class this entry
+is about, one file over.
+
+And it named something this change CREATED: correcting the dumbbell single-leg
+RDL to two while leaving the kettlebell one at one is a dumbbell/kettlebell
+disagreement of precisely the shape `F3` was opened for. That is now the leading
+argument on the `W7` line rather than a footnote, because whoever picks it up
+should see it.
+
+### Gaps
+
+- **Four rows are judgment calls, deliberately left** (`W7`). A bottoms-up
+  kettlebell press is usually one bell, but the catalog's bare-name convention
+  says two; pistol squats take one counterbalance or two; and
+  `single-leg-kettlebell-romanian-deadlift` is x1 where its dumbbell twin is now
+  x2. Names cannot settle any of them, and each is somebody's tonnage doubled or
+  halved. Guessing here is what produced the mess W5 untangled.
+- **No migration.** `implements` is in the seeder's change-detection tuple, so
+  the deploy's `seed` step converges every `source='seed'` row — which this is.
+  An admin-authored row with the same defect would NOT converge, and nothing
+  sweeps those.
 
 ## Open items / known gaps as of this entry
 
