@@ -188,18 +188,27 @@ func (r *PostgresRepository) List(ctx context.Context, userID string, f Filter) 
 	return &SessionPage{Sessions: sessions, Total: total, Limit: limit, Offset: offset}, nil
 }
 
-// workingSet is Summarise's rule, expressed once for SQL.
+// SQLWorkingSet is Summarise's rule, expressed once for SQL.
 //
 // Duplicating a domain rule in SQL is normally exactly the drift this
 // codebase has been bitten by. It's done here because the alternative is
 // loading every set row of a training year to produce six numbers, and it's
 // made safe the only way that actually works: TestHistoryAgreesWithSummarise
 // runs both over the same data and fails if they ever disagree.
-const workingSet = `ss.completed AND ss.set_type <> 'warmup'`
-
-// countsAsSet is the narrower rule: what the athlete would call a set.
 //
-// `workingSet` above answers "does this contribute volume" and is used for reps
+// EXPORTED, and the alias requirement below is the price of that: any query
+// using these must alias `session_sets` as `ss` — and `SQLTonnage` additionally
+// needs `exercises` LEFT JOINed as `e`. A SQL fragment cannot enforce its own
+// bindings, so a consumer that aliases differently gets a compile-time-clean
+// query that fails at the database. That is still better than the alternative
+// this replaced, where `feed` restated all three from memory and one of them
+// silently drifted (#238: its count kept including drops after this one
+// stopped).
+const SQLWorkingSet = `ss.completed AND ss.set_type <> 'warmup'`
+
+// SQLCountsAsSet is the narrower rule: what the athlete would call a set.
+//
+// `SQLWorkingSet` above answers "does this contribute volume" and is used for reps
 // and tonnage. This answers "is this one of the sets I did", and a DROP is not:
 // 225x3 stripped to 185x8 is one approach to the bar and one rest period. The
 // session screen already numbers the rows that way, and until this existed the
@@ -212,12 +221,12 @@ const workingSet = `ss.completed AND ss.set_type <> 'warmup'`
 // **Both predicates must stay pure AND-conjunctions.** Every embedding is either
 // `FILTER (WHERE p)` or `WHERE x AND p`, and none of them parenthesise — so a
 // single OR added inside either constant would silently rebind against its
-// neighbours. That invariant was already load-bearing for `workingSet` at five
+// neighbours. That invariant was already load-bearing for `SQLWorkingSet` at five
 // call sites; this adds a sixth dependent rather than a new hazard.
-const countsAsSet = workingSet + ` AND ss.set_type <> 'drop'`
+const SQLCountsAsSet = SQLWorkingSet + ` AND ss.set_type <> 'drop'`
 
-// tonnageOf is `Set.TotalWeightKg` expressed once for SQL, for the same reason
-// and under the same guard as `workingSet` above.
+// SQLTonnage is `Set.TotalWeightKg` expressed once for SQL, for the same reason
+// and under the same guard as `SQLWorkingSet` above.
 //
 // The number in `weight_kg` is what is stamped on the implement. For a pair of
 // dumbbells that is one of the two, so the total doubles — and every query that
@@ -227,7 +236,7 @@ const countsAsSet = workingSet + ` AND ss.set_type <> 'drop'`
 // Requires `exercises e` to be LEFT JOINed as `e`. Left, so a set whose
 // exercise was retired keeps counting at face value instead of dropping to
 // NULL and silently leaving the sum.
-const tonnageOf = `ss.reps * ss.weight_kg *
+const SQLTonnage = `ss.reps * ss.weight_kg *
 	CASE WHEN e.load_mode = 'per_side' AND NOT e.is_unilateral THEN 2 ELSE 1 END`
 
 // History rolls a date range up per calendar day, plus totals for the period
@@ -297,9 +306,9 @@ func (r *PostgresRepository) historyDays(ctx context.Context, userID string, f H
 		per_session AS (
 			SELECT sc.id, sc.day, sc.sport,
 			       COALESCE(EXTRACT(EPOCH FROM (sc.ended_at - sc.started_at)), 0)::bigint AS duration,
-			       COUNT(*) FILTER (WHERE `+countsAsSet+`) AS working_sets,
-			       COALESCE(SUM(ss.reps) FILTER (WHERE `+workingSet+`), 0) AS total_reps,
-			       COALESCE(SUM(`+tonnageOf+`) FILTER (WHERE `+workingSet+`), 0) AS tonnage
+			       COUNT(*) FILTER (WHERE `+SQLCountsAsSet+`) AS working_sets,
+			       COALESCE(SUM(ss.reps) FILTER (WHERE `+SQLWorkingSet+`), 0) AS total_reps,
+			       COALESCE(SUM(`+SQLTonnage+`) FILTER (WHERE `+SQLWorkingSet+`), 0) AS tonnage
 			FROM scoped sc
 			LEFT JOIN session_sets ss ON ss.session_id = sc.id
 			LEFT JOIN exercises e ON e.id = ss.exercise_id
@@ -365,9 +374,9 @@ func (r *PostgresRepository) historyTotals(
 			-- calendar and the headline a second or two apart.
 			(SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (ended_at - started_at))::bigint), 0) FROM scoped)::int,
 			(SELECT COUNT(DISTINCT (started_at AT TIME ZONE $4)::date) FROM scoped)::int,
-			COUNT(*) FILTER (WHERE `+countsAsSet+`)::int,
-			COALESCE(SUM(ss.reps) FILTER (WHERE `+workingSet+`), 0)::int,
-			COALESCE(SUM(`+tonnageOf+`) FILTER (WHERE `+workingSet+`), 0)::float8,
+			COUNT(*) FILTER (WHERE `+SQLCountsAsSet+`)::int,
+			COALESCE(SUM(ss.reps) FILTER (WHERE `+SQLWorkingSet+`), 0)::int,
+			COALESCE(SUM(`+SQLTonnage+`) FILTER (WHERE `+SQLWorkingSet+`), 0)::float8,
 			COUNT(DISTINCT ss.exercise_id)::int
 		FROM session_sets ss
 		LEFT JOIN exercises e ON e.id = ss.exercise_id
@@ -505,7 +514,7 @@ func (r *PostgresRepository) RecentEfforts(
 			  -- naming a (session, owner) pair that isn't real impossible.
 			  AND ss.user_id = $1
 			  AND ss.exercise_id = ANY($2)
-			  AND `+workingSet+`
+			  AND `+SQLWorkingSet+`
 			  -- A set with nothing recorded isn't a performance. Without this,
 			  -- an exercise added to a session and never actually done would
 			  -- rank as the most recent and hide real history behind it.
@@ -565,7 +574,7 @@ func (r *PostgresRepository) RecentEfforts(
 			continue
 		}
 
-		// Every set row here already passed the workingSet filter, and
+		// Every set row here already passed the SQLWorkingSet filter, and
 		// Progress re-checks Completed on the domain side. Setting it keeps
 		// the two consistent rather than relying on Go's zero value.
 		s.Completed = true
@@ -962,7 +971,7 @@ func (r *PostgresRepository) BestOneRMs(
 			FROM session_sets ss
 			WHERE ss.user_id = $1
 			  AND ss.exercise_id = ANY($2)
-			  AND `+workingSet+`
+			  AND `+SQLWorkingSet+`
 			  AND ss.reps IS NOT NULL AND ss.weight_kg IS NOT NULL
 			  -- Effective reps, mirroring EstimateOneRM exactly: RIR is the
 			  -- observed quantity and wins where both are present, RPE
@@ -1121,7 +1130,7 @@ func (r *PostgresRepository) Records(
 			       ss.distance_m, ss.rir, ss.rpe, ss.session_id, s.started_at
 			FROM session_sets ss
 			JOIN sessions s ON s.id = ss.session_id
-			WHERE ss.user_id = $1 AND ss.exercise_id = ANY($2) AND `+workingSet+`
+			WHERE ss.user_id = $1 AND ss.exercise_id = ANY($2) AND `+SQLWorkingSet+`
 		),
 		-- Ties break on when it happened, then on id for a total order.
 		-- Breaking on id alone was unstable: ReplaceSets deletes and
@@ -1280,7 +1289,7 @@ func (r *PostgresRepository) bestOneRMSets(
 		       ss.session_id, s.started_at
 		FROM session_sets ss
 		JOIN sessions s ON s.id = ss.session_id
-		WHERE ss.user_id = $1 AND ss.exercise_id = ANY($2) AND `+workingSet+`
+		WHERE ss.user_id = $1 AND ss.exercise_id = ANY($2) AND `+SQLWorkingSet+`
 		  AND ss.reps IS NOT NULL AND ss.weight_kg IS NOT NULL
 		  -- SOLO reps, mirroring BestOneRMs' pool. Filtering on the full count
 		  -- here while the pool filters on solo means an assisted set with, say,
@@ -1392,12 +1401,12 @@ func (r *PostgresRepository) MostTrainedExercises(ctx context.Context, userID st
 	rows, err := r.pool.Query(ctx, `
 		SELECT ss.exercise_id
 		FROM session_sets ss
-		-- workingSet, not countsAsSet, and that is a decision rather than an
+		-- SQLWorkingSet, not SQLCountsAsSet, and that is a decision rather than an
 		-- oversight: this ranks how much an exercise has been TRAINED, and a
 		-- drop is training. The number is never displayed as a set count — it
 		-- only orders the list — so the narrower rule would buy nothing and
 		-- would make a drop-heavy lift rank below one it is trained harder than.
-		WHERE ss.user_id = $1 AND `+workingSet+`
+		WHERE ss.user_id = $1 AND `+SQLWorkingSet+`
 		GROUP BY ss.exercise_id
 		ORDER BY COUNT(*) DESC, ss.exercise_id
 		LIMIT $2`, userID, limit)

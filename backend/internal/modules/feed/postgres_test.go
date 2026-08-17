@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -955,5 +956,58 @@ func TestAFriendsVolumeCountsBothDumbbells(t *testing.T) {
 	}
 	if want := session.Summarise(full.Sets).TonnageKg; page.Items[0].TonnageKg != want {
 		t.Fatalf("feed says %v, Summarise says %v", page.Items[0].TonnageKg, want)
+	}
+}
+
+// TestTheRuleIsSharedNotCopied is the guard that makes N8's refactor mean
+// something a year from now.
+//
+// The pinning test above compares this module's NUMBERS against
+// `session.Summarise` over a fixture. That is necessary and it is not
+// sufficient: it passed for months while this file's count included drops and
+// the session module's did not, because the fixture had no drop in it. A
+// fixture can only catch a divergence it happens to contain an example of.
+//
+// What it actually asserts, stated precisely because the obvious readings are
+// wrong and I checked all four:
+//
+//	feed references the constants          passes — by construction
+//	feed inlines an IDENTICAL copy          passes — indistinguishable by string
+//	the session rule changes under feed     passes — both sides move together
+//	feed carries a DIFFERENT rule           FAILS  <- the one that matters
+//
+// That last row is #238's bug exactly: this file kept `<> 'warmup'` alone after
+// the session module added `AND <> 'drop'`, so a friend's card counted drops
+// and the owner's screen did not. Restore that state and this test fires
+// immediately, where the numeric pinning test above stayed green for months
+// because its fixture had no drop in it.
+//
+// So this is a guard against RESTATEMENT, not against copying. A verbatim
+// re-inline slips through and cannot be caught from a string — that needs the
+// AST, which is a lot of machinery to catch a rewrite that is harmless right
+// up until it drifts, at which point this fires. Said plainly so nobody reads
+// more safety into it than it has.
+func TestTheRuleIsSharedNotCopied(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		rule string
+	}{
+		{"the set count", session.SQLCountsAsSet},
+		{"the tonnage filter", session.SQLWorkingSet},
+		{"the per-side doubling", session.SQLTonnage},
+	} {
+		if !strings.Contains(workingVolume, c.rule) {
+			t.Errorf("%s is no longer the session module's own SQL — it has been "+
+				"restated. Expected `workingVolume` to contain:\n%s", c.name, c.rule)
+		}
+	}
+
+	// And the asymmetry survives: the count must NOT use the wider rule.
+	// Written as "the count clause differs from the tonnage clause" because
+	// asserting the narrow string alone would pass if both became narrow —
+	// which silently deletes every drop's tonnage.
+	if session.SQLCountsAsSet == session.SQLWorkingSet {
+		t.Fatal("the count and the tonnage rules have become identical; a drop " +
+			"is not a set, but its weight was still moved")
 	}
 }

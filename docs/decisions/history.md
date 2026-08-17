@@ -21108,6 +21108,75 @@ the same locally as in CI, instead of depending on how fresh your database is.
   full-library write in `technique` calls the helper — the same standing weakness
   `exercise` has, and the reason both helpers' comments say so at the call site.
 
+## 2026-08-16 — One rule, shared where sharing is possible, and named where it is not
+
+Closes **N8**. The working-set rule had four restatements; `feed` alone carried
+**four inline copies** of three session-module constants — the count predicate,
+the tonnage predicate, and the per-side doubling — plus a fifth in its
+detail-exercises query.
+
+`SQLWorkingSet`, `SQLCountsAsSet` and `SQLTonnage` are exported now, and `feed`
+interpolates them. That is the copy N8 named as the remaining risk, and it is
+the one that had already gone wrong: after #238 taught the session module that a
+drop is not a set, this file kept counting drops, so a friend's card and the
+session's owner disagreed. Its pinning test compared numbers against
+`session.Summarise` and stayed green for months, because the fixture had no drop
+in it.
+
+### What could not be shared, and why that is the honest end of N8
+
+- **The Go domain rule and the SQL string** cannot share code — one is a Go
+  expression in `Summarise`, the other is text sent to Postgres. That
+  duplication is deliberate and already load-bearing:
+  `TestHistoryAgreesWithSummarise` runs both over the same rows. Nothing here
+  improves on that.
+- **The TypeScript copies** live in `apps/web` and `apps/mobile`, two packages
+  with nothing shared between them. Uniting them needs a shared workspace
+  package, which is a real change with its own risks, not a tidy-up.
+
+So N8 closes as "the one copy that could be shared, was" rather than "one rule
+everywhere". Claiming otherwise would have been the same overstatement this
+month has been full of.
+
+### The exported constants carry a contract a compiler cannot check
+
+They reference `ss.` — and `SQLTonnage` also needs `exercises` LEFT JOINed as
+`e`. A consumer that aliases differently gets a query that compiles cleanly in
+Go and fails at the database. That is stated on the constants. It is still
+better than four restatements, because a wrong alias fails loudly on the first
+query while a drifted copy fails silently for months.
+
+### The new guard, and exactly what it does not do
+
+`TestTheRuleIsSharedNotCopied` asserts the feed's SQL still contains the session
+module's rule text. I mutation-tested four scenarios rather than assuming:
+
+| Change | Result |
+|---|---|
+| feed references the constants | passes — by construction |
+| feed inlines an **identical** copy | passes — indistinguishable by string |
+| the session rule changes under feed | passes — both sides move together |
+| **feed carries a different rule** | **FAILS** — the one that matters |
+
+That last row is #238's bug restored, and it fires immediately. The first draft
+of this test's comment claimed it caught a verbatim re-inline; it does not, and
+measuring said so. Catching that needs the AST — a lot of machinery for a
+rewrite that is harmless until it drifts, at which point this fires anyway. The
+comment now says which of the four it catches.
+
+### Open questions this leaves
+
+- **`sessioncard` and `MostTrainedExercises` still restate `workingSet`
+  inline**, both deliberately (they want the wider rule) and both now
+  documented as such. They could reference `session.SQLWorkingSet` for the same
+  drift protection; they were left alone because touching a query to change
+  nothing about it is how the sessioncard comment came to be wrong in the first
+  place.
+- **The TS side is untouched**, and is where the next drift will happen: two
+  apps, two copies, no shared package.
+- **Nothing checks the alias contract.** A consumer aliasing `session_sets` as
+  something other than `ss` fails at runtime on the first query, not at build.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.

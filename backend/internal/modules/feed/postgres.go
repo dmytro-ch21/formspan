@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/dmytro-ch21/vola/backend/internal/modules/session"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -52,26 +53,39 @@ const visibleFrom = `
 // session to sum two fields in Go — an N+1 over other people's training on the
 // one endpoint most likely to be polled.
 //
-// The rule it has to match: uncompleted sets contribute nothing, warm-ups
-// contribute nothing, and tonnage needs both reps and weight — and the weight
-// is DOUBLED for a pair of dumbbells, because `weight_kg` holds one of them.
-// Miss that last part and a friend's row reports half the work of the session
-// its owner is looking at. A test asserts all of it against `session.Summarise`
-// over the same fixture rather than trusting the comment.
-const workingVolume = `
+// The rule is IMPORTED now rather than restated, which is why this is a `var`:
+// `session.SQLCountsAsSet`, `session.SQLWorkingSet` and `session.SQLTonnage`
+// are the same strings the session module's own queries run, so a friend's row
+// cannot drift from what the session's owner sees.
+//
+// It had drifted. This file kept counting drops after #238 taught the session
+// module not to, and the test that pins it against `session.Summarise` could
+// not see the difference because its fixture had no drop in it. Restating a
+// rule and testing the restatement over data that cannot distinguish them is
+// the shape of that whole class of bug.
+//
+// The count and the tonnage take DIFFERENT predicates, and that asymmetry is
+// the point: a drop is part of the set above it so it adds no set, but its
+// weight was moved so it still adds tonnage. Collapsing them back into one
+// predicate — the obvious tidy-up — deletes a drop's work everywhere.
+//
+// `SQLTonnage` requires `exercises` LEFT JOINed as `e`, which the subquery
+// below does. Left, not inner: a set whose exercise was retired keeps counting
+// at face value rather than falling out of the sum.
+//
+// The test against `session.Summarise` stays. Sharing the string removes the
+// drift; it does not remove the need to check that the SQL and the Go agree
+// about what the string means.
+var workingVolume = `
 	COALESCE((
 		SELECT count(*) FROM session_sets ss
-		-- A drop is excluded from the COUNT and included in the tonnage below.
-		-- One approach to the bar is one set; the weight it moved is still work.
-		WHERE ss.session_id = s.id AND ss.completed
-		  AND ss.set_type <> 'warmup' AND ss.set_type <> 'drop'
+		WHERE ss.session_id = s.id AND ` + session.SQLCountsAsSet + `
 	), 0) AS working_sets,
 	COALESCE((
-		SELECT sum(ss.reps * ss.weight_kg *
-		           CASE WHEN e.load_mode = 'per_side' AND NOT e.is_unilateral THEN 2 ELSE 1 END)
+		SELECT sum(` + session.SQLTonnage + `)
 		FROM session_sets ss
 		LEFT JOIN exercises e ON e.id = ss.exercise_id
-		WHERE ss.session_id = s.id AND ss.completed AND ss.set_type <> 'warmup'
+		WHERE ss.session_id = s.id AND ` + session.SQLWorkingSet + `
 		  AND ss.reps IS NOT NULL AND ss.weight_kg IS NOT NULL
 	), 0) AS tonnage_kg`
 
@@ -237,7 +251,7 @@ func (r *PostgresRepository) exerciseDetail(
 		       (ARRAY_AGG(ss.reps ORDER BY ss.weight_kg DESC NULLS LAST, ss.reps DESC))[1]
 		FROM session_sets ss
 		JOIN exercises e ON e.id = ss.exercise_id
-		WHERE ss.session_id = ANY($1) AND ss.completed AND ss.set_type <> 'warmup'
+		WHERE ss.session_id = ANY($1) AND `+session.SQLWorkingSet+`
 		GROUP BY ss.session_id, e.id, e.name
 		ORDER BY ss.session_id, MIN(ss.position)`, ids)
 	if err != nil {
