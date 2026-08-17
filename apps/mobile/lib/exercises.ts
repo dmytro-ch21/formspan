@@ -39,8 +39,8 @@ export type Exercise = {
    * one dumbbell, one kettlebell, one farmer handle — because that is what is
    * stamped on it and what an athlete reads off it.
    *
-   * NOT the same question as whether the load doubles. All 142 `per_side`
-   * exercises are entered per hand, but 34 of them are also `is_unilateral`
+   * NOT the same question as whether the load doubles. All 134 `per_side`
+   * exercises are entered per hand, but 35 of them are also `is_unilateral`
    * (a one-arm row), where only one implement moves and the factor stays 1.
    * So this drives the INPUT hint; the set's own `load_factor` drives the
    * total shown back. Keying both off one flag says the wrong thing on a

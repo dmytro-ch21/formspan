@@ -1,6 +1,9 @@
 package exercise
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestSeedCatalogCarriesLoadMode is the regression for a bug that a migration
 // alone could never have fixed.
@@ -76,5 +79,98 @@ func TestNormalizeLoadModeFailsToTotal(t *testing.T) {
 	}
 	if got := NormalizeLoadMode(LoadModePerSide); got != LoadModePerSide {
 		t.Errorf("the one valid value did not survive: %q", got)
+	}
+}
+
+// TestNoMovementDoublesAWeightItDoesNotHold is the guard F3 exists for.
+//
+// The 142 `per_side` rows were classified by EQUIPMENT plus a hand-written
+// exclusion list, and nobody read the result. Ten were wrong: seven
+// single-implement movements marked `per_side` while their identical peers
+// (goblet squat, halo, pullover) were correctly `total`; two alternating lifts
+// doubling a dumbbell they move one at a time; and one "double dumbbell" lift
+// counting single because `is_unilateral` had been set truthfully about the
+// STANCE.
+//
+// That last one is the trap worth naming. `is_unilateral` answers "is one limb
+// working" and `load_mode` answers "is the recorded number one implement", and
+// only their product decides tonnage — so a row can be honest about both fields
+// and still report half the work.
+//
+// This asserts what the names already say, in both directions. A heuristic, and
+// deliberately so: it cannot know what a movement is, but it can insist that a
+// row calling itself "single" does not double and one calling itself "double"
+// does not halve.
+//
+// It catches NINE of the ten. `alternating` had to be added after review
+// mutation-tested the claim that it caught all of them and found it did not —
+// and the four corrections checked by hand beforehand happened to be four of
+// the covered ones. A sample that agrees with you is not a check.
+func TestNoMovementDoublesAWeightItDoesNotHold(t *testing.T) {
+	all, err := SeedData()
+	if err != nil {
+		t.Fatalf("seed data: %v", err)
+	}
+
+	// Words meaning "the athlete holds ONE of these". `offset` and `suitcase`
+	// are a load carried on one side; `svend` is a plate or bell squeezed
+	// between the palms; `goblet` and `halo` are one bell in two hands.
+	single := []string{
+		"single-", "one-arm", "suitcase", "offset", "goblet",
+		"svend", "halo", "russian-twist", "hip-thrust", "glute-bridge",
+		// `alternating` was MISSING from the first version of this list, and
+		// review found it by mutation: reverting the two alternating
+		// corrections left this test green. Both of them are among the ten this
+		// guard was written for, so it was covering eight of its own examples
+		// while its comment claimed all ten. The four corrections I
+		// mutation-checked happened to be four of the covered eight — a sample
+		// that agreed with me.
+		"alternating",
+	}
+	// Words meaning TWO, so the recorded weight is one of them.
+	//
+	// Scoped to rows that actually carry a hand implement, because "double" is
+	// not always a count: `jump-rope-double-under` is the rope passing twice per
+	// jump and holds nothing. The first version of this test failed on it, which
+	// is the right way round — a guard that cannot tell a skipping term from a
+	// pair of dumbbells is one the first person it annoys will delete.
+	//
+	// `renegade` is deliberately NOT here. A renegade row holds two implements
+	// but rows one per rep, which is the alternating case — and the confirmed
+	// ruling for alternating is x1. Asserting x2 for it would have locked that
+	// contradiction into a test. Left unclassified rather than guessed at; see
+	// the open item in the history entry.
+	pair := []string{"double-", "dual-", "farmer"}
+	holdsAnImplement := func(e Exercise) bool {
+		for _, q := range e.Equipment {
+			if q == "dumbbells" || q == "kettlebell" || q == "farmer-handles" {
+				return true
+			}
+		}
+		return false
+	}
+
+	for _, e := range all {
+		factor := 1
+		if e.LoadMode == LoadModePerSide && !e.IsUnilateral {
+			factor = 2
+		}
+		for _, w := range single {
+			if strings.Contains(e.ID, w) && factor != 1 {
+				t.Errorf("%s: the name says %q — one implement — but it counts x2, "+
+					"so every set reports double the weight actually moved", e.ID, w)
+			}
+		}
+		for _, w := range pair {
+			// `single-` wins where both appear, so those rows are skipped here
+			// rather than being contradicted by the block above.
+			if strings.Contains(e.ID, "single-") || !holdsAnImplement(e) {
+				continue
+			}
+			if strings.Contains(e.ID, w) && factor != 2 {
+				t.Errorf("%s: the name says %q — two implements — but it counts x1, "+
+					"so every set reports half the weight actually moved", e.ID, w)
+			}
+		}
 	}
 }

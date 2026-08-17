@@ -21955,6 +21955,112 @@ of opening the PR.
   successful invocations. `gh api -X PATCH repos/<owner>/<repo>/pulls/<n>` works.
   Found by hitting it on this very PR, which is a small argument for writing
   conventions by following them rather than by describing them.
+## 2026-08-17 — Eleven rows were wrong, and the guard that found them missed two
+
+Advances **F3**, which stays open. 142 exercises were `per_side`; 108 doubled. They had been
+classified by equipment plus a hand-written exclusion list, spot-checked, and
+never read end to end. Reading them found **ten wrong — and wrong in both
+directions**, which is why spot-checking missed them: a sample that happens to
+land on correct rows says nothing about a systematic split.
+
+### The field was answering two questions
+
+`is_unilateral` answers *"is one limb working"*. `load_mode` answers *"is the
+recorded number one implement"*. Only their product decides tonnage — so a row
+can be **honest about both fields and still report half the work**.
+
+`double-dumbbell-kickstand-deadlift` is the clean case. A kickstand deadlift is
+staggered-stance, one leg doing most of the work, so `is_unilateral: true` is a
+true statement about the movement. It also holds *two dumbbells*. The row was
+counting ×1 and under-reporting every set by half.
+
+### The other nine were an inconsistency inside the data, not a judgement call
+
+Seven single-implement movements — `svend-press`, `hip-thrust`,
+`russian-twist`, `offset-reverse-lunge-and-press` — were marked `per_side` and
+doubling. Their identical peers were already right: `kettlebell-goblet-squat`,
+`kettlebell-halo` and `kettlebell-pullover` are all `total`. One bell, weight
+recorded whole. So each correction points at a peer rather than at an opinion.
+They are now `total` too, which is the semantically accurate fix — the recorded
+number *is* the whole load, and forcing `is_unilateral` to get the factor right
+would have made the row lie about the movement.
+
+The two `alternating-dumbbell-*` rows keep `per_side` (the number really is one
+dumbbell) and gain `is_unilateral` — you hold two and move one per rep. That one
+was a genuine product judgement rather than a data error, and it was put to the
+user: the app counts total reps with no per-arm concept, so each rep moves one
+implement. Confirmed ×1.
+
+### The guard, and why it is a heuristic on purpose
+
+Correcting rows without one repeats the defect — the list was already "checked"
+once. `TestNoMovementDoublesAWeightItDoesNotHold` asserts what the names already
+say, both ways: nothing calling itself `single`, `goblet`, `svend`, `offset` or
+`suitcase` may double, and nothing calling itself `double` or `farmer` may
+halve.
+
+**Its first version caught eight of its own ten examples, and its comment
+claimed all ten.** Review disproved that by mutation — reverting the two
+`alternating-*` corrections left the test green, because no word in the list
+matched them. My own mutation check had reverted four corrections and all four
+happened to be among the covered eight. A sample that agrees with you is not a
+check, which is the same lesson this file has now recorded three times in two
+days.
+
+Every correction is now reverted individually rather than sampled: **11 of 11
+caught.** `dumbbell-glute-bridge` was the eleventh, and it was found the same
+way — as a missed twin of a row this branch had just fixed.
+
+`renegade` was deliberately dropped from the "two implements" list. A renegade
+row holds two and rows one per rep, which is the alternating case, and the
+confirmed ruling there is ×1 — so asserting ×2 would have locked a contradiction
+into a test.
+
+It cannot know what a movement *is*, and its first version proved that by
+failing on `jump-rope-double-under` — a "double under" is the rope passing twice
+per jump, holding nothing. The pair check is now scoped to rows that actually
+carry a hand implement. A guard that cannot tell a skipping term from a pair of
+dumbbells is one the first person it annoys will delete.
+
+### F3 is NOT closed, and the closure claim was the second overstatement
+
+The entry first said "somebody read the list" and ticked F3. Review found
+`dumbbell-glute-bridge` — the exact peer of a row fixed in the same commit,
+a hip thrust without the bench — still doubling, and a whole family that
+contradicts itself:
+
+| | |
+|---|---|
+| every **kettlebell** lunge, split squat, step-up | ×2 |
+| every **dumbbell** one except `dumbbell-lunge` | ×1 |
+| `kettlebell-split-squat` vs `kettlebell-bulgarian-split-squat` | ×2 vs ×1 |
+
+Same movement, opposite factor depending on which implement the row names — and
+inconsistent *within* kettlebell. At least one side of every pair is wrong,
+provable from the data alone with no exercise-science opinion required. It is
+the same stance-versus-implement conflation the kickstand fix diagnoses, at
+family scale.
+
+Which side is right is a product judgement — is a dumbbell lunge one dumbbell or
+two? — and it moves ~14 rows of somebody's tonnage, so it is filed as **W5**
+rather than guessed at. F3 stays open.
+
+### Open questions this leaves
+
+- **Every past session using these eleven now reports different tonnage** — nine
+  of them halved. That is the correct figure and it is also a number moving
+  under somebody with no explanation, the same trade W2 made. Nothing in the UI
+  says so.
+- **The remaining 132 were read but not individually justified.** Nothing
+  records *why* each is classified as it is, so the next audit starts from the
+  same place this one did. Per-row rationale in the seed file would fix that and
+  is a much larger change.
+- **`load_mode` is still equipment-derived at authoring time.** `createWithin`
+  never writes it (**T2**, now closed separately), and nothing prompts an author
+  to think about implement count when adding a dumbbell exercise.
+- **Existing databases need a re-seed** to pick this up: the seeder updates
+  `WHERE source = 'seed'`, so a deploy applies it, but a developer database that
+  is not re-seeded keeps the old factors.
 
 ## 2026-08-17 — The exercises were never missing, and trigrams alone would not have found them
 
