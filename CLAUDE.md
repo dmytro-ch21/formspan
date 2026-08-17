@@ -337,17 +337,24 @@ than a RESTRICT** — the constraint that blocks you is the one that tells you.
 Not covered: `cmd/seed` also writes 11 `positions`, deliberately left, since
 nothing borrows position ids the way packages borrowed catalog and library ids.
 
-**One related thing is NOT fixed**, and it is the worse failure mode:
-`curriculum`'s `TestEverySeededTechniqueExistsInTheLibrary` needs the *technique*
-library, and `curriculum` sorts before `technique`, which is what seeds it. So
-ordering never saved that one — it **skips on every CI run** while the package
-still prints `ok`. Being green and being run are different things, and only
-`-v` tells them apart. It has its own PR.
+**The related failure this used to sit beside is now fixed** (#216), and the
+shape is worth keeping because it is the worse one. `curriculum`'s
+`TestEverySeededTechniqueExistsInTheLibrary` needed the *technique* library, and
+`curriculum` sorts before `technique`, which is what seeds it — so ordering never
+saved it. It **skipped on every CI run** while the package printed `ok`, for
+months. Being green and being run are different things, and only `-v` tells them
+apart.
 
-What the library cleanup did change is that the skip is now *consistent*: before
-it, the 542 rows survived the run, so a second run on the same database made
-that test **pass** instead of skip — silently, on residue, which reads as
-coverage. Measured 569 pass / 1 skip on both runs now, where it used to flip.
+It no longer touches a database at all: it reads the embedded catalog through
+`technique.SeedData()`, so it cannot skip, and both sides `t.Fatal` rather than
+pass vacuously on an empty file. That is also the *stronger* check — a live
+`techniques` table additionally holds whatever the console authored
+(`source='admin'`), any of which would satisfy an id no fresh deploy has.
+
+**The whole backend suite now has zero skips**: 28 packages, 583 tests, 0 skips,
+0 failures on a migrated, never-seeded database. If you see a skip appear there,
+something has regressed to the pattern above — check with `-v`, because the
+package will still print `ok`.
 
 If a package does start failing on unknown exercise ids, the first question is
 whether the catalog is there at all:
