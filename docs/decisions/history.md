@@ -20757,6 +20757,12 @@ was `working.length`, drops included — which the comment this branch had just
 added two lines above explicitly said was handled. The reviewer's point was
 sharper than the bug: a reader now believed it was correct.
 
+**Two readers found that one independently, within hours**, which is the
+strongest thing to say about it. This branch's reviewer flagged it from the
+diff; #239 filed the same defect as `W4` from the other direction, having gone
+looking for surviving copies of the drop rule after #238 consolidated the
+mobile clients only. Two descriptions, one expression. `W4` is ticked here.
+
 Three silent failures on one expression is not bad luck, it is a location. It
 was a hand-rolled copy of a server rule sitting in a component file, where
 nothing in `lib/__tests__` could reach it. So it moved: `sessionVolume()` in
