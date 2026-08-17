@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dmytro-ch21/vola/backend/internal/platform/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -60,9 +59,24 @@ func (r *PostgresRepository) List(ctx context.Context, f Filter) ([]Exercise, er
 		args = append(args, f.Sport)
 		where = append(where, fmt.Sprintf("sport = $%d", len(args)))
 	}
+	// Ranked when there is a query, alphabetical when there is not — see
+	// `SearchClause` for why matching and ranking are separate concerns.
+	order := " ORDER BY sport, name"
 	if f.Query != "" {
-		args = append(args, database.LikeTerm(f.Query))
-		where = append(where, database.LikeClause("name", len(args)))
+		clause, qargs := SearchClause(f.Query, len(args)+1)
+		where = append(where, clause)
+		args = append(args, qargs...)
+		// Only worth ranking when something can match. A tokenless query binds
+		// no arguments and its clause is `false`.
+		if len(qargs) > 0 {
+			rank, rankArg := SearchRank(f.Query, len(args)+1)
+			args = append(args, rankArg)
+			// Sport first so a filtered list still groups, then closeness, then
+			// name as the tiebreak — without that last one, equally-similar
+			// rows order arbitrarily and a list reshuffles between identical
+			// requests.
+			order = " ORDER BY sport, " + rank + ", name"
+		}
 	}
 
 	// DRAFTS ARE NOT PUBLIC — here and Get, the only two places that know it.
@@ -75,7 +89,7 @@ func (r *PostgresRepository) List(ctx context.Context, f Filter) ([]Exercise, er
 
 	q := `SELECT ` + selectColumns + ` FROM exercises`
 	q += ` WHERE ` + strings.Join(where, " AND ")
-	q += ` ORDER BY sport, name`
+	q += order
 
 	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {

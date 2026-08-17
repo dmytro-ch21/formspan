@@ -4261,10 +4261,26 @@ paths:
           in: query
           required: false
           schema: { type: string }
-          description: Case-insensitive substring match on the name.
+          description: >
+            Finds an exercise by the words an athlete would use, not by
+            substring. Every typed word must appear somewhere in the name — in
+            any order, punctuation and simple plurals ignored — and a small set
+            of lifting synonyms lets one word reach another: "bench" finds a
+            press, "overhead" finds a shoulder press.
+
+
+            Results are ordered by how close the whole name is to the whole
+            query, so a row that happens to contain every typed word does not
+            outrank the movement actually meant.
+
+
+            A query of only punctuation (`%`, `_`, `\`) matches NOTHING. It is
+            not a wildcard and it is not "no filter".
       responses:
         "200":
-          description: Matching catalog entries, ordered by sport then name.
+          description: >
+            Matching catalog entries. Ordered by sport, then by closeness to the
+            query when one was given, then by name.
           content:
             application/json:
               schema:

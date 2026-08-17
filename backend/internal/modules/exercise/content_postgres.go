@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dmytro-ch21/vola/backend/internal/platform/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -399,12 +398,27 @@ func (r *PostgresRepository) Restore(ctx context.Context, id string, revision in
 const maxConsoleSearch = 100
 
 func (r *PostgresRepository) SearchAll(ctx context.Context, query string) ([]Exercise, error) {
+	// The same search the athletes get — see `SearchClause`. An operator
+	// looking for the row an athlete could not find has to be able to type what
+	// the athlete typed; two different searches over one catalog is how a
+	// support answer becomes "it works for me".
+	//
+	// The id is no longer matched separately. It is a slug DERIVED from the
+	// name, so it carries no word the name does not, and an OR against it made
+	// the clause unable to use any index while adding nothing.
+	where, args := SearchClause(query, 1)
+	if len(args) == 0 {
+		// An unmatchable query — all punctuation. The clause is already
+		// `false`, so running it would be correct but pointless.
+		return []Exercise{}, nil
+	}
+	rank, rankArg := SearchRank(query, len(args)+1)
+	args = append(args, rankArg, maxConsoleSearch)
 	rows, err := r.pool.Query(ctx, `
 		SELECT `+contentReturning+` FROM exercises
-		WHERE `+database.LikeClause("name", 1)+`
-		   OR `+database.LikeClause("id", 1)+`
-		ORDER BY name
-		LIMIT $2`, database.LikeTerm(query), maxConsoleSearch)
+		WHERE `+where+`
+		ORDER BY `+rank+`, name
+		LIMIT $`+fmt.Sprint(len(args))+``, args...)
 	if err != nil {
 		return nil, fmt.Errorf("exercise: console search: %w", err)
 	}
