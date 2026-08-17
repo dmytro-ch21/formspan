@@ -21407,6 +21407,114 @@ independently, which is a fair signal about how visible it was.
   same convention that keeps a finished TASKS line in place rather than deleting
   it. Only current-state documents were corrected.
 
+## 2026-08-16 — Grip lives on the set, and the column nobody reads is the one that wipes it
+
+"Incline dumbbell press, neutral grip" and "incline dumbbell press" are the same
+movement trained differently, and nothing recorded which. **N1**, done together
+with **T3**, which is the trap it was always going to spring.
+
+### Why the set and not the catalog
+
+The obvious design is a catalog row per grip, and it is wrong twice. It turns
+504 exercises into something near 2,000, each needing muscles, equipment,
+instructions and media differing from its sibling in one word — and having paid
+that, it still cannot express what athletes actually do, which is switch grip on
+the last set because the first three hurt.
+
+The quieter cost is history. Two rows split one exercise's past in two: the
+progression rule, the 1RM estimate and the personal records each see half the
+sets, so an athlete who alternates has two half-histories and no PRs. One row
+with a per-set grip keeps a single history and makes grip a filter over it
+rather than a fork in it.
+
+### NULL is unrecorded, and that is not `regular`
+
+No default, deliberately. Every set ever logged predates this column, and a
+default would have all of them assert a grip nobody chose. That is worse than
+silence: a future "you press better neutral" would be computed over fabricated
+data. Every layer carries the same discipline — the column is nullable, the Go
+field is a pointer, the clients render nothing rather than a default, and
+`emptySet` carries `undefined` forward as `undefined`.
+
+### The vocabulary is deliberately incomplete, and the gate is what makes that honest
+
+Four values: `regular`, `neutral`, `reverse`, `angled`. **`mixed` and `hook` are
+missing**, and they are how a heavy deadlift is actually held.
+
+The response is not to widen the enum on the way past — it is to withhold the
+question. The picker only appears where these four ARE the vocabulary: pushes,
+pulls and isolation work, 403 of 762 exercises, derived from the catalog's
+existing `movement_pattern` rather than from a new `grips_vary` column nobody
+would maintain (F3 is the standing evidence of what hand-classification costs).
+On a hinge, offering these four would collect `regular` for a mixed pull — **a
+false entry, which is strictly worse than a missing one**, because nothing
+downstream can tell it from a real answer. Filed as `N9`.
+
+`isolation` is the debatable inclusion: 210 rows, the catalog's "honest bucket
+for the single-joint long tail", so it carries calf raises next to hammer and
+reverse curls. Excluding it halves the gate to 193 and cuts exactly the
+exercises this feature is clearest for. The asymmetry decides it — a false
+positive is a control somebody ignores on a calf raise; a false negative is the
+feature not existing for reverse curls.
+
+### T3, and the two things it does not say
+
+The rule reads "any new `session_sets` column needs **mobile** pass-through
+before an authoring surface". Mapping it found both halves of that understated:
+
+**It is not only mobile.** Any client that PUTs sets can wipe the column, and
+web edits sets too. Web turned out to be safe *by accident* — its `request()`
+ends in a plain `body as T` cast with no schema, and every editor spreads whole
+objects, so unknown keys physically survive. Worth stating rather than relying
+on: "survives because nothing strips it" is a property no one chose, sitting
+next to a wholesale replace. `grip` is declared on web's type now.
+
+**The worst case is the SERVER's own read.** `insertSets` and `attachSets` are a
+pair. Add the column to the INSERT and forget the SELECT, and every client —
+however correctly it passes fields through — PUTs back a set whose grip the
+server itself just failed to hand it. The wipe comes from our own read, and no
+client-side care prevents it. That is the mutation this branch's integration
+test is built around: it writes a grip, reads it back, and then writes the
+*read-back* sets again, which is exactly what an edit does.
+
+### The per-set decisions, which are where this kind of column goes wrong
+
+- **`emptySet` carries it forward** — you do not change grip between sets unless
+  you mean to. Unlike effort (RIR/RPE), which is deliberately never carried.
+- **`emptyDropSet` inherits it** — same bar, same hands, lighter plates.
+- **`swapExercise` clears it**, like `assisted_reps` and `load_factor`. Not
+  merely because grip describes the replaced movement: the picker is gated on
+  movement pattern, so a grip left on a leg press is still sent on every write
+  with no control anywhere that can clear it. Invisible and unclearable.
+- **`withSetMode` does NOT clear it**, deliberately unlike `assisted_reps` —
+  that goes with the reps because it counts them, whereas a dead hang has no
+  reps and very much has a grip.
+- **`repairSet` drops an illegal value.** A grip outside the CHECK 400s on every
+  push and strands the session, with no screen able to edit it back into
+  legality. It nulls rather than removes, and it must not ADD the key to a row
+  that never had one.
+
+### Found in passing
+
+**Web's `swapExercise` never cleared `assisted_reps`**, and mobile's always has.
+A shape-changing swap nulls `reps` while leaving the assisted count, which the
+database CHECK refuses — a permanent 400 on a field web cannot display or clear.
+Latent since 000053, unreachable from web's UI but reachable through it. Fixed
+here, since `grip` would have inherited exactly the same shape.
+
+### Gaps
+
+- **Never run on a device.** The chip row, the carry-forward and the gating are
+  typechecked and unit-tested; nobody has tapped them. `L1` already covers the
+  standing version of this.
+- **Web shows grip but cannot set it** (`N10`) — its `SetRow` takes a name and
+  booleans rather than the `Exercise`, so gating a picker needs a prop change.
+  Logging is a phone thing, so the gap is correcting a session at a desk.
+- **Nothing reads grip yet.** It is recorded and displayed and nothing analyses
+  it — no "your neutral-grip press is stronger", no filter, no PR split by grip.
+  That is the point of putting it on the set rather than in the catalog, but the
+  payoff is not built.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.

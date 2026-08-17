@@ -1607,6 +1607,41 @@ components:
             A spotted set is still ONE set. It is not split into an unassisted
             row and an assisted one — one approach to the bar, one rest period,
             one entry in the working-set count.
+        grip:
+          type: string
+          nullable: true
+          enum: [regular, neutral, reverse, angled]
+          example: neutral
+          description: >
+            How the implement was held for this set: `regular` (overhand,
+            pronated), `neutral` (palms facing), `reverse` (underhand,
+            supinated), `angled` (the canted position an EZ-bar or multi-grip
+            handle forces).
+
+
+            **A property of the SET, not of the exercise.** A catalog row per
+            grip would multiply 504 exercises into something near 2,000 and
+            still not express what athletes do — switch on the last set because
+            the first three hurt — while splitting one exercise's history in
+            two, so the progression rule and the personal records would each see
+            half the sets.
+
+
+            **NULL is UNRECORDED, and that is not `regular`.** Every set logged
+            before this field existed chose no grip, and reading silence as
+            overhand would have the app assert training that never happened.
+            Clients show nothing rather than a default.
+
+
+            Nothing is derived from it — it is recorded and displayed, never
+            summed — so it appears only on this schema and not in any figure.
+
+
+            `mixed` and `hook` are deliberately absent. They are how a heavy
+            deadlift is actually held and they are not variations of these four,
+            so the clients do not offer the picker on hinges, carries or olympic
+            lifts: collecting `regular` for a mixed pull would be a false entry
+            rather than a missing one.
         load_factor:
           type: integer
           example: 2

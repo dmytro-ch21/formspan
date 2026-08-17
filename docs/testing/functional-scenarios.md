@@ -6890,6 +6890,55 @@ told the opposite of the truth.
   silently disappears everywhere and no arithmetic test notices, because the
   tonnage rule reads the column in SQL and never touches that response.
 
+## Grip (`session_sets.grip`)
+
+How the implement was held, per LOGGED SET. Four values — regular, neutral,
+reverse, angled — plus NULL for unrecorded, which is **not** the same as
+regular.
+
+### The pass-through, which is what actually breaks
+
+- **Log a set with a neutral grip, then edit something else about the session**
+  (add a set, change a weight) **and reload.** The grip must still be there.
+  `ReplaceSets` deletes and reinserts every row, so this is the scenario that
+  catches a client — or the server's own read — dropping the column.
+- **Do the same edit from the WEB session page.** Web cannot set a grip, but it
+  must not destroy one the phone recorded.
+- **Round-trip the server's own output**: read a session, PUT the sets back
+  unchanged, read again. Nothing may change. Missing `grip` from `attachSets`
+  fails exactly here and nowhere else.
+- **A set logged offline by an older build** has no grip key. It must sync
+  without error and read as unrecorded — never as `regular`.
+
+### Where the picker appears
+
+- **Dumbbell bench press, lat pulldown, barbell curl** → the grip chips appear.
+- **Back squat, walking lunge, a run** → no chips. The question is meaningless.
+- **Deadlift, farmer's carry, clean** → **no chips, deliberately.** The real
+  answer there is `mixed` or `hook`, which this enum does not have; offering
+  these four would collect a false answer. If a picker appears on a deadlift,
+  that is the bug.
+- **Offline with the catalog uncached** → no chips, rather than chips on
+  everything.
+
+### Recording and clearing
+
+- Tap `Neutral` → the set reads neutral, and **the next set added inherits it**.
+- Tap `Neutral` again → cleared, back to unrecorded. This is the only way back,
+  and without it a mis-tap is permanent.
+- A set whose grip was never set shows **nothing** — no "Regular" anywhere, on
+  the row, the share card or the web table.
+- Add a drop off a neutral-grip set → the drop inherits neutral.
+- **Swap the exercise** (dumbbell press → leg press) → the grip is cleared. A
+  grip surviving onto a movement with no picker can never be removed.
+- **Switch a dual-mode exercise to time** (assisted pull-up → a hang) → the grip
+  **survives**. Unlike assisted reps, which go with the reps.
+
+### Errors
+
+- `PUT` a set with `"grip": "banana"` → **400**, naming the set.
+- The database refuses it too, for any caller that bypasses the handler.
+
 ## Assisted reps and drop sets (`session_sets.assisted_reps`, `set_type='drop'`)
 
 ### Spotter reps

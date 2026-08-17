@@ -25,6 +25,7 @@ import {
   pickImage,
   replaceSets,
   setExerciseUnit,
+  GRIPS,
   SET_TYPES,
   swapSuggestions,
   swapExercise,
@@ -980,6 +981,15 @@ function SetRow({
         <span className="stat text-text-dim">{ordinal}</span>
         {short && (
           <span className="ml-1 text-xs font-bold text-lime">{short}</span>
+        )}
+        {/* Read-only here. Grip is recorded while training, which is a phone
+            thing under the platform rule; web's job is that a session opened at
+            a desk SHOWS what was recorded and does not destroy it. Only when
+            set — an unrecorded grip renders nothing, never "Reg". */}
+        {set.grip && (
+          <span className="ml-1 text-xs text-text-dim">
+            {GRIPS.find((g) => g.key === set.grip)?.short ?? set.grip}
+          </span>
         )}
       </td>
 

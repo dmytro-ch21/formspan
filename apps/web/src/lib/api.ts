@@ -193,6 +193,22 @@ export function pickImage(
 export type SetType =
   "warmup" | "working" | "backoff" | "drop" | "amrap" | "failure";
 
+/**
+ * How the implement was held for one set. A property of the SET, not of the
+ * exercise — see the migration and the server's `Grip`.
+ *
+ * `mixed` and `hook` are deliberately absent, which is why no picker is offered
+ * on hinges.
+ */
+export type Grip = "regular" | "neutral" | "reverse" | "angled";
+
+export const GRIPS: { key: Grip; label: string; short: string }[] = [
+  { key: "regular", label: "Regular", short: "Reg" },
+  { key: "neutral", label: "Neutral", short: "Neu" },
+  { key: "reverse", label: "Reverse", short: "Rev" },
+  { key: "angled", label: "Angled", short: "Ang" },
+];
+
 export const SET_TYPES: { key: SetType; label: string; short: string }[] = [
   { key: "warmup", label: "Warm-up", short: "W" },
   { key: "working", label: "Working", short: "" },
@@ -215,6 +231,25 @@ export type LoggedSet = {
   /** 1–10, half steps. RPE 8 is roughly 2 RIR; record whichever you think in. */
   rpe: number | null;
   notes: string;
+  /**
+   * How many of `reps` somebody else helped with. Web neither shows nor edits
+   * it — declared because web CLEARS it on an exercise swap, and an undeclared
+   * field being assigned reads as a typo to the next person. (A spread
+   * suppresses excess-property checking, so the assignment compiled either
+   * way, which is exactly why the declaration is worth having.)
+   */
+  assisted_reps?: number | null;
+  /**
+   * How the implement was held. Absent/null is UNRECORDED, which is NOT
+   * `regular` — no set logged before this column existed chose a grip.
+   *
+   * Declared even though this app does not yet author it, because the server
+   * replaces a session's sets wholesale: a shape that DROPPED this on a write
+   * would wipe what the phone recorded. Web happens to round-trip whole
+   * objects, so it survived untyped — but "survives by accident" is not a
+   * property to leave undeclared next to a wholesale replace.
+   */
+  grip?: Grip | null;
   /**
    * How many implements of `weight_kg` were moved: 1 for a barbell or a
    * machine, 2 for a PAIR of dumbbells. Server-sent, derived from the
@@ -434,6 +469,20 @@ export function swapExercise(
       : {
           ...s,
           exercise_id: to.id,
+          // Cleared, both of them, because they describe the movement that was
+          // just replaced. Mobile's `swapExercise` has always done this; web's
+          // never has, and that is a LATENT BUG this change would otherwise
+          // inherit and widen:
+          //
+          //   - `assisted_reps` (which web cannot even display): a
+          //     shape-changing swap nulls `reps`, and an assisted count with no
+          //     rep count is a row the database CHECK refuses — so the session
+          //     wedges on a permanent 400 with nothing on screen to clear.
+          //   - `grip`: the picker is gated on movement pattern, so swapping a
+          //     pull-up for a leg press strands a grip that is still sent on
+          //     every write and has no control anywhere that can clear it.
+          assisted_reps: null,
+          grip: null,
           reps: sameShape ? s.reps : null,
           weight_kg: sameShape ? s.weight_kg : null,
           seconds: sameShape ? s.seconds : null,

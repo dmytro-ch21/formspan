@@ -55,6 +55,13 @@ func validateSets(sets []Set) error {
 		if s.SetType != "" && !ValidSetType(s.SetType) {
 			return errors.New(at + "unknown set type")
 		}
+		// nil is legal and means unrecorded; a PRESENT value has to be one of
+		// the four. An empty string is rejected rather than read as "clear it",
+		// because the client that wants no grip omits the field or sends null —
+		// and "" reaching the CHECK would be a 500 where a 400 belongs.
+		if s.Grip != nil && !ValidGrip(*s.Grip) {
+			return errors.New(at + "unknown grip")
+		}
 		if s.RPE != nil && (*s.RPE < 1 || *s.RPE > 10) {
 			return errors.New(at + "RPE must be between 1 and 10")
 		}
