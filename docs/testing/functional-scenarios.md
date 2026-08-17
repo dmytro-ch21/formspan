@@ -7386,11 +7386,11 @@ training. Everything here is about it telling the truth.
 - **A drop set adds tonnage but does not add to `sets`.** Both halves fail in opposite directions — counting it inflates the count, excluding its volume deflates the tonnage.
 - A pair of dumbbells doubles `tonnage_kg` but **not** `top_weight_kg`: the logged weight is per implement and the doubling belongs to tonnage alone.
 - Warm-ups and sets never marked completed contribute nothing — not to sets, reps, tonnage or the estimate.
-- **An assisted set is estimated from the reps done UNAIDED**, matching `/records` exactly — 8 reps with 3 assisted at 102.5kg must read 115.3, never 127.2. A set where every rep was assisted supports no estimate at all. The evidence carries the full count *and* the assisted figure, or the number cannot be reconciled.
+- **An assisted set is estimated from the reps done UNAIDED**, matching `/records` exactly — a weighted (`weight_reps`) set of 8 with 3 assisted at 102.5kg must read 115.3, never 127.2. A set where every rep was assisted supports no estimate at all. The evidence carries the full count *and* the assisted figure, or the number cannot be reconciled.
 - Two sets in one session tying on the estimate must return the SAME evidence on every request — the earlier set by position, not whichever the join emitted first.
 - An exercise that carries no external load (plank, run) says so, rather than explaining rep-max divergence to somebody who never lifted a weight.
 - The evidence table says "5 sets · 25 reps", never "5 × 25 reps" — `reps` is the session total and "×" reads as a multiplication.
-- - The heaviest set is not always the best estimate (1×110 vs 5×100). The chart's "Top set" and "Est. 1RM" must be free to point at different sessions.
+- The heaviest set is not always the best estimate (1×110 vs 5×100). The chart's "Top set" and "Est. 1RM" must be free to point at different sessions.
 - A known exercise the athlete has never trained returns `points: []` — **not** a 404, and the array must serialise as `[]` rather than `null`.
 - An exercise id not in the catalog is a **404**. "You have never trained this" and "no such exercise" are different answers.
 - Bad `from`/`to`/`tz`, or `to` before `from`, are 400s with `invalid_input`.

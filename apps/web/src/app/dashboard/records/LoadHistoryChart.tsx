@@ -143,7 +143,11 @@ export function LoadHistoryChart({
             </>
           ) : (
             <>
-              {metric.label} needs an external load, and this exercise is
+              {/* "a logged weight", not "an external load": a farmer's carry
+                  is loaded and is `distance`, so the logging form never
+                  records the kilograms. Saying it has no load would be false
+                  about the athlete's own exercise. */}
+              {metric.label} needs a logged weight, and this exercise is
               measured in {measuredIn(history.load_type)}. Its record is on the
               card above.
             </>
@@ -359,8 +363,16 @@ function EvidenceTable({
                       "×" here would read as a multiplication and state a
                       rep count nobody did. On this page "×" already means
                       reps × weight. */}
+                  {/* `reps` is the SESSION TOTAL, not reps per set, so a
+                      "×" here would read as a multiplication and state a rep
+                      count nobody did — on this page "×" already means reps ×
+                      weight. And a plank has no reps at all: printing "0
+                      reps" presents something never measured as a measured
+                      zero. */}
                   <td className="py-1 pr-4">
-                    {p.sets} set{p.sets === 1 ? "" : "s"} · {p.reps} reps
+                    {p.sets} set{p.sets === 1 ? "" : "s"}
+                    {p.reps > 0 &&
+                      ` · ${p.reps} rep${p.reps === 1 ? "" : "s"}`}
                   </td>
                   <td className="py-1 text-text-dim">
                     {/* Only the estimate is a modelled number, so only it
@@ -375,7 +387,7 @@ function EvidenceTable({
                           p.best_1rm_assisted_reps
                             ? ` (${p.best_1rm_reps - p.best_1rm_assisted_reps} alone)`
                             : ""
-                        }`
+                        }${effortSuffix(p)}`
                       : ""}
                   </td>
                 </tr>
@@ -416,6 +428,21 @@ function measuredIn(loadType: string): string {
     default:
       return "something other than weight";
   }
+}
+
+/**
+ * The effort the estimate used, when it used any.
+ *
+ * Without it the evidence does not recompute to the published number — 5 × 100
+ * at 2 RIR estimates 120.0, while "5 × 100" alone comes back 112.5, so the
+ * figure looks wrong to exactly the person who bothered to check it. Assisted
+ * sets discard effort by construction, and the API sends null there, so this
+ * shows nothing rather than working the number did not do.
+ */
+function effortSuffix(p: LoadPoint): string {
+  if (p.best_1rm_rir !== null) return `, ${p.best_1rm_rir} RIR`;
+  if (p.best_1rm_rpe !== null) return `, RPE ${p.best_1rm_rpe}`;
+  return "";
 }
 
 function shortDate(iso: string): string {

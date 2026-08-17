@@ -394,11 +394,13 @@ function ProgressSection({
       </button>
       {open && (
         <div className="mt-3">
-          {loading && (
-            <p className="text-sm text-text-dim" aria-live="polite">
-              Loading…
-            </p>
-          )}
+          {/* A PERSISTENT status container whose text changes, not a live
+              region that mounts already populated — several screen reader and
+              browser pairs announce nothing at all for the latter, because
+              there was no change to the region to observe. */}
+          <p className="text-sm text-text-dim" role="status">
+            {loading ? "Loading…" : ""}
+          </p>
           {error && (
             // `role="alert"`, matching the page-level error: without it a
             // screen-reader user activates the disclosure, the fetch fails,

@@ -23035,8 +23035,9 @@ this entry had already written.
 **The estimate ignored assisted reps.** The query never selected
 `assisted_reps`, so it called the bare `EstimateOneRM` with the FULL rep count
 while every other 1RM surface in the module routes through `EstimateSetOneRM`,
-which estimates from the reps done unaided. A pull-up of 8 with 3 assisted at
-102.5kg reads **115.3 on the records page and 127.2 here** — and if the athlete
+which estimates from the reps done unaided. A weighted set of 8 with 3 assisted at
+102.5kg reads **115.3 on the records page and 127.2 here** (weighted, because a
+bodyweight pull-up is `load_type: reps` and carries no 1RM record at all) — and if the athlete
 also recorded RIR on that spotted set, 136.7, because reusing recorded effort
 beside a full count compounds it. So "computed once so the two can never
 disagree" was false at the moment it was written.
@@ -23062,6 +23063,21 @@ does; and the chart's empty state explained rep-max divergence to somebody
 looking at a plank, which is answering a question they did not ask —
 `load_type` was on the response for that and unused.
 
+A second pass then found that the tie-break fix was itself unenforced — with no
+fixture tying, both deleting `position` and relaxing `>` to `>=` passed. Ties
+are exact in binary (5 × 100 and 1 × 112.5 both estimate 112.5), so there is a
+fixture now, asserted four times over because the failure is non-determinism and
+one agreeing call proves nothing about the next.
+
+It also found the recheckability claim was **one field wider than the
+evidence**: `Record` carries RIR/RPE precisely so a 1RM can be recomputed by the
+rule that chose it, and `LoadPoint` dropped them — 5 × 100 at 2 RIR publishes
+120.0 while its own evidence recomputes to 112.5, which looks wrong to exactly
+the person who checks. `best_1rm_rir`/`best_1rm_rpe` are carried now (null on an
+assisted set, where effort is discarded rather than missing), the chart prints
+them, and a test feeds the evidence back through the rule and asserts it
+reproduces the published number.
+
 Neither reviewer found a scoping or cap defect, and the "no index needed"
 judgement was confirmed rather than assumed: migration 000014's
 `session_sets_user_exercise_idx` already prefix-serves the scan.
@@ -23081,6 +23097,12 @@ judgement was confirmed rather than assumed: migration 000014's
 - **Nothing links to it from a session.** Reading a lift's arc while reviewing
   the session you just did is the obvious next step, and the records page is
   currently the only door.
+- **The chart's axis labels are SVG text inside a 720-unit viewBox**, so they
+  scale with the container — legible at desktop width, sub-8px on a narrow
+  window. `VolumeTrend`, the precedent this follows, keeps its labels in HTML
+  *outside* the svg for exactly that reason. Not changed here because it is a
+  layout question this branch cannot see rendered, and guessing at it blind is
+  how the last two runtime-only defects shipped.
 
 ## Open items / known gaps as of this entry
 

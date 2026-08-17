@@ -2099,6 +2099,9 @@ export type LoadPoint = {
   best_1rm_reps: number | null;
   best_1rm_weight_kg: number | null;
   best_1rm_assisted_reps: number | null;
+  /** Effort, so the evidence recomputes to the published estimate. */
+  best_1rm_rir: number | null;
+  best_1rm_rpe: number | null;
   tonnage_kg: number;
   sets: number;
   reps: number;
