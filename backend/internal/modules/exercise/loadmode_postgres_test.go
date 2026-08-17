@@ -65,3 +65,73 @@ func TestAdminAuthoredCarriesLoadMode(t *testing.T) {
 	}
 	t.Fatalf("%s did not come back from AdminAuthored at all", id)
 }
+
+// TestTheCatalogReadPathCarriesLoadMode covers the OTHER select — the public
+// one, which every client actually reads.
+//
+// `AdminAuthored` has a test above because dropping `load_mode` there corrupts
+// the seed file. Dropping it from `selectColumns` is quieter and reaches
+// further: `GET /v1/exercises` and `GET /v1/exercises/{id}` are where the
+// phone and the web session page learn that a movement is entered per hand, so
+// an empty value there does not break anything — it silently stops telling the
+// athlete which number to type, on all 142 of them, while every arithmetic
+// test in the repository still passes because the tonnage rule reads the
+// column directly in SQL and never goes near this path.
+//
+// The contract now lists `load_mode` in `Exercise.required`, which is the
+// promise this test is the enforcement for.
+func TestTheCatalogReadPathCarriesLoadMode(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, url)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { pool.Close() })
+
+	// Owned by this test rather than borrowed from the catalog: a seeded row
+	// would make the assertion depend on `exercise`'s own Seed() having run,
+	// which is the cross-package dependency this repository just finished
+	// removing everywhere else.
+	const id = "lm_read_db_press"
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO exercises (id, name, sport, movement_pattern, load_type, status, source, load_mode)
+		VALUES ($1, 'Fixture Read Path Press', 'strength', 'push', 'weight_reps', 'published', 'seed', 'per_side')
+		ON CONFLICT (id) DO UPDATE SET load_mode = 'per_side', status = 'published'`, id); err != nil {
+		t.Fatalf("seed exercise: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM exercises WHERE id = $1`, id)
+	})
+
+	repo := NewPostgresRepository(pool)
+
+	got, err := repo.Get(ctx, id)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.LoadMode != LoadModePerSide {
+		t.Fatalf("Get returned load_mode %q, want %q — a client reading this cannot tell the "+
+			"athlete to enter one dumbbell", got.LoadMode, LoadModePerSide)
+	}
+
+	// Both, because they are two different SQL statements sharing one column
+	// list, and a change that reaches one can miss the other.
+	list, err := repo.List(ctx, Filter{})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	for _, e := range list {
+		if e.ID != id {
+			continue
+		}
+		if e.LoadMode != LoadModePerSide {
+			t.Fatalf("List returned load_mode %q, want %q", e.LoadMode, LoadModePerSide)
+		}
+		return
+	}
+	t.Fatalf("%s did not come back from List at all", id)
+}

@@ -2124,6 +2124,14 @@ function SetRow({
                     : m === 'seconds'
                       ? `Time (${durationInputUnit(duration)})`
                       : MEASURE_LABEL[m];
+              // Which number to type, at the moment of typing it. Keyed on the
+              // EXERCISE's `load_mode`, not on the set's `load_factor`: a
+              // one-arm dumbbell row is entered per hand exactly like a
+              // dumbbell bench press, and only the bench press doubles. The
+              // factor drives the total on the row summary instead, so the two
+              // never have to answer each other's question.
+              const hint =
+                m === 'weight' && exercise?.load_mode === 'per_side' ? 'per hand' : undefined;
               // Converted for display, converted back on input — the stored
               // value is always kilograms, metres or seconds, whatever is on
               // screen. Duration is the third of those and works exactly like
@@ -2159,12 +2167,16 @@ function SetRow({
                             : Math.round(raw);
                     onChange(withSetChange(set, { [MEASURE_KEY[m]]: canonical }));
                   }}
+                  hint={hint}
                   // A duration in minutes is the second field that takes a
                   // decimal — 1.5 min is 90 seconds, and forcing a whole number
                   // there would make the unit useless for exactly the durations
                   // it exists for.
                   integer={m !== 'weight' && !(m === 'seconds' && duration === 'minutes')}
-                  accessibilityLabel={`${label} for ${setName} of ${exerciseName}`}
+                  // The hint is spoken, not just shown. It says WHICH number to
+                  // type, so a VoiceOver user reaching this field without it is
+                  // the one person given no way to know.
+                  accessibilityLabel={`${label}${hint ? ` ${hint}` : ''} for ${setName} of ${exerciseName}`}
                   testID={`set-${index}-${m}`}
                 />
               );

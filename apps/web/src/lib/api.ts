@@ -42,6 +42,16 @@ export type Exercise = {
   secondary_muscles: string[];
   equipment: string[];
   load_type: LoadType;
+  /**
+   * Which number goes in the weight field. `per_side` means ONE implement —
+   * one dumbbell, one kettlebell — because that is what is stamped on it.
+   *
+   * Not the same question as whether the load doubles: all 142 `per_side`
+   * exercises are entered per hand, but 34 are also `is_unilateral`, where one
+   * implement moves and the factor stays 1. So this drives what the athlete is
+   * told to type; the set's `load_factor` is what says the total.
+   */
+  load_mode?: "total" | "per_side";
   is_unilateral: boolean;
   instructions: string;
   media: Media[];
@@ -205,6 +215,16 @@ export type LoggedSet = {
   /** 1–10, half steps. RPE 8 is roughly 2 RIR; record whichever you think in. */
   rpe: number | null;
   notes: string;
+  /**
+   * How many implements of `weight_kg` were moved: 1 for a barbell or a
+   * machine, 2 for a PAIR of dumbbells. Server-sent, derived from the
+   * exercise's `load_mode`; nothing here may invent one.
+   *
+   * Absent means 1 — older responses, and any set logged before the server
+   * started sending it. Reading absent as zero would erase a set's volume
+   * rather than merely under-reporting the dumbbell ones.
+   */
+  load_factor?: number;
   /**
    * Done. The trigger for progressive volume — the summary counts what's
    * been performed, not what's been planned, so the header climbs as you

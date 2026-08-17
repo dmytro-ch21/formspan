@@ -737,12 +737,23 @@ function SessionRow({
   // Completed, non-warm-up sets — the backend's own working-volume rule. The
   // `completed` half was missed when progressive volume landed, so this row
   // showed a session's full volume while the detail page showed zero for
-  // the same session.
+  // the same session. Drops stay IN: a drop adds no set but its weight was
+  // still moved, which is the volume-versus-count split the session endpoints
+  // draw with `workingSet` and `countsAsSet`.
   const working = session.sets.filter(
     (s) => s.completed && s.set_type !== "warmup",
   );
+  // `load_factor` is the second half that was missed, on the same line. A pair
+  // of dumbbells moves double what is stamped on one of them, so without it
+  // every dumbbell session on this list read at HALF the volume its own detail
+  // page showed. Absent means one — never zero, or an older row's volume
+  // vanishes instead of merely under-reporting.
   const volume = working.reduce(
-    (sum, s) => sum + (s.reps ?? 0) * (s.weight_kg ?? 0),
+    (sum, s) =>
+      sum +
+      (s.reps ?? 0) *
+        (s.weight_kg ?? 0) *
+        (s.load_factor && s.load_factor > 1 ? s.load_factor : 1),
     0,
   );
   const exercises = new Set(session.sets.map((s) => s.exercise_id)).size;

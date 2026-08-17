@@ -756,6 +756,22 @@ function ExerciseBlock({
               Per side — 8 reps here means 8 each side.
             </p>
           )}
+          {/* A second, separate per-side fact: the one above is about REPS and
+              keys on `is_unilateral`, this one is about WEIGHT and keys on
+              `load_mode`. They overlap on 34 exercises and each is true there,
+              which is why they are two lines rather than one — a single note
+              covering both would have to say "per side" about two different
+              quantities that do not agree.
+
+              Only the non-unilateral half doubles, so only it claims a total.
+              Saying "counts both" on a one-arm row would be a straight lie. */}
+          {exercise?.load_mode === "per_side" && (
+            <p className="text-xs text-text-dim">
+              {exercise.is_unilateral
+                ? "Weight is per hand — enter the one dumbbell you lift."
+                : "Weight is per hand — enter one dumbbell, not the pair. Volume counts both."}
+            </p>
+          )}
         </div>
         {editable && (
           <button
@@ -874,6 +890,7 @@ function ExerciseBlock({
                 measures={measures}
                 editable={editable}
                 exerciseName={exercise?.name ?? exerciseID}
+                perSide={exercise?.load_mode === "per_side"}
                 units={units}
                 onChange={(next) => onChange(index, next)}
                 onRemove={() => onRemove(index)}
@@ -902,6 +919,7 @@ function SetRow({
   measures,
   editable,
   exerciseName,
+  perSide,
   onChange,
   onRemove,
   units,
@@ -911,6 +929,14 @@ function SetRow({
   measures: Measure[];
   editable: boolean;
   exerciseName: string;
+  /**
+   * The exercise is entered per hand. Passed down rather than read here
+   * because this row is given a NAME, not an exercise — and it is needed for
+   * the weight cell's accessible name, since the visible note explaining it
+   * sits above the table where a screen-reader user tabbing straight into a
+   * cell never reaches it.
+   */
+  perSide: boolean;
   onChange: (next: LoggedSet) => void;
   onRemove: () => void;
   units: UnitSystem;
@@ -970,7 +996,7 @@ function SetRow({
         return (
           <td key={m} className="px-2 py-1.5">
             <NumberCell
-              label={`${unitLabel} for set ${ordinal} of ${exerciseName}`}
+              label={`${unitLabel}${m === "weight" && perSide ? " per hand" : ""} for set ${ordinal} of ${exerciseName}`}
               value={shown}
               onChange={(raw) => {
                 const n =

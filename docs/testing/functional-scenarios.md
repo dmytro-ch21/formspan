@@ -6821,6 +6821,46 @@ is the specific regression this guards.
 - An older client that ignores `load_factor` still shows the server's totals
   correctly, because the server does the multiplying for anything it computes.
 
+### Saying so on screen (W3)
+
+The arithmetic above being right is not the same as the athlete being able to
+tell. These check the explanation, and the whole point is that the two halves
+key on **different flags** — get them from one and a quarter of the catalog is
+told the opposite of the truth.
+
+- **The input hint keys on `load_mode`, so it appears on all 142.** Open
+  **Dumbbell Bench Press**: the weight field reads `Weight kg per hand`. Open
+  **One-Arm Dumbbell Row**: it *also* reads `per hand` — you still type one
+  dumbbell there. Open **Barbell Bench Press**: no hint at all.
+- **The total keys on `load_factor`, so it appears only on the 108 that
+  double.** Log 10 × 30 kg on Dumbbell Bench Press → the row reads
+  `10 × 30kg (60kg total)`. Log 10 × 40 kg on One-Arm Dumbbell Row → the row
+  reads `10 × 40kg` and **must not** claim a total. That second case is the
+  one worth writing first; it is what a single-flag implementation gets wrong.
+- **Both are spoken, not just shown.** With VoiceOver on, the weight field
+  announces "Weight kg per hand for set 2 of Dumbbell Bench Press". The visible
+  note on web sits above the table, where a screen-reader user tabbing into a
+  cell never reaches it — so the cell's own label has to carry it.
+- **Imperial converts both numbers.** Switch units: `10 × 66.1lb (132.3lb
+  total)`. Note 132.3, not 66.1 × 2 = 132.2 — the total is doubled in
+  kilograms and converted once. A test asserting 132.2 is asserting a rounding
+  bug.
+- **A set with no factor says nothing** rather than guessing. Offline rows and
+  anything logged before the server sent one: `10 × 30kg`, no annotation.
+- **Web shows two per-side lines on the 34 overlapping exercises**, and both
+  are true: "Per side — 8 reps here means 8 each side." (reps, keyed on
+  `is_unilateral`) and "Weight is per hand — enter the one dumbbell you lift."
+  (weight, keyed on `load_mode`). On a Dumbbell Bench Press only the second
+  appears, and it adds "Volume counts both".
+- **The web sessions LIST agrees with the session detail page.** Open a
+  dumbbell session's row in `/dashboard/sessions` and then the session itself:
+  the volume figures must match. They did not — the list halved every dumbbell
+  session, on the same line that had already missed `completed` once.
+- **`GET /v1/exercises` and `GET /v1/exercises/{id}` both carry `load_mode`.**
+  It is in the contract's `required` list now. If either drops it the hint
+  silently disappears everywhere and no arithmetic test notices, because the
+  tonnage rule reads the column in SQL and never touches that response.
+
 ## Assisted reps and drop sets (`session_sets.assisted_reps`, `set_type='drop'`)
 
 ### Spotter reps
