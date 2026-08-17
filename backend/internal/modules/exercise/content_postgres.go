@@ -31,7 +31,7 @@ import (
 const contentReturning = `
 	id, name, sport, movement_pattern, movement_pattern_detail,
 	primary_muscles, secondary_muscles, equipment, load_type,
-	is_unilateral, load_mode, instructions, source, status, created_at, updated_at`
+	is_unilateral, load_mode, implements, instructions, source, status, created_at, updated_at`
 
 type contentScannable interface {
 	Scan(dest ...any) error
@@ -41,7 +41,7 @@ func scanContent(s contentScannable) (Exercise, error) {
 	var e Exercise
 	err := s.Scan(&e.ID, &e.Name, &e.Sport, &e.MovementPattern,
 		&e.MovementPatternDetail, &e.PrimaryMuscles, &e.SecondaryMuscles,
-		&e.Equipment, &e.LoadType, &e.IsUnilateral, &e.LoadMode, &e.Instructions,
+		&e.Equipment, &e.LoadType, &e.IsUnilateral, &e.LoadMode, &e.Implements, &e.Instructions,
 		&e.Source, &e.Status, &e.CreatedAt, &e.UpdatedAt)
 	if err != nil {
 		return Exercise{}, err
@@ -83,12 +83,13 @@ func createWithin(ctx context.Context, tx pgx.Tx, e Exercise) (Exercise, error) 
 		INSERT INTO exercises (
 			id, name, sport, movement_pattern, movement_pattern_detail,
 			primary_muscles, secondary_muscles, equipment, load_type,
-			is_unilateral, load_mode, instructions, source, status
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'admin','draft')
+			is_unilateral, load_mode, implements, instructions, source, status
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'admin','draft')
 		RETURNING `+contentReturning,
 		e.ID, e.Name, e.Sport, e.MovementPattern, e.MovementPatternDetail,
 		nonNil(e.PrimaryMuscles), nonNil(e.SecondaryMuscles), nonNil(e.Equipment),
-		e.LoadType, e.IsUnilateral, NormalizeLoadMode(e.LoadMode), e.Instructions)
+		e.LoadType, e.IsUnilateral, NormalizeLoadMode(e.LoadMode),
+		NormalizeImplements(e.Implements), e.Instructions)
 
 	out, err := scanContent(row)
 	if err != nil {
@@ -138,13 +139,14 @@ func updateWithin(ctx context.Context, tx pgx.Tx, e Exercise) (Exercise, error) 
 			name = $2, sport = $3, movement_pattern = $4,
 			movement_pattern_detail = $5, primary_muscles = $6,
 			secondary_muscles = $7, equipment = $8, load_type = $9,
-			is_unilateral = $10, load_mode = $11, instructions = $12,
+			is_unilateral = $10, load_mode = $11, implements = $12, instructions = $13,
 			source = 'admin', updated_at = now()
 		WHERE id = $1
 		RETURNING `+contentReturning,
 		e.ID, e.Name, e.Sport, e.MovementPattern, e.MovementPatternDetail,
 		nonNil(e.PrimaryMuscles), nonNil(e.SecondaryMuscles), nonNil(e.Equipment),
-		e.LoadType, e.IsUnilateral, NormalizeLoadMode(e.LoadMode), e.Instructions)
+		e.LoadType, e.IsUnilateral, NormalizeLoadMode(e.LoadMode),
+		NormalizeImplements(e.Implements), e.Instructions)
 
 	out, err := scanContent(row)
 	if errors.Is(err, pgx.ErrNoRows) {

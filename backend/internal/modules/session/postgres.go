@@ -237,9 +237,14 @@ const SQLCountsAsSet = SQLWorkingSet + ` AND ss.set_type <> 'drop'`
 //
 // Requires `exercises e` to be LEFT JOINed as `e`. Left, so a set whose
 // exercise was retired keeps counting at face value instead of dropping to
-// NULL and silently leaving the sum.
-const SQLTonnage = `ss.reps * ss.weight_kg *
-	CASE WHEN e.load_mode = 'per_side' AND NOT e.is_unilateral THEN 2 ELSE 1 END`
+// NULL and silently leaving the sum — hence the COALESCE, which is what makes
+// that retired row count once rather than zero.
+//
+// Reads `implements` directly. It used to derive the factor as
+// `load_mode = 'per_side' AND NOT is_unilateral`, which read "one LIMB at a
+// time" as though it meant "one IMPLEMENT" — and could not express a dumbbell
+// walking lunge, which is two implements and one leg. See migration 000056.
+const SQLTonnage = `ss.reps * ss.weight_kg * COALESCE(e.implements, 1)`
 
 // History rolls a date range up per calendar day, plus totals for the period
 // and for the window immediately before it.
@@ -439,7 +444,7 @@ func (r *PostgresRepository) attachSets(ctx context.Context, sessions []Session,
 		SELECT ss.session_id, ss.exercise_id, ss.position, ss.set_type, ss.reps, ss.weight_kg,
 		       ss.seconds, ss.distance_m, ss.rir, ss.rpe, ss.notes, ss.completed, ss.assisted_reps,
 		       ss.grip,
-		       CASE WHEN e.load_mode = 'per_side' AND NOT e.is_unilateral THEN 2 ELSE 1 END
+		       COALESCE(e.implements, 1)
 		FROM session_sets ss
 		LEFT JOIN exercises e ON e.id = ss.exercise_id
 		WHERE ss.session_id = ANY($1)

@@ -20,7 +20,7 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 
 const selectColumns = `
 	id, name, sport, movement_pattern, movement_pattern_detail, primary_muscles,
-	secondary_muscles, equipment, load_type, is_unilateral, load_mode, instructions,
+	secondary_muscles, equipment, load_type, is_unilateral, load_mode, implements, instructions,
 	created_at, updated_at`
 
 type scannable interface {
@@ -31,7 +31,7 @@ func scanExercise(row scannable) (*Exercise, error) {
 	var e Exercise
 	err := row.Scan(
 		&e.ID, &e.Name, &e.Sport, &e.MovementPattern, &e.MovementPatternDetail, &e.PrimaryMuscles,
-		&e.SecondaryMuscles, &e.Equipment, &e.LoadType, &e.IsUnilateral, &e.LoadMode,
+		&e.SecondaryMuscles, &e.Equipment, &e.LoadType, &e.IsUnilateral, &e.LoadMode, &e.Implements,
 		&e.Instructions, &e.CreatedAt, &e.UpdatedAt,
 	)
 	if err != nil {
@@ -214,8 +214,8 @@ const upsertSQL = `
 	INSERT INTO exercises (
 		id, name, sport, movement_pattern, movement_pattern_detail,
 		primary_muscles, secondary_muscles, equipment, load_type,
-		is_unilateral, instructions, status, load_mode
-	) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		is_unilateral, instructions, status, load_mode, implements
+	) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 	ON CONFLICT (id) DO UPDATE SET
 		name              = EXCLUDED.name,
 		sport             = EXCLUDED.sport,
@@ -229,6 +229,7 @@ const upsertSQL = `
 		instructions      = EXCLUDED.instructions,
 		status            = EXCLUDED.status,
 		load_mode         = EXCLUDED.load_mode,
+		implements        = EXCLUDED.implements,
 		updated_at        = now()
 	-- Scoped to seeded rows: a deploy must not revert admin-authored content.
 	-- See migration 000032 and the same guard on techniques.
@@ -236,12 +237,12 @@ const upsertSQL = `
 		exercises.name, exercises.sport, exercises.movement_pattern,
 		exercises.movement_pattern_detail, exercises.primary_muscles, exercises.secondary_muscles,
 		exercises.equipment, exercises.load_type, exercises.is_unilateral,
-		exercises.instructions, exercises.status, exercises.load_mode
+		exercises.instructions, exercises.status, exercises.load_mode, exercises.implements
 	) IS DISTINCT FROM (
 		EXCLUDED.name, EXCLUDED.sport, EXCLUDED.movement_pattern,
 		EXCLUDED.movement_pattern_detail, EXCLUDED.primary_muscles, EXCLUDED.secondary_muscles,
 		EXCLUDED.equipment, EXCLUDED.load_type, EXCLUDED.is_unilateral,
-		EXCLUDED.instructions, EXCLUDED.status, EXCLUDED.load_mode
+		EXCLUDED.instructions, EXCLUDED.status, EXCLUDED.load_mode, EXCLUDED.implements
 	)`
 
 func upsertArgs(e Exercise) []any {
@@ -249,6 +250,7 @@ func upsertArgs(e Exercise) []any {
 		e.ID, e.Name, e.Sport, e.MovementPattern, e.MovementPatternDetail,
 		e.PrimaryMuscles, e.SecondaryMuscles, e.Equipment, e.LoadType,
 		e.IsUnilateral, e.Instructions, NormalizeStatus(e.Status), NormalizeLoadMode(e.LoadMode),
+		NormalizeImplements(e.Implements),
 	}
 }
 

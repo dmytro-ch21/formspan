@@ -2214,7 +2214,7 @@ components:
       # rather than asking it for something new.
       required:
         [id, name, sport, movement_pattern, primary_muscles,
-         secondary_muscles, equipment, load_type, load_mode, is_unilateral,
+         secondary_muscles, equipment, load_type, load_mode, implements, is_unilateral,
          instructions, media, movement_pattern_detail, created_at, updated_at]
       properties:
         id:
@@ -2304,6 +2304,27 @@ components:
             `load_mode` it decides a logged set's `load_factor`: a per_side
             exercise doubles unless it is unilateral, because then only one
             implement is moving.
+        implements:
+          type: integer
+          enum: [1, 2]
+          example: 2
+          description: >
+            How many implements of `weight_kg` move in one rep: 1 for a barbell,
+            a machine, or a single dumbbell; 2 for a PAIR. Logged weight is
+            multiplied by this to give tonnage.
+
+
+            **Not the same question as `is_unilateral`**, and separating them is
+            why this field exists. The factor used to be derived as
+            `load_mode = 'per_side' AND NOT is_unilateral`, which read "one LIMB
+            at a time" as though it meant "one IMPLEMENT". A dumbbell walking
+            lunge is two implements and one leg, so that derivation had to be
+            wrong about either the tonnage or the reps hint — and the catalog
+            was internally inconsistent about which, by equipment.
+
+
+            Absent or unrecognised reads as 1, failing to the side that
+            under-reports rather than inventing weight nobody lifted.
         load_mode:
           type: string
           enum: [total, per_side]
@@ -3255,6 +3276,24 @@ components:
         load_type:
           type: string
           enum: [weight_reps, reps, time, distance, distance_time]
+        implements:
+          type: integer
+          enum: [1, 2]
+          description: >
+            How many implements of the logged weight move in one rep — the
+            tonnage factor. 1 for a barbell, a machine or a single dumbbell; 2
+            for a pair.
+
+
+            Distinct from `is_unilateral`, which is how many LIMBS work. A
+            dumbbell walking lunge is two implements and one leg; the factor
+            used to be derived from those two flags together and could not say
+            that, so the catalog was internally inconsistent by equipment. See
+            migration 000056.
+
+
+            Omitting it on a POST defaults to 1. Omitting it on a PATCH leaves
+            the stored value alone. Any value but 1 or 2 is a 400.
         load_mode:
           type: string
           enum: [total, per_side]

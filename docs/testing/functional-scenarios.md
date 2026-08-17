@@ -6955,6 +6955,37 @@ told the opposite of the truth.
 - **VoiceOver** still reads one stop per post — the card stays hidden from the
   reader, and the label leads with the person.
 
+## Implement count vs unilateral (`exercises.implements`)
+
+The two are independent and are the pair most often confused. A dumbbell walking
+lunge is **two implements and one leg**.
+
+- **Log 10 reps at 20 kg on a Dumbbell Walking Lunge** → tonnage **400**, not
+  200. Two dumbbells moved.
+- **The same on a Kettlebell Walking Lunge** → also 400. The identical movement
+  must not depend on which implement it is held with; five such pairs disagreed
+  before this.
+- **10 reps at 40 kg on a One-Arm Dumbbell Row** → 400, not 800. One implement.
+- **8 reps at 20 kg on a Goblet Squat** → 160. `load_mode = total`: the number
+  typed is already the whole load.
+- **Every lunge, split squat and step-up still shows "8 reps here means 8 each
+  side"** — that hint keys on `is_unilateral`, which was being switched off on
+  the kettlebell rows purely to buy a doubling, and now is not.
+- **Change history is retroactive.** A past session using a corrected exercise
+  reports the new tonnage — `load_factor` is derived on read, never stored. The
+  old figure was wrong; this is a correction, not a rewrite.
+
+### Authoring it
+
+- **Create an exercise in the console with Implements = 2**, log against it →
+  tonnage doubles. Born wrong is the failure this guards (the same shape as the
+  `load_mode` bug).
+- **Edit any other field on it and save** → the count is unchanged.
+- **Correct a wrong count from 2 to 1** → it sticks. Under the old derived rule
+  the only way to change the factor was flipping `is_unilateral`, which silently
+  changed the reps hint too.
+- **PATCH `"implements": 3`** → **400**.
+
 ## Finding an exercise (`GET /v1/exercises?q=`)
 
 The three queries below are a real report of "these exercises are missing". All

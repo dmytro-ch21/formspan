@@ -448,6 +448,15 @@ export type Exercise = {
    * those are entered per hand while the load does NOT double.
    */
   load_mode: string;
+  /**
+   * How many implements of the logged weight move in one rep — the tonnage
+   * factor. 1 for a barbell or a single dumbbell; 2 for a pair.
+   *
+   * NOT the same question as `is_unilateral` (how many limbs work). A dumbbell
+   * walking lunge is two implements and one leg — the case the old derived
+   * rule could not express, which is why the lunge family contradicted itself.
+   */
+  implements: number;
   is_unilateral: boolean;
   instructions: string;
   media?: { kind: string; url: string; is_default: boolean }[];

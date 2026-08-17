@@ -315,6 +315,27 @@ export function ExerciseForm({
           </select>
         </Field>
 
+        <Field
+          label="Implements"
+          htmlFor="implements"
+          hint="How many of the logged weight move in one rep. Two for a pair of dumbbells; one for a barbell, a machine, or anything held in a single hand. This is what multiplies logged weight into tonnage."
+        >
+          <select
+            key={`implements-${String(shown.implements ?? "")}`}
+            id="implements"
+            name="implements"
+            required
+            defaultValue={shown.implements ? String(shown.implements) : ""}
+            className={inputClass}
+          >
+            <option value="" disabled>
+              Pick one…
+            </option>
+            <option value="1">1 — a bar, a machine, or one implement</option>
+            <option value="2">2 — a pair, one in each hand</option>
+          </select>
+        </Field>
+
         <div className="flex items-center gap-2">
           <input
             key={`is_unilateral-${String(shown.is_unilateral ?? false)}`}
@@ -339,6 +360,12 @@ export function ExerciseForm({
             implies the other and the tonnage rule reads them together:
             per_side AND NOT unilateral is the only combination that doubles. */}
         <p id="load-mode-vs-unilateral" className="text-[12px] text-text-secondary">
+          <strong>Implements and unilateral are the ones most often confused.</strong> A dumbbell
+          walking lunge is <em>two</em> implements and <em>one</em> leg — the catalog used to
+          derive the tonnage factor from the unilateral flag, could not express that, and ended up
+          counting the dumbbell version at half the kettlebell version of the same movement.{" "}
+        </p>
+        <p className="text-[12px] text-text-secondary">
           These two are independent. A one-arm dumbbell row is <em>per_side</em> (you enter one
           dumbbell) <em>and</em> unilateral (only that hand works), so its load does not double —
           only per_side movements that are <em>not</em> unilateral do.

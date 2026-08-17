@@ -60,6 +60,10 @@ function bodyFrom(form: FormData): ExerciseWrite {
     // merge instead would make the console the one caller whose behaviour
     // depends on a field being absent.
     load_mode: text(form.get("load_mode")),
+    // Number, not text: the API types this as an integer enum and a string
+    // would be rejected. Falls back to 1, which is both the column default and
+    // the right answer for the overwhelming majority.
+    implements: Number(form.get("implements")) === 2 ? 2 : 1,
     // `has`, not `=== "on"`. An unchecked box sends nothing, so presence IS the
     // value — and comparing to the browser's default string breaks silently the
     // moment someone adds a `value` attribute for styling, writing false for

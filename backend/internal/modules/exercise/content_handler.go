@@ -61,7 +61,11 @@ type exerciseRequest struct {
 	// typo must not fail a whole deploy, but an API write has one author who
 	// can be told, and coercing here would reinstate the halving bug through
 	// a spelling mistake.
-	LoadMode     *string `json:"load_mode"`
+	LoadMode *string `json:"load_mode"`
+	// How many implements of the logged weight move — the tonnage factor since
+	// migration 000056. Absent leaves the stored value alone; present and
+	// outside {1,2} is a 400, for the same reason a bad load_mode is.
+	Implements   *int    `json:"implements"`
 	IsUnilateral *bool   `json:"is_unilateral"`
 	Instructions *string `json:"instructions"`
 }
@@ -84,6 +88,9 @@ func (b exerciseRequest) applyTo(base Exercise) Exercise {
 	}
 	if b.LoadType != nil {
 		base.LoadType = LoadType(*b.LoadType)
+	}
+	if b.Implements != nil {
+		base.Implements = *b.Implements
 	}
 	if b.LoadMode != nil {
 		// Raw, NOT normalised — validation downstream is what turns a bad
@@ -114,6 +121,12 @@ func (b exerciseRequest) applyTo(base Exercise) Exercise {
 	// — its base is the stored row, which is NOT NULL and therefore never "".
 	if base.LoadMode == "" {
 		base.LoadMode = LoadModeTotal
+	}
+	// Same reasoning: a create that never mentions it lands on a zero Exercise
+	// and should take the column's own default, while an update's base is the
+	// stored row and is never zero.
+	if base.Implements == 0 {
+		base.Implements = 1
 	}
 	return base
 }
@@ -389,6 +402,11 @@ func decodeExercise(w http.ResponseWriter, r *http.Request) (exerciseRequest, bo
 	//
 	// Absent stays absent: nil means "leave it alone", and only a value the
 	// client actually chose is judged.
+	if body.Implements != nil && *body.Implements != 1 && *body.Implements != 2 {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			fmt.Sprintf("implements must be 1 or 2, got %d", *body.Implements))
+		return exerciseRequest{}, false
+	}
 	if body.LoadMode != nil && *body.LoadMode != LoadModeTotal && *body.LoadMode != LoadModePerSide {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
 			fmt.Sprintf("unknown load_mode %q — one of: %s, %s",
