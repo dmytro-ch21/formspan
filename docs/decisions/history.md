@@ -23001,9 +23001,11 @@ only way to find out whether a narrow rule is narrow.
   `SQLCountsAsSet` and `SQLTonnage` — N8 exported them so a fourth restatement
   could not drift, and this is the first new caller since. A drop is volume but
   not a second set, and tonnage folds in `implements`, for free.
-- **The 1RM is `EstimateOneRM`,** in Go, not a SQL re-derivation. A second
-  opinion would let the records screen and the chart publish two different bests
-  for one set.
+- **The 1RM is `EstimateSetOneRM`,** in Go, not a SQL re-derivation — the same
+  entry point `/records` uses, so an assisted set is estimated from the reps
+  done unaided. A second opinion would let the records screen and the chart
+  publish two different bests for one set, and the first draft of this endpoint
+  did exactly that (below).
 - **A missing estimate is a gap, not a zero.** `EstimateOneRM` refuses past
   twelve effective reps because every rep-max formula diverges there, so a
   session of high-rep back-off work legitimately has none. The line breaks;
@@ -23024,6 +23026,45 @@ question it exists for, which is precisely why it is not a phone screen.
 Every guard was mutation-tested: dropping the user scope, counting a drop as a
 set, forgetting the implement count, inverting the cap's order, taking the
 estimate from the top set, and returning empty instead of 404 all go red.
+
+### What review caught, and it was the claim above
+
+Both reviewers found a blocking defect, and the backend one falsified a bullet
+this entry had already written.
+
+**The estimate ignored assisted reps.** The query never selected
+`assisted_reps`, so it called the bare `EstimateOneRM` with the FULL rep count
+while every other 1RM surface in the module routes through `EstimateSetOneRM`,
+which estimates from the reps done unaided. A pull-up of 8 with 3 assisted at
+102.5kg reads **115.3 on the records page and 127.2 here** — and if the athlete
+also recorded RIR on that spotted set, 136.7, because reusing recorded effort
+beside a full count compounds it. So "computed once so the two can never
+disagree" was false at the moment it was written.
+
+Worse, this is a **documented** trap: the comment on `Set` names exactly this
+mistake — a query that does not select `assisted_reps` hydrates every set with
+it permanently nil, and nothing complains. This was the fourth query to walk
+into it. The instrumentation is a comment, and a comment cannot fail a build.
+There is a fixture now, and reverting to the bare call turns it red with those
+two numbers in the message.
+
+**The evidence table stated a false rep count.** It rendered
+`{sets} × {reps}`, but `reps` is the session TOTAL — so five sets of five
+squats read "5 × 25 reps", which any lifter parses as 125. On the same page "×"
+already means reps × weight. Now "5 sets · 25 reps".
+
+Three smaller things worth keeping: the within-session order was unspecified, so
+two sets tying on the estimate could flip the evidence between requests (the
+final ORDER BY carries `position` now); the response spelled the estimate two
+ways (`best_1rm_kg` beside `one_rm_reps`) and wire names freeze on merge, so the
+evidence fields are `best_1rm_*` and carry `assisted_reps` the way `Record`
+does; and the chart's empty state explained rep-max divergence to somebody
+looking at a plank, which is answering a question they did not ask —
+`load_type` was on the response for that and unused.
+
+Neither reviewer found a scoping or cap defect, and the "no index needed"
+judgement was confirmed rather than assumed: migration 000014's
+`session_sets_user_exercise_idx` already prefix-serves the scan.
 
 ### Gaps
 
