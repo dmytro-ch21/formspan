@@ -21781,9 +21781,27 @@ three ways:
 
 | Change | Result |
 |---|---|
-| button posts immediately (the pre-F2 behaviour) | 5 of 5 red |
-| preview shown, but it posts anyway | 3 of 5 red |
-| preview closes on failure, hiding the error | 1 of 5 red |
+| button posts immediately (the pre-F2 behaviour) | red |
+| preview shown, but it posts anyway | red |
+| preview closes on failure, hiding the error | red |
+| **captures the visible card instead of the off-screen one** | red |
+| a dismissed sheet closes the preview | red |
+| a stale error survives a reopen | red |
+
+The last three came from review, and the fourth is the one that mattered: the
+original five tests never asserted **which** ref was captured, so a build doing
+the exact thing this design note forbids passed all of them. The load-bearing
+decision was a comment.
+
+Pinning it produced a second lesson. `expect(mockShareCard).toHaveBeenCalledWith(cardRef)`
+is the natural way to write that assertion, and when it fails it **aborts the
+test runner** — a ref holding a mounted host component is full of circular fiber
+references, and jest's deep-equality printer walks them until the process dies
+with `SIGABRT` and a hex stack. Measured, by running the mutation. Reducing to
+`=== ` first and asserting a boolean means a break reports "expected true,
+received false" and the test name carries the rest. A test whose failure output
+kills the runner is worse than no test: the next person sees a crash, not a
+cause.
 
 A failed capture deliberately leaves the preview **up**, with the message on it.
 Dropping back to the session screen would hide both the error and the card it is
@@ -21793,10 +21811,19 @@ their mind is worse than saying nothing.
 
 ### Open questions this leaves
 
-- **Not seen on a device.** The preview's size is `min(window - 40, 420)`, which
-  is reasoning about phones rather than looking at one. Whether the card, the
-  note and both buttons fit on a small screen without scrolling is unverified —
-  belongs with **L1**.
+- **Not seen on a device**, and two things wait on that. The preview's size is
+  `min(window - 40, 420)` — width only, which is safe *because* `app.json` locks
+  portrait; lift that lock and the buttons go off the bottom in landscape, so
+  the code says so. And the celebration path now puts a **modal over a modal**:
+  nesting is the supported iOS shape and `expo-sharing` walks the presented-VC
+  chain, so the sheet arrives above both — but animation stacking and VoiceOver
+  focus hand-off are things only a device settles. Belongs with **L1**.
+- **The "measured" capture predates the preview.** The verified 1080×1080 export
+  was taken when no modal window sat above the off-screen card. `captureRef`
+  renders the target view's own hierarchy rather than the screen, so occlusion
+  should not matter — but the first device run of this flow is what actually
+  confirms it, and the comment now says that rather than borrowing the older
+  measurement wholesale.
 - **The calorie figure may be absent when the preview opens.** It arrives from
   `/sessions/{id}/card` and the card is complete without it, so a slow network
   means previewing a card that then gains a number before the capture. The

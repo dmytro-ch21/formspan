@@ -265,6 +265,13 @@ export function ShareCardHost({ share }: { share: SessionShare }) {
   // always 1080px square (see `shareCard`); this is only about whether a person
   // can read it, so it takes the window minus the scrim's padding and caps out
   // where a card stops gaining anything from being bigger.
+  //
+  // WIDTH ONLY, which is safe because `app.json` locks the app to portrait: the
+  // card is square, so on the narrowest supported phone it is ~335pt tall and
+  // the note plus buttons still fit. Lift that lock — tablets and iPad
+  // multitasking are the likely pressure — and this needs a height term
+  // (`Math.min(width - 40, height - 200, 420)`) or a scroll view, or the
+  // buttons go off the bottom in landscape.
   const previewWidth = Math.min(width - PREVIEW_INSET * 2, 420);
 
   return (
@@ -291,10 +298,17 @@ export function ShareCardHost({ share }: { share: SessionShare }) {
 
         **It stays the capture source even while the preview is open**, and the
         card is therefore mounted twice for that moment. Capturing the visible
-        one instead would be tidier and is not worth the risk: this path is
-        measured — 1080x1080, verified off a real device — and a preview laid
-        out inside a `Modal` is exactly the "is it really laid out" question that
-        produces blank PNGs.
+        one instead would be tidier and is not worth the risk: a card laid out
+        inside a `Modal` is exactly the "is it really laid out" question that
+        produces blank PNGs, while this path produced a verified 1080x1080
+        export off a real device.
+
+        One honest qualification on that measurement: it was taken BEFORE this
+        preview existed, so no modal window sat above the off-screen card at
+        capture time. `captureRef` renders the target view's own hierarchy
+        rather than the screen, so occlusion should not matter — but "should"
+        is doing work there, and the first device run of this flow is what
+        actually settles it.
       */}
       <RNView
         style={styles.offscreen}
@@ -329,8 +343,14 @@ export function ShareCardHost({ share }: { share: SessionShare }) {
           <RNView style={styles.previewActions}>
             <Pressable
               onPress={cancel}
-              style={styles.previewCancel}
+              // Disabled mid-capture. Otherwise: tap Share, tap Not now before
+              // the sheet appears, and the sheet arrives anyway over the screen
+              // you just returned to — the capture was already in flight and
+              // cancelling the preview never cancelled it.
+              disabled={sharing}
+              style={[styles.previewCancel, sharing && styles.previewCancelBusy]}
               accessibilityRole="button"
+              accessibilityState={{ disabled: sharing }}
               testID="share-preview-cancel"
             >
               <Text style={styles.previewCancelText}>Not now</Text>
@@ -407,6 +427,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   previewCancelText: { fontSize: 16, fontWeight: '700', color: vola.text },
+  previewCancelBusy: { opacity: 0.4 },
   previewShare: {
     flex: 1,
     minHeight: 50,
