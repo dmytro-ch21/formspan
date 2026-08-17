@@ -2280,7 +2280,15 @@ components:
 
 
             A property of the movement, never of a single set, which is why it
-            lives here. Absent reads as `total`, the safe side: it
+            lives here.
+
+
+            Always present on a response — it is in this schema's `required`
+            list, because clients render copy off it ("per hand" on the weight
+            field) and a field that merely happens to be sent is one a later
+            change can drop with nothing failing. Where absence IS still
+            possible — the seed file, and revision snapshots written before the
+            column existed — it reads as `total`, the safe side: it
             under-reports rather than inventing weight nobody lifted.
         instructions:
           type: string

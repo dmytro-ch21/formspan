@@ -579,6 +579,51 @@ export function swapSuggestions(base: Exercise, all: Exercise[]): SwapSuggestion
   };
 }
 
+/**
+ * A session's own volume and set count, computed client-side.
+ *
+ * This lives here rather than inline in the sessions list because the same
+ * three-line reduce there has been wrong THREE times, each time in a way no
+ * check could see: it missed `completed` when progressive volume landed (the
+ * row showed full volume while the detail page showed zero), it missed
+ * `load_factor` when per-side load landed (every dumbbell session read at
+ * half), and it counted drops as sets after #238 split those rules apart.
+ *
+ * Every one of those was a hand-rolled copy of a rule that has a name on the
+ * server, in a component file where nothing in `lib/__tests__` could reach it.
+ * The mobile app learned the same lesson from `localVolume`, which was missed
+ * twice for exactly the same reason and now lives in `lib/sessions.ts`.
+ *
+ * The two figures deliberately disagree about drops, which is the whole point
+ * of the split:
+ *
+ *   - VOLUME keeps them. A drop is weight that was moved.
+ *   - The SET COUNT excludes them. A drop is part of the set it came off —
+ *     one approach to the bar, one rest period.
+ *
+ * Mirrors the backend's `workingSet` / `countsAsSet` predicates; if you change
+ * one of these, that pair is what it has to keep agreeing with.
+ */
+export function sessionVolume(sets: LoggedSet[]): {
+  working_sets: number;
+  tonnage_kg: number;
+} {
+  const working = sets.filter((s) => s.completed && s.set_type !== "warmup");
+  return {
+    working_sets: working.filter((s) => s.set_type !== "drop").length,
+    tonnage_kg: working.reduce(
+      (sum, s) =>
+        sum +
+        (s.reps ?? 0) *
+          (s.weight_kg ?? 0) *
+          // Absent means one, never zero — an older row's volume must
+          // under-report at worst, never vanish.
+          (s.load_factor && s.load_factor > 1 ? s.load_factor : 1),
+      0,
+    ),
+  };
+}
+
 export function describeSet(s: LoggedSet): string {
   const parts: string[] = [];
   if (s.reps != null && s.weight_kg != null)

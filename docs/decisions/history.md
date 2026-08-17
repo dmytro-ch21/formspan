@@ -20752,6 +20752,21 @@ the comment directly above it explains that the `completed` half was forgotten
 when progressive volume landed. Two different omissions, one expression,
 because it is a hand-rolled copy of a rule that has a name everywhere else.
 
+Review then found a **third** bug on the same three lines: the row's set count
+was `working.length`, drops included — which the comment this branch had just
+added two lines above explicitly said was handled. The reviewer's point was
+sharper than the bug: a reader now believed it was correct.
+
+Three silent failures on one expression is not bad luck, it is a location. It
+was a hand-rolled copy of a server rule sitting in a component file, where
+nothing in `lib/__tests__` could reach it. So it moved: `sessionVolume()` in
+`lib/api.ts`, with the drop split stated once and **nine tests, one per
+historical bug plus the properties around them**, all mutation-checked. This is
+the same lesson `localVolume` taught on the phone — missed twice, for the same
+reason, and fixed the same way in #238. Two apps have now learned it
+independently; the rule is that a figure an athlete compares across screens
+does not live in a screen.
+
 ### What is now enforced rather than merely true
 
 `GET /v1/exercises` has always returned `load_mode`, and nothing checked it.
@@ -20766,6 +20781,16 @@ reads the column directly in SQL and never goes near that path.
 and `List` separately, since they are two statements sharing one column list.
 Mutation-tested: aliasing the column to a constant fails it.
 
+Review then found the corollary: **one read path's `load_mode` does not come
+from the column at all.** A revision is a JSON snapshot, and
+`exercise_revisions` (000039) predates the column (000052), so a revision
+written between those deploys has no `load_mode` key — it unmarshals to `""`
+and went out as `"load_mode": ""`, which satisfies `required` (the key is
+there) while violating the property's own `enum`. Normalised on read now,
+mirroring what the write path already did. Restoring such a revision was always
+safe, because `updateWithin` never writes the column and the RETURNING re-reads
+the real one; it was only *reading* that advertised an illegal value.
+
 ### Gaps
 
 - **Not device-verified, and not browser-verified either.** The mobile copy is
@@ -20779,6 +20804,18 @@ Mutation-tested: aliasing the column to a constant fails it.
   dumbbell work — but making the total visible makes the inconsistency visible
   with it. `L4` covers it and is untouched here; this change raises its
   priority rather than resolving it.
+- **The template planners now carry the hint too**, which was not in the
+  original scope and should have been. A target weight PREFILLS the logged
+  weight verbatim and the server then applies the ×2, so an athlete typing the
+  pair's total into a plan gets a session doubled from an already-doubled
+  number — the one place "which number do I type?" was still asked and left
+  unanswered. Both editors say it now.
+- **The copy is implement-neutral, and the first draft was not.** It said
+  "enter one dumbbell" — wrong on 58 of the 142, since 57 are kettlebell and
+  one is farmer-handles, including every double-kettlebell movement where "not
+  the pair" is otherwise exactly right. This entry recorded the 85/57/1 split
+  as the reason mobile's "per hand" works everywhere, and the web copy named
+  the implement anyway; review caught it.
 - **The feed and share-card `figure` strings are still un-annotated.** They are
   formatted in Go (`fmt.Sprintf("%g kg × %d")`) from queries that never select
   `load_mode`, so a friend's card shows the one-dumbbell number with no total.

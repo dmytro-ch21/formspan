@@ -764,12 +764,18 @@ function ExerciseBlock({
               quantities that do not agree.
 
               Only the non-unilateral half doubles, so only it claims a total.
-              Saying "counts both" on a one-arm row would be a straight lie. */}
+              Saying "counts both" on a one-arm row would be a straight lie.
+
+              Implement-neutral on purpose: 57 of the 142 per-side exercises
+              are kettlebell and one is farmer-handles, so naming the dumbbell
+              would be wrong on 58 of them — including every double-kettlebell
+              movement, where "not the pair" is otherwise exactly the right
+              thing to say. "What one hand holds" is true of all three. */}
           {exercise?.load_mode === "per_side" && (
             <p className="text-xs text-text-dim">
               {exercise.is_unilateral
-                ? "Weight is per hand — enter the one dumbbell you lift."
-                : "Weight is per hand — enter one dumbbell, not the pair. Volume counts both."}
+                ? "Weight is per hand — enter what the working hand holds."
+                : "Weight is per hand — enter what one hand holds, not the pair. Volume counts both."}
             </p>
           )}
         </div>

@@ -711,6 +711,16 @@ function ItemRow({
           {exercise?.is_unilateral && (
             <Text style={styles.hint}>Per side — 8 reps here means 8 each side.</Text>
           )}
+          {/* The same question the logger now answers, asked here too — and
+              this is the surface where getting it wrong compounds. A target
+              weight PREFILLS the logged weight verbatim, and the server then
+              applies the ×2 on read, so an athlete who types the pair's total
+              into a plan gets a session doubled from an already-doubled
+              number. Implement-neutral wording: 57 of the 142 per-side
+              exercises are kettlebell and one is farmer-handles. */}
+          {exercise?.load_mode === 'per_side' && (
+            <Text style={styles.hint}>Weight is per hand — what one hand holds, not the pair.</Text>
+          )}
 
           <View style={styles.itemActions}>
             <Pressable
