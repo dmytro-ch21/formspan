@@ -57,7 +57,7 @@ export type Exercise = {
    * Distinct from `is_unilateral`, which is how many LIMBS work, and the
    * distinction is why this column exists: a dumbbell walking lunge is two
    * implements and one leg. The factor used to be derived from those two
-   * flags together, which could not express that — see migration 000056.
+   * flags together, which could not express that — see migration 000057.
    */
   implements?: number;
   is_unilateral: boolean;

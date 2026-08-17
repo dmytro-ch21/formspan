@@ -767,7 +767,7 @@ function ExerciseBlock({
 
               The doubling claim keys on `implements`, NOT on `is_unilateral`.
               It used to key on the flag, which was the retired derivation — and
-              since migration 000056 a dumbbell walking lunge is per_side AND
+              since migration 000057 a dumbbell walking lunge is per_side AND
               unilateral AND counts both, so the old test rendered "the working
               hand" beside a total that visibly doubled.
 

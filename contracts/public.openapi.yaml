@@ -1651,9 +1651,14 @@ components:
             dumbbells. Total load is `weight_kg x load_factor`.
 
 
-            RESPONSE ONLY — assigned from the exercise's `load_mode`, which is a
-            property of the movement. A client sending it is asserting something
-            about a catalog row it does not own, so writes ignore it.
+            RESPONSE ONLY — assigned from the exercise's `implements`, which is
+            a property of the movement. A client sending it is asserting
+            something about a catalog row it does not own, so writes ignore it.
+
+
+            Was derived from `load_mode` and `is_unilateral` together until
+            migration 000057; see `implements` on the Exercise schema for why
+            that could not express a movement with two implements and one limb.
 
 
             Absent means 1. Older clients and sets logged before this existed
@@ -2300,10 +2305,15 @@ components:
         is_unilateral:
           type: boolean
           description: >
-            Affects volume maths — 8 reps per side is not 8 reps. Together with
-            `load_mode` it decides a logged set's `load_factor`: a per_side
-            exercise doubles unless it is unilateral, because then only one
-            implement is moving.
+            How many LIMBS work at a time — one, when true. Drives the "8 reps
+            here means 8 each side" hint, and nothing else.
+
+
+            **It no longer decides a set's `load_factor`**, and the sentence
+            that said so was retired with migration 000057. Reading this as
+            "one implement moves" is precisely the conflation that broke the
+            lunge family: a dumbbell walking lunge is two implements and one
+            leg. The factor is `implements`.
         implements:
           type: integer
           enum: [1, 2]
@@ -3289,7 +3299,7 @@ components:
             dumbbell walking lunge is two implements and one leg; the factor
             used to be derived from those two flags together and could not say
             that, so the catalog was internally inconsistent by equipment. See
-            migration 000056.
+            migration 000057.
 
 
             Omitting it on a POST defaults to 1. Omitting it on a PATCH leaves

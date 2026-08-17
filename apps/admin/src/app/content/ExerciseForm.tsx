@@ -357,7 +357,7 @@ export function ExerciseForm({
         {/* THREE questions, and this screen is where they get confused.
             Replaces a note that taught the retired rule ("only per_side
             movements that are not unilateral double"), which since migration
-            000056 is false — and worse than false here, because an author who
+            000057 is false — and worse than false here, because an author who
             believed it would untick unilateral to buy a doubling, recreating
             the exact forced error that migration exists to end.
 

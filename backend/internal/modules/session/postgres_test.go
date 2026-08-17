@@ -63,7 +63,7 @@ type fixtureExercise struct {
 	loadType string
 	loadMode string
 	// How many implements of the logged weight move. THIS is the tonnage
-	// factor now (migration 000056); it used to be derived from `load_mode`
+	// factor now (migration 000057); it used to be derived from `load_mode`
 	// and `is_unilateral` together, a rule that could not express a movement
 	// with two implements and one limb.
 	//

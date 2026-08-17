@@ -1,6 +1,11 @@
 package exercise
 
-import "testing"
+import (
+	"net/http"
+	"strconv"
+	"strings"
+	"testing"
+)
 
 // `implements` exists because the old tonnage rule asked one question and read
 // the answer to another.
@@ -120,4 +125,50 @@ func isLungeFamily(id string) bool {
 		}
 	}
 	return false
+}
+
+// The 400, at the handler. The repository-level tests cover create, preserve
+// and correct; this covers the branch in `decodeExercise` that refuses a count
+// the column could never hold — which had no coverage at all.
+func TestAnImpossibleImplementCountIsRejected(t *testing.T) {
+	for _, n := range []string{"0", "3", "-1"} {
+		body := `{"name":"X","sport":"strength","movement_pattern":"squat",` +
+			`"load_type":"reps","implements":` + n + `}`
+		rec := post(t, NewContentHandler(newFakeRepo()), body)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("implements=%s got status %d, want 400: %s", n, rec.Code, rec.Body)
+			continue
+		}
+		if !strings.Contains(rec.Body.String(), "implements") {
+			t.Errorf("the refusal for implements=%s does not name the field: %s", n, rec.Body)
+		}
+	}
+}
+
+func TestBothLegalImplementCountsAreAccepted(t *testing.T) {
+	// Or the refusal above proves only that the check fires on everything.
+	for _, n := range []int{1, 2} {
+		repo := newFakeRepo()
+		body := `{"name":"X","sport":"strength","movement_pattern":"squat",` +
+			`"load_type":"reps","implements":` + strconv.Itoa(n) + `}`
+		if rec := post(t, NewContentHandler(repo), body); rec.Code != http.StatusOK {
+			t.Fatalf("implements=%d got status %d: %s", n, rec.Code, rec.Body)
+		}
+		if repo.lastWritten.Implements != n {
+			t.Fatalf("the handler stored implements=%d, want %d", repo.lastWritten.Implements, n)
+		}
+	}
+}
+
+// And a create that never mentions it is still accepted, defaulting to 1 —
+// otherwise the check above would have made the field mandatory on every
+// existing caller and every single-implement exercise.
+func TestACreateWithoutImplementsDefaultsToOne(t *testing.T) {
+	repo := newFakeRepo()
+	if rec := post(t, NewContentHandler(repo), validCreate); rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	if repo.lastWritten.Implements != 1 {
+		t.Fatalf("stored implements=%d, want 1", repo.lastWritten.Implements)
+	}
 }

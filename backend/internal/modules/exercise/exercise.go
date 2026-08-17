@@ -177,7 +177,7 @@ type Exercise struct {
 	// by deriving `load_mode = 'per_side' AND NOT is_unilateral`. That
 	// derivation read `is_unilateral` — one LIMB at a time — as though it meant
 	// one IMPLEMENT, and could not express a dumbbell walking lunge: two
-	// implements, one leg. See migration 000056.
+	// implements, one leg. See migration 000057.
 	//
 	// Zero means "not recorded" and reads as 1, so a row written by code that
 	// predates the column under-reports rather than inventing weight.

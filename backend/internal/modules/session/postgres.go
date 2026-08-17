@@ -240,10 +240,17 @@ const SQLCountsAsSet = SQLWorkingSet + ` AND ss.set_type <> 'drop'`
 // NULL and silently leaving the sum — hence the COALESCE, which is what makes
 // that retired row count once rather than zero.
 //
+// That state is UNREACHABLE today: `session_sets_exercise_id_fkey` is NO
+// ACTION, so an exercise with sets against it cannot be deleted and the LEFT
+// JOIN can never miss. The COALESCE is therefore armed rather than load-bearing
+// — and it has no test, because none can be written through the public surface.
+// If that foreign key is ever weakened to allow a hard delete, this is the line
+// that keeps a retired exercise's history from silently leaving every total.
+//
 // Reads `implements` directly. It used to derive the factor as
 // `load_mode = 'per_side' AND NOT is_unilateral`, which read "one LIMB at a
 // time" as though it meant "one IMPLEMENT" — and could not express a dumbbell
-// walking lunge, which is two implements and one leg. See migration 000056.
+// walking lunge, which is two implements and one leg. See migration 000057.
 const SQLTonnage = `ss.reps * ss.weight_kg * COALESCE(e.implements, 1)`
 
 // History rolls a date range up per calendar day, plus totals for the period

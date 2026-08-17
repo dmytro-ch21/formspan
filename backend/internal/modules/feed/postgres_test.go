@@ -114,7 +114,7 @@ func seedExercise(t *testing.T, pool *pgxpool.Pool, id string) string {
 // compared kept being true while meaning nothing.
 //
 // `implements` is derived here rather than passed, because it is the tonnage
-// factor since migration 000056 and every caller of this helper wants the
+// factor since migration 000057 and every caller of this helper wants the
 // ordinary reading: a per-side row is a PAIR. A caller needing the one-armed
 // case would set it explicitly — and would be the first, which is why it is
 // not a parameter yet.

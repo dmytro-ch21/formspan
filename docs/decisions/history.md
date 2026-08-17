@@ -22333,8 +22333,51 @@ per-side CASE could have been deleted entirely — so an unset `implements`
 defaulted to 1 and `TestHistoryAgreesWithSummarise` caught the halving
 immediately. `feed`'s `seedExerciseAs` had the same gap. Both now set it.
 
+### What review found
+
+**`Restore` halved it again** — the same bug the grip work shipped, on the
+column that had just replaced the derived factor. `Restore` feeds a revision's
+JSON to `updateWithin`, and this change put `implements` in that SET clause;
+every revision predates the column, so every snapshot unmarshals to 0 and
+`NormalizeImplements` reads that as 1. Restoring a description edit halved a
+pair of dumbbells. The `load_mode` guard sits directly above it and its own
+comment says the two must stay in step; they did not, for one commit. Both
+share one SELECT now, absent-key only, with three tests.
+
+**Two screens still taught the retired rule.** Web's session hint keyed "Volume
+counts both" on `!is_unilateral`, so a dumbbell walking lunge — now per_side AND
+unilateral AND doubling — rendered "enter what the working hand holds" beside a
+total that visibly doubled. The console's note said "only per_side movements that
+are not unilateral double", which on an authoring screen is worse than false: an
+author who believed it would untick unilateral to buy the doubling, recreating
+the forced error this migration exists to end. The contract said it too, three
+lines above the new field contradicting it.
+
+**Migration step 3 is unguarded, and that is now recorded rather than assumed.**
+Deleting the `LIKE '%lunge%'` UPDATE turns nothing red: the Go tests read
+`SeedData()`, and no test can re-run a migration against pre-migration rows. Two
+things compensate — the deploy runs `seed` straight after `migrate`, and the
+upsert's change-detection tuple now includes `implements`, so every
+`source='seed'` row converges regardless. **The residual exposure is
+admin-authored rows**, for which step 3 is the only corrector, since the seeder
+skips them by design. Verified instead by replicating the migration over the
+762-row catalog and diffing against the corrected `exercises.json`: zero
+mismatches, so a migrated database and a freshly seeded one agree exactly.
+
+**The `COALESCE` is armed, not load-bearing.** `session_sets_exercise_id_fkey`
+is NO ACTION, so an exercise with sets cannot be deleted and the LEFT JOIN can
+never miss — removing the COALESCE passes the whole suite, and no test can be
+written through the public surface. Left in place with a comment saying so, for
+the day that foreign key is weakened.
+
 ### Gaps
 
+- **Two rows are a judgment call nobody has confirmed.**
+  `kettlebell-lunge-press` and `kettlebell-rotational-lunge` keep `implements =
+  2`, unchanged by this work, but both are commonly single-bell movements. The
+  catalog's structure supports the paired reading — the single-bell analogues
+  exist separately as `total` rows — and if it is wrong it predates this
+  change. Worth a human eye.
 - **Only the lunge family was swept.** `implements` was backfilled from the old
   derived rule, so every other row inherits whatever that rule said — including
   any other movement held with two implements while working one limb. The lunge

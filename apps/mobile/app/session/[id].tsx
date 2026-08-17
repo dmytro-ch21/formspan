@@ -2131,7 +2131,7 @@ function SetRow({
               // one-arm dumbbell row is entered per hand exactly like a
               // dumbbell bench press, and only the bench press doubles.
               //
-              // The factor is the exercise's `implements` (migration 000056),
+              // The factor is the exercise's `implements` (migration 000057),
               // which the server applies before this screen sees it — so the
               // total on the row summary answers "how much moved" while this
               // answers "what do I type", and neither has to know the other.

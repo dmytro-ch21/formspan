@@ -7,7 +7,7 @@ import "testing"
 //
 // `Restore` feeds a revision's JSON payload to `updateWithin`, and this change
 // put `implements` in that UPDATE's SET clause. Every revision in existence
-// predates migration 000056, so every snapshot has no `implements` key: it
+// predates migration 000057, so every snapshot has no `implements` key: it
 // unmarshals to 0, `NormalizeImplements` reads that as 1, and restoring a
 // description edit silently halves a pair of dumbbells. CHECK passes, 200
 // returned, and the console's revision list renders only the name.
@@ -24,7 +24,7 @@ func TestRestoringAPreImplementsRevisionDoesNotHalveTheExercise(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	// A snapshot shaped the way pre-000056 code wrote one: no `implements` key.
+	// A snapshot shaped the way pre-000057 code wrote one: no `implements` key.
 	// Literal JSON rather than a marshalled Exercise, because the current
 	// struct always emits the key and would reproduce today's shape instead.
 	if _, err := repo.pool.Exec(ctx, `
@@ -92,7 +92,7 @@ func TestRestoringAModernRevisionAppliesItsImplements(t *testing.T) {
 	}
 }
 
-// A pre-000056 revision must not be SERVED with `"implements": 0` either: the
+// A pre-000057 revision must not be SERVED with `"implements": 0` either: the
 // contract's enum admits 1 and 2, on a field this change made required.
 func TestAnOldRevisionReportsALegalImplementCount(t *testing.T) {
 	repo, ctx, id := contentFixture(t)

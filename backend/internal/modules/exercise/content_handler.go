@@ -63,7 +63,7 @@ type exerciseRequest struct {
 	// a spelling mistake.
 	LoadMode *string `json:"load_mode"`
 	// How many implements of the logged weight move — the tonnage factor since
-	// migration 000056. Absent leaves the stored value alone; present and
+	// migration 000057. Absent leaves the stored value alone; present and
 	// outside {1,2} is a 400, for the same reason a bad load_mode is.
 	Implements   *int    `json:"implements"`
 	IsUnilateral *bool   `json:"is_unilateral"`
