@@ -20660,10 +20660,23 @@ rule.
 
 The count is right. `sets` there is never displayed: it feeds
 `energy.StrengthBlocks`, which asks how much work the body did, and a drop is
-another bout under load whatever it is called on screen. Aligning it with the
-display rule would lower the calorie estimate for every session containing a
-drop, and **nothing on any screen would look wrong** — which is what makes it
-worth a comment rather than a shrug. It now says it is the deliberate
+another bout under load whatever it is called on screen. Aligning it with the display rule would
+change the calorie estimate for **some** sessions — the count reaches the output
+only as a density proxy (`sets/minutes >= 0.5` picks the circuit-like MET), so
+most drop-containing sessions would not move at all — and it would also shift
+the displayed VOLA Score, since the same `WHERE` feeds the effort average.
+**Nothing on any screen would look wrong** either way, which is what makes it
+worth a comment rather than a shrug.
+
+Review corrected all three load-bearing claims in the first draft of that
+comment: it said "the one place", "every displayed count" and "every session
+containing a drop", and none of the three was true. `MostTrainedExercises`
+is a second deliberate holdout and says so itself; checking "every displayed
+count" turned up **W4** — the web sessions list renders two "Working sets"
+figures on one page under two different rules, W2 still alive there because
+#238 consolidated the mobile clients only. A PR whose entire content is a claim
+about the codebase is the one where a reviewer checking the claim earns the
+most. It now says it is the deliberate
 exception, and says it to the person most likely to change it: somebody
 grepping `set_type` while making the counts agree.
 
@@ -20679,7 +20692,7 @@ way through the same work. The duplicate was discarded rather than merged: its
 diff against `main` was 1,310 deletions, because a branch cut before four
 merges reverts them. `TASKS.md` is ordered by what an athlete would notice and
 has no claim mechanism, so two agents reading it will reliably pick the same
-top item; H1 and H2 carry an ad-hoc *"In progress — spun off"* note and nothing
+top item; **H1** carries an ad-hoc *"In progress — spun off"* note and nothing
 else does. The two items above are the only part of that branch `main` did not
 already have — review findings rather than code.
 

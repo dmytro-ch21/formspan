@@ -181,20 +181,34 @@ func (r *PostgresRepository) calories(
 // back-off, drop, AMRAP and failure set, so the effort average ignored the
 // hardest set of a session that ended on an AMRAP.
 //
-// **It is deliberately NOT `session.countsAsSet`, and this is the one place in
-// the codebase where that is true.** Since #238 there are two rules: the
-// narrower `countsAsSet` excludes drops, because a drop is part of the set
-// above it and the athlete did not do another set. Every DISPLAYED count uses
-// it — the session tile, Today, the calendar, the feed, history.
+// **It is deliberately NOT `session.countsAsSet`.** Since #238 there are two
+// rules: the narrower `countsAsSet` excludes drops, because a drop is part of
+// the set above it and the athlete did not do another set. It is the rule for
+// counts an athlete READS. This is one of two queries that deliberately keep
+// the wider one — the other is `session.MostTrainedExercises`, which says so
+// itself.
 //
-// `sets` here is never displayed. It feeds `energy.StrengthBlocks`, which is
-// asking how much work the body did, and a drop is unambiguously more work: it
-// is another bout under load, whatever it is called on screen. Aligning this
-// with the display rule would quietly lower the calorie estimate for every
-// session containing a drop, and nothing on any screen would look wrong.
+// `sets` here is never displayed. It reaches `energy.StrengthBlocks`, where it
+// is a DENSITY proxy rather than a quantity of work: `workingSets/minutes >=
+// 0.5` picks the "circuit-like" MET over the general one, and only when the
+// session was loaded but had no heavy compounds. On that ground a drop belongs
+// in the count more clearly than "it is more work" would suggest — it is an
+// extra bout at near-zero rest, which is exactly the density the threshold is
+// looking for.
+//
+// So aligning this with the display rule would change the calorie estimate for
+// SOME sessions — those near the threshold, not every session with a drop, and
+// never upward — and nothing on any screen would look wrong. That silence is
+// the reason this comment exists.
+//
+// And the blast radius is wider than the calories. This `WHERE` also drives
+// `effort`, the AVG of RPE/RIR that `r.score` turns into the displayed VOLA
+// Score. Drops can carry an RPE — no schema constraint or editor stops one —
+// so appending `AND ss.set_type <> 'drop'` here moves a number the athlete can
+// see, by a route that looks like it only touches calories.
 //
 // Two rules, on purpose. If you are here because a grep for `set_type` turned
-// this up while making the counts agree, this is the one to leave alone.
+// this up while making the counts agree, this is one to leave alone.
 func (r *PostgresRepository) liftEffort(
 	ctx context.Context, callerID, id string,
 ) (effort float64, sets int, loaded, heavy bool, err error) {

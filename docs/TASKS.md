@@ -25,6 +25,7 @@ These contradict each other or overstate what the athlete did. Visible without l
 - [x] **W1** — 1RM estimate counts spotted reps. Nothing reads `soloReps`, so a spotted 8×102.5 estimates ~127 kg where honest solo-5 is ~115; also sets rep PRs not completed unaided. Done together with T1 — #231. (#226)
 - [x] **W2** — A drop counts as a set in the Sets tile but not in the row numbers, so one screen shows both answers. Cross-stack: `localVolume` must match the server, and the same figure feeds Today and the calendar. — done #238, a drop no longer counts as a set but still contributes volume (#227)
 - [ ] **W3** — Per-side load is right everywhere but unexplained: no "enter one dumbbell" hint, no `30 kg × 2 = 60` on a logged set. The athlete can do that maths and conclude the app is wrong. (#224)
+- [ ] **W4** — The web sessions list shows two "Working sets" figures on one page under two different rules. The totals strip reads the server's `working_sets` (drops excluded, #238); each `SessionRow` recomputes `s.completed && s.set_type !== 'warmup'` client-side (drops included). Same label, same screen, two answers — W2 exactly, still alive on web because #238 consolidated the MOBILE clients only. (#238)
 
 ## T — Traps set for the next change
 
@@ -50,7 +51,7 @@ Each compiles, passes its tests, and is wrong. Read before starting the related 
 - [ ] **N5** — Weight check-in graph (weekly/monthly/yearly), on mobile. Needs CLAUDE.md's platform rule amended — agreed that a trend read in 3 seconds is decision-support, not analysis.
 - [ ] **N6** — Per-exercise load over time. Same platform-rule amendment; pairs with **N5**.
 - [ ] **N7** — Point the camera at a machine. Can't be trained on our library (8 images for 504 exercises); works as a Claude vision call with an equipment-filtered shortlist. ~1–3 s, ~$0.005/call. After logging is solid.
-- [ ] **N8** — One working-set rule the four copies read instead of restating. `countsAsSet` exists as a Go predicate (`session.Summarise`), a SQL string (`session/postgres.go`), a **second, inline SQL copy** (`feed/postgres.go`), and a TS predicate (`lib/sessions.ts`). #238 taught all four together and consolidated the clients onto the TS one — the remaining risk is the feed's, which restates the predicate rather than importing the constant one package over, and is pinned only by its own fixture. A fifth copy would be silent. Made sharper by the count/tonnage split: the tempting one-predicate tidy-up deletes every drop's tonnage. (#238)
+- [ ] **N8** — One working-set rule the four copies read instead of restating. `countsAsSet` exists as a Go predicate (`session.Summarise`), a SQL string (`session/postgres.go`), a **second, inline SQL copy** (`feed/postgres.go`), and a TS predicate (`lib/sessions.ts`). #238 taught all four together and consolidated the MOBILE clients onto the TS one (web still recomputes its own — see **W4**) — the remaining risk is the feed's, which restates the predicate rather than importing the constant one package over, and is pinned by a test that does cross-check it against `session.Summarise`, over a fixture that has to remember to contain a drop. A fifth copy would be silent. Made sharper by the count/tonnage split: the tempting one-predicate tidy-up deletes every drop's tonnage. (#238)
 
 ## L — Recorded, low
 
