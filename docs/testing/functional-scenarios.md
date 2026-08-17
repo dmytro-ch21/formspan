@@ -6666,7 +6666,8 @@ whole user-visible property.
 ## Body check-ins and phases (`/v1/body`, mobile Today + check-in screen)
 
 Logged on the phone by the platform rule — a bathroom scale is not a desk. The
-analytical surface (history, charts) stays on web and does not exist yet.
+analytical surface (history, comparison, export) stays on web and does not exist
+yet. The one exception is the weight trend below — see CLAUDE.md's carve-out.
 
 ### The daily check-in
 

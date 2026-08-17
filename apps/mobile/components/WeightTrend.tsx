@@ -5,8 +5,8 @@ import Svg, { Circle, Path } from 'react-native-svg';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
-import { MIN_TREND_READINGS, type Measured } from '@/lib/anthropometry';
-import { formatWeight, toDisplayWeight, weightUnit, type UnitSystem } from '@/lib/units';
+import { daysBetween, MIN_TREND_READINGS, type Measured } from '@/lib/anthropometry';
+import { toDisplayWeight, weightUnit, type UnitSystem } from '@/lib/units';
 import {
   buildTrendSeries,
   RANGES,
@@ -76,7 +76,7 @@ export function WeightTrend({
   );
   const bounds = useMemo(() => trendBounds(series), [series]);
 
-  const span = Math.max(1, RANGE_LEN(series.from, series.to));
+  const span = Math.max(1, daysBetween(series.from, series.to));
   const x = (p: TrendPoint) => (p.day / span) * W;
   const y = (kg: number) =>
     bounds ? H - PAD_Y - ((kg - bounds.min) / (bounds.max - bounds.min)) * (H - PAD_Y * 2) : H / 2;
@@ -89,7 +89,12 @@ export function WeightTrend({
     .map((seg) => seg.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(p)},${y(p.kg)}`).join(' '));
   const lonely = series.segments.filter((seg) => seg.length === 1).map((seg) => seg[0]);
 
-  const enough = series.segments.length > 0;
+  // Readings without a line still get drawn. `MIN_TREND_READINGS` is three
+  // readings inside a TRAILING WEEK, so somebody who weighs in every Sunday
+  // never satisfies it — and the old gate showed them an empty box forever
+  // while a year of their data sat in `series.readings`. Review caught it.
+  const anyData = series.segments.length > 0 || series.readings.length > 0;
+  const hasLine = series.segments.length > 0;
 
   return (
     <View style={styles.card}>
@@ -102,7 +107,7 @@ export function WeightTrend({
               <Pressable
                 key={r.key}
                 onPress={() => setRange(r.key)}
-                hitSlop={8}
+                hitSlop={12}
                 style={[styles.range, on && { backgroundColor: accent.accent }]}
                 accessibilityRole="button"
                 accessibilityState={{ selected: on }}
@@ -116,10 +121,12 @@ export function WeightTrend({
         </RNView>
       </RNView>
 
-      {enough ? (
+      {anyData ? (
         <>
           <Text style={styles.delta} testID="trend-delta">
-            {series.deltaKg == null
+            {!hasLine
+              ? `Weigh in ${MIN_TREND_READINGS} times in a week for a trend line`
+              : series.deltaKg == null
               ? // Not "0 kg". The line does not reach both edges of the window,
                 // so the honest answer is that this range cannot be summarised
                 // — see `deltaKg`.
@@ -128,7 +135,21 @@ export function WeightTrend({
                   toDisplayWeight(series.deltaKg, units),
                 )} ${weightUnit(units)} this ${range}`}
           </Text>
-          <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`}>
+          {/* The delta line above is the text alternative when there IS one;
+              when there is not, the chart would otherwise be silent, so the
+              shape is described here rather than left to the picture. */}
+          <Svg
+            width="100%"
+            height={H}
+            viewBox={`0 0 ${W} ${H}`}
+            accessible
+            accessibilityRole="image"
+            accessibilityLabel={`Weight over the last ${range}, ${
+              series.readings.length
+            } readings${
+              hasLine ? '' : ', not enough for a trend line'
+            }`}
+          >
             {series.readings.map((p) => (
               <Circle
                 key={`${p.on}-r`}
@@ -154,26 +175,15 @@ export function WeightTrend({
               <Circle key={`${p.on}-t`} cx={x(p)} cy={y(p.kg)} r={3} fill={accent.accent} />
             ))}
           </Svg>
-          <RNView style={styles.foot}>
-            <Text style={styles.bound}>{formatWeight(bounds ? bounds.min : null, units)}</Text>
-            <Text style={styles.bound}>{formatWeight(bounds ? bounds.max : null, units)}</Text>
-          </RNView>
         </>
       ) : (
         // The same honesty the check-in card uses: say there is not enough
         // rather than drawing a confident line through two points.
         <Text style={styles.empty} testID="trend-empty">
-          {`Weigh in on ${MIN_TREND_READINGS} days and the trend appears here.`}
+          Weigh in and your trend appears here.
         </Text>
       )}
     </View>
-  );
-}
-
-/** Days between the window's ends, so `day` maps onto the full width. */
-function RANGE_LEN(from: string, to: string): number {
-  return Math.round(
-    (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000,
   );
 }
 
@@ -189,7 +199,5 @@ const styles = StyleSheet.create({
   range: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, borderWidth: 1, borderColor: vola.line },
   rangeText: { fontSize: 12 },
   delta: { fontSize: 15 },
-  foot: { flexDirection: 'row', justifyContent: 'space-between' },
-  bound: { fontSize: 11, opacity: 0.5 },
   empty: { fontSize: 14, opacity: 0.7, paddingVertical: 24, textAlign: 'center' },
 });

@@ -70,7 +70,7 @@ Each compiles, passes its tests, and is wrong. Read before starting the related 
 
 ## L — Recorded, low
 
-- [ ] **L1** — Nothing on the phone has been seen on a phone: share card, feed, drop indent, `↳`, Assisted field placement. Typechecked and tested, never looked at. (#210 #227) **Now also N4's timer field and the play button it puts on a squat** — built and tested, never seen on a device. (#259)
+- [ ] **L1** — Nothing on the phone has been seen on a phone: share card, feed, drop indent, `↳`, Assisted field placement. Typechecked and tested, never looked at. (#210 #227) **Now also N4's timer field and the play button it puts on a squat** — built and tested, never seen on a device. (#259) **And N5's weight chart** — an SVG whose readability genuinely cannot be inferred from a passing test. (#261)
 - [ ] **L2** — A drop dragged away from its parent re-parents. Inherent cost of expressing the relationship as order, since row ids are regenerated every save. (#227)
 - [ ] **L3** — `dropsOf` has no consumer. Mirrors the server for whatever reads a drop group next; dead code until then. (#227)
 - [ ] **L4** — 1RM and tonnage read `weight_kg` differently. Deliberate (a per-hand 1RM is what lifters quote) but nothing tells a client. (#224)

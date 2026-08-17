@@ -22759,11 +22759,46 @@ also exactly the failure the "reaches back before the window" property describes
 easy to get wrong, invisible in the output, and it looks like a shape rather than
 a bug.
 
+### What review found
+
+Four things, one of them a bug the repo had already banned in writing:
+
+- **`toISOString().slice(0, 10)` is the UTC date**, and `app/(tabs)/index.tsx`
+  carries a comment forbidding exactly that idiom, twenty lines from code I had
+  read. Check-ins are dated by the LOCAL calendar day. West of Greenwich an
+  evening opens the chart on an empty "tomorrow"; east of Greenwich a morning
+  weigh-in is dated past the window's right edge and dropped as a FUTURE
+  reading — invisible on the day it was logged. The `TZ=America/Los_Angeles`
+  suite exists for this class and did not catch it, because the lib takes
+  `today` as a parameter and nothing tested the screen's own computation.
+- **An athlete who weighs in weekly saw an empty box forever.** The gate was
+  "is there a trend line", and `MIN_TREND_READINGS` means three readings inside
+  a trailing WEEK — a Sunday-only weigher never qualifies, while a year of their
+  readings sat unused in the series. The dots now draw without the line.
+- **The footer printed the padded axis bounds** as two numbers under the chart,
+  min on the left and max on the right, where a time axis puts start and end. On
+  a falling trend that reads as weight going up, and neither number is one the
+  athlete ever recorded. Removed — which also settles the carve-out's own "no
+  axes to read values off" condition, which it was quietly violating.
+- **The carve-out could be read as excluding its own first instance.** It banned
+  a "date-range picker" while the screen ships a week/month/year switcher, so it
+  now says explicitly that three preset windows all ending today are one
+  question at three depths, and that a picker is free start and end dates —
+  which is comparison, and comparison stays on web.
+
+Review also found three mutations my tests did NOT catch: an off-by-one in a
+reading's day (every dot shifts right and today's weigh-in falls off the
+window), bounds taken from the readings alone (the left-edge trend can sit above
+every in-window reading and would be clipped outside the box), and the delta's
+magnitude, which was only sign-checked. All three are pinned now — the delta
+against `trendWeight` itself, so the test pins the arithmetic without this file
+growing a second opinion about what a mean is.
+
 ### Open questions this leaves
 
-- **Not seen on a device.** Same debt as N4, folded into **L1** — the chart, the
-  range switcher and the empty state have been typechecked and tested, never
-  looked at. An SVG chart is the kind of thing where "renders" and "reads well"
+- **Not seen on a device.** Same debt as N4, and **L1** now names this chart
+  specifically — the range switcher and the empty state have been typechecked
+  and tested, never looked at. An SVG chart is the kind of thing where "renders" and "reads well"
   are genuinely different, so this one is worth a look before it is trusted.
 - **Girths get no chart**, though the data is there and the same builder would
   serve. Left out because each site is a weekly measurement with a tape error

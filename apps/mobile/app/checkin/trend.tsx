@@ -6,6 +6,7 @@ import { Text } from '@/components/Themed';
 import { WeightTrend } from '@/components/WeightTrend';
 import { RANGE_DAYS } from '@/lib/weightTrend';
 import { shiftDate } from '@/lib/anthropometry';
+import { dayString } from '@/lib/calendar';
 import { listCheckins, type Checkin } from '@/lib/body';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
@@ -44,7 +45,15 @@ export default function WeightTrendScreen() {
   const { units } = useUnits();
   const [checkins, setCheckins] = useState<Checkin[] | null>(null);
   const [failed, setFailed] = useState(false);
-  const today = new Date().toISOString().slice(0, 10);
+  // `dayString`, NOT `toISOString().slice(0,10)`. That is the UTC date, and
+  // this repo already banned it once in review (`app/(tabs)/index.tsx`): check-
+  // ins are dated by the LOCAL calendar day, so west of Greenwich an evening
+  // opens the chart on an empty "tomorrow", and east of Greenwich a morning
+  // weigh-in is dated past the window's right edge and dropped as a future
+  // reading — invisible, on the day the athlete just logged it. It would also
+  // put the card's trend number and the chart's right edge on different days
+  // in the same glance.
+  const today = dayString(new Date());
 
   useFocusEffect(
     useCallback(() => {

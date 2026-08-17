@@ -1,4 +1,4 @@
-import { MIN_TREND_READINGS, TREND_DAYS, type Measured } from '../anthropometry';
+import { MIN_TREND_READINGS, TREND_DAYS, trendWeight, type Measured } from '../anthropometry';
 import { buildTrendSeries, MIN_SPAN_KG, RANGE_DAYS, trendBounds } from '../weightTrend';
 
 /**
@@ -140,6 +140,44 @@ describe('the change across the window', () => {
     expect(s.deltaKg).toBeNull();
     expect(s.low).toBeNull();
     expect(s.high).toBeNull();
+  });
+});
+
+describe('the mutations review found still alive', () => {
+  it('pins a reading to its exact day, not just its presence', () => {
+    // An off-by-one in `readings`' day survived every other test here: every
+    // dot shifts one to the right and TODAY'S weigh-in falls off the window
+    // entirely, filtered as "future" — invisible on the day it was logged.
+    const s = buildTrendSeries([{ measured_on: TODAY, weight_kg: 80 }], TODAY, 'week');
+    expect(s.readings).toHaveLength(1);
+    expect(s.readings[0].day).toBe(RANGE_DAYS.week - 1);
+
+    const s2 = buildTrendSeries([{ measured_on: '2026-08-11', weight_kg: 80 }], TODAY, 'week');
+    expect(s2.readings[0].day).toBe(0);
+  });
+
+  it('bounds cover the TREND too, not only the readings', () => {
+    // Also survived. On a week view the left-edge trend averages heavier
+    // pre-window readings, so the line can sit above every reading inside the
+    // window — and bounds taken from readings alone would clip it outside the
+    // box. Heavy before, light inside.
+    const before = daily('2026-08-10', [95, 95, 95, 95, 95, 95, 95]);
+    const inside = daily(TODAY, [80, 80, 80, 80, 80, 80, 80]);
+    const s = buildTrendSeries([...before, ...inside], TODAY, 'week');
+    const trendHigh = Math.max(...s.segments.flat().map((p) => p.kg));
+    const readingHigh = Math.max(...s.readings.map((p) => p.kg));
+    expect(trendHigh).toBeGreaterThan(readingHigh);
+    expect(s.high!).toBeGreaterThanOrEqual(trendHigh);
+  });
+
+  it('pins the delta MAGNITUDE, against the real mean', () => {
+    // Only its sign was checked. Asserting the number against `trendWeight`
+    // itself pins the arithmetic without this file growing a second opinion
+    // about what a mean is.
+    const fixture = daily(TODAY, [83, 83, 83, 82, 82, 82, 82, 81, 81, 81, 80, 80, 80]);
+    const s = buildTrendSeries(fixture, TODAY, 'week');
+    const expected = trendWeight(fixture, s.to)! - trendWeight(fixture, s.from)!;
+    expect(s.deltaKg!).toBeCloseTo(expected, 2);
   });
 });
 

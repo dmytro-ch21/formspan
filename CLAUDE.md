@@ -42,10 +42,18 @@ hold:
   lives on web, and this is not a step toward moving that.
 
 `apps/mobile/app/checkin/trend.tsx` is the first and currently only instance.
-The test is the three bullets, not "is it a chart" — the moment one of these
-grows a second metric or a date-range picker it has become the web screen and
-belongs there. Logging and authoring are unaffected; this changes nothing about
-where a session is run from.
+The test is the three bullets, not "is it a chart" — the moment one grows a
+second metric or a **date-range picker** it has become the web screen and
+belongs there.
+
+**A fixed zoom toggle is not a date-range picker**, and the distinction has to
+be stated or the first instance fails the rule that blesses it: week / month /
+year are three preset windows that all END TODAY, which is one question asked at
+three depths. A picker is one that lets the athlete choose a start and an end —
+that is comparison, and comparison is the web screen's job.
+
+Logging and authoring are unaffected; this changes nothing about where a session
+is run from.
 
 ## Backend module pattern
 
