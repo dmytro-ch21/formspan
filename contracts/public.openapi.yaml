@@ -3220,6 +3220,31 @@ components:
         load_type:
           type: string
           enum: [weight_reps, reps, time, distance, distance_time]
+        load_mode:
+          type: string
+          enum: [total, per_side]
+          description: >
+            Which number the athlete types. `per_side` means ONE implement of a
+            pair, so a dumbbell exercise left at `total` silently reports half
+            its real tonnage — which is what every console-authored dumbbell
+            exercise did before this field existed here.
+
+
+            Omitting it on a POST defaults to `total`, the column's own
+            default. Omitting it on a PATCH leaves the stored value alone, like
+            every other field. Sending an unrecognised value is a 400 — NOT a
+            fallback to `total`, which would restore the halving bug through a
+            typo. That is deliberately stricter than the seeder, which
+            normalises so one bad row cannot fail a deploy.
+
+
+            **`""` is unrecognised too**, and is the exception to this
+            endpoint's "a field sent as empty is cleared" rule. There is nothing
+            to clear to: an empty value would have to mean `total`, which is a
+            halved exercise rather than an absent fact. An empty placeholder
+            option or a `?? ''` in a client produces `""` without anyone
+            intending it, which is exactly why it is refused rather than
+            interpreted.
         is_unilateral: { type: boolean }
         instructions: { type: string }
 
@@ -6488,6 +6513,14 @@ paths:
         A PARTIAL update: an omitted field keeps its stored value, and a field
         sent as empty is cleared. The id comes from the path and is never moved,
         because renaming must not orphan the training records pointing at it.
+
+
+        `load_mode` is the ONE exception to empty-clears, because it has no
+        empty state to clear to: it is a closed enum backing an arithmetic rule,
+        and "cleared" would have to mean `total`, which silently halves a
+        per-side exercise. So it can be set and changed, never emptied — an
+        explicit `""` is a 400 like any other unrecognised value. Omitting it
+        still leaves the stored value alone, as everywhere else here.
 
 
         ANY row, seeded or admin-authored, and the write TAKES OWNERSHIP: it

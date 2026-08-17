@@ -2,6 +2,7 @@ package exercise
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"testing"
 
@@ -155,10 +156,12 @@ func TestTheCatalogReadPathCarriesLoadMode(t *testing.T) {
 // `"load_mode": ""` — a value the schema's `enum` does not admit, on a field
 // this branch just moved into `Exercise.required`.
 //
-// Restoring such a revision was always safe, because `updateWithin` never
-// writes the column and the RETURNING re-reads the real one. It was READING it
-// that advertised an illegal value, which is why the fix is on this path and
-// not on Restore.
+// Restoring such a revision USED to be safe for free, because `updateWithin`
+// never wrote the column and the RETURNING re-read the real one. That is no
+// longer true — T2 put the column in the SET clause — so restore now needs its
+// own absent-key rule, and has one. See
+// `TestRestoringAPreColumnRevisionDoesNotSilentlyHalveTheExercise`, which is
+// the test this comment used to argue was unnecessary.
 func TestAnOldRevisionStillReportsALegalLoadMode(t *testing.T) {
 	url := os.Getenv("TEST_DATABASE_URL")
 	if url == "" {
@@ -212,5 +215,172 @@ func TestAnOldRevisionStillReportsALegalLoadMode(t *testing.T) {
 	if got := revs[0].Payload.LoadMode; got != LoadModeTotal {
 		t.Fatalf("revision payload load_mode = %q, want %q — the contract's enum admits "+
 			"only 'total' and 'per_side', and this response is typed as an Exercise", got, LoadModeTotal)
+	}
+}
+
+// TestTheConsoleCanAuthorAndCorrectLoadMode is T2 at the level that matters:
+// the column, not the struct.
+//
+// `createWithin` never wrote `load_mode`, so every exercise created in the
+// admin console took the column default `total` — a dumbbell exercise authored
+// there reported half its real tonnage from the moment it existed. And
+// `updateWithin` did not write it either, so nothing could put it right: the
+// omission that protected a deploy-set value from being cleared also made a
+// wrong value permanent.
+//
+// Both halves are covered here, plus the guarantee that replaced the old
+// protection — an edit that never mentions the field must write back what is
+// already stored.
+func TestTheConsoleCanAuthorAndCorrectLoadMode(t *testing.T) {
+	repo, ctx, id := contentFixture(t)
+
+	perSide := authored(id)
+	perSide.LoadMode = LoadModePerSide
+	created, err := repo.CreateExercise(ctx, perSide, testActor)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if created.LoadMode != LoadModePerSide {
+		t.Fatalf("CreateExercise returned load_mode %q, want %q — a console-authored "+
+			"dumbbell exercise born 'total' halves its own tonnage forever",
+			created.LoadMode, LoadModePerSide)
+	}
+
+	// Read back rather than trusting the RETURNING, because the bug this covers
+	// was the column never being written at all.
+	var stored string
+	if err := repo.pool.QueryRow(ctx,
+		`SELECT load_mode FROM exercises WHERE id = $1`, id).Scan(&stored); err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if stored != LoadModePerSide {
+		t.Fatalf("the column holds %q, want %q", stored, LoadModePerSide)
+	}
+
+	// An edit that says nothing about load_mode. This is the handler's shape:
+	// merge the request onto the STORED row, then write the whole thing.
+	current, err := repo.GetExercise(ctx, id)
+	if err != nil {
+		t.Fatalf("get for write: %v", err)
+	}
+	renamed := exerciseRequest{Name: ptr("Zercher Squat (Wide)")}.applyTo(current)
+	updated, err := repo.UpdateExercise(ctx, renamed, testActor)
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if updated.LoadMode != LoadModePerSide {
+		t.Fatalf("a rename reset load_mode to %q — adding the column to the UPDATE "+
+			"removed the omission that used to protect it, and the merge is what "+
+			"replaces that guarantee", updated.LoadMode)
+	}
+
+	// And the correction path: a row already classified wrongly can be fixed,
+	// which before this change no endpoint could do.
+	fix := exerciseRequest{LoadMode: ptr(LoadModeTotal)}.applyTo(updated)
+	fixed, err := repo.UpdateExercise(ctx, fix, testActor)
+	if err != nil {
+		t.Fatalf("update to total: %v", err)
+	}
+	if fixed.LoadMode != LoadModeTotal {
+		t.Fatalf("load_mode is %q after correcting it to %q", fixed.LoadMode, LoadModeTotal)
+	}
+}
+
+// TestRestoringAPreColumnRevisionDoesNotSilentlyHalveTheExercise is the bug
+// T2's own fix created, found by review and not by any check.
+//
+// Putting `load_mode` in `updateWithin`'s SET clause removed a guarantee that
+// had been free: while the UPDATE never wrote the column, `Restore` could feed
+// it any payload and the RETURNING still read back the live value. Now the
+// UPDATE writes what Restore hands it — and a revision written before the
+// column existed hands it "", which `NormalizeLoadMode` turns into `total`.
+//
+// So clicking Restore on an old revision of a dumbbell exercise halved it:
+// CHECK satisfied, 200 returned, and the console's revision list even displays
+// that revision as `total`, which makes the damage look deliberate.
+func TestRestoringAPreColumnRevisionDoesNotSilentlyHalveTheExercise(t *testing.T) {
+	repo, ctx, id := contentFixture(t)
+
+	perSide := authored(id)
+	perSide.LoadMode = LoadModePerSide
+	if _, err := repo.CreateExercise(ctx, perSide, testActor); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// A snapshot shaped the way pre-000052 code wrote one: no `load_mode` key.
+	// Literal JSON rather than a marshalled Exercise, because the current struct
+	// always emits the key and would reproduce today's shape instead.
+	if _, err := repo.pool.Exec(ctx, `
+		INSERT INTO exercise_revisions (exercise_id, revision, actor, action, payload)
+		VALUES ($1, 99, 'user_fixture', 'update', $2::jsonb)
+		ON CONFLICT (exercise_id, revision) DO UPDATE SET payload = EXCLUDED.payload`,
+		id, `{"id":"`+id+`","name":"Zercher Squat","sport":"strength",
+		      "movement_pattern":"squat","load_type":"weight_reps","is_unilateral":false,
+		      "primary_muscles":[],"secondary_muscles":[],"equipment":[]}`); err != nil {
+		t.Fatalf("seed pre-column revision: %v", err)
+	}
+
+	restored, err := repo.Restore(ctx, id, 99, testActor)
+	if err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	if restored.LoadMode != LoadModePerSide {
+		t.Fatalf("restore set load_mode to %q, want %q — a revision that predates the "+
+			"column says nothing about it, and reading that silence as 'total' halves "+
+			"every logged set of this exercise", restored.LoadMode, LoadModePerSide)
+	}
+
+	// Read the column back too: the RETURNING used to hide this exact bug by
+	// re-reading a value the SET had not touched, so trusting it here would
+	// repeat the mistake that let the bug through.
+	var stored string
+	if err := repo.pool.QueryRow(ctx,
+		`SELECT load_mode FROM exercises WHERE id = $1`, id).Scan(&stored); err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if stored != LoadModePerSide {
+		t.Fatalf("the column holds %q after the restore, want %q", stored, LoadModePerSide)
+	}
+}
+
+// The other half, and it must not be lost while fixing the first: a revision
+// that DOES carry a load_mode is restored as it stands.
+//
+// Without this, "preserve the stored value" is an equally simple fix that makes
+// restore silently refuse to change the column — which is not a restore, and
+// contradicts what the endpoint promises ("copies that revision's content
+// back"). Before T2, restore genuinely could not change this column; now it can,
+// and that is an improvement worth pinning.
+func TestRestoringAModernRevisionAppliesItsLoadMode(t *testing.T) {
+	repo, ctx, id := contentFixture(t)
+
+	total := authored(id)
+	total.LoadMode = LoadModeTotal
+	if _, err := repo.CreateExercise(ctx, total, testActor); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	snapshot := authored(id)
+	snapshot.LoadMode = LoadModePerSide
+	payload, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if _, err := repo.pool.Exec(ctx, `
+		INSERT INTO exercise_revisions (exercise_id, revision, actor, action, payload)
+		VALUES ($1, 98, 'user_fixture', 'update', $2::jsonb)
+		ON CONFLICT (exercise_id, revision) DO UPDATE SET payload = EXCLUDED.payload`,
+		id, payload); err != nil {
+		t.Fatalf("seed revision: %v", err)
+	}
+
+	restored, err := repo.Restore(ctx, id, 98, testActor)
+	if err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	if restored.LoadMode != LoadModePerSide {
+		t.Fatalf("restore left load_mode at %q, want %q — a revision that names a "+
+			"value must be restorable, or the absent-key rule has become "+
+			"'never change this column'", restored.LoadMode, LoadModePerSide)
 	}
 }

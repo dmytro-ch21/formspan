@@ -119,6 +119,13 @@ func (f *fakeContentRepo) Restore(_ context.Context, id string, revision int, ac
 			e := rev.Payload
 			// Mirrors the SQL: content only, never status.
 			e.Status = f.stored[id].Status
+			// And mirrors its absent-key rule for load_mode. A revision written
+			// before the column existed carries no value; letting "" through
+			// here would make this fake disagree with the repository about
+			// whether restore halves a dumbbell exercise.
+			if e.LoadMode == "" {
+				e.LoadMode = f.stored[id].LoadMode
+			}
 			f.stored[id] = e
 			f.record(id, actor, ActionRestore, e)
 			return e, nil

@@ -6821,6 +6821,35 @@ is the specific regression this guards.
 - An older client that ignores `load_factor` still shows the server's totals
   correctly, because the server does the multiplying for anything it computes.
 
+### Authoring it in the console (T2)
+
+The console can set `load_mode` now. Before, every exercise created there was
+born `total` — a dumbbell exercise authored in the console halved its own
+tonnage from the start, and nothing could correct it.
+
+- **Create a dumbbell exercise with Load mode = per_side**, then log 10 × 30 kg
+  against it. Volume must read 600, not 300. This is the whole task in one
+  scenario.
+- **Create without touching Load mode** → the row is `total`. The field is
+  optional and the default matches the column's.
+- **Rename a per_side exercise and save.** It must still be `per_side`
+  afterwards. The UPDATE writes the column now, so the only thing keeping a
+  rename from reverting it is that the handler merges onto the stored row —
+  worth checking directly rather than trusting.
+- **Change an existing exercise from `total` to `per_side` and back.** Both
+  directions must stick; a misclassified row was previously permanent.
+- **POST/PATCH `"load_mode": "per_sied"`** → **400**, naming the bad value and
+  the legal set. NOT a silent fall back to `total`, which would be the halving
+  bug arriving through a typo.
+- **`cmd/exportcontent` must still export a row whose load_mode is absent from
+  the in-memory struct** — the export's validate step is deliberately tolerant
+  where the API is strict, because an unknown value would seed as `total`
+  rather than break a deploy. Two of that command's tests catch this; if a
+  future change moves the strict check into `ValidateForWrite`, they go red.
+- **Author a per_side exercise, run `cmd/exportcontent`, then `cmd/seed`** →
+  `load_mode` survives the whole round trip and the next deploy does not revert
+  it.
+
 ### Saying so on screen (W3)
 
 The arithmetic above being right is not the same as the athlete being able to

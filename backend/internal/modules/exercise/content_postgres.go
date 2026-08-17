@@ -84,12 +84,12 @@ func createWithin(ctx context.Context, tx pgx.Tx, e Exercise) (Exercise, error) 
 		INSERT INTO exercises (
 			id, name, sport, movement_pattern, movement_pattern_detail,
 			primary_muscles, secondary_muscles, equipment, load_type,
-			is_unilateral, instructions, source, status
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'admin','draft')
+			is_unilateral, load_mode, instructions, source, status
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'admin','draft')
 		RETURNING `+contentReturning,
 		e.ID, e.Name, e.Sport, e.MovementPattern, e.MovementPatternDetail,
 		nonNil(e.PrimaryMuscles), nonNil(e.SecondaryMuscles), nonNil(e.Equipment),
-		e.LoadType, e.IsUnilateral, e.Instructions)
+		e.LoadType, e.IsUnilateral, NormalizeLoadMode(e.LoadMode), e.Instructions)
 
 	out, err := scanContent(row)
 	if err != nil {
@@ -139,13 +139,13 @@ func updateWithin(ctx context.Context, tx pgx.Tx, e Exercise) (Exercise, error) 
 			name = $2, sport = $3, movement_pattern = $4,
 			movement_pattern_detail = $5, primary_muscles = $6,
 			secondary_muscles = $7, equipment = $8, load_type = $9,
-			is_unilateral = $10, instructions = $11,
+			is_unilateral = $10, load_mode = $11, instructions = $12,
 			source = 'admin', updated_at = now()
 		WHERE id = $1
 		RETURNING `+contentReturning,
 		e.ID, e.Name, e.Sport, e.MovementPattern, e.MovementPatternDetail,
 		nonNil(e.PrimaryMuscles), nonNil(e.SecondaryMuscles), nonNil(e.Equipment),
-		e.LoadType, e.IsUnilateral, e.Instructions)
+		e.LoadType, e.IsUnilateral, NormalizeLoadMode(e.LoadMode), e.Instructions)
 
 	out, err := scanContent(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -321,10 +321,16 @@ func (r *PostgresRepository) Revisions(ctx context.Context, id string) ([]Revisi
 		// admits only `total` and `per_side`.
 		//
 		// Normalised here rather than left to the client, matching what
-		// `upsertArgs` already does on the way in. Restoring such a revision
-		// was always safe — `updateWithin` never writes the column, so the
-		// RETURNING re-reads the real one — but READING it advertised a value
-		// the contract does not allow.
+		// `upsertArgs` already does on the way in.
+		//
+		// NOTE this normalisation is DISPLAY only, and deliberately does not
+		// speak for what a restore does. It used to: while `updateWithin` never
+		// wrote the column, restoring such a revision preserved the live value
+		// for free. That stopped being true when the column joined the SET
+		// clause, so `Restore` now carries its own absent-key rule — see it
+		// there. The two must stay in step: this one makes an old revision
+		// LOOK like `total` in the console's history, and if the restore rule
+		// were dropped, clicking it would make it BE `total`.
 		rev.Payload.LoadMode = NormalizeLoadMode(rev.Payload.LoadMode)
 		out = append(out, rev)
 	}
@@ -354,6 +360,33 @@ func (r *PostgresRepository) Restore(ctx context.Context, id string, revision in
 		// The id comes from the PATH, not the payload: a revision whose payload
 		// carried a different id would otherwise rewrite some other exercise.
 		want.ID = id
+
+		// `load_mode` is the one field a revision can be SILENT about rather
+		// than merely wrong about, and silence has to mean "leave it" here.
+		//
+		// `exercise_revisions` (000039) predates the column (000052), so a
+		// snapshot taken between those deploys has no `load_mode` key at all.
+		// It unmarshals to "", and letting that reach the UPDATE turns it into
+		// `total` — so restoring an old revision of a dumbbell exercise would
+		// silently halve it, pass the CHECK, and answer 200. The console's
+		// revision list even renders that revision AS `total`, which makes the
+		// damage look deliberate.
+		//
+		// This only became reachable when this change added the column to
+		// `updateWithin`'s SET clause. Before, the UPDATE never wrote it and
+		// the RETURNING re-read the live value, so restore preserved it for
+		// free. That free preservation is what is being paid for here.
+		//
+		// Absent ONLY — a revision that does carry a value is restored as it
+		// stands, which is what "copies that revision's content back" has
+		// always claimed and did not previously do for this column.
+		if want.LoadMode == "" {
+			if err := tx.QueryRow(ctx,
+				`SELECT load_mode FROM exercises WHERE id = $1`, id,
+			).Scan(&want.LoadMode); err != nil {
+				return Exercise{}, fmt.Errorf("exercise: read load_mode for restore: %w", err)
+			}
+		}
 		return updateWithin(ctx, tx, want)
 	})
 }

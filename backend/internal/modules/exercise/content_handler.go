@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -54,8 +55,15 @@ type exerciseRequest struct {
 	SecondaryMuscles      *[]string `json:"secondary_muscles"`
 	Equipment             *[]string `json:"equipment"`
 	LoadType              *string   `json:"load_type"`
-	IsUnilateral          *bool     `json:"is_unilateral"`
-	Instructions          *string   `json:"instructions"`
+	// Absent leaves the stored value alone, which is what makes a PATCH that
+	// never mentions it safe. Present and wrong is a 400 rather than a silent
+	// fallback to "total": the seeder normalises an unknown value because a
+	// typo must not fail a whole deploy, but an API write has one author who
+	// can be told, and coercing here would reinstate the halving bug through
+	// a spelling mistake.
+	LoadMode     *string `json:"load_mode"`
+	IsUnilateral *bool   `json:"is_unilateral"`
+	Instructions *string `json:"instructions"`
 }
 
 // applyTo overlays the present fields onto a base — the zero Exercise for a
@@ -77,6 +85,11 @@ func (b exerciseRequest) applyTo(base Exercise) Exercise {
 	if b.LoadType != nil {
 		base.LoadType = LoadType(*b.LoadType)
 	}
+	if b.LoadMode != nil {
+		// Raw, NOT normalised — validation downstream is what turns a bad
+		// value into a 400. Normalising here would swallow it.
+		base.LoadMode = *b.LoadMode
+	}
 	if b.IsUnilateral != nil {
 		base.IsUnilateral = *b.IsUnilateral
 	}
@@ -95,6 +108,13 @@ func (b exerciseRequest) applyTo(base Exercise) Exercise {
 	base.PrimaryMuscles = nonNil(base.PrimaryMuscles)
 	base.SecondaryMuscles = nonNil(base.SecondaryMuscles)
 	base.Equipment = nonNil(base.Equipment)
+	// A CREATE that never mentions load_mode lands here with the zero value,
+	// because the base is a zero Exercise. Default it to the column's own
+	// default so the common case needs no field, while an UPDATE is untouched
+	// — its base is the stored row, which is NOT NULL and therefore never "".
+	if base.LoadMode == "" {
+		base.LoadMode = LoadModeTotal
+	}
 	return base
 }
 
@@ -270,6 +290,28 @@ func (h *ContentHandler) write(
 	w http.ResponseWriter, r *http.Request, e Exercise,
 	store func(context.Context, Exercise, string) (Exercise, error),
 ) {
+	// A BACKSTOP. The real check is on the request field in `decodeExercise`,
+	// which sees what the client sent rather than what the merge produced;
+	// this one catches an Exercise assembled some other way.
+	//
+	// Neither is in `ValidateForWrite`, and that is the design of this field
+	// rather than an omission. That function is shared with
+	// `cmd/exportcontent`, whose validate step asks "would this seed?" — and an
+	// unrecognised load_mode WOULD seed, as `total`, because
+	// `NormalizeLoadMode` fails it closed so one bad row cannot break a deploy.
+	// A strict shared validator therefore fails an export over something that
+	// would have worked; two of that command's tests proved it.
+	//
+	// An API write is the opposite case: exactly one author, waiting for a
+	// response, and coercing `per_sied` to `total` for them is the
+	// dumbbell-halving bug arriving through a spelling mistake — invisible
+	// until somebody notices their tonnage is out by half.
+	if e.LoadMode != LoadModeTotal && e.LoadMode != LoadModePerSide {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			fmt.Sprintf("unknown load_mode %q — one of: %s, %s",
+				e.LoadMode, LoadModeTotal, LoadModePerSide))
+		return
+	}
 	if err := ValidateForWrite(e); err != nil {
 		// The message names the offending value and the legal set. This is
 		// content authoring, and "invalid input" alone means opening the source
@@ -317,6 +359,26 @@ func decodeExercise(w http.ResponseWriter, r *http.Request) (exerciseRequest, bo
 	var body exerciseRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxContentBody)).Decode(&body); err != nil {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "malformed request body")
+		return exerciseRequest{}, false
+	}
+	// Judged on what the CLIENT sent, before any merge — which is the whole
+	// point, and the reason this is not down in `write()` with the other
+	// validation.
+	//
+	// A merged value has already been through `applyTo`, whose tail rewrites ""
+	// to `total` so a create need not mention the field. Validating after that
+	// therefore cannot see the one wrong value most likely to be sent by
+	// accident: an explicit `"load_mode": ""`, which a client with an empty
+	// placeholder option or a `?? ''` produces without trying. It would flip a
+	// per_side row to total on a PATCH and answer 200 — the halving bug, past a
+	// check written to stop exactly that.
+	//
+	// Absent stays absent: nil means "leave it alone", and only a value the
+	// client actually chose is judged.
+	if body.LoadMode != nil && *body.LoadMode != LoadModeTotal && *body.LoadMode != LoadModePerSide {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			fmt.Sprintf("unknown load_mode %q — one of: %s, %s",
+				*body.LoadMode, LoadModeTotal, LoadModePerSide))
 		return exerciseRequest{}, false
 	}
 	return body, true

@@ -277,6 +277,44 @@ export function ExerciseForm({
           />
         </Field>
 
+        <Field
+          label="Load mode"
+          htmlFor="load_mode"
+          hint="Which number the athlete types. Per side means ONE dumbbell or kettlebell of a pair — get this wrong and the exercise reports half its real tonnage, or double it."
+        >
+          <select
+            key={`load_mode-${shown.load_mode ?? ""}`}
+            id="load_mode"
+            name="load_mode"
+            required
+            /* `?? ""` and NOT `?? "total"`, which is what this was first.
+               Defaulting to a real value makes the select unable to represent
+               "no data", so any path that ever failed to supply `load_mode`
+               would render "total" and the next save would write it — silently
+               halving a per_side exercise on an edit to something else
+               entirely. Every shipped path does supply it, and this is the
+               single line that would turn a future one that does not into
+               data loss rather than a blocked save.
+
+               It also makes `required` mean something, and matches the sport /
+               load_type / movement_pattern selects above: on a CREATE the
+               author must choose, rather than shipping a dumbbell exercise as
+               `total` by skimming past it — which is T2 surviving as a default
+               instead of as an impossibility. */
+            defaultValue={shown.load_mode ?? ""}
+            className={inputClass}
+          >
+            <option value="" disabled>
+              Pick one…
+            </option>
+            {/* Implement-neutral, and not "one of a pair": 57 of the 142
+                per-side exercises are kettlebell, one is farmer-handles, and
+                34 are one-armed, where there is no pair at all. */}
+            <option value="total">total — the weight IS the whole load</option>
+            <option value="per_side">per_side — the weight of ONE implement</option>
+          </select>
+        </Field>
+
         <div className="flex items-center gap-2">
           <input
             key={`is_unilateral-${String(shown.is_unilateral ?? false)}`}
@@ -284,12 +322,27 @@ export function ExerciseForm({
             name="is_unilateral"
             type="checkbox"
             defaultChecked={shown.is_unilateral ?? false}
+            // The note below explains how this differs from load_mode, and a
+            // screen-reader user on this checkbox would otherwise never reach
+            // it — it is a bare paragraph two elements away.
+            aria-describedby="load-mode-vs-unilateral"
             className="size-4 rounded border-border-strong"
           />
           <label htmlFor="is_unilateral" className="text-[13px]">
             Unilateral — one limb at a time
           </label>
         </div>
+        {/* Two different questions, and the console is where they get confused.
+            `load_mode` says which number is typed; `is_unilateral` says whether
+            one limb works at a time. 34 catalog rows are BOTH — a one-arm
+            dumbbell row is entered per hand and does not double — so neither
+            implies the other and the tonnage rule reads them together:
+            per_side AND NOT unilateral is the only combination that doubles. */}
+        <p id="load-mode-vs-unilateral" className="text-[12px] text-text-secondary">
+          These two are independent. A one-arm dumbbell row is <em>per_side</em> (you enter one
+          dumbbell) <em>and</em> unilateral (only that hand works), so its load does not double —
+          only per_side movements that are <em>not</em> unilateral do.
+        </p>
       </Section>
 
       <Section title="Anatomy and equipment">
