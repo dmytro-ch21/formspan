@@ -175,13 +175,13 @@ func (r *PostgresRepository) calories(
 // proportion to how carefully somebody warms up, which punishes the right
 // behaviour.
 //
-// `completed AND set_type <> 'warmup'` is `session.workingSet` — the rule for
+// `completed AND set_type <> 'warmup'` is `session.SQLWorkingSet` — the rule for
 // "does this contribute work". `set_type = 'working'` was used here first,
 // which both counted sets that were never performed and silently dropped every
 // back-off, drop, AMRAP and failure set, so the effort average ignored the
 // hardest set of a session that ended on an AMRAP.
 //
-// **It is deliberately NOT `session.countsAsSet`.** Since #238 there are two
+// **It is deliberately NOT `session.SQLCountsAsSet`.** Since #238 there are two
 // rules: the narrower `countsAsSet` excludes drops, because a drop is part of
 // the set above it and the athlete did not do another set. It is the rule for
 // counts an athlete READS. This is one of two queries that deliberately keep
@@ -258,6 +258,10 @@ func (r *PostgresRepository) exercises(ctx context.Context, callerID, id string)
 		FROM session_sets ss
 		JOIN sessions s  ON s.id = ss.session_id AND s.user_id = $2
 		JOIN exercises e ON e.id = ss.exercise_id
+		-- The wider rule again, deliberately -- see liftEffort above for why
+		-- this module keeps drops. Restated rather than referencing
+		-- session.SQLWorkingSet for the same reason: these are independent
+		-- decisions that happen to agree today, not the shared rule.
 		WHERE ss.session_id = $1 AND ss.completed AND ss.set_type <> 'warmup'
 		GROUP BY e.id, e.name
 		ORDER BY MIN(ss.position)`,
@@ -416,6 +420,8 @@ func (r *PostgresRepository) score(
 			LEFT JOIN LATERAL (
 				SELECT AVG(COALESCE(ss.rpe, 10 - ss.rir)) AS rpe
 				FROM session_sets ss
+				-- Wider rule, deliberately; see liftEffort. This averages
+				-- effort, and a drop is where failure often happened.
 				WHERE ss.session_id = s.id AND ss.completed AND ss.set_type <> 'warmup'
 			) e ON true
 			WHERE s.user_id = $1 AND s.sport <> 'bjj'
