@@ -9,7 +9,7 @@ import {
   View as RNView,
 } from 'react-native';
 
-import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
+import { KeyboardAwareFlatList } from '@/components/KeyboardAwareScroll';
 import { SessionCard } from '@/components/SessionCard';
 import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
@@ -269,19 +269,33 @@ export default function SocialScreen() {
   return (
     <>
       <Stack.Screen options={{ title: 'Social' }} />
-      <KeyboardAwareScrollView
-        contentContainerStyle={styles.scroll}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => {
-              setRefreshing(true);
-              load();
-            }}
+      <KeyboardAwareFlatList
+        data={items ?? []}
+        keyExtractor={(item) => item.id}
+        renderItem={({ item }) => (
+          <FeedRow
+            item={item}
+            sportLabel={labelFor(modules, item.sport)}
+            now={now}
+            units={units}
+            width={cardWidth}
           />
-        }
-        testID="social-screen"
-      >
+        )}
+        // ELEMENTS, not component functions. Passing `() => <X/>` here hands
+        // FlatList a new component type every render, which unmounts and
+        // remounts the whole header on each keystroke of anything above.
+        //
+        // The two *Style props are not decoration. `VirtualizedList` wraps the
+        // header and footer each in a plain `View` styled ONLY by these
+        // (VirtualizedList.js:952-966), so `contentContainerStyle`'s `gap: 10`
+        // reaches the cells but not the children inside these wrappers. Without
+        // them the error text sits flush against the friends pane on a failed
+        // load, and the spinner loses 10 of its 26pt. Between-cell rhythm is
+        // unaffected — cells are direct children of the content container.
+        ListHeaderComponentStyle={styles.slot}
+        ListFooterComponentStyle={styles.slot}
+        ListHeaderComponent={
+          <>
         {/* The friends pane. A summary and a way through, not the whole
             management screen — adding a partner is occasional, reading the
             feed is why you opened this. */}
@@ -344,28 +358,29 @@ export default function SocialScreen() {
         {items === null && !loadError && (
           <ActivityIndicator style={styles.loader} accessibilityLabel="Loading" />
         )}
-
-        {items !== null && items.length === 0 && (
-          <View style={styles.empty} testID="social-empty">
-            <Text style={styles.emptyTitle}>Nothing here yet</Text>
-            <Text style={styles.muted}>
-              {friendCount === 0
-                ? 'Add a training partner, and their sessions show up here once they choose to share them.'
-                : 'Your training partners haven’t shared any sessions yet. Sharing is off until someone turns it on.'}
-            </Text>
-          </View>
-        )}
-
-        {items?.map((item) => (
-          <FeedRow
-            key={item.id}
-            item={item}
-            sportLabel={labelFor(modules, item.sport)}
-            now={now}
-            units={units}
-            width={cardWidth}
-          />
-        ))}
+          </>
+        }
+        ListEmptyComponent={
+          // `data` is `[]` for BOTH "still loading" and "genuinely quiet", so
+          // the screen's three-way distinction has to be re-made here: null is
+          // loading, [] is a quiet feed, and a failed load is neither. The
+          // spinner and the error stay in the header above; this renders only
+          // the third case. Without the guard, every cold open would flash
+          // "Nothing here yet" — a claim about other people's training, made
+          // before we have asked.
+          items === null ? null : (
+            <View style={styles.empty} testID="social-empty">
+              <Text style={styles.emptyTitle}>Nothing here yet</Text>
+              <Text style={styles.muted}>
+                {friendCount === 0
+                  ? 'Add a training partner, and their sessions show up here once they choose to share them.'
+                  : 'Your training partners haven’t shared any sessions yet. Sharing is off until someone turns it on.'}
+              </Text>
+            </View>
+          )
+        }
+        ListFooterComponent={
+          <>
 
         {items !== null && items.length < total && (
           <Pressable
@@ -398,13 +413,30 @@ export default function SocialScreen() {
             </Text>
           </Pressable>
         )}
-      </KeyboardAwareScrollView>
+          </>
+        }
+        contentContainerStyle={styles.scroll}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              setRefreshing(true);
+              load();
+            }}
+          />
+        }
+        testID="social-screen"
+      />
     </>
   );
 }
 
 const styles = StyleSheet.create({
   scroll: { padding: 20, gap: 10, paddingBottom: 40 },
+  // The header and footer wrappers do not inherit `scroll`'s gap — see the
+  // comment at the call site. Same value, so the rhythm is identical either
+  // side of the list.
+  slot: { gap: 10 },
   pane: {
     flexDirection: 'row',
     alignItems: 'center',
