@@ -140,7 +140,7 @@ Then: `git push -u origin <branch>`, `gh pr create`, watch CI with `gh run watch
 queued feature, one line each with a stable id. **Read it before starting work**
 and **tick your line when you finish**, in the same PR.
 
-Two rules make it survive several agents at once:
+Three rules make it survive several agents at once:
 
 - **One line per task, marked in place.** `- [ ]` becomes `- [x]` with a PR
   number appended; the line is never deleted, because a finished task is the
@@ -148,6 +148,57 @@ Two rules make it survive several agents at once:
   over one line rather than a paragraph.
 - **Ids are never reused**, so "closes W2" in a commit message still means
   something a year later.
+- **Claim a task before you work it**, below.
+
+### Claiming (hard rule)
+
+This list is ordered by what an athlete would notice, so every session that
+opens it independently picks the same top line. Two full rounds of work were
+lost that way in a single afternoon — W2, then W4 — both times with the checks
+genuinely run, because **a check cannot see work that has not been pushed.**
+
+So, before writing anything:
+
+```bash
+gh pr list --state open        # includes drafts; a draft IS a claim
+```
+
+and if the task is free, claim it before you start:
+
+```bash
+git commit --allow-empty -m "Claim <ID> — <task>"
+git push -u origin <branch>
+gh pr create --draft --title "[claim] <ID> — <task>" --body "Claiming <ID>."
+```
+
+Then do the work on that branch and mark the PR ready when it is reviewable:
+
+```bash
+gh pr ready <n>
+gh api -X PATCH repos/dmytro-ch21/formspan/pulls/<n> -f title="..." -F body=@body.md
+```
+
+The claim PR becomes the real one; nothing is thrown away. **Use `gh api`, not
+`gh pr edit`** — the latter fails outright in this repo on a deprecated
+Projects-classic GraphQL query (`repository.pullRequest.projectCards`) and
+silently changes nothing, so a title still reading `[claim] …` after an apparent
+success is that, not a typo. `gh pr ready` and `gh pr create` are unaffected.
+
+**Why a draft PR rather than a field in this file.** TASKS.md is itself the
+contended resource — a claim written here is one more edit to the file two
+sessions are already fighting over, and it still needs a push to be visible, so
+it costs the same and conflicts more. `gh pr list` is the one channel every
+session can already see without pulling anything.
+
+**What it does not fix.** The window between deciding and claiming is still
+invisible, so claim *early* — the empty commit exists precisely so you can claim
+before there is anything to show. And nothing enforces any of this; it is a
+convention, and it works only if the check half is done too.
+
+It does work when it is. This convention was written after a session picked up
+**H1**, ran `gh pr list` first, found #216 already open with the work complete
+but a week stale, and rebased and landed that instead of writing a second copy
+of it.
 
 Detail belongs in `docs/decisions/history.md`. TASKS.md is an index, and it stops
 being useful the moment it becomes prose.

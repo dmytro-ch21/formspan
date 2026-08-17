@@ -21886,6 +21886,76 @@ Zero-padding, not drift.
   its owner has. Worth knowing that "run the API locally" against it will not
   match the current schema until somebody migrates it.
 
+## 2026-08-17 — Claiming a task, and why the claim does not live in the task list
+
+H6, and the last of the housekeeping section. It is a convention rather than
+code, which makes it the easiest kind of change to write and the easiest to have
+no effect.
+
+The problem it addresses is structural rather than careless: `TASKS.md` is
+ordered by what an athlete would notice, so every session that opens it
+independently and honestly picks **the same top line**. Two full rounds of work
+were lost that way in one afternoon — W2, then W4 — and both times the checks had
+genuinely been run. That is the part worth sitting with: **no check can see work
+that has not been pushed**, so a green suite says nothing about whether somebody
+else is three hours into the same task.
+
+### The convention
+
+Before writing anything, `gh pr list --state open` — drafts included, because a
+draft *is* a claim. If the task is free, claim it before starting: an empty
+commit, a push, and a draft PR titled `[claim] <ID> — <task>`. The work then
+happens on that branch and the draft becomes the real PR, so nothing is
+discarded.
+
+**This entry's own PR claimed itself that way before a line of it was written**,
+which is the only reason it can be said to work: the draft appeared in
+`gh pr list` as `#253 DRAFT [claim] H6` while the branch still contained nothing
+but an empty commit.
+
+### Why not a claim field in TASKS.md
+
+That is the obvious design and it is worse, for a reason specific to this file:
+**TASKS.md is itself the contended resource.** A claim written there is one more
+edit to the file two sessions are already conflicting over, it still needs a push
+before anyone can see it, and it therefore costs exactly what a draft PR costs
+while adding conflicts rather than avoiding them. `gh pr list` is the one channel
+every session can already read without pulling anything.
+
+### What it does not fix, stated plainly
+
+The window between deciding to do something and pushing the claim is still
+invisible. The empty commit exists precisely to make that window small — you can
+claim before there is anything to show — but it cannot be closed, only narrowed.
+And nothing enforces any of it. It is a convention, and it only works if the
+*check* half is done as well as the claim half.
+
+There is evidence the check half pays for itself, from this same run of work:
+picking up **H1**, a `gh pr list` first turned up #216 — the work already done, CI
+already green, and a week stale. That became a rebase and a merge instead of a
+second implementation of the same fix. Had the same session skipped the check,
+it would have written H1 from scratch and discovered the duplicate at the point
+of opening the PR.
+
+### Gaps
+
+- **Nothing enforces it**, and the failure is silent by construction: duplicated
+  work looks exactly like work until two PRs touch the same file.
+- **A claim can go stale.** #216 sat open and complete for a week; under this
+  convention a *claim* could do the same, and reserve a task nobody is working
+  on. There is no expiry, and no convention for taking one over — the honest
+  answer today is to look at the branch's last commit date and ask.
+- **It costs a PR per task**, including tasks that turn out to be one line. That
+  is a real cost against a rare failure, and the two lost rounds are the only
+  evidence so far that the trade is worth making.
+- **`gh pr edit` does not work in this repo**, which the claim→ready step needs.
+  It fails on a deprecated Projects-classic GraphQL query
+  (`repository.pullRequest.projectCards`) and changes nothing, while still
+  looking like it ran — the title stayed `[claim] H6 …` through two apparently
+  successful invocations. `gh api -X PATCH repos/<owner>/<repo>/pulls/<n>` works.
+  Found by hitting it on this very PR, which is a small argument for writing
+  conventions by following them rather than by describing them.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
