@@ -5,7 +5,6 @@ import (
 
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -48,6 +47,21 @@ func writeErr(w http.ResponseWriter, r *http.Request, err error) {
 	}
 }
 
+// gripError is the one validateSets failure carrying its own wire code, so it
+// needs both the sentinel chain and a message shaped like its siblings.
+//
+// A `%w` of ErrInvalidGrip cannot give both: wrapping necessarily concatenates
+// that sentinel's own text, so the repair screen showed an athlete
+// "session: invalid input: unknown grip (set 2)" on a list where every other
+// line reads "set 2: RPE must be between 1 and 10". `Unwrap` keeps
+// `errors.Is(err, ErrInvalidGrip)` — and through it `ErrInvalidInput` — working
+// exactly as the wrapped form did, so `writeErr`'s ordering still decides the
+// code; only the sentence changes.
+type gripError struct{ set int }
+
+func (e gripError) Error() string { return "set " + strconv.Itoa(e.set) + ": unknown grip" }
+func (e gripError) Unwrap() error { return ErrInvalidGrip }
+
 // validateSets checks what the database's CHECK constraints would catch
 // anyway, but with a message naming the offending set — a 400 saying "set 3:
 // RPE must be 1-10" is actionable in a way "a value is out of range" isn't.
@@ -68,9 +82,7 @@ func validateSets(sets []Set) error {
 		// maps 23514 to ErrInvalidInput — but a vague one, with no set number
 		// and no mention of grip. What this buys is the message, not the status.
 		if s.Grip != nil && !ValidGrip(*s.Grip) {
-			// Formatted from `i` rather than by trimming `at`'s ": ", which is a
-			// slice that silently depends on that suffix never changing.
-			return fmt.Errorf("%w (set %d)", ErrInvalidGrip, i+1)
+			return gripError{set: i + 1}
 		}
 		if s.RPE != nil && (*s.RPE < 1 || *s.RPE > 10) {
 			return errors.New(at + "RPE must be between 1 and 10")

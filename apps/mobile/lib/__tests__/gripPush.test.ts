@@ -1,5 +1,7 @@
 import { ApiError } from '../apiError';
-import { pushSession } from '../sessionStore';
+import { pushSession, saveLocalSets } from '../sessionStore';
+
+import { migratedFixture, type FixtureDb } from './support/sqlite';
 
 /**
  * The grip repair: the one server refusal a phone can settle by itself.
@@ -14,8 +16,16 @@ import { pushSession } from '../sessionStore';
  * That trade moves the risk into THIS retry, and the retry is the part with no
  * screen behind it: an athlete never sees it happen. Review found two holes here
  * that the rest of the suite could not — a create path the repair never covered,
- * and a write with no compare-and-swap that could delete a mid-push edit — so
- * every case below pins one of them.
+ * and a write with no compare-and-swap that could delete a mid-push edit.
+ *
+ * **Against a real database, deliberately.** The first version of this file
+ * mocked `lib/db` with a hand-rolled object that returned a settable `changes`
+ * for the repair's UPDATE — and that mock WAS the compare-and-swap. Deleting
+ * `AND updated_at = ?` from the production SQL while leaving the JS guard in
+ * place kept the whole suite green, so the test could not see the very hole it
+ * was written for. Exactly the failure `support/sqlite.ts` was built to end: a
+ * mock silently supplying the behaviour under test. The fixture runs the app's
+ * own migrations, so the clause is enforced by SQLite or not at all.
  */
 
 const mockStart = jest.fn();
@@ -39,66 +49,53 @@ jest.mock('../sessions', () => ({
 
 jest.mock('../bjjSession', () => ({ putDetail: jest.fn() }));
 
-type Row = {
-  id: string; user_id: string; remote: number; dirty: number;
-  deleted_at: string | null; updated_at: string; sets_json: string;
-  sport: string; name: string; workout_id: string | null; name_dirty: number;
-  started_at: string; ended_at: string | null; bjj_json: string | null;
-};
-
-let mockRow: Row | null = null;
-const writes: { sql: string; params: unknown[] }[] = [];
-/**
- * What the repair's UPDATE matches. 0 is a real state, not a contrivance: it is
- * what SQLite answers when `updated_at` has moved since this push read the row.
- */
-let mockRepairMatches = 1;
-
-jest.mock('../db', () => ({
-  getDb: async () => ({
-    getFirstAsync: async () => mockRow,
-    getAllAsync: async () => [],
-    runAsync: async (sql: string, ...params: unknown[]) => {
-      writes.push({ sql, params });
-      if (/SET sets_json = \?/.test(sql)) return { lastInsertRowId: 0, changes: mockRepairMatches };
-      return { lastInsertRowId: 0, changes: 1 };
-    },
-  }),
-}));
+let mockFixture: FixtureDb;
+jest.mock('../db', () => {
+  const real = jest.requireActual('../db');
+  return { ...real, getDb: async () => mockFixture };
+});
 
 /** A grip no build in the wild knows, standing in for the one a future server adds. */
 const FUTURE_GRIP = 'mixed';
 
-const SETS = [
-  {
-    exercise_id: 'bench-press', position: 0, set_type: 'working', reps: 5, weight_kg: 100,
-    seconds: null, distance_m: null, rir: null, rpe: null, notes: '', completed: true,
-    grip: FUTURE_GRIP,
-  },
-  {
-    exercise_id: 'bench-press', position: 1, set_type: 'working', reps: 5, weight_kg: 100,
-    seconds: null, distance_m: null, rir: null, rpe: null, notes: '', completed: true,
-    grip: 'neutral',
-  },
-];
+const set = (position: number, grip: string | null) => ({
+  exercise_id: 'bench-press', position, set_type: 'working', reps: 5, weight_kg: 100,
+  seconds: null, distance_m: null, rir: null, rpe: null, notes: '', completed: true, grip,
+});
 
+const SETS = [set(0, FUTURE_GRIP), set(1, 'neutral')];
+/** What an athlete ticking another set mid-push would leave behind. */
+const LATER_SETS = [...SETS, set(2, FUTURE_GRIP)];
+
+const AT = '2026-08-01T10:00:00Z';
 const refused = () => new ApiError('unknown grip (set 1)', 'invalid_grip', 400);
 
-const seed = (over: Partial<Row> = {}) => {
-  writes.length = 0;
-  mockRepairMatches = 1;
-  mockRow = {
-    id: 's1', user_id: 'u1', remote: 1, dirty: 1,
-    deleted_at: null, updated_at: '2026-08-01T10:00:00Z', sets_json: JSON.stringify(SETS),
-    sport: 'strength', name: 'Bench', workout_id: null, name_dirty: 0,
-    started_at: '2026-08-01T09:00:00Z', ended_at: '2026-08-01T10:00:00Z',
-    bjj_json: null, ...over,
-  };
+const seed = async (remote = 1) => {
+  mockFixture = await migratedFixture();
+  await mockFixture.runAsync(
+    `INSERT INTO local_sessions
+       (id, user_id, workout_id, sport, name, started_at, ended_at, notes,
+        sets_json, dirty, remote, deleted_at, updated_at, name_dirty, bjj_json)
+     VALUES (?, 'u1', NULL, 'strength', 'Bench', '2026-08-01T09:00:00Z', ?, '',
+             ?, 1, ?, NULL, ?, 0, NULL)`,
+    's1',
+    AT,
+    JSON.stringify(SETS),
+    remote,
+    AT,
+  );
 };
 
+const rowNow = async () =>
+  (await mockFixture.getFirstAsync<{
+    sets_json: string;
+    dirty: number;
+    remote: number;
+    updated_at: string;
+  }>(`SELECT sets_json, dirty, remote, updated_at FROM local_sessions WHERE id = 's1'`))!;
+
 const grips = (sets: { grip?: unknown }[]) => sets.map((s) => s.grip);
-const setsWritten = () => writes.filter((w) => /SET sets_json = \?/.test(w.sql));
-const markedClean = () => writes.some((w) => /SET dirty = 0/.test(w.sql));
+const storedGrips = async () => grips(JSON.parse((await rowNow()).sets_json));
 
 beforeEach(() => {
   mockStart.mockReset().mockResolvedValue({ session: {}, volume: {} });
@@ -112,7 +109,7 @@ beforeEach(() => {
  */
 describe('a grip the server refuses on the sets push', () => {
   it('retries without the grips and lets the session land', async () => {
-    seed();
+    await seed();
     mockSets.mockRejectedValueOnce(refused());
 
     await pushSession('u1', 's1', async () => 'tok');
@@ -120,18 +117,16 @@ describe('a grip the server refuses on the sets push', () => {
     expect(mockSets).toHaveBeenCalledTimes(2);
     expect(grips(mockSets.mock.calls[0][2])).toEqual([FUTURE_GRIP, 'neutral']);
     expect(grips(mockSets.mock.calls[1][2])).toEqual([null, null]);
-    expect(markedClean()).toBe(true);
+    expect((await rowNow()).dirty).toBe(0);
   });
 
   it('persists the repair, so the next push cannot send the refused grip again', async () => {
-    seed();
+    await seed();
     mockSets.mockRejectedValueOnce(refused());
 
     await pushSession('u1', 's1', async () => 'tok');
 
-    const written = setsWritten();
-    expect(written).toHaveLength(1);
-    expect(grips(JSON.parse(written[0].params[0] as string))).toEqual([null, null]);
+    expect(await storedGrips()).toEqual([null, null]);
   });
 
   it('falls through to the finish rather than returning', async () => {
@@ -139,12 +134,12 @@ describe('a grip the server refuses on the sets push', () => {
     // `ended_at` — and a session with no duration counts for nothing at all in
     // history. The same "optional half costing the mandatory one" shape the BJJ
     // reflection ordering exists to prevent.
-    seed();
+    await seed();
     mockSets.mockRejectedValueOnce(refused());
 
     await pushSession('u1', 's1', async () => 'tok');
 
-    expect(mockFinish).toHaveBeenCalledWith(expect.anything(), 's1', '2026-08-01T10:00:00Z');
+    expect(mockFinish).toHaveBeenCalledWith(expect.anything(), 's1', AT);
   });
 });
 
@@ -160,7 +155,7 @@ describe('a grip the server refuses on the sets push', () => {
  */
 describe('a grip the server refuses on the create', () => {
   it('retries the create without the grips', async () => {
-    seed({ remote: 0 });
+    await seed(0);
     mockStart.mockRejectedValueOnce(refused());
 
     await pushSession('u1', 's1', async () => 'tok');
@@ -174,19 +169,19 @@ describe('a grip the server refuses on the create', () => {
     // The repair replaces the list every later call reads, rather than being
     // local to the call that was refused — otherwise the create would land
     // repaired and the very next request would re-send the refused grip.
-    seed({ remote: 0 });
+    await seed(0);
     mockStart.mockRejectedValueOnce(refused());
 
     await pushSession('u1', 's1', async () => 'tok');
 
     expect(grips(mockSets.mock.calls[0][2])).toEqual([null, null]);
-    expect(markedClean()).toBe(true);
+    expect((await rowNow()).dirty).toBe(0);
   });
 
   it('keeps the rest of the create intact', async () => {
     // Only the grips are dropped. A retry that lost `ended_at` would cost the
     // session its duration to settle a disagreement about a different field.
-    seed({ remote: 0 });
+    await seed(0);
     mockStart.mockRejectedValueOnce(refused());
 
     await pushSession('u1', 's1', async () => 'tok');
@@ -194,60 +189,93 @@ describe('a grip the server refuses on the create', () => {
     expect(mockStart.mock.calls[1][1]).toMatchObject({
       id: 's1',
       started_at: '2026-08-01T09:00:00Z',
-      ended_at: '2026-08-01T10:00:00Z',
+      ended_at: AT,
     });
   });
 });
 
 /**
- * The compare-and-swap, and the data-loss it exists to prevent.
+ * The compare-and-swap, and the data loss it exists to prevent.
  *
  * `saveLocalSets` bumps `updated_at` on every edit and a live session pushes on
  * every debounced save, so an athlete ticking a set mid-push is the ordinary
  * state. Without the swap, the repair writes the sets read at the START of the
  * push back over that newer edit — the athlete's last reps deleted locally, to
  * settle a refusal about a grip.
+ *
+ * The edit below is a REAL `saveLocalSets` against the real row, landing exactly
+ * where it would in production: after the push has read the sets, before the
+ * repair writes them back. Nothing here simulates the swap — SQLite decides.
  */
 describe('an edit that lands mid-push', () => {
   it('declines the repair rather than writing stale sets over it', async () => {
-    seed();
-    mockRepairMatches = 0; // `updated_at` moved: a save landed while we were pushing
-    mockSets.mockRejectedValueOnce(refused());
+    await seed();
+    mockSets.mockImplementationOnce(async () => {
+      await saveLocalSets('u1', 's1', LATER_SETS as never);
+      throw refused();
+    });
 
     await expect(pushSession('u1', 's1', async () => 'tok')).rejects.toThrow(ApiError);
 
+    const after = await rowNow();
+    // The third set survives, and so do the grips on all three. Had the repair
+    // written its stale list, this would be two sets with null grips — an
+    // athlete's last logged set gone, silently, with the sync reporting only a
+    // grip complaint.
+    expect(JSON.parse(after.sets_json)).toEqual(LATER_SETS);
     // No retry, because the list to retry with was never established.
     expect(mockSets).toHaveBeenCalledTimes(1);
     // And the row stays dirty, so the next sync re-reads the athlete's newer
     // sets and repairs THOSE. The cost of declining is one cycle, not the edit.
-    expect(markedClean()).toBe(false);
+    expect(after.dirty).toBe(1);
+  });
+
+  it('still repairs when nothing changed underneath it', async () => {
+    // The other half: without this, "never repair at all" would pass the test
+    // above. Same fixture, same code path, no concurrent edit.
+    await seed();
+    mockSets.mockRejectedValueOnce(refused());
+
+    await pushSession('u1', 's1', async () => 'tok');
+
+    expect(await storedGrips()).toEqual([null, null]);
+    expect((await rowNow()).dirty).toBe(0);
   });
 });
 
 describe('refusals that are not about a grip', () => {
   it('never repairs, and never writes', async () => {
-    seed();
+    await seed();
     mockSets.mockRejectedValue(new ApiError('RPE must be 1-10', 'invalid_input', 400));
 
     await expect(pushSession('u1', 's1', async () => 'tok')).rejects.toThrow();
 
     expect(mockSets).toHaveBeenCalledTimes(1);
-    expect(setsWritten()).toHaveLength(0);
-    expect(markedClean()).toBe(false);
+    expect(await storedGrips()).toEqual([FUTURE_GRIP, 'neutral']);
+    expect((await rowNow()).dirty).toBe(1);
   });
 
-  it('still forgets `remote` on a 404 — including one the RETRY hits', async () => {
+  it('forgets `remote` on a 404, so the next sync recreates the session', async () => {
+    await seed();
+    mockSets.mockRejectedValue(new ApiError('gone', 'not_found', 404));
+
+    await expect(pushSession('u1', 's1', async () => 'tok')).rejects.toThrow();
+
+    expect((await rowNow()).remote).toBe(0);
+  });
+
+  it('forgets `remote` on a 404 the RETRY hits', async () => {
     // Reachable because the server validates sets before it checks the session
     // exists: "deleted on another device AND holding a refused grip" answers
     // `invalid_grip` first and 404 only on the way back. Missing it there would
     // cost a sync cycle, since nothing would recreate the session.
-    seed();
+    await seed();
     mockSets
       .mockRejectedValueOnce(refused())
       .mockRejectedValueOnce(new ApiError('gone', 'not_found', 404));
 
     await expect(pushSession('u1', 's1', async () => 'tok')).rejects.toThrow();
 
-    expect(writes.some((w) => /SET remote = 0/.test(w.sql))).toBe(true);
+    expect((await rowNow()).remote).toBe(0);
   });
 });

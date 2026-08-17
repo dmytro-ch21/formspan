@@ -2,6 +2,7 @@ package session
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -119,10 +120,40 @@ func TestSetValidation_KeepsInvalidInputForEveryOtherRefusal(t *testing.T) {
 // The message is not contract and is not asserted as one — but it is what the
 // repair screen shows a person, and "which set" is the whole reason
 // `validateSets` exists rather than letting the CHECK answer.
+//
+// The exact sentence is pinned because the obvious implementation cannot
+// produce it: `fmt.Errorf("%w …", ErrInvalidGrip, …)` gets the sentinel chain
+// right and drags that sentinel's own text onto the wire with it, so an athlete
+// reads "session: invalid input: unknown grip (set 2)" in a list where every
+// neighbouring line reads "set 2: RPE must be between 1 and 10". Hence
+// `gripError`. Asserting only that "set 2" appears somewhere passes for both.
 func TestGripRefusal_NamesTheOffendingSet(t *testing.T) {
 	rec := replaceSetsResponse(t, `{"sets":[`+goodGripSet+`,`+badGripSet+`]}`)
-	if !strings.Contains(rec.Body.String(), "set 2") {
-		t.Errorf("the message should name set 2: %s", rec.Body.String())
+	var out struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("body is not the error contract: %q", rec.Body.String())
+	}
+	if out.Error.Message != "set 2: unknown grip" {
+		t.Errorf("message is %q, want %q — a person reads this on the repair screen",
+			out.Error.Message, "set 2: unknown grip")
+	}
+}
+
+// The sentinel chain the message change must not cost. `writeErr` routes on
+// these, so a `gripError` that stopped satisfying either would keep its tidy
+// sentence and silently lose the code the client acts on.
+func TestGripError_StillSatisfiesBothSentinels(t *testing.T) {
+	err := validateSets([]Set{{ExerciseID: "bench-press", Grip: ptrGrip("banana")}})
+	if !errors.Is(err, ErrInvalidGrip) {
+		t.Errorf("%v does not wrap ErrInvalidGrip, so writeErr reports invalid_input", err)
+	}
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Errorf("%v does not wrap ErrInvalidInput, so every existing caller "+
+			"that classifies validation failures stops recognising it", err)
 	}
 }
 

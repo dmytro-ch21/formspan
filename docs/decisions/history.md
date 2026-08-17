@@ -22489,10 +22489,36 @@ cost of declining is one cycle.
 satisfied too — so it would have stayed green through a complete revert of this
 behaviour. `handler_test.go` now asserts the wire code from both endpoints, and
 that every other refusal still reports `invalid_input`; `gripPush.test.ts` drives
-a real `invalid_grip` response through `pushRow`. Both were mutation-checked
-against the guards they cover — reverse `writeErr`'s case order, drop either
-endpoint's routing, delete the CAS, un-share the repair, and the matching test
-goes red.
+a real `invalid_grip` response through `pushRow`.
+
+**Then the test written for the CAS turned out to be guarded by its own mock**,
+which is the part worth keeping. `gripPush.test.ts` originally mocked `lib/db`
+with a hand-rolled object returning a settable `changes` for the repair's
+UPDATE — so *the mock was the compare-and-swap*. Deleting `AND updated_at = ?`
+from the production SQL while leaving the JS `changes === 0` guard in place kept
+all nine cases green, against real SQLite the repair would have matched and
+overwritten the edit, and the hole was back with nothing to show it. The
+mutation that "proved" the test removed the clause **and** the guard together,
+so it went red for the guard and said nothing about the clause. Precisely the
+failure `support/sqlite.ts` exists to end, and CLAUDE.md already names it: an
+array mock can silently *supply* the behaviour under test. The file now runs
+against `migratedFixture()` throughout, and the mid-push edit is a real
+`saveLocalSets` against the real row, so SQLite decides.
+
+Smaller, and the reason `gripError` exists rather than a `fmt.Errorf`: wrapping
+the sentinel gets the chain right and drags the sentinel's own text onto the
+wire, so the repair screen read "session: invalid input: unknown grip (set 2)"
+in a list where every neighbouring line reads "set 2: RPE must be between 1 and
+10". A type with `Unwrap` keeps both `errors.Is` answers and writes its own
+sentence. The message is not contract, but a person reads it.
+
+That is what makes the mutation record mean something. Reverse `writeErr`'s case
+order, drop either endpoint's routing, widen the code onto all invalid input,
+invert `ValidGrip`, revert `translatePgError`, un-share the repair, remove the
+create's catch, remove either 404 handler, return instead of falling through,
+**delete only the `AND updated_at = ?` clause, or transpose its bindings** — each
+turns the matching test red and nothing else. The two on that list that no
+earlier version could catch are the last two.
 
 ### Gaps
 
