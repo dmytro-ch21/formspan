@@ -67,6 +67,24 @@ describe("the set count, which is a different question", () => {
     expect(sessionVolume([set()]).working_sets).toBe(1);
   });
 
+  it("counts back-off, AMRAP and to-failure sets, both ways", () => {
+    // The rule is "everything except a warm-up", NOT an allowlist of the types
+    // somebody thought of. Without this case a plausible refactor to
+    // `set_type === "working" || set_type === "drop"` passes every other test
+    // here while silently zeroing three of the six set types out of BOTH
+    // figures — measured: it survives the whole file.
+    //
+    // These three are not exotic. A back-off is the second half of most
+    // strength templates, and an AMRAP or a to-failure set is usually the
+    // hardest thing in the session — exactly the work an athlete would notice
+    // going missing.
+    for (const set_type of ["backoff", "amrap", "failure"] as const) {
+      const v = sessionVolume([set({ set_type })]);
+      expect(v.working_sets, `${set_type} should count as a set`).toBe(1);
+      expect(v.tonnage_kg, `${set_type} should contribute volume`).toBe(600);
+    }
+  });
+
   it("does NOT count a drop, but still takes its weight", () => {
     // Bug three, and the reason the two figures cannot share one filter. A
     // drop is part of the set it came off — one approach to the bar, one rest
