@@ -23113,9 +23113,10 @@ instant: the window between the snapshot `runSync` took and the UPDATE that says
 that window is ordinary. Cleared wrongly, the change exists on that phone and
 nowhere else, `countPendingPlans` reads zero, and nothing ever retries.
 
-T5 was filed after #256, from a measurement: delete either clause **with its
-binding** — the clause alone is a parameter-arity error, which measures the
-harness rather than the guard — and the whole mobile suite stayed green,
+T5 was filed after #256, from a measurement: delete either clause — the
+`updated_at` one **with its binding**, since that clause alone is a
+parameter-arity error which measures the harness rather than the guard; the
+tombstone clause has no binding — and the whole mobile suite stayed green,
 1280/1280. Two sibling swaps in `sessionStore` were pinned; this was the last
 unheld one.
 
@@ -23152,8 +23153,8 @@ declares or pins it. CI's own regime was never measured by anyone here.
 That the coin lands differently on different days is not a weakening of the
 finding, it is the finding.
 
-Both of the original 1280/1280 measurements were correct; they were measuring
-different clocks, and reconciling them is what produced this entry. The first
+Both of the original measurements were correct; they were measuring different
+clocks, and reconciling them is what produced this entry. The first
 read (a full-suite run) is what put "held by nothing" in the T5 line; the second
 (a single-file run) contradicted it an hour later.
 
@@ -23165,8 +23166,8 @@ Three cases in `planSync.test.ts`, all deterministic:
 - a **delete** landing mid-push, which writes the tombstone with the real
   `unplanSession` and then closes the millisecond by hand. Two `Date.now()`
   calls cannot be forced to collide on demand, so the clock is normalised and
-  the guard under test is left alone. **8 of 8** with the clause removed, and it
-  fails under the full suite too;
+  the guard under test is left alone. **12 of 12** with the clause removed, and
+  it fails under the full suite too;
 - a clean push that **does** go clean, because "never clear `dirty`" would
   otherwise satisfy both of the above.
 
@@ -23179,8 +23180,20 @@ Three cases in `planSync.test.ts`, all deterministic:
 - **`updated_at` equality is still the reconciliation primitive**, at
   millisecond ISO text resolution, in all three sync paths. The tombstone clause
   exists precisely because that resolution is too coarse; the same coarseness
-  applies to any two writes in one millisecond, and only the delete case has a
-  second clause behind it.
+  applies to any two writes in one millisecond.
+- **And the other two paths have no tombstone clause at all — filed as T6.**
+  Review noticed the shape while checking this entry's wording, and it is not a
+  resemblance: `sessionStore.ts`'s closing swaps for `local_sessions` and
+  `workout_cache` carry only `AND updated_at = ?`, while `deleteLocalSession`
+  and `deleteWorkout` stamp `deleted_at` and `updated_at` from the same wall
+  clock, and both push functions branch on the *snapshot's* `deleted_at`.
+  **Reproduced, with a control**: a delete landing mid-push in the same
+  millisecond leaves `deleted_at` set and `dirty = 0`, and the push loop selects
+  on `dirty = 1`, so the tombstone is never sent — gone from the phone, alive on
+  the server, `pending` reading zero. Adding the clause makes the same probe
+  report `dirty = 1`. So `plan.ts` was the *only* one of the three that had the
+  guard, and it was the one nothing was testing; the two that had no guard were
+  never noticed because nothing tested them either.
 
 ## Open items / known gaps as of this entry
 

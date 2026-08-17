@@ -266,9 +266,10 @@ describe('deleting', () => {
  * screen writes through on every change, so something landing in that window is
  * ordinary, not exotic.
  *
- * Measured against #256's merge, by deleting each clause WITH its binding —
- * deleting a clause alone is a parameter-arity error, which measures the
- * harness rather than the guard. The whole mobile suite stayed green,
+ * Measured against #256's merge, by deleting each clause — the `updated_at`
+ * one with its binding, since that clause alone is a parameter-arity error
+ * which measures the harness rather than the guard; the tombstone clause has
+ * no binding to remove. The whole mobile suite stayed green,
  * 1280/1280, for both. The two sibling swaps in `sessionStore` were pinned;
  * this was the last unheld one.
  *
@@ -365,8 +366,10 @@ describe('an edit or a delete that lands mid-push', () => {
     // where a true collision gives `deleted_at = updated_at = snapshot`. The
     // clause reads `deleted_at IS NULL` and never its value, so the difference
     // is invisible to it — and the state is reachable anyway without a
-    // sub-millisecond write pair, since `new Date()` is wall clock and an NTP
-    // step backwards between the edit and the delete produces the same thing.
+    // sub-millisecond write pair, since `new Date()` is wall clock and a
+    // backwards clock step between the edit and the delete can produce the same
+    // thing — any step that lands the delete's read back on the snapshot's
+    // millisecond, not merely any step backwards.
     const p = await planSession(USER, '2026-08-05', 'strength', null);
     await syncPlans(USER, getToken);
     await pushableAt(p.id, 'edited');
