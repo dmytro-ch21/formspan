@@ -1449,3 +1449,129 @@ func (r *PostgresRepository) MostTrainedExercises(ctx context.Context, userID st
 	}
 	return out, rows.Err()
 }
+
+// LoadHistory returns one exercise's arc, one point per session.
+//
+// The three shared rules are used, not restated: `SQLWorkingSet` decides what
+// counts as evidence, `SQLCountsAsSet` counts sets so a drop does not read as a
+// second one here while reading as one everywhere else, and `SQLTonnage` is the
+// tonnage rule with implements folded in. N8 exported them precisely so a
+// fourth restatement could not drift; this is the first new caller since.
+//
+// The 1RM is computed in Go by `EstimateOneRM` for the same reason. It is
+// Brzycki with effort folded in, and a SQL re-derivation would be a second
+// opinion about a number the records screen already publishes — the athlete
+// would see two different bests for one set.
+func (r *PostgresRepository) LoadHistory(
+	ctx context.Context, userID, exerciseID string, f LoadHistoryFilter,
+) (*LoadHistory, error) {
+	// The catalog decides what this exercise can hold, never the caller —
+	// same rule `Records` follows. It also proves the id exists, so an
+	// unknown exercise is a 404 rather than an empty chart that looks like
+	// "you have never trained this".
+	var loadType string
+	err := r.pool.QueryRow(ctx,
+		`SELECT load_type FROM exercises WHERE id = $1`, exerciseID).Scan(&loadType)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("session: load history load type: %w", err)
+	}
+
+	args := []any{userID, exerciseID}
+	where := ""
+	if f.From != nil {
+		args = append(args, *f.From)
+		where += fmt.Sprintf(" AND s.started_at >= $%d", len(args))
+	}
+	if f.To != nil {
+		args = append(args, *f.To)
+		where += fmt.Sprintf(" AND s.started_at < $%d", len(args))
+	}
+	args = append(args, f.points())
+	limitArg := len(args)
+
+	// `recent` picks the sessions FIRST, so the cap drops the oldest rather
+	// than truncating mid-series. A LIMIT on the set rows would have cut a
+	// session in half and reported a partial tonnage as if it were the whole
+	// of that day's work.
+	rows, err := r.pool.Query(ctx, `
+		WITH scoped AS (
+			SELECT ss.session_id, s.started_at,
+			       ss.reps, ss.weight_kg, ss.rir, ss.rpe,
+			       COALESCE(`+SQLTonnage+`, 0) AS tonnage,
+			       (`+SQLCountsAsSet+`) AS counts_as_set
+			FROM session_sets ss
+			JOIN sessions s ON s.id = ss.session_id
+			JOIN exercises e ON e.id = ss.exercise_id
+			WHERE ss.user_id = $1 AND ss.exercise_id = $2 AND `+SQLWorkingSet+where+`
+		),
+		recent AS (
+			SELECT session_id, started_at
+			FROM scoped
+			GROUP BY session_id, started_at
+			ORDER BY started_at DESC, session_id DESC
+			LIMIT $`+fmt.Sprint(limitArg)+`
+		)
+		SELECT sc.session_id, sc.started_at, sc.reps, sc.weight_kg, sc.rir, sc.rpe,
+		       sc.tonnage, sc.counts_as_set
+		FROM scoped sc
+		JOIN recent rc ON rc.session_id = sc.session_id
+		ORDER BY sc.started_at ASC, sc.session_id ASC`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("session: load history: %w", err)
+	}
+	defer rows.Close()
+
+	out := &LoadHistory{ExerciseID: exerciseID, LoadType: loadType, Points: []LoadPoint{}}
+	byID := map[string]int{}
+	for rows.Next() {
+		var sessionID string
+		var startedAt time.Time
+		var reps *int
+		var weightKg *float64
+		var rir *int
+		var rpe *float64
+		var tonnage float64
+		var countsAsSet bool
+		if err := rows.Scan(&sessionID, &startedAt, &reps, &weightKg, &rir, &rpe,
+			&tonnage, &countsAsSet); err != nil {
+			return nil, fmt.Errorf("session: load history scan: %w", err)
+		}
+
+		i, ok := byID[sessionID]
+		if !ok {
+			out.Points = append(out.Points, LoadPoint{SessionID: sessionID, StartedAt: startedAt})
+			i = len(out.Points) - 1
+			byID[sessionID] = i
+		}
+		p := &out.Points[i]
+
+		p.TonnageKg += tonnage
+		if countsAsSet {
+			p.Sets++
+		}
+		if reps != nil {
+			p.Reps += *reps
+		}
+		if weightKg != nil && (p.TopWeightKg == nil || *weightKg > *p.TopWeightKg) {
+			w := *weightKg
+			p.TopWeightKg = &w
+		}
+		if reps != nil && weightKg != nil {
+			// Ties keep the FIRST set that reached the estimate, which is the
+			// earlier one in the session — an estimate matched later in the
+			// same session is not new evidence.
+			if est, ok := EstimateOneRM(*reps, *weightKg, rir, rpe); ok &&
+				(p.BestOneRMKg == nil || est > *p.BestOneRMKg) {
+				e, rr, ww := est, *reps, *weightKg
+				p.BestOneRMKg, p.OneRMReps, p.OneRMWeightKg = &e, &rr, &ww
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("session: load history rows: %w", err)
+	}
+	return out, nil
+}

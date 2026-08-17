@@ -2062,6 +2062,48 @@ components:
           type: boolean
           description: Set within the last two weeks — the only reason to treat one record differently from another.
 
+    LoadHistory:
+      type: object
+      required: [exercise_id, load_type, points]
+      properties:
+        exercise_id: { type: string }
+        load_type:
+          type: string
+          description: >
+            From the catalog, not the caller — it decides which fields below
+            are meaningful.
+        points:
+          type: array
+          items: { $ref: "#/components/schemas/LoadPoint" }
+    LoadPoint:
+      type: object
+      required: [session_id, started_at, tonnage_kg, sets, reps]
+      properties:
+        session_id: { type: string }
+        started_at: { type: string, format: date-time }
+        top_weight_kg:
+          type: number
+          nullable: true
+          description: Heaviest working set. Null for bodyweight, timed or distance work.
+        best_1rm_kg:
+          type: number
+          nullable: true
+          description: >
+            Brzycki with effort folded in — the same estimate `/records`
+            publishes, computed once so the two can never disagree. Null when
+            no set supports one.
+        one_rm_reps:
+          type: integer
+          nullable: true
+          description: The set behind the estimate. A modelled number with no evidence cannot be checked.
+        one_rm_weight_kg: { type: number, nullable: true }
+        tonnage_kg:
+          type: number
+          description: This exercise's share of the session, under the one tonnage rule — implements folded in, drops counted, warm-ups excluded.
+        sets:
+          type: integer
+          description: Counted the way sets are counted everywhere else, so a drop is not a second set here.
+        reps: { type: integer }
     ExerciseRecords:
       type: object
       required: [exercise_id, records]
@@ -5892,6 +5934,68 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /records/{exerciseID}/history:
+    get:
+      summary: One exercise's load over time, for the caller
+      operationId: getExerciseLoadHistory
+      description: >
+        One point per session, oldest first — the arc of a single lift.
+
+
+        Under `/records` rather than `/exercises` deliberately: everything
+        below `/records` is the caller's own training data, scoped by the
+        token, while `/exercises` is the shared catalog. The path parameter
+        names the exercise, never the athlete.
+
+
+        A session is the unit. A set is noise (five sets of five are one fact
+        about strength, not five) and a calendar day merges a morning and an
+        evening session into an average neither of them was.
+
+
+        `best_1rm_kg` is null whenever no set in that session can support an
+        estimate — high-rep back-off work legitimately has none, because every
+        rep-max formula diverges past about twelve effective reps. It is a gap
+        to be drawn as a gap, not a zero.
+      parameters:
+        - name: exerciseID
+          in: path
+          required: true
+          schema: { type: string }
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+          description: Inclusive, YYYY-MM-DD, resolved in `tz`.
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+          description: Inclusive, YYYY-MM-DD, resolved in `tz`.
+        - name: tz
+          in: query
+          schema: { type: string }
+          description: >
+            IANA name. Decides which calendar day a bound falls on. Defaults
+            to UTC rather than guessing, so a caller that sends none still
+            gets consistent days.
+      responses:
+        "200":
+          description: >
+            The caller's own history only. At most 400 points; when there are
+            more sessions than that the OLDEST are dropped, so the recent end
+            of the chart is never silently truncated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoadHistory" }
+        "400":
+          description: Bad date, bad timezone, or `to` before `from`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: No such exercise in the catalog.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /records:
     get:
       summary: Personal records the caller holds

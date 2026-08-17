@@ -509,6 +509,11 @@ type Repository interface {
 	// Records derives every personal record the caller holds for the named
 	// exercises. Derived rather than stored — see the implementation.
 	Records(ctx context.Context, userID string, exerciseIDs []string) ([]ExerciseRecords, error)
+
+	// LoadHistory is one exercise's arc over time, one point per session.
+	// Serves the web analytical surface — see the type's doc comment for why
+	// it is not the phone.
+	LoadHistory(ctx context.Context, userID, exerciseID string, f LoadHistoryFilter) (*LoadHistory, error)
 	// PinnedExercises is the athlete's chosen shortlist for their profile.
 	PinnedExercises(ctx context.Context, userID string) ([]string, error)
 	SetPinnedExercises(ctx context.Context, userID string, exerciseIDs []string) error
