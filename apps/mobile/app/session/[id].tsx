@@ -90,6 +90,7 @@ import {
   emptyDropSet,
   emptySet,
   setOrdinals,
+  localVolume,
   soloReps,
   withSetChange,
   fetchSuggestions,
@@ -106,7 +107,6 @@ import {
   type Suggestion,
   type SuggestionCode,
   type Volume,
-  totalWeightKg,
 } from '@/lib/sessions';
 import { getWorkout } from '@/lib/workouts';
 
@@ -1974,36 +1974,6 @@ function RepRangePips({
   );
 }
 
-function localVolume(sets: LoggedSet[]): Volume {
-  const v: Volume = {
-    working_sets: 0,
-    total_reps: 0,
-    tonnage_kg: 0,
-    hardest_rpe: 0,
-    exercise_ids: [],
-  };
-  for (const s of sets) {
-    if (!v.exercise_ids.includes(s.exercise_id)) v.exercise_ids.push(s.exercise_id);
-    // Must match the server's rule exactly. Missing this on the first pass
-    // showed the plan's full volume against a column of unticked sets —
-    // precisely the drift this duplicated arithmetic risks.
-    if (!s.completed) continue;
-    if (s.set_type === 'warmup') continue;
-    v.working_sets++;
-    if (s.rpe != null && s.rpe > v.hardest_rpe) v.hardest_rpe = s.rpe;
-    if (s.reps != null) {
-      v.total_reps += s.reps;
-      // `totalWeightKg`, not the raw number: for a PAIR of dumbbells
-      // `weight_kg` is one of the two. The comment above promises this matches
-      // the server's rule, and for a while it silently did not — this tile and
-      // the finish-card sat next to a Today header and a calendar that had all
-      // been converted, so one session read half on one screen and double on
-      // another. Same phone, same session.
-      if (s.weight_kg != null) v.tonnage_kg += s.reps * totalWeightKg(s);
-    }
-  }
-  return v;
-}
 
 function SetRow({
   index,

@@ -20476,6 +20476,59 @@ sides, and reproduced the collision with them. Resolving a conflict correctly
 line-by-line can still produce a file that is wrong as a whole, which is an
 argument for reading the merged section rather than only the conflict markers.
 
+## 2026-08-16 — A drop is not a set, and its work still counts
+
+The rows on the session screen numbered "225x3 stripped to 185x8" as one set;
+the Sets tile above them said two. One screen, two answers, and the athlete had
+no way to know which the app meant. **W2**.
+
+Settled the way the rows already had: a drop is part of the set it came off —
+one approach to the bar, one rest period — so it does not add to the number the
+athlete counts and compares to last week. Its weight was still moved, so it
+stays in reps and tonnage.
+
+### The change is a SPLIT, and that is the whole risk
+
+`workingSet` was doing two jobs: "does this contribute volume" and "is this one
+of the sets I did". They differ by one clause and had never needed separating,
+so a single predicate served both. Excluding drops from it would have removed a
+drop's work from every volume figure — the over-correction, and the more
+expensive mistake, because it silently loses training the athlete performed.
+
+So there are two predicates now, on both sides of the wire: `workingSet` /
+`countsAsSet` in SQL and Go, `contributesVolume` / `countsAsSet` on the phone.
+Two names rather than one function with a flag: they are used within lines of
+each other, the risk is picking the wrong one, and a name at the call site shows
+which was meant where a boolean would not.
+
+Five sites, all moved together: `Summarise`, the two session SQL aggregates, the
+feed's own copy of the rule, and three mobile sums (Today's header, the
+calendar, the week review — the last of which keeps drops, because it measures
+volume).
+
+### The test that makes it stick
+
+`TestHistoryAgreesWithSummarise` compares SQL against the domain over one
+fixture, and that fixture now contains a drop — a per-side one, so it also
+proves the two rules compose: doubled tonnage, no extra set. Without a drop in
+it, `workingSet` and `countsAsSet` are indistinguishable and a site using the
+wrong one passes green. Its literal expectation moved to five sets and 2080 kg.
+
+Both directions are mutation-tested. Counting drops in SQL reports "days sum to
+6, totals say 5"; discarding a drop's volume in the domain reports "tonnage 600,
+want 1240".
+
+### Gaps
+
+- **Not device-verified.** The tile and the rows now agree arithmetically;
+  nobody has looked at them together on a phone.
+- **Historical set counts drop** for any session already containing a drop set.
+  Only sessions logged since drops became loggable this morning can have one, so
+  the blast radius is a day.
+- **`working_sets` is still the name** of a field that now means "sets, drops
+  excluded". Accurate enough — a drop is not a working set under this
+  definition — but the contract's wording was not revisited.
+
 ## Open items / known gaps as of this entry
 
 - **Nothing stops a package borrowing catalog rows again.** All three holdouts are converted (`session` #231, `workout` #234, `profile`) and every module package now passes alone against its own pristine database — but the rule is documented in seven test files and CLAUDE.md and held by review alone. A fixture referencing `bench-press` added tomorrow gets a green CI run and silently restores the whole dependency, because `exercise` still seeds the catalog first and never cleans up. A tripwire would need to run last, and nothing does.

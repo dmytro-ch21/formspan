@@ -480,8 +480,16 @@ components:
         working_sets:
           type: integer
           description: >
-            Warm-ups and uncompleted sets contribute nothing, matching the
-            volume rule the session endpoints report.
+            How many SETS were performed — warm-ups and uncompleted sets
+            contribute nothing, and neither does a drop.
+
+
+            This deliberately no longer matches the volume rule. A drop is part
+            of the set it came off (225x3 stripped to 185x8 is one approach to
+            the bar), so it adds no set — while its reps and weight DO count
+            toward `tonnage_kg`, because the load was moved. Counting it as a
+            set told the athlete they did four where the session screen's own
+            row numbers said three.
         tonnage_kg:
           type: number
         detail:
@@ -1812,7 +1820,10 @@ components:
         last_max_reps: { type: integer, nullable: true }
         working_sets:
           type: integer
-          description: How many working sets last session, warm-ups excluded.
+          description: >
+            How many sets were performed last session — warm-ups, uncompleted
+            sets and DROPS all excluded, matching every other set count in the
+            API. A drop is part of the set it came off, so it adds none.
         sessions_at_load:
           type: integer
           description: >
@@ -1901,7 +1912,14 @@ components:
       description: >
         The derived working-volume summary, computed server-side so both
         clients report identical numbers rather than each rolling their own
-        arithmetic. Warm-up sets are excluded.
+        arithmetic. Warm-up and uncompleted sets are excluded throughout.
+
+
+        TWO RULES, differing by one clause. `working_sets` counts what the
+        athlete would call a set, and a DROP is not one — 225x3 stripped to
+        185x8 is one approach to the bar, so it is one set with a drop off it.
+        `total_reps` and `tonnage_kg` DO include that drop, because the reps
+        were performed and the load was moved.
       required: [working_sets, total_reps, tonnage_kg, hardest_rpe, exercise_ids]
       properties:
         working_sets: { type: integer }

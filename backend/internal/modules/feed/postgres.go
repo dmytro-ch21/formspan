@@ -61,7 +61,10 @@ const visibleFrom = `
 const workingVolume = `
 	COALESCE((
 		SELECT count(*) FROM session_sets ss
-		WHERE ss.session_id = s.id AND ss.completed AND ss.set_type <> 'warmup'
+		-- A drop is excluded from the COUNT and included in the tonnage below.
+		-- One approach to the bar is one set; the weight it moved is still work.
+		WHERE ss.session_id = s.id AND ss.completed
+		  AND ss.set_type <> 'warmup' AND ss.set_type <> 'drop'
 	), 0) AS working_sets,
 	COALESCE((
 		SELECT sum(ss.reps * ss.weight_kg *

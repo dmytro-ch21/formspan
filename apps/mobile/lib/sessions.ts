@@ -991,3 +991,85 @@ export function repairSet<T extends LoggedSet>(set: T): T {
       : null,
   };
 }
+
+/**
+ * Does this set contribute VOLUME — reps and tonnage?
+ *
+ * Warm-ups do not. Everything else performed does, drops included: the weight
+ * was moved.
+ */
+export function contributesVolume(set: Pick<LoggedSet, 'completed' | 'set_type'>): boolean {
+  return set.completed && set.set_type !== 'warmup';
+}
+
+/**
+ * Is this one of the sets the athlete would say they did?
+ *
+ * Narrower than `contributesVolume`, by exactly one clause: **a drop is not a
+ * set.** 225x3 stripped to 185x8 is one approach to the bar and one rest
+ * period, so it is one set with a drop off it — which is how the session screen
+ * already numbers the rows. Counting it as two told the athlete they did four
+ * sets when they did three, on the same screen as the rows saying three.
+ *
+ * Two functions rather than one with a flag: they differ by a clause and are
+ * called within lines of each other, so the risk is picking the wrong one, and
+ * a name at the call site makes that visible where a boolean would not. The
+ * server keeps the same pair — `workingSet` and `countsAsSet`.
+ */
+export function countsAsSet(set: Pick<LoggedSet, 'completed' | 'set_type'>): boolean {
+  return contributesVolume(set) && set.set_type !== 'drop';
+}
+
+/**
+ * The server's `Summarise`, computed locally so a session in progress has
+ * numbers before it has been saved.
+ *
+ * **EXTRACTED FROM THE SESSION SCREEN, and the reason is a measurement rather
+ * than a preference.** It lived in a ~2,700-line file, promised in a comment to
+ * "match the server's rule exactly", and was the site missed TWICE — once when
+ * per-side load landed, so the tile showed half the history's tonnage, and
+ * again when drops stopped counting as sets. A comment did not prevent either.
+ * It is here now, beside the predicates it depends on and covered by tests, for
+ * the same reason `setOrdinals` was moved.
+ *
+ * Two rules, and the difference is the whole point: `countsAsSet` gates the
+ * COUNT, `contributesVolume` gates the sums. A drop adds work and adds no set.
+ */
+export function localVolume(sets: LoggedSet[]): Volume {
+  const v: Volume = {
+    working_sets: 0,
+    total_reps: 0,
+    tonnage_kg: 0,
+    hardest_rpe: 0,
+    exercise_ids: [],
+  };
+  for (const s of sets) {
+    if (!v.exercise_ids.includes(s.exercise_id)) v.exercise_ids.push(s.exercise_id);
+    // Must match the server's rule exactly. Missing this on the first pass
+    // showed the plan's full volume against a column of unticked sets —
+    // precisely the drift this duplicated arithmetic risks.
+    if (!contributesVolume(s)) continue;
+    // The COUNT takes the narrower rule while the sums below take the wider
+    // one — a drop adds work but not a set. Both live in `lib/sessions.ts`
+    // rather than being spelled out here, because this function has now been
+    // the one missed TWICE: once when per-side load landed and the tile read
+    // half the history's tonnage, and again here. Inline predicates are how a
+    // duplicated rule drifts, and this is the duplicate furthest from the
+    // original.
+    if (countsAsSet(s)) {
+      v.working_sets++;
+    }
+    if (s.rpe != null && s.rpe > v.hardest_rpe) v.hardest_rpe = s.rpe;
+    if (s.reps != null) {
+      v.total_reps += s.reps;
+      // `totalWeightKg`, not the raw number: for a PAIR of dumbbells
+      // `weight_kg` is one of the two. The comment above promises this matches
+      // the server's rule, and for a while it silently did not — this tile and
+      // the finish-card sat next to a Today header and a calendar that had all
+      // been converted, so one session read half on one screen and double on
+      // another. Same phone, same session.
+      if (s.weight_kg != null) v.tonnage_kg += s.reps * totalWeightKg(s);
+    }
+  }
+  return v;
+}

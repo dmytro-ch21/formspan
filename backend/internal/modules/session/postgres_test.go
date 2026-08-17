@@ -724,6 +724,16 @@ func TestHistoryAgreesWithSummarise(t *testing.T) {
 			// 10 x 30 x 2 = 600, not 300. Both sides of the comparison have to
 			// agree about that, which is the only reason it is in this fixture.
 			{ExerciseID: exDBBench, SetType: SetTypeWorking, Reps: ptrInt(10), WeightKg: ptrF(30), Completed: true},
+			// A DROP off it. Counted in reps and tonnage, NOT in the set count —
+			// and both sides of this comparison have to agree about that, which
+			// is the only reason it is in the fixture. Without one, `workingSet`
+			// and `countsAsSet` are indistinguishable here and a SQL site using
+			// the wrong one passes green.
+			//
+			// Per-side as well, so it also proves the two rules compose: a drop
+			// on a pair of dumbbells contributes doubled tonnage while adding no
+			// set.
+			{ExerciseID: exDBBench, SetType: SetTypeDrop, Reps: ptrInt(12), WeightKg: ptrF(20), Completed: true},
 			// Third exercise, warm-up only. Summarise counts it in ExerciseIDs
 			// (they're collected before the completed/warm-up guards), so the
 			// SQL's COUNT(DISTINCT exercise_id) must stay unfiltered. Without a
@@ -789,13 +799,18 @@ func TestHistoryAgreesWithSummarise(t *testing.T) {
 	//   8 reps unweighted        =    0
 	//   3×120 + 1×140 (barbell)  =  500
 	//   10×30 PER HAND, doubled  =  600
+	//   12×20 PER HAND, DROP      =  480
 	//                              -----
-	//                              1600
+	//                              2080
+	//
+	// The drop adds its 480 and adds NO set — five sets, not six. That pair is
+	// the whole of W2, and asserting only one half would pass against a change
+	// that dropped its volume too.
 	//
 	// The dumbbell line is why this number moved. Written literally rather than
 	// computed, because a computed expectation would apply whatever factor the
 	// code applies and agree with a bug.
-	if wantSets != 5 || wantReps != 27 || !closeEnough(wantTonnage, 1600) {
+	if wantSets != 5 || wantReps != 39 || !closeEnough(wantTonnage, 2080) {
 		t.Fatalf("fixture expectations drifted: sets=%d reps=%d tonnage=%v", wantSets, wantReps, wantTonnage)
 	}
 	// Two sessions, two days, four distinct exercises — one of them only
