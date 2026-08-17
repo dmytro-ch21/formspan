@@ -22688,6 +22688,126 @@ earlier version could catch are the last two.
 - **Nothing yet sends a fifth grip.** N9 (`mixed`/`hook`) is unblocked, not done,
   and the first PR to add one should confirm an old build round-trips it rather
   than trusting this entry.
+## 2026-08-17 — A chart on the phone, and the first hole in the platform rule
+
+**N5.** The weight trend now lives at `apps/mobile/app/checkin/trend.tsx`, one
+tap from the check-in card: week, month, year, a seven-day mean over the raw
+readings.
+
+### The rule it breaks, and how narrowly
+
+"Mobile logs, web analyses" has held since the beginning and was re-litigated
+per feature until it stopped being open. `CheckinCard`'s own doc said it: *"the
+history and the charts live on web, which is the analytical surface by the
+platform rule."*
+
+The carve-out now in CLAUDE.md does not weaken that; it names a test that
+"analysis" was hiding. **A trend you read in three seconds to decide something
+is not analysis, it is decision support** — and "am I losing weight fast enough"
+is decided in a supermarket, not at a desk. Three conditions, all required: one
+question, no picker/axes/tooltips/zoom; the decision is made away from a
+computer; and the comparable, exportable version still lives on web.
+
+Written as three conditions rather than "small charts are fine" because the
+second version is one every future session can talk itself into. The moment one
+of these grows a metric selector it has become the web screen.
+
+The chart is still deliberately OFF the Today card, for the reason that card
+already gave: it is a decision surface and a chart on it would make it a report.
+
+### The arithmetic is borrowed, not rewritten
+
+`lib/anthropometry.ts` already owned what a trend means — the seven-day rolling
+mean, `MIN_TREND_READINGS`, the rate. `lib/weightTrend.ts` therefore contains no
+statistics at all: it decides which days to ask about and how to fit the answers
+into a box. A second implementation of the mean would have been a third number
+the app could report for the same body, which is the whole reason that file was
+centralised.
+
+### A gap is a gap
+
+The property this hinges on. A line chart interpolates by default, so a
+fortnight nobody weighed in comes out as a confident straight line through the
+middle of it — the app inventing a fortnight of data, and the wrong version
+looks *better* than the right one. `trendWeight` already returns null for a day
+with too little behind it, and the series builder keeps those nulls as segment
+breaks rather than dropping them. One path per segment; the holes draw
+themselves.
+
+Three related refusals, each tested and mutation-checked:
+
+- **The delta needs both edges.** Nine days of readings must not produce "down
+  2 kg this month" — it would measure a shorter span than the one on screen and
+  label it with the range's name.
+- **The mean reaches back before the window.** The smoothed line is computed
+  from the full list, not the cropped one; windowing first makes the oldest week
+  of every chart climb out of nothing, an artefact of the crop rather than
+  anything the athlete did. The screen fetches a year *plus a fortnight* for the
+  same reason.
+- **The axis is not zero-based.** Deliberate, and the opposite of the usual
+  advice: body mass has no meaningful zero, and a zero-based axis puts a year of
+  work in the top 5% of the box and renders it flat.
+
+### Two off-by-ones, both mine, both caught by tests
+
+A 365-day window *including today* reaches back 364 days, and I wrote 365. And
+three fixtures gave a seven-day window only seven days of readings — the mean at
+the left edge looks back seven days *before* it, so the first days fell short of
+`MIN_TREND_READINGS` and the line legitimately did not exist. Both were the test
+being wrong and the code being right, which is the pleasant direction, but it is
+also exactly the failure the "reaches back before the window" property describes:
+easy to get wrong, invisible in the output, and it looks like a shape rather than
+a bug.
+
+### What review found
+
+Four things, one of them a bug the repo had already banned in writing:
+
+- **`toISOString().slice(0, 10)` is the UTC date**, and `app/(tabs)/index.tsx`
+  carries a comment forbidding exactly that idiom, twenty lines from code I had
+  read. Check-ins are dated by the LOCAL calendar day. West of Greenwich an
+  evening opens the chart on an empty "tomorrow"; east of Greenwich a morning
+  weigh-in is dated past the window's right edge and dropped as a FUTURE
+  reading — invisible on the day it was logged. The `TZ=America/Los_Angeles`
+  suite exists for this class and did not catch it, because the lib takes
+  `today` as a parameter and nothing tested the screen's own computation.
+- **An athlete who weighs in weekly saw an empty box forever.** The gate was
+  "is there a trend line", and `MIN_TREND_READINGS` means three readings inside
+  a trailing WEEK — a Sunday-only weigher never qualifies, while a year of their
+  readings sat unused in the series. The dots now draw without the line.
+- **The footer printed the padded axis bounds** as two numbers under the chart,
+  min on the left and max on the right, where a time axis puts start and end. On
+  a falling trend that reads as weight going up, and neither number is one the
+  athlete ever recorded. Removed — which also settles the carve-out's own "no
+  axes to read values off" condition, which it was quietly violating.
+- **The carve-out could be read as excluding its own first instance.** It banned
+  a "date-range picker" while the screen ships a week/month/year switcher, so it
+  now says explicitly that three preset windows all ending today are one
+  question at three depths, and that a picker is free start and end dates —
+  which is comparison, and comparison stays on web.
+
+Review also found three mutations my tests did NOT catch: an off-by-one in a
+reading's day (every dot shifts right and today's weigh-in falls off the
+window), bounds taken from the readings alone (the left-edge trend can sit above
+every in-window reading and would be clipped outside the box), and the delta's
+magnitude, which was only sign-checked. All three are pinned now — the delta
+against `trendWeight` itself, so the test pins the arithmetic without this file
+growing a second opinion about what a mean is.
+
+### Open questions this leaves
+
+- **Not seen on a device.** Same debt as N4, and **L1** now names this chart
+  specifically — the range switcher and the empty state have been typechecked
+  and tested, never looked at. An SVG chart is the kind of thing where "renders" and "reads well"
+  are genuinely different, so this one is worth a look before it is trusted.
+- **Girths get no chart**, though the data is there and the same builder would
+  serve. Left out because each site is a weekly measurement with a tape error
+  comparable to a week of change, so a nine-line chart would mostly draw
+  measurement noise. That is a judgement, not a technical limit.
+- **N6 (per-exercise load over time) is NOT unlocked by this.** It has to pass
+  the same three conditions on its own, and it is closer to analysis than
+  bodyweight is — "did my squat go up" is a question you ask at a desk, planning
+  next block.
 
 ## Open items / known gaps as of this entry
 

@@ -28,6 +28,33 @@ VOLA is a unified training and nutrition platform for BJJ athletes who also stre
 
 This was re-litigated per feature for a while; it isn't open. When adding something to the session flow, decide which of the two it is before building it, and say so in the history entry.
 
+**One carve-out, added 2026-08-17 for N5, and it is narrow on purpose.** A
+*trend you read in three seconds to decide something* is not analysis, it is
+decision support — and the decision it supports is usually made away from a
+desk. "Am I losing weight fast enough" is answered in a supermarket, not in a
+spreadsheet. So a small read-only chart may live on mobile when **all** of these
+hold:
+
+- it answers ONE question, with no metric picker, no axes to read values off, no
+  tooltips and no zoom;
+- the decision it informs is made while away from a computer;
+- the comparable, exportable, correlate-it-with-training-load version still
+  lives on web, and this is not a step toward moving that.
+
+`apps/mobile/app/checkin/trend.tsx` is the first and currently only instance.
+The test is the three bullets, not "is it a chart" — the moment one grows a
+second metric or a **date-range picker** it has become the web screen and
+belongs there.
+
+**A fixed zoom toggle is not a date-range picker**, and the distinction has to
+be stated or the first instance fails the rule that blesses it: week / month /
+year are three preset windows that all END TODAY, which is one question asked at
+three depths. A picker is one that lets the athlete choose a start and an end —
+that is comparison, and comparison is the web screen's job.
+
+Logging and authoring are unaffected; this changes nothing about where a session
+is run from.
+
 ## Backend module pattern
 
 Every domain module follows the shape of `internal/modules/profile/` — read it as the reference implementation before adding a new one:

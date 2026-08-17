@@ -22,8 +22,14 @@ import { formatWeight, type UnitSystem } from '@/lib/units';
  *
  * **A decision surface, not a report.** It answers one question — is what I am
  * doing working, and do I need to do anything right now — and everything it
- * shows is in service of that. The history and the charts live on web, which is
- * the analytical surface by the platform rule.
+ * shows is in service of that.
+ *
+ * The full history and the analytical views live on web. **The weight trend no
+ * longer does** — it is one tap away at `app/checkin/trend.tsx`, under the
+ * amendment to the platform rule recorded in CLAUDE.md: a chart read in three
+ * seconds to decide what to eat is decision support, and that decision is made
+ * in a supermarket. It stayed OFF this card for the reason above; a chart here
+ * would make the card the report it must not become.
  *
  * ## Why it shows a trend and not this morning's number
  *
@@ -174,6 +180,19 @@ export function CheckinCard({
             {loggedToday ? 'Edit check-in' : 'Check in'}
           </Text>
         </Pressable>
+        {/* The trend, one tap away rather than on the card. Secondary
+            styling on purpose: the card's job is today's decision, and a
+            chart competing with "Check in" for the thumb would invert that.
+            See `app/checkin/trend.tsx` for why it is a screen at all. */}
+        <Pressable
+          onPress={() => router.push('/checkin/trend')}
+          style={styles.secondary}
+          accessibilityRole="button"
+          accessibilityLabel="See your weight trend"
+          testID="checkin-trend"
+        >
+          <Text style={styles.secondaryText}>Trend</Text>
+        </Pressable>
         {/* Surfaced only when it is actually due — a permanent "measure
             yourself" prompt is the thing people learn to ignore. */}
         {dueGirths && (
@@ -235,5 +254,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   primaryText: { fontWeight: '700', fontSize: 14 },
+  secondary: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: vola.line,
+  },
+  secondaryText: { fontSize: 14 },
   due: { fontSize: 12, color: vola.textMuted, flex: 1 },
 });

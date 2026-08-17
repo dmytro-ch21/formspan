@@ -6666,7 +6666,8 @@ whole user-visible property.
 ## Body check-ins and phases (`/v1/body`, mobile Today + check-in screen)
 
 Logged on the phone by the platform rule — a bathroom scale is not a desk. The
-analytical surface (history, charts) stays on web and does not exist yet.
+analytical surface (history, comparison, export) stays on web and does not exist
+yet. The one exception is the weight trend below — see CLAUDE.md's carve-out.
 
 ### The daily check-in
 
@@ -6753,6 +6754,31 @@ analytical surface (history, charts) stays on web and does not exist yet.
   behaving as though storage were absent.
 - Photos are downscaled on the device before upload; a raw 4–5MB frame must not
   be sent.
+
+### The weight trend (`/checkin/trend`, N5)
+
+- **Three ranges, one fetch.** Week / month / year switch instantly — the screen
+  fetches a year once and slices locally. Switching must not re-request.
+- **A gap stays a gap.** Log a fortnight, skip a fortnight, log again: the line
+  must break, not run straight through the hole. This is the property most
+  likely to regress, because interpolating is what a line chart does by default
+  and the wrong version looks *better*.
+- **The left edge does not climb out of nothing.** Open the month view with a
+  year of daily readings: the line must start at full height on day one, not
+  ramp up over the first week. A ramp means the input was windowed before the
+  rolling mean was taken.
+- **Not enough data says so.** Below three readings there is no line and no
+  chart — a message instead. It must never draw a confident line through two
+  points, and must never show 0 kg.
+- **The delta refuses rather than misleads.** With only nine days of readings
+  the month view must not claim "down 2 kg this month"; it says the range
+  cannot be compared.
+- **Units follow the athlete.** In imperial the delta and the bounds read in lb.
+  The stored value is always kilograms; only the display converts.
+- **Offline.** Reachable from a cached Today; a failed fetch shows a note, not
+  an alert or a retry loop.
+- **The card did not become a report.** Today still shows the decision card;
+  the chart is one tap away and the "Check in" action is still the primary one.
 
 ## The BJJ position map (`GET /v1/bjj/positions`, mobile `/bjj/positions`)
 
