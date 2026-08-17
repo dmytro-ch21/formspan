@@ -20893,6 +20893,90 @@ reading it independently will keep converging on the same line.
   typechecked and unit-tested, and no dev server was run against a session
   containing back-offs.
 
+## 2026-08-16 — The console can author `load_mode`, and where "invalid" is allowed to mean different things
+
+`createWithin` never wrote `load_mode`. Every exercise authored in the admin
+console therefore took the column default `total` — so a dumbbell exercise
+created there reported **half** its real tonnage from the moment it existed,
+and `updateWithin` did not write the column either, which made the wrong value
+permanent. That is **T2**, and it is the per-side halving bug reissued for new
+content rather than old.
+
+Both statements now write it, the console has a Load mode select, and
+`ExerciseWrite` carries the field.
+
+### The omission being removed was load-bearing, so something has to replace it
+
+`updateWithin` leaving `load_mode` out was not an oversight — it is the same
+reasoning that keeps `media` out of the write: **a field the update cannot
+write is a field an edit cannot clear.** Adding the column to the SET clause
+gives that guarantee up, so the replacement has to be explicit:
+
+`applyTo` merges the request onto the **stored row** (`GetExercise`, which
+selects `load_mode` from a NOT NULL column), so a PATCH that never mentions the
+field writes the same value back. A create merges onto a zero `Exercise`
+instead, which is why the tail defaults `""` to `total` — the column's own
+default, so silence means the same thing to the API and the database.
+
+Both halves are pinned by tests, because the failure mode is quiet: if the
+handler ever built its `Exercise` from the request alone, **every rename of a
+dumbbell exercise would silently revert it to `total`.**
+
+### Where "invalid" is allowed to mean two different things
+
+The strict check went into `ValidateForWrite` first. That was wrong, and two
+`cmd/exportcontent` tests said so within a minute.
+
+That function is **shared with the export**, whose validate step asks *"would
+this seed?"* — and an unrecognised `load_mode` **would** seed, as `total`,
+because `NormalizeLoadMode` fails it closed precisely so one bad row cannot
+break a whole deploy. A strict shared validator therefore fails an export over
+something that would have worked fine.
+
+So the check lives on the **handler**, and the asymmetry is the design rather
+than an accident:
+
+- **Seeder / export — tolerant.** No author is present, the cost of refusing is
+  a broken deploy, and `total` under-reports rather than inventing weight.
+- **API write — strict, 400.** There is exactly one author, waiting for a
+  response. Coercing `per_sied` to `total` for them is the dumbbell-halving bug
+  arriving through a spelling mistake, invisible until somebody notices their
+  tonnage is out by half.
+
+Worth keeping as a general shape: *the same value can be legitimately invalid
+in one direction and merely unusual in another, and a validator shared across
+both will pick one and be wrong for the other.* The tests that caught it were
+not testing `load_mode` at all.
+
+### The console's two flags, which are the thing most likely to be confused
+
+The form now carries a note, because `load_mode` and `is_unilateral` answer
+different questions and 34 catalog rows are both. Only `per_side AND NOT
+unilateral` doubles — a one-arm dumbbell row is entered per hand and does not.
+An author who reads one as implying the other misclassifies exactly the rows
+where it matters.
+
+Note also that the console sends **every field on every save**, so its select
+is always authoritative; the merge-preserve behaviour above exists for other
+callers and partial PATCHes. And the select's default is `shown.load_mode ??
+"total"` — safe only because both of the form's data sources carry the field
+(`GET /v1/exercises/{id}`, which W3 made contractual, and the error-path
+re-render, which round-trips `bodyFrom`). If either stopped carrying it, editing
+anything on a per-side exercise would revert it. That is checked, not assumed.
+
+### Gaps
+
+- **Not exercised through the console UI.** The select, the note and the
+  round-trip are typechecked and covered at the handler and repository layers;
+  nobody has loaded `/content/exercises/{id}` in a browser, because the admin
+  app needs Clerk credentials Claude will not enter.
+- **The 142 existing classifications are still unreviewed** — `F3`. This change
+  makes them *correctable*, which is what it was blocking.
+- **Nothing warns an author that a dumbbell exercise is `total`.** The console
+  will now let you set it correctly; it will not notice that "Dumbbell Bench
+  Press" left at `total` is almost certainly a mistake. A name/equipment
+  heuristic in the form is the obvious follow-up and is not done here.
+
 ## Open items / known gaps as of this entry
 
 - **The technique library is still left behind by `technique`'s tests**, exactly as the exercise catalog was until the tripwire entry above. Smaller exposure — `technique` sorts seventeenth of nineteen, so only `theme` and `workout` run after it — but the same shape: a package borrowing a technique id would pass on that residue. The same fix applies (`removeCatalogAfterTest`'s shape, scoped to the ids `SeedData()` names); deferred because H1 is already in flight against that library.

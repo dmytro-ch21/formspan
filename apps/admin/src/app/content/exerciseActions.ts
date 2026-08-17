@@ -53,6 +53,13 @@ function bodyFrom(form: FormData): ExerciseWrite {
     secondary_muscles: lines(form.get("secondary_muscles")),
     equipment: lines(form.get("equipment")),
     load_type: text(form.get("load_type")),
+    // Always sent, like every other field here — the select has a value in both
+    // states, so there is no unchecked-box ambiguity to handle. The API would
+    // preserve the stored value if this were omitted, but this action's whole
+    // contract is "the whole form, every save", and relying on the server's
+    // merge instead would make the console the one caller whose behaviour
+    // depends on a field being absent.
+    load_mode: text(form.get("load_mode")),
     // `has`, not `=== "on"`. An unchecked box sends nothing, so presence IS the
     // value — and comparing to the browser's default string breaks silently the
     // moment someone adds a `value` attribute for styling, writing false for

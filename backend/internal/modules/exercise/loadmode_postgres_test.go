@@ -214,3 +214,71 @@ func TestAnOldRevisionStillReportsALegalLoadMode(t *testing.T) {
 			"only 'total' and 'per_side', and this response is typed as an Exercise", got, LoadModeTotal)
 	}
 }
+
+// TestTheConsoleCanAuthorAndCorrectLoadMode is T2 at the level that matters:
+// the column, not the struct.
+//
+// `createWithin` never wrote `load_mode`, so every exercise created in the
+// admin console took the column default `total` — a dumbbell exercise authored
+// there reported half its real tonnage from the moment it existed. And
+// `updateWithin` did not write it either, so nothing could put it right: the
+// omission that protected a deploy-set value from being cleared also made a
+// wrong value permanent.
+//
+// Both halves are covered here, plus the guarantee that replaced the old
+// protection — an edit that never mentions the field must write back what is
+// already stored.
+func TestTheConsoleCanAuthorAndCorrectLoadMode(t *testing.T) {
+	repo, ctx, id := contentFixture(t)
+
+	perSide := authored(id)
+	perSide.LoadMode = LoadModePerSide
+	created, err := repo.CreateExercise(ctx, perSide, testActor)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if created.LoadMode != LoadModePerSide {
+		t.Fatalf("CreateExercise returned load_mode %q, want %q — a console-authored "+
+			"dumbbell exercise born 'total' halves its own tonnage forever",
+			created.LoadMode, LoadModePerSide)
+	}
+
+	// Read back rather than trusting the RETURNING, because the bug this covers
+	// was the column never being written at all.
+	var stored string
+	if err := repo.pool.QueryRow(ctx,
+		`SELECT load_mode FROM exercises WHERE id = $1`, id).Scan(&stored); err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if stored != LoadModePerSide {
+		t.Fatalf("the column holds %q, want %q", stored, LoadModePerSide)
+	}
+
+	// An edit that says nothing about load_mode. This is the handler's shape:
+	// merge the request onto the STORED row, then write the whole thing.
+	current, err := repo.GetExercise(ctx, id)
+	if err != nil {
+		t.Fatalf("get for write: %v", err)
+	}
+	renamed := exerciseRequest{Name: ptr("Zercher Squat (Wide)")}.applyTo(current)
+	updated, err := repo.UpdateExercise(ctx, renamed, testActor)
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if updated.LoadMode != LoadModePerSide {
+		t.Fatalf("a rename reset load_mode to %q — adding the column to the UPDATE "+
+			"removed the omission that used to protect it, and the merge is what "+
+			"replaces that guarantee", updated.LoadMode)
+	}
+
+	// And the correction path: a row already classified wrongly can be fixed,
+	// which before this change no endpoint could do.
+	fix := exerciseRequest{LoadMode: ptr(LoadModeTotal)}.applyTo(updated)
+	fixed, err := repo.UpdateExercise(ctx, fix, testActor)
+	if err != nil {
+		t.Fatalf("update to total: %v", err)
+	}
+	if fixed.LoadMode != LoadModeTotal {
+		t.Fatalf("load_mode is %q after correcting it to %q", fixed.LoadMode, LoadModeTotal)
+	}
+}

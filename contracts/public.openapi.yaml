@@ -3220,6 +3220,22 @@ components:
         load_type:
           type: string
           enum: [weight_reps, reps, time, distance, distance_time]
+        load_mode:
+          type: string
+          enum: [total, per_side]
+          description: >
+            Which number the athlete types. `per_side` means ONE implement of a
+            pair, so a dumbbell exercise left at `total` silently reports half
+            its real tonnage — which is what every console-authored dumbbell
+            exercise did before this field existed here.
+
+
+            Omitting it on a POST defaults to `total`, the column's own
+            default. Omitting it on a PATCH leaves the stored value alone, like
+            every other field. Sending an unrecognised value is a 400 — NOT a
+            fallback to `total`, which would restore the halving bug through a
+            typo. That is deliberately stricter than the seeder, which
+            normalises so one bad row cannot fail a deploy.
         is_unilateral: { type: boolean }
         instructions: { type: string }
 

@@ -277,6 +277,24 @@ export function ExerciseForm({
           />
         </Field>
 
+        <Field
+          label="Load mode"
+          htmlFor="load_mode"
+          hint="Which number the athlete types. Per side means ONE dumbbell or kettlebell of a pair — get this wrong and the exercise reports half its real tonnage, or double it."
+        >
+          <select
+            key={`load_mode-${shown.load_mode ?? ""}`}
+            id="load_mode"
+            name="load_mode"
+            required
+            defaultValue={shown.load_mode ?? "total"}
+            className={inputClass}
+          >
+            <option value="total">total — the weight IS the whole load</option>
+            <option value="per_side">per_side — one implement of a pair</option>
+          </select>
+        </Field>
+
         <div className="flex items-center gap-2">
           <input
             key={`is_unilateral-${String(shown.is_unilateral ?? false)}`}
@@ -290,6 +308,17 @@ export function ExerciseForm({
             Unilateral — one limb at a time
           </label>
         </div>
+        {/* Two different questions, and the console is where they get confused.
+            `load_mode` says which number is typed; `is_unilateral` says whether
+            one limb works at a time. 34 catalog rows are BOTH — a one-arm
+            dumbbell row is entered per hand and does not double — so neither
+            implies the other and the tonnage rule reads them together:
+            per_side AND NOT unilateral is the only combination that doubles. */}
+        <p className="text-[12px] text-text-secondary">
+          These two are independent. A one-arm dumbbell row is <em>per_side</em> (you enter one
+          dumbbell) <em>and</em> unilateral (only that hand works), so its load does not double —
+          only per_side movements that are <em>not</em> unilateral do.
+        </p>
       </Section>
 
       <Section title="Anatomy and equipment">

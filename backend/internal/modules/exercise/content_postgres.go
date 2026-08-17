@@ -84,12 +84,12 @@ func createWithin(ctx context.Context, tx pgx.Tx, e Exercise) (Exercise, error) 
 		INSERT INTO exercises (
 			id, name, sport, movement_pattern, movement_pattern_detail,
 			primary_muscles, secondary_muscles, equipment, load_type,
-			is_unilateral, instructions, source, status
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'admin','draft')
+			is_unilateral, load_mode, instructions, source, status
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'admin','draft')
 		RETURNING `+contentReturning,
 		e.ID, e.Name, e.Sport, e.MovementPattern, e.MovementPatternDetail,
 		nonNil(e.PrimaryMuscles), nonNil(e.SecondaryMuscles), nonNil(e.Equipment),
-		e.LoadType, e.IsUnilateral, e.Instructions)
+		e.LoadType, e.IsUnilateral, NormalizeLoadMode(e.LoadMode), e.Instructions)
 
 	out, err := scanContent(row)
 	if err != nil {
@@ -139,13 +139,13 @@ func updateWithin(ctx context.Context, tx pgx.Tx, e Exercise) (Exercise, error) 
 			name = $2, sport = $3, movement_pattern = $4,
 			movement_pattern_detail = $5, primary_muscles = $6,
 			secondary_muscles = $7, equipment = $8, load_type = $9,
-			is_unilateral = $10, instructions = $11,
+			is_unilateral = $10, load_mode = $11, instructions = $12,
 			source = 'admin', updated_at = now()
 		WHERE id = $1
 		RETURNING `+contentReturning,
 		e.ID, e.Name, e.Sport, e.MovementPattern, e.MovementPatternDetail,
 		nonNil(e.PrimaryMuscles), nonNil(e.SecondaryMuscles), nonNil(e.Equipment),
-		e.LoadType, e.IsUnilateral, e.Instructions)
+		e.LoadType, e.IsUnilateral, NormalizeLoadMode(e.LoadMode), e.Instructions)
 
 	out, err := scanContent(row)
 	if errors.Is(err, pgx.ErrNoRows) {

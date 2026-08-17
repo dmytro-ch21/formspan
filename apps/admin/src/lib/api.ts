@@ -438,6 +438,16 @@ export type Exercise = {
   secondary_muscles: string[];
   equipment: string[];
   load_type: string;
+  /**
+   * Which number the athlete types: `total`, or `per_side` for ONE implement
+   * of a pair. A dumbbell exercise left at `total` reports half its real
+   * tonnage — which is what every exercise authored in this console did before
+   * the field was writable here.
+   *
+   * Not the same question as `is_unilateral`: 34 catalog rows are both, and
+   * those are entered per hand while the load does NOT double.
+   */
+  load_mode: string;
   is_unilateral: boolean;
   instructions: string;
   media?: { kind: string; url: string; is_default: boolean }[];
