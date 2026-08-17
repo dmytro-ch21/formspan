@@ -2171,9 +2171,15 @@ components:
         reference content shared by every user — there is no owner, so
         nothing here is user-scoped. Seeded from version-controlled JSON
         rather than written through the API.
+      # `load_mode` is required because clients now render copy off it — the
+      # weight field says "per hand" on a per_side movement — and a field that
+      # merely happens to be present is one a later change can drop without
+      # anything failing. The column is NOT NULL with a CHECK and the Go field
+      # has no omitempty, so this documents what the server already guarantees
+      # rather than asking it for something new.
       required:
         [id, name, sport, movement_pattern, primary_muscles,
-         secondary_muscles, equipment, load_type, is_unilateral,
+         secondary_muscles, equipment, load_type, load_mode, is_unilateral,
          instructions, media, movement_pattern_detail, created_at, updated_at]
       properties:
         id:
@@ -2274,7 +2280,15 @@ components:
 
 
             A property of the movement, never of a single set, which is why it
-            lives here. Absent reads as `total`, the safe side: it
+            lives here.
+
+
+            Always present on a response — it is in this schema's `required`
+            list, because clients render copy off it ("per hand" on the weight
+            field) and a field that merely happens to be sent is one a later
+            change can drop with nothing failing. Where absence IS still
+            possible — the seed file, and revision snapshots written before the
+            column existed — it reads as `total`, the safe side: it
             under-reports rather than inventing weight nobody lifted.
         instructions:
           type: string

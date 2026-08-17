@@ -577,6 +577,12 @@ function ItemRow({
         <p className="truncate text-xs capitalize text-text-dim">
           {exercise?.movement_pattern.replace(/_/g, " ")}
           {exercise?.is_unilateral ? " · per side" : ""}
+          {/* A target weight PREFILLS the logged weight verbatim, and the
+              server applies the ×2 on read — so a pair total typed here comes
+              back doubled from an already-doubled number. This is the last
+              place "which number do I type?" was asked and left unanswered.
+              Implement-neutral: 58 of the 142 are kettlebell or handles. */}
+          {exercise?.load_mode === "per_side" ? " · weight per hand" : ""}
         </p>
       </div>
 

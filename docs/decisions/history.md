@@ -20696,6 +20696,141 @@ top item; **H1** carries an ad-hoc *"In progress — spun off"* note and nothing
 else does. The two items above are the only part of that branch `main` did not
 already have — review findings rather than code.
 
+## 2026-08-16 — Per-side load says so now, and the two flags that mean different things
+
+The arithmetic landed in #224 and was right everywhere. It was also completely
+silent: the Volume tile had already doubled a pair of dumbbells while the row
+below it still read `10 × 30kg`, so an athlete checking one against the other
+found the app off by exactly a factor of two — and the row, being the number
+they typed, is the one they believe. **W3.**
+
+### The design turns on a distinction that is easy to miss
+
+The obvious implementation is one flag and one line of copy. It would be wrong
+on a quarter of the affected exercises.
+
+Two different questions are in play, and they have different answers:
+
+| question | flag | population | what it drives |
+|---|---|---|---|
+| which number do I type? | exercise's `load_mode` | **142** `per_side` | the input hint, "per hand" |
+| what did I actually move? | the set's `load_factor` | **108** of those | the total on the row |
+
+The gap is the **34 exercises that are `per_side` AND `is_unilateral`** — a
+one-arm dumbbell row. You still enter one dumbbell, so the input hint is right
+to appear; only one implement moves, so the factor stays 1 and "60kg total"
+there would be a straight lie. Measured from `exercises.json`: 762 exercises,
+142 `per_side` (85 dumbbells, 57 kettlebell, 1 farmer-handles — all hand-held,
+which is what makes "per hand" accurate for every one of them), 108 doubling.
+
+So the phone now shows `10 × 30kg (60kg total)` on the row and `per hand` on
+the weight field, keyed on the two flags respectively. The annotation derives
+from `totalWeightKg` rather than testing `load_factor === 2`, which a test
+pins — the two are indistinguishable on every factor the server currently
+emits, so without that test the narrower form reads like a free simplification.
+
+The copy deviates from the task's own `30 kg × 2 = 60`: `10 × 30kg ×2` puts two
+multiplications in one phrase and the first one is reps. `(60kg total)` carries
+the same fact without the ambiguity.
+
+**Web gets a note, not a per-row total.** Its set editor is a grid of input
+cells with nowhere to put per-row text, and the page already has a convention
+for exercise-level notes — the existing "Per side — 8 reps here means 8 each
+side." That line is about REPS and keys on `is_unilateral`; the new one is
+about WEIGHT and keys on `load_mode`. They overlap on 34 exercises and both are
+true there, which is why they are two lines. One line covering both would have
+to say "per side" about two quantities that disagree.
+
+### A halved figure found while mapping the surfaces
+
+`apps/web/.../sessions/page.tsx` summed `reps × weight_kg` with no factor, so
+**every dumbbell session on the web sessions list read at half the volume its
+own detail page showed.** Fixed here.
+
+Worth recording that this is the *same line* that carried the previous miss:
+the comment directly above it explains that the `completed` half was forgotten
+when progressive volume landed. Two different omissions, one expression,
+because it is a hand-rolled copy of a rule that has a name everywhere else.
+
+Review then found a **third** bug on the same three lines: the row's set count
+was `working.length`, drops included — which the comment this branch had just
+added two lines above explicitly said was handled. The reviewer's point was
+sharper than the bug: a reader now believed it was correct.
+
+**Two readers found that one independently, within hours**, which is the
+strongest thing to say about it. This branch's reviewer flagged it from the
+diff; #239 filed the same defect as `W4` from the other direction, having gone
+looking for surviving copies of the drop rule after #238 consolidated the
+mobile clients only. Two descriptions, one expression. `W4` is ticked here.
+
+Three silent failures on one expression is not bad luck, it is a location. It
+was a hand-rolled copy of a server rule sitting in a component file, where
+nothing in `lib/__tests__` could reach it. So it moved: `sessionVolume()` in
+`lib/api.ts`, with the drop split stated once and **nine tests, one per
+historical bug plus the properties around them**, all mutation-checked. This is
+the same lesson `localVolume` taught on the phone — missed twice, for the same
+reason, and fixed the same way in #238. Two apps have now learned it
+independently; the rule is that a figure an athlete compares across screens
+does not live in a screen.
+
+### What is now enforced rather than merely true
+
+`GET /v1/exercises` has always returned `load_mode`, and nothing checked it.
+The existing test covers `AdminAuthored` — dropping the column there corrupts
+the seed file, which is loud. Dropping it from `selectColumns` is quiet and
+reaches further: it would silently stop telling athletes which number to type
+on all 142, while every arithmetic test still passed, because the tonnage rule
+reads the column directly in SQL and never goes near that path.
+
+`Exercise.load_mode` is now in the contract's `required` list, and
+`TestTheCatalogReadPathCarriesLoadMode` is the enforcement — it covers `Get`
+and `List` separately, since they are two statements sharing one column list.
+Mutation-tested: aliasing the column to a constant fails it.
+
+Review then found the corollary: **one read path's `load_mode` does not come
+from the column at all.** A revision is a JSON snapshot, and
+`exercise_revisions` (000039) predates the column (000052), so a revision
+written between those deploys has no `load_mode` key — it unmarshals to `""`
+and went out as `"load_mode": ""`, which satisfies `required` (the key is
+there) while violating the property's own `enum`. Normalised on read now,
+mirroring what the write path already did. Restoring such a revision was always
+safe, because `updateWithin` never writes the column and the RETURNING re-reads
+the real one; it was only *reading* that advertised an illegal value.
+
+### Gaps
+
+- **Not device-verified, and not browser-verified either.** The mobile copy is
+  typechecked and unit-tested; the web note has never been rendered, because
+  `/dashboard` needs Clerk credentials Claude will not enter. The one thing
+  worth a human eye is whether `10 × 30kg (60kg total) · 2 RIR` wraps badly on
+  a small phone — `setSummary` has no `numberOfLines`, so it wraps rather than
+  truncating, which is the safe failure but not necessarily a tidy one.
+- **Estimated 1RM still reads per-hand and now sits next to a total that does
+  not.** That was deliberate — a per-hand 1RM is what lifters quote for
+  dumbbell work — but making the total visible makes the inconsistency visible
+  with it. `L4` covers it and is untouched here; this change raises its
+  priority rather than resolving it.
+- **The template planners now carry the hint too**, which was not in the
+  original scope and should have been. A target weight PREFILLS the logged
+  weight verbatim and the server then applies the ×2, so an athlete typing the
+  pair's total into a plan gets a session doubled from an already-doubled
+  number — the one place "which number do I type?" was still asked and left
+  unanswered. Both editors say it now.
+- **The copy is implement-neutral, and the first draft was not.** It said
+  "enter one dumbbell" — wrong on 58 of the 142, since 57 are kettlebell and
+  one is farmer-handles, including every double-kettlebell movement where "not
+  the pair" is otherwise exactly right. This entry recorded the 85/57/1 split
+  as the reason mobile's "per hand" works everywhere, and the web copy named
+  the implement anyway; review caught it.
+- **The feed and share-card `figure` strings are still un-annotated.** They are
+  formatted in Go (`fmt.Sprintf("%g kg × %d")`) from queries that never select
+  `load_mode`, so a friend's card shows the one-dumbbell number with no total.
+  Left alone deliberately: it is a contract change, and a card seen by someone
+  else is a different copy problem from a field you are typing into.
+- **`describeSet` in `apps/web` was found to have zero callers** and to format
+  raw kilograms regardless of unit preference. Not touched — annotating a dead
+  function is waste. Recorded as `L8`.
+
 ## Open items / known gaps as of this entry
 
 - **The technique library is still left behind by `technique`'s tests**, exactly as the exercise catalog was until the tripwire entry above. Smaller exposure — `technique` sorts seventeenth of nineteen, so only `theme` and `workout` run after it — but the same shape: a package borrowing a technique id would pass on that residue. The same fix applies (`removeCatalogAfterTest`'s shape, scoped to the ids `SeedData()` names); deferred because H1 is already in flight against that library.

@@ -45,7 +45,11 @@ func TestAdminAuthoredCarriesLoadMode(t *testing.T) {
 		t.Fatalf("seed admin exercise: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM exercises WHERE id = $1`, id)
+		// Logged rather than swallowed: `vola_test` is shared by every
+		// worktree, so a fixture that fails to clean up outlives this run.
+		if _, err := pool.Exec(context.Background(), `DELETE FROM exercises WHERE id = $1`, id); err != nil {
+			t.Logf("cleanup %s: %v", id, err)
+		}
 	})
 
 	rows, err := NewPostgresRepository(pool).AdminAuthored(ctx)
@@ -64,4 +68,149 @@ func TestAdminAuthoredCarriesLoadMode(t *testing.T) {
 		return
 	}
 	t.Fatalf("%s did not come back from AdminAuthored at all", id)
+}
+
+// TestTheCatalogReadPathCarriesLoadMode covers the OTHER select — the public
+// one, which every client actually reads.
+//
+// `AdminAuthored` has a test above because dropping `load_mode` there corrupts
+// the seed file. Dropping it from `selectColumns` is quieter and reaches
+// further: `GET /v1/exercises` and `GET /v1/exercises/{id}` are where the
+// phone and the web session page learn that a movement is entered per hand, so
+// an empty value there does not break anything — it silently stops telling the
+// athlete which number to type, on all 142 of them, while every arithmetic
+// test in the repository still passes because the tonnage rule reads the
+// column directly in SQL and never goes near this path.
+//
+// The contract now lists `load_mode` in `Exercise.required`, which is the
+// promise this test is the enforcement for.
+func TestTheCatalogReadPathCarriesLoadMode(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, url)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { pool.Close() })
+
+	// Owned by this test rather than borrowed from the catalog: a seeded row
+	// would make the assertion depend on `exercise`'s own Seed() having run,
+	// which is the cross-package dependency this repository just finished
+	// removing everywhere else.
+	const id = "lm_read_db_press"
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO exercises (id, name, sport, movement_pattern, load_type, status, source, load_mode)
+		VALUES ($1, 'Fixture Read Path Press', 'strength', 'push', 'weight_reps', 'published', 'seed', 'per_side')
+		ON CONFLICT (id) DO UPDATE SET
+			name = EXCLUDED.name, sport = EXCLUDED.sport,
+			movement_pattern = EXCLUDED.movement_pattern, load_type = EXCLUDED.load_type,
+			status = EXCLUDED.status, source = EXCLUDED.source,
+			load_mode = EXCLUDED.load_mode`, id); err != nil {
+		t.Fatalf("seed exercise: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), `DELETE FROM exercises WHERE id = $1`, id); err != nil {
+			t.Logf("cleanup %s: %v", id, err)
+		}
+	})
+
+	repo := NewPostgresRepository(pool)
+
+	got, err := repo.Get(ctx, id)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.LoadMode != LoadModePerSide {
+		t.Fatalf("Get returned load_mode %q, want %q — a client reading this cannot tell the "+
+			"athlete to enter one dumbbell", got.LoadMode, LoadModePerSide)
+	}
+
+	// Both, because they are two different SQL statements sharing one column
+	// list, and a change that reaches one can miss the other.
+	list, err := repo.List(ctx, Filter{})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	for _, e := range list {
+		if e.ID != id {
+			continue
+		}
+		if e.LoadMode != LoadModePerSide {
+			t.Fatalf("List returned load_mode %q, want %q", e.LoadMode, LoadModePerSide)
+		}
+		return
+	}
+	t.Fatalf("%s did not come back from List at all", id)
+}
+
+// TestAnOldRevisionStillReportsALegalLoadMode covers the one read path whose
+// `load_mode` does not come from the column.
+//
+// A revision is a JSON snapshot, and `exercise_revisions` (migration 000039)
+// predates `load_mode` (000052). Any revision written between those two
+// deploys has no `load_mode` key: it unmarshals to "" and would go out as
+// `"load_mode": ""` — a value the schema's `enum` does not admit, on a field
+// this branch just moved into `Exercise.required`.
+//
+// Restoring such a revision was always safe, because `updateWithin` never
+// writes the column and the RETURNING re-reads the real one. It was READING it
+// that advertised an illegal value, which is why the fix is on this path and
+// not on Restore.
+func TestAnOldRevisionStillReportsALegalLoadMode(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, url)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { pool.Close() })
+
+	const id = "lm_rev_db_press"
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO exercises (id, name, sport, movement_pattern, load_type, status, source, load_mode)
+		VALUES ($1, 'Fixture Revision Press', 'strength', 'push', 'weight_reps', 'draft', 'admin', 'per_side')
+		ON CONFLICT (id) DO UPDATE SET
+			name = EXCLUDED.name, sport = EXCLUDED.sport,
+			movement_pattern = EXCLUDED.movement_pattern, load_type = EXCLUDED.load_type,
+			status = EXCLUDED.status, source = EXCLUDED.source,
+			load_mode = EXCLUDED.load_mode`, id); err != nil {
+		t.Fatalf("seed exercise: %v", err)
+	}
+	// Cascades to the revision, so one delete covers both.
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), `DELETE FROM exercises WHERE id = $1`, id); err != nil {
+			t.Logf("cleanup %s: %v", id, err)
+		}
+	})
+
+	// A payload shaped the way pre-000052 code wrote it: no `load_mode` key at
+	// all. Written as literal JSON rather than by marshalling an Exercise,
+	// because the current struct always emits the key — marshalling one would
+	// reproduce today's shape and prove nothing about the rows this exists for.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO exercise_revisions (exercise_id, revision, actor, action, payload)
+		VALUES ($1, 1, 'user_fixture', 'create', $2::jsonb)
+		ON CONFLICT (exercise_id, revision) DO UPDATE SET payload = EXCLUDED.payload`,
+		id, `{"id":"`+id+`","name":"Fixture Revision Press","sport":"strength",
+		      "movement_pattern":"push","load_type":"weight_reps","is_unilateral":false}`); err != nil {
+		t.Fatalf("seed revision: %v", err)
+	}
+
+	revs, err := NewPostgresRepository(pool).Revisions(ctx, id)
+	if err != nil {
+		t.Fatalf("revisions: %v", err)
+	}
+	if len(revs) == 0 {
+		t.Fatalf("no revisions came back for %s", id)
+	}
+	if got := revs[0].Payload.LoadMode; got != LoadModeTotal {
+		t.Fatalf("revision payload load_mode = %q, want %q — the contract's enum admits "+
+			"only 'total' and 'per_side', and this response is typed as an Exercise", got, LoadModeTotal)
+	}
 }

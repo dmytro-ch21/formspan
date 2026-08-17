@@ -483,9 +483,23 @@ export function describeSet(
 ): string {
   const parts: string[] = [];
   const w = formatWeight(s.weight_kg, units);
-  if (s.reps != null && s.weight_kg != null) parts.push(`${s.reps} × ${w}`);
+  // A pair of dumbbells moves double what is stamped on one of them, and one
+  // is what was typed. Say so on the row, because the Volume tile above it
+  // has already doubled and an athlete checking 8 × 30 against it otherwise
+  // finds the app off by exactly a factor of two — and concludes the app is
+  // wrong rather than that it knew something they did not.
+  //
+  // Derived from the total rather than from `load_factor == 2`, so a factor
+  // this code has never seen still annotates, and 1 / 0 / undefined — which
+  // `totalWeightKg` already flattens to "times one" — say nothing at all.
+  const total = totalWeightKg(s);
+  const shown =
+    s.weight_kg != null && total !== s.weight_kg
+      ? `${w} (${formatWeight(total, units)} total)`
+      : w;
+  if (s.reps != null && s.weight_kg != null) parts.push(`${s.reps} × ${shown}`);
   else if (s.reps != null) parts.push(`${s.reps} reps`);
-  else if (s.weight_kg != null) parts.push(w);
+  else if (s.weight_kg != null) parts.push(shown);
   if (s.seconds != null) parts.push(formatDuration(s.seconds, duration));
   if (s.distance_m != null) parts.push(formatDistance(s.distance_m, units));
   if (s.rpe != null) parts.push(`RPE ${s.rpe}`);

@@ -313,6 +313,19 @@ func (r *PostgresRepository) Revisions(ctx context.Context, id string) ([]Revisi
 		if err := json.Unmarshal(payload, &rev.Payload); err != nil {
 			return nil, fmt.Errorf("exercise: parse revision %d: %w", rev.Revision, err)
 		}
+		// The one read path whose `load_mode` does NOT come from the column.
+		// A revision is a JSON snapshot, and `exercise_revisions` (000039)
+		// predates the column (000052) — so a revision recorded between those
+		// two deploys has no `load_mode` key at all, unmarshals to "", and
+		// would serialise as `"load_mode": ""` against a schema whose enum
+		// admits only `total` and `per_side`.
+		//
+		// Normalised here rather than left to the client, matching what
+		// `upsertArgs` already does on the way in. Restoring such a revision
+		// was always safe — `updateWithin` never writes the column, so the
+		// RETURNING re-reads the real one — but READING it advertised a value
+		// the contract does not allow.
+		rev.Payload.LoadMode = NormalizeLoadMode(rev.Payload.LoadMode)
 		out = append(out, rev)
 	}
 	return out, rows.Err()

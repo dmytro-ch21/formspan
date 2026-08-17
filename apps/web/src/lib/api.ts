@@ -42,6 +42,16 @@ export type Exercise = {
   secondary_muscles: string[];
   equipment: string[];
   load_type: LoadType;
+  /**
+   * Which number goes in the weight field. `per_side` means ONE implement —
+   * one dumbbell, one kettlebell — because that is what is stamped on it.
+   *
+   * Not the same question as whether the load doubles: all 142 `per_side`
+   * exercises are entered per hand, but 34 are also `is_unilateral`, where one
+   * implement moves and the factor stays 1. So this drives what the athlete is
+   * told to type; the set's `load_factor` is what says the total.
+   */
+  load_mode?: "total" | "per_side";
   is_unilateral: boolean;
   instructions: string;
   media: Media[];
@@ -205,6 +215,16 @@ export type LoggedSet = {
   /** 1–10, half steps. RPE 8 is roughly 2 RIR; record whichever you think in. */
   rpe: number | null;
   notes: string;
+  /**
+   * How many implements of `weight_kg` were moved: 1 for a barbell or a
+   * machine, 2 for a PAIR of dumbbells. Server-sent, derived from the
+   * exercise's `load_mode`; nothing here may invent one.
+   *
+   * Absent means 1 — older responses, and any set logged before the server
+   * started sending it. Reading absent as zero would erase a set's volume
+   * rather than merely under-reporting the dumbbell ones.
+   */
+  load_factor?: number;
   /**
    * Done. The trigger for progressive volume — the summary counts what's
    * been performed, not what's been planned, so the header climbs as you
@@ -556,6 +576,51 @@ export function swapSuggestions(base: Exercise, all: Exercise[]): SwapSuggestion
   return {
     muscle: muscle.sort(order).slice(0, MAX_SWAP_SUGGESTIONS),
     movement: movement.sort(order).slice(0, MAX_SWAP_SUGGESTIONS),
+  };
+}
+
+/**
+ * A session's own volume and set count, computed client-side.
+ *
+ * This lives here rather than inline in the sessions list because the same
+ * three-line reduce there has been wrong THREE times, each time in a way no
+ * check could see: it missed `completed` when progressive volume landed (the
+ * row showed full volume while the detail page showed zero), it missed
+ * `load_factor` when per-side load landed (every dumbbell session read at
+ * half), and it counted drops as sets after #238 split those rules apart.
+ *
+ * Every one of those was a hand-rolled copy of a rule that has a name on the
+ * server, in a component file where nothing in `lib/__tests__` could reach it.
+ * The mobile app learned the same lesson from `localVolume`, which was missed
+ * twice for exactly the same reason and now lives in `lib/sessions.ts`.
+ *
+ * The two figures deliberately disagree about drops, which is the whole point
+ * of the split:
+ *
+ *   - VOLUME keeps them. A drop is weight that was moved.
+ *   - The SET COUNT excludes them. A drop is part of the set it came off —
+ *     one approach to the bar, one rest period.
+ *
+ * Mirrors the backend's `workingSet` / `countsAsSet` predicates; if you change
+ * one of these, that pair is what it has to keep agreeing with.
+ */
+export function sessionVolume(sets: LoggedSet[]): {
+  working_sets: number;
+  tonnage_kg: number;
+} {
+  const working = sets.filter((s) => s.completed && s.set_type !== "warmup");
+  return {
+    working_sets: working.filter((s) => s.set_type !== "drop").length,
+    tonnage_kg: working.reduce(
+      (sum, s) =>
+        sum +
+        (s.reps ?? 0) *
+          (s.weight_kg ?? 0) *
+          // Absent means one, never zero — an older row's volume must
+          // under-report at worst, never vanish.
+          (s.load_factor && s.load_factor > 1 ? s.load_factor : 1),
+      0,
+    ),
   };
 }
 
