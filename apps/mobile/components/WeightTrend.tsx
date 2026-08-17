@@ -114,7 +114,14 @@ export function WeightTrend({
                 accessibilityLabel={`Show the last ${r.label.toLowerCase()}`}
                 testID={`trend-range-${r.key}`}
               >
-                <Text style={[styles.rangeText, on && { color: accent.ink }]}>{r.label}</Text>
+                {/* `accent.on`, NOT `accent.ink`. The provider's own doc says
+                    it: "`accent` fills, `ink` is … text on a dark ground, and
+                    `on` is what may be written on the fill." This pill IS the
+                    fill, so `ink` painted the label in the accent colour on the
+                    accent colour — the SELECTED range had no visible label at
+                    all, while the two unselected ones read fine. Typecheck and
+                    tests cannot see a colour; only the Simulator could. */}
+                <Text style={[styles.rangeText, on && { color: accent.on }]}>{r.label}</Text>
               </Pressable>
             );
           })}
