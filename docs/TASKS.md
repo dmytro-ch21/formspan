@@ -58,6 +58,7 @@ Each compiles, passes its tests, and is wrong. Read before starting the related 
 - [x] **N11** — Feed reaches back 3 days only, and the poster leads with an avatar. The window is a rolling 72h on `ended_at` inside `visibleFrom`, so the count cannot disagree with the list; the avatar is a monogram derived from the handle (no upload path, nothing new on the wire, stable colour per person). — done #PR
 - [ ] **N12** — Real uploaded avatars. The monogram is the fallback layer either way, so this is additive: needs `profiles.avatar_url`, the platform `objectstore` wired up, an upload surface, resizing, and a moderation answer — `display_name` is already unguarded prose friends can see and a photo is worse. (#PR)
 - [ ] **N13** — The 3-day feed window is not configurable and not surfaced beyond one line of copy. If athletes want a week, it is a constant (`feed.FeedWindow`) plus the copy that names it in three places. (#PR)
+- [ ] **N14** — `sessions` has no index on `ended_at`. The feed's 3-day window is a Filter, not an Index Cond, so every friend's LIFETIME rows are still fetched and then discarded. Harmless now (the window strictly reduces sort and count input), but `(user_id, ended_at DESC)` — optionally partial `WHERE ended_at IS NOT NULL` — is the fix when the table grows. (#PR)
 
 ## L — Recorded, low
 

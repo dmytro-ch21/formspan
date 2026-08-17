@@ -1,3 +1,5 @@
+import { activeMonogramColors, monogramInk, type MonogramColor } from '@/constants/Colors';
+
 /**
  * A person's stand-in avatar, derived from their handle.
  *
@@ -15,49 +17,53 @@
  *     that problem with no report path built.
  *   - **Nothing to store, resize, cache or serve.**
  *
- * The COLOUR is the point, more than the letters. Two initials are not very
- * distinguishing across a feed, but "the teal one" is scannable at a glance —
- * so the colour has to be stable for a person forever, which is why it is a
- * pure function of the handle and not of anything that can be reassigned.
+ * ## What the colour is and is not
+ *
+ * The first draft of this file claimed the colour was the point — "two initials
+ * do not distinguish many people, but the teal one is scannable". Measurement
+ * retired that claim. `scripts/validate_palette.mjs` requires categorical
+ * colours to stay ΔE 15 apart under simulated protanopia, deuteranopia and
+ * tritanopia, and an eight-colour palette failed **16 of its 28 pairs** while
+ * looking perfectly varied. White ink pins every disc into one dark luminance
+ * band, and CVD collapses hue toward a single axis, so what survives is
+ * lightness — and there is only room for about five distinguishable steps.
+ *
+ * So: **the INITIALS and the `@handle` beside them identify a person. The
+ * colour groups them.** Five buckets over a feed of friends means shared
+ * colours are ordinary rather than exceptional, and that is fine for a coarse
+ * aid and would be useless for an identity. The stability guarantee below is
+ * still worth having — a colour that shuffled would be worse than none — but it
+ * is not load-bearing the way it was first written to be.
  */
 
-/**
- * The palette.
- *
- * Chosen to sit on the app's dark ground with white text at readable contrast,
- * and to be distinguishable from each other rather than merely pretty — a ramp
- * of one hue would defeat the whole purpose. Deliberately NOT the accent
- * colour: the accent moves with the athlete's own theme, and a friend whose
- * avatar changes colour because YOU changed a setting is not an identity.
- */
-const PALETTE = [
-  '#2F6F5E', // pine
-  '#1F5F8B', // deep blue
-  '#6B4E9B', // violet
-  '#9B4E6B', // plum
-  '#A05A2C', // amber-brown
-  '#3F7A3F', // moss
-  '#4A5B8C', // slate blue
-  '#8C5A3F', // clay
-] as const;
+/** The bucket names, in the order the palette declares them. */
+const NAMES = Object.keys(monogramInk) as MonogramColor[];
 
 /**
  * A stable, order-dependent hash of the handle.
  *
- * djb2, because it is four lines and its avalanche is good enough to keep
- * `alice` and `alicf` in different buckets — which is the only property that
- * matters here. Nothing about this is a security claim.
+ * djb2 — but note the FOLD below, which is not decoration. djb2's multiplier is
+ * 33, and 33 ≡ 1 (mod 8), so `hash(s) % 8` reduces exactly to
+ * `(5381 + Σ charCodes) % 8`: order-independent, zero avalanche, and anagrams
+ * land in the same bucket every time. `mat_rat` and `rat_mat` collided
+ * deterministically, as did `alice`/`celia` and `sam`/`sim`, measured. Review
+ * caught it; the comment here previously asserted the opposite.
  *
- * `>>> 0` on every step keeps it in unsigned 32-bit range: without it the value
- * silently leaves the integer-safe range and the "same handle, same colour"
- * guarantee stops holding for long handles.
+ * The bucket count is no longer a power of two, which weakens that particular
+ * degeneracy on its own — but the fold is what makes the result independent of
+ * the modulus, and a palette resize must not be able to quietly reintroduce it.
+ *
+ * `>>> 0` on every step, and again after the fold: `^` yields a SIGNED 32-bit
+ * int in JavaScript, so an unmasked fold can go negative and index the palette
+ * out of bounds. That is not hypothetical — it was observed while writing this.
  */
-function hash(s: string): number {
+function bucket(s: string): number {
   let h = 5381;
   for (let i = 0; i < s.length; i++) {
     h = (((h << 5) >>> 0) + h + s.charCodeAt(i)) >>> 0;
   }
-  return h;
+  const folded = ((h ^ (h >>> 8) ^ (h >>> 16)) >>> 0) % NAMES.length;
+  return folded;
 }
 
 /**
@@ -68,9 +74,10 @@ function hash(s: string): number {
  * so letters and colour can never disagree about who this is. A display name
  * can be changed to anything, including somebody else's name.
  *
- * Word boundaries are `_`, `-`, `.` and a digit run, because handles are
- * `[a-z][a-z0-9_]{2,29}` and `mat_rat` reads as two words where `matrat` does
- * not. A handle with no boundary gives its first two letters.
+ * Word boundaries are `_`, `-`, `.` and a digit run. Handles are
+ * `[a-z][a-z0-9_]{2,29}` so only `_` and the digits occur in practice; the
+ * other two are harmless generality. `mat_rat` reads as two words where
+ * `matrat` does not, and a handle with no boundary gives its first two letters.
  */
 export function initialsFor(handle: string): string {
   const words = handle
@@ -82,22 +89,26 @@ export function initialsFor(handle: string): string {
   return (words[0][0] + words[1][0]).toUpperCase();
 }
 
-export type Monogram = { initials: string; background: string };
+export type Monogram = { initials: string; background: string; ink: string };
 
 /**
  * The whole avatar for a handle. Pure, so the same person is the same colour on
- * every screen, on every device, forever.
+ * every screen, on every device, forever — which matters even for a coarse aid,
+ * because a colour that shuffled between launches would be actively misleading.
+ *
+ * Reads `activeMonogramColors`, not the raw palette, so monochrome mode swaps
+ * all of them to one grey. Under mono the initials carry everything, which is
+ * what that mode asks of every other signal in the app.
  */
 export function monogramFor(handle: string): Monogram {
   const clean = handle.trim().toLowerCase();
-  if (!clean) {
-    // A row with no handle should not reach a feed at all — the server's
-    // `visibleFrom` requires one — but rendering a grey blank is a better
-    // answer than crashing on `PALETTE[NaN]`.
-    return { initials: '?', background: '#3A4150' };
-  }
+  const name = clean ? NAMES[bucket(clean)] : NAMES[0];
   return {
-    initials: initialsFor(clean),
-    background: PALETTE[hash(clean) % PALETTE.length],
+    // A row with no handle should not reach a feed at all — the server's
+    // `visibleFrom` requires one — but a '?' on the first bucket is a better
+    // answer than crashing on an undefined palette entry.
+    initials: clean ? initialsFor(clean) : '?',
+    background: activeMonogramColors[name],
+    ink: monogramInk[name],
   };
 }

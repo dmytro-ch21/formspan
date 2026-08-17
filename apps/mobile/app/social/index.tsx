@@ -121,7 +121,11 @@ const FeedRow = memo(function FeedRow({
       // below, so it contributes nothing and this label is the whole reading.
       accessible
       accessibilityLabel={[
-        who,
+        // The handle too, whenever it is not already what `who` shows. The
+        // visible row gained that line because a display name is prose anyone
+        // can set to anything — and a VoiceOver user, who also cannot see the
+        // disc's colour, would otherwise hear only the impersonable half.
+        item.display_name ? `${who}, @${item.from}` : who,
         item.name || sportLabel,
         ...metrics.map((m) => `${m.value} ${m.label}`),
         ...(item.detail ?? []).map((d) =>
@@ -147,7 +151,16 @@ const FeedRow = memo(function FeedRow({
             is read. The sport keeps its tinted glyph, moved down beside its own
             label where it is a detail rather than an identity. */}
         <RNView style={[styles.avatar, { backgroundColor: mono.background }]}>
-          <Text style={styles.avatarText}>{mono.initials}</Text>
+          <Text
+            style={[styles.avatarText, { color: mono.ink }]}
+            // The disc is a fixed 38pt and RN scales text by default, so at
+            // accessibility sizes the initials outgrow it and spill — views do
+            // not clip. Capped because this is an identity GLYPH and the name
+            // it stands for is right beside it, scaling freely.
+            maxFontSizeMultiplier={1.4}
+          >
+            {mono.initials}
+          </Text>
         </RNView>
         <RNView style={styles.byBody}>
           {/* The person leads. */}
@@ -399,7 +412,7 @@ export default function SocialScreen() {
               <Text style={styles.muted}>
                 {friendCount === 0
                   ? 'Add a training partner, and their sessions show up here once they choose to share them.'
-                  : 'Nobody you train with has shared a session in the last 3 days. Older ones drop off — this is what your partners are doing now, not everything they have ever done.'}
+                  : 'Nobody you train with has shared a session in the last 3 days — older ones drop off, and sharing is off until someone turns it on.'}
               </Text>
             </View>
           )
@@ -524,7 +537,7 @@ const styles = StyleSheet.create({
   },
   // White on every palette entry, which is why the palette is constrained to
   // colours that carry it.
-  avatarText: { fontSize: 14, fontWeight: '800', color: '#FFFFFF', letterSpacing: 0.5 },
+  avatarText: { fontSize: 14, fontWeight: '800', letterSpacing: 0.5 },
   byMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 1 },
   handle: { fontSize: 11, color: vola.textDim, marginTop: 1 },
   byBody: { flex: 1, minWidth: 0 },

@@ -21683,6 +21683,55 @@ empty state now distinguishes "nobody has shared" from "nobody has shared
 once, and only when there is a feed to say it about, since the empty state
 already carries it.
 
+### What review found, and it was mostly in my tests
+
+**The count-side window had no guard at all.** `TestTheFeedReachesBack...`
+asserted `page.Total`, but with `limit=30` over two rows `List` takes its
+short-circuit — `offset == 0 && len(items) < limit` sets `Total = len(Items)`
+and the count query never runs. The assertion compared a slice's length to
+itself. Proven by mutation: removing the window from the count alone left the
+whole package green. It calls `List(ctx, alice, 1, 0)` now, so the page fills
+and the count actually executes.
+
+**The monogram hash was degenerate at the only place it was used.** djb2's
+multiplier is 33, and 33 ≡ 1 (mod 8), so `hash % 8` reduced exactly to
+`(5381 + Σ charCodes) % 8` — order-independent, zero avalanche. Anagrams
+collided *deterministically*: measured 6 of 6 pairs before the fix, 1 of 6
+after, which is the 1-in-5 chance rate. The comment claimed "order-dependent"
+and "good avalanche"; both were false. A fold before the modulo fixes it, and it
+needs its own `>>> 0` because `^` yields a SIGNED int32 in JavaScript — an
+unmasked fold goes negative and indexes the palette out of bounds.
+
+**The palette was never gated, and could not have passed.**
+`scripts/validate_palette.mjs` is the FIRST link in `verify`, and it parses
+palettes by name out of `constants/Colors.ts` — so eight colours defined
+privately in a lib module sailed straight past it, which is the exact failure
+this repo's metals comment already records ("sailed straight through the mono
+swap"). Moved into `Colors.ts`, taught the validator to check it, and the answer
+came back hard: **16 of 28 pairs failed** under simulated CVD.
+
+The cause is structural. White ink on every disc pins them all into one dark
+luminance band; CVD collapses hue toward a single axis; so what separates them
+is lightness, and there is only room for about five distinguishable steps. The
+fix was per-disc ink (the `beltAccent`/`beltAccentOn` pattern already here) and
+**five colours, not eight** — every pair now clears ΔE 15 under all three
+simulations with contrast 4.8:1 or better.
+
+That measurement retired the feature's own headline claim. "Two initials do not
+distinguish many people, but the teal one is scannable" is not true at five
+buckets across a feed of friends. **The initials and the `@handle` identify a
+person; the colour groups them.** Stability is still worth guarding — a colour
+that shuffled would be worse than none — but it is a coarse aid, and the docs
+and tests say so now rather than overclaiming.
+
+Also from review: the accessibility label omitted the handle exactly where this
+change argues the handle is the real identity (a VoiceOver user heard only the
+impersonable display name and cannot see the colour either); the 38pt disc held
+font-scaled initials that would spill at accessibility sizes, since the badge it
+replaced held a non-scaling icon; and the new empty-state copy dropped the
+opt-in education, implying activity had aged out when the common case is friends
+who never enabled sharing.
+
 ### Gaps
 
 - **Not seen on a device.** The monogram's contrast, the 38pt badge against the

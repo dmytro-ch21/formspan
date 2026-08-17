@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/dmytro-ch21/vola/backend/internal/modules/session"
 )
 
 // age moves a finished session's end time into the past.
@@ -28,9 +30,9 @@ func age(t *testing.T, h *harness, id string, ago time.Duration) {
 func TestTheFeedReachesBackThreeDaysAndNoFurther(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
-	alice := person(t, h.pool, "fd_wa", "fd_wa_h", true)
-	bob := person(t, h.pool, "fd_wb", "fd_wb_h", true)
-	befriend(t, h, alice, "fd_wa_h", bob, "fd_wb_h")
+	alice := person(t, h.pool, "fd_win_a", "fd_win_a_h", true)
+	bob := person(t, h.pool, "fd_win_b", "fd_win_b_h", true)
+	befriend(t, h, alice, "fd_win_a_h", bob, "fd_win_b_h")
 
 	train(t, h, bob, "fd_w_now", "This morning", true, nil)
 	train(t, h, bob, "fd_w_edge", "Just inside", true, nil)
@@ -52,13 +54,28 @@ func TestTheFeedReachesBackThreeDaysAndNoFurther(t *testing.T) {
 		}
 	}
 
-	// The count must agree with the list. This is the half that has bitten
-	// this file twice: a window applied only to the page query leaves the
-	// total promising rows the list will never return, and "+1 more" that
-	// loads nothing is worse than no total at all.
-	if page.Total != 2 {
-		t.Fatalf("total is %d but the list returned %d — the count is not windowed",
-			page.Total, len(got))
+	// The count must agree with the list — the half that has bitten this file
+	// twice, and the reason the window lives in `visibleFrom` rather than
+	// beside the LIMIT.
+	//
+	// **`limit` is 1, and that is the entire point of this second call.** With
+	// a limit above the row count, `List` takes its short-circuit —
+	// `offset == 0 && len(items) < limit` sets `Total = len(Items)` and the
+	// count query never runs. Asserting `page.Total` on the call above
+	// therefore tested the length of a slice against itself: proven by
+	// mutation, removing the window from the count alone left this whole
+	// package green. A limit BELOW the visible count is what makes the page
+	// fill and the count actually execute.
+	filled, err := h.repo.List(ctx, alice, 1, 0)
+	if err != nil {
+		t.Fatalf("list one: %v", err)
+	}
+	if len(ids(filled)) != 1 {
+		t.Fatalf("want a full page of one, got %v", ids(filled))
+	}
+	if filled.Total != 2 {
+		t.Fatalf("total is %d, want 2 — the COUNT query is not windowed, so it is "+
+			"promising a row the list will never return", filled.Total)
 	}
 }
 
@@ -124,4 +141,19 @@ func TestTheWindowDoesNotTouchTheOwnersOwnHistory(t *testing.T) {
 	if got.ID != "fd_h_old" {
 		t.Fatalf("got session %q", got.ID)
 	}
+
+	// And the LIST, which is the surface the owner's history screen actually
+	// reads — `Get` alone would leave the claim in this test's name resting on
+	// a fetch nobody makes from a history view.
+	own, err := h.sessions.List(ctx, bob, session.Filter{})
+	if err != nil {
+		t.Fatalf("list the owner's own sessions: %v", err)
+	}
+	for _, s := range own.Sessions {
+		if s.ID == "fd_h_old" {
+			return
+		}
+	}
+	t.Fatal("a week-old session vanished from the owner's own session list — the feed's " +
+		"window is not supposed to touch any surface but the feed")
 }

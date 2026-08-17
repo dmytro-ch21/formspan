@@ -24,21 +24,39 @@ func NewPostgresRepository(pool *pgxpool.Pool, friends Friends) *PostgresReposit
 //
 //   - `s.user_id = ANY($1)` — an ACCEPTED friend. The id set comes from the
 //     friend module, which is the only thing that knows what accepted means.
+//
 //   - `p.share_training_with_friends` — the owner opted in. Joined and read
 //     LIVE, so switching it off retracts every past session at once rather than
 //     leaving already-published rows behind.
+//
 //   - `s.ended_at IS NOT NULL` — finished. An in-progress session is a live
 //     location, which is a different disclosure entirely.
+//
 //   - `p.username IS NOT NULL` — the owner has a handle. A card with no name on
 //     it is not a card, and the Go scan below skips such a row anyway. Doing it
 //     HERE is what keeps the list and the count agreeing: skipping in Go alone
 //     consumed a LIMIT slot and still counted the row, which is the same
 //     list-versus-count divergence this file has now been bitten by twice.
+//
 //   - `s.ended_at >= now() - INTERVAL` — recent. The feed is what your friends
 //     are doing, not an archive of what they have ever done; a week-old session
 //     is history, and history is the owner's own screen. See FeedWindow.
 //     Bound as `$2`, with the page's LIMIT/OFFSET at `$3`/`$4`, so the count
 //     can run this same clause without binding parameters it never mentions.
+//
+//     An INSTANT, computed once per call and passed to both queries — not
+//     `now() - interval` evaluated inside each. The page and the count are two
+//     separate implicit transactions, so their `now()`s differ by the latency
+//     between them, and a session ending inside that sliver would be in the
+//     list and absent from the total. Milliseconds wide, and exactly the
+//     divergence this clause exists to make impossible; one bound instant
+//     removes it by construction rather than by being small.
+//
+//     It also keeps the arithmetic honest. `timestamptz - INTERVAL '3 days'`
+//     is CALENDAR arithmetic in the session's zone — 71 or 73 real hours over
+//     a DST edge — where subtracting a duration in Go is not. The literal is
+//     the tempting simplification and it is the one that reintroduces a
+//     timezone.
 //
 // Written as a const and used by BOTH the page query and the count, because a
 // count that disagrees with its list is how a total ends up promising rows the
@@ -51,7 +69,7 @@ const visibleFrom = `
 	WHERE s.user_id = ANY($1)
 	  AND p.share_training_with_friends
 	  AND s.ended_at IS NOT NULL
-	  AND s.ended_at >= now() - ($2)::interval
+	  AND s.ended_at >= $2
 	  AND p.username IS NOT NULL`
 
 // FeedWindow is how far back the feed reaches.
@@ -144,6 +162,9 @@ func (r *PostgresRepository) List(ctx context.Context, userID string, limit, off
 		return page, nil
 	}
 
+	// ONE instant for both queries below. See visibleFrom's note on `$2`.
+	since := time.Now().UTC().Add(-FeedWindow)
+
 	// ORDER BY ended_at DESC, id — a TOTAL order, per the paging convention.
 	// `ended_at` alone can tie (two friends finishing in the same microsecond
 	// is unlikely; a client supplying its own `ended_at` on a sync retry is
@@ -159,7 +180,7 @@ func (r *PostgresRepository) List(ctx context.Context, userID string, limit, off
 		       p.share_training_details,`+
 		workingVolume+visibleFrom+`
 		ORDER BY s.ended_at DESC, s.id
-		LIMIT $3 OFFSET $4`, ids, FeedWindow, limit, offset)
+		LIMIT $3 OFFSET $4`, ids, since, limit, offset)
 	if err != nil {
 		return page, fmt.Errorf("feed: list: %w", err)
 	}
@@ -214,7 +235,7 @@ func (r *PostgresRepository) List(ctx context.Context, userID string, limit, off
 		page.Total = len(page.Items)
 		return page, nil
 	}
-	// Same clause, same window — see visibleFrom.
+	// Same clause, and the SAME `since` the page used — see visibleFrom.
 	//
 	// The window is `$2` and the page's LIMIT/OFFSET are `$3`/`$4` for this
 	// reason: the shared clause has to be numbered so that BOTH queries bind
@@ -223,7 +244,7 @@ func (r *PostgresRepository) List(ctx context.Context, userID string, limit, off
 	// referenced is an error — `could not determine data type of parameter $2`
 	// — and not a harmless extra.
 	if err := r.pool.QueryRow(ctx, `SELECT count(*)`+visibleFrom,
-		ids, FeedWindow).Scan(&page.Total); err != nil {
+		ids, since).Scan(&page.Total); err != nil {
 		return page, fmt.Errorf("feed: count: %w", err)
 	}
 	return page, nil
