@@ -175,11 +175,26 @@ func (r *PostgresRepository) calories(
 // proportion to how carefully somebody warms up, which punishes the right
 // behaviour.
 //
-// `completed AND set_type <> 'warmup'` is `session.Summarise`'s rule, and the
-// only definition of "a working set" this codebase has. `set_type = 'working'`
-// was used here first, which both counted sets that were never performed and
-// silently dropped every back-off, drop, AMRAP and failure set — so the effort
-// average ignored the hardest set of a session that ended on an AMRAP.
+// `completed AND set_type <> 'warmup'` is `session.workingSet` — the rule for
+// "does this contribute work". `set_type = 'working'` was used here first,
+// which both counted sets that were never performed and silently dropped every
+// back-off, drop, AMRAP and failure set, so the effort average ignored the
+// hardest set of a session that ended on an AMRAP.
+//
+// **It is deliberately NOT `session.countsAsSet`, and this is the one place in
+// the codebase where that is true.** Since #238 there are two rules: the
+// narrower `countsAsSet` excludes drops, because a drop is part of the set
+// above it and the athlete did not do another set. Every DISPLAYED count uses
+// it — the session tile, Today, the calendar, the feed, history.
+//
+// `sets` here is never displayed. It feeds `energy.StrengthBlocks`, which is
+// asking how much work the body did, and a drop is unambiguously more work: it
+// is another bout under load, whatever it is called on screen. Aligning this
+// with the display rule would quietly lower the calorie estimate for every
+// session containing a drop, and nothing on any screen would look wrong.
+//
+// Two rules, on purpose. If you are here because a grep for `set_type` turned
+// this up while making the counts agree, this is the one to leave alone.
 func (r *PostgresRepository) liftEffort(
 	ctx context.Context, callerID, id string,
 ) (effort float64, sets int, loaded, heavy bool, err error) {

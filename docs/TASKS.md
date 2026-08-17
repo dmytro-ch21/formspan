@@ -50,6 +50,7 @@ Each compiles, passes its tests, and is wrong. Read before starting the related 
 - [ ] **N5** — Weight check-in graph (weekly/monthly/yearly), on mobile. Needs CLAUDE.md's platform rule amended — agreed that a trend read in 3 seconds is decision-support, not analysis.
 - [ ] **N6** — Per-exercise load over time. Same platform-rule amendment; pairs with **N5**.
 - [ ] **N7** — Point the camera at a machine. Can't be trained on our library (8 images for 504 exercises); works as a Claude vision call with an equipment-filtered shortlist. ~1–3 s, ~$0.005/call. After logging is solid.
+- [ ] **N8** — One working-set rule the four copies read instead of restating. `countsAsSet` exists as a Go predicate (`session.Summarise`), a SQL string (`session/postgres.go`), a **second, inline SQL copy** (`feed/postgres.go`), and a TS predicate (`lib/sessions.ts`). #238 taught all four together and consolidated the clients onto the TS one — the remaining risk is the feed's, which restates the predicate rather than importing the constant one package over, and is pinned only by its own fixture. A fifth copy would be silent. Made sharper by the count/tonnage split: the tempting one-predicate tidy-up deletes every drop's tonnage. (#238)
 
 ## L — Recorded, low
 
