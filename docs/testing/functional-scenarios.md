@@ -5593,6 +5593,21 @@ Two switches, and the second one only ever narrows what the first allows.
 - `PATCH /v1/profile` omitting `share_training_details` leaves it unchanged — an
   older client cannot publish anything by omission.
 
+### Performance (the plan, not the result)
+
+- **A friend with years of history does not slow the feed.** Seed one friend
+  ~4000 finished sessions, all but a handful outside the 3-day window, then
+  read the feed. The rows returned are the only observable at the API layer
+  and they are correct either way — so the assertion has to be on the query
+  plan: `sessions_user_ended_idx` chosen, and `ended_at` appearing under
+  `Index Cond`, never under `Filter`. Covered by
+  `feed.TestTheWindowIsASeekNotASift`; listed here because the same trap
+  applies to any future window query (`sessioncard`'s neighbour lookups use
+  the same shape) and a functional suite that only checks rows cannot see it.
+- **The count and the list agree under load.** `visibleFrom` is shared by both
+  for this reason; a total that promises rows the list will not return is the
+  regression to watch when either query is edited.
+
 ## Sharing (`/v1/shares`, both clients' Share control + Sharing screens)
 
 Two kinds are shareable: **sequences** and **workouts**. Everything in this

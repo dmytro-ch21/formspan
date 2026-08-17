@@ -1016,3 +1016,153 @@ func TestTheRuleIsSharedNotCopied(t *testing.T) {
 			"is not a set, but its weight was still moved")
 	}
 }
+
+// TestTheWindowIsASeekNotASift reads the query PLAN, because correctness tests
+// cannot see this bug at all.
+//
+// Every other test in this file passes identically with and without
+// `sessions_user_ended_idx` — the rows returned are the same rows. What
+// changes is how many are touched to find them, and the old plan touched every
+// finished session a friend had EVER logged, then discarded the ones outside
+// three days. Measured before the index, on 200k sessions across 500 users:
+// 4000 rows fetched, 3919 Rows Removed by Filter, to return 81. The cost grew
+// with an athlete's training history rather than with their week, which for a
+// "what are my friends doing" query is the one scaling property that is not
+// allowed.
+//
+// So this asserts two things the plan makes visible and nothing else does:
+// that the index is the one chosen, and that the 3-day window is an Index Cond
+// rather than a Filter. The second is the load-bearing half — a plan can use
+// the index for the friend list alone and still sift the window, which is
+// precisely what `sessions_user_started_idx` was already doing.
+func TestTheWindowIsASeekNotASift(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+
+	me := person(t, h.pool, "plan-me", "planme", true)
+	mate := person(t, h.pool, "plan-mate", "planmate", true)
+	befriend(t, h, me, "planme", mate, "planmate")
+
+	// Enough history to make a Seq Scan the wrong answer, and skewed the way
+	// real training is: a long tail outside the window, a handful inside it.
+	// With a few rows Postgres reads the whole table whatever indexes exist,
+	// and the test would assert the planner's small-table shortcut instead of
+	// the fix.
+	if _, err := h.pool.Exec(ctx, `
+		INSERT INTO sessions (id, user_id, sport, name, started_at, ended_at, created_at, updated_at)
+		SELECT gen_random_uuid(), $1, 'strength', 'history '||g,
+		       now() - (g || ' hours')::interval,
+		       now() - (g || ' hours')::interval + interval '1 hour',
+		       now(), now()
+		FROM generate_series(1, 4000) g`, mate); err != nil {
+		t.Fatalf("seed history: %v", err)
+	}
+	// `person()` already deletes this user's sessions, but it discards the
+	// error. That is tolerable for the handful of rows every other test here
+	// seeds and not for 4000: a cleanup that silently fails leaves the next
+	// package a table it did not expect. Registered AFTER person()'s, so LIFO
+	// runs it FIRST, and it fails the test rather than logging.
+	t.Cleanup(func() {
+		if _, err := h.pool.Exec(ctx, `DELETE FROM sessions WHERE user_id = $1`, mate); err != nil {
+			t.Errorf("cleanup history: %v", err)
+		}
+		var left int
+		if err := h.pool.QueryRow(ctx,
+			`SELECT count(*) FROM sessions WHERE user_id = $1`, mate).Scan(&left); err != nil {
+			t.Errorf("verify cleanup: %v", err)
+		} else if left != 0 {
+			t.Errorf("cleanup left %d sessions behind", left)
+		}
+	})
+	// ANALYZE, or the planner works from stats that predate these rows and
+	// picks a plan for a table it thinks is empty.
+	if _, err := h.pool.Exec(ctx, `ANALYZE sessions`); err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+
+	// The repository's OWN SQL — see pageQuery. A restated query here would
+	// only prove the restatement is fast.
+	since := time.Now().UTC().Add(-FeedWindow)
+	rows, err := h.pool.Query(ctx,
+		"EXPLAIN (ANALYZE, COSTS OFF) "+pageQuery,
+		[]string{mate}, since, 20, 0)
+	if err != nil {
+		t.Fatalf("explain: %v", err)
+	}
+	defer rows.Close()
+	var plan strings.Builder
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			t.Fatalf("scan plan: %v", err)
+		}
+		plan.WriteString(line)
+		plan.WriteString("\n")
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("plan rows: %v", err)
+	}
+	got := plan.String()
+
+	if !strings.Contains(got, "sessions_user_ended_idx") {
+		t.Errorf("the feed is not using sessions_user_ended_idx; plan was:\n%s", got)
+	}
+
+	// BOTH halves of the index have to be doing work, and each fails in its own
+	// direction. Asserting only one of them is not a weaker guard, it is a
+	// guard that blesses the opposite bug:
+	//
+	//   - lose `ended_at`  → the friend list seeks, the WINDOW sifts. Every
+	//     friend's lifetime is read. This is the bug the index was added for.
+	//   - lose `user_id`   → the window seeks, the FRIEND LIST sifts. Every
+	//     user on the platform's last three days is read and thinned down to
+	//     your friends — cost proportional to how busy VOLA is, which is worse
+	//     than the original as the product grows.
+	//
+	// The second was found by review, against an earlier version of this test
+	// that checked the window only: an index named `sessions_user_ended_idx` on
+	// `(ended_at DESC)` alone passed all three of its assertions. Reproduced
+	// before fixing.
+	//
+	// Both are therefore expressed the same way: the column must appear in an
+	// `Index Cond:` and must NOT appear in a `Filter:`.
+	//
+	// Matched on the line's PREFIX, not with Contains, because `Join Filter:`
+	// and `Rows Removed by Filter:` both contain "Filter:" and neither means
+	// the predicate was sifted at this node.
+	filtered := func(col string) bool {
+		for _, line := range strings.Split(got, "\n") {
+			l := strings.TrimSpace(line)
+			if strings.HasPrefix(l, "Filter:") && strings.Contains(l, col) {
+				return true
+			}
+		}
+		return false
+	}
+	indexed := func(col string) bool {
+		for _, line := range strings.Split(got, "\n") {
+			l := strings.TrimSpace(line)
+			// Bitmap plans print `Recheck Cond:` on the heap node and
+			// `Index Cond:` on the index node; the index node is the one that
+			// proves a seek, so only that prefix counts.
+			if strings.HasPrefix(l, "Index Cond:") && strings.Contains(l, col) {
+				return true
+			}
+		}
+		return false
+	}
+
+	if filtered("ended_at") {
+		t.Errorf("the 3-day window is a Filter, not a seek — every lifetime row is being read:\n%s", got)
+	}
+	if !indexed("ended_at") {
+		t.Errorf("no Index Cond carries ended_at; the window is not a boundary seek:\n%s", got)
+	}
+	// NOT "user_id appears in some Index Cond" — the join's own probe into
+	// profiles prints `Index Cond: (user_id = s.user_id)` and would satisfy
+	// that even when the sessions scan is sifting. Only its ABSENCE from every
+	// Filter distinguishes the two plans.
+	if filtered("user_id") {
+		t.Errorf("the friend list is a Filter — every user's window is being read, not just your friends':\n%s", got)
+	}
+}

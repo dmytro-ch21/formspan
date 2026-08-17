@@ -1,0 +1,35 @@
+-- The feed reads a 3-day window over a friend list, and until now it read
+-- every friend's LIFETIME of sessions to do it.
+--
+-- `sessions_user_started_idx (user_id, started_at DESC)` matches the friend
+-- list and nothing else, so `ended_at IS NOT NULL AND ended_at >= $2` could
+-- only be a post-hoc Filter. Measured on 200k rows / 500 users, 10 friends:
+-- 4000 rows fetched, 3919 Rows Removed by Filter, to return 81. That cost
+-- grows with how long an athlete has trained, not with how much they did this
+-- week — the one thing a "recent activity" query must not do.
+--
+-- Column order is the query's: `user_id` is the equality (`= ANY`), so it
+-- leads, and `ended_at DESC` then makes the range a boundary seek.
+--
+-- It does NOT remove the sort, and an earlier draft of this comment claimed it
+-- did. The feed orders by `ended_at DESC, s.id` for a total order, and probing
+-- several friends through one `= ANY` cannot emit globally ordered rows
+-- anyway, so every observed plan keeps a Sort node. That is cheap for the
+-- right reason — its input is the window, ~81 rows, not a lifetime — which is
+-- the same win stated accurately.
+--
+-- PARTIAL on `ended_at IS NOT NULL` because that predicate is in every reader
+-- and an in-progress session is never in any of them. It also keeps the index
+-- off live sessions, which are the rows being written most often.
+--
+-- Not CONCURRENTLY, but not because it is impossible here: `cmd/migrate` runs
+-- each file through the driver's single Exec with no explicit BEGIN, and
+-- golang-migrate documents CONCURRENTLY as workable when it is the only
+-- statement in the file. The reason is the failure mode — a CONCURRENTLY build
+-- that fails leaves an INVALID index behind AND the migration marked dirty,
+-- which is a worse thing to meet on a deploy than a brief ACCESS SHARE lock on
+-- a table with four figures of rows in it. Revisit if sessions ever gets big
+-- enough for that lock to matter.
+CREATE INDEX sessions_user_ended_idx
+  ON sessions (user_id, ended_at DESC)
+  WHERE ended_at IS NOT NULL;
