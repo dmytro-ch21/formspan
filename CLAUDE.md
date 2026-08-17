@@ -171,8 +171,18 @@ git push -u origin <branch>
 gh pr create --draft --title "[claim] <ID> — <task>" --body "Claiming <ID>."
 ```
 
-Then do the work on that branch and mark the PR ready when it is reviewable.
-The claim PR becomes the real one; nothing is thrown away.
+Then do the work on that branch and mark the PR ready when it is reviewable:
+
+```bash
+gh pr ready <n>
+gh api -X PATCH repos/dmytro-ch21/formspan/pulls/<n> -f title="..." -F body=@body.md
+```
+
+The claim PR becomes the real one; nothing is thrown away. **Use `gh api`, not
+`gh pr edit`** — the latter fails outright in this repo on a deprecated
+Projects-classic GraphQL query (`repository.pullRequest.projectCards`) and
+silently changes nothing, so a title still reading `[claim] …` after an apparent
+success is that, not a typo. `gh pr ready` and `gh pr create` are unaffected.
 
 **Why a draft PR rather than a field in this file.** TASKS.md is itself the
 contended resource — a claim written here is one more edit to the file two

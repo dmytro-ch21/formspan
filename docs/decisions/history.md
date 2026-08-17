@@ -21948,6 +21948,13 @@ of opening the PR.
 - **It costs a PR per task**, including tasks that turn out to be one line. That
   is a real cost against a rare failure, and the two lost rounds are the only
   evidence so far that the trade is worth making.
+- **`gh pr edit` does not work in this repo**, which the claim→ready step needs.
+  It fails on a deprecated Projects-classic GraphQL query
+  (`repository.pullRequest.projectCards`) and changes nothing, while still
+  looking like it ran — the title stayed `[claim] H6 …` through two apparently
+  successful invocations. `gh api -X PATCH repos/<owner>/<repo>/pulls/<n>` works.
+  Found by hitting it on this very PR, which is a small argument for writing
+  conventions by following them rather than by describing them.
 
 ## Open items / known gaps as of this entry
 
