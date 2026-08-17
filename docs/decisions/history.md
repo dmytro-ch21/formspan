@@ -22421,8 +22421,15 @@ target.
 ### A duration is a target, not a measure
 
 `measuresForSet` is deliberately untouched. It answers "what does this exercise
-record", and a squat with 40s on it is still a weight×reps set — same summary,
-same tonnage, same records. What N4 adds is a separate optional field, below the
+record", and a squat with 40s on it is still a weight×reps set: same tonnage,
+same records, same fields offered.
+
+Its collapsed summary DOES gain the duration — `describeSet` appends any
+non-null `seconds` unconditionally, so the row reads "10 × 100 kg · 40s". A
+first draft of this entry claimed the opposite, in four places, and review
+checked the code. That behaviour is kept, because a target you cannot see
+without expanding the row is a target you will forget you set; the claim is what
+was wrong, not the display. What N4 adds is a separate optional field, below the
 measures rather than among them, whose value is a timer target.
 
 Keeping those two questions apart is the whole design. Folding `seconds` into
@@ -22471,6 +22478,26 @@ Worth noting how it was found — by writing the design intent down for review a
 listing dual-mode as a property to attack. The question surfaced while composing
 the prompt, before the reviewer had answered.
 
+### What else review found
+
+Two more, neither of which the check suite could see:
+
+**The completion path overwrote the target with the clock.** `recordTimedSet`
+writes elapsed into `seconds` — correct for a plank, where that is the whole
+documented contract, and destructive for a squat, where `seconds` is now the
+prescription. Racking a 40s target at 25 rewrote it to 25; worse,
+`bankRunningWork` fires whenever any OTHER timer starts, so a stray tap ten
+seconds in did it too. `elapsedBelongsInSeconds` is the rule now, and it is the
+exact inverse of `offersTimerTarget` — a test asserts that inversion across
+every load type, so the two cannot drift apart.
+
+**A banked zero is an unsyncable row.** `elapsedOf` rounds, so banking within
+half a second of starting wrote `seconds: 0`, which the server's
+`seconds IS NULL OR seconds > 0` CHECK rejects — failing that set's whole
+session write. Pre-existing, and only ever reachable where `seconds` is the
+measure. Fixed here because it is two lines and the alternative is a 400 nobody
+can explain.
+
 ### One consequence that was nearly missed
 
 The seconds/minutes chip was gated on the exercise measuring time, with its own
@@ -22481,16 +22508,18 @@ The chip now also appears when any set in the group carries a target.
 
 ### Open questions this leaves
 
-- **The duration is only visible while the row is expanded.** The play button
-  appearing is the feedback that it took; the row summary does not show it, so a
-  40s squat reads as a plain weight×reps row when collapsed. Deliberate for now
-  (the summary is the athlete's own log of what they did, and the target is not
-  that), but worth revisiting if people set them often.
+- **The collapsed summary does not distinguish a target from a measurement.**
+  It shows "· 40s" identically whether that 40s is a plank's recorded hold or a
+  squat's prescription. Nothing currently reads wrong — but the two are
+  different claims and the row says them the same way, which is the seam a
+  stopwatch feature would have to open up.
 - **Not seen on a device.** Built, typechecked, tested; the field, the play
   button on a squat and the unit chip have never been looked at on a phone.
   Folded into **L1**, which already tracks exactly this debt.
-- **The stopwatch is still not a thing.** N4 lets you say how long a set should
-  take; it does not record how long one actually took when no target was set.
+- **The stopwatch is still not a thing, and now it is explicitly refused.**
+  N4 lets you say how long a set should take; on a targeted set the elapsed time
+  is deliberately not kept anywhere, because the only field available is the
+  target and overwriting it is the bug review found.
   That is a different feature and a bigger one — it needs somewhere to put the
   elapsed value that is not the target field.
 

@@ -15,6 +15,7 @@ import {
 } from '../countdown';
 import {
   DEFAULT_WORK_SECONDS,
+  elapsedBelongsInSeconds,
   offersTimerTarget,
   timedSetStillAt,
   workSecondsFor,
@@ -405,6 +406,31 @@ describe('which sets can be timed, and for how long', () => {
     expect(offersTimerTarget('reps')).toBe(false);
 
     expect(offersTimerTarget(undefined)).toBe(false);
+  });
+
+  it('lets the clock overwrite seconds only where seconds is the MEASURE', () => {
+    // A plank: elapsed is the honest record, and the 60s-let-go-at-40 contract
+    // above depends on this staying true.
+    expect(elapsedBelongsInSeconds('time')).toBe(true);
+    expect(elapsedBelongsInSeconds('distance_time')).toBe(true);
+    // Dual-mode measures seconds when it is in time mode, and the load type is
+    // the same either way — a burpee run as time logs what the clock counted.
+    expect(elapsedBelongsInSeconds('reps')).toBe(true);
+
+    // A squat with a 40s TARGET. Found in review: the completion path wrote
+    // elapsed into `seconds` unconditionally, so racking at 25 rewrote the
+    // prescription to 25 — and `bankRunningWork` fires whenever any other
+    // timer starts, so a stray tap ten seconds in did it too.
+    expect(elapsedBelongsInSeconds('weight_reps')).toBe(false);
+    expect(elapsedBelongsInSeconds('distance')).toBe(false);
+
+    expect(elapsedBelongsInSeconds(undefined)).toBe(false);
+
+    // It is the exact inverse of the field gate, and must stay so: the row
+    // that OFFERS a target is the row whose target must not be overwritten.
+    for (const lt of ['time', 'distance_time', 'reps', 'weight_reps', 'distance'] as const) {
+      expect(elapsedBelongsInSeconds(lt)).toBe(!offersTimerTarget(lt));
+    }
   });
 
   it('defaults a plank with nothing prescribed', () => {

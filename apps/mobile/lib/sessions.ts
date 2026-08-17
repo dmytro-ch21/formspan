@@ -295,9 +295,12 @@ export function measuresFor(loadType: Exercise['load_type']): Measure[] {
  *
  * A duration is therefore a TIMER TARGET, not a measure. `measuresForSet` is
  * untouched and still answers "what does this exercise record" — a squat with
- * 40s on it is still a weight×reps set, and the summary still reads that way.
- * Keeping the two questions apart is what stops a timed squat from silently
- * becoming a timed exercise.
+ * 40s on it is still a weight×reps set for tonnage, records and which fields it
+ * offers. (Its collapsed summary does show the duration: `describeSet` appends
+ * any non-null `seconds`. That is intended — an unseen target is a forgotten
+ * one — and is noted here because an earlier version of this comment claimed
+ * otherwise.) Keeping the two questions apart is what stops a timed squat from
+ * silently becoming a timed exercise.
  *
  * A pure `time` exercise with nothing prescribed does get a default, because a
  * plank with no number is still a plank you want to time.
@@ -339,6 +342,35 @@ export function offersTimerTarget(loadType: Exercise['load_type'] | undefined): 
   return !measuresFor(loadType).includes('seconds') && !isDualMode(loadType);
 }
 
+/**
+ * When a countdown finishes, does the clock's elapsed time belong in `seconds`?
+ *
+ * For a plank it does, and that is the documented contract: log what was
+ * actually held, never what was asked for — a 60s plank let go at 40 records
+ * 40. `seconds` there is the MEASURE, and the clock is the honest source.
+ *
+ * For a squat given a 40s target it does not, and this is the half N4 had to
+ * add. `seconds` there is the TARGET, so writing elapsed into it destroys the
+ * prescription the athlete typed: rack at 25 and the row now says 25, the play
+ * button next offers 25, and the number nobody chose has replaced the one they
+ * did. The same path fires on early Stop and on `bankRunningWork`, which runs
+ * whenever any OTHER timer starts — so a stray tap ten seconds in would have
+ * rewritten the target to 10.
+ *
+ * The rule is therefore the exact inverse of {@link offersTimerTarget}: where
+ * the row offers a target field, the target is what `seconds` means and the
+ * clock does not get to overwrite it. Dual-mode lands on the right side of this
+ * for free — a burpee set in time mode measures seconds, so elapsed wins there
+ * as it always did.
+ *
+ * What this leaves undone is deliberate and recorded: on a targeted set the
+ * elapsed time is simply not kept anywhere. There is no honest field for it
+ * yet, and inventing one by overwriting the target is what this prevents.
+ */
+export function elapsedBelongsInSeconds(loadType: Exercise['load_type'] | undefined): boolean {
+  return loadType !== undefined && !offersTimerTarget(loadType);
+}
+
 export function workSecondsFor(
   set: Pick<LoggedSet, 'seconds'>,
   loadType: Exercise['load_type'] | undefined,
@@ -352,7 +384,13 @@ export function workSecondsFor(
   //
   // Checked BEFORE the load type, which is the reordering that implements N4.
   if (set.seconds != null && set.seconds > 0) return set.seconds;
-  if (!measuresFor(loadType).includes('seconds') && !isDualMode(loadType)) return null;
+  // Only `time` gets a duration nobody asked for. The load-type gate that used
+  // to sit here was left in place at first and described as "guarding the
+  // default"; review did the case analysis and showed it guarded nothing —
+  // every type it rejected fell through this ternary to the same null, so
+  // deleting it changed no behaviour and no test. Removed rather than kept as
+  // belt-and-braces, because a line that cannot fail is a line that will be
+  // read as load-bearing by the next person.
   return loadType === 'time' ? DEFAULT_WORK_SECONDS : null;
 }
 

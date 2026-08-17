@@ -650,9 +650,20 @@ Domain: a training session that **actually happened**, and the sets in it — re
   button, and neither does a `distance_time` row with a distance and no time.
   A plank with nothing prescribed still defaults to 60s. The regression to
   watch for is a default leaking onto untimed sets.
-- **A timed squat is still a weight×reps set.** Its summary, its tonnage and
-  its records must be unchanged by putting 40s on it — the duration is a timer
-  target, not a measure. Check the row summary and the session volume.
+- **A timed squat is still a weight×reps set** where it counts: tonnage,
+  records and the fields offered must be unchanged by putting 40s on it. Its
+  collapsed summary DOES gain "· 40s" — that is intended, and an earlier draft
+  of this list asserted the opposite, which would have made a passing test out
+  of a wrong expectation.
+- **The target survives the timer.** Put 40s on a squat, run it, stop at 25:
+  the row must still say 40. On a plank the opposite must hold — a 60s hold let
+  go at 40 records 40. Same completion path, opposite answers, decided by
+  whether `seconds` is the exercise's measure.
+- **A dual-mode exercise is not offered the field at all.** Open a burpee set
+  logged in reps: there must be no Timer field, because writing one would flip
+  the row to time mode and strand the rep count. The mode toggle is the
+  affordance there. This is the case that has no automated coverage — the gate
+  is tested, its call site is not.
 - **The circuit follows.** An exercise mixing a timed burpee set and a squat
   set with a duration should offer "run all"; remove the squat's duration and
   the offer must disappear, since the run is all-or-nothing.
