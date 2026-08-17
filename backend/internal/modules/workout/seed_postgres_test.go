@@ -165,9 +165,30 @@ func seedReferencedExercises(t *testing.T, pool *pgxpool.Pool) {
 			`DELETE FROM workout_items WHERE exercise_id = ANY($1)`, created); err != nil {
 			t.Logf("cleanup workout items referencing seeded-plan exercises: %v", err)
 		}
-		// 3. And now the exercises themselves.
+		// 3. And now the exercises themselves — reported as a FAILURE, not a
+		// log line, and verified afterwards.
+		//
+		// These are REAL catalog ids, so a silently failed delete here leaves
+		// the actual catalog partially populated in the shared database, which
+		// is exactly the residue a later package can start borrowing from
+		// without anything going red. That is the crutch `exercise`'s own
+		// `removeCatalogAfterTest` exists to remove, and this is the one other
+		// place in the suite that can put a piece of it back. A `t.Logf` is
+		// invisible in a green non-verbose run, so it gets the same treatment
+		// as the guard it would otherwise undermine.
 		if _, err := pool.Exec(ctx, `DELETE FROM exercises WHERE id = ANY($1)`, created); err != nil {
-			t.Logf("cleanup seeded-plan exercises: %v", err)
+			t.Errorf("cleanup seeded-plan exercises: %v", err)
+			return
+		}
+		var left int
+		if err := pool.QueryRow(ctx,
+			`SELECT count(*) FROM exercises WHERE id = ANY($1)`, created).Scan(&left); err != nil {
+			t.Errorf("could not confirm the seeded-plan exercises were removed: %v", err)
+			return
+		}
+		if left != 0 {
+			t.Errorf("%d of %d real catalog rows this test inserted survived cleanup; "+
+				"another package could start depending on them", left, len(created))
 		}
 	})
 
