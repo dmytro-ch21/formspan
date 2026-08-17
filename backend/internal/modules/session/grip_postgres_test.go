@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"testing"
 )
 
@@ -69,5 +70,42 @@ func TestTheDatabaseRefusesAGripNobodyDefined(t *testing.T) {
 	}))
 	if err == nil {
 		t.Fatal("an unknown grip was stored — the CHECK constraint is not doing its job")
+	}
+	// Not merely "an error": the module's rule is that no raw SQL error escapes
+	// a repository. Asserting only `err != nil` would pass while leaking a
+	// pgconn.PgError — constraint name, table name and all — to the client.
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("error %v does not wrap ErrInvalidInput, so this is a 500 and a leaked "+
+			"driver message rather than a 400", err)
+	}
+}
+
+// GripApplies has no backend caller — the clients gate their pickers on their
+// own copy of this list — so without a test nothing pins it at all, and an
+// uncalled source of truth is exactly how the two copies drift apart.
+//
+// The exclusions are the half worth pinning. Hinges, carries and olympic lifts
+// are absent BECAUSE the enum has no `mixed` or `hook`; if someone adds those
+// values later and this list is not revisited, the picker stays hidden on the
+// movements the new values exist for.
+func TestGripIsOnlyAskedWhereTheseFourAnswerIt(t *testing.T) {
+	for _, p := range []string{
+		"horizontal_push", "horizontal_pull", "vertical_push", "vertical_pull", "isolation",
+	} {
+		if !GripApplies(p) {
+			t.Errorf("GripApplies(%q) = false, want true", p)
+		}
+	}
+	for _, p := range []string{
+		// Meaningless.
+		"squat", "lunge", "jump", "locomotion", "mobility", "core", "rotation", "grappling",
+		// Withheld: their real answer is `mixed` or `hook`. See N9.
+		"hinge", "carry", "olympic",
+		// And an exercise whose pattern the client could not load.
+		"",
+	} {
+		if GripApplies(p) {
+			t.Errorf("GripApplies(%q) = true, want false", p)
+		}
 	}
 }

@@ -32,7 +32,7 @@ const (
 // Grip is how the implement was held for one set.
 //
 // A property of the SET, not of the exercise. A catalog row per grip would
-// multiply 504 exercises into something near 2,000 and still not express the
+// multiply the 762-row catalog into something near 3,000 and still not express the
 // thing athletes actually do — switch on the last set because the first three
 // hurt — while splitting one exercise's history in two, so the progression
 // rule and the personal records each see half the sets.

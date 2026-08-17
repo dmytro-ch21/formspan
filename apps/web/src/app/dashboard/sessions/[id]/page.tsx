@@ -29,6 +29,7 @@ import {
   SET_TYPES,
   swapSuggestions,
   swapExercise,
+  withSetChange,
   type Exercise,
   type LoggedSet,
   type Measure,
@@ -987,7 +988,14 @@ function SetRow({
             a desk SHOWS what was recorded and does not destroy it. Only when
             set — an unrecorded grip renders nothing, never "Reg". */}
         {set.grip && (
-          <span className="ml-1 text-xs text-text-dim">
+          // `title` because "Neu" alone is announced verbatim by a screen
+          // reader and explains nothing on hover — and unlike the set-type
+          // short beside it, grip has no other surface on this page to read the
+          // full word from. Same treatment the RIR/RPE headers already use.
+          <span
+            className="ml-1 text-xs text-text-dim"
+            title={`${GRIPS.find((g) => g.key === set.grip)?.label ?? set.grip} grip`}
+          >
             {GRIPS.find((g) => g.key === set.grip)?.short ?? set.grip}
           </span>
         )}
@@ -1018,7 +1026,10 @@ function SetRow({
                 const n =
                   raw.trim() === "" ? null : Number(raw.replace(",", "."));
                 if (n === null || !Number.isFinite(n)) {
-                  onChange({ ...set, [MEASURE_KEY[m]]: null });
+                  // Through `withSetChange`, not a bare spread: clearing reps
+                  // on a phone-logged set leaves an assisted count web cannot
+                  // see, and the CHECK then 400s every later edit.
+                  onChange(withSetChange(set, { [MEASURE_KEY[m]]: null }));
                   return;
                 }
                 // Converted back before it's stored — the database only ever
@@ -1029,7 +1040,7 @@ function SetRow({
                     : m === "distance"
                       ? Math.round(fromDisplayDistance(n, units))
                       : Math.round(n);
-                onChange({ ...set, [MEASURE_KEY[m]]: canonical });
+                onChange(withSetChange(set, { [MEASURE_KEY[m]]: canonical }));
               }}
               step={m === "weight" ? 0.5 : 1}
               disabled={!editable}

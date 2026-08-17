@@ -21416,7 +21416,7 @@ with **T3**, which is the trap it was always going to spring.
 ### Why the set and not the catalog
 
 The obvious design is a catalog row per grip, and it is wrong twice. It turns
-504 exercises into something near 2,000, each needing muscles, equipment,
+the 762-row catalog into something near 3,000, each needing muscles, equipment,
 instructions and media differing from its sibling in one word — and having paid
 that, it still cannot express what athletes actually do, which is switch grip on
 the last set because the first three hurt.

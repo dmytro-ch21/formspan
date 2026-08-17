@@ -11,7 +11,7 @@
 -- The obvious alternative is a catalog row per grip — "Dumbbell Bench Press
 -- (Neutral)" beside "Dumbbell Bench Press" — and it is wrong twice over.
 --
--- It multiplies the catalog: 504 exercises become something near 2,000, every
+-- It multiplies the catalog: 762 exercises become something near 3,000, every
 -- one of them needing muscles, equipment, instructions and media that differ
 -- from its sibling in one word. And having paid that, it STILL cannot say the
 -- thing an athlete actually does, which is switch grip on the last set because

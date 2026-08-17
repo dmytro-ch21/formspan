@@ -56,6 +56,8 @@ func translatePgError(err error) error {
 			return fmt.Errorf("%w: RIR must be between 0 and 20", ErrInvalidInput)
 		case strings.Contains(pgErr.ConstraintName, "set_type"):
 			return fmt.Errorf("%w: unknown set type", ErrInvalidInput)
+		case strings.Contains(pgErr.ConstraintName, "grip"):
+			return fmt.Errorf("%w: unknown grip", ErrInvalidInput)
 		case strings.Contains(pgErr.ConstraintName, "ends_after_start"):
 			return fmt.Errorf("%w: a session can't end before it started", ErrInvalidInput)
 		}

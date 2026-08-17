@@ -18,8 +18,8 @@ const API_BASE = `${API_URL}/v1`;
  *
  * A property of the SET, not of the exercise — you might press neutral today
  * and regular next week, or switch on the last set because the first three
- * hurt. A catalog row per grip could express neither, and would split one
- * exercise's history in two.
+ * hurt. A catalog row per grip could express neither — it would multiply the
+ * 762-row catalog toward 3,000 — and would split one exercise's history in two.
  *
  * `mixed` and `hook` are deliberately absent: they are how a heavy deadlift is
  * held, and they are not variations of these four. The picker is not offered on

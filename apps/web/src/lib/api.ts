@@ -394,6 +394,12 @@ export const MEASURE_KEY: Record<Measure, keyof LoggedSet> = {
   distance: "distance_m",
 };
 
+/**
+ * A brand-new set. Deliberately does NOT carry `grip` from `from`, unlike
+ * mobile's — web has no grip control, so a carried value would be a recording
+ * this app made and cannot unmake. Absent is the honest state for a row created
+ * here, and the phone can set it afterwards.
+ */
 export function emptySet(
   exerciseID: string,
   position: number,
@@ -456,6 +462,35 @@ export function setsFromWorkout(items: WorkoutItem[]): LoggedSet[] {
  * anything, and inventing a number there would be worse than a blank. Effort
  * is always cleared — it was a judgement about a different movement.
  */
+/**
+ * Apply a change to a set, keeping the cross-field invariant the database
+ * enforces.
+ *
+ * Mirrors mobile's `withSetChange`, and exists for the same reason: dropping
+ * reps below the assisted count — or clearing reps entirely — leaves a row that
+ * `session_sets_assisted_within_reps` refuses. Because a save is a WHOLESALE
+ * PUT of every set, that one row then 400s every subsequent edit to any set in
+ * the session, and web can neither display nor clear `assisted_reps`, so there
+ * is no way to work out what is wrong from this screen.
+ *
+ * Web had no equivalent of this until now: it edited measures with a bare
+ * spread, which is how a field it never shows could wedge the whole page.
+ */
+export function withSetChange(
+  set: LoggedSet,
+  patch: Partial<LoggedSet>,
+): LoggedSet {
+  const next = { ...set, ...patch };
+  if (next.reps == null) {
+    // Nothing left to have been assisted with.
+    return next.assisted_reps == null ? next : { ...next, assisted_reps: null };
+  }
+  if (next.assisted_reps != null && next.assisted_reps > next.reps) {
+    return { ...next, assisted_reps: next.reps };
+  }
+  return next;
+}
+
 export function swapExercise(
   sets: LoggedSet[],
   fromID: string,
