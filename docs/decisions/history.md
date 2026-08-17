@@ -21233,20 +21233,32 @@ footgun, and it would have been invisible except as jank.
 
 ### Open questions this leaves
 
-- **The spacing is unverified.** `styles.scroll` carries `gap: 10`, which spaced
-  the ScrollView's children and now has to space the header, each cell and the
-  footer instead. It should behave the same — cells are direct children of the
-  content container — but "should" is doing work there, and only a screenshot
-  settles it.
+- **The spacing was NOT fine, and review found it by reading the source.** I
+  shipped this as "should behave the same" and it did not: `VirtualizedList`
+  wraps the header and the footer each in a plain `View` styled only by
+  `ListHeaderComponentStyle`/`ListFooterComponentStyle`, so
+  `contentContainerStyle`'s `gap: 10` never reached their children. The error
+  text would have sat flush against the friends pane on a failed load. Fixed
+  with those two props. Between-cell rhythm was genuinely unaffected — cells
+  *are* direct children of the content container — so the half I reasoned
+  correctly and the half I got wrong looked identical from where I was standing.
+- **One residual, for the device pass:** a virtualised-out region collapses to a
+  single spacer sized from cell metrics, and for *unmeasured* cells the estimate
+  uses average cell length, which excludes the gap. That can show as small
+  scroll-position corrections during fast flings. If it does, the fix is moving
+  inter-item spacing to `ItemSeparatorComponent` and dropping `gap` from the
+  content container.
 - **Nothing tests that virtualisation actually happens.** The suite proves the
   screen still renders the right things; windowing is layout-driven and does not
   occur under jest. The claim that fewer views are mounted is reasoned from
   `FlatList`'s contract, not measured. **L1** already covers "nothing on the
   phone has been seen on a phone", and this belongs to it.
-- **`renderItem` is an inline arrow**, so it changes identity every render.
-  `FlatList` still only re-renders visible rows, and `FeedRow` is not memoised,
-  so this costs re-renders of what is on screen rather than of everything. Worth
-  measuring on a device before optimising blind.
+- **`renderItem` is an inline arrow**, so it changes identity every render and
+  `VirtualizedList` re-invokes it for windowed cells. `FeedRow` **is** memoised
+  (it already was), so those bail out on unchanged props — and parent renders
+  here are load-driven rather than scroll-driven. Left alone deliberately. An
+  earlier draft of this entry said `FeedRow` was not memoised, which was simply
+  wrong and would have argued for an optimisation that is already in place.
 - **`onEndReached` was deliberately not wired.** "Show older" stays an explicit
   button. Infinite scroll on other people's training is a different product
   decision, not a side effect of changing a container.

@@ -284,6 +284,16 @@ export default function SocialScreen() {
         // ELEMENTS, not component functions. Passing `() => <X/>` here hands
         // FlatList a new component type every render, which unmounts and
         // remounts the whole header on each keystroke of anything above.
+        //
+        // The two *Style props are not decoration. `VirtualizedList` wraps the
+        // header and footer each in a plain `View` styled ONLY by these
+        // (VirtualizedList.js:952-966), so `contentContainerStyle`'s `gap: 10`
+        // reaches the cells but not the children inside these wrappers. Without
+        // them the error text sits flush against the friends pane on a failed
+        // load, and the spinner loses 10 of its 26pt. Between-cell rhythm is
+        // unaffected — cells are direct children of the content container.
+        ListHeaderComponentStyle={styles.slot}
+        ListFooterComponentStyle={styles.slot}
         ListHeaderComponent={
           <>
         {/* The friends pane. A summary and a way through, not the whole
@@ -423,6 +433,10 @@ export default function SocialScreen() {
 
 const styles = StyleSheet.create({
   scroll: { padding: 20, gap: 10, paddingBottom: 40 },
+  // The header and footer wrappers do not inherit `scroll`'s gap — see the
+  // comment at the call site. Same value, so the rhythm is identical either
+  // side of the list.
+  slot: { gap: 10 },
   pane: {
     flexDirection: 'row',
     alignItems: 'center',
