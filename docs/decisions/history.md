@@ -18396,101 +18396,6 @@ sixty-minute session of thirty sets ties one of ten.
   an app that now compiles its own binary — judged a disproportionate price for
   a directory the OS purges under pressure.
 
-## 2026-08-09 — The one referential check on the curriculum seed path never ran in CI
-
-`TestEverySeededTechniqueExistsInTheLibrary` is the check that every
-`technique_id` in `curricula.json` actually exists in the technique library —
-ids are hand-authored against a 542-entry catalog and nothing else verifies
-them. It queried the `techniques` table and, finding it empty, called
-`t.Skip`. CI migrates `TEST_DATABASE_URL` and never runs `cmd/seed`, so the
-table is always empty there. Measured against a freshly migrated, unseeded
-database: **597 passed, 1 skipped, exit 0** — the suite reported success while
-the single assertion guarding the deploy path never executed.
-
-This is the failure mode this file already records twice ("a test that skips is
-indistinguishable from one that passes"; the 8-of-9 share tests that skipped on
-a CI-shaped database). Third time, so the pattern is worth naming: the skip was
-added for a *correct* reason — an empty catalog would make every id read as
-missing, which is a true statement about an unseeded database and tells you
-nothing about the syllabuses — and the mistake was the remedy, not the
-diagnosis. `t.Skip` converts "I cannot answer this" into "success".
-
-**The fix was neither of the two obvious ones.** Seeding the rows inside the
-test is the rule the rest of the repo settled on
-(`bjj/proficiency_postgres_test.go` and friends own their library rows), and
-adding `go run ./cmd/seed` to CI is one line. Both were wrong here, because
-**both sides of this comparison are content files**: `curriculum.SeedData()`
-reads embedded `curricula.json`, `technique.SeedData()` reads embedded
-`techniques.json`, and `cmd/seed` inserts techniques *then* curricula
-(`cmd/seed/main.go`, where the ordering is already commented as load-bearing).
-So the check needs no database at all — it is a pure comparison of two files
-compiled into the binary. `bjj`'s
-`TestTheShippedLibraryStaysUnderTheProficiencyCap` was rewritten from this
-exact mistake to read the embedded catalog; this is the same fix, and the
-precedent was already in the tree.
-
-Worth stating because it inverts the intuition: querying the live table was the
-**weaker** check. A hand-seeded local database also holds whatever the admin
-console authored (`source='admin'`), any of which satisfies the foreign key for
-an id that no fresh deploy would ever have. The database version could go green
-on a syllabus that breaks production.
-
-The empty-catalog guard survives as `t.Fatal` rather than `t.Skip`: the
-reasoning behind it was sound, and the embedded file cannot be empty for any
-environmental reason, so an empty one means somebody emptied `techniques.json`
-— a failure, not a condition.
-
-Verified the way the report asked. Scratch database created, migrated to 49,
-deliberately **not** seeded (`SELECT count(*) FROM techniques` = 0), full
-backend suite: **598 passed, 0 failed, 0 skipped, exit 0**, with the test
-reporting `pass`. Then the mutation, on that same pristine database — one item
-pointed at `this-technique-does-not-exist`:
-
-- old test: `--- SKIP` → `ok`. A syllabus pointing at nothing reports success.
-- new test: `--- FAIL`, naming the curriculum and the id.
-
-It also fails with `TEST_DATABASE_URL` unset entirely, which is the deeper
-point: the check no longer has an environment in which it declines to run.
-
-**A package-ordering accident is why this was invisible.** `technique`'s own
-test seeds the full 542-row catalog (`technique/postgres_test.go`), and
-`go test ./...` walks packages alphabetically — `curriculum` before
-`technique`. So the shared database ends a suite run *full*, which is why a
-second consecutive run on the same database would have shown this test passing,
-and why anyone checking by hand after a run saw a seeded library and no
-problem. Had the two package names sorted the other way, this test would have
-passed in CI for the wrong reason and the bug would have been even harder to
-see.
-
-### Gaps
-
-- **Nothing prevents the fourth recurrence.** A CI gate asserting zero skips
-  would, and this repo already likes that shape of ratchet (`--max-warnings` on
-  mobile lint). It was left out deliberately rather than overlooked: many tests
-  legitimately skip when `TEST_DATABASE_URL` is unset locally, so the invariant
-  is "zero skips *in CI*", and choosing where to enforce that is a decision
-  about every future test, not part of this fix.
-- **`activity/postgres_test.go` has the last conditional skip** — it skips when
-  the discipline registry holds no default-on/default-off pair to invert. Not
-  the same bug (it reads an in-process registry, not ambient database state) and
-  it does not fire today, but it is the same shape, and it would go quiet rather
-  than red if every discipline ever defaulted on.
-- **The seeder's technique-before-curriculum ordering is still asserted only by
-  a comment.** A fresh deploy would fail loudly via the foreign key and
-  `log.Fatalf`, so this is legible rather than silent — but no test covers it.
-- **"In the library" here means present, not published.** Review raised this and
-  it was deliberately left: both public technique reads filter
-  `status = 'published'` (`technique/postgres.go`), while the curriculum item
-  join does not — so a syllabus item pointing at a `draft` technique would seed
-  fine, satisfy the foreign key, pass this test, render in the syllabus, and
-  then 404 on the tap-through. Unreachable today (all 542 entries normalize to
-  published) and the database version of this test had the identical hole, so
-  it is not a regression — but the console and `cmd/exportcontent` make drafts
-  in `techniques.json` a plausible future state, at which point this becomes
-  reachable. Asserting published status on referenced ids is the fix; it is a
-  different property from referential existence, which is why it is recorded
-  here rather than bolted onto this test.
-
 ## 2026-08-09 — The position map, and a week that says how it went
 
 Two additions, one for BJJ and one for everything: **where the rounds actually
@@ -21357,6 +21262,150 @@ footgun, and it would have been invisible except as jank.
 - **`onEndReached` was deliberately not wired.** "Show older" stays an explicit
   button. Infinite scroll on other people's training is a different product
   decision, not a side effect of changing a container.
+
+## 2026-08-16 — The one referential check on the curriculum seed path never ran in CI
+
+*Written 2026-08-09; landed 2026-08-16 as #216, after a week stale and a rebase across 32 commits.*
+
+`TestEverySeededTechniqueExistsInTheLibrary` is the check that every
+`technique_id` in `curricula.json` actually exists in the technique library —
+ids are hand-authored against a 542-entry catalog and nothing else verifies
+them. It queried the `techniques` table and, finding it empty, called
+`t.Skip`. CI migrates `TEST_DATABASE_URL` and never runs `cmd/seed`, so the
+table is always empty there. Measured against a freshly migrated, unseeded
+database: **597 passed, 1 skipped, exit 0** — the suite reported success while
+the single assertion guarding the deploy path never executed.
+
+This is the failure mode this file already records twice ("a test that skips is
+indistinguishable from one that passes"; the 8-of-9 share tests that skipped on
+a CI-shaped database). Third time, so the pattern is worth naming: the skip was
+added for a *correct* reason — an empty catalog would make every id read as
+missing, which is a true statement about an unseeded database and tells you
+nothing about the syllabuses — and the mistake was the remedy, not the
+diagnosis. `t.Skip` converts "I cannot answer this" into "success".
+
+**The fix was neither of the two obvious ones.** Seeding the rows inside the
+test is the rule the rest of the repo settled on
+(`bjj/proficiency_postgres_test.go` and friends own their library rows), and
+adding `go run ./cmd/seed` to CI is one line. Both were wrong here, because
+**both sides of this comparison are content files**: `curriculum.SeedData()`
+reads embedded `curricula.json`, `technique.SeedData()` reads embedded
+`techniques.json`, and `cmd/seed` inserts techniques *then* curricula
+(`cmd/seed/main.go`, where the ordering is already commented as load-bearing).
+So the check needs no database at all — it is a pure comparison of two files
+compiled into the binary. `bjj`'s
+`TestTheShippedLibraryStaysUnderTheProficiencyCap` was rewritten from this
+exact mistake to read the embedded catalog; this is the same fix, and the
+precedent was already in the tree.
+
+Worth stating because it inverts the intuition: querying the live table was the
+**weaker** check. A hand-seeded local database also holds whatever the admin
+console authored (`source='admin'`), any of which satisfies the foreign key for
+an id that no fresh deploy would ever have. The database version could go green
+on a syllabus that breaks production.
+
+The empty-catalog guard survives as `t.Fatal` rather than `t.Skip`: the
+reasoning behind it was sound, and the embedded file cannot be empty for any
+environmental reason, so an empty one means somebody emptied `techniques.json`
+— a failure, not a condition.
+
+Verified the way the report asked. Scratch database created, migrated to 49,
+deliberately **not** seeded (`SELECT count(*) FROM techniques` = 0), full
+backend suite: **598 passed, 0 failed, 0 skipped, exit 0**, with the test
+reporting `pass`. Then the mutation, on that same pristine database — one item
+pointed at `this-technique-does-not-exist`:
+
+- old test: `--- SKIP` → `ok`. A syllabus pointing at nothing reports success.
+- new test: `--- FAIL`, naming the curriculum and the id.
+
+It also fails with `TEST_DATABASE_URL` unset entirely, which is the deeper
+point: the check no longer has an environment in which it declines to run.
+
+**A package-ordering accident is why this was invisible.** `technique`'s own
+test seeds the full 542-row catalog (`technique/postgres_test.go`), and
+`go test ./...` walks packages alphabetically — `curriculum` before
+`technique`. So the shared database ends a suite run *full*, which is why a
+second consecutive run on the same database would have shown this test passing,
+and why anyone checking by hand after a run saw a seeded library and no
+problem. Had the two package names sorted the other way, this test would have
+passed in CI for the wrong reason and the bug would have been even harder to
+see.
+
+### Gaps
+
+- **Nothing prevents the fourth recurrence.** A CI gate asserting zero skips
+  would, and this repo already likes that shape of ratchet (`--max-warnings` on
+  mobile lint). It was left out deliberately rather than overlooked: many tests
+  legitimately skip when `TEST_DATABASE_URL` is unset locally, so the invariant
+  is "zero skips *in CI*", and choosing where to enforce that is a decision
+  about every future test, not part of this fix.
+- **`activity/postgres_test.go` has the last conditional skip** — it skips when
+  the discipline registry holds no default-on/default-off pair to invert. Not
+  the same bug (it reads an in-process registry, not ambient database state) and
+  it does not fire today, but it is the same shape, and it would go quiet rather
+  than red if every discipline ever defaulted on.
+- **The seeder's technique-before-curriculum ordering is still asserted only by
+  a comment.** A fresh deploy would fail loudly via the foreign key and
+  `log.Fatalf`, so this is legible rather than silent — but no test covers it.
+- **"In the library" here means present, not published.** Review raised this and
+  it was deliberately left: both public technique reads filter
+  `status = 'published'` (`technique/postgres.go`), while the curriculum item
+  join does not — so a syllabus item pointing at a `draft` technique would seed
+  fine, satisfy the foreign key, pass this test, render in the syllabus, and
+  then 404 on the tap-through. Unreachable today (all 542 entries normalize to
+  published) and the database version of this test had the identical hole, so
+  it is not a regression — but the console and `cmd/exportcontent` make drafts
+  in `techniques.json` a plausible future state, at which point this becomes
+  reachable. Asserting published status on referenced ids is the fix; it is a
+  different property from referential existence, which is why it is recorded
+  here rather than bolted onto this test.
+
+
+## 2026-08-16 — Docs that outlived the thing they described
+
+Small follow-up to #216, worth its own entry because the failure is a documented
+hard rule working exactly as designed and still not being enough.
+
+Three documents disagreed with the code the moment #216 merged, and **all three
+were things this same series had written**:
+
+- **CLAUDE.md** still said `TestEverySeededTechniqueExistsInTheLibrary`
+  "**skips on every CI run**… It has its own PR", and quoted "569 pass / 1 skip".
+  That is the local-dev brief every session reads first. A future agent would
+  have gone looking for a skip that no longer exists, or redone the fix.
+- **`docs/TASKS.md`** ticked H1 without the PR number the convention requires.
+- **`docs/decisions/history.md`** carried #216's entry at its *written* date
+  (2026-08-09) rather than its landing position.
+
+The history one is the interesting mistake. Placing it chronologically looked
+more correct — the file is dated and ordered — but **five later entries, all
+2026-08-16 and all sitting after it, describe that test in the present tense as
+unfixed**: "still skips one test on every CI run", "still H1's to fix", "H1 is
+already in flight". A reader of the file's tail, which is where anyone looks for
+current state, would conclude the test still skips. A chronological reader would
+conclude the fix had been reverted.
+
+So the append-at-the-end convention is not only about the trailing heading it
+was written to protect. **Entry order is landing order, and the back-references
+between entries depend on it.** Moving the entry to the end and stamping it
+"written 2026-08-09; landed 2026-08-16 as #216" makes the five earlier mentions
+read correctly as what they are: earlier in truth, not contradictions.
+
+The other two are ordinary staleness, and both were caught by review rather than
+by any check — CLAUDE.md by both the reviewer and the pre-merge checker
+independently, which is a fair signal about how visible it was.
+
+### Gaps
+
+- **Nothing detects doc drift.** Every claim in CLAUDE.md about test counts,
+  skip counts and open problems is hand-maintained and unverified. "569 pass /
+  1 skip" was measured, correct, and false a day later. The suite has no way to
+  notice, and the only reason these three were caught is that a review happened
+  to run afterwards.
+- Historical entries were deliberately **not** rewritten. Those five present-tense
+  mentions still say the test skips, because that was true when written — the
+  same convention that keeps a finished TASKS line in place rather than deleting
+  it. Only current-state documents were corrected.
 
 ## Open items / known gaps as of this entry
 
