@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Modal,
   Pressable,
   StyleSheet,
+  useWindowDimensions,
   View as RNView,
   type StyleProp,
   type TextStyle,
@@ -9,8 +11,9 @@ import {
 } from 'react-native';
 
 import { SessionCard } from '@/components/SessionCard';
-import { Text } from '@/components/Themed';
+import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { useAccent } from '@/lib/AccentProvider';
 import { statsFor, type SessionSummary } from '@/lib/celebration';
 import { cardFromSummary, type CardData } from '@/lib/sessionCard';
 import { getSessionCard, type SessionCardNumbers } from '@/lib/sessionCardApi';
@@ -54,6 +57,18 @@ export type SessionShare = {
    * stop being the same outcome.
    */
   error: string | null;
+  /**
+   * Whether the preview is open.
+   *
+   * `ShareSessionButton` opens it; `ShareCardHost` renders it. The capture
+   * itself still reads the off-screen card, not this one — see the host.
+   */
+  previewing: boolean;
+  /** Open the preview. What the Share button does now. */
+  preview: () => void;
+  /** Close it without sharing. */
+  cancel: () => void;
+  /** Capture and hand off to the share sheet. */
   share: () => Promise<void>;
 };
 
@@ -139,6 +154,26 @@ export function useSessionShare(opts: {
         })
       : null;
 
+  /*
+    The preview, which is the whole of F2.
+
+    The only look an athlete got at this card before posting it was the share
+    sheet's thumbnail — about 40pt square. The card carries a CALORIE FIGURE
+    INFERRED FROM BODY DATA and a VOLA score, so it was going out sight-unseen:
+    numbers about someone's body, published to whichever app they picked, with
+    no opportunity to read them first.
+
+    Opening a preview rather than adding a confirm dialog is the point. A dialog
+    asks "are you sure" about something you still cannot see; this shows the
+    thing.
+  */
+  const [previewing, setPreviewing] = useState(false);
+  const preview = useCallback(() => {
+    setError(null);
+    setPreviewing(true);
+  }, []);
+  const cancel = useCallback(() => setPreviewing(false), []);
+
   const share = useCallback(async () => {
     if (sharing) return;
     setSharing(true);
@@ -149,9 +184,13 @@ export function useSessionShare(opts: {
     // a message.
     if (!result.ok && result.reason !== 'failed') setError(result.message);
     setSharing(false);
+    // Closed only on success. A failure leaves the preview up with its message
+    // on it — dropping back to the session screen would hide both the error and
+    // the card it is about.
+    if (result.ok) setPreviewing(false);
   }, [sharing]);
 
-  return { card, cardRef, sharing, error, share };
+  return { card, cardRef, sharing, error, previewing, preview, cancel, share };
 }
 
 /**
@@ -176,7 +215,11 @@ export function ShareSessionButton({
   if (!share.card) return null;
   return (
     <Pressable
-      onPress={share.share}
+      // Opens the preview; the capture happens from inside it. One line, and
+      // it is what makes every caller of this component inherit F2 — the
+      // celebration modal, the finished strength session and the BJJ class all
+      // go through here.
+      onPress={share.preview}
       disabled={share.sharing}
       style={[styles.button, style]}
       accessibilityRole="button"
@@ -213,19 +256,127 @@ export function ShareCardHost({ share }: { share: SessionShare }) {
   // `share` object as a ref, after which `share.card` beside it reads as
   // accessing a ref value during render — two warnings for code that does
   // neither. Pulling both out first is what makes them plain locals again.
-  const { card, cardRef } = share;
+  const { card, cardRef, previewing, sharing, error, cancel } = share;
+  const accent = useAccent();
+  const { width } = useWindowDimensions();
   if (!card) return null;
+
+  // The preview is sized to the SCREEN, not to the capture. The exported PNG is
+  // always 1080px square (see `shareCard`); this is only about whether a person
+  // can read it, so it takes the window minus the scrim's padding and caps out
+  // where a card stops gaining anything from being bigger.
+  //
+  // WIDTH ONLY, which is safe because `app.json` locks the app to portrait: the
+  // card is square, so on the narrowest supported phone it is ~335pt tall and
+  // the note plus buttons still fit. Lift that lock — tablets and iPad
+  // multitasking are the likely pressure — and this needs a height term
+  // (`Math.min(width - 40, height - 200, 420)`) or a scroll view, or the
+  // buttons go off the bottom in landscape.
+  const previewWidth = Math.min(width - PREVIEW_INSET * 2, 420);
+
   return (
-    <RNView
-      style={styles.offscreen}
-      pointerEvents="none"
-      accessibilityElementsHidden
-      importantForAccessibility="no-hide-descendants"
-    >
-      <SessionCard ref={cardRef} data={card} width={360} />
-    </RNView>
+    <>
+      {/*
+        The card the export captures, mounted OFF TO THE SIDE rather than
+        hidden.
+
+        `captureRef` reads the native view tree, so the card has to be genuinely
+        laid out — `display: none` captures nothing and `opacity: 0` captures
+        blank on some iOS versions, both of which fail silently and hand the
+        athlete an empty image. Positioning it outside the visible bounds keeps
+        it real while keeping it out of the way, and `pointerEvents="none"` stops
+        it eating taps.
+
+        HIDDEN FROM SCREEN READERS TOO, and that is not the same thing as hidden
+        from the eye. VoiceOver traverses off-screen elements, so without the two
+        props below a VoiceOver user swiping past the button walks straight into
+        an invisible duplicate card and hears the wordmark, the date, every stat
+        and — once the fetch lands — the calorie figure and the score.
+
+        Mount this at the SCREEN ROOT, never inside a `ScrollView`. See the file
+        comment: a clipped host is a blank capture, and it fails without a word.
+
+        **It stays the capture source even while the preview is open**, and the
+        card is therefore mounted twice for that moment. Capturing the visible
+        one instead would be tidier and is not worth the risk: a card laid out
+        inside a `Modal` is exactly the "is it really laid out" question that
+        produces blank PNGs, while this path produced a verified 1080x1080
+        export off a real device.
+
+        One honest qualification on that measurement: it was taken BEFORE this
+        preview existed, so no modal window sat above the off-screen card at
+        capture time. `captureRef` renders the target view's own hierarchy
+        rather than the screen, so occlusion should not matter — but "should"
+        is doing work there, and the first device run of this flow is what
+        actually settles it.
+      */}
+      <RNView
+        style={styles.offscreen}
+        pointerEvents="none"
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+      >
+        <SessionCard ref={cardRef} data={card} width={360} />
+      </RNView>
+
+      <Modal
+        transparent
+        animationType="fade"
+        visible={previewing}
+        onRequestClose={cancel}
+      >
+        <View style={styles.scrim} testID="share-preview">
+          <SessionCard data={card} width={previewWidth} />
+
+          {/* Says what the picture cannot: where it is about to go. The card
+              shows the numbers; this shows that the next tap leaves the app. */}
+          <Text style={styles.previewNote}>
+            This is what gets posted. Nothing leaves VOLA until you pick where.
+          </Text>
+
+          {!!error && (
+            <Text style={styles.previewError} accessibilityLiveRegion="polite">
+              {error}
+            </Text>
+          )}
+
+          <RNView style={styles.previewActions}>
+            <Pressable
+              onPress={cancel}
+              // Disabled mid-capture. Otherwise: tap Share, tap Not now before
+              // the sheet appears, and the sheet arrives anyway over the screen
+              // you just returned to — the capture was already in flight and
+              // cancelling the preview never cancelled it.
+              disabled={sharing}
+              style={[styles.previewCancel, sharing && styles.previewCancelBusy]}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: sharing }}
+              testID="share-preview-cancel"
+            >
+              <Text style={styles.previewCancelText}>Not now</Text>
+            </Pressable>
+            <Pressable
+              onPress={share.share}
+              disabled={sharing}
+              style={[styles.previewShare, { backgroundColor: accent.accent }]}
+              accessibilityRole="button"
+              accessibilityLabel="Share this card"
+              accessibilityState={{ busy: sharing, disabled: sharing }}
+              testID="share-preview-confirm"
+            >
+              <Text style={[styles.previewShareText, { color: accent.on }]}>
+                {sharing ? 'Preparing…' : 'Share'}
+              </Text>
+            </Pressable>
+          </RNView>
+        </View>
+      </Modal>
+    </>
   );
 }
+
+/** The scrim's horizontal padding, doubled out of the card's available width. */
+const PREVIEW_INSET = 20;
 
 const styles = StyleSheet.create({
   button: {
@@ -241,4 +392,48 @@ const styles = StyleSheet.create({
   // Far enough left that no phone shows it, still laid out so it can be
   // captured. See the comment on the host.
   offscreen: { position: 'absolute', left: -10000, top: 0 },
+  scrim: {
+    flex: 1,
+    backgroundColor: 'rgba(8,11,18,0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: PREVIEW_INSET,
+    gap: 14,
+  },
+  previewNote: {
+    fontSize: 13,
+    color: vola.textMuted,
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  previewError: { fontSize: 13, color: vola.danger, textAlign: 'center' },
+  // Same shape as the celebration's action row, and for the same reason: the
+  // two buttons have to line up, so the row owns the spacing and `stretch`
+  // owns the height rather than each button guessing.
+  previewActions: {
+    flexDirection: 'row',
+    alignSelf: 'stretch',
+    alignItems: 'stretch',
+    gap: 10,
+    marginTop: 4,
+  },
+  previewCancel: {
+    flex: 1,
+    minHeight: 50,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: vola.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  previewCancelText: { fontSize: 16, fontWeight: '700', color: vola.text },
+  previewCancelBusy: { opacity: 0.4 },
+  previewShare: {
+    flex: 1,
+    minHeight: 50,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  previewShareText: { fontSize: 16, fontWeight: '800' },
 });

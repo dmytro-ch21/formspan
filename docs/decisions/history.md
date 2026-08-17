@@ -21743,6 +21743,95 @@ who never enabled sharing.
   within three days. That is correct, but it means the affordance disappears far
   sooner than before, which nobody has watched happen.
 
+## 2026-08-17 — You can see the card before you post it
+
+Closes **F2**. The only look an athlete got at a shared card was the share
+sheet's own thumbnail, roughly 40pt square. That card carries a **calorie figure
+inferred from body data** and a VOLA score — so those numbers went out
+sight-unseen, to whichever app was picked, with no opportunity to read them
+first. Tapping Share now opens the card at readable size with **Share** and
+**Not now**.
+
+A preview rather than a confirmation dialog, and that is the whole distinction:
+a dialog asks "are you sure" about something you still cannot see.
+
+### One place, three surfaces
+
+It lives in `ShareCardHost`, so the completion modal, the finished strength
+session and the BJJ class all inherited it without being touched. That is the
+payoff from #229's split — the button, the hook and the host are separate
+exports precisely because the host has to sit at the screen root, and putting
+the preview there means one change reached every caller.
+
+### The off-screen card stays the capture source
+
+The visible preview is *not* what gets captured. The card is briefly mounted
+twice, which is the cost, and it is deliberate: the off-screen path is
+**measured** — 1080×1080, read off a real device earlier this session — whereas
+capturing a card laid out inside a `Modal` reopens exactly the "is it genuinely
+laid out" question that produces blank PNGs and fails without a word. Tidier was
+available; proven was better.
+
+### What the tests pin is the ORDER
+
+Not that a preview exists — that tapping Share **captures nothing**. A test
+asserting only "the preview appears" passes against a build that shows the card
+*and* posts anyway, which is the failure worth preventing. Mutation-checked
+three ways:
+
+| Change | Result |
+|---|---|
+| button posts immediately (the pre-F2 behaviour) | red |
+| preview shown, but it posts anyway | red |
+| preview closes on failure, hiding the error | red |
+| **captures the visible card instead of the off-screen one** | red |
+| a dismissed sheet closes the preview | red |
+| a stale error survives a reopen | red |
+
+The last three came from review, and the fourth is the one that mattered: the
+original five tests never asserted **which** ref was captured, so a build doing
+the exact thing this design note forbids passed all of them. The load-bearing
+decision was a comment.
+
+Pinning it produced a second lesson. `expect(mockShareCard).toHaveBeenCalledWith(cardRef)`
+is the natural way to write that assertion, and when it fails it **aborts the
+test runner** — a ref holding a mounted host component is full of circular fiber
+references, and jest's deep-equality printer walks them until the process dies
+with `SIGABRT` and a hex stack. Measured, by running the mutation. Reducing to
+`=== ` first and asserting a boolean means a break reports "expected true,
+received false" and the test name carries the rest. A test whose failure output
+kills the runner is worse than no test: the next person sees a crash, not a
+cause.
+
+A failed capture deliberately leaves the preview **up**, with the message on it.
+Dropping back to the session screen would hide both the error and the card it is
+about. A merely dismissed share sheet stays silent — the libraries disagree
+about whether a dismissal rejects, and accusing someone of a fault for changing
+their mind is worse than saying nothing.
+
+### Open questions this leaves
+
+- **Not seen on a device**, and two things wait on that. The preview's size is
+  `min(window - 40, 420)` — width only, which is safe *because* `app.json` locks
+  portrait; lift that lock and the buttons go off the bottom in landscape, so
+  the code says so. And the celebration path now puts a **modal over a modal**:
+  nesting is the supported iOS shape and `expo-sharing` walks the presented-VC
+  chain, so the sheet arrives above both — but animation stacking and VoiceOver
+  focus hand-off are things only a device settles. Belongs with **L1**.
+- **The "measured" capture predates the preview.** The verified 1080×1080 export
+  was taken when no modal window sat above the off-screen card. `captureRef`
+  renders the target view's own hierarchy rather than the screen, so occlusion
+  should not matter — but the first device run of this flow is what actually
+  confirms it, and the comment now says that rather than borrowing the older
+  measurement wholesale.
+- **The calorie figure may be absent when the preview opens.** It arrives from
+  `/sessions/{id}/card` and the card is complete without it, so a slow network
+  means previewing a card that then gains a number before the capture. The
+  export would still match what the sheet posts, but not necessarily what was
+  read a second earlier.
+- **No zoom.** The card is shown at up to 420pt wide; the exported PNG is 1080px.
+  Fine for reading the stats, not for inspecting the type.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
