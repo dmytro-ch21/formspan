@@ -210,15 +210,20 @@ func TestABareMovementHoldsMoreThanItsOneArmedTwin(t *testing.T) {
 				continue
 			}
 			pairs++
-			if NormalizeImplements(twin.Implements) != 1 {
+			// RAW, not normalised. `NormalizeImplements` turns a 0 into a 1,
+			// and `SeedData` does not validate the column — so normalising here
+			// would make a twin written as `implements: 0` pass this test
+			// silently, leaving one invariant test as the only thing standing
+			// between the file and a meaningless value.
+			if twin.Implements != 1 {
 				t.Errorf("%s names one arm but holds %d implements",
-					twin.ID, NormalizeImplements(twin.Implements))
+					twin.ID, twin.Implements)
 			}
-			if NormalizeImplements(e.Implements) != 2 {
+			if e.Implements != 2 {
 				t.Errorf("%s holds %d implements, the same as its explicit twin %s — "+
 					"the twin's name says nothing unless the bare movement is two-armed, "+
 					"so one of the pair is wrong",
-					e.ID, NormalizeImplements(e.Implements), twin.ID)
+					e.ID, e.Implements, twin.ID)
 			}
 		}
 	}

@@ -450,8 +450,11 @@ func (r *PostgresRepository) attachSets(ctx context.Context, sessions []Session,
 	// read a missing exercise as factor 1, so the fallback is consistent.
 	//
 	// The factor is decided here, in SQL, rather than sent by the client:
-	// `per_side` says the number is one implement, and `is_unilateral` says
-	// whether one or two are moving. A missing exercise falls back to 1, which
+	// `implements` says how many of the logged weight moved — that IS the
+	// factor. It used to be derived here from `load_mode` and `is_unilateral`
+	// together; migration 000057 retired that rule because it could not express
+	// two implements and one limb. The sibling comment on `SQLTonnage` was
+	// updated then and this one was missed. A missing exercise falls back to 1, which
 	// `TotalWeightKg` also treats as 1 — the same reading from both ends.
 	rows, err := r.pool.Query(ctx, `
 		SELECT ss.session_id, ss.exercise_id, ss.position, ss.set_type, ss.reps, ss.weight_kg,

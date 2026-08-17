@@ -22860,6 +22860,27 @@ time in two days that a guard here passed for the wrong reason after the thing
 underneath it moved; the first was the parity fixture that agreed trivially at
 factor 1.
 
+### What review added
+
+Two mutations I had not run, both now armed: the twin test's `pairs == 0` guard
+fires if the convention ever disappears from the catalog, and a twin written as
+`implements: 0` was passing every guard silently — `SeedData` does not validate
+the column, so the twin test reads the RAW value now rather than the normalised
+one, and no longer leans on a single invariant test to catch a meaningless
+number.
+
+It also found the last survivor of the retired rule: a comment in
+`session/postgres.go` still describing the factor as derived from `load_mode`
+and `is_unilateral`, sitting directly above SQL that reads `implements`. Its
+sibling was updated by #257 and this one was missed — the exact class this entry
+is about, one file over.
+
+And it named something this change CREATED: correcting the dumbbell single-leg
+RDL to two while leaving the kettlebell one at one is a dumbbell/kettlebell
+disagreement of precisely the shape `F3` was opened for. That is now the leading
+argument on the `W7` line rather than a footnote, because whoever picks it up
+should see it.
+
 ### Gaps
 
 - **Four rows are judgment calls, deliberately left** (`W7`). A bottoms-up
