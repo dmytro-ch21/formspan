@@ -21515,6 +21515,86 @@ here, since `grip` would have inherited exactly the same shape.
   That is the point of putting it on the set rather than in the catalog, but the
   payoff is not built.
 
+## 2026-08-17 — The mobile flake was never about load, and both measurements were right
+
+H4 asked for one thing: reconcile two first-hand measurements of the same
+flakiness that disagreed by about thirty times. #235 ran 92 times under 8-way
+CPU saturation alongside the web and admin builds and saw **zero** failures,
+concluding "≤3%, low, not a coin flip". #233 measured **1 in 3**, on `main` and
+on a branch touching no `apps/` files, and concluded CI might be masking it.
+The task line said to treat the rate as unknown rather than adopt either.
+
+Both were right. They measured different variables, and neither recorded the one
+that mattered.
+
+### The matrix
+
+74 full mobile-suite runs (84 suites, 1208 tests each), load average recorded
+with every data point — which is precisely what both earlier measurements
+omitted:
+
+| condition | jest instances × workers | runs | failures | mean wall | mean load |
+|---|---|---|---|---|---|
+| A — one instance | 1 × 9 | 20 | 0 | 6.5s | 30.9 |
+| B — concurrent | 3 × 9 = **27** | 24 | **2 (8%)** | **33.7s** | 69.2 |
+| C — one instance, CPU saturated | 1 × 9 + 8 busy loops | 12 | 0 | 7.8s | **89.0** |
+| D — concurrent, capped | 3 × 3 = 9 | 18 | 0 | 15.9s | 57.8 |
+
+**Condition C settles it.** It ran at the highest load of all four — 89 on a
+ten-core machine — and never failed once. Condition B failed at load 69. More
+load, fewer failures; less load, more failures. CPU pressure is not the variable,
+which is why #235 could saturate the box 92 times and see nothing.
+
+The variable is **worker oversubscription**. `jest.config.js` sets no
+`maxWorkers`, so every instance claims `cores - 1` = 9. One instance is
+self-limiting no matter how busy the machine is. Three instances claim 27
+workers for 10 cores, suite wall time goes from 6.5s to 33.7s, and the
+`waitFor` at `sharedScreen.test.tsx:135` exhausts its 10s `asyncUtilTimeout`
+with the share card still on screen. It is a starved render, not a crash:
+1207 of 1208 tests still pass, and the failure is always the same one — the test
+both entries named.
+
+So #233 was running concurrent suites and #235 was not. Both honest, both
+reproducible, thirty times apart, and the difference invisible in either report
+because neither recorded how many jest instances were running.
+
+### Capping is faster as well as safer
+
+Condition D caps each instance at 3 workers so the three together match the core
+count: **0 failures in 18 runs, and 15.9s instead of 33.7s.** Oversubscription
+was not buying speed, it was costing it — the contention more than ate the
+parallelism.
+
+### Nothing was changed in the test setup, deliberately
+
+CI runs one instance, so it has never been exposed: condition A is CI's shape and
+it is clean. `pnpm run verify` is also one instance. The exposure is entirely
+local, and specifically **this repo's working pattern** — several agent sessions
+running suites on one machine at once, which is what H6 is about from the other
+direction.
+
+Setting `maxWorkers` globally would slow the case that matters most (CI, one
+instance, 9 workers) to fix a case that only exists when humans or agents create
+it. So the mitigation is guidance rather than configuration: if you know other
+sessions are running, pass `--maxWorkers=3`.
+
+### Gaps
+
+- **The 10s `asyncUtilTimeout` is still a wall-clock budget in a test that does
+  not control the clock.** Capping workers moves the failure out of reach rather
+  than removing it; enough contention from any source would reach it again. The
+  robust fix is for that test to not depend on real elapsed time, which is a
+  different piece of work from the reconciliation this task asked for.
+- **The 8% figure is this machine, this week.** It is not a property of the test
+  — it is a property of the contention, and it will move with core count and
+  with how many sessions are live. The reproducible claim is the *ordering* of
+  the four conditions, not the percentage.
+- **Two of the three tests named in H4 never failed here**: "keeps the LOCAL
+  copy on screen when the local row is dirty" and "a preference changed while
+  Today sat mounted" were clean across all 74 runs. #233 saw a different one
+  each time, which fits a starvation effect landing on whichever `waitFor` is
+  unluckiest, but it means those two are unconfirmed rather than exonerated.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
