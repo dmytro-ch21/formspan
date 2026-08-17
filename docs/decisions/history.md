@@ -20948,6 +20948,49 @@ in one direction and merely unusual in another, and a validator shared across
 both will pick one and be wrong for the other.* The tests that caught it were
 not testing `load_mode` at all.
 
+### What review caught: the fix reopened the bug twice, where the tests did not reach
+
+Both reviewers independently found the same two, and both are this change's own
+doing rather than pre-existing.
+
+**1. `Restore` silently halved the exercise.** Removing the free preservation
+above did not only affect PATCH. `Restore` also goes through `updateWithin`,
+carrying a revision's payload — and a revision recorded before the column
+existed has no `load_mode` key, so it unmarshals to `""`, which
+`NormalizeLoadMode` turns into `total`. Clicking Restore on an old revision of a
+dumbbell exercise therefore halved it: CHECK satisfied, 200 returned, and the
+console's revision list *displays* that revision as `total`, so the damage looks
+deliberate to anyone who checks.
+
+Worth being precise about how it was missed. The verification was "Restore reads
+through `updateWithin`'s RETURNING" — which was true, and was checking the **old**
+property. While the SET never touched the column, RETURNING re-read the live
+value; once the SET writes it, RETURNING reads back what Restore wrote. The
+sentence stayed true word for word while what it guaranteed inverted. Two
+comments asserting restore was safe had to be rewritten alongside the fix, and
+one of them was arguing that a restore test was unnecessary.
+
+`Restore` now fills an absent `load_mode` from the stored row — **absent only**,
+because a revision that names a value must still be restorable, and "always
+preserve" is the equally short fix that quietly turns restore into "never change
+this column". Both halves are pinned.
+
+**2. An explicit `"load_mode": ""` was coerced, not refused.** The strict check
+ran on the *merged* exercise, after `applyTo`'s tail had already rewritten `""`
+to `total` so a create need not mention the field. So the one wrong value that
+dodged the 400 was the empty string — and it dodged it on a PATCH, flipping a
+per_side row and answering 200. A client with an empty placeholder option or a
+`?? ''` produces `""` without trying.
+
+The check now judges the **request field**, before any merge. The general
+lesson: *validation placed after a normalisation step cannot see the values that
+normalisation absorbs*, and those are exactly the ones sent by accident.
+
+The contract already said this correctly and the code did not — the PATCH
+endpoint promises "a field sent as empty is cleared", which `load_mode` must
+refuse because it has no empty state to clear to. Both texts now name the
+exception.
+
 ### The console's two flags, which are the thing most likely to be confused
 
 The form now carries a note, because `load_mode` and `is_unilateral` answer
@@ -20966,6 +21009,12 @@ anything on a per-side exercise would revert it. That is checked, not assumed.
 
 ### Gaps
 
+- **The select forces a choice on create** rather than defaulting to `total`.
+  A deliberate reversal of the first draft: a real default makes the control
+  unable to represent "no data", so any future path that failed to supply
+  `load_mode` would render `total` and the next save would write it. `total` is
+  right for ~72% of the catalog, so this costs a click on most creates; it buys
+  that a missing value becomes a blocked save rather than a silent halving.
 - **Not exercised through the console UI.** The select, the note and the
   round-trip are typechecked and covered at the handler and repository layers;
   nobody has loaded `/content/exercises/{id}` in a browser, because the admin

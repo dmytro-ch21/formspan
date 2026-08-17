@@ -290,18 +290,22 @@ func (h *ContentHandler) write(
 	w http.ResponseWriter, r *http.Request, e Exercise,
 	store func(context.Context, Exercise, string) (Exercise, error),
 ) {
-	// NOT in `ValidateForWrite`, and the reason is the whole design of this
-	// field. That function is shared with `cmd/exportcontent`, whose validate
-	// step asks "would this seed?" — and an empty or unrecognised load_mode
-	// WOULD seed, as `total`, because `NormalizeLoadMode` fails it closed so
-	// one bad row cannot break a deploy. Making the shared validator strict
-	// therefore fails an export over something that would have worked.
+	// A BACKSTOP. The real check is on the request field in `decodeExercise`,
+	// which sees what the client sent rather than what the merge produced;
+	// this one catches an Exercise assembled some other way.
 	//
-	// An API write is the opposite case: there is exactly one author, they are
-	// waiting for a response, and coercing `per_sied` to `total` for them is
-	// the dumbbell-halving bug arriving through a spelling mistake — invisible
-	// until somebody notices their tonnage is out by half. So the strictness
-	// lives here, where the asymmetry is deliberate rather than accidental.
+	// Neither is in `ValidateForWrite`, and that is the design of this field
+	// rather than an omission. That function is shared with
+	// `cmd/exportcontent`, whose validate step asks "would this seed?" — and an
+	// unrecognised load_mode WOULD seed, as `total`, because
+	// `NormalizeLoadMode` fails it closed so one bad row cannot break a deploy.
+	// A strict shared validator therefore fails an export over something that
+	// would have worked; two of that command's tests proved it.
+	//
+	// An API write is the opposite case: exactly one author, waiting for a
+	// response, and coercing `per_sied` to `total` for them is the
+	// dumbbell-halving bug arriving through a spelling mistake — invisible
+	// until somebody notices their tonnage is out by half.
 	if e.LoadMode != LoadModeTotal && e.LoadMode != LoadModePerSide {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
 			fmt.Sprintf("unknown load_mode %q — one of: %s, %s",
@@ -355,6 +359,26 @@ func decodeExercise(w http.ResponseWriter, r *http.Request) (exerciseRequest, bo
 	var body exerciseRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxContentBody)).Decode(&body); err != nil {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "malformed request body")
+		return exerciseRequest{}, false
+	}
+	// Judged on what the CLIENT sent, before any merge — which is the whole
+	// point, and the reason this is not down in `write()` with the other
+	// validation.
+	//
+	// A merged value has already been through `applyTo`, whose tail rewrites ""
+	// to `total` so a create need not mention the field. Validating after that
+	// therefore cannot see the one wrong value most likely to be sent by
+	// accident: an explicit `"load_mode": ""`, which a client with an empty
+	// placeholder option or a `?? ''` produces without trying. It would flip a
+	// per_side row to total on a PATCH and answer 200 — the halving bug, past a
+	// check written to stop exactly that.
+	//
+	// Absent stays absent: nil means "leave it alone", and only a value the
+	// client actually chose is judged.
+	if body.LoadMode != nil && *body.LoadMode != LoadModeTotal && *body.LoadMode != LoadModePerSide {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			fmt.Sprintf("unknown load_mode %q — one of: %s, %s",
+				*body.LoadMode, LoadModeTotal, LoadModePerSide))
 		return exerciseRequest{}, false
 	}
 	return body, true

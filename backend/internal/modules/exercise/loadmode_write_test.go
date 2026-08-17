@@ -129,3 +129,68 @@ func TestACreateWithoutLoadModeIsStillAccepted(t *testing.T) {
 		t.Fatalf("stored load_mode %q, want %q", repo.lastWritten.LoadMode, LoadModeTotal)
 	}
 }
+
+// An explicit empty string is the one wrong value that used to get through, and
+// it is the likeliest one to be sent by accident.
+//
+// The check first lived in `write()`, on the MERGED exercise — by which point
+// `applyTo`'s tail had already rewritten "" to `total` so a create need not
+// mention the field. So `{"load_mode": ""}` on a per_side row flipped it and
+// answered 200: the halving bug, straight past a check written to stop exactly
+// that. A client with an empty placeholder option or a `?? ”` produces it
+// without trying.
+//
+// It is judged on the request field now, before any merge.
+func TestAnExplicitlyEmptyLoadModeIsRejected(t *testing.T) {
+	t.Run("create", func(t *testing.T) {
+		body := `{"name":"X","sport":"strength","movement_pattern":"squat",` +
+			`"load_type":"reps","load_mode":""}`
+		if rec := post(t, NewContentHandler(newFakeRepo()), body); rec.Code != http.StatusBadRequest {
+			t.Fatalf("status %d, want 400: %s", rec.Code, rec.Body)
+		}
+	})
+
+	t.Run("patch of a per_side row", func(t *testing.T) {
+		// The case that actually loses data: the stored row is per_side, and
+		// nothing about this request says otherwise on purpose.
+		repo := newFakeRepo()
+		repo.stored["dumbbell-bench-press"] = Exercise{
+			ID: "dumbbell-bench-press", Name: "Dumbbell Bench Press", Sport: "strength",
+			MovementPattern: "horizontal_push", LoadType: LoadTypeWeightReps, LoadMode: LoadModePerSide,
+		}
+		repo.sources["dumbbell-bench-press"] = "seed"
+
+		rec := patch(t, NewContentHandler(repo), "dumbbell-bench-press", `{"load_mode":""}`)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status %d, want 400: %s", rec.Code, rec.Body)
+		}
+		// Names load_mode, so a 400 raised by some other check cannot satisfy
+		// this — the point is which guard fired, not that something did.
+		if !strings.Contains(rec.Body.String(), "load_mode") {
+			t.Errorf("the refusal does not mention load_mode: %s", rec.Body)
+		}
+		if got := repo.stored["dumbbell-bench-press"].LoadMode; got != LoadModePerSide {
+			t.Fatalf("the row is now %q — a rejected write must not have written", got)
+		}
+	})
+}
+
+// A PATCH is the composition the "" bug lived in, and every other handler test
+// here drives create. This one drives the update path end to end.
+func TestPatchCanSetLoadModeOnAStoredRow(t *testing.T) {
+	repo := newFakeRepo()
+	repo.stored["dumbbell-bench-press"] = Exercise{
+		ID: "dumbbell-bench-press", Name: "Dumbbell Bench Press", Sport: "strength",
+		MovementPattern: "horizontal_push", LoadType: LoadTypeWeightReps, LoadMode: LoadModeTotal,
+	}
+	repo.sources["dumbbell-bench-press"] = "seed"
+
+	if rec := patch(t, NewContentHandler(repo), "dumbbell-bench-press",
+		`{"load_mode":"per_side"}`); rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	if got := repo.lastWritten.LoadMode; got != LoadModePerSide {
+		t.Fatalf("the handler stored %q, want %q — correcting a misclassified row "+
+			"is half of what T2 was", got, LoadModePerSide)
+	}
+}
