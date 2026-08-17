@@ -32,7 +32,7 @@ These contradict each other or overstate what the athlete did. Visible without l
 Each compiles, passes its tests, and is wrong. Read before starting the related work.
 
 - [x] **T1** — Add `assisted_reps` to `RecentEfforts`, `BestOneRMs`, `bestOneRMSets` and `Records` SELECTs **before** wiring progression to `soloReps`. They don't select it, unrecorded reads as all-solo, so a progression-only change silently reads full reps. — done #231 (#226)
-- [x] **T2** — `createWithin` never writes `load_mode`, so every console-authored dumbbell exercise starts `total` — the halving bug, for new content. No endpoint can correct a row today. — done #PR: INSERT and UPDATE both write it, the console has a Load mode select, and an unknown value is a 400 rather than a coercion to `total`. (#224)
+- [x] **T2** — `createWithin` never writes `load_mode`, so every console-authored dumbbell exercise starts `total` — the halving bug, for new content. No endpoint can correct a row today. — done #244: INSERT and UPDATE both write it, the console has a Load mode select, and an unknown value is a 400 rather than a coercion to `total`. (#224)
 - [ ] **T3** — Any new `session_sets` column needs mobile pass-through **before** an authoring surface. The server replaces sets wholesale, so a phone shape that doesn't know a column wipes it on first edit. Applies to grip (**N1**). (#226)
 
 ## F — Worth fixing
