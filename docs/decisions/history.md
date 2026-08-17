@@ -21956,6 +21956,120 @@ of opening the PR.
   Found by hitting it on this very PR, which is a small argument for writing
   conventions by following them rather than by describing them.
 
+## 2026-08-17 — The exercises were never missing, and trigrams alone would not have found them
+
+An athlete reported three exercises as absent from the catalog: incline dumbbell
+bench, EZ-bar curls, dumbbell overhead press. **All three were there.** `N2`,
+and `N3` closed as stale.
+
+### What the search actually did
+
+One contiguous `ILIKE '%term%'`, so a query had to be a substring of the stored
+name. Two different ways to miss, and both return an empty list — which reads
+exactly like "this app does not have that exercise":
+
+| typed | in the catalog as | why it missed |
+|---|---|---|
+| ez bar curls | EZ-Bar Curl | hyphen, and a plural |
+| incline dumbbell bench | Incline Dumbbell **Press** | "bench" is nowhere in the name |
+| dumbbell **overhead** press | Seated Dumbbell **Shoulder** Press | different word, same movement |
+
+### The task line's own fix would have solved one of three
+
+`N2` credited `pg_trgm` — "fuzzy, word-order-independent matching" — as the
+answer. Measured against the real 762-row catalog, trigram similarity alone puts
+`Incline Bench Dumbbell **Row**` top for "incline dumbbell bench" and never
+surfaces the press at all; "dumbbell overhead press" returns
+`Overhead Press` and `Dumbbell Overhead Carry`, never the shoulder press.
+
+Because two of the three are not spellings. **"Bench" and "press" are different
+words for one movement**, as are "overhead" and "shoulder", and no amount of
+fuzzy string matching bridges a synonym. Trigrams fix word order; a synonym map
+fixes vocabulary; the report needed both.
+
+So there is a hand-maintained synonym list, which this repository is otherwise
+right to be wary of. It earns its place by being **closed lifting vocabulary
+rather than a per-exercise mapping** — it grows when a word is ambiguous in a
+gym, never when a row is added to the catalog. `N15` records that nothing checks
+it against the catalog yet.
+
+### Matching and ranking must speak the same vocabulary
+
+The subtle half, and it shipped wrong in the first draft. "incline dumbbell
+bench" MATCHES both `Incline Dumbbell Press` (via the synonym) and
+`Incline Bench Dumbbell Row` (which contains all three typed words literally).
+Ranked against the RAW query the row wins — it is the closer string — and the
+press is buried.
+
+Ranking therefore runs against the **expanded** query, the one carrying the
+synonyms that made a row match in the first place. The failure mode is quiet:
+results appear, they are simply the wrong ones first, which is harder to notice
+than an empty list.
+
+### The regression this shipped, and what caught it
+
+`searchTokens` strips non-alphanumerics, so a query of `%` produced zero tokens,
+an empty clause, and — read by the caller as "no constraint" — **all 762 rows**.
+That is precisely what the old `LikeTerm` escaping existed to prevent.
+
+Caught by `TestPostgresRepository_ListFilters`, a test that predates this work
+and asserts `%`, `_` and `\` match nothing. The fix is that `SearchClause` now
+returns `false` rather than `""` for an unmatchable query: **a clause that always
+means something is one no caller can misread.**
+
+### What review found
+
+**The index documentation was backwards, including the `COMMENT ON INDEX` baked
+into the database.** GIN has no ordered scans — only GiST supports KNN ordering
+via `<->` — so the trigram index cannot serve `ORDER BY similarity()`, which is
+the one job the migration said it was for. What it CAN serve is the `ILIKE`
+predicates in the WHERE, which is what the migration said it did not. Measured
+either way, it is unused at this size: 762 rows seq-scans in 0.5 ms, and 7,620
+rows still seq-scans, in 3.9 ms. Kept as headroom on a table written only by the
+seeder and the console, with comments that now say the true thing.
+
+**The `/admin/exercises` contract still promised the old behaviour** — "matched
+on name or id and ordered by name" — because the public entry was updated and
+this one was not. Two contracts for one search is the kind of drift the spec
+exists to prevent.
+
+**`N15` was filed and closed in the same change.** The plan was to record that
+nothing checks the synonym list; review pointed out the check is one test and no
+database. It immediately found three dead entries — `front -> front` (a
+self-synonym expanding to nothing), `pulldown -> pull-down` (the catalog spells
+it as one word), and `ez -> ezbar` (written that same hour, in the fix for a
+different dead entry). A hand-maintained list that looks like coverage and
+reaches nothing is worse than no list.
+
+Also: `"crunches"` tokenized to `"crunche"` and matched none of the catalog's
+eight `… Crunch` rows, so `-es` plurals are an additional ALTERNATIVE rather
+than a replacement — substitutive, the same rule would turn "hors" into "hor".
+And the admin search had no length cap while the public one caps at 100: harmless
+before, when the whole string was one bound parameter, and worth fixing now that
+each word binds its own and Postgres refuses a statement over 65,535 of them.
+
+### Gaps
+
+- **Misspellings still find nothing.** `"dumbell press"` returns zero rows,
+  because trigrams participate only in the ranking and `dumbell` is not a
+  substring of `Dumbbell`. Matching on `name % $1` would fix it and would
+  destroy the AND-across-words precision that makes the rest work; a
+  similarity fallback for the zero-result case is the coherent next step and
+  does not belong here.
+- **The console and the athlete list now share one search.** That is deliberate —
+  an operator answering "I cannot find X" has to be able to type what the athlete
+  typed — but the console's id matching was dropped in the process. The id is a
+  slug derived from the name and carries no word the name does not, so nothing is
+  lost; it is a behaviour change worth knowing about.
+- **No client changes.** Both search boxes send the same `?q=` they always did,
+  so this is entirely a server-side improvement. Nothing has been seen on a
+  device.
+- **The synonym list is unchecked** (`N15`) — a synonym pointing at a word no
+  exercise contains is silently dead weight.
+- **Ranking is `similarity()` over the whole name.** It is good enough for these
+  cases and it is not a relevance model; a short name will tend to outrank a long
+  one containing the same words.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.

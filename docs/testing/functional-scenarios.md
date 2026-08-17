@@ -6940,6 +6940,38 @@ told the opposite of the truth.
 - **VoiceOver** still reads one stop per post — the card stays hidden from the
   reader, and the label leads with the person.
 
+## Finding an exercise (`GET /v1/exercises?q=`)
+
+The three queries below are a real report of "these exercises are missing". All
+three exercises existed; the search could not reach them.
+
+- **"ez bar curls"** → `EZ-Bar Curl` first. Word order, a hyphen and a plural.
+- **"incline dumbbell bench"** → `Incline Dumbbell Press` first, **above**
+  `Incline Bench Dumbbell Row`. The row contains every typed word literally, so
+  this is the case that catches ranking against the raw query instead of the
+  expanded one — and it fails by ordering, not by returning nothing.
+- **"dumbbell overhead press"** → a `Dumbbell Shoulder Press` first.
+- **Each of the three returns nothing at all** under the old contiguous `ILIKE`.
+  If a change makes any of them empty again, that is the original bug.
+
+### It must not become a way to list everything
+
+- **`%`, `_`, `\` and `!!!`** → **no results**. These tokenize to nothing, and an
+  unmatchable query must match nothing rather than falling through to "no
+  filter". Returning the whole catalog for one keystroke is the regression this
+  shipped once.
+- **A draft is never findable**, by any query. The search is ANDed with the
+  status filter, not substituted for it.
+- **`?q=` combined with `?sport=`** still respects both.
+
+### The console searches the same way
+
+- **`/content/exercises?q=` with any of the three queries above** finds the same
+  rows the athlete's app does. An operator answering "I can't find X" who
+  searches differently from the athlete gets "works for me".
+- The console no longer matches on **id** — it is a slug derived from the name,
+  so it carries no word the name does not.
+
 ## Grip (`session_sets.grip`)
 
 How the implement was held, per LOGGED SET. Four values — regular, neutral,
