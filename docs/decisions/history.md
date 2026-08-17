@@ -21197,6 +21197,60 @@ measuring rather than reasoning is what showed it.
 - **Nothing checks the alias contract.** A consumer aliasing `session_sets` as
   something other than `ss` fails at runtime on the first query, not at build.
 
+## 2026-08-16 — The feed stopped keeping every card it had ever loaded
+
+Closes **F1**. `app/social/index.tsx` was a `KeyboardAwareScrollView` with
+`items?.map(...)` inside it: every session card mounted on load and mounted
+forever. A card is 25–35 native views, a page is 30 cards, and "Show older" adds
+30 more — so the third page held roughly 2,700 views, none of which could be
+released. It is now a `KeyboardAwareFlatList`, which already existed for exactly
+this.
+
+### The part that needed care was not the list
+
+The conversion itself is mechanical. What is not is the screen's **three-way
+distinction**, which its own comment calls out: `null` is loading, `[]` is a
+genuinely quiet feed, and a failed load must render as **neither** — because
+"nobody has trained" is a claim about other people, and inventing it from a
+failed request is worse than saying the request failed.
+
+`FlatList` collapses two of those: `data` is `[]` for both "still loading" and
+"actually empty", so `ListEmptyComponent` fires for both. The guard therefore
+had to be re-made inside it. Without it, every cold open flashes "Nothing here
+yet" before the first response lands.
+
+That guard is pinned, and by a test that already existed: *"says the load failed
+rather than claiming nobody has trained"*. Mutation-checked — forcing the guard
+false turns it red. The loading and error paths share the `items === null`
+branch, so the existing test covers the new structure as well as the old.
+
+### Elements, not component functions
+
+`ListHeaderComponent` and `ListFooterComponent` take elements here rather than
+`() => <X/>`. An inline arrow is a **new component type on every render**, which
+unmounts and remounts the entire header each time — the classic FlatList
+footgun, and it would have been invisible except as jank.
+
+### Open questions this leaves
+
+- **The spacing is unverified.** `styles.scroll` carries `gap: 10`, which spaced
+  the ScrollView's children and now has to space the header, each cell and the
+  footer instead. It should behave the same — cells are direct children of the
+  content container — but "should" is doing work there, and only a screenshot
+  settles it.
+- **Nothing tests that virtualisation actually happens.** The suite proves the
+  screen still renders the right things; windowing is layout-driven and does not
+  occur under jest. The claim that fewer views are mounted is reasoned from
+  `FlatList`'s contract, not measured. **L1** already covers "nothing on the
+  phone has been seen on a phone", and this belongs to it.
+- **`renderItem` is an inline arrow**, so it changes identity every render.
+  `FlatList` still only re-renders visible rows, and `FeedRow` is not memoised,
+  so this costs re-renders of what is on screen rather than of everything. Worth
+  measuring on a device before optimising blind.
+- **`onEndReached` was deliberately not wired.** "Show older" stays an explicit
+  button. Infinite scroll on other people's training is a different product
+  decision, not a side effect of changing a container.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
