@@ -13,8 +13,9 @@ import { KeyboardAwareFlatList } from '@/components/KeyboardAwareScroll';
 import { SessionCard } from '@/components/SessionCard';
 import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
-import { sportColor, sportIcon, sportTint } from '@/components/ui/sport';
+import { sportColor, sportIcon } from '@/components/ui/sport';
 import { vola } from '@/constants/Colors';
+import { monogramFor } from '@/lib/monogram';
 import { useAccent } from '@/lib/AccentProvider';
 import {
   agoLabel,
@@ -103,6 +104,10 @@ const FeedRow = memo(function FeedRow({
   const glyph = sportIcon(item.sport);
   const metrics = feedMetrics(item, units);
   const who = item.display_name || `@${item.from}`;
+  // Keyed on the handle, never the display name: the handle is unique and
+  // cannot be set to somebody else's, so letters and colour always agree about
+  // who this is.
+  const mono = monogramFor(item.from);
   const when = agoLabel(item.ended_at, now);
   const card = cardFromFeedItem(item, units, now);
 
@@ -131,19 +136,39 @@ const FeedRow = memo(function FeedRow({
       testID={`feed-${item.id}`}
     >
       <RNView style={styles.by}>
-        {glyph && (
-          <RNView style={[styles.byBadge, { backgroundColor: sportTint(tone) }]}>
-            <Icon name={glyph} size={15} color={tone} />
-          </RNView>
-        )}
+        {/* The PERSON in the avatar slot, not the sport.
+            This badge used to carry the sport glyph — while `byMeta` two lines
+            below already says the sport in words. The most prominent thing on
+            every post was therefore a restatement of its own caption, and the
+            person, which is the question a feed is scanned for, was plain text.
+
+            The colour is derived from the handle and never changes, so a feed
+            of the same few friends becomes scannable by colour before any of it
+            is read. The sport keeps its tinted glyph, moved down beside its own
+            label where it is a detail rather than an identity. */}
+        <RNView style={[styles.avatar, { backgroundColor: mono.background }]}>
+          <Text style={styles.avatarText}>{mono.initials}</Text>
+        </RNView>
         <RNView style={styles.byBody}>
           {/* The person leads. */}
           <Text style={styles.who} numberOfLines={1}>
             {who}
           </Text>
-          <Text style={styles.byMeta} numberOfLines={1}>
-            {[sportLabel, when].filter(Boolean).join(' · ')}
-          </Text>
+          <RNView style={styles.byMetaRow}>
+            {glyph && <Icon name={glyph} size={11} color={tone} />}
+            <Text style={styles.byMeta} numberOfLines={1}>
+              {[sportLabel, when].filter(Boolean).join(' · ')}
+            </Text>
+          </RNView>
+          {/* The handle, whenever it is not already what `who` shows. A display
+              name is unguarded prose that anyone can set to anything, so the
+              handle — unique, and what the avatar's colour is keyed on — is
+              what actually identifies the poster. */}
+          {item.display_name ? (
+            <Text style={styles.handle} numberOfLines={1}>
+              @{item.from}
+            </Text>
+          ) : null}
         </RNView>
       </RNView>
 
@@ -374,13 +399,23 @@ export default function SocialScreen() {
               <Text style={styles.muted}>
                 {friendCount === 0
                   ? 'Add a training partner, and their sessions show up here once they choose to share them.'
-                  : 'Your training partners haven’t shared any sessions yet. Sharing is off until someone turns it on.'}
+                  : 'Nobody you train with has shared a session in the last 3 days. Older ones drop off — this is what your partners are doing now, not everything they have ever done.'}
               </Text>
             </View>
           )
         }
         ListFooterComponent={
           <>
+
+        {/* The window, stated once at the point it is felt.
+            Without this a feed that stops after four posts reads as a bug or as
+            silent friends; the boundary is a rule, and a rule the reader cannot
+            see is indistinguishable from a fault. Shown only when there IS a
+            feed — on an empty one the message above already carries it, and two
+            statements of the same rule on one screen is nagging. */}
+        {items !== null && items.length > 0 && items.length >= total && (
+          <Text style={styles.windowNote}>Showing the last 3 days</Text>
+        )}
 
         {items !== null && items.length < total && (
           <Pressable
@@ -480,19 +515,31 @@ const styles = StyleSheet.create({
   // contact sheet and the eye cannot tell where one session ends.
   post: { gap: 8, marginBottom: 12 },
   by: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  byBadge: {
-    width: 30,
-    height: 30,
+  avatar: {
+    width: 38,
+    height: 38,
     borderRadius: 999,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // White on every palette entry, which is why the palette is constrained to
+  // colours that carry it.
+  avatarText: { fontSize: 14, fontWeight: '800', color: '#FFFFFF', letterSpacing: 0.5 },
+  byMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 1 },
+  handle: { fontSize: 11, color: vola.textDim, marginTop: 1 },
   byBody: { flex: 1, minWidth: 0 },
   who: { fontSize: 15, fontWeight: '700' },
-  byMeta: { fontSize: 11, color: vola.textDim, marginTop: 1 },
+  byMeta: { fontSize: 11, color: vola.textDim },
 
   more: { alignSelf: 'center', paddingVertical: 12, paddingHorizontal: 24 },
   moreText: { fontSize: 14, fontWeight: '700' },
   disabled: { opacity: 0.4 },
+  windowNote: {
+    fontSize: 12,
+    color: vola.textDim,
+    textAlign: 'center',
+    paddingTop: 14,
+    paddingBottom: 2,
+  },
   nudge: { paddingTop: 8 },
 });

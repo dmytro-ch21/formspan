@@ -3,6 +3,7 @@ package feed
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/dmytro-ch21/vola/backend/internal/modules/session"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -33,17 +34,40 @@ func NewPostgresRepository(pool *pgxpool.Pool, friends Friends) *PostgresReposit
 //     HERE is what keeps the list and the count agreeing: skipping in Go alone
 //     consumed a LIMIT slot and still counted the row, which is the same
 //     list-versus-count divergence this file has now been bitten by twice.
+//   - `s.ended_at >= now() - INTERVAL` — recent. The feed is what your friends
+//     are doing, not an archive of what they have ever done; a week-old session
+//     is history, and history is the owner's own screen. See FeedWindow.
+//     Bound as `$2`, with the page's LIMIT/OFFSET at `$3`/`$4`, so the count
+//     can run this same clause without binding parameters it never mentions.
 //
 // Written as a const and used by BOTH the page query and the count, because a
 // count that disagrees with its list is how a total ends up promising rows the
-// list will not return.
+// list will not return. The window is inside it for exactly that reason: as a
+// LIMIT-side filter it would have left the total counting rows the list had
+// already dropped, and "+12 more" that loads nothing is worse than no total.
 const visibleFrom = `
 	FROM sessions s
 	JOIN profiles p ON p.user_id = s.user_id
 	WHERE s.user_id = ANY($1)
 	  AND p.share_training_with_friends
 	  AND s.ended_at IS NOT NULL
+	  AND s.ended_at >= now() - ($2)::interval
 	  AND p.username IS NOT NULL`
+
+// FeedWindow is how far back the feed reaches.
+//
+// A ROLLING duration, not a number of calendar days, and that is a deliberate
+// dodge rather than laziness. Calendar days need the reader's timezone, and
+// this repository has already shipped one date bug that failed for seven hours
+// a day west of Greenwich because a `::date` cast resolved through the server's
+// zone. `ended_at` is timestamptz and `now()` is absolute, so this comparison
+// has no zone in it at all and cannot acquire one.
+//
+// Three days rather than seven: the feed answers "what are my friends doing",
+// and a session from last Tuesday does not answer it. It is also the whole of
+// the retention story — NOTHING is deleted. The owner's history, calendar and
+// session list are untouched and complete; this is a window on one surface.
+const FeedWindow = 3 * 24 * time.Hour
 
 // workingVolume mirrors session.Summarise's rule in SQL.
 //
@@ -135,7 +159,7 @@ func (r *PostgresRepository) List(ctx context.Context, userID string, limit, off
 		       p.share_training_details,`+
 		workingVolume+visibleFrom+`
 		ORDER BY s.ended_at DESC, s.id
-		LIMIT $2 OFFSET $3`, ids, limit, offset)
+		LIMIT $3 OFFSET $4`, ids, FeedWindow, limit, offset)
 	if err != nil {
 		return page, fmt.Errorf("feed: list: %w", err)
 	}
@@ -190,7 +214,16 @@ func (r *PostgresRepository) List(ctx context.Context, userID string, limit, off
 		page.Total = len(page.Items)
 		return page, nil
 	}
-	if err := r.pool.QueryRow(ctx, `SELECT count(*)`+visibleFrom, ids).Scan(&page.Total); err != nil {
+	// Same clause, same window — see visibleFrom.
+	//
+	// The window is `$2` and the page's LIMIT/OFFSET are `$3`/`$4` for this
+	// reason: the shared clause has to be numbered so that BOTH queries bind
+	// only the parameters they actually mention. Postgres infers a parameter's
+	// type from where it appears, so a placeholder that is passed but never
+	// referenced is an error — `could not determine data type of parameter $2`
+	// — and not a harmless extra.
+	if err := r.pool.QueryRow(ctx, `SELECT count(*)`+visibleFrom,
+		ids, FeedWindow).Scan(&page.Total); err != nil {
 		return page, fmt.Errorf("feed: count: %w", err)
 	}
 	return page, nil

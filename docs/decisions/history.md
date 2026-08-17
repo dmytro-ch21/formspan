@@ -21595,6 +21595,105 @@ sessions are running, pass `--maxWorkers=3`.
   each time, which fits a starvation effect landing on whichever `waitFor` is
   unluckiest, but it means those two are unconfirmed rather than exonerated.
 
+## 2026-08-17 — The feed reaches back three days, and the person leads it
+
+Two requests, one screen: stop the feed reaching back forever, and make it
+obvious who posted.
+
+### The window is a rolling 72 hours, and it lives in the access clause
+
+`visibleFrom` is the feed's whole access rule, written once and used by both the
+page query and the count — because "a count that disagrees with its list is how
+a total ends up promising rows the list will not return", a divergence that file
+had already been bitten by twice. The window went **inside** it for exactly that
+reason. As a LIMIT-side filter it would have left `total` counting rows the list
+had dropped, and a "+12 more" that loads nothing is worse than no total.
+
+**Rolling duration, not calendar days**, and that is a deliberate dodge. Calendar
+days need the reader's timezone, and this repository has already shipped a date
+bug that failed for seven hours a day west of Greenwich because a `::date` cast
+resolved through the server's zone. `ended_at` is timestamptz and `now()` is
+absolute, so the comparison contains no zone and cannot acquire one.
+
+**Nothing is deleted.** The owner's history, calendar and session list are
+complete and untouched; this is a window on one surface, and a test asserts the
+owner can still read a week-old session of their own.
+
+### Two bugs my own tests did not catch, and how
+
+**The count query bound parameters it never mentions.** Numbering the window
+`$4` — after the page's `LIMIT $2 OFFSET $3` — meant the count had to pass two
+placeholders that appear nowhere in `SELECT count(*)` + the clause. Postgres
+infers a parameter's type from where it appears, so this is
+`could not determine data type of parameter $2`, not a harmless extra. The
+window is `$2` now and LIMIT/OFFSET are `$3`/`$4`, so both queries bind only
+what they use.
+
+It was caught by the package's EXISTING tests, and only when the whole package
+ran — a `-run` filter on the new tests hid it, because the failing assertion was
+in a test about paging. Worth remembering: a targeted run is for iterating, not
+for believing.
+
+**The boundary tests did not pin the boundary.** Both aged their fixtures
+relative to `FeedWindow` itself, so they proved the window is enforced wherever
+the constant points and said nothing about where that is — measured by mutation,
+widening to seven days or narrowing to one left both green. Three days is the
+requirement, so it now has an assertion of its own. A definition that agrees with
+itself is not a test.
+
+### The avatar slot already existed, holding the wrong thing
+
+The feed row led with a circular badge carrying the **sport** glyph — while the
+line directly beneath it already said the sport in words. So the most prominent
+element on every post restated its own caption, and the person, which is the
+question a feed is scanned for, was plain text.
+
+The badge now carries a **monogram**: initials and a colour derived from the
+handle. The sport keeps its glyph, moved down beside its own label where it is a
+detail rather than an identity.
+
+**Derived, not uploaded**, and not as a placeholder for uploading. It costs no
+storage, no resizing, no CDN; it needs nothing new on the wire (the social scope
+addresses everyone by handle and never sends a user id, which a hosted image
+would require); and it needs no moderation answer, where a photo would — the
+`display_name` field is already unguarded prose that friends can see, with no
+report path. It also stays the fallback if photos are ever added, because every
+avatar system needs something to draw for people who upload nothing. `N12`.
+
+Two details are load-bearing:
+
+- **Keyed on the handle, never the display name.** The handle is unique and
+  cannot be set to somebody else's, so letters and colour always agree about who
+  a card belongs to.
+- **Never the athlete's accent colour.** The accent follows the READER's theme,
+  so keying a friend's avatar on it would make their identity change when you
+  change a setting.
+
+The colour matters more than the letters: two initials do not distinguish many
+people, but "the teal one" is scannable before anything is read — which only
+works if a person's colour never changes, so it is a pure function of the handle
+and most of its test file is about stability rather than about which colour
+anyone gets.
+
+### The window had to be said out loud
+
+A feed that stops after four posts reads as a bug or as silent friends. The
+empty state now distinguishes "nobody has shared" from "nobody has shared
+*recently*", and the end of a complete list says "Showing the last 3 days" —
+once, and only when there is a feed to say it about, since the empty state
+already carries it.
+
+### Gaps
+
+- **Not seen on a device.** The monogram's contrast, the 38pt badge against the
+  card, and the end-of-list line are all judged from source.
+- **The window is a constant, not a preference** (`N13`). If three days turns out
+  to be wrong, it is one constant plus the copy that names it in three places —
+  and the copy is the part that will be forgotten.
+- **`total` is now bounded by the window**, so "Show older" can only ever page
+  within three days. That is correct, but it means the affordance disappears far
+  sooner than before, which nobody has watched happen.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.

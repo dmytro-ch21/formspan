@@ -6890,6 +6890,56 @@ told the opposite of the truth.
   silently disappears everywhere and no arithmetic test notices, because the
   tonnage rule reads the column in SQL and never touches that response.
 
+## The feed's 3-day window and the poster's avatar
+
+### The window
+
+- **A friend finishes a session now** → it appears in your feed.
+- **A friend's session that ended 4 days ago** → not in the feed, and not in
+  `total` either. The count and the list must agree; a "+1 more" that loads
+  nothing is the specific regression here.
+- **Just inside and just outside the boundary** (say 71h and 73h) → one appears,
+  one does not. A test that only checks "a week ago is gone" passes for any
+  window from a minute to six days.
+- **The window is three days.** Worth asserting as a literal somewhere: a
+  boundary check written relative to the constant passes for any value of it.
+- **Your own week-old session** is still in your history, your calendar and your
+  session list. Nothing is deleted — this is a window on one surface.
+- **Cross a boundary while the app is open**: a session that was the oldest row
+  drops out on the next refresh rather than lingering.
+
+### Saying so
+
+- **Feed with friends but nothing recent** → "Nobody you train with has shared a
+  session in the last 3 days", NOT "Nothing here yet" alone, which reads as
+  broken or as friends who never train.
+- **Feed with no friends at all** → still the add-a-partner message. The two
+  empty states are different facts.
+- **Reaching the end of a complete feed** → "Showing the last 3 days" once. Not
+  shown on an empty feed, where the message above already carries it.
+- **"Show older"** appears only while there are more rows *within* the window.
+
+### The avatar
+
+- **Every post leads with the poster's initials on a coloured disc**, not the
+  sport icon. The sport keeps a small glyph beside its own label underneath.
+- **The same person is the same colour on every post, every launch, every
+  device.** This is the whole feature — a feed becomes scannable by colour
+  before it is read.
+- **A friend renames their display name** → the avatar does not change. It is
+  keyed on the handle, which is unique and cannot be set to somebody else's.
+- **Change your own accent theme** → your friends' avatar colours do not move.
+  Keying them on the accent would make someone else's identity depend on your
+  settings.
+- **A handle with a separator** (`mat_rat`) shows two initials; one without
+  (`matrat`) shows its first two letters; one with digits (`dmytro21`) treats
+  the digit run as a boundary.
+- **A poster with a display name** shows the name on the first line and
+  `@handle` beneath. Without one, the handle is the first line and is not
+  repeated.
+- **VoiceOver** still reads one stop per post — the card stays hidden from the
+  reader, and the label leads with the person.
+
 ## Grip (`session_sets.grip`)
 
 How the implement was held, per LOGGED SET. Four values — regular, neutral,

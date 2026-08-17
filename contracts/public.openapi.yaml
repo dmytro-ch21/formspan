@@ -3716,6 +3716,20 @@ paths:
         FINISHED.
 
 
+        **The feed reaches back 3 days and no further.** A rolling 72 hours
+        against `ended_at`, not a count of calendar days — there is no timezone
+        in the comparison, so it cannot acquire one. The window applies to BOTH
+        the page and `total`, so the count never promises rows the list will not
+        return.
+
+
+        Nothing is deleted, and this is not retention: the owner's own history,
+        calendar and session list are complete and untouched. The feed answers
+        "what are my training partners doing", and a session from last Tuesday
+        does not answer it. A client should say so at the end of the list, or a
+        feed that stops reads as one that broke.
+
+
         MOBILE ONLY by product decision — the web app sees shared content and
         manages friends; a feed is a phone thing. Nothing prevents a web client
         calling this, but nothing should.
