@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useAuth } from "@clerk/nextjs";
 
 import {
+  fetchLoadHistory,
   fetchPinnedExercises,
   fetchRecords,
   listExercises,
@@ -13,9 +14,11 @@ import {
   setPinnedExercises,
   type Exercise,
   type ExerciseRecords,
+  type LoadHistory,
   type PersonalRecord,
   type Sport,
 } from "@/lib/api";
+import { LoadHistoryChart } from "./LoadHistoryChart";
 import { useModules } from "@/lib/ModulesProvider";
 import {
   formatDistance,
@@ -316,7 +319,94 @@ function RecordCard({
           <RecordCell key={r.kind} record={r} units={units} />
         ))}
       </dl>
+
+      {/* A record is a single best; this is the shape it arrived in. Loaded
+          on demand rather than with the page — the desk view lists every
+          exercise you have ever trained, and charting all of them eagerly
+          would be one request per card for data nobody has asked to see. */}
+      <ProgressSection exerciseID={records.exercise_id} name={name} units={units} />
     </li>
+  );
+}
+
+function ProgressSection({
+  exerciseID,
+  name,
+  units,
+}: {
+  exerciseID: string;
+  name: string;
+  units: UnitSystem;
+}) {
+  const { getToken } = useAuth();
+  const [open, setOpen] = useState(false);
+  const [history, setHistory] = useState<LoadHistory | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const abort = useRef<AbortController | null>(null);
+
+  // Fetched from the click, not from an effect. The request is caused by the
+  // athlete opening the section, and an effect would only re-describe that
+  // through render state — which is what `set-state-in-effect` objects to, and
+  // it is right: the eager version set three states synchronously on every
+  // open. One in-flight request is tracked so unmounting mid-flight cancels it.
+  const load = useCallback(() => {
+    abort.current?.abort();
+    const c = new AbortController();
+    abort.current = c;
+    setLoading(true);
+    setError(null);
+    fetchLoadHistory(getToken, exerciseID, {}, c.signal)
+      .then((h) => {
+        if (!c.signal.aborted) setHistory(h);
+      })
+      .catch((err) => {
+        if (c.signal.aborted) return;
+        // A failed load must stay distinguishable from "nothing here" and must
+        // be retryable — the bug mobile's pinned screen documents having
+        // shipped was exactly one sentinel meaning both.
+        setError(err instanceof Error ? err.message : "Could not load progress.");
+      })
+      .finally(() => {
+        if (!c.signal.aborted) setLoading(false);
+      });
+  }, [getToken, exerciseID]);
+
+  useEffect(() => () => abort.current?.abort(), []);
+
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    // Closing and reopening must not refetch; a previous failure must.
+    if (next && !history && !loading) load();
+  };
+
+  return (
+    <div className="mt-4 border-t border-line pt-3">
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={open}
+        className="text-sm font-semibold text-text-dim transition hover:text-text"
+      >
+        {open ? "Hide" : "Show"} progress over time
+        <span className="sr-only"> for {name}</span>
+      </button>
+      {open && (
+        <div className="mt-3">
+          {loading && <p className="text-sm text-text-dim">Loading…</p>}
+          {error && (
+            <p className="text-sm text-danger">
+              {error}{" "}
+              <button type="button" onClick={load} className="underline">
+                Try again
+              </button>
+            </p>
+          )}
+          {history && <LoadHistoryChart history={history} units={units} />}
+        </div>
+      )}
+    </div>
   );
 }
 

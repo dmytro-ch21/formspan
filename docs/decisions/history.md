@@ -22951,6 +22951,95 @@ L1 is not a nice-to-have queued behind the feature work. It is the only check in
 this project that can see colour, layout, contrast or whether a thing reads at
 arm's length — and it caught something on its first outing after being deferred
 across two PRs. A screen should be looked at in the PR that ships it.
+## 2026-08-17 — N6 failed the carve-out it was written to use, so it shipped on web
+
+`N6` (per-exercise load over time) was filed as N5's sibling: same
+platform-rule amendment, same shape, a chart on the phone. Its own line already
+carried the doubt — "N6 has to pass its three conditions on its own, and it is
+closer to analysis than bodyweight is" — and N5's entry was blunter still:
+**"N6 is NOT unlocked by this."**
+
+It does not pass. The deciding condition is the second one, *the decision it
+informs is made while away from a computer*, and the argument that settles it is
+one neither earlier note made: **the at-the-rack decision is already answered.**
+`app/session/[id].tsx` shows the double-progression recommendation next to the
+exercise — the phase, what moves next, compressed to a line because between sets
+nobody reads a rationale. "What do I put on the bar today" has an answer on the
+phone already. A chart beside it would not inform a decision that recommendation
+leaves open; it would decorate one. That is the same test the platform rule
+applies to a rest countdown on a desktop, pointed the other way.
+
+What remains once that is subtracted is "did my squat go up over three months",
+which is asked while planning the next block. So this went to web.
+
+It also fails the first condition on inspection, which is worth recording
+because it is the cheaper test: *per-exercise load* has no single meaning. Top
+set, estimated 1RM and tonnage are three different questions with three
+different answers, and the moment a screen has to offer the choice it has grown
+the metric picker the carve-out names as the disqualifier.
+
+### The carve-out is unchanged
+
+Nothing was weakened to make this fit, and nothing was added to make it fit
+either. `apps/mobile/app/checkin/trend.tsx` is still the only instance. The
+carve-out survived its first real test by **excluding** something, which is the
+only way to find out whether a narrow rule is narrow.
+
+### What shipped
+
+`GET /v1/records/{exerciseID}/history` — one point per session, oldest first.
+
+- **A session is the unit.** A set is noise (five sets of five are one fact
+  about strength, not five) and a calendar day merges a morning and an evening
+  session into an average neither of them was.
+- **Under `/records`, not `/exercises`.** Everything below `/records` is the
+  caller's own training data, scoped by the token; `/exercises` is the shared
+  catalog. Hanging per-user data off a catalog path is how a caller starts
+  believing the path parameter identifies the subject, which is the cross-user
+  enumeration bug review has caught twice here.
+- **Three shared rules borrowed, not restated.** `SQLWorkingSet`,
+  `SQLCountsAsSet` and `SQLTonnage` — N8 exported them so a fourth restatement
+  could not drift, and this is the first new caller since. A drop is volume but
+  not a second set, and tonnage folds in `implements`, for free.
+- **The 1RM is `EstimateOneRM`,** in Go, not a SQL re-derivation. A second
+  opinion would let the records screen and the chart publish two different bests
+  for one set.
+- **A missing estimate is a gap, not a zero.** `EstimateOneRM` refuses past
+  twelve effective reps because every rep-max formula diverges there, so a
+  session of high-rep back-off work legitimately has none. The line breaks;
+  drawn across, it would assert a value nobody measured. Same discipline N5
+  applied to a missed weigh-in.
+- **The cap drops the OLDEST.** 400 sessions, picked before the set rows are
+  joined, so a long training history loses its left edge rather than its right —
+  and a session is never cut in half and reported as a whole day's tonnage. The
+  bound is a filter field rather than a bare constant so that property is
+  provable with three fixtures instead of four hundred and one; a cap nothing
+  can afford to test is a cap nobody has tested.
+
+On web it has a metric picker, axes with values, and per-point evidence — the
+three things the carve-out forbids on mobile. That is the distinction being
+drawn rather than scope creep: strip all three and it stops answering the
+question it exists for, which is precisely why it is not a phone screen.
+
+Every guard was mutation-tested: dropping the user scope, counting a drop as a
+set, forgetting the implement count, inverting the cap's order, taking the
+estimate from the top set, and returning empty instead of 404 all go red.
+
+### Gaps
+
+- **Not seen in a browser.** The route is behind Clerk and this session cannot
+  sign in, so `build:web` compiling the page is the strongest check run. The SVG
+  path — gap segments, the flat-series guard, the axis labels — is typechecked
+  and unit-free. `L1` already names N5's chart for the same reason; this joins
+  it.
+- **No index was added.** The query filters `session_sets` by
+  `(user_id, exercise_id)` and joins `sessions`. `N14` added
+  `sessions_user_ended_idx` for the feed's window after measuring; nothing has
+  been measured here, and guessing at an index is how you get an unused one.
+  Worth an `EXPLAIN` on a real corpus before it matters.
+- **Nothing links to it from a session.** Reading a lift's arc while reviewing
+  the session you just did is the obvious next step, and the records page is
+  currently the only door.
 
 ## Open items / known gaps as of this entry
 
