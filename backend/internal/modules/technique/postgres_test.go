@@ -30,6 +30,112 @@ func newTestRepo(t *testing.T) *PostgresRepository {
 	return NewPostgresRepository(pool)
 }
 
+// removeLibraryAfterTest deletes the whole seeded technique library when the
+// test ends.
+//
+// Same tripwire `exercise`'s `removeCatalogAfterTest` is, for the same reason
+// and one library over. `Seed` writes 542 rows into the database the suite
+// shares and nothing removed them, so every package after this one ran against
+// a library it had not seeded — which is exactly the arrangement that let
+// `session`, `workout` and `profile` quietly borrow exercise ids for months.
+// Removing the residue is what stops a package doing the same with technique
+// ids: with the library gone, a borrowed id fails in the ordinary
+// `go test -p 1 ./...` run instead of passing on somebody else's litter.
+//
+// **The order matters here in the opposite way to `exercise`, and that is the
+// trap.** Over there the delete ABORTED on a NO ACTION foreign key, which is
+// loud. Every foreign key into `techniques` is CASCADE or SET NULL, so a bare
+// `DELETE FROM techniques` succeeds — and takes the 136 `curriculum_items` of
+// the five seeded syllabuses with it, leaving five named curricula containing
+// nothing. Silent, and it guts the very content the curriculum seed tests are
+// about. So the seeded curricula are removed first and deliberately, and their
+// items go with them as an intended cascade rather than an unnoticed one.
+//
+// Scoped to `source = 'seed'`, which is deploy content: `curricula_source_matches_owner`
+// makes `owner_user_id IS NULL` and `source <> 'user'` the same condition, so an
+// athlete's syllabus cannot be reached. `cmd/seed` puts both back.
+//
+// Sequences are NOT deleted alongside the curricula, though the task that asked
+// for this said they should be. `cmd/seed` writes none, and `sequence`'s own
+// `source='seed'` fixtures clean up after themselves and reference only
+// `seq-test-*` technique ids — so there is nothing to remove today. Recorded
+// because `bjj_sequence_steps.technique_id` is CASCADE: the day anything starts
+// seeding sequences, this delete will hollow them out exactly as it would have
+// hollowed out the curricula, and silently.
+//
+// One failure mode this cannot avoid, named so the error is legible when it
+// happens: `curriculum_enrollments.curriculum_id` is ON DELETE **RESTRICT**, so
+// an athlete enrolled in a seeded syllabus makes the first delete abort and
+// every test here fail in cleanup. Nothing in the suite can produce that state
+// (curriculum's tests enrol only against their own `source='user'` rows), but a
+// hand-poked `vola_test` can. It fails loud and destroys nothing, which is the
+// right end of the trade — and note `cmd/seed` does not restore enrollments the
+// way it restores curricula, so pre-deleting them would be a real data choice
+// rather than a tidy-up.
+//
+// **What this does NOT remove, and the second one is a trap.** `positions` (11
+// rows) survive: nothing borrows position ids the way packages borrowed catalog
+// and library ids, so they are left deliberately. Note they are written by this
+// package's own `TestPostgresRepository_SeedPositionsAndGet` as well as by
+// `cmd/seed`, which is why they are present in CI where `cmd/seed` never runs.
+//
+// `ibjjf_rulesets` (25 rows) also survive, and they are **load-bearing rather
+// than merely unremoved**. All 542 seeded techniques carry an
+// `ibjjf_ruleset_id`, and it is a RESTRICT foreign key. The three
+// `UpsertAll(SeedData())` tests below never seed rulesets themselves — they only
+// ever work because `TestPostgresRepository_SeedAndFilter` sorts earlier in this
+// file and its `Seed` writes the rulesets first, and because nothing here
+// removes them afterwards.
+//
+// Two consequences, both measured. Running one of those three ALONE against a
+// database with no rulesets fails immediately —
+// `violates foreign key constraint "techniques_ibjjf_ruleset_id_fkey"`. And
+// deleting rulesets here, which is the obvious next tightening and exactly what
+// a reader of this comment would reach for, breaks them for the same reason. A
+// full-package run hides both, because the first test keeps rebuilding what they
+// depend on. If you remove this residue, make those three seed their own
+// rulesets first.
+func removeLibraryAfterTest(t *testing.T, repo *PostgresRepository) {
+	t.Helper()
+	ctx := context.Background()
+
+	library, err := SeedData()
+	if err != nil {
+		t.Fatalf("read seed library: %v", err)
+	}
+	ids := make([]string, 0, len(library))
+	for _, tech := range library {
+		ids = append(ids, tech.ID)
+	}
+
+	t.Cleanup(func() {
+		if _, err := repo.pool.Exec(ctx,
+			`DELETE FROM curricula WHERE source = 'seed'`); err != nil {
+			t.Errorf("could not remove the seeded curricula, whose items would "+
+				"otherwise be cascaded away silently by the library delete below: %v", err)
+			return
+		}
+		if _, err := repo.pool.Exec(ctx,
+			`DELETE FROM techniques WHERE id = ANY($1)`, ids); err != nil {
+			t.Errorf("the seeded technique library could not be removed, so it stays "+
+				"in the database this suite shares and other packages can silently "+
+				"start depending on it: %v", err)
+			return
+		}
+		var left int
+		if err := repo.pool.QueryRow(ctx,
+			`SELECT count(*) FROM techniques WHERE id = ANY($1)`, ids).Scan(&left); err != nil {
+			t.Errorf("could not confirm the seeded library was removed: %v", err)
+			return
+		}
+		if left != 0 {
+			t.Errorf("%d of %d seeded technique rows survived cleanup; the database "+
+				"this suite shares is polluted and the guard against borrowed "+
+				"library ids is off", left, len(ids))
+		}
+	})
+}
+
 // The library IS the product here, so a malformed entry is a real defect.
 func TestSeedData_IsValid(t *testing.T) {
 	techs, err := SeedData()
@@ -110,6 +216,7 @@ func TestValidate_RejectsBadContent(t *testing.T) {
 func TestPostgresRepository_SeedAndFilter(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
+	removeLibraryAfterTest(t, repo)
 
 	n, err := Seed(ctx, repo)
 	if err != nil {
@@ -199,6 +306,7 @@ func TestPostgresRepository_GetNotFound(t *testing.T) {
 func TestTechniqueEnrichment(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
+	removeLibraryAfterTest(t, repo)
 	if _, err := Seed(ctx, repo); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -774,6 +882,7 @@ func TestReseedPopulatesFunctionOnRowsThatPredateTheColumn(t *testing.T) {
 	repo := newTestRepo(t)
 	pool := repo.pool
 	ctx := context.Background()
+	removeLibraryAfterTest(t, repo)
 
 	techniques, err := SeedData()
 	if err != nil {
@@ -915,6 +1024,7 @@ func TestReseedPopulatesToPositionOnRowsThatPredateTheColumn(t *testing.T) {
 	repo := newTestRepo(t)
 	pool := repo.pool
 	ctx := context.Background()
+	removeLibraryAfterTest(t, repo)
 
 	techniques, err := SeedData()
 	if err != nil {
@@ -985,6 +1095,7 @@ func TestReseedPopulatesToPositionOnRowsThatPredateTheColumn(t *testing.T) {
 func TestSummaryCarriesTheGraphEdge(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
+	removeLibraryAfterTest(t, repo)
 
 	seed, err := SeedData()
 	if err != nil {

@@ -317,10 +317,25 @@ crutch and disarm all of this without anything going red.
 back — it inserts up to 45 real ids for the deploy-path tests — so its cleanup
 gets the same fail-and-verify treatment rather than a log line.
 
-This covers the *exercise* catalog only. The technique library is still seeded
-by `technique` and left behind, which is a smaller exposure — `technique` sorts
-seventeenth of nineteen, so only `theme` and `workout` follow it — but it is the
-same shape and nothing prevents it.
+**The technique library has the same treatment** (`removeLibraryAfterTest`), and
+finding every place that seeds it took a second pass worth recording. Grepping
+for `Seed(ctx` found two tests; the library is *also* loaded wholesale by
+`repo.UpsertAll(ctx, SeedData())`, a different idiom in three more. Five sites,
+not two — and the miss was invisible except by measuring: the suite passed with
+542 rows still sitting in the database afterwards. **Check the row count after a
+run, not the call sites**, if you ever extend this.
+
+That cleanup **removes the seeded curricula first**, and the reason inverts the
+exercise case. There the delete aborted on a NO ACTION foreign key — loud, and
+what made the first version obvious. Every foreign key into `techniques` is
+CASCADE or SET NULL, so a bare delete *succeeds* and takes the syllabuses' items
+with it: measured at 136 curriculum items becoming 38, five named curricula left
+gutted, suite green. Removing the seeded curricula explicitly turns that into an
+intended cascade instead of an unnoticed one. **A CASCADE is more dangerous here
+than a RESTRICT** — the constraint that blocks you is the one that tells you.
+
+Not covered: `cmd/seed` also writes 11 `positions`, deliberately left, since
+nothing borrows position ids the way packages borrowed catalog and library ids.
 
 **One related thing is NOT fixed**, and it is the worse failure mode:
 `curriculum`'s `TestEverySeededTechniqueExistsInTheLibrary` needs the *technique*
@@ -328,6 +343,11 @@ library, and `curriculum` sorts before `technique`, which is what seeds it. So
 ordering never saved that one — it **skips on every CI run** while the package
 still prints `ok`. Being green and being run are different things, and only
 `-v` tells them apart. It has its own PR.
+
+What the library cleanup did change is that the skip is now *consistent*: before
+it, the 542 rows survived the run, so a second run on the same database made
+that test **pass** instead of skip — silently, on residue, which reads as
+coverage. Measured 569 pass / 1 skip on both runs now, where it used to flip.
 
 If a package does start failing on unknown exercise ids, the first question is
 whether the catalog is there at all:
