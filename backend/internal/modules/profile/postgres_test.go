@@ -16,7 +16,104 @@ import (
 // Requires a real Postgres with migrations already applied — set
 // TEST_DATABASE_URL to run this (see docker-compose.yml for local dev, or
 // the `backend` CI job for how it's wired there). Skips otherwise so
-// `go test ./...` still works without a database configured.
+// `go test ./...` still works without a database configured. These fixtures
+// OWN the catalog rows they run on — nothing here needs `cmd/seed`.
+
+// The catalog ids this package's tests use. Namespaced, because they are this
+// package's rows and not the shipped catalog's.
+//
+// They used to be `bench-press` and `back-squat`, which the package never
+// seeded — so `TestExerciseUnits_SetClearAndScope` failed against a freshly
+// migrated database and passed in a full run only because
+// `internal/modules/exercise` seeds the whole catalog and sorts before
+// `profile` under `-p 1`. Last of the three holdouts; `session` and `workout`
+// went first.
+//
+// Suffixes keep the original names, per the convention those two settled on:
+// some tests depend on the ids' relative LEXICAL ORDER, that dependency is
+// invisible at the call site, and `session`'s re-wording inverted such a pair
+// and silently disarmed two tests. **No test here has that dependency** —
+// `ListExerciseUnits` returns a `map[string]string` and its query carries no
+// `ORDER BY`, so nothing observes an order — which is why there is no
+// `requireUnsorted` call in this package. Checked rather than assumed; the
+// convention is followed anyway so the next reader does not have to re-derive
+// that it was safe to break.
+//
+// What the scope test *does* need is that the two ids DIFFER, and that fails
+// loudly rather than silently: make them equal and the leak assertion fires.
+// (It fires on this athlete's OWN row under the now-shared key, not on the
+// other athlete's — the test cannot tell those apart. The point is only that
+// equal ids cannot slip through unnoticed.)
+const (
+	exBench = "pf_fx_bench_press"
+	exSquat = "pf_fx_back_squat"
+)
+
+// fixtureExercise is a catalog row this package writes for itself. Nothing here
+// reads any column but `id` — `exercise_unit_prefs` is keyed on it and the
+// repository never joins the catalog — so the rest exist only to satisfy NOT
+// NULLs. They are still set explicitly rather than defaulted: `feed` shipped the
+// opposite, where an omitted `load_mode` let every fixture take the column
+// default and the per-side path could have been deleted with the suite green.
+type fixtureExercise struct {
+	id       string
+	sport    string
+	pattern  string
+	loadType string
+}
+
+var fixtureExercises = []fixtureExercise{
+	{exBench, "strength", "horizontal_push", "weight_reps"},
+	{exSquat, "strength", "squat", "weight_reps"},
+}
+
+// seedFixtureExercises writes this package's catalog rows and removes them
+// again. Called from newTestRepo, so it runs before any test body and — since
+// t.Cleanup is LIFO — its cleanup runs after every cleanup a test registers
+// later.
+//
+// The removal is simpler than the session and workout helpers' deliberately,
+// not by oversight. The only table here that references `exercises` is
+// `exercise_unit_prefs`, which is ON DELETE CASCADE, so deleting the exercise
+// takes its overrides with it and no parent-first step is needed. **If a test
+// in this package ever writes a `session_sets` or `workout_items` row against
+// these ids, that stops being true** — both are NO ACTION, the delete would
+// fail the foreign key, and a discarded error would leak the fixture into the
+// database every other package shares. Copy the parent-first cleanup from
+// `session/postgres_test.go` if that day comes.
+func seedFixtureExercises(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	ctx := context.Background()
+
+	ids := make([]string, 0, len(fixtureExercises))
+	for _, e := range fixtureExercises {
+		ids = append(ids, e.id)
+	}
+
+	t.Cleanup(func() {
+		if _, err := pool.Exec(ctx, `DELETE FROM exercises WHERE id = ANY($1)`, ids); err != nil {
+			t.Logf("cleanup fixture exercises: %v", err)
+		}
+	})
+
+	for _, e := range fixtureExercises {
+		// Every column reconciled on conflict, not just inserted — a row left
+		// behind by an interrupted run is repaired rather than trusted.
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO exercises (id, name, sport, movement_pattern, load_type, status)
+			VALUES ($1, $1, $2, $3, $4, 'published')
+			ON CONFLICT (id) DO UPDATE SET
+				name = EXCLUDED.name,
+				sport = EXCLUDED.sport,
+				movement_pattern = EXCLUDED.movement_pattern,
+				load_type = EXCLUDED.load_type,
+				status = EXCLUDED.status`,
+			e.id, e.sport, e.pattern, e.loadType); err != nil {
+			t.Fatalf("seed fixture exercise %s: %v", e.id, err)
+		}
+	}
+}
+
 // newTestRepo matches the session module's helper. pool.Close is registered
 // first so it runs *last* under LIFO cleanup — registering it later would
 // close the pool before the per-test row cleanups could use it.
@@ -31,6 +128,7 @@ func newTestRepo(t *testing.T) (*PostgresRepository, *pgxpool.Pool) {
 		t.Fatalf("connect: %v", err)
 	}
 	t.Cleanup(pool.Close)
+	seedFixtureExercises(t, pool)
 	return NewPostgresRepository(pool), pool
 }
 
@@ -109,10 +207,18 @@ func TestExerciseUnits_SetClearAndScope(t *testing.T) {
 	ctx := context.Background()
 
 	const me, other = "user_units_a", "user_units_b"
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(),
-			`DELETE FROM exercise_unit_prefs WHERE user_id IN ($1, $2)`, me, other)
-	})
+	// Clear before as well as after: the first assertion below is "this athlete
+	// has no overrides", so a prefs row left by an interrupted run fails it
+	// once before the cleanup below heals it. One red run for somebody else's
+	// crash is avoidable, and the delete costs nothing.
+	clearUnits := func() {
+		if _, err := pool.Exec(context.Background(),
+			`DELETE FROM exercise_unit_prefs WHERE user_id IN ($1, $2)`, me, other); err != nil {
+			t.Errorf("cleanup exercise unit prefs: %v", err)
+		}
+	}
+	clearUnits()
+	t.Cleanup(clearUnits)
 
 	// Absence means "use the profile default" — no third state.
 	got, err := repo.ListExerciseUnits(ctx, me)
@@ -123,34 +229,34 @@ func TestExerciseUnits_SetClearAndScope(t *testing.T) {
 		t.Fatalf("expected no overrides, got %v", got)
 	}
 
-	if err := repo.SetExerciseUnit(ctx, me, "bench-press", "imperial"); err != nil {
+	if err := repo.SetExerciseUnit(ctx, me, exBench, "imperial"); err != nil {
 		t.Fatalf("set: %v", err)
 	}
 	// Upsert rather than a duplicate-key error.
-	if err := repo.SetExerciseUnit(ctx, me, "bench-press", "metric"); err != nil {
+	if err := repo.SetExerciseUnit(ctx, me, exBench, "metric"); err != nil {
 		t.Fatalf("re-set: %v", err)
 	}
 	got, _ = repo.ListExerciseUnits(ctx, me)
-	if got["bench-press"] != "metric" {
-		t.Fatalf("want metric after re-set, got %q", got["bench-press"])
+	if got[exBench] != "metric" {
+		t.Fatalf("want metric after re-set, got %q", got[exBench])
 	}
 
 	// Another user's override must never appear in mine.
-	if err := repo.SetExerciseUnit(ctx, other, "back-squat", "imperial"); err != nil {
+	if err := repo.SetExerciseUnit(ctx, other, exSquat, "imperial"); err != nil {
 		t.Fatalf("set other: %v", err)
 	}
 	got, _ = repo.ListExerciseUnits(ctx, me)
-	if _, leaked := got["back-squat"]; leaked {
+	if _, leaked := got[exSquat]; leaked {
 		t.Fatal("another user's override leaked into this user's map")
 	}
 
 	// Clearing is a delete, so the key disappears rather than holding a
 	// sentinel value.
-	if err := repo.SetExerciseUnit(ctx, me, "bench-press", ""); err != nil {
+	if err := repo.SetExerciseUnit(ctx, me, exBench, ""); err != nil {
 		t.Fatalf("clear: %v", err)
 	}
 	got, _ = repo.ListExerciseUnits(ctx, me)
-	if _, still := got["bench-press"]; still {
+	if _, still := got[exBench]; still {
 		t.Fatal("cleared override is still present")
 	}
 }
@@ -249,12 +355,27 @@ func TestProfileModules(t *testing.T) {
 	}
 }
 
+// cleanupProfile clears the row before the test AND registers its removal
+// afterwards.
+//
+// It used to do only the first, which is a clean-BEFORE and not a cleanup: the
+// row it created outlived every run, and the next run merely overwrote it. One
+// stale `user_modules_test` profile therefore sat in the shared database
+// permanently. Harmless in itself — same id every time, so it never
+// accumulated — but it is a fixture this package does not own left in a
+// database every other package reads, which is the habit this suite has been
+// unpicking elsewhere. Found by checking what the package left behind after the
+// fixture conversion, not by any test failing.
 func cleanupProfile(t *testing.T, pool *pgxpool.Pool, userID string) {
 	t.Helper()
-	if _, err := pool.Exec(context.Background(),
-		`DELETE FROM profiles WHERE user_id = $1`, userID); err != nil {
-		t.Fatalf("cleanup: %v", err)
+	del := func() {
+		if _, err := pool.Exec(context.Background(),
+			`DELETE FROM profiles WHERE user_id = $1`, userID); err != nil {
+			t.Errorf("cleanup profile %s: %v", userID, err)
+		}
 	}
+	del()
+	t.Cleanup(del)
 }
 
 // The username claim path. Every case here is one of the ways a unique handle
@@ -265,11 +386,16 @@ func TestUsernameClaimAndRename(t *testing.T) {
 	ctx := context.Background()
 	a, b := "test_user_uname_a", "test_user_uname_b"
 	for _, id := range []string{a, b} {
-		id := id
+		// BEFORE the Create, not after. Registering the cleanup afterwards
+		// makes this test permanently red rather than flaky: a row left by an
+		// interrupted run fails `Create` with ErrAlreadyExists, the Fatalf
+		// stops the function, the cleanup that would have removed the row is
+		// therefore never registered, and every subsequent run repeats it.
+		// Verified in review, not theorised.
+		cleanupProfile(t, pool, id)
 		if _, err := repo.Create(ctx, id, NewProfile{}); err != nil {
 			t.Fatalf("create %s: %v", id, err)
 		}
-		t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM profiles WHERE user_id = $1`, id) })
 	}
 
 	u := "dmytro_bjj"
@@ -357,10 +483,11 @@ func TestGetByUsername(t *testing.T) {
 	repo, pool := newTestRepo(t)
 	ctx := context.Background()
 	id := "test_user_lookup"
+	// Before the Create — same reason as TestUsernameClaimAndRename above.
+	cleanupProfile(t, pool, id)
 	if _, err := repo.Create(ctx, id, NewProfile{}); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM profiles WHERE user_id = $1`, id) })
 
 	u := "lookup_target"
 	dn := "Lookup Target"
