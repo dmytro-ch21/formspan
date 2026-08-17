@@ -20437,6 +20437,45 @@ that can fail is not a cleanup.** Register it first, or clear before and after.
   separate piece of work: seven assertions in one file alone would have to be
   scoped, which was tried and abandoned once already.
 
+## 2026-08-16 — Two `H4`s, and the more interesting problem underneath
+
+`docs/TASKS.md` carried two lines numbered **H4**. #235 added one; #233, cut
+before #235 landed, saw `H3` as the highest id and added another. Neither author
+did anything wrong — the file's "ids are never reused" rule is exactly the
+invariant that concurrent branches break, and nothing checks it. It survived
+into `main` and through a fourth PR before anyone noticed.
+
+The obvious fix is renumbering the newer one, and it would have been the wrong
+one. **The two entries were the same issue**, measured twice, and they
+contradict each other:
+
+- #235: `sharedScreen.test.tsx` "drops the accepted row locally" exhausted its
+  10s `asyncUtilTimeout` once, then **0 failures in 92 runs** — including under
+  8-way CPU saturation and alongside the web/admin builds, with 2.4–4.0s of
+  headroom. Conclusion: ≤3%, "low, not a coin flip".
+- #233: **1 failure in 3 runs**, on `main` and on a branch touching zero `apps/`
+  files, across three tests — one of which is the same "drops the accepted row
+  locally" — failing only under concurrent runs.
+
+Both ran under load, both are first-hand, and they disagree by roughly thirty
+times about the same test. Renumbering would have left two lines saying
+incompatible things, and whoever picked the work up would have acted on
+whichever they read first. They are now one `H4` that states both measurements
+and says the rate is **unknown** — because that is the actual state of the
+knowledge, and reconciling the two is the first task, ahead of touching the
+tests.
+
+`H4` stays with the id #235 established and cited; no new id was minted, since
+there is only one task here. Ids remain unique across the file (28 tasks,
+checked).
+
+Worth keeping: **a duplicate id is a symptom, and the merge conflict is where it
+should have been caught.** This one arrived through a conflict resolution — the
+`profile` branch resolved a `TASKS.md` conflict, faithfully reproduced both
+sides, and reproduced the collision with them. Resolving a conflict correctly
+line-by-line can still produce a file that is wrong as a whole, which is an
+argument for reading the merged section rather than only the conflict markers.
+
 ## Open items / known gaps as of this entry
 
 - **Nothing stops a package borrowing catalog rows again.** All three holdouts are converted (`session` #231, `workout` #234, `profile`) and every module package now passes alone against its own pristine database — but the rule is documented in seven test files and CLAUDE.md and held by review alone. A fixture referencing `bench-press` added tomorrow gets a green CI run and silently restores the whole dependency, because `exercise` still seeds the catalog first and never cleans up. A tripwire would need to run last, and nothing does.
