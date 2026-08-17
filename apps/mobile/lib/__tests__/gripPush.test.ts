@@ -68,7 +68,8 @@ const SETS = [set(0, FUTURE_GRIP), set(1, 'neutral')];
 const LATER_SETS = [...SETS, set(2, FUTURE_GRIP)];
 
 const AT = '2026-08-01T10:00:00Z';
-const refused = () => new ApiError('unknown grip (set 1)', 'invalid_grip', 400);
+/** Shaped like the wire's — `validateSets` writes "set 1: unknown grip". */
+const refused = () => new ApiError('set 1: unknown grip', 'invalid_grip', 400);
 
 const seed = async (remote = 1) => {
   mockFixture = await migratedFixture();
@@ -98,6 +99,13 @@ const grips = (sets: { grip?: unknown }[]) => sets.map((s) => s.grip);
 const storedGrips = async () => grips(JSON.parse((await rowNow()).sets_json));
 
 beforeEach(() => {
+  // Dropped, not merely replaced by the next `seed()`. Left pointing at the
+  // previous test's database, a case that forgot to seed would find no dirty
+  // row, push nothing, and be satisfied by the state its predecessor left — a
+  // vacuous pass, demonstrated: deleting one `await seed()` kept all eleven
+  // green. Only the first test in the file failed loudly. `cacheRace.test.ts`
+  // resets it for the same reason.
+  mockFixture = undefined as never;
   mockStart.mockReset().mockResolvedValue({ session: {}, volume: {} });
   mockSets.mockReset().mockResolvedValue(undefined);
   mockFinish.mockReset().mockResolvedValue(undefined);
@@ -240,6 +248,38 @@ describe('an edit that lands mid-push', () => {
 
     expect(await storedGrips()).toEqual([null, null]);
     expect((await rowNow()).dirty).toBe(0);
+  });
+
+  /*
+   * The SAME race on a push that SUCCEEDS, which is the commoner one and had
+   * nothing pinning it at all.
+   *
+   * `pushRow` ends by clearing `dirty` under the identical
+   * `AND updated_at = ?`, and its comment says why: "or we'd mark a newer edit
+   * as already sent and silently drop it". Review measured that clause deleted
+   * against the whole suite — **1256 tests, all green**. So the guard the grip
+   * repair was modelled on was itself unguarded, and the failure needs no
+   * refused grip to happen: finish a set while an ordinary push is in flight,
+   * the row is marked clean, and that set never reaches the server. It is the
+   * `completed`-flag shape again, and `retryBlockedRow` explicitly leans on
+   * this swap to know whether a repair actually worked.
+   *
+   * Not introduced by T4 — but T4 is the branch that built the fixture able to
+   * see it, and it was one case away.
+   */
+  it('does not mark the row clean when an edit landed during a SUCCESSFUL push', async () => {
+    await seed();
+    mockSets.mockImplementationOnce(async () => {
+      await saveLocalSets('u1', 's1', LATER_SETS as never);
+    });
+
+    await pushSession('u1', 's1', async () => 'tok');
+
+    const after = await rowNow();
+    expect(JSON.parse(after.sets_json)).toEqual(LATER_SETS);
+    // Still owed to the server. Cleared here, the third set is on this phone
+    // and nowhere else, with nothing left saying so.
+    expect(after.dirty).toBe(1);
   });
 });
 

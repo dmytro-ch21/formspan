@@ -22505,6 +22505,18 @@ array mock can silently *supply* the behaviour under test. The file now runs
 against `migratedFixture()` throughout, and the mid-push edit is a real
 `saveLocalSets` against the real row, so SQLite decides.
 
+**And the guard the repair was modelled on turned out to be unguarded too.**
+`pushRow` has always ended by clearing `dirty` under the identical
+`AND updated_at = ?`, with a comment saying exactly why — "or we'd mark a newer
+edit as already sent and silently drop it". Review deleted that clause and ran
+the whole mobile suite: **1256 tests, all green.** No refused grip is needed to
+reach it; finishing a set while an ordinary push is in flight is enough, and the
+set then exists on that phone and nowhere else, with nothing recording that it
+is owed. `retryBlockedRow` leans on this same swap to decide whether a repair
+worked. It is pinned now, in the same fixture file, because that file was one
+case away from it — which is the argument for the fixture rather than for T4:
+the mock-based suite could not have seen this at all.
+
 Smaller, and the reason `gripError` exists rather than a `fmt.Errorf`: wrapping
 the sentinel gets the chain right and drags the sentinel's own text onto the
 wire, so the repair screen read "session: invalid input: unknown grip (set 2)"
