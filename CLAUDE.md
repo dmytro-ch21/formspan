@@ -288,10 +288,39 @@ seeds exactly the rows those plans name from `exercise.SeedData()`, using
 inserted** — on an already-seeded database it inserts nothing and deletes
 nothing, so it can never take a real catalog row out from under another package.
 
-**Nothing enforces the rule** — it is documented in seven test files and here,
-and held by review alone. A package that adds a fixture referencing
-`bench-press` tomorrow gets a green CI run and puts the whole dependency back,
-invisibly, because `exercise` will still be seeding for it.
+**The rule is enforced now, structurally rather than by a checker.**
+`exercise`'s three seeding tests call `removeCatalogAfterTest`, so the 762 rows
+are gone by the time any later package runs. There is no populated catalog left
+to borrow from, so a fixture that references `bench-press` without seeding it
+fails in the ordinary `go test -p 1 ./...` run with
+`unknown exercise "bench-press"` — immediately, in CI, on the PR that
+introduces it.
+
+Demonstrated both ways rather than assumed: reintroduce a borrowed id in
+`session` and the suite goes red on that test; remove the cleanup and the *same*
+regression passes, 28 packages green. That difference is the whole guarantee.
+
+Three consequences worth knowing. **If you add a fourth test in `exercise` that
+calls `Seed`, it needs `removeCatalogAfterTest` too**, or the crutch comes back
+for everything alphabetically after it. **The cleanup deletes the seeded workout
+plans first** — `cmd/seed` writes 17 of them and their items reference the
+catalog through a NO ACTION foreign key, so without that step the exercise
+delete aborts on any database `cmd/seed` has touched, leaving the suite red and
+the catalog intact. That delete is scoped to `source = 'seed'`, and an athlete's
+workout is out of reach by constraint rather than convention — migration
+000043's `workouts_owned_rows_are_never_seeded` makes owned-and-seeded a state
+the database refuses. And **both cleanups verify their catalog deletes** and
+fail the test if rows survive, because one that quietly errors would restore the
+crutch and disarm all of this without anything going red.
+
+`workout/seed_postgres_test.go` is the other place that can put catalog rows
+back — it inserts up to 45 real ids for the deploy-path tests — so its cleanup
+gets the same fail-and-verify treatment rather than a log line.
+
+This covers the *exercise* catalog only. The technique library is still seeded
+by `technique` and left behind, which is a smaller exposure — `technique` sorts
+seventeenth of nineteen, so only `theme` and `workout` follow it — but it is the
+same shape and nothing prevents it.
 
 **One related thing is NOT fixed**, and it is the worse failure mode:
 `curriculum`'s `TestEverySeededTechniqueExistsInTheLibrary` needs the *technique*
@@ -310,11 +339,10 @@ docker compose exec -T postgres psql -U vola -d vola_test -tc 'SELECT count(*) F
 `0` means it was never seeded into that database — the normal state of a
 per-branch database created by the recipe below, since that recipe migrates and
 stops. That should no longer break any package, so a failure there means
-somebody has reintroduced a borrowed id; seeding unblocks you in the moment:
-
-```bash
-cd backend && DATABASE_URL="$TEST_DATABASE_URL" go run ./cmd/seed
-```
+somebody has reintroduced a borrowed id, and **the fix is to own the row, not to
+seed the catalog.** Running `cmd/seed` by hand will make your local run pass and
+will not help in CI: `exercise` deletes the catalog again on every run there, so
+the borrowed id fails regardless of what you seeded beforehand.
 
 (Substitute your own database name if you are not on the shared `vola_test` —
 and note that `vola_test` has usually been seeded by some earlier full run,

@@ -41,6 +41,93 @@ func newTestRepo(t *testing.T) *PostgresRepository {
 	return NewPostgresRepository(pool)
 }
 
+// removeCatalogAfterTest deletes the whole seeded catalog when the test ends.
+//
+// **This is the tripwire.** Every test in this package that calls `Seed` must
+// call this first, and the reason is about the other twenty packages rather
+// than this one.
+//
+// `Seed` writes 762 rows into the database the entire suite shares, and for a
+// long time nothing removed them. `exercise` sorts fifth of nineteen, so under
+// `-p 1` every package after it ran against a fully populated catalog it had
+// not seeded — and three of them (`session`, `workout`, `profile`) quietly came
+// to depend on that, referencing real ids like `bench-press` in fixtures they
+// never owned. 37 tests across three modules were green only because of this
+// package's litter. CI leaned on it hardest: it migrates and never seeds, so
+// every CI run was the unseeded case held up by this side effect alone. All
+// three were converted on 2026-08-16 to own their rows.
+//
+// Removing the litter is what stops it coming back. With the catalog gone at
+// the end of each test here, a package that borrows a catalog id again fails
+// immediately, in the ordinary `go test -p 1 ./...` run, with
+// `unknown exercise "bench-press"` — instead of passing for months and failing
+// the first time somebody renames this package or runs one package alone.
+//
+// It is scoped to the ids `SeedData()` names, so an admin-authored row planted
+// by a neighbouring test is untouched, and it VERIFIES the delete rather than
+// logging a failure and moving on: a cleanup that silently fails would restore
+// the crutch and disarm everything above without a single test going red.
+func removeCatalogAfterTest(t *testing.T, repo *PostgresRepository) {
+	t.Helper()
+	ctx := context.Background()
+
+	catalog, err := SeedData()
+	if err != nil {
+		t.Fatalf("read seed catalog: %v", err)
+	}
+	ids := make([]string, 0, len(catalog))
+	for _, e := range catalog {
+		ids = append(ids, e.ID)
+	}
+
+	t.Cleanup(func() {
+		// The seeded PLANS go first, and this is not optional on any database
+		// `cmd/seed` has ever been run against — which includes the shared
+		// `vola_test` this suite's own docs name as the default target.
+		// `cmd/seed` writes 17 public workout plans whose 84 items reference
+		// catalog ids, and `workout_items.exercise_id` is NO ACTION, so the
+		// exercise delete below aborts on the foreign key while the catalog
+		// survives: the tripwire red AND disarmed at once. Measured, not
+		// theorised — three tests here failed that way on a seeded database.
+		//
+		// Scoped to `source = 'seed'`. An athlete's workout is unreachable by
+		// something stronger than convention: migration 000043's
+		// `workouts_owned_rows_are_never_seeded` makes owned-and-seeded a state
+		// the database refuses. Fixtures are a weaker argument — `share`'s
+		// `sh_wk_public_plan` also writes `source='seed'` — and rest on order:
+		// `share` sorts sixteenth and removes its own row, `exercise` fifth, so
+		// nothing of anyone else's exists yet when this runs. The items cascade
+		// from their plan. Same "remove the deploy's litter" as the exercise
+		// delete, one table up — and `Seed` puts both back, so nothing is lost.
+		if _, err := repo.pool.Exec(ctx,
+			`DELETE FROM workouts WHERE source = 'seed'`); err != nil {
+			t.Errorf("could not remove the seeded workout plans, which reference the "+
+				"catalog and will block its removal below: %v", err)
+			return
+		}
+		if _, err := repo.pool.Exec(ctx,
+			`DELETE FROM exercises WHERE id = ANY($1)`, ids); err != nil {
+			t.Errorf("the seeded catalog could not be removed, so it stays in the "+
+				"database this suite shares and other packages can silently start "+
+				"depending on it again. Something still references a catalog row — "+
+				"`session_sets` and `workout_items` are the two NO ACTION foreign "+
+				"keys, and whatever owns those rows should be clearing them: %v", err)
+			return
+		}
+		var left int
+		if err := repo.pool.QueryRow(ctx,
+			`SELECT count(*) FROM exercises WHERE id = ANY($1)`, ids).Scan(&left); err != nil {
+			t.Errorf("could not confirm the seeded catalog was removed: %v", err)
+			return
+		}
+		if left != 0 {
+			t.Errorf("%d of %d seeded catalog rows survived cleanup; the database this "+
+				"suite shares is polluted and the guard against borrowed fixture ids "+
+				"is off", left, len(ids))
+		}
+	})
+}
+
 // The seed content is the product here, so a malformed entry is a real
 // defect. No database needed — this guards the JSON itself.
 func TestSeedData_IsValid(t *testing.T) {
@@ -107,6 +194,7 @@ func TestValidate_RejectsBadContent(t *testing.T) {
 func TestPostgresRepository_SeedIsIdempotent(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
+	removeCatalogAfterTest(t, repo)
 
 	n1, err := Seed(ctx, repo)
 	if err != nil {
@@ -178,6 +266,7 @@ func TestPostgresRepository_SeedIsIdempotent(t *testing.T) {
 func TestPostgresRepository_ListFilters(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
+	removeCatalogAfterTest(t, repo)
 	if _, err := Seed(ctx, repo); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -258,6 +347,7 @@ func TestPostgresRepository_GetNotFound(t *testing.T) {
 func TestPostgresRepository_Media(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
+	removeCatalogAfterTest(t, repo)
 	if _, err := Seed(ctx, repo); err != nil {
 		t.Fatalf("seed: %v", err)
 	}

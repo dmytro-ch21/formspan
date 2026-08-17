@@ -20529,9 +20529,126 @@ want 1240".
   excluded". Accurate enough — a drop is not a working set under this
   definition — but the contract's wording was not revisited.
 
+## 2026-08-16 — The tripwire is `exercise` cleaning up after itself
+
+Four entries above end with the same admission: the three fixture conversions
+fixed the borrowing, and nothing stopped it coming back. A package that added a
+fixture referencing `bench-press` tomorrow would get a green CI run and restore
+the entire dependency invisibly, because `exercise` was still seeding the
+catalog first and leaving it there.
+
+The fix is not a checker. It is deleting the thing that made borrowing possible
+to hide: `exercise`'s three seeding tests now call `removeCatalogAfterTest`, so
+the 762 rows are gone by the time any later package runs. There is no populated
+catalog to lean on, so a borrowed id fails in the ordinary
+`go test -p 1 ./...` run with `unknown exercise "bench-press"` — on the PR that
+introduces it, not months later when somebody renames a package.
+
+**This is the change that would have been catastrophic a week ago**, and that is
+the neatest part of it. The `-p 1` entry named it as one of the two things that
+would turn 37 tests red across three modules nobody had touched: "giving that
+`Seed()` test the `t.Cleanup` its neighbours all have". It was the hazard.
+Once the three packages owned their rows it became the remedy, unchanged. The
+danger and the fix were the same edit; only the order mattered.
+
+### Demonstrated in both directions, because one direction proves nothing
+
+A tripwire that has never fired is indistinguishable from a comment. So the
+regression was simulated — one `ExerciseID` in `session` changed to the real
+`bench-press`, which the package does not seed:
+
+- **With the cleanup**: full `-p 1` run FAILS,
+  `unknown exercise "bench-press"` at that test.
+- **Without it**: the *same* regression passes. 28 packages, green, silent.
+
+That difference is the entire guarantee, and it is why the second run was worth
+doing. The first only shows the suite can fail.
+
+### The first version was red and disarmed on the one database that matters most
+
+Review caught this and it is the sharpest finding of the series, because the
+verification above is exactly what missed it: **every run was against a pristine
+database**, which is CI's shape but not a developer's.
+
+`cmd/seed` writes 17 public workout plans alongside the catalog, and their 84
+items reference catalog ids through `workout_items.exercise_id` — a NO ACTION
+foreign key. So on any database `cmd/seed` has ever touched, including the
+shared `vola_test` this file names as the default target, the exercise delete
+aborted on that constraint. Measured: three tests red, and **all 762 rows
+surviving** — the tripwire simultaneously broken and switched off, on precisely
+the database it most needed to clean. CI, with its throwaway Postgres, was
+perfectly green throughout.
+
+The fix is one statement ahead of the delete: remove `workouts WHERE source =
+'seed'` first, whose items cascade, and `Seed` puts both back. Same "remove the
+deploy's litter" argument, one table up.
+
+The first wording of *that* claim was itself too absolute — "a value only
+`cmd/seed` writes" — and review caught it, which is the series' defect appearing
+one more time inside the fix for the series' defect. `share`'s
+`sh_wk_public_plan` fixture writes `source='seed'` too. The safety is real but
+comes from two different places: athlete workouts are unreachable by
+*constraint* (migration 000043's `workouts_owned_rows_are_never_seeded` makes
+owned-and-seeded a state the database refuses, which is stronger than was
+claimed), while fixtures are safe by *ordering* — `share` sorts sixteenth and
+clears its own row, `exercise` fifth. Both are now stated as what they are.
+
+Re-verified on both shapes afterwards, which is what should have happened first:
+pristine and seeded databases each give 28 packages ok with 0 exercises and 0
+workouts left, and the simulated borrow fails on **both** — where before, a
+seeded database would have masked it entirely.
+
+The lesson is not about foreign keys. It is that "verified" meant "verified in
+the state CI happens to use", and the gap between that and the state a person
+actually has was invisible until somebody asked about it.
+
+### Two properties it needs to keep working
+
+- **`exercise` may no longer leave the catalog behind.** A fourth test there
+  calling `Seed` without `removeCatalogAfterTest` restores the crutch for
+  everything alphabetically after it. The helper's comment says so at the call
+  site, which is the only place someone adding such a test will be looking.
+- **`workout` is the other package that can put a piece of the catalog back**,
+  and review was right that the original wording ("`exercise` is now the only
+  one") claimed more than the code did — the recurring defect of this series,
+  committed one more time. `seed_postgres_test.go` inserts up to 45 *real*
+  catalog ids for the deploy-path tests, and its final delete only logged on
+  failure, so a silent error there would leave genuine catalog rows for a later
+  package to borrow. It now fails the test and verifies the delete, like
+  `exercise`'s does.
+- **The cleanup verifies its own delete** and fails the test if rows survive,
+  rather than logging and moving on. A cleanup that quietly errors would put the
+  762 rows back and disarm all of this without a single test going red — the
+  precise failure mode this whole series has been about, one level up.
+
+### Verified
+
+- Full `go test -p 1 ./...` on a pristine database: 28 packages ok, and
+  **0 exercises left in the database afterwards** (was 762).
+- The regression simulation above, both directions.
+- `pnpm run verify` → exit 0.
+
+### Gaps
+
+- **The technique library is still left behind**, and the pre-merge check turned
+  up a consequence sharper than "a package might borrow from it". Run the suite
+  twice against the same database and `curriculum`'s
+  `TestEverySeededTechniqueExistsInTheLibrary` **skips on the first run and
+  passes on the second** — 634 pass / 1 skip, then 635 / 0 — because the 542
+  technique rows survive. So that test is not merely skipped in CI: on any
+  reused database it silently starts passing, on residue, which is worse than a
+  skip because it looks like coverage. Same shape as the exercise crutch, one
+  library over. Deferred as **H5** because H1 is already in flight against that
+  library; noted here because the skip-versus-pass flip is the thing that will
+  confuse whoever picks it up.
+- **This constrains `exercise` in a way a future author will not expect.** The
+  package is now responsible for a property that benefits nineteen others, and
+  the only thing carrying that is a comment. If it is ever removed, the failure
+  is silent and the symptom appears somewhere else entirely.
+
 ## Open items / known gaps as of this entry
 
-- **Nothing stops a package borrowing catalog rows again.** All three holdouts are converted (`session` #231, `workout` #234, `profile`) and every module package now passes alone against its own pristine database — but the rule is documented in seven test files and CLAUDE.md and held by review alone. A fixture referencing `bench-press` added tomorrow gets a green CI run and silently restores the whole dependency, because `exercise` still seeds the catalog first and never cleans up. A tripwire would need to run last, and nothing does.
+- **The technique library is still left behind by `technique`'s tests**, exactly as the exercise catalog was until the tripwire entry above. Smaller exposure — `technique` sorts seventeenth of nineteen, so only `theme` and `workout` run after it — but the same shape: a package borrowing a technique id would pass on that residue. The same fix applies (`removeCatalogAfterTest`'s shape, scoped to the ids `SeedData()` names); deferred because H1 is already in flight against that library.
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
 - **Two position taxonomies now sit on one Library screen.** The filter chips are nine coarse families; the glossary is eleven curated entries. Since the guard split they disagree in a visible way: a beginner can read the Closed Guard card, learn the distinction, and then find no chip that filters to those 37 techniques. Adding North-South, and later Leg Entanglement, closed the cheap half each time (a position the glossary advertised that no chip could reach) — but doing it twice by hand is the evidence that hand-maintenance is the actual bug: the vocabulary is copied across four client files and one backend map, and the taxonomy PR updated one of the four until review caught it. Keying the chips on the glossary's ids, or a shared constant with a test asserting it matches positions.json, is the real answer and is design work, not a patch.
 
