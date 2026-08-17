@@ -23,7 +23,6 @@ import { totalWeightKg, contributesVolume } from './sessions';
  * local rollup able to lie.
  */
 
-/** Working, non-warm-up sets — the rule every volume count in this app shares. */
 export type SportTotals = {
   sport: string;
   sessions: number;

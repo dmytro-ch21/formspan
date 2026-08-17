@@ -16,7 +16,7 @@ import { type PlannedSession } from '@/lib/plan';
 import type { Session } from '@/lib/sessions';
 import { listLocalSessions } from '@/lib/sessionStore';
 import { formatVolume, type UnitSystem } from '@/lib/units';
-import { totalWeightKg, countsAsSet } from '@/lib/sessions';
+import { contributesVolume, countsAsSet, totalWeightKg } from '@/lib/sessions';
 
 /**
  * The training calendar: a week you can open, and a month behind it.
@@ -50,7 +50,11 @@ import { totalWeightKg, countsAsSet } from '@/lib/sessions';
  * limit and a both-day is exactly the day worth telling someone about.
  */
 
-/** Working, non-warm-up sets — the backend's own rule, mirrored. */
+/**
+ * Sets the athlete would say they did — the backend's `countsAsSet`, mirrored.
+ * A drop is part of the set above it and adds none; its work still counts in
+ * the volume below.
+ */
 function workingSets(s: Session): number {
   // A drop is part of the set above it — see `countsAsSet`.
   return s.sets.filter(countsAsSet).length;
@@ -59,7 +63,7 @@ function workingSets(s: Session): number {
 function sessionVolume(s: Session): number {
   let kg = 0;
   for (const set of s.sets) {
-    if (set.completed && set.set_type !== 'warmup' && set.weight_kg != null && set.reps != null) {
+    if (contributesVolume(set) && set.weight_kg != null && set.reps != null) {
       kg += totalWeightKg(set) * set.reps;
     }
   }

@@ -356,6 +356,12 @@ func TestTheRowCarriesAHandleAndTheVolumeRule(t *testing.T) {
 			SetType: session.SetTypeWarmup},
 		// Does NOT count: planned but never performed.
 		{ExerciseID: ex, Reps: &five, WeightKg: &hundred, Completed: false},
+		// Counts toward TONNAGE but not toward the set count. Without a drop
+		// here the feed's two rules are indistinguishable and a query using the
+		// wrong one passes green — the same trap the session module's parity
+		// fixture had to close.
+		{ExerciseID: ex, Reps: &ten, WeightKg: &twenty, Completed: true,
+			SetType: session.SetTypeDrop},
 	}
 	train(t, h, bob, "fd_v_row", "Squat day", true, sets)
 
@@ -397,7 +403,12 @@ func TestTheRowCarriesAHandleAndTheVolumeRule(t *testing.T) {
 	}
 	// And it is not vacuously equal — the fixture has to have produced work,
 	// or two zeroes would satisfy the comparison above.
-	if want.WorkingSets != 1 || want.TonnageKg != 500 {
+	//
+	// ONE set and 700 kg is the pair that matters: 5x100 from the working set
+	// plus 10x20 from the DROP, which adds its 200 to the tonnage and adds no
+	// set. Written literally rather than computed, because a computed
+	// expectation applies whatever rule the code applies and agrees with a bug.
+	if want.WorkingSets != 1 || want.TonnageKg != 700 || want.TotalReps != 15 {
 		t.Fatalf("fixture produced no working volume to compare: %+v", want)
 	}
 }

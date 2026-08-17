@@ -90,8 +90,7 @@ import {
   emptyDropSet,
   emptySet,
   setOrdinals,
-  contributesVolume,
-  countsAsSet,
+  localVolume,
   soloReps,
   withSetChange,
   fetchSuggestions,
@@ -108,7 +107,6 @@ import {
   type Suggestion,
   type SuggestionCode,
   type Volume,
-  totalWeightKg,
 } from '@/lib/sessions';
 import { getWorkout } from '@/lib/workouts';
 
@@ -1976,44 +1974,6 @@ function RepRangePips({
   );
 }
 
-function localVolume(sets: LoggedSet[]): Volume {
-  const v: Volume = {
-    working_sets: 0,
-    total_reps: 0,
-    tonnage_kg: 0,
-    hardest_rpe: 0,
-    exercise_ids: [],
-  };
-  for (const s of sets) {
-    if (!v.exercise_ids.includes(s.exercise_id)) v.exercise_ids.push(s.exercise_id);
-    // Must match the server's rule exactly. Missing this on the first pass
-    // showed the plan's full volume against a column of unticked sets —
-    // precisely the drift this duplicated arithmetic risks.
-    if (!contributesVolume(s)) continue;
-    // The COUNT takes the narrower rule while the sums below take the wider
-    // one — a drop adds work but not a set. Both live in `lib/sessions.ts`
-    // rather than being spelled out here, because this function has now been
-    // the one missed TWICE: once when per-side load landed and the tile read
-    // half the history's tonnage, and again here. Inline predicates are how a
-    // duplicated rule drifts, and this is the duplicate furthest from the
-    // original.
-    if (countsAsSet(s)) {
-      v.working_sets++;
-    }
-    if (s.rpe != null && s.rpe > v.hardest_rpe) v.hardest_rpe = s.rpe;
-    if (s.reps != null) {
-      v.total_reps += s.reps;
-      // `totalWeightKg`, not the raw number: for a PAIR of dumbbells
-      // `weight_kg` is one of the two. The comment above promises this matches
-      // the server's rule, and for a while it silently did not — this tile and
-      // the finish-card sat next to a Today header and a calendar that had all
-      // been converted, so one session read half on one screen and double on
-      // another. Same phone, same session.
-      if (s.weight_kg != null) v.tonnage_kg += s.reps * totalWeightKg(s);
-    }
-  }
-  return v;
-}
 
 function SetRow({
   index,

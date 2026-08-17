@@ -314,7 +314,18 @@ func Progress(in ProgressionInput, now time.Time) Plan {
 	// the client shows both, and neither has to infer the other.
 	p.LastReps = top.Reps
 	p.LastAssistedReps = top.AssistedReps
-	p.WorkingSets = len(sets)
+	// Drops excluded, same as everywhere else. This is report-only evidence —
+	// no rule branch reads it — but the web progression card renders it as
+	// "across N sets", so leaving it as len(sets) put "4" beside a session the
+	// rows, the tile, the history and the feed all called 3. The same
+	// one-screen-two-answers bug this change exists to close, on the one
+	// surface nobody thought to look at. Found in review.
+	p.WorkingSets = 0
+	for _, s := range sets {
+		if s.SetType != SetTypeDrop {
+			p.WorkingSets++
+		}
+	}
 	p.TargetWeightKg = &weight
 
 	minReps, maxReps := repSpread(sets)
