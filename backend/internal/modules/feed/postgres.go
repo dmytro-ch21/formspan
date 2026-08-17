@@ -87,6 +87,24 @@ const visibleFrom = `
 // session list are untouched and complete; this is a window on one surface.
 const FeedWindow = 3 * 24 * time.Hour
 
+// pageQuery is a const rather than an inline string so a test can EXPLAIN the
+// SQL the repository actually runs.
+//
+// `sessions_user_ended_idx` only pays off while the window stays a boundary
+// seek on that index. Nothing in the query says so, and the failure is silent:
+// reorder a predicate, wrap `ended_at` in a cast or a `date_trunc`, add an OR,
+// and Postgres quietly demotes it to a Filter over every friend's lifetime of
+// training — the exact plan this index was added to remove. Only the plan can
+// tell you, so the test reads the plan, and it can only read the real one if
+// there is one string. Inline, the test would have had to restate the SQL, and
+// a restated query proves the copy is fast.
+const pageQuery = `
+		SELECT s.id, p.username, p.display_name, s.sport, s.name, s.started_at, s.ended_at,
+		       p.share_training_details,` +
+	workingVolume + visibleFrom + `
+		ORDER BY s.ended_at DESC, s.id
+		LIMIT $3 OFFSET $4`
+
 // workingVolume mirrors session.Summarise's rule in SQL.
 //
 // **A DUPLICATION, and a knowing one.** `Summarise` is deliberately in the
@@ -175,12 +193,7 @@ func (r *PostgresRepository) List(ctx context.Context, userID string, limit, off
 	// that is when it became visible: a session started on Monday and finished
 	// on Tuesday arrives in the feed on Tuesday, and a feed whose rows appear
 	// below ones you have already scrolled past is a feed that hides things.
-	rows, err := r.pool.Query(ctx, `
-		SELECT s.id, p.username, p.display_name, s.sport, s.name, s.started_at, s.ended_at,
-		       p.share_training_details,`+
-		workingVolume+visibleFrom+`
-		ORDER BY s.ended_at DESC, s.id
-		LIMIT $3 OFFSET $4`, ids, since, limit, offset)
+	rows, err := r.pool.Query(ctx, pageQuery, ids, since, limit, offset)
 	if err != nil {
 		return page, fmt.Errorf("feed: list: %w", err)
 	}

@@ -22176,6 +22176,72 @@ each word binds its own and Postgres refuses a statement over 65,535 of them.
   cases and it is not a relevance model; a short name will tend to outrank a long
   one containing the same words.
 
+## 2026-08-17 — The feed read every friend's lifetime to show three days
+
+**N14.** `sessions` carried two indexes, neither of which the feed could use
+for the thing it does. `sessions_user_started_idx (user_id, started_at DESC)`
+matched the friend list, so Postgres took it — and then applied
+`ended_at IS NOT NULL AND ended_at >= $2` as a **Filter** over everything it
+came back with. Measured on 200k sessions across 500 users, ten friends:
+
+| | before | after |
+|---|---|---|
+| rows fetched from `sessions` | 4000 | 81 |
+| Rows Removed by Filter | 3919 | none |
+| shared buffers | 515 | 49 |
+
+The number that matters is not 515→49, it is what 4000 was proportional to.
+The feed asks "what did my friends do in the last three days" and was paying
+for **how long they have been training** — an athlete two years in costs
+twenty times an athlete two weeks in, for the same three days of answer. That
+is invisible today because nobody's history is long yet, and it gets worse
+every week the product succeeds.
+
+`sessions_user_ended_idx (user_id, ended_at DESC) WHERE ended_at IS NOT NULL`.
+The equality leads, the range follows and becomes a boundary seek, and the
+index then supplies `ORDER BY ended_at DESC` in order. Partial because every
+reader of `ended_at` also demands it be non-null, and because it keeps the
+index off the rows being written most — the live ones.
+
+### The test reads the plan, because nothing else can see this
+
+Every existing feed test passes identically with and without the index: the
+rows returned are the same rows. A correctness suite is structurally blind to
+this class of bug, which is most of why it survived to be found by reading.
+
+So `TestTheWindowIsASeekNotASift` seeds ~4000 sessions (enough that a Seq Scan
+is genuinely wrong — at small scale Postgres reads the whole table whatever
+exists, and the test would be asserting the small-table shortcut), runs
+`EXPLAIN (ANALYZE)` and asserts two separate things: the index is chosen, and
+`ended_at` appears under `Index Cond` and never under `Filter`.
+
+Two assertions rather than one because **an index can be used and the window
+still sifted** — that was precisely the old plan, using
+`sessions_user_started_idx` for the friend list alone. Verified by mutation,
+both halves independently: dropping the index fails all three checks; an index
+with the right NAME on `(user_id)` alone leaves the name check passing and
+fails the seek checks. A guard that only asked "is an index used" would have
+called the original bug fixed.
+
+That required `pageQuery` to become a const. The test EXPLAINs the exact string
+the repository runs — restate the SQL in the test and it proves the copy is
+fast, which is the same defect as a mock supplying the behaviour under test,
+and this repo has shipped that one before.
+
+### Open questions this leaves
+
+- **`sessioncard`'s neighbour queries have the same shape**
+  (`user_id`, `ended_at IS NOT NULL`, `ORDER BY ended_at DESC, id`) and should
+  now use this index too — not measured, because they are single-row lookups
+  bounded by LIMIT 1 rather than a window scan. Worth an EXPLAIN if they ever
+  show up slow.
+- **Not `CONCURRENTLY`**, because golang-migrate runs each migration in a
+  transaction. Fine at today's table size; a `sessions` big enough for the
+  ACCESS SHARE lock to matter needs this applied out-of-band instead.
+- **Nothing watches for the next one.** This was found by reading a query, not
+  by an alarm. There is no slow-query log, no plan regression check in CI, and
+  the next index-shaped bug will be found the same way.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.

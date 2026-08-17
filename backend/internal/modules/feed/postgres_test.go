@@ -1016,3 +1016,94 @@ func TestTheRuleIsSharedNotCopied(t *testing.T) {
 			"is not a set, but its weight was still moved")
 	}
 }
+
+// TestTheWindowIsASeekNotASift reads the query PLAN, because correctness tests
+// cannot see this bug at all.
+//
+// Every other test in this file passes identically with and without
+// `sessions_user_ended_idx` — the rows returned are the same rows. What
+// changes is how many are touched to find them, and the old plan touched every
+// finished session a friend had EVER logged, then discarded the ones outside
+// three days. Measured before the index, on 200k sessions across 500 users:
+// 4000 rows fetched, 3919 Rows Removed by Filter, to return 81. The cost grew
+// with an athlete's training history rather than with their week, which for a
+// "what are my friends doing" query is the one scaling property that is not
+// allowed.
+//
+// So this asserts two things the plan makes visible and nothing else does:
+// that the index is the one chosen, and that the 3-day window is an Index Cond
+// rather than a Filter. The second is the load-bearing half — a plan can use
+// the index for the friend list alone and still sift the window, which is
+// precisely what `sessions_user_started_idx` was already doing.
+func TestTheWindowIsASeekNotASift(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+
+	me := person(t, h.pool, "plan-me", "planme", true)
+	mate := person(t, h.pool, "plan-mate", "planmate", true)
+	befriend(t, h, me, "planme", mate, "planmate")
+
+	// Enough history to make a Seq Scan the wrong answer, and skewed the way
+	// real training is: a long tail outside the window, a handful inside it.
+	// With a few rows Postgres reads the whole table whatever indexes exist,
+	// and the test would assert the planner's small-table shortcut instead of
+	// the fix.
+	if _, err := h.pool.Exec(ctx, `
+		INSERT INTO sessions (id, user_id, sport, name, started_at, ended_at, created_at, updated_at)
+		SELECT gen_random_uuid(), $1, 'strength', 'history '||g,
+		       now() - (g || ' hours')::interval,
+		       now() - (g || ' hours')::interval + interval '1 hour',
+		       now(), now()
+		FROM generate_series(1, 4000) g`, mate); err != nil {
+		t.Fatalf("seed history: %v", err)
+	}
+	// ANALYZE, or the planner works from stats that predate these rows and
+	// picks a plan for a table it thinks is empty.
+	if _, err := h.pool.Exec(ctx, `ANALYZE sessions`); err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+
+	// The repository's OWN SQL — see pageQuery. A restated query here would
+	// only prove the restatement is fast.
+	since := time.Now().UTC().Add(-FeedWindow)
+	rows, err := h.pool.Query(ctx,
+		"EXPLAIN (ANALYZE, COSTS OFF) "+pageQuery,
+		[]string{mate}, since, 20, 0)
+	if err != nil {
+		t.Fatalf("explain: %v", err)
+	}
+	defer rows.Close()
+	var plan strings.Builder
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			t.Fatalf("scan plan: %v", err)
+		}
+		plan.WriteString(line)
+		plan.WriteString("\n")
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("plan rows: %v", err)
+	}
+	got := plan.String()
+
+	if !strings.Contains(got, "sessions_user_ended_idx") {
+		t.Errorf("the feed is not using sessions_user_ended_idx; plan was:\n%s", got)
+	}
+	// The window has to be INSIDE the index condition. `ended_at` appearing
+	// under `Filter:` means it is being sifted after the fetch, which is the
+	// regression — and it reads as a passing plan to anyone who only checks
+	// that an index appears somewhere.
+	indexed := false
+	for _, line := range strings.Split(got, "\n") {
+		if strings.Contains(line, "Index Cond:") && strings.Contains(line, "ended_at") {
+			indexed = true
+		}
+		if strings.Contains(line, "Filter:") && strings.Contains(line, "ended_at") {
+			t.Errorf("the 3-day window is a Filter, not a seek — every lifetime row is being read:\n%s", got)
+		}
+	}
+	if !indexed {
+		t.Errorf("no Index Cond carries ended_at; the window is not a boundary seek:\n%s", got)
+	}
+}
