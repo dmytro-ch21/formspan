@@ -2089,14 +2089,22 @@ components:
           type: number
           nullable: true
           description: >
-            Brzycki with effort folded in — the same estimate `/records`
-            publishes, computed once so the two can never disagree. Null when
-            no set supports one.
-        one_rm_reps:
+            Brzycki with effort folded in, via the same `EstimateSetOneRM`
+            `/records` uses — so an assisted set is estimated from the reps
+            done unaided and the two surfaces cannot publish different bests
+            for one set. Null when no set supports one, including when every
+            rep of the only candidate was assisted.
+        best_1rm_reps:
           type: integer
           nullable: true
-          description: The set behind the estimate. A modelled number with no evidence cannot be checked.
-        one_rm_weight_kg: { type: number, nullable: true }
+          description: >
+            The set behind the estimate — a modelled number with no evidence
+            cannot be checked. This is the FULL rep count, with
+            `best_1rm_assisted_reps` alongside, matching how `/records` reports
+            evidence; the estimate itself derives from the solo count, so the
+            two only reconcile when both are shown.
+        best_1rm_weight_kg: { type: number, nullable: true }
+        best_1rm_assisted_reps: { type: integer, nullable: true }
         tonnage_kg:
           type: number
           description: This exercise's share of the session, under the one tonnage rule — implements folded in, drops counted, warm-ups excluded.
@@ -5991,6 +5999,8 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: No such exercise in the catalog.
           content:

@@ -692,6 +692,14 @@ func (h *Handler) LoadHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	hist, err := h.repo.LoadHistory(r.Context(), claims.UserID, exerciseID, f)
+	if errors.Is(err, ErrNotFound) {
+		// Mapped here rather than through `writeErr`, whose shared message says
+		// "session not found" — true for every other caller and wrong for this
+		// one, where the missing thing is a catalog entry.
+		apihttp.WriteError(w, http.StatusNotFound, apihttp.CodeNotFound,
+			"exercise not found")
+		return
+	}
 	if err != nil {
 		writeErr(w, r, err)
 		return

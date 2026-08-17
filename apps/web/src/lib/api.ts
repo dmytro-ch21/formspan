@@ -2090,9 +2090,15 @@ export type LoadPoint = {
    * strongest athlete's chart as a collapse.
    */
   best_1rm_kg: number | null;
-  /** The set behind the estimate, so a modelled number can be checked. */
-  one_rm_reps: number | null;
-  one_rm_weight_kg: number | null;
+  /**
+   * The set behind the estimate, so a modelled number can be checked.
+   * `best_1rm_reps` is the FULL count with the assisted figure alongside — the
+   * estimate itself comes from the solo count, so showing one without the
+   * other cannot be reconciled.
+   */
+  best_1rm_reps: number | null;
+  best_1rm_weight_kg: number | null;
+  best_1rm_assisted_reps: number | null;
   tonnage_kg: number;
   sets: number;
   reps: number;

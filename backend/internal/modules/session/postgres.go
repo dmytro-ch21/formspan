@@ -1498,8 +1498,8 @@ func (r *PostgresRepository) LoadHistory(
 	// of that day's work.
 	rows, err := r.pool.Query(ctx, `
 		WITH scoped AS (
-			SELECT ss.session_id, s.started_at,
-			       ss.reps, ss.weight_kg, ss.rir, ss.rpe,
+			SELECT ss.session_id, s.started_at, ss.position,
+			       ss.reps, ss.assisted_reps, ss.weight_kg, ss.rir, ss.rpe,
 			       COALESCE(`+SQLTonnage+`, 0) AS tonnage,
 			       (`+SQLCountsAsSet+`) AS counts_as_set
 			FROM session_sets ss
@@ -1514,11 +1514,15 @@ func (r *PostgresRepository) LoadHistory(
 			ORDER BY started_at DESC, session_id DESC
 			LIMIT $`+fmt.Sprint(limitArg)+`
 		)
-		SELECT sc.session_id, sc.started_at, sc.reps, sc.weight_kg, sc.rir, sc.rpe,
-		       sc.tonnage, sc.counts_as_set
+		SELECT sc.session_id, sc.started_at, sc.reps, sc.assisted_reps,
+		       sc.weight_kg, sc.rir, sc.rpe, sc.tonnage, sc.counts_as_set
 		FROM scoped sc
 		JOIN recent rc ON rc.session_id = sc.session_id
-		ORDER BY sc.started_at ASC, sc.session_id ASC`, args...)
+		-- position orders rows WITHIN a session, which nothing else does. The
+		-- Go tie-break keeps the first set to reach an estimate, and without
+		-- this the "first" was whatever order the join happened to emit, so two
+		-- sets tying on the estimate flipped the evidence between requests.
+		ORDER BY sc.started_at ASC, sc.session_id ASC, sc.position ASC`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("session: load history: %w", err)
 	}
@@ -1530,13 +1534,14 @@ func (r *PostgresRepository) LoadHistory(
 		var sessionID string
 		var startedAt time.Time
 		var reps *int
+		var assistedReps *int
 		var weightKg *float64
 		var rir *int
 		var rpe *float64
 		var tonnage float64
 		var countsAsSet bool
-		if err := rows.Scan(&sessionID, &startedAt, &reps, &weightKg, &rir, &rpe,
-			&tonnage, &countsAsSet); err != nil {
+		if err := rows.Scan(&sessionID, &startedAt, &reps, &assistedReps, &weightKg,
+			&rir, &rpe, &tonnage, &countsAsSet); err != nil {
 			return nil, fmt.Errorf("session: load history scan: %w", err)
 		}
 
@@ -1559,15 +1564,23 @@ func (r *PostgresRepository) LoadHistory(
 			w := *weightKg
 			p.TopWeightKg = &w
 		}
-		if reps != nil && weightKg != nil {
-			// Ties keep the FIRST set that reached the estimate, which is the
-			// earlier one in the session — an estimate matched later in the
-			// same session is not new evidence.
-			if est, ok := EstimateOneRM(*reps, *weightKg, rir, rpe); ok &&
-				(p.BestOneRMKg == nil || est > *p.BestOneRMKg) {
-				e, rr, ww := est, *reps, *weightKg
-				p.BestOneRMKg, p.OneRMReps, p.OneRMWeightKg = &e, &rr, &ww
-			}
+		// `EstimateSetOneRM`, not the bare `EstimateOneRM` — and this is the
+		// whole reason `assisted_reps` is selected above. A set of 8 with 3
+		// assisted demonstrates 5 unaided; estimating from 8 publishes a number
+		// `/records` does not agree with, for the same set, on the same screen
+		// (115.3 vs 127.2 at 102.5kg). Worse, reusing the recorded RIR
+		// alongside the full count compounds it. The trap is documented on
+		// `Set` and this was the fourth query to walk into it — found by
+		// review, not by the suite, which is why there is now a fixture.
+		if est, ok := EstimateSetOneRM(Set{
+			Reps: reps, AssistedReps: assistedReps, WeightKg: weightKg, RIR: rir, RPE: rpe,
+		}); ok && (p.BestOneRMKg == nil || est > *p.BestOneRMKg) {
+			// Ties keep the FIRST set that reached the estimate — an estimate
+			// matched later is not new evidence. `position` in the ORDER BY is
+			// what makes "first" mean anything.
+			e, rr, ww := est, *reps, *weightKg
+			p.BestOneRMKg, p.BestOneRMReps, p.BestOneRMWeightKg = &e, &rr, &ww
+			p.BestOneRMAssistedReps = assistedReps
 		}
 	}
 	if err := rows.Err(); err != nil {

@@ -114,8 +114,12 @@ export function LoadHistoryChart({
             aria-pressed={m.key === metric.key}
             className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
               m.key === metric.key
-                ? "border-lime bg-lime/10 text-lime"
-                : "border-line text-text-dim hover:text-text"
+                ? // `text-lime-ink`, not `text-lime`: lime on a 10% wash of its
+                  // own hue measures 2.95:1 in light mode, below AA, and
+                  // `--c-lime-ink` exists for exactly this pairing (5.57:1)
+                  // while resolving to the same neon on dark.
+                  "border-lime bg-lime/10 text-lime-ink"
+                : "border-line text-text-muted hover:text-text"
             }`}
           >
             {m.label}
@@ -124,13 +128,26 @@ export function LoadHistoryChart({
       </div>
 
       {present.length === 0 ? (
-        // Not an error, and worth saying which metric is missing rather than
-        // showing an empty frame: high-rep work genuinely supports no estimate.
+        // Not an error, and the REASON matters: for a plank or a run, no
+        // weight-based metric can ever have a value, and telling that athlete
+        // about rep-max formulas would be answering a question they did not
+        // ask. `load_type` is on the response precisely so this can tell the
+        // two apart.
         <p className="text-sm text-text-dim">
-          None of these {history.points.length} sessions has a value for{" "}
-          {metric.label.toLowerCase()}.
-          {metric.key === "1rm" &&
-            " An estimate needs a set of about twelve reps or fewer — every rep-max formula diverges past that."}
+          {carriesLoad(history.load_type) ? (
+            <>
+              None of these {history.points.length} sessions has a value for{" "}
+              {metric.label}.
+              {metric.key === "1rm" &&
+                " An estimate needs a set of about twelve reps or fewer — every rep-max formula diverges past that."}
+            </>
+          ) : (
+            <>
+              {metric.label} needs an external load, and this exercise is
+              measured in {measuredIn(history.load_type)}. Its record is on the
+              card above.
+            </>
+          )}
         </p>
       ) : (
         <Plot series={series} metric={metric} units={units} />
@@ -249,8 +266,13 @@ function Plot({
               r={3}
               className="fill-lime"
             >
-              {/* A native <title> is the tooltip: it works without JS, it is
-                  read by screen readers, and it cannot drift from the data. */}
+              {/* A native <title> is the tooltip: it works without JS and
+                  cannot drift from the data. It is NOT the accessible surface
+                  — role="img" above makes the svg an opaque leaf, so these
+                  are excluded from the accessibility tree, and they are
+                  hover-only on a 3px target besides. The evidence table below
+                  is what carries this to a keyboard or a screen reader; do not
+                  remove it believing these cover it. */}
               <title>
                 {shortDate(s.point.started_at)}: {metric.format(s.raw, units)}
               </title>
@@ -333,16 +355,27 @@ function EvidenceTable({
                       metric.format(v, units)
                     )}
                   </td>
+                  {/* `reps` is the SESSION TOTAL, not reps per set, so a
+                      "×" here would read as a multiplication and state a
+                      rep count nobody did. On this page "×" already means
+                      reps × weight. */}
                   <td className="py-1 pr-4">
-                    {p.sets} × {p.reps} reps
+                    {p.sets} set{p.sets === 1 ? "" : "s"} · {p.reps} reps
                   </td>
                   <td className="py-1 text-text-dim">
                     {/* Only the estimate is a modelled number, so only it
                         needs its working shown. */}
                     {metric.key === "1rm" &&
-                    p.one_rm_reps !== null &&
-                    p.one_rm_weight_kg !== null
-                      ? `from ${formatWeight(p.one_rm_weight_kg, units)} × ${p.one_rm_reps}`
+                    p.best_1rm_reps !== null &&
+                    p.best_1rm_weight_kg !== null
+                      ? `from ${formatWeight(p.best_1rm_weight_kg, units)} × ${p.best_1rm_reps}${
+                          // The estimate derives from the SOLO reps, so the
+                          // full count only reconciles with it when the
+                          // assistance is shown too.
+                          p.best_1rm_assisted_reps
+                            ? ` (${p.best_1rm_reps - p.best_1rm_assisted_reps} alone)`
+                            : ""
+                        }`
                       : ""}
                   </td>
                 </tr>
@@ -353,6 +386,36 @@ function EvidenceTable({
       </div>
     </details>
   );
+}
+
+/**
+ * Whether an exercise carries an external weight at all.
+ *
+ * Every metric this chart offers is a weight, so for a plank or a run there is
+ * nothing to plot and never will be — a different answer from "you have not
+ * lifted heavy enough recently", and the reason `load_type` is on the response.
+ *
+ * `weight_reps` is the whole list, matching the backend's `RecordKindsFor`:
+ * it is the only load type that yields a weight record. Kept as a function
+ * rather than inlined so it reads as the deliberate one-case rule it is.
+ */
+function carriesLoad(loadType: string): boolean {
+  return loadType === "weight_reps";
+}
+
+function measuredIn(loadType: string): string {
+  switch (loadType) {
+    case "reps":
+      return "reps";
+    case "time":
+      return "time";
+    case "distance":
+      return "distance";
+    case "distance_time":
+      return "distance and time";
+    default:
+      return "something other than weight";
+  }
 }
 
 function shortDate(iso: string): string {

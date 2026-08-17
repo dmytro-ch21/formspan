@@ -52,14 +52,22 @@ type LoadPoint struct {
 	// applied to a missing weigh-in — a chart's default is to invent a line
 	// across the hole.
 	BestOneRMKg *float64 `json:"best_1rm_kg"`
-	// OneRMReps and OneRMWeightKg are the set that produced the estimate.
+	// BestOneRMReps, BestOneRMWeightKg and BestOneRMAssistedReps are the set
+	// that produced the estimate.
 	//
 	// Carried for the same reason `Record.AssistedReps` is: a modelled number
 	// with no evidence under it cannot be checked, and "112kg" means something
-	// different when it came from 100×5 than from 110×2. Web shows the
-	// evidence; this is what it shows.
-	OneRMReps     *int     `json:"one_rm_reps"`
-	OneRMWeightKg *float64 `json:"one_rm_weight_kg"`
+	// different when it came from 100×5 than from 110×2.
+	//
+	// **Reps is the FULL count and assisted rides alongside**, matching how
+	// `Record` reports evidence — so a client can render "8 (5 alone)". The
+	// estimate itself is computed from the SOLO count by `EstimateSetOneRM`;
+	// showing the full count under a solo-derived number without the assisted
+	// figure beside it would make the evidence unrecheckable, which is exactly
+	// the mismatch `Record` documents having produced once.
+	BestOneRMReps         *int     `json:"best_1rm_reps"`
+	BestOneRMWeightKg     *float64 `json:"best_1rm_weight_kg"`
+	BestOneRMAssistedReps *int     `json:"best_1rm_assisted_reps"`
 
 	// TonnageKg is this exercise's contribution to the session, under the one
 	// tonnage rule (`SQLTonnage`) — implements included, drops included,

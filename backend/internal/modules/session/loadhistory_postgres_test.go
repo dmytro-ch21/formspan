@@ -202,7 +202,7 @@ func TestLoadHistory_NoEstimableSetIsAGapNotAZero(t *testing.T) {
 	if got.Points[0].TopWeightKg == nil || *got.Points[0].TopWeightKg != 60 {
 		t.Errorf("the session is still real: top weight = %v, want 60", got.Points[0].TopWeightKg)
 	}
-	if got.Points[0].OneRMReps != nil || got.Points[0].OneRMWeightKg != nil {
+	if got.Points[0].BestOneRMReps != nil || got.Points[0].BestOneRMWeightKg != nil {
 		t.Error("evidence was carried for an estimate that does not exist")
 	}
 
@@ -220,10 +220,10 @@ func TestLoadHistory_NoEstimableSetIsAGapNotAZero(t *testing.T) {
 			got.Points[1].BestOneRMKg, want)
 	}
 	// The evidence names the set that won, so a modelled number can be checked.
-	if got.Points[1].OneRMReps == nil || *got.Points[1].OneRMReps != 5 ||
-		got.Points[1].OneRMWeightKg == nil || *got.Points[1].OneRMWeightKg != 100 {
+	if got.Points[1].BestOneRMReps == nil || *got.Points[1].BestOneRMReps != 5 ||
+		got.Points[1].BestOneRMWeightKg == nil || *got.Points[1].BestOneRMWeightKg != 100 {
 		t.Errorf("evidence = %v x %v, want 5 x 100",
-			got.Points[1].OneRMReps, got.Points[1].OneRMWeightKg)
+			got.Points[1].BestOneRMReps, got.Points[1].BestOneRMWeightKg)
 	}
 }
 
@@ -253,10 +253,10 @@ func TestLoadHistory_BestEstimateIsNotTheHeaviestSet(t *testing.T) {
 	}
 	// The two point at different sets, which is the property. If the estimate
 	// were taken from the top set this reads 110.
-	if p.OneRMWeightKg == nil || *p.OneRMWeightKg != 100 {
+	if p.BestOneRMWeightKg == nil || *p.BestOneRMWeightKg != 100 {
 		t.Errorf("the estimate came from the %vkg set; 5x100 is stronger evidence "+
 			"than 1x110 and the two record kinds must be free to disagree",
-			p.OneRMWeightKg)
+			p.BestOneRMWeightKg)
 	}
 }
 
@@ -357,5 +357,112 @@ func TestLoadHistory_UnknownExerciseIsNotFound(t *testing.T) {
 	if got.Points == nil {
 		t.Error("points must serialise as [] rather than null — a client mapping over " +
 			"null is a crash, and this is the common first-use case")
+	}
+}
+
+// An assisted set is estimated from the reps done UNAIDED, because that is what
+// /records publishes for the same set. This is the finding review caught: the
+// query did not select assisted_reps at all, so a spotted or band-assisted set
+// estimated from its full count and the two screens disagreed — 8 assisted-by-3
+// at 102.5kg reads 115.3 on the records page and 127.2 here.
+//
+// The trap is documented on `Set`: a query that does not SELECT assisted_reps
+// hydrates every set with it permanently nil, and nothing complains. This was
+// the fourth query to walk into it.
+func TestLoadHistory_AnAssistedSetIsEstimatedFromSoloReps(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const user = "user_lh_assist"
+
+	f := histAt("ses-lh-assist", user, "strength", time.Date(2024, 12, 1, 12, 0, 0, 0, time.UTC), time.Hour, []Set{
+		{
+			ExerciseID: exPullUp, SetType: SetTypeWorking,
+			Reps: ptrInt(8), AssistedReps: ptrInt(3), WeightKg: ptrF(102.5),
+			Completed: true,
+		},
+	})
+	cleanup(t, pool, f.ID)
+	if _, err := repo.Create(ctx, f); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	got, err := repo.LoadHistory(ctx, user, exPullUp, LoadHistoryFilter{})
+	if err != nil {
+		t.Fatalf("load history: %v", err)
+	}
+	if len(got.Points) != 1 {
+		t.Fatalf("want 1 point, got %d", len(got.Points))
+	}
+	p := got.Points[0]
+
+	// The same function every other 1RM surface uses, rather than a number
+	// spelled out here — hard-coding would pass while letting this endpoint
+	// drift from /records the day the rule changes.
+	want, ok := EstimateSetOneRM(Set{
+		Reps: ptrInt(8), AssistedReps: ptrInt(3), WeightKg: ptrF(102.5),
+	})
+	if !ok {
+		t.Fatal("EstimateSetOneRM refused the fixture")
+	}
+	if p.BestOneRMKg == nil || *p.BestOneRMKg != want {
+		t.Errorf("best 1RM = %v, want %v — an assisted set must be estimated from "+
+			"the reps done unaided, exactly as /records does it",
+			p.BestOneRMKg, want)
+	}
+	// And the naive reading must NOT be what came back.
+	naive, _ := EstimateOneRM(8, 102.5, nil, nil)
+	if p.BestOneRMKg != nil && *p.BestOneRMKg == naive {
+		t.Errorf("best 1RM = %v is the estimate from the FULL rep count — "+
+			"assisted_reps is being ignored", naive)
+	}
+
+	// The evidence carries the full count AND the assistance, matching how
+	// Record reports it. Showing 8 under a solo-5 estimate with no assisted
+	// figure beside it is unrecheckable.
+	if p.BestOneRMReps == nil || *p.BestOneRMReps != 8 {
+		t.Errorf("evidence reps = %v, want the full count 8", p.BestOneRMReps)
+	}
+	if p.BestOneRMAssistedReps == nil || *p.BestOneRMAssistedReps != 3 {
+		t.Errorf("evidence assisted = %v, want 3 — without it the full rep count "+
+			"cannot be reconciled with the estimate", p.BestOneRMAssistedReps)
+	}
+}
+
+// A window with only one bound. The both-bounds case is covered above; a
+// previous endpoint of mine mis-numbered parameters in exactly the one-bound
+// case, so both halves are exercised rather than assumed.
+func TestLoadHistory_ASingleBoundStillScopes(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const user = "user_lh_onebound"
+
+	for i, day := range []int{1, 10, 20} {
+		f := histAt(
+			"ses-lh-ob-"+string(rune('a'+i)), user, "strength",
+			time.Date(2025, 1, day, 12, 0, 0, 0, time.UTC), time.Hour, []Set{
+				{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(5), WeightKg: ptrF(100), Completed: true},
+			})
+		cleanup(t, pool, f.ID)
+		if _, err := repo.Create(ctx, f); err != nil {
+			t.Fatalf("create %s: %v", f.ID, err)
+		}
+	}
+
+	from := time.Date(2025, 1, 15, 0, 0, 0, 0, time.UTC)
+	got, err := repo.LoadHistory(ctx, user, exSquat, LoadHistoryFilter{From: &from})
+	if err != nil {
+		t.Fatalf("from-only: %v", err)
+	}
+	if len(got.Points) != 1 || got.Points[0].SessionID != "ses-lh-ob-c" {
+		t.Fatalf("from-only should keep the 20th alone, got %+v", got.Points)
+	}
+
+	to := time.Date(2025, 1, 5, 0, 0, 0, 0, time.UTC)
+	got, err = repo.LoadHistory(ctx, user, exSquat, LoadHistoryFilter{To: &to})
+	if err != nil {
+		t.Fatalf("to-only: %v", err)
+	}
+	if len(got.Points) != 1 || got.Points[0].SessionID != "ses-lh-ob-a" {
+		t.Fatalf("to-only should keep the 1st alone, got %+v", got.Points)
 	}
 }

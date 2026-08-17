@@ -394,9 +394,16 @@ function ProgressSection({
       </button>
       {open && (
         <div className="mt-3">
-          {loading && <p className="text-sm text-text-dim">Loading…</p>}
+          {loading && (
+            <p className="text-sm text-text-dim" aria-live="polite">
+              Loading…
+            </p>
+          )}
           {error && (
-            <p className="text-sm text-danger">
+            // `role="alert"`, matching the page-level error: without it a
+            // screen-reader user activates the disclosure, the fetch fails,
+            // and nothing is announced at all.
+            <p className="text-sm text-danger" role="alert">
               {error}{" "}
               <button type="button" onClick={load} className="underline">
                 Try again
