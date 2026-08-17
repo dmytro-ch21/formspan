@@ -22198,10 +22198,14 @@ is invisible today because nobody's history is long yet, and it gets worse
 every week the product succeeds.
 
 `sessions_user_ended_idx (user_id, ended_at DESC) WHERE ended_at IS NOT NULL`.
-The equality leads, the range follows and becomes a boundary seek, and the
-index then supplies `ORDER BY ended_at DESC` in order. Partial because every
-reader of `ended_at` also demands it be non-null, and because it keeps the
-index off the rows being written most — the live ones.
+The equality leads and the range follows, becoming a boundary seek. It does
+**not** remove the sort — a first draft of this entry said it did, and the
+measurement it was written from shows a `top-N heapsort` sitting there in both
+plans. The order is `ended_at DESC, s.id`, and a multi-friend `= ANY` cannot
+emit globally ordered rows regardless. What changed is the sort's INPUT: 81
+rows instead of 4000. Partial because every reader of `ended_at` also demands
+it be non-null, and because it keeps the index off the rows being written most
+— the live ones.
 
 ### The test reads the plan, because nothing else can see this
 
@@ -22217,11 +22221,25 @@ exists, and the test would be asserting the small-table shortcut), runs
 
 Two assertions rather than one because **an index can be used and the window
 still sifted** — that was precisely the old plan, using
-`sessions_user_started_idx` for the friend list alone. Verified by mutation,
-both halves independently: dropping the index fails all three checks; an index
-with the right NAME on `(user_id)` alone leaves the name check passing and
-fails the seek checks. A guard that only asked "is an index used" would have
-called the original bug fixed.
+`sessions_user_started_idx` for the friend list alone.
+
+**And two was still not enough.** Review mutated the schema in a direction I
+had not: an index with the right name on `(ended_at DESC)` **alone**, dropping
+`user_id`. All three assertions stayed green, and the plan it blessed reads
+every user on the platform's last three days and filters it down to your
+friends — cost proportional to how busy VOLA is, which is a worse scaling
+property than the lifetime sift it replaced. I reproduced it before fixing.
+
+So the guard now asserts the same thing about both columns, symmetrically:
+each must appear in an `Index Cond:` and in no `Filter:`. Deliberately not
+"`user_id` appears in some Index Cond" — the join's own probe into `profiles`
+prints `Index Cond: (user_id = s.user_id)` and satisfies that even in the bad
+plan. Only its absence from every `Filter:` separates them. Matched on line
+prefix rather than by `Contains`, since `Join Filter:` and `Rows Removed by
+Filter:` both contain the word.
+
+Four shapes, measured: no index, `(user_id)` only, `(ended_at DESC)` only, and
+the real one. Only the last passes.
 
 That required `pageQuery` to become a const. The test EXPLAINs the exact string
 the repository runs — restate the SQL in the test and it proves the copy is
@@ -22230,11 +22248,13 @@ and this repo has shipped that one before.
 
 ### Open questions this leaves
 
-- **`sessioncard`'s neighbour queries have the same shape**
-  (`user_id`, `ended_at IS NOT NULL`, `ORDER BY ended_at DESC, id`) and should
-  now use this index too — not measured, because they are single-row lookups
-  bounded by LIMIT 1 rather than a window scan. Worth an EXPLAIN if they ever
-  show up slow.
+- **`sessioncard`'s two neighbour queries have the same shape**
+  (`user_id`, `ended_at IS NOT NULL`, `ORDER BY ended_at DESC, id`) and get the
+  same benefit for free. This entry first dismissed them as "single-row lookups
+  bounded by LIMIT 1"; review checked, and they are `LIMIT score.Window` = **20**,
+  top-N over the whole of a user's finished history — which makes them the
+  strongest additional beneficiary of this index, not a negligible one. Not
+  separately measured.
 - **Not `CONCURRENTLY`**, because golang-migrate runs each migration in a
   transaction. Fine at today's table size; a `sessions` big enough for the
   ACCESS SHARE lock to matter needs this applied out-of-band instead.

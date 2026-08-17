@@ -9,17 +9,27 @@
 -- week — the one thing a "recent activity" query must not do.
 --
 -- Column order is the query's: `user_id` is the equality (`= ANY`), so it
--- leads; `ended_at DESC` then makes the range a boundary seek AND supplies
--- ORDER BY ended_at DESC in index order.
+-- leads, and `ended_at DESC` then makes the range a boundary seek.
+--
+-- It does NOT remove the sort, and an earlier draft of this comment claimed it
+-- did. The feed orders by `ended_at DESC, s.id` for a total order, and probing
+-- several friends through one `= ANY` cannot emit globally ordered rows
+-- anyway, so every observed plan keeps a Sort node. That is cheap for the
+-- right reason — its input is the window, ~81 rows, not a lifetime — which is
+-- the same win stated accurately.
 --
 -- PARTIAL on `ended_at IS NOT NULL` because that predicate is in every reader
 -- and an in-progress session is never in any of them. It also keeps the index
 -- off live sessions, which are the rows being written most often.
 --
--- Not CONCURRENTLY: golang-migrate wraps each migration in a transaction and
--- CREATE INDEX CONCURRENTLY cannot run inside one. The ACCESS SHARE-blocking
--- window is a table with four figures of rows in it today. If sessions is ever
--- large enough for that to matter, this needs to be applied out-of-band.
+-- Not CONCURRENTLY, but not because it is impossible here: `cmd/migrate` runs
+-- each file through the driver's single Exec with no explicit BEGIN, and
+-- golang-migrate documents CONCURRENTLY as workable when it is the only
+-- statement in the file. The reason is the failure mode — a CONCURRENTLY build
+-- that fails leaves an INVALID index behind AND the migration marked dirty,
+-- which is a worse thing to meet on a deploy than a brief ACCESS SHARE lock on
+-- a table with four figures of rows in it. Revisit if sessions ever gets big
+-- enough for that lock to matter.
 CREATE INDEX sessions_user_ended_idx
   ON sessions (user_id, ended_at DESC)
   WHERE ended_at IS NOT NULL;
