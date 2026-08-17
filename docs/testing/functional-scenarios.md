@@ -7165,3 +7165,19 @@ training. Everything here is about it telling the truth.
   Volume —".
 - The row still offers Try again alongside, and it reads as the quieter of the
   two.
+
+## Previewing the card before sharing (mobile)
+
+- **Tap Share on a finished session.** The card appears at readable size — big
+  enough to read the calorie figure and the VOLA score, which are the reason
+  this exists. The share sheet must NOT have opened.
+- **Not now** closes it and posts nothing.
+- **Share** inside the preview opens the system sheet with the same card.
+- All three surfaces behave identically: the completion modal, a finished
+  strength session, and a finished BJJ class.
+- **A failed capture leaves the preview open**, with the message on it. Dropping
+  back to the session screen would hide both the error and the card.
+- **Dismissing the system share sheet says nothing** — no error, preview still
+  there, so a second attempt costs one tap.
+- On a small phone (SE), check the card, the note and both buttons fit without
+  the buttons being pushed off-screen.

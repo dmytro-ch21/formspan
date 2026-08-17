@@ -21743,6 +21743,68 @@ who never enabled sharing.
   within three days. That is correct, but it means the affordance disappears far
   sooner than before, which nobody has watched happen.
 
+## 2026-08-17 — You can see the card before you post it
+
+Closes **F2**. The only look an athlete got at a shared card was the share
+sheet's own thumbnail, roughly 40pt square. That card carries a **calorie figure
+inferred from body data** and a VOLA score — so those numbers went out
+sight-unseen, to whichever app was picked, with no opportunity to read them
+first. Tapping Share now opens the card at readable size with **Share** and
+**Not now**.
+
+A preview rather than a confirmation dialog, and that is the whole distinction:
+a dialog asks "are you sure" about something you still cannot see.
+
+### One place, three surfaces
+
+It lives in `ShareCardHost`, so the completion modal, the finished strength
+session and the BJJ class all inherited it without being touched. That is the
+payoff from #229's split — the button, the hook and the host are separate
+exports precisely because the host has to sit at the screen root, and putting
+the preview there means one change reached every caller.
+
+### The off-screen card stays the capture source
+
+The visible preview is *not* what gets captured. The card is briefly mounted
+twice, which is the cost, and it is deliberate: the off-screen path is
+**measured** — 1080×1080, read off a real device earlier this session — whereas
+capturing a card laid out inside a `Modal` reopens exactly the "is it genuinely
+laid out" question that produces blank PNGs and fails without a word. Tidier was
+available; proven was better.
+
+### What the tests pin is the ORDER
+
+Not that a preview exists — that tapping Share **captures nothing**. A test
+asserting only "the preview appears" passes against a build that shows the card
+*and* posts anyway, which is the failure worth preventing. Mutation-checked
+three ways:
+
+| Change | Result |
+|---|---|
+| button posts immediately (the pre-F2 behaviour) | 5 of 5 red |
+| preview shown, but it posts anyway | 3 of 5 red |
+| preview closes on failure, hiding the error | 1 of 5 red |
+
+A failed capture deliberately leaves the preview **up**, with the message on it.
+Dropping back to the session screen would hide both the error and the card it is
+about. A merely dismissed share sheet stays silent — the libraries disagree
+about whether a dismissal rejects, and accusing someone of a fault for changing
+their mind is worse than saying nothing.
+
+### Open questions this leaves
+
+- **Not seen on a device.** The preview's size is `min(window - 40, 420)`, which
+  is reasoning about phones rather than looking at one. Whether the card, the
+  note and both buttons fit on a small screen without scrolling is unverified —
+  belongs with **L1**.
+- **The calorie figure may be absent when the preview opens.** It arrives from
+  `/sessions/{id}/card` and the card is complete without it, so a slow network
+  means previewing a card that then gains a number before the capture. The
+  export would still match what the sheet posts, but not necessarily what was
+  read a second earlier.
+- **No zoom.** The card is shown at up to 420pt wide; the exported PNG is 1080px.
+  Fine for reading the stats, not for inspecting the type.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
