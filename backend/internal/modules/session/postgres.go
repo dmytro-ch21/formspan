@@ -197,6 +197,20 @@ func (r *PostgresRepository) List(ctx context.Context, userID string, f Filter) 
 // runs both over the same data and fails if they ever disagree.
 const workingSet = `ss.completed AND ss.set_type <> 'warmup'`
 
+// countsAsSet is the narrower rule: what the athlete would call a set.
+//
+// `workingSet` above answers "does this contribute volume" and is used for reps
+// and tonnage. This answers "is this one of the sets I did", and a DROP is not:
+// 225x3 stripped to 185x8 is one approach to the bar and one rest period. The
+// session screen already numbers the rows that way, and until this existed the
+// Sets tile above them said otherwise — two answers on one screen.
+//
+// Deliberately two constants rather than a parameterised one. They differ by a
+// single clause and are used within lines of each other, so the risk is using
+// the wrong one; two names that say what they mean make that visible at the
+// call site, where a boolean argument would not.
+const countsAsSet = workingSet + ` AND ss.set_type <> 'drop'`
+
 // tonnageOf is `Set.TotalWeightKg` expressed once for SQL, for the same reason
 // and under the same guard as `workingSet` above.
 //
@@ -278,7 +292,7 @@ func (r *PostgresRepository) historyDays(ctx context.Context, userID string, f H
 		per_session AS (
 			SELECT sc.id, sc.day, sc.sport,
 			       COALESCE(EXTRACT(EPOCH FROM (sc.ended_at - sc.started_at)), 0)::bigint AS duration,
-			       COUNT(*) FILTER (WHERE `+workingSet+`) AS working_sets,
+			       COUNT(*) FILTER (WHERE `+countsAsSet+`) AS working_sets,
 			       COALESCE(SUM(ss.reps) FILTER (WHERE `+workingSet+`), 0) AS total_reps,
 			       COALESCE(SUM(`+tonnageOf+`) FILTER (WHERE `+workingSet+`), 0) AS tonnage
 			FROM scoped sc
@@ -346,7 +360,7 @@ func (r *PostgresRepository) historyTotals(
 			-- calendar and the headline a second or two apart.
 			(SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (ended_at - started_at))::bigint), 0) FROM scoped)::int,
 			(SELECT COUNT(DISTINCT (started_at AT TIME ZONE $4)::date) FROM scoped)::int,
-			COUNT(*) FILTER (WHERE `+workingSet+`)::int,
+			COUNT(*) FILTER (WHERE `+countsAsSet+`)::int,
 			COALESCE(SUM(ss.reps) FILTER (WHERE `+workingSet+`), 0)::int,
 			COALESCE(SUM(`+tonnageOf+`) FILTER (WHERE `+workingSet+`), 0)::float8,
 			COUNT(DISTINCT ss.exercise_id)::int

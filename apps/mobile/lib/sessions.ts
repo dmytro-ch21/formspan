@@ -991,3 +991,31 @@ export function repairSet<T extends LoggedSet>(set: T): T {
       : null,
   };
 }
+
+/**
+ * Does this set contribute VOLUME — reps and tonnage?
+ *
+ * Warm-ups do not. Everything else performed does, drops included: the weight
+ * was moved.
+ */
+export function contributesVolume(set: Pick<LoggedSet, 'completed' | 'set_type'>): boolean {
+  return set.completed && set.set_type !== 'warmup';
+}
+
+/**
+ * Is this one of the sets the athlete would say they did?
+ *
+ * Narrower than `contributesVolume`, by exactly one clause: **a drop is not a
+ * set.** 225x3 stripped to 185x8 is one approach to the bar and one rest
+ * period, so it is one set with a drop off it — which is how the session screen
+ * already numbers the rows. Counting it as two told the athlete they did four
+ * sets when they did three, on the same screen as the rows saying three.
+ *
+ * Two functions rather than one with a flag: they differ by a clause and are
+ * called within lines of each other, so the risk is picking the wrong one, and
+ * a name at the call site makes that visible where a boolean would not. The
+ * server keeps the same pair — `workingSet` and `countsAsSet`.
+ */
+export function countsAsSet(set: Pick<LoggedSet, 'completed' | 'set_type'>): boolean {
+  return contributesVolume(set) && set.set_type !== 'drop';
+}

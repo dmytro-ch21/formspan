@@ -36,7 +36,7 @@ import { fetchThemes, type Theme } from '@/lib/themes';
 import { owedOn } from '@/lib/adherence';
 import { listPlannedBetween, type PlannedSession } from '@/lib/plan';
 import { formatElapsed } from '@/lib/rest';
-import type { LoggedSet, Session } from '@/lib/sessions';
+import type { Session } from '@/lib/sessions';
 import { cachedWorkouts, listLocalSessions } from '@/lib/sessionStore';
 import { reviewWeek } from '@/lib/weekReview';
 import { listWorkingCurricula, type Curriculum } from '@/lib/curriculum';
@@ -68,7 +68,7 @@ import { listCheckins, listPhases, type Checkin, type Phase } from '@/lib/body';
 import { accentGlow } from '@/lib/palette';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
-import { totalWeightKg } from '@/lib/sessions';
+import { totalWeightKg, contributesVolume, countsAsSet } from '@/lib/sessions';
 
 /**
  * Room under the scroll so the floating New Log never covers the last row.
@@ -94,19 +94,17 @@ const STALE_SESSION_MS = 24 * 60 * 60 * 1000;
  * said "5 working sets" and the session it linked to said "Sets 0". Two screens
  * disagreeing about the same session is worse than either number alone.
  */
-function isWorkingSet(set: LoggedSet): boolean {
-  return set.completed && set.set_type !== 'warmup';
-}
-
 function workingSets(s: Session): number {
-  return s.sets.filter(isWorkingSet).length;
+  // `countsAsSet`, not `contributesVolume` — a drop is part of the set above
+  // it, so it does not add to the number the athlete counts.
+  return s.sets.filter(countsAsSet).length;
 }
 
 /** Weight × reps over a session's working sets. */
 function sessionVolume(s: Session): number {
   let kg = 0;
   for (const set of s.sets) {
-    if (isWorkingSet(set) && set.weight_kg != null && set.reps != null) {
+    if (contributesVolume(set) && set.weight_kg != null && set.reps != null) {
       kg += totalWeightKg(set) * set.reps;
     }
   }

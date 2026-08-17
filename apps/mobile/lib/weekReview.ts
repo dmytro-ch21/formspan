@@ -1,8 +1,8 @@
 import { addDays, dayString, startOfWeek } from './calendar';
 import { matchPlans } from './adherence';
 import type { PlannedSession } from './plan';
-import type { LoggedSet, Session } from './sessions';
-import { totalWeightKg } from './sessions';
+import type { Session } from './sessions';
+import { totalWeightKg, contributesVolume } from './sessions';
 
 /**
  * The week, summed up — what actually happened, against what was meant to.
@@ -24,10 +24,6 @@ import { totalWeightKg } from './sessions';
  */
 
 /** Working, non-warm-up sets — the rule every volume count in this app shares. */
-function isWorkingSet(set: LoggedSet): boolean {
-  return set.completed && set.set_type !== 'warmup';
-}
-
 export type SportTotals = {
   sport: string;
   sessions: number;
@@ -88,7 +84,7 @@ function accumulate(sessions: Session[]): { totals: WeekTotals; bySport: SportTo
     }
     let sessionVolume = 0;
     for (const set of s.sets) {
-      if (isWorkingSet(set) && set.weight_kg != null && set.reps != null) {
+      if (contributesVolume(set) && set.weight_kg != null && set.reps != null) {
         sessionVolume += totalWeightKg(set) * set.reps;
       }
     }

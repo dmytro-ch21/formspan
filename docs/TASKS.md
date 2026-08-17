@@ -23,7 +23,7 @@ Sections: **W** wrong now · **T** traps · **F** worth fixing · **N** new · *
 These contradict each other or overstate what the athlete did. Visible without looking.
 
 - [x] **W1** — 1RM estimate counts spotted reps. Nothing reads `soloReps`, so a spotted 8×102.5 estimates ~127 kg where honest solo-5 is ~115; also sets rep PRs not completed unaided. Done together with T1 — #231. (#226)
-- [ ] **W2** — A drop counts as a set in the Sets tile but not in the row numbers, so one screen shows both answers. Cross-stack: `localVolume` must match the server, and the same figure feeds Today and the calendar. (#227)
+- [x] **W2** — A drop counts as a set in the Sets tile but not in the row numbers, so one screen shows both answers. Cross-stack: `localVolume` must match the server, and the same figure feeds Today and the calendar. — done #237, a drop no longer counts as a set but still contributes volume (#227)
 - [ ] **W3** — Per-side load is right everywhere but unexplained: no "enter one dumbbell" hint, no `30 kg × 2 = 60` on a logged set. The athlete can do that maths and conclude the app is wrong. (#224)
 
 ## T — Traps set for the next change

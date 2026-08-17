@@ -16,7 +16,7 @@ import { type PlannedSession } from '@/lib/plan';
 import type { Session } from '@/lib/sessions';
 import { listLocalSessions } from '@/lib/sessionStore';
 import { formatVolume, type UnitSystem } from '@/lib/units';
-import { totalWeightKg } from '@/lib/sessions';
+import { totalWeightKg, countsAsSet } from '@/lib/sessions';
 
 /**
  * The training calendar: a week you can open, and a month behind it.
@@ -52,7 +52,8 @@ import { totalWeightKg } from '@/lib/sessions';
 
 /** Working, non-warm-up sets — the backend's own rule, mirrored. */
 function workingSets(s: Session): number {
-  return s.sets.filter((x) => x.completed && x.set_type !== 'warmup').length;
+  // A drop is part of the set above it — see `countsAsSet`.
+  return s.sets.filter(countsAsSet).length;
 }
 
 function sessionVolume(s: Session): number {

@@ -262,7 +262,21 @@ func Summarise(sets []Set) Volume {
 		if s.RPE != nil && *s.RPE > v.HardestRPE {
 			v.HardestRPE = *s.RPE
 		}
-		v.WorkingSets++
+		// A DROP IS NOT A SET, but its work still counts.
+		//
+		// 225x3 stripped to 185x8 is one approach to the bar and one rest
+		// period — the athlete did three sets, not four, and that count is the
+		// one they carry around and compare to last week. The rows on the
+		// session screen already number it that way; this is the tile above
+		// them agreeing.
+		//
+		// Only the COUNT changes. The reps and the tonnage below are unguarded
+		// on purpose: the weight was moved, so it belongs in the volume. That
+		// split is the whole change, and collapsing it back into one predicate
+		// is how a drop's work silently disappears.
+		if s.SetType != SetTypeDrop {
+			v.WorkingSets++
+		}
 		if s.Reps != nil {
 			v.TotalReps += *s.Reps
 			if s.WeightKg != nil {
