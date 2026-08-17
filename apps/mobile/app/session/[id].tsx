@@ -90,6 +90,8 @@ import {
   emptyDropSet,
   emptySet,
   setOrdinals,
+  contributesVolume,
+  countsAsSet,
   soloReps,
   withSetChange,
   fetchSuggestions,
@@ -1987,9 +1989,17 @@ function localVolume(sets: LoggedSet[]): Volume {
     // Must match the server's rule exactly. Missing this on the first pass
     // showed the plan's full volume against a column of unticked sets —
     // precisely the drift this duplicated arithmetic risks.
-    if (!s.completed) continue;
-    if (s.set_type === 'warmup') continue;
-    v.working_sets++;
+    if (!contributesVolume(s)) continue;
+    // The COUNT takes the narrower rule while the sums below take the wider
+    // one — a drop adds work but not a set. Both live in `lib/sessions.ts`
+    // rather than being spelled out here, because this function has now been
+    // the one missed TWICE: once when per-side load landed and the tile read
+    // half the history's tonnage, and again here. Inline predicates are how a
+    // duplicated rule drifts, and this is the duplicate furthest from the
+    // original.
+    if (countsAsSet(s)) {
+      v.working_sets++;
+    }
     if (s.rpe != null && s.rpe > v.hardest_rpe) v.hardest_rpe = s.rpe;
     if (s.reps != null) {
       v.total_reps += s.reps;
