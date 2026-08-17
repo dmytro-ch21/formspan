@@ -20646,6 +20646,56 @@ actually has was invisible until somebody asked about it.
   the only thing carrying that is a comment. If it is ever removed, the failure
   is silent and the symptom appears somewhere else entirely.
 
+## 2026-08-16 — The one place that still counts drops, and why it must
+
+A footnote to #238, which split "does this contribute work" from "is this a set
+I did" and taught both rules to every surface. One query was left on the wider
+rule, and nothing said so.
+
+`sessioncard`'s `liftEffort` counts drops. Its doc comment claimed the predicate
+it uses "is `session.Summarise`'s rule, and the only definition of 'a working
+set' this codebase has" — true when written, false the moment `countsAsSet`
+existed, and pointing at `Summarise` as the authority while using the other
+rule.
+
+The count is right. `sets` there is never displayed: it feeds
+`energy.StrengthBlocks`, which asks how much work the body did, and a drop is
+another bout under load whatever it is called on screen. Aligning it with the display rule would
+change the calorie estimate for **some** sessions — the count reaches the output
+only as a density proxy (`sets/minutes >= 0.5` picks the circuit-like MET), so
+most drop-containing sessions would not move at all — and it would also shift
+the displayed VOLA Score, since the same `WHERE` feeds the effort average.
+**Nothing on any screen would look wrong** either way, which is what makes it
+worth a comment rather than a shrug.
+
+Review corrected all three load-bearing claims in the first draft of that
+comment: it said "the one place", "every displayed count" and "every session
+containing a drop", and none of the three was true. `MostTrainedExercises`
+is a second deliberate holdout and says so itself; checking "every displayed
+count" turned up **W4** — the web sessions list renders two "Working sets"
+figures on one page under two different rules, W2 still alive there because
+#238 consolidated the mobile clients only. A PR whose entire content is a claim
+about the codebase is the one where a reviewer checking the claim earns the
+most. It now says it is the deliberate
+exception, and says it to the person most likely to change it: somebody
+grepping `set_type` while making the counts agree.
+
+Filed **N8** alongside. The rule has four copies — a Go predicate, a SQL string,
+a second inline SQL copy in `feed`, and a TS predicate. #238 consolidated the
+clients onto the TS one, which is the good half; the feed's restates the
+predicate rather than importing the constant from one package over, and is
+pinned only by its own fixture.
+
+**A note on how this entry came to exist.** W2 was implemented twice, in
+parallel, by two sessions — #238 landed while a second branch was most of the
+way through the same work. The duplicate was discarded rather than merged: its
+diff against `main` was 1,310 deletions, because a branch cut before four
+merges reverts them. `TASKS.md` is ordered by what an athlete would notice and
+has no claim mechanism, so two agents reading it will reliably pick the same
+top item; **H1** carries an ad-hoc *"In progress — spun off"* note and nothing
+else does. The two items above are the only part of that branch `main` did not
+already have — review findings rather than code.
+
 ## Open items / known gaps as of this entry
 
 - **The technique library is still left behind by `technique`'s tests**, exactly as the exercise catalog was until the tripwire entry above. Smaller exposure — `technique` sorts seventeenth of nineteen, so only `theme` and `workout` run after it — but the same shape: a package borrowing a technique id would pass on that residue. The same fix applies (`removeCatalogAfterTest`'s shape, scoped to the ids `SeedData()` names); deferred because H1 is already in flight against that library.
