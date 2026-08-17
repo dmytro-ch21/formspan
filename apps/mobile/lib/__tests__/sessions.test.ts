@@ -171,6 +171,32 @@ describe('repairSet', () => {
     expect(repairSet({ ...spotted, assisted_reps: 0 }).assisted_reps).toBe(0);
   });
 
+  it('keeps a grip this build does not recognise, because only the server owns the vocabulary', () => {
+    // T4. The picker only ever writes a value from GRIPS, so an unrecognised
+    // grip can only have come from the server — which means the server accepts
+    // it. The old guard checked `GRIPS.some(...)` and nulled anything else, so
+    // the day a fifth value shipped, every phone on an older build would read a
+    // legitimate `mixed`, null it, and the wholesale PUT would write that null
+    // back over data the athlete really recorded. Silently.
+    const future = set('bench-press', { grip: 'mixed' as never });
+    expect(repairSet(future).grip).toBe('mixed');
+
+    // The four it does know are untouched, obviously.
+    for (const g of ['regular', 'neutral', 'reverse', 'angled'] as const) {
+      expect(repairSet(set('bench-press', { grip: g })).grip).toBe(g);
+    }
+    // And "not recorded" still means not recorded — never coerced to a default.
+    expect(repairSet(set('bench-press', { grip: null })).grip).toBeNull();
+  });
+
+  it('still nulls a grip that could not be a value at all', () => {
+    // The half that survives: SHAPE is decidable here, vocabulary is not. An
+    // empty string or a non-string is not a grip on any server, so it is still
+    // dropped rather than left to strand the session on a permanent 400.
+    expect(repairSet(set('bench-press', { grip: '' as never })).grip).toBeNull();
+    expect(repairSet(set('bench-press', { grip: 7 as never })).grip).toBeNull();
+  });
+
   it('does not give a set an assisted_reps key it never had', () => {
     // Sent on every push, so inventing the field would start claiming "none
     // were assisted" about sets nobody recorded that for.

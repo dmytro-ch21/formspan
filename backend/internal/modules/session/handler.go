@@ -1,6 +1,7 @@
 package session
 
 import (
+	"fmt"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/discipline"
 
 	"encoding/json"
@@ -34,6 +35,10 @@ func writeErr(w http.ResponseWriter, r *http.Request, err error) {
 		apihttp.WriteError(w, http.StatusNotFound, apihttp.CodeNotFound, "session not found")
 	case errors.Is(err, ErrAlreadyExists):
 		apihttp.WriteError(w, http.StatusConflict, apihttp.CodeAlreadyExists, "session id already in use")
+	case errors.Is(err, ErrInvalidGrip):
+		// BEFORE the ErrInvalidInput case below, which it also satisfies —
+		// order is what keeps this code reachable at all.
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidGrip, err.Error())
 	case errors.Is(err, ErrSportMismatch), errors.Is(err, ErrInvalidInput):
 		// Safe to surface: these name an exercise or a value the caller sent,
 		// never anything internal.
@@ -63,7 +68,7 @@ func validateSets(sets []Set) error {
 		// maps 23514 to ErrInvalidInput — but a vague one, with no set number
 		// and no mention of grip. What this buys is the message, not the status.
 		if s.Grip != nil && !ValidGrip(*s.Grip) {
-			return errors.New(at + "unknown grip")
+			return fmt.Errorf("%w (%s)", ErrInvalidGrip, at[:len(at)-2])
 		}
 		if s.RPE != nil && (*s.RPE < 1 || *s.RPE > 10) {
 			return errors.New(at + "RPE must be between 1 and 10")
@@ -440,6 +445,12 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := validateSets(req.Sets); err != nil {
+		// A grip rejection routes through writeErr so it keeps its own code;
+		// everything else keeps the message it already had, unwrapped.
+		if errors.Is(err, ErrInvalidGrip) {
+			writeErr(w, r, err)
+			return
+		}
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, err.Error())
 		return
 	}
@@ -488,6 +499,12 @@ func (h *Handler) ReplaceSets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := validateSets(req.Sets); err != nil {
+		// A grip rejection routes through writeErr so it keeps its own code;
+		// everything else keeps the message it already had, unwrapped.
+		if errors.Is(err, ErrInvalidGrip) {
+			writeErr(w, r, err)
+			return
+		}
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, err.Error())
 		return
 	}

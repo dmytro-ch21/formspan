@@ -22392,6 +22392,82 @@ the day that foreign key is weakened.
   different to the athlete. That is correct, and it means a future reader will
   wonder why both columns exist — hence this entry.
 
+## 2026-08-17 — A grip the phone does not recognise, and why guessing was the bug
+
+T4, a trap entry: `repairSet` nulled any `grip` outside mobile's own four-value
+union. Right for garbage, and wrong in a way that only appears later — the day a
+fifth value ships, an older build reads a legitimate `mixed`, nulls it, and the
+wholesale PUT writes that null back over data the athlete really recorded.
+Silent, no error anywhere, on exactly the rows somebody bothered to fill in.
+
+The asymmetry that makes this different from every other repair in that
+function: a zero weight, an RIR of 25, more assisted reps than reps — those are
+illegal on any server, forever, and the client can decide them alone. **A grip
+is not decidable locally.** This build knows four; the server decides how many
+exist. Checking against `GRIPS` answers "do I recognise this?" while pretending
+to answer "would the server take it?".
+
+Note where an unknown value can come from. The picker only ever writes a key
+from `GRIPS`, so nothing local produces one — a grip the build does not know
+arrived *from the server*, which means the server accepts it. Erasing it was
+never the conservative choice.
+
+### Two wrong turns before the right one, both worth keeping
+
+**First attempt: check shape instead of vocabulary** — keep any non-empty
+string, let the server sort it out. It fixes the erasure and abandons a real
+protection: `grip.test.ts` already asserted that `'banana'` must be nulled,
+because an illegal value 400s on every push, classifies as permanent, and **no
+screen can edit an unrecognised grip back into legality**. A shape check cannot
+tell `'banana'` from `'mixed'`. That existing test was found only after `verify`
+went red — it lives in a file the first search missed.
+
+**Second: T4's own suggested fix, "repair only after a 400 that names grip"** —
+which turns out not to be takeable as written. The server returns
+`ErrInvalidInput`, so the code is `invalid_input`, the same as every other bad
+field; the *only* thing identifying grip is the message `"unknown grip"`. And
+`docs/architecture/api-conventions.md` says codes are contract and messages are
+not, precisely so a reworded string cannot break a client. The suggestion asked
+for the thing the conventions forbid.
+
+### What landed: make the refusal machine-readable
+
+A new contract code, `invalid_grip`, carried by a distinct sentinel
+(`ErrInvalidGrip`) through both paths that can reject a grip — `validateSets`
+and `translatePgError`. It wraps `ErrInvalidInput`, so every existing
+`errors.Is(err, ErrInvalidInput)` still classifies it, which means `writeErr`
+must test for it **first** or the broader case swallows it and the code never
+reaches the wire.
+
+The client stops guessing entirely: it sends what it holds, and `pushRow` drops
+the grip and retries only when the server answers `invalid_grip`. So `mixed` is
+accepted and kept, `banana` is refused once and repaired, and neither outcome
+depends on reading English.
+
+Two details in that retry that were wrong first time and are worth stating:
+
+- It writes the repaired sets with the handle already in scope and **does not
+  mark the row dirty** — this is the push settling a disagreement, not the
+  athlete editing. `saveLocalSets` would do both.
+- It **falls through rather than returning**. Returning skips the `pushFinish`
+  below it, which would let an unknown grip cost the session its `ended_at` —
+  the "optional half costing the mandatory one" failure the comment directly
+  beneath that block exists to prevent.
+
+### Gaps
+
+- **The repair is not exercised end to end.** The client half is unit-tested and
+  the server half has its own tests, but nothing drives a real `invalid_grip`
+  response through `pushRow` — that needs a fifth value to exist, or a fake, and
+  the honest statement today is that the two halves are verified separately.
+- **`invalid_grip` is the first per-field code**, and the shape does not obviously
+  generalise: `invalid_rir`, `invalid_weight` and friends would be a poor
+  vocabulary. It earns its place because it is the only rejection a client can
+  *act* on; a second one should have to clear the same bar.
+- **Nothing yet sends a fifth grip.** N9 (`mixed`/`hook`) is unblocked, not done,
+  and the first PR to add one should confirm an old build round-trips it rather
+  than trusting this entry.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.

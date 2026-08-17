@@ -338,12 +338,21 @@ components:
               type: string
               enum:
                 - invalid_input
+                - invalid_grip
                 - unauthorized
                 - forbidden
                 - not_found
                 - already_exists
                 - rate_limited
                 - internal
+              description: >
+                `invalid_grip` is a narrower `invalid_input`, split out because
+                it is the one rejection a client can settle by itself: a set
+                names a grip this server does not know, so the client drops the
+                grip and retries rather than stranding the session. It exists as
+                a CODE because messages are explicitly not part of this
+                contract — a client that matched on the wording would break the
+                day somebody reworded it.
             message:
               type: string
 

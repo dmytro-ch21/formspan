@@ -106,6 +106,27 @@ export function isValidationError(err: unknown): boolean {
 }
 
 /**
+ * The server refused a GRIP it does not recognise — the one rejection a phone
+ * can repair by itself.
+ *
+ * Its own code rather than `invalid_input` because the difference is the whole
+ * point. A build knows four grips; the server decides how many exist. Checking
+ * a grip against the local list answers "do I recognise this?" while pretending
+ * to answer "would the server take it?" — so the day a fifth value ships, an
+ * older phone reads a legitimate `mixed`, nulls it, and the wholesale PUT
+ * writes that null back over data the athlete recorded. Silently.
+ *
+ * So the client no longer guesses: it sends what it holds and lets the server
+ * adjudicate its own vocabulary. When the answer is no, THIS is what makes the
+ * refusal actionable — drop the grip, retry, keep the rest of the session.
+ * Matching the message instead would work today and break the day somebody
+ * rewords it, which is exactly what the API conventions forbid.
+ */
+export function isUnknownGrip(err: unknown): boolean {
+  return err instanceof ApiError && err.code === 'invalid_grip';
+}
+
+/**
  * Distinguishes "the server says this doesn't exist" from "I couldn't ask".
  *
  * Load screens need this and cannot infer it: both arrive as a rejected

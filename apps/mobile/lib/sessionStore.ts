@@ -2,7 +2,7 @@ import { randomUUID } from 'expo-crypto';
 import type { TokenGetter } from './useAuthToken';
 import type * as SQLite from 'expo-sqlite';
 
-import { ApiError, isNotFound, isOffline, isPermanentRejection } from './apiError';
+import { ApiError, isNotFound, isUnknownGrip, isOffline, isPermanentRejection } from './apiError';
 import { getDb, withTransaction } from './db';
 import type { Exercise } from './exercises';
 import type { Workout, WorkoutItem } from './workouts';
@@ -618,14 +618,46 @@ async function pushRow(
     // sets in the body on a replay, so they need their own call regardless.
     await pushSets(getToken, s.id, sets);
   } catch (err) {
-    // The session was deleted on another device. Forget that it's remote so
-    // the next attempt recreates it — the device actively logging holds the
-    // live copy, and dropping the sets to honour a delete made elsewhere
-    // would lose work that only exists here.
-    if (err instanceof ApiError && err.status === 404) {
-      await db.runAsync(`UPDATE local_sessions SET remote = 0 WHERE id = ? AND user_id = ?`, s.id, userID);
+    // A grip THIS BUILD sent that the server does not know. The only rejection
+    // the phone can settle by itself, and the reason it is worth settling: a
+    // 4xx classifies as permanent, so without this the session stays dirty
+    // forever, sits on the repair screen forever, and no screen can edit an
+    // unrecognised value back into legality.
+    //
+    // Repaired HERE rather than in `repairSet` deliberately, and that is the
+    // whole of T4. `repairSet` runs on every read and cannot know the server's
+    // vocabulary — it knows four grips, the server decides how many exist. It
+    // used to null anything outside its own list, which is right for garbage
+    // and WRONG for a value a newer server legitimately added: an older phone
+    // would read a valid `mixed`, null it, and this very PUT would write that
+    // null back over real data, silently. So the client now sends what it holds
+    // and only drops a grip the server has actually refused, by code.
+    if (isUnknownGrip(err)) {
+      const withoutGrip = sets.map((set) => ({ ...set, grip: null }));
+      // Written with the handle already in scope, and WITHOUT marking the row
+      // dirty: this is the push settling a disagreement, not the athlete
+      // editing. `saveLocalSets` would do both and is therefore wrong here.
+      await db.runAsync(
+        `UPDATE local_sessions SET sets_json = ? WHERE id = ? AND user_id = ?`,
+        JSON.stringify(withoutGrip),
+        s.id,
+        userID,
+      );
+      await pushSets(getToken, s.id, withoutGrip);
+      // Falls through rather than returning, so `ended_at` and the BJJ detail
+      // below stay on their normal path. Returning here would let an unknown
+      // grip cost the session its duration — the "optional half costing the
+      // mandatory one" failure the comment under this block exists to prevent.
+    } else {
+      // The session was deleted on another device. Forget that it's remote so
+      // the next attempt recreates it — the device actively logging holds the
+      // live copy, and dropping the sets to honour a delete made elsewhere
+      // would lose work that only exists here.
+      if (err instanceof ApiError && err.status === 404) {
+        await db.runAsync(`UPDATE local_sessions SET remote = 0 WHERE id = ? AND user_id = ?`, s.id, userID);
+      }
+      throw err;
     }
-    throw err;
   }
 
   // Before the reflection, deliberately. The finish is what the session's

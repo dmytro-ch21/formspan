@@ -15,6 +15,7 @@ package session
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -112,6 +113,12 @@ var (
 	ErrNotFound      = errors.New("session: not found")
 	ErrAlreadyExists = errors.New("session: id already in use")
 	ErrInvalidInput  = errors.New("session: invalid input")
+	// ErrInvalidGrip is an invalid input the CLIENT can fix without a human:
+	// it drops the grip and retries. Wraps ErrInvalidInput, so every existing
+	// `errors.Is(err, ErrInvalidInput)` still classifies it — but writeErr must
+	// test for it FIRST, or the broader case swallows it and the phone loses
+	// the one thing that made it actionable.
+	ErrInvalidGrip = fmt.Errorf("%w: unknown grip", ErrInvalidInput)
 	// ErrSportMismatch means a logged set's exercise belongs to a different
 	// discipline than the session.
 	ErrSportMismatch = errors.New("session: exercise sport does not match session sport")
