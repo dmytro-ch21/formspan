@@ -22869,6 +22869,20 @@ the column, so the twin test reads the RAW value now rather than the normalised
 one, and no longer leans on a single invariant test to catch a meaningless
 number.
 
+A second pass, after those fixes and two rebases, found something better: the
+guards were all **name-derived**, and shared one weakness because of it. Three
+mutations survived. Flipping the corrected row to `total` AND `1` together
+exempts it from every other check in the file. Deleting its twin is invisible to
+a `pairs == 0` floor. And — the one worth the whole pass — **reverting the name
+guard's factor to the retired derivation was itself green**, because no catalog
+row distinguishes the two sources today. That is this entry's own fix being
+silently revertible: the regression class described above, one level up.
+
+`TestNamedCatalogRowsCarryTheirImplementCount` pins four ids to four numbers and
+to `per_side`, the load_mode being what exempts a row from every other guard. A
+name can be edited to match a wrong number; an id cannot. All three mutations
+are red.
+
 It also found the last survivor of the retired rule: a comment in
 `session/postgres.go` still describing the factor as derived from `load_mode`
 and `is_unilateral`, sitting directly above SQL that reads `implements`. Its
