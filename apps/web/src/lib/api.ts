@@ -2076,6 +2076,72 @@ export async function fetchRecords(
   return b.records ?? [];
 }
 
+/**
+ * One session's worth of one exercise. `null` is a real answer, not a failure.
+ */
+export type LoadPoint = {
+  session_id: string;
+  started_at: string;
+  /** Heaviest working set. Null for bodyweight, timed or distance work. */
+  top_weight_kg: number | null;
+  /**
+   * Null whenever no set that session could support an estimate — high-rep
+   * work legitimately has none. Draw it as a gap; a zero would render the
+   * strongest athlete's chart as a collapse.
+   */
+  best_1rm_kg: number | null;
+  /**
+   * The set behind the estimate, so a modelled number can be checked.
+   * `best_1rm_reps` is the FULL count with the assisted figure alongside — the
+   * estimate itself comes from the solo count, so showing one without the
+   * other cannot be reconciled.
+   */
+  best_1rm_reps: number | null;
+  best_1rm_weight_kg: number | null;
+  best_1rm_assisted_reps: number | null;
+  /** Effort, so the evidence recomputes to the published estimate. */
+  best_1rm_rir: number | null;
+  best_1rm_rpe: number | null;
+  tonnage_kg: number;
+  sets: number;
+  reps: number;
+};
+
+export type LoadHistory = {
+  exercise_id: string;
+  /** From the catalog — decides which fields above are meaningful. */
+  load_type: string;
+  points: LoadPoint[];
+};
+
+/**
+ * One exercise's arc over time, oldest first.
+ *
+ * Under `/records`, not `/exercises`: everything below `/records` is the
+ * caller's own training data. The path names the exercise, never the athlete.
+ */
+export async function fetchLoadHistory(
+  getToken: Token,
+  exerciseID: string,
+  opts: { from?: string; to?: string; tz?: string } = {},
+  signal?: AbortSignal,
+): Promise<LoadHistory> {
+  const p = new URLSearchParams();
+  if (opts.from) p.set("from", opts.from);
+  if (opts.to) p.set("to", opts.to);
+  // The caller's zone decides which calendar day a bound falls on. Sending
+  // the browser's rather than letting the server default to UTC is what stops
+  // a session logged at 9pm reading as the next day.
+  p.set("tz", opts.tz ?? Intl.DateTimeFormat().resolvedOptions().timeZone);
+  const query = p.toString();
+  return request<LoadHistory>(
+    getToken,
+    `/records/${encodeURIComponent(exerciseID)}/history${query ? `?${query}` : ""}`,
+    {},
+    signal,
+  );
+}
+
 export async function fetchPinnedExercises(
   getToken: Token,
   signal?: AbortSignal,

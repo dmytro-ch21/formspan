@@ -7370,3 +7370,34 @@ training. Everything here is about it telling the truth.
   there, so a second attempt costs one tap.
 - On a small phone (SE), check the card, the note and both buttons fit without
   the buttons being pushed off-screen.
+
+## Per-exercise load history (`GET /v1/records/{exerciseID}/history`, web records page)
+
+### Happy path
+
+- An exercise trained in three sessions returns three points, **oldest first**, one per session — not one per set and not one per calendar day.
+- Two sessions on the same day stay two points. A day-grained rollup would average a morning and an evening session into a number neither of them was.
+- The web records page charts it on demand: the card's "Show progress over time" fetches once, and closing/reopening does not refetch.
+
+### Edge cases & errors
+
+- **A session whose sets are all high-rep has `best_1rm_kg: null`** and renders as a **gap in the line**, never a zero and never a bridged segment. An estimate needs about twelve effective reps or fewer.
+- Switching the chart's metric to one no session has (typically Est. 1RM) shows a sentence naming the metric, not an empty frame.
+- **A drop set adds tonnage but does not add to `sets`.** Both halves fail in opposite directions — counting it inflates the count, excluding its volume deflates the tonnage.
+- A pair of dumbbells doubles `tonnage_kg` but **not** `top_weight_kg`: the logged weight is per implement and the doubling belongs to tonnage alone.
+- Warm-ups and sets never marked completed contribute nothing — not to sets, reps, tonnage or the estimate.
+- **An assisted set is estimated from the reps done UNAIDED**, matching `/records` exactly — a weighted (`weight_reps`) set of 8 with 3 assisted at 102.5kg must read 115.3, never 127.2. A set where every rep was assisted supports no estimate at all. The evidence carries the full count *and* the assisted figure, or the number cannot be reconciled.
+- Two sets in one session tying on the estimate must return the SAME evidence on every request — the earlier set by position, not whichever the join emitted first.
+- An exercise that carries no external load (plank, run) says so, rather than explaining rep-max divergence to somebody who never lifted a weight.
+- The evidence table says "5 sets · 25 reps", never "5 × 25 reps" — `reps` is the session total and "×" reads as a multiplication.
+- The heaviest set is not always the best estimate (1×110 vs 5×100). The chart's "Top set" and "Est. 1RM" must be free to point at different sessions.
+- A known exercise the athlete has never trained returns `points: []` — **not** a 404, and the array must serialise as `[]` rather than `null`.
+- An exercise id not in the catalog is a **404**. "You have never trained this" and "no such exercise" are different answers.
+- Bad `from`/`to`/`tz`, or `to` before `from`, are 400s with `invalid_input`.
+- More than 400 sessions: the **oldest** are dropped. The recent end of the chart is never silently truncated, and no session is cut in half and reported as a partial day.
+
+### Auth / security
+
+- Another athlete's sessions never appear, even when they trained the same exercise between two of yours. The user comes from the token; the path parameter names the exercise only.
+- Unauthenticated requests are 401.
+- The route lives under `/records` precisely so the per-user scoping is structural — a test that passes a friend's session id or user id anywhere must not change the result.

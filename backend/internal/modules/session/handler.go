@@ -629,6 +629,84 @@ const maxRecordExercises = 200
 // With no `exercise_ids`, it answers for their pinned shortlist, falling back
 // to what they train most. That fallback is the point: a records screen that
 // opens empty and asks to be configured is one nobody configures.
+// LoadHistory serves one exercise's arc for the signed-in athlete.
+//
+// Lives under `/v1/records/*` rather than `/v1/exercises/*` on purpose. Every
+// route under `/v1/records` is this athlete's own training data, scoped by the
+// token; `/v1/exercises` is the shared catalog, the same for everybody. Hanging
+// per-user data off a catalog path is how a caller starts believing the path
+// parameter identifies the subject — which is the cross-user enumeration bug
+// review has already caught twice in this codebase. The user is the claims, and
+// only the claims.
+func (h *Handler) LoadHistory(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.ClaimsFromContext(r.Context())
+
+	exerciseID := strings.TrimSpace(r.PathValue("exerciseID"))
+	if exerciseID == "" {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"exercise id is required")
+		return
+	}
+
+	q := r.URL.Query()
+	// Same timezone contract as History: a caller asking about calendar days
+	// gets midnight resolved in their zone, and a caller that sends none gets
+	// consistent days rather than a guess.
+	tz := q.Get("tz")
+	if tz == "" {
+		tz = "UTC"
+	}
+	loc, ok := parseZone(tz)
+	if !ok {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"tz must be an IANA timezone name, e.g. Europe/Berlin")
+		return
+	}
+
+	var f LoadHistoryFilter
+	if raw := q.Get("from"); raw != "" {
+		from, ok := parseDay(raw, loc)
+		if !ok {
+			apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+				"from must be a date in YYYY-MM-DD form")
+			return
+		}
+		f.From = &from
+	}
+	if raw := q.Get("to"); raw != "" {
+		to, ok := parseDay(raw, loc)
+		if !ok {
+			apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+				"to must be a date in YYYY-MM-DD form")
+			return
+		}
+		// `to` is inclusive to the caller and exclusive in the query, so a
+		// same-day from/to returns that day rather than nothing.
+		end := to.AddDate(0, 0, 1)
+		f.To = &end
+	}
+	if f.From != nil && f.To != nil && !f.To.After(*f.From) {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"to must not be before from")
+		return
+	}
+
+	hist, err := h.repo.LoadHistory(r.Context(), claims.UserID, exerciseID, f)
+	if errors.Is(err, ErrNotFound) {
+		// Mapped here rather than through `writeErr`, whose shared message says
+		// "session not found" — true for every other caller and wrong for this
+		// one, where the missing thing is a catalog entry.
+		apihttp.WriteError(w, http.StatusNotFound, apihttp.CodeNotFound,
+			"exercise not found")
+		return
+	}
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	apihttp.WriteJSON(w, http.StatusOK, hist)
+}
+
 func (h *Handler) Records(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
 
