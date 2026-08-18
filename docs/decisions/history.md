@@ -25251,18 +25251,60 @@ arithmetic did. The measured drift is one rounding step — 355 kcal at two
 servings returns 355.1 — and both the docstring and the test say that instead of
 claiming exactness.
 
+**The target is cached, and the fourth state is a type.** The first draft
+fetched the target over the network on every render and rendered a failure as
+`Set a target` — an instruction to go and do homework the athlete may have done
+on web that morning. It is now cached in SQLite at **schema v19**, behind a
+`TargetView` union (`checking | unknown | none | set`) rather than
+`Target | null` alongside a `loaded` boolean. The union is the point: a pair of
+booleans lets the fourth state collapse silently, and this is exactly the
+collapse the module's own rule forbids.
+
+v19 rather than an extension of the unmerged v18, because `migrate()` returns
+early at `current >= SCHEMA_VERSION` — a device already stamped 18, which is
+every machine that has run this branch, would never reach the unconditional
+`CREATE TABLE IF NOT EXISTS` section. **The version bump is what fixes that, not
+the `if (current < 19)` branch**, which is a no-op against the unconditional
+section exactly as v18's is. Both comments claimed the branch was load-bearing
+until mutation testing showed otherwise; reverting `SCHEMA_VERSION` to 18 is the
+mutation that goes red, and it takes four tests with it.
+
+**Four review findings, and the sharpest was in the outbox.** The
+compare-and-swap protecting a mid-push edit existed on the success path from the
+start and had never been added to the FAILURE path — so a 4xx on the payload
+that preceded an edit cleared `dirty` on the newer row and the correction never
+left the phone. Also: `accept()` on the target screen had no `catch`, so a
+failed save un-dimmed the button and was indistinguishable from success;
+stepping to another day kept the previous day's target while the new day's
+entries rendered against it; and `noteFoodUsed` was the one unscoped write in a
+file whose every read scopes.
+
+**And the two mid-push tests were themselves passing for the wrong reason** — a
+third instance in one branch. A persistent mock implementation also fired on the
+newly-wired foods pull, which re-ran the edit and re-dirtied the row, so
+removing the guard under test left them green. One-shot now, and all three
+compare-and-swap guards go red under mutation.
+
 ### Open questions this leaves
 
-- **Not verified on a device or Simulator.** Typecheck, lint and 1,412 mobile
-  tests are green, and every guard was mutation-tested, but no screen here has
-  been looked at. `L1` records what that gap has cost before.
-- The Fuel card and the day screen both fetch the day's target over the network.
-  It is the one number the phone cannot compute, and a failure renders as "set a
-  target" rather than a wrong number — but a target that never loads in a gym
-  dead-spot reads identically to not having one. Caching the live target
-  locally is the obvious fix and is not done here.
+- **Not verified on a device or Simulator.** `verify` is green, 1,424 mobile
+  tests pass under the pinned `TZ`, and every new guard was mutation-tested —
+  but no screen here has been looked at. `L1` records what that gap has cost
+  before.
+- **`cacheEntries` is written, tested, and deliberately not wired.** Entries are
+  push-only today because nothing on web writes one. The merge exists because
+  the moment web can correct a day (N28) the phone needs one that does not
+  clobber what it still owes, and writing that under pressure next to a scoped
+  DELETE is how a sync loses data. It says so in its own docstring rather than
+  sitting there looking like an oversight.
+- A reinstalled phone has an empty diary: entries never pull, so history lives
+  on the server and the device cannot fetch it back. Acceptable while the phone
+  is the only writer; it stops being acceptable at N28.
 - Saving a meal from a slot with two or more entries is in the plan and is not
   built. Quick-add covers the repeat case; that covers the repeat *combination*.
+- The training row on the day screen is not built either. Its docstring states
+  the rule it must obey when it is — stated, never spent — because the tempting
+  version is the wrong one.
 
 
 ## Open items / known gaps as of this entry

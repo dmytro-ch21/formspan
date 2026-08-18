@@ -7161,9 +7161,15 @@ this section.
 - **No target is a first-class state.** The card and the day screen show eaten
   totals and say `Set a target` — never a zero remaining, which reads as "you
   have nothing left".
-- **Not-yet-loaded, nothing-logged and no-target are three different
-  sentences.** A scenario that accepts any of them for the others is not testing
-  the distinction.
+- **An unreachable target is NOT reported as no target.** With the network off
+  and a target cached, the cached figure is shown; with none cached and no fetch
+  ever having succeeded, the screen says it cannot check — never `Set a target`,
+  which is an instruction to redo work the athlete may have done on web. These
+  are FOUR distinct sentences with not-yet-loaded and nothing-logged, and a
+  scenario that accepts any of them for another is not testing the distinction.
+- **Stepping to another day never shows the previous day's target.** The failure
+  mode is a wrong remaining figure, not a stale one, and it appears specifically
+  when the new day's target fetch fails.
 - **Over the target is muted, never an error colour.** One day over is not a
   failure state, and rendering it as one is against the no-shame rule.
 - **A dinner logged at 23:00 stays dinner.** The slot is assigned from the wall
@@ -7175,8 +7181,13 @@ this section.
   need their own scenario; each passes against the other's bug.
 - **Changing servings on an entry rescales the macros; typing a macro stops it
   rescaling** for the rest of that edit.
-- **Deleting an entry the server has never seen removes it outright; deleting
-  one it knows about tombstones it** and it does not return on the next pull.
+- **Deleting an entry always tombstones while a push may be in flight.** A row
+  logged and immediately deleted must not be forgotten locally before its create
+  has landed, or the server keeps an entry the phone no longer knows about and
+  no tombstone will ever remove it.
+- **An edit made during a push survives the REJECTION of the payload that
+  preceded it**, not only its success. Both halves need a scenario; each passes
+  against the other's bug.
 - **An incomplete profile blocks the target with named fields**, and the screen
   routes to the profile form rather than offering a retry. It must never fall
   back to an estimated resting baseline — that runs 20–30% high, which is a cut
