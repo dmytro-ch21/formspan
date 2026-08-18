@@ -56,7 +56,10 @@ type Curriculum struct {
 	//
 	// `owner_user_id IS NULL` is the definition, straight from migration 000034
 	// ("NULL means VOLA-authored"), and `curricula_source_matches_owner` makes
-	// it trustworthy by refusing an owned row that claims `seed` or `admin`.
+	// it trustworthy: `(owner_user_id IS NULL) = (source <> 'user')` is
+	// BIDIRECTIONAL, so an owned row cannot claim `seed`/`admin` and an
+	// ownerless one cannot claim `user`. Ownership and provenance cannot drift
+	// apart, which is what lets one boolean stand for both.
 	// Deliberately NOT `source`: that distinguishes which ownerless writer —
 	// a deploy or the console — which is the content pipeline's question and
 	// not a client's.

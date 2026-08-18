@@ -25351,8 +25351,14 @@ word. The same payload worked on the Plan tab's Roadmaps strip.
 
 The fix is to serialise the positive fact. `official` is `owner_user_id IS
 NULL`, which is migration 000034's own definition of VOLA-authored, and it is
-trustworthy because `curricula_source_matches_owner` refuses an owned row that
-claims `seed` or `admin` — an athlete has no route to an ownerless row.
+trustworthy because `curricula_source_matches_owner` is **bidirectional** —
+`(owner_user_id IS NULL) = (source <> 'user')`, so an owned row cannot claim
+`seed`/`admin` and an ownerless one cannot claim `user`. Ownership and
+provenance cannot drift apart, which is what lets one boolean stand for both.
+(Review checked this rather than taking my word for it, and found the guarantee
+stronger than I had written it: I had described only the first half.) An athlete
+has no route to an ownerless row — `Create` hard-codes both columns, and neither
+`Update` nor `Delete` touches either.
 Deliberately not `source`: that distinguishes *which* ownerless writer, a deploy
 or the console, which is the content pipeline's question and not a client's.
 `owner_user_id` stays `json:"-"` — a client needs to know whether something is

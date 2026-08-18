@@ -119,8 +119,8 @@ func mustExec(t *testing.T, pool *pgxpool.Pool, sql string, args ...any) {
 // seedOwnerlessCurriculum writes a VOLA-authored row the way a deploy does.
 //
 // `repo.Create` cannot produce one: it hard-codes `owner_user_id` to the caller
-// and `source` to 'user', which is exactly the property that makes the `vola`
-// flag trustworthy — an athlete has no route to an ownerless row. So the seed
+// and `source` to 'user', which is exactly the property that makes the
+// `official` flag trustworthy — an athlete has no route to an ownerless row. So the seed
 // path is reproduced here in SQL rather than faked by nulling a column
 // afterwards, which would not exercise `curricula_source_matches_owner`.
 //
@@ -283,25 +283,25 @@ func TestOfficialAndEditableAreNotTheSameQuestion(t *testing.T) {
 	}
 	volaID := seedOwnerlessCurriculum(t, pool, "White belt basics", "syllabus", "white")
 
-	mine, err := repo.Get(ctx, "reader8", strangers.ID, "")
+	strangersView, err := repo.Get(ctx, "reader8", strangers.ID, "")
 	if err != nil {
 		t.Fatalf("Get stranger's: %v", err)
 	}
-	theirs, err := repo.Get(ctx, "reader8", volaID, "")
+	volasView, err := repo.Get(ctx, "reader8", volaID, "")
 	if err != nil {
 		t.Fatalf("Get VOLA's: %v", err)
 	}
 
 	// They are indistinguishable on `editable` — which is the bug — and must
 	// differ on `vola`, which is the fix.
-	if mine.Editable != theirs.Editable {
+	if strangersView.Editable != volasView.Editable {
 		t.Fatal("premise broken: these are supposed to look identical on editable")
 	}
-	if mine.Official == theirs.Official {
-		t.Fatalf("official failed to tell them apart: stranger=%v vola=%v", mine.Official, theirs.Official)
+	if strangersView.Official == volasView.Official {
+		t.Fatalf("official failed to tell them apart: stranger=%v official=%v", strangersView.Official, volasView.Official)
 	}
-	if !theirs.Official {
-		t.Fatal("the VOLA row is the one that should be vola=true")
+	if !volasView.Official {
+		t.Fatal("the VOLA row is the one that should be official=true")
 	}
 }
 
