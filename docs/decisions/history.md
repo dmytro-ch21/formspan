@@ -23850,8 +23850,10 @@ bug. "Ids are never reused, so 'closes W2' in a commit message still means
 something a year later" is the rule, and for a while one id named two unrelated
 things.
 
-Then #270, resolving a conflict over that same region, **deleted the line
-altogether**. The rule there is "the line is never deleted, because a finished
+Then #270 **deleted the line altogether**. Its diff also ticks T7 in the
+adjacent hunk, which is consistent with a conflict resolution taking the line
+with it — but nothing in the commit proves the mechanism, so that reading is
+inference and is left as one. The rule there is "the line is never deleted, because a finished
 task is the record that it was considered", and the failure is worse than an
 untidy file: a task that vanishes mid-flight is indistinguishable from one
 nobody ever filed — while a draft PR claiming it was open and visible the whole
@@ -23864,9 +23866,15 @@ Re-filed here as F5.
 
 - **`last_error` is cleared, not recorded.** If somebody later wants "this
   delete has failed six times", the count is gone. Nothing asks for that today.
-- **The three traps found reviewing #267 are now closed** (T6, T8 here, T7 in
-  flight as #270). Nobody has swept for a fourth, and this family has produced
-  one every time somebody looked.
+- **A delete's own failure is reported in exactly one place**, and it is not the
+  repair screen: `noteRowError` stores only permanent rejections, and by then
+  the row is restored to `dirty = 0`, which `blockedRows` filters. The sync
+  banner is the surface. An earlier draft of this entry's comment claimed the
+  repair screen would show it; review disproved that.
+- **The four things found reviewing #267 are now all closed** — T6 (#267), T8
+  (#271), T7 (#270) and this one. Nobody has swept for a fifth, and this family
+  produced a new member every time somebody looked.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.

@@ -487,8 +487,16 @@ export async function deleteLocalSession(userID: string, id: string): Promise<vo
     // `last_error` is cleared: it described the PREVIOUS operation, and that
     // operation is no longer what this row is trying to do. Leaving it set
     // meant a deleted row carried a stale complaint about a push that will
-    // never be retried -- and if this delete itself fails, `pushRow` writes a
-    // fresh error describing the delete, which is the one worth showing.
+    // never be retried.
+    //
+    // An earlier version of this comment added "and if this delete itself
+    // fails, pushRow writes a fresh error describing the delete, which is the
+    // one worth showing". Both halves were wrong, and review caught it.
+    // `pushRow` writes no errors at all -- `noteRowError` does -- and that
+    // function returns early unless the rejection is PERMANENT, in which case
+    // the row has already been restored to dirty = 0, which `blockedRows`
+    // filters on. So the repair screen never shows a delete's own error. What
+    // the athlete sees when a delete fails is the run-level banner.
     `UPDATE local_sessions SET deleted_at = ?, dirty = 1, updated_at = ?,
             last_error = NULL
      WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
@@ -1004,7 +1012,7 @@ export type BlockedRow = {
  * The rows the repair screen shows: something failed to push and is still
  * queued.
  *
- * **Tombstones are excluded, which every other read here already did** — F4.
+ * **Tombstones are excluded, which every other read here already did** — F5.
  * This was the one SELECT in the file without the clause, and the cost was not
  * cosmetic in the way it first looked. The screen's primary action is "Open the
  * session", and `readLocalSession` filters tombstones, so a deleted row on this
@@ -1013,8 +1021,11 @@ export type BlockedRow = {
  * deleted.
  *
  * A failing DELETE does not become invisible by being dropped from here. It
- * still counts in `countPendingSessions`, which deliberately does not filter
- * tombstones, so the pending badge keeps reporting it. What it loses is a
+ * still counts toward the pending badge, which deliberately does not filter
+ * tombstones — `countPendingSessions` for a session, and `countPendingWorkouts`
+ * via `workoutOwed` for a plan. (An earlier version of this note credited only
+ * the sessions counter, leaving the plan half of the claim resting on a
+ * function it did not name.) What it loses is a
  * repair affordance that never worked for it: a tombstone has nothing to edit,
  * and the retry it needs is the ordinary sync, not a screen.
  *

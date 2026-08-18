@@ -7,7 +7,7 @@ import {
 import { migratedFixture, type FixtureDb } from './support/sqlite';
 
 /**
- * What the repair screen is allowed to show — F4.
+ * What the repair screen is allowed to show — F5.
  *
  * `blockedRows` was the one read in `sessionStore` without `deleted_at IS NULL`,
  * and the cost was worse than "a deleted row lingers for a cycle". The screen's
@@ -66,6 +66,28 @@ async function blockedWorkout(id: string) {
 const ids = async () => (await blockedRows('u1')).map((r) => r.id);
 
 describe('the repair screen', () => {
+  it('does not list a plan with nothing wrong', async () => {
+    // Pins the workouts query's `last_error IS NOT NULL`. Review found it
+    // survived the entire repo suite: the only error-free dirty workout in any
+    // other test is asserted with `.find`, which does not fail on extra rows.
+    await db.runAsync(
+      `INSERT INTO workout_cache
+         (id, user_id, sport, name, items_json, dirty, deleted_at, updated_at,
+          name_dirty, last_error, cached_at)
+       VALUES ('w-ok', 'u1', 'strength', 'Fine', '[]', 1, NULL, ?, 0, NULL, ?)`,
+      AT, AT,
+    );
+    expect(await ids()).toEqual([]);
+  });
+
+  it('does not list a settled plan that once failed', async () => {
+    // Pins the workouts query's `dirty = 1`. Also survived the whole suite —
+    // every workout fixture anywhere is dirty, so the clause was free to go.
+    await blockedWorkout('w1');
+    await db.runAsync(`UPDATE workout_cache SET dirty = 0 WHERE id = 'w1'`);
+    expect(await ids()).toEqual([]);
+  });
+
   it('shows a blocked session that is still there', async () => {
     // The control. Without it, every assertion below passes on an empty list
     // whatever the query says.
