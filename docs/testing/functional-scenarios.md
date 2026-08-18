@@ -6999,6 +6999,123 @@ yet. The one exception is the weight trend below — see CLAUDE.md's carve-out.
 - **The card did not become a report.** Today still shows the decision card;
   the chart is one tap away and the "Check in" action is still the primary one.
 
+## Nutrition: targets, food log and saved foods (`/v1/nutrition`)
+
+Nutrition is the last frozen-MVP pillar, and its whole posture is that a number
+you can argue with beats a verdict you must trust. The scenarios below lean on
+that: almost every one is about the app being honest when it does not know
+something, rather than about the arithmetic being right.
+
+Backend-only so far (N24). The Food tab, the day screen and the offline outbox
+are N25 and their scenarios belong with them.
+
+### The rule that outranks everything else here
+
+- **Correcting a saved food must not change what the log says you ate.** Log an
+  entry from "Chicken thigh" at 180 kcal, correct the food to 210, and the entry
+  still reads 180. This is the single most important scenario in the module:
+  the failure is invisible — every average and trend an athlete was reading
+  changes underneath them, with nothing left to compare against — and the only
+  thing that catches it is asserting the old number explicitly.
+- **The same holds one level down.** Correcting an ingredient must not rewrite a
+  recipe built from it last month.
+- **Deleting a saved food leaves its entries intact**, losing only the
+  provenance link. `source_food_id` becomes null; the numbers do not move.
+
+### Logging
+
+- **A re-sent entry is the same entry.** The id is client-generated, so pushing
+  it twice from an outbox is one row, updated — not two rows and not a failure.
+- **Deleting twice is not an error**, and neither is deleting an id that never
+  existed. An outbox retries; a second delete recording a permanent failure
+  would strand a correctly-gone row on the sync screen forever.
+- **Macros are absolute for the quantity logged.** The server never scales by
+  `servings` and never converts a unit — send 1.5 × "100 g" with the macros
+  already multiplied.
+- **kcal is authoritative.** An entry whose macros do not sum to its kcal under
+  4/4/9 must be accepted, because real labels do not reconcile. A client that
+  rejects or "corrects" it is the bug.
+- **The meal slot is stored, not derived.** A dinner logged at 23:00 is still
+  dinner when the day is read back — never re-derived from the timestamp.
+- **The day is the athlete's local calendar day.** A 22:00 entry logged west of
+  Greenwich stays on that day. Worth testing under a non-UTC `TZ`, because in
+  UTC the bug is invisible.
+
+### What a day adds up to
+
+- **The day being edited is summed on the client, not the server.** An offline
+  client holds entries the server has never seen, so `/nutrition/days` is for
+  review windows only. A client that renders today's remaining figure from it
+  will show a number that is wrong for exactly as long as the outbox is full.
+- **Each day is paired with the target that was live THAT day.** Set 2400 in
+  May and 2100 on the 18th; the 17th must report 2400 and the 18th 2100. One
+  figure for the whole window misattributes every day before the change.
+- **A day nobody logged fibre for reports null fibre, not zero.** Averaging
+  unstated as zero drags every fibre figure down.
+
+### Targets
+
+- **The date is the identity.** Setting today's target twice is one row.
+- **A window with no targets of its own still reports one.** Set a target in
+  May, ask for a week in August, and the May row comes back as the carry-in.
+  Without it the client honestly reports "no target" for a week the athlete was
+  eating to one — and it only breaks for people who have *not* changed their
+  target recently, which is to say the ones doing it right.
+- **The basis survives a round trip**, because it *is* the explanation. A target
+  whose arithmetic was lost cannot be argued with.
+- **The basis is frozen, never recomputed.** Change the athlete's weight or end
+  their phase, and a target set last month still explains itself with the
+  numbers that produced it.
+
+### Deriving a target
+
+- **It is a proposal and stores nothing.** `GET /targets/suggested` twice
+  changes no state; the athlete accepts with a PUT.
+- **An incomplete profile is a 200 with a null suggestion**, not a 400, and
+  `missing` names the fields. The request was fine; the fix is a form.
+- **A profile with only a bodyweight is REFUSED**, even though a number could be
+  produced. The generic resting baseline runs 20–30% high; in a food target that
+  overfeeds by roughly 400 kcal a day and the cut silently never happens. There
+  is no caveat an athlete can act on.
+- **A cut proposes less than maintenance and a lean bulk proposes more.** Both
+  directions, because a single-direction test passes against a sign that is
+  inverted for both — and an inverted sign proposes *more* food to somebody
+  already losing too fast while every number on screen still looks plausible.
+- **Training is added once.** The activity ladder is NEAT-only and stops at
+  1.45; a textbook 1.55 "moderately active" plus the logged-session average
+  double-counts every mat class.
+- **A missed weigh-in deadline must not prescribe a surplus.** Set a
+  `making_weight` phase whose `target_on` has passed while the athlete is still
+  over: the target must not go UP. A negative day count inverts the required
+  rate, and the sign flips again per phase.
+- **A deadline four weeks out and six kilos to go is clamped**, not obeyed. A
+  competition date does not change physiology.
+- **Nothing proposes less than the athlete's resting rate.**
+- **An unknown phase kind holds weight.** A phase kind the server gains before a
+  build knows it is a real deployment state, and under-feeding on a vocabulary
+  mismatch is the worse failure.
+- **Macros round coarsely, so `4P + 4C + 9F` will not equal kcal.** That is
+  intended, and a client must not reconcile them.
+
+### Auth and security
+
+- **A UUID belonging to another athlete is 404, never 403.** A 403 confirms the
+  row exists to somebody enumerating ids. Needs two accounts — a single-account
+  test passes against the bug.
+- **And it writes nothing.** After a foreign PUT, the original row's name,
+  macros and `user_id` are unchanged. This is the cross-user bug the reviewers
+  have already caught twice in this codebase, and a client-generated primary key
+  is exactly what re-opens it.
+- **Saved foods are scoped.** Another athlete's foods never appear in a list or
+  a search.
+- **`source` is not settable by a client.** Everything written through the API
+  is `user`; letting a client claim `usda` or `off` would make the licence
+  separation those values exist for meaningless.
+- **Every endpoint 401s without a token.**
+- **A range longer than its cap is a 400**, not a slow success — the response
+  stack buffers to compute an ETag, so an unbounded window is a memory cost that
+  scales with how long somebody has trained.
+
 ## The BJJ position map (`GET /v1/bjj/positions`, mobile `/bjj/positions`)
 
 ### The aggregate

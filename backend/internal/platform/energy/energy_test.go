@@ -275,3 +275,66 @@ func TestDensityBoundaryIsInclusive(t *testing.T) {
 		t.Fatalf("exactly one set per two minutes should be dense, got MET %.1f", got[0].MET)
 	}
 }
+
+// RestingPerDay is what the nutrition module's calorie target is built on, so
+// it is pinned against the same reference athlete the rest of this file uses.
+// 1780 kcal/day is Mifflin–St Jeor by hand: 10(80) + 6.25(180) − 5(30) + 5.
+func TestRestingPerDayIsMifflinStJeorOverAWholeDay(t *testing.T) {
+	kcal, ok := RestingPerDay(reference())
+	if !ok {
+		t.Fatal("reference athlete refused")
+	}
+	near(t, kcal, 1780, 0.5, "resting kcal/day")
+
+	// It must be exactly the per-minute figure times a day, not a second
+	// derivation that happens to land nearby — otherwise the session card and
+	// the food target can disagree about the same athlete's resting rate.
+	near(t, kcal, restingKcalPerMinute(reference())*1440, 1e-9, "day == minute × 1440")
+}
+
+// The fallback path is USABLE but inflated, and both halves of that matter:
+// a weight-only profile still gets a number (so the caller can decide), and
+// that number sits ABOVE Mifflin–St Jeor (so a caller that ships it as a food
+// target overfeeds). PrecisionOf is the discriminator, and this test is what
+// stops the two drifting apart.
+func TestRestingPerDayFallbackIsCoarseAndRunsHigh(t *testing.T) {
+	weightOnly := Profile{WeightKG: f(80)}
+
+	coarse, ok := RestingPerDay(weightOnly)
+	if !ok {
+		t.Fatal("weight-only profile refused; it should be coarse, not absent")
+	}
+	if got := PrecisionOf(weightOnly); got != PrecisionCoarse {
+		t.Fatalf("precision %q, want coarse", got)
+	}
+
+	full, _ := RestingPerDay(reference())
+	if coarse <= full {
+		t.Fatalf("fallback %.0f is not above Mifflin–St Jeor %.0f; the package doc's "+
+			"claim that the baseline runs 20–30%% high no longer holds, and the "+
+			"nutrition module's refusal to derive from it is now unjustified", coarse, full)
+	}
+}
+
+// Same refusal as Estimate's, for the same reason: weight is the dominant
+// input and there is no honest default. NaN is included because Postgres
+// numeric accepts 'NaN' and `<= 0` is false for it — the guard has to be
+// written inverted or a NaN weight yields a NaN target.
+func TestRestingPerDayRefusesWithoutAnHonestWeight(t *testing.T) {
+	nan := math.NaN()
+	for _, tc := range []struct {
+		name string
+		p    Profile
+	}{
+		{"no weight", Profile{HeightCM: f(180), Sex: s("male")}},
+		{"zero weight", Profile{WeightKG: f(0)}},
+		{"negative weight", Profile{WeightKG: f(-80)}},
+		{"NaN weight", Profile{WeightKG: &nan}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if kcal, ok := RestingPerDay(tc.p); ok || kcal != 0 {
+				t.Fatalf("got %v ok=%v, want 0 false", kcal, ok)
+			}
+		})
+	}
+}

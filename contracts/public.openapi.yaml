@@ -37,6 +37,279 @@ components:
       description: Clerk-issued session token, verified server-side via Clerk's JWKS.
 
   schemas:
+    NutritionMacros:
+      type: object
+      description: >
+        What a quantity of food contains.
+
+
+        **kcal is authoritative.** Clients must not re-derive it from the macros:
+        real labels do not reconcile against 4/4/9 (rounding, fibre, sugar
+        alcohols, and Atwater's own approximations put them 5-10% apart), so
+        recomputing it discards the number the manufacturer measured.
+
+
+        `fibre_g` is nullable and the others are not, because that difference is
+        real: zero fat is a measurement, but a label that does not state fibre is
+        not claiming there is none, and averaging unstated as zero drags every
+        fibre figure down.
+      required: [kcal, protein_g, carb_g, fat_g]
+      properties:
+        kcal: { type: number }
+        protein_g: { type: number }
+        carb_g: { type: number }
+        fat_g: { type: number }
+        fibre_g: { type: number, nullable: true }
+
+    NutritionEntry:
+      allOf:
+        - $ref: "#/components/schemas/NutritionMacros"
+        - type: object
+          description: >
+            One item eaten on one day. Macros are ABSOLUTE for the quantity
+            logged, already multiplied by `servings`.
+          required: [id, user_id, eaten_on, meal, name, servings, serving_label, notes, created_at, updated_at]
+          properties:
+            id: { type: string, format: uuid, description: Client-generated. It is the idempotency key for an offline push. }
+            user_id: { type: string }
+            eaten_on:
+              type: string
+              format: date
+              description: >
+                The athlete's LOCAL calendar day, never derived from a UTC
+                timestamp — west of Greenwich a 22:00 snack would land on
+                tomorrow and the remaining figure would be wrong on two days.
+            meal: { type: string, enum: [breakfast, lunch, dinner, snack] }
+            name: { type: string }
+            servings:
+              type: number
+              description: How many of `serving_label` were eaten — 1.5 x "100 g".
+            serving_label: { type: string }
+            source_food_id:
+              type: string
+              format: uuid
+              nullable: true
+              description: >
+                Provenance only, for "log this again". Nothing reads nutrition
+                back through it, and it becomes null if the food is deleted.
+            notes: { type: string }
+            created_at: { type: string, format: date-time }
+            updated_at: { type: string, format: date-time }
+
+    NutritionEntryInput:
+      allOf:
+        - $ref: "#/components/schemas/NutritionMacros"
+        - type: object
+          required: [eaten_on, meal, name, servings, serving_label]
+          properties:
+            eaten_on: { type: string, format: date }
+            meal: { type: string, enum: [breakfast, lunch, dinner, snack] }
+            name: { type: string, minLength: 1, maxLength: 120 }
+            servings: { type: number, exclusiveMinimum: true, minimum: 0 }
+            serving_label: { type: string, minLength: 1, maxLength: 40 }
+            source_food_id: { type: string, format: uuid, nullable: true }
+            notes: { type: string, maxLength: 500 }
+
+    NutritionRecipeItem:
+      allOf:
+        - $ref: "#/components/schemas/NutritionMacros"
+        - type: object
+          description: >
+            One component of a recipe. Its numbers are copied here, exactly like
+            an entry's: correcting a saved ingredient must not rewrite a recipe
+            built last month.
+          required: [name, quantity, serving_label]
+          properties:
+            name: { type: string, minLength: 1, maxLength: 120 }
+            quantity: { type: number, exclusiveMinimum: true, minimum: 0 }
+            serving_label: { type: string, minLength: 1, maxLength: 40 }
+            source_food_id: { type: string, format: uuid, nullable: true }
+
+    NutritionFood:
+      allOf:
+        - $ref: "#/components/schemas/NutritionMacros"
+        - type: object
+          description: >
+            A saved food, or a recipe. Macros are PER ONE SERVING; for a recipe
+            they are derived from `items` divided by `yield_servings` at write
+            time and stored, so a food picker never has to join.
+          required: [id, user_id, kind, name, brand, serving_label, source, items, created_at, updated_at]
+          properties:
+            id: { type: string, format: uuid }
+            user_id: { type: string }
+            kind: { type: string, enum: [food, recipe] }
+            name: { type: string }
+            brand: { type: string }
+            serving_label:
+              type: string
+              description: What one serving IS, as the athlete would say it — "100 g", "1 scoop (30 g)", "1 egg".
+            serving_grams:
+              type: number
+              nullable: true
+              description: >
+                Nullable on purpose: an egg has no honest gram weight, and
+                inventing one would make every gram-based total quietly
+                fictional.
+            yield_servings:
+              type: number
+              nullable: true
+              description: Recipes only — "this makes 6 portions". Null for a plain food.
+            items:
+              type: array
+              description: A recipe's components. Empty for a plain food.
+              items: { $ref: "#/components/schemas/NutritionRecipeItem" }
+            source:
+              type: string
+              enum: [user, seed, usda, off]
+              description: >
+                Where the row came from. Not settable by a client — everything
+                written through the API is `user`.
+            external_id: { type: string, nullable: true }
+            barcode: { type: string, nullable: true }
+            created_at: { type: string, format: date-time }
+            updated_at: { type: string, format: date-time }
+
+    NutritionFoodInput:
+      type: object
+      description: >
+        For `kind: food`, the macros are REQUIRED and are the figures for one
+        serving. For `kind: recipe`, send `items` and `yield_servings` instead —
+        the per-serving macros are derived from them and any sent are ignored.
+
+
+        The macro fields are therefore declared here rather than inherited from
+        `NutritionMacros`: inheriting them would make them required on a recipe
+        too, and required-but-ignored is a contradiction a generated client
+        cannot satisfy.
+      required: [name, serving_label]
+      properties:
+        kind: { type: string, enum: [food, recipe], default: food }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        brand: { type: string, maxLength: 80 }
+        serving_label: { type: string, minLength: 1, maxLength: 40 }
+        serving_grams: { type: number, nullable: true }
+        kcal: { type: number, description: Required for a food; ignored for a recipe. }
+        protein_g: { type: number, description: Required for a food; ignored for a recipe. }
+        carb_g: { type: number, description: Required for a food; ignored for a recipe. }
+        fat_g: { type: number, description: Required for a food; ignored for a recipe. }
+        fibre_g: { type: number, nullable: true }
+        yield_servings: { type: number, nullable: true }
+        items:
+          type: array
+          maxItems: 100
+          items: { $ref: "#/components/schemas/NutritionRecipeItem" }
+        barcode: { type: string, nullable: true }
+
+    NutritionDay:
+      allOf:
+        - $ref: "#/components/schemas/NutritionMacros"
+        - type: object
+          description: One day's summed intake, against the target that was live that day.
+          required: [eaten_on, entries]
+          properties:
+            eaten_on: { type: string, format: date }
+            entries: { type: integer }
+            target_kcal:
+              type: integer
+              nullable: true
+              description: >
+                The target live on THAT day, resolved per day rather than once
+                for the window — and sent per day rather than as a weekly total
+                the client divides, so training-day cycling stays a server
+                change later rather than a client rewrite.
+            target_protein_g: { type: integer, nullable: true }
+
+    NutritionTargetBasis:
+      type: object
+      description: >
+        The arithmetic that produced a derived target, frozen at the moment it
+        was accepted. Every field is one line of the explanation a UI renders.
+      properties:
+        rmr_kcal: { type: integer }
+        rmr_precision: { type: string, enum: [none, coarse, estimated] }
+        weight_kg: { type: number }
+        weight_measured_on: { type: string, format: date }
+        activity: { type: string, enum: [sedentary, light, active] }
+        activity_factor: { type: number, description: NEAT only — training is added separately. }
+        neat_kcal: { type: integer }
+        training_kcal_per_day: { type: integer }
+        training_days_covered: { type: integer }
+        training_sessions:
+          type: integer
+          description: Reported so a thin history is visible rather than silently flattering.
+        tdee_kcal: { type: integer }
+        phase_kind: { type: string }
+        target_rate_pct_per_week:
+          type: number
+          description: Signed — negative for loss.
+        target_rate_kg_per_week: { type: number }
+        kcal_per_kg:
+          type: number
+          description: >
+            7700, Wishnofsky's figure. An approximation that overestimates
+            long-run loss because it ignores adaptive thermogenesis — which is
+            why a weekly adjustment against observed weight change exists.
+        energy_delta_kcal: { type: integer }
+        clamped:
+          type: boolean
+          description: True when a rail bound, so a UI can say "we stopped here".
+        clamp_reason: { type: string }
+        relaxed: { type: string, description: "Which macro rule gave way, if any." }
+        protein_g_per_kg: { type: number }
+        fat_g_per_kg: { type: number }
+
+    NutritionSuggestion:
+      type: object
+      required: [kcal, protein_g, carb_g, fat_g, fibre_g, basis]
+      properties:
+        kcal: { type: integer }
+        protein_g: { type: integer }
+        carb_g: { type: integer }
+        fat_g: { type: integer }
+        fibre_g: { type: integer }
+        basis: { $ref: "#/components/schemas/NutritionTargetBasis" }
+
+    NutritionTarget:
+      type: object
+      description: What the athlete is eating to, from a date onward.
+      required: [user_id, effective_on, kcal, protein_g, carb_g, fat_g, source, created_at, updated_at]
+      properties:
+        user_id: { type: string }
+        effective_on:
+          type: string
+          format: date
+          description: >
+            The date is the identity — setting a target twice for one day is one
+            row, and a past day stays judged against the target that was live
+            then.
+        kcal: { type: integer }
+        protein_g: { type: integer }
+        carb_g: { type: integer }
+        fat_g: { type: integer }
+        fibre_g: { type: integer, nullable: true }
+        source:
+          type: string
+          enum: [derived, manual, adjustment]
+          description: >
+            `derived` came from the wizard and carries a basis; `manual` was
+            typed and has none to show; `adjustment` is a weekly proposal the
+            athlete accepted.
+        basis: { $ref: "#/components/schemas/NutritionTargetBasis" }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    NutritionTargetInput:
+      type: object
+      required: [kcal, protein_g, carb_g, fat_g]
+      properties:
+        kcal: { type: integer, minimum: 800, maximum: 8000 }
+        protein_g: { type: integer, minimum: 0, maximum: 500 }
+        carb_g: { type: integer, minimum: 0, maximum: 1200 }
+        fat_g: { type: integer, minimum: 0, maximum: 400 }
+        fibre_g: { type: integer, nullable: true, minimum: 0, maximum: 120 }
+        source: { type: string, enum: [derived, manual, adjustment], default: manual }
+        basis: { $ref: "#/components/schemas/NutritionTargetBasis" }
+
     BodyCheckin:
       type: object
       description: >
@@ -7825,6 +8098,413 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+
+
+  /nutrition/entries:
+    get:
+      operationId: listNutritionEntries
+      summary: What the caller ate, over a window of days
+      description: >
+        `from` and `to` are both required and bound to 31 days. Both rather than
+        defaulted, because a client that omits one would silently receive a
+        different span than it rendered.
+
+
+        The response also carries `meals`, the slot vocabulary in DISPLAY order,
+        so a client's picker renders from the server's list rather than a
+        hardcoded copy that can drift. Sorting it alphabetically gives
+        breakfast, dinner, lunch, snack — which reads as a bug to every athlete
+        who sees it.
+      tags: [Nutrition]
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: The entries in that window.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [entries, meals]
+                properties:
+                  entries:
+                    type: array
+                    items: { $ref: "#/components/schemas/NutritionEntry" }
+                  meals:
+                    type: array
+                    items: { type: string, enum: [breakfast, lunch, dinner, snack] }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /nutrition/entries/{id}:
+    put:
+      operationId: saveNutritionEntry
+      summary: Record or replace one logged item
+      description: >
+        **PUT on a client-generated UUID.** The client names the resource, so
+        sending it twice is the same as sending it once — which is what makes an
+        entry logged with no signal safe to retry from an outbox.
+
+
+        **Macros are absolute for the quantity logged**, already multiplied by
+        `servings`. The server never scales and never converts a unit, which is
+        what keeps `serving_label` a descriptive string rather than something to
+        parse.
+
+
+        **`kcal` is authoritative and clients must not re-derive it from the
+        macros.** Real labels do not reconcile against 4/4/9 — rounding, fibre,
+        sugar alcohols and Atwater's own approximations put them 5-10% apart
+        routinely — so there is deliberately no constraint tying them together. A
+        client that "fixes" the discrepancy is discarding the number the
+        manufacturer measured in favour of an estimate.
+
+
+        **`source_food_id` is provenance only.** It answers "log this again". No
+        response ever reads nutrition back through it: correcting a saved food
+        must not rewrite what this entry says you ate.
+
+
+        A UUID belonging to another athlete returns 404, never 403 — a 403 would
+        confirm the row exists to somebody enumerating ids.
+      tags: [Nutrition]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NutritionEntryInput" }
+      responses:
+        "200":
+          description: The stored entry.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NutritionEntry" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      operationId: deleteNutritionEntry
+      summary: Remove one logged item
+      description: >
+        **204 whether or not the row was there.** An outbox retrying a delete
+        that already landed would otherwise record a permanent failure for a row
+        that is correctly gone, and it would sit on the athlete's sync screen
+        forever. It is also the non-oracle answer: a foreign UUID and an absent
+        one are indistinguishable.
+      tags: [Nutrition]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204": { description: "Gone, or never there." }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /nutrition/days:
+    get:
+      operationId: listNutritionDays
+      summary: Per-day totals against the target that was live that day
+      description: >
+        A read-only roll-up for review screens, bounded to 366 days.
+
+
+        **Not for the day the client is currently editing.** An offline client
+        holds entries the server has never seen, so this figure is not
+        stylistically but numerically wrong there, during the exact minute
+        somebody is looking at it. Sum the day being edited on the client.
+
+
+        The target is resolved PER DAY rather than once for the window: a target
+        changed mid-window applies from its own date forward, and a single
+        figure would misattribute every day before it. It is also why the target
+        arrives per day rather than as a weekly total the client divides —
+        training-day calorie cycling then stays a server change rather than a
+        client rewrite.
+      tags: [Nutrition]
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: One row per day that has at least one entry.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [days]
+                properties:
+                  days:
+                    type: array
+                    items: { $ref: "#/components/schemas/NutritionDay" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /nutrition/foods:
+    get:
+      operationId: listNutritionFoods
+      summary: The caller's saved foods and recipes
+      description: >
+        `q` matches on name, case-insensitively. Recipes carry their `items`;
+        a plain food's `items` is an empty array.
+      tags: [Nutrition]
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema: { type: string, maxLength: 100 }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        "200":
+          description: The matching foods.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [foods]
+                properties:
+                  foods:
+                    type: array
+                    items: { $ref: "#/components/schemas/NutritionFood" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /nutrition/foods/{id}:
+    put:
+      operationId: saveNutritionFood
+      summary: Save or replace a food, or a recipe and its components
+      description: >
+        Create-or-replace on a client-generated UUID, in one transaction.
+
+
+        **A recipe's macros are DERIVED, not supplied.** Send `items` and
+        `yield_servings`; the per-serving figures are computed as sum divided by
+        yield and stored on the row, so the food picker never joins. Any macros
+        sent on a recipe are ignored.
+
+
+        **Items are replaced wholesale**, not merged — they are an ordered list
+        the client owns in full.
+
+
+        **`source` is not settable.** Everything written here is `user`; `usda`
+        and `off` are set by the importers that fetch them. Letting a client
+        claim a provenance would make the licence separation those values exist
+        for meaningless.
+      tags: [Nutrition]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NutritionFoodInput" }
+      responses:
+        "200":
+          description: The stored food, with a recipe's derived per-serving macros.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NutritionFood" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      operationId: deleteNutritionFood
+      summary: Remove a saved food
+      description: >
+        204 whether or not it was there, for the same reason an entry delete is.
+
+
+        **Entries logged from it are untouched.** They carry their own numbers
+        and only lose the provenance link, so deleting a favourite can never
+        change what the log says you ate.
+      tags: [Nutrition]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204": { description: "Gone, or never there." }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /nutrition/targets:
+    get:
+      operationId: listNutritionTargets
+      summary: The targets in a window, plus the one live at its start
+      description: >
+        **The carry-in row is the point.** A target set three months ago means a
+        week-long window contains no rows of its own, and without it the client
+        would report "no target" for a week the athlete was very much eating to
+        one — a bug that only appears for people who have not changed their
+        target recently, which is to say the ones doing it right.
+      tags: [Nutrition]
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Targets in the window, plus at most one carry-in row before it.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [targets]
+                properties:
+                  targets:
+                    type: array
+                    items: { $ref: "#/components/schemas/NutritionTarget" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /nutrition/targets/suggested:
+    get:
+      operationId: suggestNutritionTarget
+      summary: Derive a calorie and macro target, without storing it
+      description: >
+        **A proposal, never a decision.** Nothing is written; the athlete accepts
+        it with `PUT /nutrition/targets/{date}`, which is what makes the number
+        arguable rather than imposed.
+
+
+        The chain, every step of which is returned in `basis` so the UI can show
+        its work: resting rate (Mifflin-St Jeor) + NEAT (an activity factor that
+        stops at 1.45 because training is added SEPARATELY, and a textbook 1.55
+        would double-count every session) + a 28-day trailing training average =
+        maintenance; then the live body phase's own rate band supplies the
+        deficit or surplus.
+
+
+        **An incomplete profile is a 200, not a 400.** `suggestion` is null and
+        `missing` names the fields — the request was fine, the profile is
+        incomplete, and the client's fix is a form rather than a retry.
+
+
+        It also refuses when the resting rate would come from the generic
+        baseline rather than Mifflin-St Jeor. That baseline runs 20-30% high; on
+        a session card it inflates a badge, but in a food target it overfeeds by
+        roughly 400 kcal a day and the cut simply never happens. There is no
+        caveat an athlete could act on, so it is a refusal.
+
+
+        **Macro rounding is coarse (5 g, and 10 kcal), so `4P + 4C + 9F` will
+        not equal `kcal`.** That is intended. kcal is authoritative.
+      tags: [Nutrition]
+      parameters:
+        - name: on
+          in: query
+          required: false
+          description: The day to derive for. Defaults to today, UTC.
+          schema: { type: string, format: date }
+        - name: activity
+          in: query
+          required: false
+          description: >
+            NEAT only — everything that is NOT logged training. The ladder stops
+            at `active` (an on-your-feet job) on purpose.
+          schema: { type: string, enum: [sedentary, light, active], default: light }
+      responses:
+        "200":
+          description: A suggestion, or null with the fields that are missing.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [suggestion, missing, activities]
+                properties:
+                  suggestion:
+                    type: object
+                    nullable: true
+                    description: Null when the profile is incomplete — see `missing`.
+                    allOf: [{ $ref: "#/components/schemas/NutritionSuggestion" }]
+                  missing:
+                    type: array
+                    description: Profile fields a derivation needs and did not have. Empty on success.
+                    items: { type: string }
+                  activities:
+                    type: array
+                    items: { type: string, enum: [sedentary, light, active] }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /nutrition/targets/{date}:
+    put:
+      operationId: saveNutritionTarget
+      summary: Set the target that holds from a date
+      description: >
+        **The date is the identity**, so setting today's target twice is one
+        row, not two — and history stays readable: a day logged in March is
+        judged against March's target rather than against whatever the athlete
+        is eating to now.
+
+
+        `basis` should be echoed back verbatim from `/nutrition/targets/suggested`
+        when accepting a derived target. It is FROZEN at that moment and never
+        recomputed on read, because weight, height and the live phase all move —
+        a "live" explanation would be a confident lie about a past decision.
+        Omit it for a manually typed target, which has no arithmetic to show.
+      tags: [Nutrition]
+      parameters:
+        - name: date
+          in: path
+          required: true
+          schema: { type: string, format: date }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NutritionTargetInput" }
+      responses:
+        "200":
+          description: The stored target.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NutritionTarget" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    delete:
+      operationId: deleteNutritionTarget
+      summary: Undo a target set on a date
+      description: 204 whether or not it was there.
+      tags: [Nutrition]
+      parameters:
+        - name: date
+          in: path
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        "204": { description: "Gone, or never there." }
+        "401": { $ref: "#/components/responses/Unauthorized" }
 
   /admin/users:
     get:

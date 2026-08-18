@@ -157,6 +157,16 @@ jobs:
       - name: Grip vocabulary parity
         run: python3 scripts/check-grip-parity.py
 
+      # The evidence-based rate bands are duplicated between anthropometry.ts,
+      # which judges an observed rate, and nutrition/target.go, which derives a
+      # calorie target from the same band. Neither can be deleted: the mobile
+      # copy has to work with no signal, the Go copy has to aggregate training
+      # the phone does not hold. Drift is worse than the grip case because both
+      # halves stay plausible — the app would report "on target" against a
+      # number the target itself never used.
+      - name: Rate band parity
+        run: python3 scripts/check-rate-parity.py
+
       # Until this job existed, NOTHING in this repo read a .py file: no CI
       # step, no `verify` link, no pyproject/ruff config anywhere. The content
       # pipeline is Python, and the script that imports the whole catalog is

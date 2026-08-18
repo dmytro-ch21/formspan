@@ -27,6 +27,7 @@ import (
 	"github.com/dmytro-ch21/vola/backend/internal/modules/friend"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/health"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/notification"
+	"github.com/dmytro-ch21/vola/backend/internal/modules/nutrition"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/plan"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/profile"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/sequence"
@@ -236,6 +237,7 @@ func main() {
 		os.Exit(1)
 	}
 	bodyHandler := body.NewHandler(body.NewPostgresRepository(pool), photoStore)
+	nutritionHandler := nutrition.NewHandler(nutrition.NewPostgresRepository(pool))
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/healthz", handleHealthz)
@@ -257,6 +259,32 @@ func main() {
 	mux.Handle("GET /v1/body/phases", verifier.RequireAuth(http.HandlerFunc(bodyHandler.ListPhases)))
 	mux.Handle("POST /v1/body/phases", verifier.RequireAuth(http.HandlerFunc(bodyHandler.CreatePhase)))
 	mux.Handle("POST /v1/body/phases/{id}/end", verifier.RequireAuth(http.HandlerFunc(bodyHandler.EndPhase)))
+
+	// Nutrition. Entries and foods are addressed by a CLIENT-GENERATED UUID and
+	// written with PUT, which is what makes an offline push idempotent: sending
+	// the same row twice is the same as sending it once.
+	//
+	// Not `PUT /v1/nutrition/days/{date}` replacing a whole day, which is how
+	// sessions handle sets. A day accrues from several contexts and commonly
+	// from two devices at once — a phone logging lunch while web corrects
+	// breakfast — and under day-replace the second write deletes the first.
+	// Worse, a day-replace outbox has to queue a whole-day snapshot, and
+	// replaying one captured before another device's entry synced silently
+	// drops it. That is the T5-T8 family already in TASKS.md.
+	mux.Handle("GET /v1/nutrition/entries", verifier.RequireAuth(http.HandlerFunc(nutritionHandler.ListEntries)))
+	mux.Handle("PUT /v1/nutrition/entries/{id}", verifier.RequireAuth(http.HandlerFunc(nutritionHandler.SaveEntry)))
+	mux.Handle("DELETE /v1/nutrition/entries/{id}", verifier.RequireAuth(http.HandlerFunc(nutritionHandler.DeleteEntry)))
+	mux.Handle("GET /v1/nutrition/days", verifier.RequireAuth(http.HandlerFunc(nutritionHandler.Days)))
+	mux.Handle("GET /v1/nutrition/foods", verifier.RequireAuth(http.HandlerFunc(nutritionHandler.ListFoods)))
+	mux.Handle("PUT /v1/nutrition/foods/{id}", verifier.RequireAuth(http.HandlerFunc(nutritionHandler.SaveFood)))
+	mux.Handle("DELETE /v1/nutrition/foods/{id}", verifier.RequireAuth(http.HandlerFunc(nutritionHandler.DeleteFood)))
+	// Literal before wildcard, which Go 1.22's mux resolves by specificity
+	// rather than declaration order — the same shape /v1/sessions/suggestions
+	// and /v1/curricula/working already rely on. Ordered this way for readers.
+	mux.Handle("GET /v1/nutrition/targets/suggested", verifier.RequireAuth(http.HandlerFunc(nutritionHandler.Suggested)))
+	mux.Handle("GET /v1/nutrition/targets", verifier.RequireAuth(http.HandlerFunc(nutritionHandler.ListTargets)))
+	mux.Handle("PUT /v1/nutrition/targets/{date}", verifier.RequireAuth(http.HandlerFunc(nutritionHandler.SaveTarget)))
+	mux.Handle("DELETE /v1/nutrition/targets/{date}", verifier.RequireAuth(http.HandlerFunc(nutritionHandler.DeleteTarget)))
 	mux.Handle("GET /v1/bjj/standing", verifier.RequireAuth(http.HandlerFunc(bjjHandler.GetStanding)))
 	mux.Handle("POST /v1/bjj/promotions", verifier.RequireAuth(http.HandlerFunc(bjjHandler.CreatePromotion)))
 	mux.Handle("PATCH /v1/bjj/promotions/{promotionID}", verifier.RequireAuth(http.HandlerFunc(bjjHandler.UpdatePromotion)))

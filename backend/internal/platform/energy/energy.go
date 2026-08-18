@@ -164,6 +164,34 @@ func restingKcalPerMinute(p Profile) float64 {
 	return 3.5 * *p.WeightKG * kcalPerLitreO2 / 1000
 }
 
+// RestingPerDay is Mifflin–St Jeor over a whole day, and the ONLY way to get a
+// resting rate out of this package.
+//
+// Exported because a calorie target needs the same number a session's cost is
+// priced against. Without it the nutrition module would carry a second copy of
+// the equation — and unlike the MET table, which is a list of constants a
+// reviewer can check line by line, a duplicated formula drifts silently and in
+// a direction nobody notices. `check:grip-parity` exists because that already
+// happened once to a vocabulary; this is the same shape with arithmetic that
+// decides how much somebody eats.
+//
+// ok is false for the same reason Estimate's is: no bodyweight, no honest
+// answer. Callers must NOT substitute 70 kg.
+//
+// PAIR THIS WITH PrecisionOf. The fallback baseline below runs 20–30% high, and
+// a caller sizing a daily intake off it inflates the whole chain by roughly
+// 400 kcal/day — invisibly, and in the direction that makes a cut never happen.
+// A session card can live with that; a food target cannot, so the nutrition
+// module refuses to derive unless PrecisionOf reports PrecisionEstimated.
+func RestingPerDay(p Profile) (kcal float64, ok bool) {
+	// NOT `<= 0`: that is FALSE for NaN, and Postgres numeric accepts 'NaN'.
+	// Same inversion as Estimate's guard, and for the same reason.
+	if p.WeightKG == nil || !(*p.WeightKG > 0) {
+		return 0, false
+	}
+	return restingKcalPerMinute(p) * 1440, true
+}
+
 // Precision says how good the estimate is, so a caller can label it honestly
 // rather than presenting two different qualities of number identically.
 type Precision string

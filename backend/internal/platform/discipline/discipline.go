@@ -77,6 +77,18 @@ type Capabilities struct {
 	// hiding the UI, not for deciding the answer.
 	HasProgression bool `json:"has_progression"`
 
+	// HasFoodLog gates the food log, its target, and the tab that reaches
+	// them. True only for nutrition.
+	//
+	// A capability rather than `key == "nutrition"` at each call site, matching
+	// every other gate here — the clients ban comparing keys because a
+	// discipline gaining or losing a surface then means editing three apps
+	// instead of one row. It is a distinct flag rather than a reading of
+	// `!IsSport` because those answer different questions: IsSport says a
+	// session cannot have this sport, which happens to be true here and says
+	// nothing about whether there is a food log.
+	HasFoodLog bool `json:"has_food_log"`
+
 	// RecordKinds are the personal-best kinds that mean anything here. Empty
 	// for BJJ — "heaviest weight" and "estimated 1RM" are not BJJ facts, and
 	// there is no rounds-rolled or mat-time record kind in the model. A
@@ -176,7 +188,13 @@ var modules = []Module{
 		// default silently flips it for every user who never touched it.
 		DefaultOn: true,
 		Caps: Capabilities{
-			Catalog:     "",
+			Catalog: "",
+			// Catalog stays empty: it names the content kind the LIBRARY
+			// renders, and an athlete's own saved foods are not a library.
+			// It becomes "foods" only if a shared catalog ever ships, and
+			// that change also needs the Library screen to know how to draw
+			// one.
+			HasFoodLog:  true,
 			RecordKinds: []string{},
 		},
 	},
