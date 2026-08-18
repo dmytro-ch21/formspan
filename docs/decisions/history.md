@@ -23229,11 +23229,11 @@ carries and olympic lifts get regular/neutral/hook.
 Two of those read wrong until you check the catalog, which is why the test says
 so:
 
-- **Hinges include `neutral`** — the Hex Bar Deadlift and four kettlebell and
-  dumbbell swings sit in those 55 rows.
-- **Olympic lifts include `neutral`**, and harder: 22 of its 25 rows are
-  kettlebell or dumbbell cleans and snatches. `hook` is the barbell answer;
-  `neutral` is what most of the bucket actually is.
+- **Hinges include `neutral`** — 20 of those 55 rows are kettlebell, dumbbell
+  or hex-bar: dumbbell deadlifts and RDLs, the swings, the Hex Bar Deadlift.
+- **Olympic lifts include `neutral`** — 12 of those 25 are kettlebell (11) or
+  dumbbell (1), none of which hook-grips anything. Barbell is the plurality at
+  13, so neither value is the majority answer and the bucket needs both.
 
 `mixed` is offered on hinges **alone**. You do not mix-grip a snatch, and a
 mixed farmer's carry is not a thing — offering it there would relocate the
@@ -23285,6 +23285,45 @@ disappears and the athlete is stuck with it.
   CHECK. That loses data, and it is the honest cost — there is no narrower grip
   to demote a mixed pull to, and `regular` would be the false entry 000054
   refused to invent. Unrecorded is at least true.
+
+### What review caught
+
+**The same rotted probe, one file over.** Re-pointing `grip.test.ts`'s `'mixed'`
+was right and incomplete: `sessions.test.ts` had its own
+`keeps a grip this build does not recognise` probing the identical value.
+Reverting the T4 guard left that one green — the test whose NAME promised the
+coverage was the one not providing it. Both fire now; the mutation takes 11
+tests across the two files. `gripPush.test.ts` had a third instance in weaker
+form, a constant literally named `FUTURE_GRIP = 'mixed'` described as "a grip no
+build in the wild knows", which this branch made false on both halves.
+
+**My olympic arithmetic was wrong**, stated as the load-bearing reason in four
+places. "22 of 25 rows are kettlebell or dumbbell cleans and snatches"
+conflated two counts: 22 is how many are NAMED clean or snatch, while kettlebell
+and dumbbell together are 12, with barbell the plurality at 13. The decision
+survives — 12 rows that cannot hook-grip anything still need `neutral` — but
+"most of the bucket" was false. The hinge number was wrong the other way and the
+reviewer accepted it: I claimed the Hex Bar Deadlift and four swings, and it is
+20 of 55.
+
+**The migration was missing `lock_timeout`.** 000054 — which created this very
+constraint — sets `3s` on both directions, because `session_sets` is the largest
+table in the app and `ADD CONSTRAINT ... CHECK` scans all of it under ACCESS
+EXCLUSIVE; without a timeout the ALTER queues behind any long query and every
+later query, reads included, queues behind the ALTER. The down migration also
+cleared rows BEFORE dropping the constraint, leaving a window for a concurrent
+insert to commit a `mixed` row between the clear and the re-validation, failing
+the ADD and landing the migration dirty. Reordered to drop, clear, add.
+
+**The picker gated on the wrong predicate.** `gripApplies` and `offeredGrips`
+differ in exactly one case and it is the trapping one: a set holding a grip on a
+movement whose subset is EMPTY — an exercise the console re-categorised after it
+was logged. The row was hidden and the grip became unclearable, the same defect
+`offeredGrips` exists to prevent, one level up.
+
+Flagged and not taken: nothing in this repo runs a down migration, so
+`down.sql`'s clear-before-narrow is exercised only by hand. It was, in a
+rolled-back transaction, during review.
 
 ### Gaps
 
