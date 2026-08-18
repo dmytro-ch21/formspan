@@ -24505,6 +24505,133 @@ Open questions:
 - The same treatment is available for the mobile ladder and was not done — it has
   no geometry to get wrong, which is exactly why the phone got a ladder.
 
+## 2026-08-18 — BJJ accomplishments, derived from evidence that already existed
+
+`SessionCelebration` has given a finished strength session a personal-record
+row and a BJJ session nothing, with a comment saying so in the code: there is no
+BJJ equivalent of a PR, and "inventing a 'you showed up' badge to fill that gap
+is exactly the wallpaper the badge rule exists to prevent. It stays empty until
+the accomplishments work lands." This is that work — the derivation half.
+`internal/modules/accomplishment`, one route, `GET /v1/bjj/accomplishments`.
+
+**No migration, no table, and no write verb anywhere.** Everything is derived on
+read from `contests`/`contest_matches` (landed hours earlier, #279) and
+`bjj_session_tags`.
+
+### One rule decides what may be in here
+
+An accomplishment is a **FIRST**: something that happened once, that a row
+proves, and that most athletes reach at most once ever. That single rule does
+the work three separate prohibitions would have:
+
+- It excludes anything that fires constantly for whoever trains that way. The
+  badge entry already rejected long sessions, high tonnage and many exercises by
+  name, as "a description of a training style rather than an achievement".
+- It excludes running counters — the ethical argument `lib/milestones.ts` makes
+  on the mobile side, that a number which can visibly break becomes a thing to
+  protect, and protecting it is what makes somebody train on a week their body
+  wanted off. **A first cannot break.**
+- It excludes anything self-declared, since every kind is a query over logged
+  events rather than a claim about oneself.
+
+Seven kinds: `first_scored` and `first_drilled_scored` from the mat,
+`first_competition`, `first_match_won`, `first_submission_win`, `first_podium`
+and `first_gold` from the bracket. The submission win is the migration's own
+named example of "an accomplishment worth awarding… a row here, not an increment
+nobody can look inside" — which is what `contest_matches` recording a *method*
+rather than a win/loss counter was for.
+
+### Belt promotions are excluded on principle, and they were the obvious candidate
+
+`bjj_promotions` already records them and `/v1/bjj/standing` already derives
+current rank from them. Deriving them again here would put one fact behind two
+vocabularies — the drift this repo has argued against every time it has come up,
+most explicitly in the theme-versus-focus split. A client wanting to show a
+promotion beside these has an endpoint for it.
+
+### Each award carries its BASIS, and that is the point
+
+This is the one list in the app that puts measured and reported evidence side by
+side. A contest result is **measured** — a bracket, a referee, a placement
+nobody can talk themselves into. A tag is **reported**: the athlete typed that
+they hit an armbar, and nobody checked.
+
+Both are worth marking and they are not the same claim, so the distinction
+travels with each award rather than being flattened into one gold-star list.
+`session/basis.go` remains the authority and this is a second declaration of a
+shared wire vocabulary, exactly as `apps/web`'s own `Basis` type is.
+
+What that file's first reading rule then forbids is worth stating, because it is
+the obvious next feature: **a measured award may never be judged or ranked by a
+reported one.** Nothing here ranks anything — the list is chronological — and a
+"score" over these would be precisely that violation.
+
+`basisOf` is a map rather than a method with a default arm, and
+`TestEveryKindHasABasis` is why: a default would have to pick one for a kind
+nobody classified, and the flattering answer is the likely default. A
+self-reported award rendering as externally verified is the one wrong answer
+this module must never give. The repository fails loudly on an unclassified kind
+for the same reason.
+
+### The graduation award requires a strictly earlier session
+
+`first_drilled_scored` is the drilled → attempted → scored funnel completing:
+a technique drilled in one session, landed live in a *later* one. Same-session
+was considered and rejected — drilling something and hitting it that same
+afternoon is an ordinary class, and allowing it would make this award fire
+together with `first_scored` for most athletes, leaving one of the two
+redundant.
+
+### Three query details that would each have been silently wrong
+
+- **`held_on ASC NULLS LAST` decides "first".** Sorting a NULL as the beginning
+  of time would hand the first-competition award to whichever entry merely
+  lacked a date. Undated entries also sort last in the response, for the same
+  reason: such an award happened, but it cannot be shown to have PRECEDED
+  something dated.
+- **`ORDER BY` inside a `UNION` branch has to be parenthesised.** Without the
+  parentheses Postgres reads a trailing ORDER BY and LIMIT as applying to the
+  whole union — returning ONE row for the entire result instead of one per kind.
+  It parses, it runs, and it is wrong.
+- **The date comes from the SESSION, not from the tag's `created_at`.** A
+  reflection typed up on Sunday about Thursday's class belongs to Thursday;
+  `created_at` would date the act of typing. And which calendar day that is
+  depends on the athlete's zone, so `tz` is a parameter — rendering it in UTC
+  shows the previous day for everyone west of Greenwich.
+
+`contests` is cross-sport by design, so the competition half filters on sport or
+a road race would award a BJJ podium. The mat half filters too, even though tags
+can only reach a BJJ session by construction, because "by construction" is a
+claim about today's writers and this is one predicate.
+
+### Testing: 22 tests, zero skips, four mutations checked
+
+The interesting ones assert what must NOT be awarded: a powerlifting meet earns
+nothing, a fourth place is not a podium, an unrecorded placement is neither a
+podium nor a miss, drilling a kimura does not graduate an omoplata, and a tag on
+a barbell session is not mat evidence.
+
+Four guards were mutation-checked rather than assumed — dropping the sport
+filter, relaxing the graduation to same-session, sorting undated contests first,
+and dropping the caller scoping. Each fails a different test.
+
+### Gaps this leaves
+
+- **No client.** Deliberate, and the reason is coordination rather than scope:
+  #276 is mid-flight in `SessionCelebration.tsx`, `lib/celebration.ts` and the
+  BJJ session screen — the exact files a badge renders in. The placeholder
+  comment there stays until that lands and a follow-up wires this in.
+- **Nothing marks the moment.** This answers "what have I achieved", not "you
+  just achieved something". The finish card wants the second, which needs a
+  notion of *newly* earned — comparing against what the client last saw, since
+  nothing here is stored.
+- **Competition awards are BJJ-only**, because the route is. The same five
+  derive perfectly well for a powerlifting meet; a cross-sport version would
+  read `contests` alone and drop the tag half.
+- **No "not yet" list.** The response is a named envelope so `Kinds()` could be
+  served beside it later, but a client wanting to show unearned awards greyed
+  out has to hardcode the vocabulary today.
+- **Not staging-verified.** Local `vola_test` only.
 
 ## Open items / known gaps as of this entry
 
