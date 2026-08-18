@@ -23845,7 +23845,7 @@ and is recomputed on read — so reordering, renaming and re-describing all five
 curricula is a content edit plus a reseed. No migration, no backfill, nothing to
 reconcile. That is why the reference layer can be built as pure content later.
 
-One boundary on that, worth stating before N19 leans on it: it is exactly true
+One boundary on that, worth stating before N20 leans on it: it is exactly true
 for reorder, rename, re-describe and add. **Removing** a technique item does move
 the displayed fraction, because that item's countable and mastered contributions
 leave with it — the underlying record is untouched and re-adding the item
@@ -23856,7 +23856,7 @@ So the safe sentence is not "any rewrite is invisible to athletes".
 70 techniques for white belt against the roadmap's 25. That gap is not closed
 here and should not be closed *in the roadmap*: 70 criteria-bearing items is a
 progress bar nobody fills, which is a worse version of the original complaint. It
-belongs in the reference syllabus (N19), where nothing is completable.
+belongs in the reference syllabus (N20), where nothing is completable.
 
 Verified: seeded against a migrated `vola_test` — 5 curricula, white belt at 11
 phases / 25 techniques / 17 concepts — the three content tests green (shape,
