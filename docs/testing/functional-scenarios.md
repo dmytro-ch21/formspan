@@ -8065,3 +8065,30 @@ training. Everything here is about it telling the truth.
 
 - `+ Set` and `+ Drop` are equal halves of one row; with the drop not offered (a set carrying no weight), `+ Set` takes the full width. Neither may shrink-wrap its label.
 - **No dashed border with a corner radius anywhere on iOS.** It renders squared-off with an uneven dash phase — that combination is the original defect, not a value to be tuned.
+
+## Weekly plan congratulation and streak milestones (N19, mobile)
+
+### Happy path
+
+- Plan 3 sessions for the week and log 3: Today's `THIS WEEK` card shows `3/3 planned` **and** a bordered congratulation line. Log only 2 and the line is absent.
+- Finish the session that takes a weekly streak to 4 / 13 / 26 / 52 consecutive weeks: the celebration card shows the rung's label and blurb, above the `N weeks in a row` line, and plays the milestone chime.
+
+### Edge cases & errors
+
+- **Week 27 must say nothing.** The rung fires on the week it is *reached*, never after. Check 5, 27 and 53 weeks — all silent. This is the property that keeps the feature from being a streak counter, and a `>=` written by accident satisfies every positive test.
+- **A missed week resets it.** Two weeks, a gap, two more weeks is not a month — no rung.
+- **Only one session per week fires the card.** Train four times in the week you hit a rung: the milestone shows once, on the session that carried the streak, not four times.
+- **A week nobody planned is not a met plan.** `0 of 0` must show no congratulation, or it fires every week for every athlete who does not use the planner.
+- Meeting *more* than planned (4 of 3) still counts as met.
+- **Offline, both stay silent.** History is the server's; a phone that never reached the network sees a shorter streak. No congratulation is the correct answer — a guessed one is a claim.
+
+### The chime ladder
+
+- One celebratory sound per session, and the order is milestone → personal record → ordinary streak. Set a PR *and* cross a rung in the same session: the milestone chime plays and the PR chime does not.
+- With no milestone, the pre-existing rule must be unchanged: a PR still outranks an ordinary streak.
+- The milestone chime needs no records-settled gate — nothing can outrank it, so it must not wait on a lookup that may never return.
+
+### Regression trap
+
+- **Nothing may add a running streak number to Today.** `WeekReview` records "no score, no grade, no streak", and the congratulation is compatible with it only because it is absent except when earned. A "N weeks in a row" figure, or a "next milestone in N weeks" countdown, is the same protectable number and reintroduces the framing the project rules out.
+- **`lib/calendar.ts` and `lib/history.ts` both export `startOfWeek` / `addDays` / `today`, and they are different functions** — `Date` versus the `YYYY-MM-DD` key. Anything working on `HistoryDay` must import from `history`; the wrong one compiles and then compares a Date to a string.

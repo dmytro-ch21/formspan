@@ -25766,6 +25766,105 @@ rather than a list repeated in the test — so a seventh grip added without copy
 fails, rather than silently shipping a pill whose long press says "no
 description yet". Mutation-checked: blanking `hook`'s entry turns it red.
 
+## 2026-08-18 — A week you finished, and the rungs a streak passes, said out loud
+
+The fourth complaint from the same screenshot session, and the one that is not
+about a screen being wrong: *"I hit everything that was planned, so it should
+congratulate me."* Plus streaks — a month, half a year, a year.
+
+Most of the machinery already existed and none of it was ever *said*.
+`weekStreak` has counted consecutive training weeks for a long time and the
+Progress tab has always shown the number; `weekVerdict` has always ended
+"— the whole plan, done." for a met week. What nothing did was **mark the
+moment**. The met week read in the same grey sentence as the four weeks that
+were not met, and an athlete who trained every week for a year got the same
+quiet line in week 52 that they got in week 51, on a screen they had to go and
+open.
+
+**The hard part was not the ladder, it was not becoming a streak counter.**
+`components/WeekReview.tsx` records a design decision in its own header — *no
+score, no grade, no streak* — resting on the project's no-shame-based-messaging
+principle. The obvious implementation of this feature contradicts it directly.
+
+The distinction that lets both stand: **a running number can visibly break and
+a congratulation cannot.** A "12 weeks" figure on the home screen is a
+possession, and protecting a possession is exactly what makes somebody train on
+a week their body wanted off and then feel they lost something when they
+didn't. So `milestoneReached` compares **`===`, never `>=`** — it returns a rung
+only in the week that rung is newly reached, and null every other week of an
+athlete's life. There is no number that ticks on any screen this touches,
+nothing to watch, and so nothing to break; a week off simply means the next
+congratulation comes later. The Progress tab keeps the honest running count,
+which is a different act — going to look at a number is not being shown one.
+
+That `===` is the whole mechanism and it is easy to "fix" into a `>=` while
+tidying, so the test that pins it asserts the *negative*: week 27 must say
+nothing, week 5 must say nothing, week 53 must say nothing. Mutation-checked —
+swapping it to `<=` turns two tests red.
+
+**The ladder is 4 / 13 / 26 / 52 weeks.** A month is reachable from a standing
+start; a year is rare enough to mean something. 13 exists because the gap from
+4 to 26 is five months, long enough that the ladder would stop existing for most
+people between their first milestone and their second. Weeks and not days,
+inherited from `weekStreak` and worth restating because it is the ethics of the
+whole thing: a *daily* streak in a training app punishes rest days, which are
+training, so it cannot be protected by training hurt.
+
+**The chime ladder gained a top rung, and it inverts the argument below it.**
+`celebratesStreak` documents why a personal record outranks an ordinary weekly
+streak — frequency: a PR is rare, a streak recurs every week. A milestone sits
+on the other side of that same argument, since three of the four rungs happen at
+most once ever, so it outranks the PR. It needs no `recordsSettled` gate for the
+same reason — nothing can outrank it, so there is no race to lose. The shared
+`chimed` latch moved above all three effects, and declaration order is now the
+precedence, reading top to bottom: milestone, record, streak. `celebratesStreak`
+additionally stands down for a milestone *explicitly* rather than relying on
+that ordering, because an explicit refusal is what a test can pin.
+
+**Today did not get a history fetch, deliberately.** Its `WeekReview` is
+computed from the local store precisely so it answers on a gym floor with no
+signal, and adding a network call to the home screen for a congratulation that
+fires four times in an athlete's life is the wrong trade. So the split is:
+Today shows the plan-met congratulation, which it can compute from the review it
+already holds; the finish card shows the rung, where the history fetch for the
+streak line already exists and the milestone is derived from the *same pass*
+over the *same* days — so the card can never show a milestone whose streak line
+disagrees with it.
+
+`metThePlan` refuses a week nobody planned rather than treating `0 of 0` as met.
+That is the hollow-praise case `worthCelebrating` already declines elsewhere,
+and without the guard it would fire every week for every athlete who does not
+use the planner at all — which is most of them.
+
+**One trap found while writing this, worth recording because it typechecks
+against nothing useful.** `lib/calendar.ts` and `lib/history.ts` both export
+`startOfWeek`, `addDays` and `today` under the same names, and they are
+different functions: `calendar`'s take and return `Date`, `history`'s take and
+return the `YYYY-MM-DD` key a `HistoryDay` is stored under. The first version of
+`milestones.ts` imported from `calendar`, which compiles far enough to run and
+then compares a Date to a string. One test caught it. The import now carries a
+comment saying which one and why.
+
+### Gaps this leaves
+
+- **Not seen on a phone.** Both halves are typechecked and covered, and neither
+  has been looked at on a device — the same L1 gap, now with two more entries.
+  The finish card's milestone block in particular is a two-line bordered panel
+  whose fit in a column that already holds a badge, a streak line and a stat row
+  cannot be inferred from a passing test.
+- **A milestone reached while offline is silently skipped, not deferred.** Same
+  bound `carriedTheStreak` already has: history is the server's, so a phone that
+  never reached the network sees a shorter streak and says nothing. Silence is
+  not a claim, but the congratulation for that rung is then lost rather than
+  shown late, and nothing re-checks it on the next sync.
+- **BJJ-only athletes reach every rung**, which is correct, but the finish card
+  they reach it on still has no badge equivalent of a personal record. That gap
+  predates this and is unchanged.
+- `isCurrentWeek` has no caller yet. It exists because the same review object is
+  what a future "last week" screen would be handed, and a congratulation for a
+  week that closed a fortnight ago is stale praise — cheap to hold now, awkward
+  to add once a caller exists.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.

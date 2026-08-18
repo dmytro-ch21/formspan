@@ -6,6 +6,7 @@ import { Medal } from '@/components/ui/Medal';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
+import { celebratesMilestone, type Milestone } from '@/lib/milestones';
 import {
   badgeFor,
   celebratesStreak,
@@ -101,6 +102,7 @@ export function SessionCelebration({
   formatTonnage,
   onDismiss,
   streak = null,
+  milestone = null,
   recordsSettled = false,
   accomplishment = null,
   sessionID,
@@ -112,6 +114,12 @@ export function SessionCelebration({
   onDismiss: () => void;
   /** Weekly streak, once history answers. `carried` means this session did it. */
   streak?: { weeks: number; carried: boolean } | null;
+  /**
+   * A streak rung this session crossed (N19), or null — which is the answer
+   * almost every session. Never a running number: see `lib/milestones.ts` for
+   * why a countdown to the next rung is deliberately not offered here.
+   */
+  milestone?: Milestone | null;
   /** Whether the records lookup has finished — see the chime below. */
   recordsSettled?: boolean;
   /**
@@ -163,6 +171,32 @@ export function SessionCelebration({
   }, []);
 
   /*
+    The shared latch — ONE celebratory sound per session.
+
+    Hoisted above all three effects rather than living in the PR block, because
+    the milestone effect now sits above that block and has to read the same
+    flag. Whichever effect fires first latches; declaration order is therefore
+    the precedence, and it reads top to bottom: milestone, then record, then
+    streak.
+  */
+  const chimed = useRef(false);
+
+  /*
+    Above both of the others, and declared before them so it claims the latch
+    first in the same commit — the same ordering argument the PR effect already
+    makes against the streak, one rung higher. `success` rather than `streak`:
+    hearing the weekly sound for a thing that happens once a year would make
+    the rarer event sound like the ordinary one.
+  */
+  const crossed = celebratesMilestone({ milestone });
+  useEffect(() => {
+    if (!crossed || chimed.current) return;
+    chimed.current = true;
+    const t = setTimeout(() => playSound('success'), 1100);
+    return () => clearTimeout(t);
+  }, [crossed]);
+
+  /*
     The PR chime, if this session set one.
 
     Separate from the mount effect because the records are not there yet when
@@ -199,9 +233,12 @@ export function SessionCelebration({
     means "something rare just happened", which is exactly what this is, and a
     new one would need the synth script, the bundle list and three more edits to
     say the same thing.
+
+    N19 puts ONE rung above it. A streak milestone is rarer still — three of its
+    four rungs happen at most once ever — so it takes the latch first and this
+    stands down, exactly as this stands above the weekly streak.
   */
   const earnedBadge = hasRecords || accomplishment != null;
-  const chimed = useRef(false);
   useEffect(() => {
     if (!earnedBadge || chimed.current) return;
     chimed.current = true;
@@ -210,7 +247,7 @@ export function SessionCelebration({
   }, [earnedBadge]);
 
   /*
-    The streak chime — ONE celebratory sound per session, and the PR wins.
+    The streak chime — last in the ladder, so both of the above win.
 
     `chimed` is shared with the effect above rather than being its own flag,
     which is what makes that precedence hold: whichever fires first latches,
@@ -221,7 +258,9 @@ export function SessionCelebration({
 
     Declared after the PR effect on purpose too: within one commit React runs
     them in order, so if both become true together the PR still claims the
-    latch.
+    latch. `celebratesStreak` additionally stands down for a milestone outright
+    rather than relying on that ordering, because the milestone is known in the
+    same pass as `carried` and an explicit refusal is what a test can pin.
   */
   const carried = celebratesStreak({
     recordsSettled,
@@ -230,6 +269,7 @@ export function SessionCelebration({
     // would chime the streak straight over the top of a BJJ first.
     hasRecords: earnedBadge,
     carried: streak?.carried === true,
+    milestone: milestone !== null,
   });
   useEffect(() => {
     if (!carried || chimed.current) return;
@@ -275,6 +315,24 @@ export function SessionCelebration({
               <Text style={[styles.badgeText, { color: accent.ink }]} testID="celebration-badge">
                 {badge.label}
               </Text>
+            </RNView>
+          )}
+
+          {/*
+            The milestone, when this session crossed one — which is almost
+            never, and that is what makes it worth a block of its own rather
+            than another line in the streak sentence. It sits above the streak
+            line because it is the larger statement about the same fact; both
+            show, because "a year, unbroken" and "52 weeks in a row" are the
+            headline and the figure behind it, not a repetition.
+          */}
+          {milestone && (
+            <RNView
+              style={[styles.milestone, { borderColor: accent.accent }]}
+              testID="celebration-milestone"
+            >
+              <Text style={[styles.milestoneLabel, { color: accent.ink }]}>{milestone.label}</Text>
+              <Text style={styles.milestoneBlurb}>{milestone.blurb}</Text>
             </RNView>
           )}
 
@@ -465,6 +523,29 @@ const styles = StyleSheet.create({
     letterSpacing: 0.6,
   },
   feltValue: { fontSize: 13, color: vola.textMuted, marginTop: 2 },
+  /*
+    Bordered in the accent like `badge`, but a block rather than a pill: it
+    carries two lines, and a pill wide enough for "Twenty-six weeks in a row.
+    Six months of showing up." is not a pill. Deliberately NOT filled with the
+    accent — the tick above it is, and two solid accent shapes in one column
+    would leave nothing as the card's focus.
+  */
+  milestone: {
+    alignSelf: 'stretch',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    gap: 4,
+    marginTop: 4,
+  },
+  milestoneLabel: { fontSize: 15, fontWeight: '800', textAlign: 'center' },
+  milestoneBlurb: {
+    fontSize: 12,
+    color: vola.textMuted,
+    textAlign: 'center',
+    lineHeight: 17,
+  },
   streak: { fontSize: 12.5, color: vola.textDim, marginTop: 10, letterSpacing: 0.2 },
   records: { alignSelf: 'stretch', gap: 8, marginTop: 12 },
   recordRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },

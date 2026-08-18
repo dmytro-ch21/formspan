@@ -9,6 +9,7 @@ import { useAccent } from '@/lib/AccentProvider';
 import { formatDuration } from '@/lib/history';
 import { labelFor, type Module } from '@/lib/modules';
 import { formatVolume, type UnitSystem } from '@/lib/units';
+import { metThePlan } from '@/lib/milestones';
 import { deltaPct, leadMeasure, weekVerdict, type WeekReview as Review } from '@/lib/weekReview';
 
 /**
@@ -69,6 +70,37 @@ export function WeekReview({
       </RNView>
 
       <Text style={styles.verdict}>{weekVerdict(review)}</Text>
+
+      {/*
+        The one week worth marking, marked (N19).
+
+        `weekVerdict` has always ended "— the whole plan, done." for a met week,
+        but it said it in the same grey sentence as every other week, so the
+        week an athlete actually finished read exactly like the four they did
+        not. This is the congratulation, and it is deliberately the ONLY thing
+        added to this card.
+
+        **It is not a score and not a streak**, which is the principle stated at
+        the top of this file and not overturned here. The distinction that keeps
+        both true: this appears when something was *achieved* and is absent
+        otherwise — there is no number that persists between weeks, nothing
+        that counts, and so nothing that can visibly break. A "4 weeks in a
+        row" figure on the home screen is a thing to protect, and protecting it
+        is what turns a rest week into a loss. A congratulation cannot be
+        protected, because it was never a possession.
+
+        `metThePlan` refuses a week nobody planned rather than treating zero as
+        met — praise for a week with no plan is the hollow kind
+        `worthCelebrating` already declines elsewhere, and it would fire for
+        every athlete who does not use the planner at all.
+      */}
+      {metThePlan(review) && (
+        <RNView style={[styles.done, { borderColor: accent.accent }]} testID="week-plan-met">
+          <Text style={[styles.doneText, { color: accent.ink }]}>
+            Every session you planned this week, done.
+          </Text>
+        </RNView>
+      )}
 
       {trained && (
         /*
@@ -196,6 +228,19 @@ const styles = StyleSheet.create({
   label: { fontSize: 11, color: vola.textDim, textTransform: 'uppercase', letterSpacing: 0.8, fontWeight: '600' },
   plan: { fontSize: 12, fontWeight: '700' },
   verdict: { fontSize: 15, fontWeight: '600', lineHeight: 21 },
+  /*
+    Outlined in the accent, not filled with it. Today already spends the accent
+    on its primary action, and a filled band here would outrank the button the
+    screen exists to get you to press — a congratulation is the smaller of the
+    two things on that screen, however good the week was.
+  */
+  done: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  doneText: { fontSize: 13, fontWeight: '700' },
 
 
   sports: {

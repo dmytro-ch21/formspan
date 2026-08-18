@@ -21,6 +21,7 @@ import {
 } from '@/lib/celebration';
 import { fetchRecords } from '@/lib/records';
 import { carriedTheStreak, fetchHistory, localZone, streakRange, weekStreak } from '@/lib/history';
+import { milestoneForSession, type Milestone } from '@/lib/milestones';
 import { elapsedOf } from '@/lib/countdown';
 import {
   adjustStepFor,
@@ -262,6 +263,15 @@ export default function SessionScreen() {
     weeks: number;
     carried: boolean;
   } | null>(null);
+  /**
+   * A streak rung this session crossed, or null — almost always null.
+   *
+   * Its own state rather than derived from `celebrationStreak.weeks`, because
+   * the milestone is about the SESSION, not the week: `milestoneForSession`
+   * needs `carriedTheStreak` as well, and a rung reached earlier in the week by
+   * a different session must not re-fire on this one.
+   */
+  const [celebrationMilestone, setCelebrationMilestone] = useState<Milestone | null>(null);
 
   /**
    * Personal records arrive after the card does, if at all.
@@ -307,7 +317,11 @@ export default function SessionScreen() {
     fetchHistory(getToken, { from, to, tz: localZone() })
       .then((h) => {
         if (!live) return;
-        setCelebrationStreak({ weeks: weekStreak(h.days), carried: carriedTheStreak(h.days) });
+        const carried = carriedTheStreak(h.days);
+        setCelebrationStreak({ weeks: weekStreak(h.days), carried });
+        // Same history, same pass — so the card can never show a milestone
+        // whose streak line disagrees with it.
+        setCelebrationMilestone(milestoneForSession(h.days, carried));
       })
       .catch(() => {
         // Same silence as the records lookup. No history, no streak line, no
@@ -1869,6 +1883,7 @@ export default function SessionScreen() {
           summary={{ ...celebrating, records: celebrationRecords }}
           sessionID={id}
           streak={celebrationStreak}
+          milestone={celebrationMilestone}
           recordsSettled={recordsSettled}
           formatTonnage={(v) => formatVolume(v, units)}
           onDismiss={() => {

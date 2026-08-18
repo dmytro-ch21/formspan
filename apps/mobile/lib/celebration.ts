@@ -154,7 +154,18 @@ export function celebratesStreak(opts: {
   recordsSettled: boolean;
   hasRecords: boolean;
   carried: boolean;
+  /**
+   * Whether this session also crossed a streak MILESTONE (N19).
+   *
+   * Top of the precedence ladder, above the personal record that outranks the
+   * ordinary streak — see `celebratesMilestone` for why the frequency argument
+   * reverses at that rung. It needs no settling gate of its own: the streak and
+   * the milestone are computed from the same history in the same pass, so this
+   * boolean is never pending while `carried` is known.
+   */
+  milestone?: boolean;
 }): boolean {
+  if (opts.milestone) return false;
   return opts.recordsSettled && !opts.hasRecords && opts.carried;
 }
 
